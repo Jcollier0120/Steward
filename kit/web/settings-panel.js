@@ -1,4 +1,7 @@
-// The Settings panel on an agent's page (page.ts's settingsPanel()), served by server.ts as /settings.js.
+// The Settings panel on an agent's page: the kit's web part, with settings-panel.css. A kit agent's page
+// (page.ts's settingsPanel()) gets it from server.ts as /settings.js. Any page can use it: an element with
+// data-settings-panel, <meta name="page-token"> with the token its server wants in x-token, and the API
+// below on the same origin (the kit's settings-kit.ts serves it; another server can serve the same).
 // It is built from GET /api/settings (the agent's schema, its values and defaults) and saves with
 // POST /api/settings, sending only what changed. The server checks everything and is the authority;
 // this shows each field with its default, keeps track of what changed, and puts each message beside
@@ -558,10 +561,11 @@
     }
     saved = clone(data.values);
     const later = data.schema.some((f) => f.applies === 'restart');
+    const usedFrom = data.usedFrom || 'from the next round on';
     intro.replaceChildren(
       'Changes are checked and saved here, into ',
       h('code', { text: data.file }),
-      later ? '. They are used from the next round on, except those marked "takes effect at the next start".' : '. They are used from the next round on.',
+      later ? `. They are used ${usedFrom}, except those marked "takes effect at the next start".` : `. They are used ${usedFrom}.`,
     );
     root.replaceChildren(intro, problems, general, form, actions);
     showProblems();

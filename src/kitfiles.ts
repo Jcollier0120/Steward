@@ -5,23 +5,42 @@ import path from 'node:path';
 /**
  * The kit's layout. The kit tree (the Steward's kit\) holds:
  * - VERSION and CHANGELOG.md;
- * - src\: the files a hire gets, each at src\kit\<the same name> (kit\src\npu.ts is a hire's src\kit\npu.ts);
- * - test\: the kit's own tests, run here against a fixture agent (test\fixture). Hires never get them.
+ * - its parts, each a folder, which an agent takes as kit.json's "parts" say:
+ *   - node\: the TypeScript modules, at a hire's src\kit\ (kit\node\npu.ts is src\kit\npu.ts);
+ *   - web\: browser files any agent's page can use, at src\kit\web\;
+ *   - spec\: the language-neutral rules (documents and test vectors), at src\kit\spec\;
+ * - test\: the kit's own tests, run here against a fixture agent (test\fixture). Agents never get them.
  */
 
-/** The kit tree's own files, beside src\ and test\. */
+/** The kit tree's own files, beside its parts and test\. */
 export const KIT_META = ['VERSION', 'CHANGELOG.md'];
 
-/** Where a hire keeps the kit: filled by its tools/kit.ts, git-ignored. */
+/** The kit's parts, and where each lands in a Node agent. */
+export const PARTS = ['node', 'web', 'spec'] as const;
+export type Part = (typeof PARTS)[number];
+export const PART_DIRS: Record<Part, string> = { node: 'src/kit', web: 'src/kit/web', spec: 'src/kit/spec' };
+
+/** Where a Node agent keeps the kit: filled by its tools/kit.ts, git-ignored. */
 export const HIRE_KIT_DIR = 'src/kit';
 
 /** The fixture agent the kit's tests run against, inside the kit tree. */
 export const FIXTURE_DIR = 'test/fixture';
 
-/** Where a kit-tree file lands in a hire (src/npu.ts is src/kit/npu.ts), or null for one that stays here. */
+/** Where a kit-tree file lands in a Node agent (node/npu.ts is src/kit/npu.ts), or null for one that stays here. */
 export function hirePathOf(kitPath: string): string | null {
   const p = kitPath.replace(/\\/g, '/');
-  return p.startsWith('src/') ? `${HIRE_KIT_DIR}/${p.slice(4)}` : null;
+  const part = PARTS.find((x) => p.startsWith(`${x}/`));
+  return part ? `${PART_DIRS[part]}/${p.slice(part.length + 1)}` : null;
+}
+
+/** The kit-tree path of a file a Node agent has under src/kit (src/kit/web/x.js is web/x.js), or null. */
+export function kitPathOfHire(hirePath: string): string | null {
+  const p = hirePath.replace(/\\/g, '/');
+  for (const part of ['spec', 'web', 'node'] as const) {
+    const dir = `${PART_DIRS[part]}/`;
+    if (p.startsWith(dir)) return `${part}/${p.slice(dir.length)}`;
+  }
+  return null;
 }
 
 /**
@@ -53,10 +72,16 @@ export const OLD_KIT_PATHS = [
   'test/settings-kit.test.ts',
 ];
 
-/** Where an old kit file's code is now, in a hire: src/npu.ts is src/kit/npu.ts, tools/release.ts is src/kit/release.ts. Null for the old kit tests. */
+/**
+ * Where an old kit file is now, in a hire: src/npu.ts is src/kit/npu.ts, tools/release.ts is
+ * src/kit/release.ts, src/settings-panel.js is src/kit/web/settings-panel.js, and the queue's vectors are
+ * the spec's. Null for the old kit tests, which run in the Steward now.
+ */
 export function newPathOfOld(oldPath: string): string | null {
   const p = oldPath.replace(/\\/g, '/');
   if (p === 'tools/release.ts') return `${HIRE_KIT_DIR}/release.ts`;
+  if (p === 'src/settings-panel.js') return `${PART_DIRS.web}/settings-panel.js`;
+  if (p === 'test/npu-queue-vectors.json') return `${PART_DIRS.spec}/npu-queue-vectors.json`;
   if (p.startsWith('src/') && OLD_KIT_PATHS.includes(p)) return `${HIRE_KIT_DIR}/${p.slice(4)}`;
   return null;
 }
@@ -87,8 +112,20 @@ export function kitVersionOf(dir: string): string | null {
   return existsSync(f) ? readFileSync(f, 'utf8').trim() || null : null;
 }
 
-/** The files a hire gets from a kit tree (paths in the tree: src/npu.ts, ...). */
-export const shippedFiles = (kitDir: string) => (existsSync(path.join(kitDir, 'src')) ? filesUnder(path.join(kitDir, 'src')).map((f) => `src/${f}`) : []);
+/** The files of a kit tree's parts (paths in the tree: node/npu.ts, web/settings-panel.js, ...): what a kit release carries. */
+export const partFiles = (kitDir: string, parts: readonly Part[] = PARTS) =>
+  parts.flatMap((p) => (existsSync(path.join(kitDir, p)) ? filesUnder(path.join(kitDir, p)).map((f) => `${p}/${f}`) : []));
+
+/**
+ * kit.json's text, as tools/convert.ts writes it and a bump keeps it: one key a line, lists on one line.
+ * {"kit": "1.0.0", "parts": ["node", "web", "spec"]}, and any other keys after them, as they were.
+ */
+export function pinText(pin: Record<string, unknown>): string {
+  const { kit, parts, ...rest } = pin;
+  const entries = Object.entries({ kit, parts, ...rest }).filter(([, v]) => v !== undefined);
+  const one = (v: unknown) => (Array.isArray(v) ? `[${v.map((x) => JSON.stringify(x)).join(', ')}]` : JSON.stringify(v));
+  return `{\n${entries.map(([k, v]) => `  ${JSON.stringify(k)}: ${one(v)}`).join(',\n')}\n}\n`;
+}
 
 /** A kit version: x.y.z. */
 export const KIT_VERSION = /^\d+\.\d+\.\d+$/;

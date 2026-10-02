@@ -20,7 +20,7 @@ import { powershell } from './ps.ts';
  * - a server that won't start within 30 s, refuses the connection, answers 5xx or times out marks its
  *   accelerator failed (a file every agent reads), and the request goes once to the next candidate;
  * - the servers' quirks: GenieX's prefix leak (a nonce first), and whether images go as a local path.
- * The turns themselves (locks, lines, this agent's manners) are src/npu.ts's.
+ * The turns themselves (locks, lines, this agent's manners) are the kit's npu.ts's.
  */
 
 export type AcceleratorKind = 'npu' | 'gpu' | 'cpu';
@@ -231,7 +231,17 @@ export function ordered(list: Accelerator[], order: 'auto' | string[]): Accelera
   return [...first, ...autoOrder(list.filter((a) => !first.includes(a)))];
 }
 
-/** The accelerators in a parsed config.json, or why there are none. */
+/**
+ * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a PC
+ * without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
+ * serves anything. The same words in each case.
+ */
+export const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`).";
+
+/**
+ * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
+ * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
+ */
 export function parseAccelerators(raw: any): AcceleratorConfig | { error: string } {
   const problems: string[] = [];
   const list: Accelerator[] = [];
@@ -247,11 +257,7 @@ export function parseAccelerators(raw: any): AcceleratorConfig | { error: string
     list.push(...fromLegacy(raw));
   }
   if (!list.some((a) => WORKS.some((w) => serves(a, w)))) {
-    return {
-      error: legacy
-        ? 'has no accelerators (nor a chatEndpoint, the GenieX server Reeve used before)'
-        : `lists no accelerator that serves anything${problems.length ? ` (${problems.join('; ')})` : ''}`,
-    };
+    return { error: problems.length ? `lists no accelerator that can be used (${problems.join('; ')})` : REEVE_NOT_SET_UP };
   }
   const order = Array.isArray(raw?.acceleratorOrder) ? raw.acceleratorOrder.filter((x: unknown) => typeof x === 'string') : 'auto';
   return { accelerators: ordered(list, order), order, requestTimeoutMs: positiveInt(raw?.requestTimeoutMs) ?? DEFAULT_TIMEOUT_MS, legacy, problems };
@@ -259,7 +265,7 @@ export function parseAccelerators(raw: any): AcceleratorConfig | { error: string
 
 /** Reeve's config.json (REEVE_HOME, else %USERPROFILE%\.reeve), or why its accelerators can't be used. */
 export function loadAccelerators(file = path.join(reeveHome, 'config.json')): AcceleratorConfig | { error: string } {
-  if (!existsSync(file)) return { error: `Reeve isn't set up here (${file} is missing)` };
+  if (!existsSync(file)) return { error: REEVE_NOT_SET_UP };
   let raw: any;
   try {
     raw = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
@@ -267,7 +273,8 @@ export function loadAccelerators(file = path.join(reeveHome, 'config.json')): Ac
     return { error: `${file} couldn't be read: ${(e as Error).message}` };
   }
   const cfg = parseAccelerators(raw);
-  return 'error' in cfg ? { error: `${file} ${cfg.error}` } : cfg;
+  if ('error' in cfg) return { error: cfg.error === REEVE_NOT_SET_UP ? cfg.error : `${file} ${cfg.error}` };
+  return cfg;
 }
 
 // ---------------------------------------------------------------- shared files

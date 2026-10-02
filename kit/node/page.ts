@@ -29,8 +29,9 @@ export const unverified = (text: string, from?: AcceleratorRef | null) =>
   `<span class="note"><span class="badge npu" title="Written by a local model on ${esc(theAccelerator(from))}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
 
 /**
- * Where the Settings panel goes on an agent's page. settings-panel.js (served by server.ts) fills it
- * from GET /api/settings, with every setting in the agent's schema, and saves it with POST.
+ * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js
+ * (server.ts serves it as /settings.js, and its stylesheet as /settings.css) fills it from
+ * GET /api/settings, with every setting in the agent's schema, and saves it with POST.
  */
 export const settingsPanel = () =>
   `<div class="card sf-panel" data-settings-panel><p class="muted">Loading the settings…</p><noscript><p>The settings need JavaScript, which this page uses only for its buttons.</p></noscript></div>`;
@@ -53,6 +54,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 <title>${esc(o.title ?? APP.name)}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>${CSS}</style>
+<link rel="stylesheet" href="/settings.css">
 </head>
 <body>
 <header>
@@ -156,6 +158,9 @@ tr:last-child td { border-bottom: 0; }
 button { font: inherit; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); cursor: pointer; }
 button.quiet { background: transparent; color: var(--accent); }
 button:disabled { opacity: .55; cursor: progress; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 13px; }
+button.link:disabled { color: var(--muted); text-decoration: none; opacity: 1; cursor: default; }
+button.small { padding: 3px 10px; font-size: 13px; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .ok { color: var(--ok); background: var(--ok-bg); }
 .warn { color: var(--warn); background: var(--warn-bg); }
@@ -164,63 +169,5 @@ button:disabled { opacity: .55; cursor: progress; }
 .note { color: var(--muted); }
 .empty { color: var(--muted); padding: 18px 0; text-align: center; }
 @media (max-width: 640px) { header { padding: 14px 16px; } th, td { padding: 6px 4px; } }
-/* The Settings panel (settings-panel.js). */
-.card.sf-panel { overflow: visible; padding-bottom: 0; }
-.sf-intro, .sf-problems { margin: 0 0 6px; }
-.sf { padding: 12px 0; border-bottom: 1px solid var(--line); }
-.sf-form > .sf:last-child { border-bottom: 0; }
-.sf-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.sf-head label, .sf-head .sf-name, .sf legend { font-weight: 600; }
-.sf-changed { display: none; }
-.sf.is-changed > .sf-head .sf-changed, .sf.is-changed > fieldset > legend .sf-changed { display: inline-block; }
-.sf-help, .sf-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-.sf-meta { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }
-.sf-control { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
-.sf-panel input[type=text], .sf-panel input[type=number], .sf-panel select {
-  font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); max-width: 100%;
-}
-.sf-panel input[type=text] { width: min(100%, 560px); }
-.sf-panel input[type=number] { width: 130px; }
-.sf-panel input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); flex: none; }
-.sf-panel :is(input, select, button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.sf-panel [aria-invalid="true"] { border-color: var(--alert); }
-.sf-switch { display: inline-flex; gap: 8px; align-items: flex-start; cursor: pointer; }
-.sf-switch input[type=checkbox] { margin-top: 3px; }
-.sf-choices { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-top: 4px; }
-.sf-choices label { display: inline-flex; gap: 6px; align-items: center; }
-.sf-msg { margin: 4px 0 0; font-size: 13px; }
-.sf-msg.error { color: var(--alert); font-weight: 600; }
-.sf-msg.warning { color: var(--warn); }
-button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 13px; }
-button.link:disabled { color: var(--muted); text-decoration: none; opacity: 1; cursor: default; }
-button.small { padding: 3px 10px; font-size: 13px; }
-.sf-list { list-style: none; margin: 6px 0; padding: 0; }
-.sf-list > li { margin: 4px 0; }
-.sf-item { display: flex; gap: 6px; align-items: center; }
-.sf-panel .sf-item input[type=text] { flex: 1 1 auto; width: auto; min-width: 0; max-width: 560px; }
-.sf-panel fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px 10px; margin: 8px 0 0; min-width: 0; }
-.sf-panel fieldset.sf-plain { border: 0; padding: 0; margin: 0; }
-.sf-panel fieldset.sf-plain > legend { padding: 0; }
-.sf-panel fieldset .sf, .sf-record .sf { padding: 8px 0; }
-.sf-panel fieldset .sf:last-child { border-bottom: 0; }
-.sf-record { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; margin: 8px 0 0; }
-.sf-record > summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
-.sf-record[open] > summary { margin-bottom: 4px; }
-.sf-record > .row { margin-top: 6px; }
-.sf-scroll { overflow-x: auto; }
-.sf-table { margin-top: 4px; }
-.sf-table th, .sf-table td { padding: 4px 6px 4px 0; border-bottom: 0; }
-.sf-table td input[type=text] { width: 100%; min-width: 110px; }
-.sf-table td input[type=number] { width: 110px; }
-.sf-actions { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 0 12px; margin-top: 4px; background: var(--card); border-top: 1px solid var(--line); }
-.sf-status { margin: 0; }
-.sf-spacer { flex: 1; }
-.sf-status.error { color: var(--alert); font-weight: 600; }
-@media (max-width: 640px) {
-  .sf-table thead { display: none; }
-  .sf-table, .sf-table tbody, .sf-table tr, .sf-table td { display: block; width: 100%; }
-  .sf-table tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
-  .sf-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
-  .sf-panel input[type=text] { width: 100%; }
-}
 `;
+/* The Settings panel's own styles are the kit's web part: web/settings-panel.css, linked as /settings.css. */

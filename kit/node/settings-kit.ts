@@ -125,6 +125,8 @@ export interface SettingsSpec<S extends object = any> {
   check?: (next: S, changed: string[], raw: Record<string, unknown>) => Findings | Promise<Findings>;
   /** After a save: apply what can be applied at once (reschedule the rounds, say). */
   onSaved?: (next: S, before: S) => void;
+  /** When a saved change is used, for the panel's first line (default "from the next round on"). */
+  usedFrom?: string;
 }
 
 /** The largest POST /api/settings body the server reads (an allowlist of long command lines fits). */
@@ -392,7 +394,7 @@ export async function settingsReply<S extends object>(spec: SettingsSpec<S>) {
   const out: Out = { errors: {}, warnings: {} };
   for (const f of spec.schema) if (!f.readOnly) cleanValue(f, (settings as any)[f.key], f.key, out);
   const extra = await spec.check?.(settings, [], raw ?? {});
-  return { schema: spec.schema, values: settings, defaults: spec.defaults, problems, warnings: { ...out.warnings, ...extra?.warnings }, file };
+  return { schema: spec.schema, values: settings, defaults: spec.defaults, problems, warnings: { ...out.warnings, ...extra?.warnings }, file, ...(spec.usedFrom ? { usedFrom: spec.usedFrom } : {}) };
 }
 
 /**

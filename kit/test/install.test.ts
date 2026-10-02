@@ -15,7 +15,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
 const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
-const { pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl } = await import('./fixture/src/kit/release.ts');
+const { kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
 let n = 0;
@@ -332,16 +332,28 @@ test('a mistyped option is refused before anything is done', async () => {
 
 // ---------------------------------------------------------------- the release
 
-test('a release carries src (no tests), art, package.json, README.md and LICENSE, and nothing else', () => {
+test('a release carries src (no tests) with the kit in src/kit, art, package.json, README.md and LICENSE, and nothing else', () => {
   const picked = pickReleaseFiles([
-    'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
-    'test/kit.test.ts', 'tools/release.ts', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
+    'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'src/kit/npu.ts', 'src/kit/VERSION', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
+    'test/agent.test.ts', 'tools/kit.ts', 'kit.json', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
   ]);
-  assert.deepEqual(picked, ['LICENSE', 'README.md', 'art/icon.svg', 'package.json', 'src/cli.ts', 'src/ocr.ps1', 'src/watch/index.ts']);
+  assert.deepEqual(picked, ['LICENSE', 'README.md', 'art/icon.svg', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts']);
 
   const own = pickReleaseFiles(repoFiles(appRoot));
-  for (const f of ['src/cli.ts', 'src/app.ts', 'src/install.ts', 'art/icon.svg', 'package.json', 'README.md']) assert.ok(own.includes(f), f);
+  for (const f of ['src/cli.ts', 'src/app.ts', 'src/kit/install.ts', 'src/kit/release.ts', 'art/icon.svg', 'package.json', 'README.md']) assert.ok(own.includes(f), f);
   assert.ok(own.every((f) => f.startsWith('src/') || f.startsWith('art/') || ['package.json', 'README.md', 'LICENSE'].includes(f)));
+});
+
+test('a release carries the kit kit.json pins, and says so; otherwise it is refused', () => {
+  const dir = path.join(tmp, 'kit-of');
+  mkdirSync(path.join(dir, 'src', 'kit'), { recursive: true });
+  assert.match((kitOf(dir) as { error: string }).error, /kit\.json is missing/);
+  writeFileSync(path.join(dir, 'kit.json'), '{ "kit": "1.2.3" }\n');
+  assert.match((kitOf(dir) as { error: string }).error, /isn't filled: run npm run kit/);
+  writeFileSync(path.join(dir, 'src', 'kit', 'VERSION'), '1.2.2\n');
+  assert.match((kitOf(dir) as { error: string }).error, /holds kit 1\.2\.2, but kit\.json pins 1\.2\.3/);
+  writeFileSync(path.join(dir, 'src', 'kit', 'VERSION'), '1.2.3\r\n');
+  assert.deepEqual(kitOf(dir), { kit: '1.2.3' });
 });
 
 test('a release from uncommitted changes is versioned +dev.<commit>; the repo comes from origin', () => {

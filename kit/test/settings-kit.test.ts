@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 
-// The kit's Settings panel and its API, run with this agent's own schema: the same file in every agent.
+// The kit's Settings panel and its API, run with the fixture agent's schema. Each agent's own schema is
+// checked in that agent, by agent-checks.ts (test/agent.test.ts here).
 const id: string = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8')).name;
 const ENV = id.toUpperCase().replace(/-/g, '_');
 const home = mkdtempSync(path.join(os.tmpdir(), `${id}-settings-test-`));
@@ -14,7 +15,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
-const { checkValues, schemaGaps, SETTINGS_BODY_LIMIT } = await import('./fixture/src/kit/settings-kit.ts');
+const { SETTINGS_BODY_LIMIT } = await import('./fixture/src/kit/settings-kit.ts');
 type Field = import('./fixture/src/kit/settings-kit.ts').Field;
 const { SETTINGS_SPEC: spec } = await import('./fixture/src/settings.ts');
 const { page, settingsPanel } = await import('./fixture/src/kit/page.ts');
@@ -40,49 +41,20 @@ const getSettings = async () => (await fetch(`${base}/api/settings`)).json();
 const first = (kind: Field['kind']) => spec.schema.find((f: Field) => f.kind === kind && !f.readOnly) as (Field & { min: number; max: number }) | undefined;
 const whole = first('whole')!;
 
-test('the schema and the defaults name the same settings', () => {
-  assert.deepEqual(schemaGaps(spec.schema, spec.defaults), []);
-  assert.ok(whole, 'every agent has a whole-number setting (its interval, at least)');
-});
-
-test('the defaults pass the schema, and the agent reads them as they are', () => {
-  assert.deepEqual(checkValues(spec.schema, spec.defaults).errors, {});
-  const { settings, problems } = spec.normalize(json(spec.defaults));
-  assert.deepEqual(problems, []);
-  assert.deepEqual(json(settings), json(spec.defaults));
-});
-
-test("each number's limits are the agent's own: normalizeSettings keeps both ends and nothing past them", () => {
-  const numbers: [string[], Field & { min: number; max: number }][] = [];
-  for (const f of spec.schema as Field[]) {
-    if (f.kind === 'whole' || f.kind === 'number') numbers.push([[f.key], f]);
-    if (f.kind === 'group') for (const g of f.fields) if (g.kind === 'whole' || g.kind === 'number') numbers.push([[f.key, g.key], g]);
-  }
-  const at = (p: string[], v: number) => {
-    const raw = json(spec.defaults);
-    if (p.length === 1) raw[p[0]] = v;
-    else raw[p[0]] = { ...raw[p[0]], [p[1]]: v };
-    const s = spec.normalize(raw).settings as any;
-    return p.length === 1 ? s[p[0]] : s[p[0]][p[1]];
-  };
-  for (const [p, f] of numbers) {
-    const step = f.kind === 'whole' ? 1 : (f.max - f.min) / 10;
-    assert.equal(at(p, f.min), f.min, `${p.join('.')} keeps its least, ${f.min}`);
-    assert.equal(at(p, f.max), f.max, `${p.join('.')} keeps its most, ${f.max}`);
-    assert.notEqual(at(p, f.max + step), f.max + step, `${p.join('.')} doesn't keep ${f.max + step}`);
-    assert.notEqual(at(p, f.min - step), f.min - step, `${p.join('.')} doesn't keep ${f.min - step}`);
-  }
-});
-
 test('the page carries the panel and loads its script, which the server serves', async () => {
   const html = page({ token: 'tok', body: `<h2>Settings</h2>${settingsPanel()}` });
   assert.match(html, /data-settings-panel/);
   assert.match(html, /<script src="\/settings\.js" defer><\/script>/);
   assert.match(html, /<meta name="page-token" content="tok">/);
+  assert.match(html, /<link rel="stylesheet" href="\/settings\.css">/);
   const r = await fetch(`${base}/settings.js`);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type') ?? '', /^text\/javascript/);
   assert.match(await r.text(), /\/api\/settings/);
+  const css = await fetch(`${base}/settings.css`);
+  assert.equal(css.status, 200);
+  assert.match(css.headers.get('content-type') ?? '', /^text\/css/);
+  assert.match(await css.text(), /\.sf-panel/);
 });
 
 test('GET /api/settings returns the schema, the values in use and the defaults', async () => {

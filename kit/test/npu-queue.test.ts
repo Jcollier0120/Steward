@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { pathToFileURL } from 'node:url';
 import { withLock } from './fixture/src/kit/lock.ts';
 import {
   compareTickets,
@@ -19,7 +18,8 @@ import {
   type Ticket,
 } from './fixture/src/kit/npu-queue.ts';
 
-const vectors = JSON.parse(readFileSync(new URL('./npu-queue-vectors.json', import.meta.url), 'utf8'));
+// The queue's shared vectors: the kit's spec part, which every implementation (Reeve's, Heiward's C#) runs.
+const vectors = JSON.parse(readFileSync(new URL('../spec/npu-queue-vectors.json', import.meta.url), 'utf8'));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const scratch = () => path.join(mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-')), 'locks', 'npu');
 
@@ -78,7 +78,7 @@ test('separate processes take their turns first come, first served', async () =>
   const out = path.join(path.dirname(path.dirname(lockDir)), 'order.txt');
   writeFileSync(out, '');
   const free = hold(lockDir);
-  const moduleUrl = pathToFileURL(path.resolve('src/npu-queue.ts')).href;
+  const moduleUrl = new URL('./fixture/src/kit/npu-queue.ts', import.meta.url).href;
   const child = (label: string, lane: string) => {
     const code =
       `import { withNpuTurn } from ${JSON.stringify(moduleUrl)}; import { appendFileSync } from 'node:fs';` +

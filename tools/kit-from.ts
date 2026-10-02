@@ -6,9 +6,10 @@
  *   node tools/kit-from.ts --from ... --write                and lay the shared files out as the kit, in kit\
  *
  * A kit file is one that is the same in every hire once CRLF is made LF. Each is written where the kit keeps
- * it: src\<f> as kit\src\<f> (a hire's src\kit\<f>), tools\release.ts as kit\src\release.ts, and test\<f> as
- * kit\test\<f>, which runs against the fixture agent in kit\test\fixture. Their relative imports are written
- * again for their new places (src/relocate.ts). Options:
+ * it (src/kitfiles.ts): src\<f> in the node part, kit\node\<f> (a hire's src\kit\<f>), and tools\release.ts
+ * as kit\node\release.ts; settings-panel.js in the web part; the queue's vectors in the spec part; and the
+ * kit's tests as kit\test\<f>, which run against the fixture agent in kit\test\fixture. Their relative
+ * imports are written again for their new places (src/relocate.ts). Options:
  *
  *   --overlay <path>=<file>,...   take that file's text for a kit file (a newer copy kept elsewhere)
  *   --promote <path>,...          files the same in every hire but for the agent's name: written with the
@@ -22,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareTrees, withoutName, type Tree } from '../src/compare.ts';
-import { filesUnder, FIXTURE_DIR, lf, newPathOfOld } from '../src/kitfiles.ts';
+import { filesUnder, FIXTURE_DIR, kitPathOfHire, lf, newPathOfOld } from '../src/kitfiles.ts';
 import { norm, relocate } from '../src/relocate.ts';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -62,16 +63,17 @@ console.log(`Per agent: ${c.perAgent.length} files`);
 if (!args.includes('--write')) process.exit(0);
 
 /**
- * Where each file goes, in the Steward repo's terms: a kit src file is laid out for a hire (src/kit/<f>) and
- * kept at kit/src/<f>; a kit test sits in kit/test and reaches the fixture's files under kit/test/fixture.
+ * Where each file goes, in the Steward repo's terms: a kit file is laid out as it will sit in a hire
+ * (src/kit/<f>, src/kit/web/<f>, src/kit/spec/<f>) and kept in its part, kit/<part>/<f>; a kit test sits in
+ * kit/test and reaches the fixture's files under kit/test/fixture, and the spec's beside it.
  */
 const fixture = `kit/${FIXTURE_DIR}`;
 const inHire = (p: string) => newPathOfOld(p) ?? p;
 function place(old: string): { at: string; text: (t: string) => string } {
   const hireNew = newPathOfOld(old);
   if (hireNew) {
-    // As it will sit in a hire, its imports of other kit files stay beside it and the agent's own go up a level.
-    return { at: `kit/src/${hireNew.slice('src/kit/'.length)}`, text: (t) => relocate(t, old, hireNew, inHire).text };
+    // As it will sit in a hire: its imports of other kit files stay beside it and the agent's own go up a level.
+    return { at: `kit/${kitPathOfHire(hireNew)}`, text: (t) => relocate(t, old, hireNew, inHire).text };
   }
   if (old.startsWith('test/')) {
     // As if it sat in the fixture's test folder, moved up beside it: kit/test/<f>.
@@ -79,6 +81,8 @@ function place(old: string): { at: string; text: (t: string) => string } {
     const move = (target: string) => {
       const inFixture = target.startsWith(`${fixture}/`) ? target.slice(fixture.length + 1) : null;
       if (inFixture === null) return target;
+      const moved = newPathOfOld(inFixture);
+      if (moved && kitPathOfHire(moved)?.startsWith('spec/')) return `kit/${kitPathOfHire(moved)}`;
       if (inFixture.startsWith('test/')) return `kit/${inFixture}`;
       return `${fixture}/${inHire(inFixture)}`;
     };

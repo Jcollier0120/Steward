@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
@@ -46,8 +46,23 @@ export interface ServeOptions {
   settings?: SettingsSpec;
 }
 
-/** The Settings panel's script (page.ts loads it), served as a file: the page's CSP allows scripts from 'self'. */
-const PANEL_JS = readFileSync(new URL('./settings-panel.js', import.meta.url), 'utf8');
+/**
+ * The kit's web part, served as files (the page's CSP allows scripts and styles from 'self'): the Settings
+ * panel's script and stylesheet, which page.ts loads. An agent that didn't take the web part (kit.json's
+ * parts) has no panel, and these answer 404.
+ */
+const WEB: Record<string, { file: URL; type: string }> = {
+  '/settings.js': { file: new URL('./web/settings-panel.js', import.meta.url), type: 'text/javascript; charset=utf-8' },
+  '/settings.css': { file: new URL('./web/settings-panel.css', import.meta.url), type: 'text/css; charset=utf-8' },
+};
+const webFile = (route: string): Handler => {
+  let text: string | null = null;
+  return () => {
+    const w = WEB[route];
+    if (text === null && existsSync(w.file)) text = readFileSync(w.file, 'utf8');
+    return text === null ? { json: { error: "this agent's kit has no web part" }, status: 404 } : { body: text, type: w.type };
+  };
+};
 
 /** A request body the server won't read: too large (413), or not JSON (400). */
 class BodyError extends Error {
@@ -100,7 +115,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract).
     '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, running: duty().onDuty, ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
-    '/settings.js': () => ({ body: PANEL_JS, type: 'text/javascript; charset=utf-8' }),
+    '/settings.js': webFile('/settings.js'),
+    '/settings.css': webFile('/settings.css'),
     ...opts.get,
   };
   const post: Record<string, Handler> = {

@@ -18,7 +18,7 @@ export const locksDir = path.dirname(npuLockDir);
 
 /**
  * An accelerator's lock folder, for its first slot: `locks\npu` for the NPU (as before), `locks\<id>`
- * for the others. Its other slots are `<lock>.2` … and its line `<lock>.queue` (src/npu-queue.ts).
+ * for the others. Its other slots are `<lock>.2` … and its line `<lock>.queue` (npu-queue.ts).
  */
 export const lockDirFor = (id: string) => (id === 'npu' ? npuLockDir : path.join(locksDir, id));
 
@@ -30,8 +30,8 @@ export const acceleratorsDir = path.join(path.dirname(locksDir), 'accelerators')
 
 /**
  * A plain machine-wide mutex on atomic `mkdir`, as Reeve's src/lock.ts: for locks nobody queues for.
- * NOT for an accelerator: model work goes through src/npu.ts, which waits its turn in the
- * accelerator's line (src/npu-queue.ts) shared by every program on this PC that uses it.
+ * NOT for an accelerator: model work goes through the kit's npu.ts, which waits its turn in the
+ * accelerator's line (npu-queue.ts) shared by every program on this PC that uses it.
  */
 export async function withLock<T>(
   dir: string,

@@ -26,7 +26,7 @@ const SCHTASKS = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 
 
 export const DEV_CHECKOUT = 'This is a development checkout. Build a release and install that: npm run release -- --install';
 
-/** What a release says about itself: release.json at its root, written by tools/release.ts. */
+/** What a release says about itself: release.json at its root, written by src/kit/release.ts. */
 export interface Release {
   id: string;
   name: string;
@@ -34,6 +34,8 @@ export interface Release {
   commit: string;
   dirty: boolean;
   built: string;
+  /** The Steward's kit it carries in src\kit\ (none in a release from before the kit had a version). */
+  kit?: string;
 }
 
 export interface Ran {

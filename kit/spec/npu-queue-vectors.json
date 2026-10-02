@@ -1,5 +1,5 @@
 {
-  "about": "Shared test data for the NPU queue (docs/NPU-QUEUE.md). Every implementation (Reeve's src/npu-queue.ts, npu-embed's npu_lock.py, Heiward's NpuLock.cs, Manor's agents) must order these tickets and judge these heartbeats exactly as listed. Copy this file into an implementation's tests unchanged.",
+  "about": "Shared test data for the NPU queue (NPU-QUEUE.md, beside this file). Its home is the Steward's kit, the spec part (kit/spec in Jcollier0120/Steward); it was Reeve's. Every implementation (the kit's npu-queue.ts, Reeve's src/npu-queue.ts, npu-embed's npu_lock.py, Heiward's NpuLock.cs) must order these tickets and judge these heartbeats exactly as listed. Take this file from a kit release, unchanged.",
   "nowUs": 1790000000000000,
   "order": [
     {

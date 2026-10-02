@@ -164,12 +164,53 @@ test('an older config with only chatEndpoint still works: one accelerator, the N
   // An embed endpoint on another device is an accelerator of its own; `start: false` never starts it.
   const two = config({ chatEndpoint: { baseUrl: 'http://x:1', model: 'm' }, embedEndpoint: { baseUrl: 'http://x:2', model: 'e', device: 'Cpu', start: false } });
   assert.deepEqual(two.accelerators.map((a) => [a.id, !!a.chat, a.embed?.startCommand]), [['npu', true, undefined], ['cpu', false, []]]);
-  assert.match((A.parseAccelerators({ accelerators: [] }) as { error: string }).error, /no accelerator/, 'an empty list is not an older config');
+  assert.equal((A.parseAccelerators({ accelerators: [] }) as { error: string }).error, A.REEVE_NOT_SET_UP, 'an empty list is not an older config');
   // The older shape `new Npu(...)` took is still read the same way.
   const old = new Npu({ baseUrl: 'http://127.0.0.1:9', model: 'm', device: 'Npu', maxContextTokens: 2400, requestTimeoutMs: 1000 });
   assert.equal(old.accelerators[0].id, 'npu');
   assert.match((A.loadAccelerators(path.join(home, 'nope.json')) as { error: string }).error, /isn't set up/);
-  assert.match((A.parseAccelerators({}) as { error: string }).error, /no accelerators/);
+  assert.equal((A.parseAccelerators({}) as { error: string }).error, A.REEVE_NOT_SET_UP);
+});
+
+// ---------------------------------------------------------------- Reeve not set up (a PC without an NPU)
+
+test('Reeve not set up reads the same whichever way: no config.json, an empty list, or nothing that serves anything', async () => {
+  const want = A.REEVE_NOT_SET_UP;
+  assert.equal(want, "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`).");
+  const dir = path.join(home, 'reeve-unset');
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'config.json');
+  // No config.json: Reeve writes none at install on a PC without an NPU.
+  assert.deepEqual(A.loadAccelerators(file), { error: want });
+  // An empty list: Reeve's accelerators setup dropped the install's npu entry.
+  writeFileSync(file, JSON.stringify({ accelerators: [] }));
+  assert.deepEqual(A.loadAccelerators(file), { error: want });
+  // A list where nothing serves anything: switched off, or with no endpoint.
+  writeFileSync(file, JSON.stringify({ accelerators: [{ id: 'npu', chat: { baseUrl: 'http://x:1', model: 'm' }, enabled: false }, { id: 'cpu', name: 'Oryon' }] }));
+  assert.deepEqual(A.loadAccelerators(file), { error: want });
+  // An older config with no endpoint either.
+  writeFileSync(file, JSON.stringify({ npuMaxContextTokens: 2400 }));
+  assert.deepEqual(A.loadAccelerators(file), { error: want });
+  // The agent's model says so as its problem, and a call fails with the same words before anything is sent.
+  const npu = new Npu(A.loadAccelerators(file));
+  assert.equal(npu.problem, want);
+  await assert.rejects(npu.chat([{ role: 'user', content: 'hi' }]), (e: Error) => e instanceof NpuError && e.message === want);
+});
+
+test("entries that can't be read are named, not taken for Reeve not set up", () => {
+  const r = A.parseAccelerators({ accelerators: [{ name: 'no id' }, { id: 'tpu-1', chat: { baseUrl: 'http://x:1', model: 'm' } }] }) as { error: string };
+  assert.match(r.error, /^lists no accelerator that can be used \(accelerators\[0\] has no id; accelerators\[1\] tpu-1: an id is/);
+  const file = path.join(home, 'reeve-broken', 'config.json');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ accelerators: [{ name: 'no id' }] }));
+  assert.equal((A.loadAccelerators(file) as { error: string }).error, `${file} lists no accelerator that can be used (accelerators[0] has no id)`);
+});
+
+test('set up, but nothing serves the kind asked for: the message names the kind', async () => {
+  const npu = new Npu(config({ accelerators: [{ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:9', model: 'm' } }] }));
+  assert.equal(npu.problem, null, 'Reeve is set up: chat is served');
+  await assert.rejects(npu.vision('C:\\x.png', 'what is it?'), (e: Error) => e instanceof NpuError && /no vision model/.test(e.message) && e.message !== A.REEVE_NOT_SET_UP);
+  await assert.rejects(npu.embed(['x']), (e: Error) => e instanceof NpuError && /serves embed/.test(e.message) && e.message !== A.REEVE_NOT_SET_UP);
 });
 
 test('auto order: cards with 2 GB or more by memory, then the NPU, then shared graphics, then the CPU; a list goes first', () => {
@@ -259,7 +300,7 @@ test("each accelerator has its own lock folders and line; the NPU's stays where 
   assert.equal(queueDirFor(g), `${g}.queue`);
 });
 
-const vectors = JSON.parse(readFileSync(new URL('./npu-queue-vectors.json', import.meta.url), 'utf8'));
+const vectors = JSON.parse(readFileSync(new URL('../spec/npu-queue-vectors.json', import.meta.url), 'utf8'));
 for (const c of vectors.slots) {
   test(`shared vectors: ${c.case}`, () => {
     const dirs = A.lockDirsOf({ id: c.id, slots: c.slots });

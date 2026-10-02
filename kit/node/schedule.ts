@@ -7,7 +7,7 @@ import { duty } from './duty.ts';
  * Staggered: Manor may start every agent at once, so the first round comes 30 s to 3 min after start
  * (random), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
  *
- * Off duty (src/duty.ts), scheduled rounds are skipped; runNow() still runs one.
+ * Off duty (duty.ts), scheduled rounds are skipped; runNow() still runs one.
  *
  * `everyMs` may be a function, read each time a wait is set: then an interval changed on the Settings
  * panel takes effect at once, with reschedule() setting the wait under way to the new interval.

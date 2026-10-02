@@ -1,0 +1,7 @@
+{
+  "name": "fixture",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The kit's test agent: it does nothing but carry the kit",
+  "type": "module"
+}

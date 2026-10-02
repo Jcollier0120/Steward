@@ -1,5 +1,6 @@
-// A copy of Reeve's src/npu-queue.ts (https://github.com/Jcollier0120/Reeve, docs/NPU-QUEUE.md). Keep it identical:
-// every NPU user on the PC must order the line the same way. Its tests are test/npu-queue.test.ts.
+// The NPU queue (the kit's spec/NPU-QUEUE.md): the original, which Reeve's src/npu-queue.ts copies until
+// Reeve takes the kit. Every NPU user on the PC must order the line the same way, so a change here is a
+// change to the spec and its vectors too. Its tests are the Steward's kit/test/npu-queue.test.ts.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

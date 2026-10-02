@@ -40,7 +40,7 @@ export { noteLabel, reeveHome, theAccelerator, type Accelerator, type Accelerato
 
 /**
  * The manor's models, wherever they run: the NPU, a graphics card or the processor (Manor's
- * docs/ACCELERATORS.md, and src/accelerators.ts). The accelerators are Reeve's, in its config.json, so
+ * docs/ACCELERATORS.md, and the kit's accelerators.ts). The accelerators are Reeve's, in its config.json, so
  * a change there reaches every agent; their servers, locks and lines are shared with Reeve, Heiward and
  * the other agents. Each request goes to one accelerator by the contract's rules, and its answer says
  * which.
@@ -113,7 +113,7 @@ export class NpuBusy extends NpuError {}
 // ---------------------------------------------------------------- manners
 //
 // Turns on an accelerator come through its line, which every program on this PC that uses it shares
-// (src/npu-queue.ts, a copy of Reeve's; Reeve's docs/NPU-QUEUE.md): first come, first served, and a
+// (npu-queue.ts, a copy of Reeve's; Reeve's docs/NPU-QUEUE.md): first come, first served, and a
 // free slot passes straight to the next in line. The agents are background staff, so a request a
 // person is waiting on (Claude asking Reeve) goes ahead of theirs, until they have waited two minutes.
 // On top of that, an agent:
@@ -205,7 +205,7 @@ export function npuTurn<T>(fn: () => Promise<T>, opts: { maxWaitMs?: number; max
   return acceleratorTurn({ id: 'npu', name: 'NPU', slots: 1 }, fn, opts);
 }
 
-/** Reeve's config.json's accelerators, or why none can be used (src/accelerators.ts). */
+/** Reeve's config.json's accelerators, or why none can be used (accelerators.ts). */
 export const loadNpuConfig = loadAccelerators;
 
 /** The pessimistic estimate Reeve uses for its cap: one token per 3 characters. */
@@ -451,7 +451,7 @@ export class Npu {
   }
 }
 
-/** The pick (src/accelerators.ts), seeing this process's own requests already headed to each line. */
+/** The pick (accelerators.ts), seeing this process's own requests already headed to each line. */
 function pick(list: Accelerator[], lane: Lane) {
   return pickFrom(list, lane, (a) => lineLook(a, headed.get(a.id) ?? 0));
 }

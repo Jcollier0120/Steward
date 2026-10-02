@@ -6,10 +6,12 @@
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
  *   npm run release -- --publish     builds it, then makes the GitHub release v<version> with both files
  *
- * The zip holds what the agent runs from, at its top level: src\ (no tests), art\, package.json,
- * README.md and release.json. This tool isn't in it. The zip is made and opened with Windows' own
- * tar.exe, so there's no dependency. Uncommitted changes in what the zip carries make a release
- * marked dirty, version <version>+dev.<commit>, which installs but doesn't publish.
+ * npm run release fills src\kit\ first (tools\kit.ts), at the version kit.json pins. The zip holds what
+ * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
+ * README.md and release.json, which names the kit. So an installed agent needs neither the Steward nor
+ * GitHub. The zip is made and opened with Windows' own tar.exe, so there's no dependency. Uncommitted
+ * changes in what the zip carries (kit.json too) make a release marked dirty, version
+ * <version>+dev.<commit>, which installs but doesn't publish.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,13 +22,35 @@ import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 
-const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+/** The agent's root: this file is its src\kit\release.ts. */
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TAR = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
-/** The folders a release carries whole, tests aside (src\ holds the PowerShell scripts an agent runs, too). */
+/** The folders a release carries whole, tests aside (src\ holds the PowerShell scripts an agent runs, too, and src\kit\). */
 export const RELEASE_FOLDERS = ['src', 'art'];
 /** The top-level files a release carries, when the repo has them. */
 export const RELEASE_FILES = ['package.json', 'README.md', 'LICENSE'];
+
+/**
+ * The kit a release carries: src\kit\VERSION, which must be the version kit.json pins (npm run kit fills
+ * it). An error in words when it isn't.
+ */
+export function kitOf(dir: string): { kit: string } | { error: string } {
+  let pin: unknown;
+  try {
+    pin = JSON.parse(readFileSync(path.join(dir, 'kit.json'), 'utf8').replace(/^\uFEFF/, '')).kit;
+  } catch {
+    return { error: `${path.join(dir, 'kit.json')} is missing or unreadable: it pins the kit this agent uses` };
+  }
+  let have = '';
+  try {
+    have = readFileSync(path.join(dir, 'src', 'kit', 'VERSION'), 'utf8').trim();
+  } catch {
+    return { error: `src\\kit\\ isn't filled: run npm run kit` };
+  }
+  if (have !== pin) return { error: `src\\kit\\ holds kit ${have}, but kit.json pins ${String(pin)}: run npm run kit` };
+  return { kit: have };
+}
 
 const isTest = (f: string) => /\.(test|spec)\.[cm]?[jt]s$/.test(f);
 
@@ -69,11 +93,14 @@ function sha256(file: string): string {
 function build(): { release: Release; zip: string; sums: string } {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   if (pkg.version !== APP.version) throw new Error(`package.json says ${pkg.version} but src/app.ts says ${APP.version}; make them agree first.`);
+  const kit = kitOf(root);
+  if ('error' in kit) throw new Error(kit.error);
   const commit = git('rev-parse', '--short', 'HEAD');
-  // Dirty means what goes into the zip isn't the commit's: a change or a new file there. Other untracked
-  // things in the checkout (a .claude folder, scratch files) don't count.
-  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES) !== '';
-  const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString() };
+  // Dirty means what goes into the zip isn't the commit's: a change or a new file there (src\kit\ is
+  // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
+  // scratch files) don't count.
+  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, 'kit.json') !== '';
+  const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit };
 
   const stage = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-release-`));
   try {
@@ -93,7 +120,7 @@ function build(): { release: Release; zip: string; sums: string } {
     const sums = path.join(outDir, 'SHA256SUMS.txt');
     const hash = sha256(zip);
     writeFileSync(sums, `${hash}  ${name}\n`);
-    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
+    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     return { release, zip, sums };
   } finally {
@@ -145,7 +172,7 @@ function publish(b: { release: Release; zip: string; sums: string }): number {
     console.error(`Not published: couldn't ask GitHub about ${tag}: ${`${view.stderr}`.trim() || view.error?.message}`);
     return 1;
   }
-  const notes = `${APP.name} ${release.version}, built from ${release.commit}. Unpack the zip anywhere and run: node src\\cli.ts install (Node 22.18 or later).`;
+  const notes = `${APP.name} ${release.version}, built from ${release.commit}, with the Steward's kit ${release.kit}. Unpack the zip anywhere and run: node src\\cli.ts install (Node 22.18 or later).`;
   const r = spawnSync(gh, ['release', 'create', tag, b.zip, b.sums, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
     stdio: 'inherit',
     windowsHide: true,
