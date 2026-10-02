@@ -13,7 +13,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   intervalMinutes: 60,
   notes: true,
-  folders: ['C:\\Users\\Public\\Documents'],
+  folders: ['%USERPROFILE%\\Documents'],
   limits: { pieceTokens: 600, share: 0.5 },
   agents: [{ port: 18383, name: 'Reeve' }],
 };
