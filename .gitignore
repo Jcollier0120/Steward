@@ -1,2 +1,4 @@
 node_modules/
 artifacts/
+src/kit/
+kit/test/fixture/src/kit/

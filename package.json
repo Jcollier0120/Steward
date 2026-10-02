@@ -2,9 +2,35 @@
   "name": "steward",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
   "type": "module",
+  "bin": {
+    "steward": "src/cli.ts"
+  },
   "engines": {
     "node": ">=22.18"
+  },
+  "scripts": {
+    "kit": "node tools/kit.ts --from kit && node tools/kit.ts --from kit --root kit/test/fixture",
+    "pretest": "npm run kit",
+    "pretypecheck": "npm run kit",
+    "serve": "node tools/kit.ts --from kit && node src/cli.ts serve",
+    "prestart": "node tools/kit.ts --from kit",
+    "start": "node src/cli.ts start",
+    "preopen": "node tools/kit.ts --from kit",
+    "open": "node src/cli.ts open",
+    "prestop": "node tools/kit.ts --from kit",
+    "stop": "node src/cli.ts stop",
+    "prestatus": "node tools/kit.ts --from kit",
+    "status": "node src/cli.ts status",
+    "test": "node --test \"test/**/*.test.ts\" \"kit/test/**/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "release": "node tools/kit.ts --from kit && node src/kit/release.ts",
+    "kit-release": "node tools/kit-release.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^7.0.2"
   }
 }
