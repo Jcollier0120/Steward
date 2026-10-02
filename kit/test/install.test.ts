@@ -332,16 +332,25 @@ test('a mistyped option is refused before anything is done', async () => {
 
 // ---------------------------------------------------------------- the release
 
-test('a release carries src (no tests) with the kit in src/kit, art, package.json, README.md and LICENSE, and nothing else', () => {
+test('a release carries src (no tests) with the kit in src/kit, art, package.json, README.md, LICENSE, kit.json and tools/kit.ts, and nothing else', () => {
   const picked = pickReleaseFiles([
     'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'src/kit/npu.ts', 'src/kit/VERSION', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
-    'test/agent.test.ts', 'tools/kit.ts', 'kit.json', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
+    'test/agent.test.ts', 'tools/kit.ts', 'tools\\convert.ts', 'kit.json', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
   ]);
-  assert.deepEqual(picked, ['LICENSE', 'README.md', 'art/icon.svg', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts']);
+  assert.deepEqual(picked, ['LICENSE', 'README.md', 'art/icon.svg', 'kit.json', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts', 'tools/kit.ts']);
 
   const own = pickReleaseFiles(repoFiles(appRoot));
   for (const f of ['src/cli.ts', 'src/app.ts', 'src/kit/install.ts', 'src/kit/release.ts', 'art/icon.svg', 'package.json', 'README.md']) assert.ok(own.includes(f), f);
-  assert.ok(own.every((f) => f.startsWith('src/') || f.startsWith('art/') || ['package.json', 'README.md', 'LICENSE'].includes(f)));
+  assert.ok(own.every((f) => f.startsWith('src/') || f.startsWith('art/') || ['package.json', 'README.md', 'LICENSE', 'kit.json', 'tools/kit.ts'].includes(f)));
+});
+
+test('repoFiles looks into tools\\ for tools/kit.ts, and the release picks only that from it', () => {
+  const dir = path.join(tmp, 'repo-tools');
+  for (const f of ['tools/kit.ts', 'tools/convert.ts', 'docs/x.md', 'src/a.ts', 'kit.json']) {
+    mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    writeFileSync(path.join(dir, f), '');
+  }
+  assert.deepEqual(pickReleaseFiles(repoFiles(dir)), ['kit.json', 'src/a.ts', 'tools/kit.ts']);
 });
 
 test('a release carries the kit kit.json pins, and says so; otherwise it is refused', () => {

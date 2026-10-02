@@ -114,6 +114,36 @@ test('already on the kit: skipped; not taking the kit: skipped; still carrying t
   assert.match((await bumpOne(none.ctx, none.e, { kit: '1.0.1' })).message, /has no kit\.json/);
 });
 
+test("tools/kit.ts rides with the pin: an agent's old one is replaced with the Steward's before its kit is filled, and committed", async () => {
+  // An old tools/kit.ts that can't fill anything: the bump must not run it.
+  const s = setup({ files: { 'tools/kit.ts': "console.error('the old tool'); process.exit(9);\n" } });
+  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
+  assert.match(res.message, /tools\/kit\.ts updated/);
+  const branch = 'steward/kit-1.0.1';
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['kit.json', 'package-lock.json', 'package.json', 'src/app.ts', 'tools/kit.ts']);
+  assert.equal(sh(s.checkout, 'show', `${branch}:tools/kit.ts`), kitTool.replace(/\r\n/g, '\n').trimEnd(), "the Steward's own, byte for byte (LF)");
+  assert.match(sh(s.checkout, 'log', '-1', '--format=%b', branch), /tools\/kit\.ts is the Steward's\./);
+  assert.equal(readFileSync(path.join(s.work, 'src', 'kit', 'VERSION'), 'utf8').trim(), '1.0.1', 'the new tool filled the kit');
+  // push says so in the PR.
+  const r = runner((args) => (args[1] === 'list' ? ok([]) : args[1] === 'create' ? ok('https://github.com/Jcollier0120/Fake/pull/8\n') : undefined));
+  assert.equal((await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', changelog: null })).outcome, 'done');
+  const create = r.gh.find((a) => a[1] === 'create')!;
+  const body = create[create.indexOf('--body') + 1];
+  assert.match(body, /the version is 0\.4\.1 in package\.json, package-lock\.json, src\/app\.ts\. tools\/kit\.ts is the Steward's/);
+});
+
+test("an agent that doesn't fill with tools/kit.ts gets none; with no tools/kit.ts to hand out, a Node agent is refused", async () => {
+  const other = setup({}, { fill: 'node -e process.exit(0)' });
+  const res = await bumpOne(other.ctx, other.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'done', res.message);
+  assert.doesNotMatch(res.message, /tools\/kit\.ts/);
+  const none = setup();
+  const r = await bumpOne(none.ctx, none.e, { kit: '1.0.1', kitFrom, tool: path.join(tmp, 'no-such-kit.ts') });
+  assert.equal(r.outcome, 'refused');
+  assert.match(r.message, /has no tools\/kit\.ts to hand out/);
+});
+
 test("version files that disagree stop a bump before anything is run", async () => {
   const s = setup({ files: { 'src/app.ts': "export const APP = { version: '0.3.9' };\n" } });
   const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { compareVersions, oldKitFilesIn } from '../kitfiles.ts';
+import { compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
+import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
 import { agreedVersion } from '../versions.ts';
 import type { Employee } from '../settings.ts';
@@ -7,8 +8,9 @@ import { bumpBranch, checkoutOf, NOT_ON_KIT, type Ctx } from './common.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
- * branch on origin (version, pinned kit, old kit files still tracked), its latest release and the kit that
- * release carries, the Steward's open PRs, and a bump prepared here but not pushed.
+ * branch on origin (version, pinned kit, old kit files still tracked, whether its tools/kit.ts is the
+ * Steward's), its latest release and the kit that release carries, the Steward's open PRs, and a bump
+ * prepared here but not pushed.
  */
 
 export type Checks = 'none' | 'passing' | 'pending' | 'failing';
@@ -39,7 +41,16 @@ export interface StaffRow {
   usesKit: boolean;
   parts: string[];
   checkout: { path: string; exists: boolean; branch: string | null; changes: number };
-  main: { commit: string; version: string | null; versionError: string | null; kit: string | null; parts: string[] | null; oldKitFiles: string[] } | null;
+  main: {
+    commit: string;
+    version: string | null;
+    versionError: string | null;
+    kit: string | null;
+    parts: string[] | null;
+    oldKitFiles: string[];
+    /** Its tools/kit.ts against the Steward's: the same, different, missing, or not asked (null). */
+    tool: 'current' | 'differs' | 'missing' | null;
+  } | null;
   release: (ReleaseInfo & { kit: string | null | 'unknown' }) | null;
   /** The version on its branch has no release yet. */
   releaseNeeded: boolean;
@@ -119,7 +130,7 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
 
 export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,headRefName,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
 
-export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null }): Promise<StaffRow> {
+export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null; tool?: string | null }): Promise<StaffRow> {
   const { run } = ctx;
   const dir = checkoutOf(e);
   const notes: string[] = [];
@@ -158,7 +169,14 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     const v = agreedVersion(texts);
     const pin = readPin(await showFile(run, dir, remote, 'kit.json'));
     const oldKitFiles = e.usesKit ? oldKitFilesIn(await trackedAt(run, dir, remote)) : [];
-    row.main = { commit: commit.slice(0, 7), version: 'version' in v ? v.version : null, versionError: 'error' in v ? v.error : null, kit: pin?.kit ?? null, parts: pin?.parts ?? null, oldKitFiles };
+    let tool: 'current' | 'differs' | 'missing' | null = null;
+    if (e.usesKit && pin && opts.tool && takesTool(e.fill)) {
+      const theirs = await showFile(run, dir, remote, TOOL);
+      tool = theirs === null ? 'missing' : lf(theirs) === lf(opts.tool) ? 'current' : 'differs';
+      if (tool === 'missing') notes.push(`no ${TOOL} on ${remote}`);
+      if (tool === 'differs') notes.push(`${TOOL} on ${remote} isn't the Steward's: the next bump brings it`);
+    }
+    row.main = { commit: commit.slice(0, 7), version: 'version' in v ? v.version : null, versionError: 'error' in v ? v.error : null, kit: pin?.kit ?? null, parts: pin?.parts ?? null, oldKitFiles, tool };
     if ('error' in v) notes.push(v.error);
     if (e.usesKit && oldKitFiles.length) notes.push(`still tracks ${oldKitFiles.length} old kit files at their old paths (${oldKitFiles.slice(0, 3).join(', ')}${oldKitFiles.length > 3 ? ', …' : ''}): convert it to the Steward's kit`);
     else if (e.usesKit && !pin) notes.push(`no kit.json on ${remote}`);
@@ -201,7 +219,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
 }
 
 /** Every employee's row, a few at a time. */
-export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null }): Promise<Staff> {
+export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null }): Promise<Staff> {
   const rows: StaffRow[] = [];
   const all = ctx.settings.employees;
   for (let i = 0; i < all.length; i += 5) rows.push(...(await Promise.all(all.slice(i, i + 5).map((e) => staffRow(ctx, e, opts)))));

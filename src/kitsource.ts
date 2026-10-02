@@ -23,6 +23,20 @@ export interface KitInfo {
 
 export const latestKit = (k: KitInfo) => k.released[0] ?? null;
 
+/**
+ * The canonical tools/kit.ts, the one file every Node agent keeps beside the kit: this repository's own,
+ * which a checkout has and a release carries (the kit's release.ts packs it). bump copies it into each
+ * agent with the new pin, so a change to it rolls out like any kit change.
+ */
+export const TOOL = 'tools/kit.ts';
+export const stewardToolFile = () => path.join(appRoot, 'tools', 'kit.ts');
+
+/** The canonical tools/kit.ts's text, or null when this copy has none. */
+export const stewardTool = () => (existsSync(stewardToolFile()) ? readFileSync(stewardToolFile(), 'utf8') : null);
+
+/** Whether an employee fills its kit with tools/kit.ts (the Node agents), and so takes the Steward's. */
+export const takesTool = (fill: string) => /(^|[\s"'])tools[\\/]kit\.ts\b/.test(fill);
+
 /** The kit-v<version> releases in a `gh release list --json tagName,isDraft` answer, newest version first. */
 export function kitReleasesIn(json: string): string[] {
   const list = JSON.parse(json || '[]') as { tagName?: string; isDraft?: boolean }[];

@@ -92,6 +92,25 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   assert.match(old.notes.join(' '), /still tracks 3 old kit files at their old paths/);
 });
 
+test("the table says whether an employee's tools/kit.ts is the Steward's", async () => {
+  const tool = "// the Steward's tools/kit.ts\nconsole.log('fill');\n";
+  const current = fakeEmployee(path.join(tmp, 'tool-current'), { files: { 'tools/kit.ts': tool.replace(/\n/g, '\r\n') } });
+  const stale = fakeEmployee(path.join(tmp, 'tool-stale'), { files: { 'tools/kit.ts': '// an older one\n' } });
+  const missing = fakeEmployee(path.join(tmp, 'tool-missing'));
+  const r = runner(() => ok([]));
+  const row = async (checkout: string) => {
+    const e = employee(checkout);
+    return staffRow(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), e, { fetch: false, kit: '1.0.0', tool });
+  };
+  const c = await row(current.checkout);
+  assert.equal(c.main?.tool, 'current', 'line endings aside');
+  assert.deepEqual(c.notes, []);
+  const s = await row(stale.checkout);
+  assert.equal(s.main?.tool, 'differs');
+  assert.match(s.notes.join(' '), /tools\/kit\.ts on origin\/main isn't the Steward's: the next bump brings it/);
+  assert.equal((await row(missing.checkout)).main?.tool, 'missing');
+});
+
 test("gh failing doesn't lose the row: what git knows is there, and the failure is a note", async () => {
   const f = fakeEmployee(path.join(tmp, 'offline'));
   const r = runner(() => ({ code: 1, out: '', err: 'error connecting to api.github.com' }));

@@ -64,6 +64,9 @@ export function kitScripts(scripts: Record<string, string>): Record<string, stri
 /** What the kit's section says fills the kit first. */
 export const FILLS_FIRST_LINE =
   '`npm test`, `npm run typecheck`, `npm run serve`, `npm run release`, `npm start`, `npm stop`, `npm run status` and `npm run open` fill it first.';
+/** What the kit's section says a Steward's PR changes. */
+export const PR_CHANGES_LINE =
+  "a new version arrives here as the Steward's PR, which changes `kit.json`, the version and, when the Steward's is newer, `tools/kit.ts`, and nothing else.";
 
 /** The README's references to the old kit, pointed at the Steward's. */
 export function readmeLinks(text: string): string {
@@ -87,7 +90,7 @@ export function kitSection(name: string): string {
 
 The parts every agent shares (the page and its server, Settings, install and release, the accelerators and the NPU queue) are the Steward's kit, kept once in [Jcollier0120/Steward](${STEWARD_URL}). ${name} doesn't carry the kit's code: \`kit.json\` pins a kit version and its parts, and \`npm run kit\` (\`node tools/kit.ts\`) fills \`src/kit/\`, which git ignores. ${FILLS_FIRST_LINE} A release carries \`src/kit/\`, so an installed ${name} needs neither the Steward nor GitHub.
 
-\`tools/kit.ts\` takes the pinned version from a Steward checkout beside this one (\`..\\Steward\\kit\`) when it is at that version, or else downloads the kit release \`kit-v<version>\` from GitHub (no sign-in; through \`gh\` if that fails), checks it against its SHA256SUMS.txt and keeps it in \`%USERPROFILE%\\.steward\\kits\`. To try a kit change before it's released: \`node tools/kit.ts --from ..\\Steward\\kit\` (or set \`STEWARD_KIT\`). Never edit \`src/kit/\`: change the kit in the Steward, and a new version arrives here as the Steward's PR, which changes \`kit.json\` and the version and nothing else. \`test/agent.test.ts\` runs the kit's checks of ${name} (its \`src/app.ts\`, \`src/settings.ts\`, \`package.json\` and icon, the agent interface in the Steward's README).
+\`tools/kit.ts\` takes the pinned version from a Steward checkout beside this one (\`..\\Steward\\kit\`) when it is at that version, or else downloads the kit release \`kit-v<version>\` from GitHub (no sign-in; through \`gh\` if that fails), checks it against its SHA256SUMS.txt and keeps it in \`%USERPROFILE%\\.steward\\kits\`. To try a kit change before it's released: \`node tools/kit.ts --from ..\\Steward\\kit\` (or set \`STEWARD_KIT\`). Never edit \`src/kit/\` or \`tools/kit.ts\`: change them in the Steward, and ${PR_CHANGES_LINE} \`test/agent.test.ts\` runs the kit's checks of ${name} (its \`src/app.ts\`, \`src/settings.ts\`, \`package.json\` and icon, the agent interface in the Steward's README).
 
 `;
 }

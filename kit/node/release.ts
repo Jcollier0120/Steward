@@ -8,9 +8,10 @@
  *
  * npm run release fills src\kit\ first (tools\kit.ts), at the version kit.json pins. The zip holds what
  * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
- * README.md and release.json, which names the kit. So an installed agent needs neither the Steward nor
- * GitHub. The zip is made and opened with Windows' own tar.exe, so there's no dependency. Uncommitted
- * changes in what the zip carries (kit.json too) make a release marked dirty, version
+ * README.md and release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill
+ * its kit again (and the Steward, installed, has the tools\kit.ts it hands out). So an installed agent
+ * needs neither the Steward nor GitHub. The zip is made and opened with Windows' own tar.exe, so there's
+ * no dependency. Uncommitted changes in what the zip carries make a release marked dirty, version
  * <version>+dev.<commit>, which installs but doesn't publish.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -28,8 +29,8 @@ const TAR = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.
 
 /** The folders a release carries whole, tests aside (src\ holds the PowerShell scripts an agent runs, too, and src\kit\). */
 export const RELEASE_FOLDERS = ['src', 'art'];
-/** The top-level files a release carries, when the repo has them. */
-export const RELEASE_FILES = ['package.json', 'README.md', 'LICENSE'];
+/** The files a release carries, when the repo has them. */
+export const RELEASE_FILES = ['package.json', 'README.md', 'LICENSE', 'kit.json', 'tools/kit.ts'];
 
 /**
  * The kit a release carries: src\kit\VERSION, which must be the version kit.json pins (npm run kit fills
@@ -62,13 +63,13 @@ export function pickReleaseFiles(files: string[]): string[] {
     .sort();
 }
 
-/** The files under a repo's root that a release could carry: its top-level files, and everything in RELEASE_FOLDERS. */
+/** The files under a repo's root that a release could carry: its top-level files, everything in RELEASE_FOLDERS, and the folders of RELEASE_FILES. */
 export function repoFiles(dir: string, rel = ''): string[] {
   const files: string[] = [];
   for (const e of readdirSync(path.join(dir, rel), { withFileTypes: true })) {
     const r = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) {
-      if (rel || RELEASE_FOLDERS.includes(e.name)) files.push(...repoFiles(dir, r));
+      if (rel || RELEASE_FOLDERS.includes(e.name) || RELEASE_FILES.some((f) => f.startsWith(`${r}/`))) files.push(...repoFiles(dir, r));
     } else if (e.isFile()) files.push(r);
   }
   return files;
@@ -99,7 +100,7 @@ function build(): { release: Release; zip: string; sums: string } {
   // Dirty means what goes into the zip isn't the commit's: a change or a new file there (src\kit\ is
   // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
   // scratch files) don't count.
-  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, 'kit.json') !== '';
+  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit };
 
   const stage = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-release-`));

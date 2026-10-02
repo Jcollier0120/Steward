@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dataDir } from './app.ts';
-import { kitInfo, chooseKit, localChangelog, type KitInfo } from './kitsource.ts';
+import { kitInfo, chooseKit, localChangelog, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
@@ -60,7 +60,7 @@ async function changelogFor(ctx: Ctx, kit: string): Promise<string | null> {
 /** The staff's table, refreshed and kept in staff.json. */
 export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean } = {}): Promise<Staff> {
   const chosen = chooseKit(ctx.kit);
-  const s = await staff(ctx, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note });
+  const s = await staff(ctx, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool() });
   writeJson(staffFile(), s);
   return s;
 }

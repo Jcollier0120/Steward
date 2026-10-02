@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { changelogBetween } from '../kitfiles.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, gh, git, gitMaybe, showFile } from '../git.ts';
+import { TOOL } from '../kitsource.ts';
 import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
 import { bumpBranch, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
@@ -14,10 +15,10 @@ import { readPin } from './staff.ts';
 
 export const prTitle = (e: Employee, version: string, kit: string) => `${e.name} ${version}: the Steward's kit ${kit}`;
 
-export function prBody(o: { kit: string; from: string | null; version: string; changelog: string | null; files: string[]; fill: string }): string {
+export function prBody(o: { kit: string; from: string | null; version: string; changelog: string | null; files: string[]; fill: string; tool?: boolean }): string {
   const entries = o.changelog ? changelogBetween(o.changelog, o.from, o.kit) : '';
   return [
-    `kit.json pins the Steward's kit ${o.kit}${o.from ? ` (it pinned ${o.from})` : ''}, and the version is ${o.version} in ${o.files.join(', ')}. The kit itself isn't in the repo: \`${o.fill}\` fills it from the kit release kit-v${o.kit}, and a release carries it.`,
+    `kit.json pins the Steward's kit ${o.kit}${o.from ? ` (it pinned ${o.from})` : ''}, and the version is ${o.version} in ${o.files.join(', ')}.${o.tool ? ` ${TOOL} is the Steward's, which changed since this one's.` : ''} The kit itself isn't in the repo: \`${o.fill}\` fills it from the kit release kit-v${o.kit}, and a release carries it.`,
     '',
     'Made by `steward bump`, which filled the kit and ran the checks in a fresh worktree of the branch before committing.',
     '',
@@ -54,7 +55,9 @@ export async function pushOne(ctx: Ctx, e: Employee, o: { kit: string; changelog
   const version = readVersion(versionFile, (await showFile(run, repo, branch, versionFile)) ?? '') ?? '?';
   const from = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
   const title = prTitle(e, version, o.kit);
-  const body = prBody({ kit: o.kit, from, version, changelog: o.changelog, files: ['kit.json', ...e.versionFiles], fill: e.fill });
+  const changed = (await git(run, repo, 'diff', '--name-only', `${remote}...${branch}`)).split('\n').filter(Boolean);
+  const files = e.versionFiles.filter((f) => changed.includes(f.replace(/\\/g, '/')));
+  const body = prBody({ kit: o.kit, from, version, changelog: o.changelog, files: files.length ? files : e.versionFiles, fill: e.fill, tool: changed.includes(TOOL) });
   const out = await gh(run, ctx.neutralDir, 'pr', 'create', '--repo', e.repo, '--base', e.branch, '--head', branch, '--title', title, '--body', body);
   const url = out.trim().split('\n').pop() ?? '';
   ctx.log(`[${e.id}] opened ${url}`);
