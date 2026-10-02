@@ -45,7 +45,7 @@ Each agent pins one exact kit version and its parts in `kit.json`:
 }
 ```
 
-Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file left in each repository: small, dependency-free, the same in every agent (this repository's `tools/kit.ts` is the original). `npm run kit` runs it, and so do `pretest`, `pretypecheck`, `serve` and `release`. It writes `src\kit\VERSION` (and `PARTS`), and does nothing when they already match the pin. Otherwise it takes the pinned version from the first of:
+Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file left in each repository: small, dependency-free, the same in every agent (this repository's `tools/kit.ts` is the original). `npm run kit` runs it, and so does every npm script that runs the kit: `pretest`, `pretypecheck`, `prestart`, `prestop`, `prestatus` and `preopen`, and `serve` and `release` before their command. So a fresh clone works whichever it runs first. It writes `src\kit\VERSION` (and `PARTS`), and does nothing when they already match the pin. Otherwise it takes the pinned version from the first of:
 
 1. `--from <dir>`, or the `STEWARD_KIT` environment variable: a kit tree on this PC, such as a Steward checkout's `kit\`, copied every time. For development; it warns when the tree's version isn't the pinned one, and a release refuses that.
 2. A sibling checkout, `..\Steward\kit`, when its VERSION is the pinned one: with the default checkouts, `C:\Projects\<Name>`, that is `C:\Projects\Steward\kit`.

@@ -56,13 +56,31 @@ test('a hire is converted: the old kit gone, its imports in src/kit, kit.json, t
   await assert.rejects(convert({ dir: f.checkout, kit: '1.0.0', parts: ['node'], version: '0.4.1', kitTool: '', run }), /tracks none of the old kit's files/);
 });
 
-test("npm's scripts fill the kit first: kit, pretest, pretypecheck, serve and release", () => {
-  const s = kitScripts({ serve: 'node src/cli.ts serve', start: 'node src/cli.ts start', test: 'node --test "test/**/*.test.ts"', typecheck: 'tsc -p .', release: 'node tools/release.ts' });
-  assert.deepEqual(Object.keys(s), ['kit', 'serve', 'start', 'pretest', 'test', 'pretypecheck', 'typecheck', 'release']);
+test("npm's scripts fill the kit first, so a fresh clone works whichever it runs first", () => {
+  const hire = {
+    serve: 'node src/cli.ts serve',
+    start: 'node src/cli.ts start',
+    stop: 'node src/cli.ts stop',
+    status: 'node src/cli.ts status',
+    test: 'node --test "test/**/*.test.ts"',
+    typecheck: 'tsc -p .',
+    release: 'node tools/release.ts',
+  };
+  const s = kitScripts(hire);
+  assert.deepEqual(Object.keys(s), ['kit', 'serve', 'prestart', 'start', 'preopen', 'open', 'prestop', 'stop', 'prestatus', 'status', 'pretest', 'test', 'pretypecheck', 'typecheck', 'release']);
   assert.equal(s.serve, 'node tools/kit.ts && node src/cli.ts serve');
   assert.equal(s.release, 'node tools/kit.ts && node src/kit/release.ts');
-  assert.equal(s.pretest, 'node tools/kit.ts');
+  for (const k of ['pretest', 'pretypecheck', 'prestart', 'prestop', 'prestatus', 'preopen']) assert.equal(s[k], 'node tools/kit.ts', k);
+  assert.equal(s.open, 'node src/cli.ts open', 'every agent can open its page from npm too');
+  assert.equal(s.status, 'node src/cli.ts status', '`npm run status -- --json` still passes --json to the command');
   assert.deepEqual(kitScripts(s), s, 'converting twice changes nothing');
+  assert.deepEqual(Object.keys(kitScripts({ test: 'x' })), ['kit', 'pretest', 'test'], 'no start, no open');
+});
+
+test('every script that runs the kit, in the Steward too, fills it first', () => {
+  const own = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts as Record<string, string>;
+  for (const k of ['test', 'typecheck', 'start', 'stop', 'status', 'open']) assert.match(own[`pre${k}`] ?? '', /^(node tools\/kit\.ts|npm run kit)\b/, `pre${k}`);
+  for (const k of ['serve', 'release']) assert.match(own[k], /^node tools\/kit\.ts .*&& /, k);
 });
 
 test('a README without a Development section gets the kit at its end; one with the section already is left as it is', () => {

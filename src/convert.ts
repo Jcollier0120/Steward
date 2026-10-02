@@ -36,19 +36,34 @@ export interface Converted {
 
 const CODE = /\.(ts|mts|cts|js|mjs|cjs)$/;
 
-/** package.json's scripts with the kit filled first: kit, pretest, pretypecheck, serve and release. */
+const FILL = 'node tools/kit.ts';
+/** The scripts that run the kit, each filled first by its pre-script (serve and release fill it inline). */
+const FILL_FIRST = ['test', 'typecheck', 'start', 'stop', 'status', 'open'];
+
+/**
+ * package.json's scripts with the kit filled first, so a fresh clone works whichever it runs first: kit;
+ * pretest, pretypecheck, prestart, prestop, prestatus and preopen; serve and release inline. An agent
+ * with `start` and no `open` gets `open` (the page up, duty unchanged), as every agent's cli.ts has it.
+ */
 export function kitScripts(scripts: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = { kit: 'node tools/kit.ts' };
+  const out: Record<string, string> = { kit: FILL };
   for (const [k, v] of Object.entries(scripts)) {
-    if (k === 'kit' || k === 'pretest' || k === 'pretypecheck') continue;
-    if (k === 'test') out.pretest = 'node tools/kit.ts';
-    if (k === 'typecheck') out.pretypecheck = 'node tools/kit.ts';
-    if (k === 'serve') out[k] = v.startsWith('node tools/kit.ts') ? v : `node tools/kit.ts && ${v}`;
-    else if (k === 'release') out[k] = 'node tools/kit.ts && node src/kit/release.ts';
+    if (k === 'kit' || FILL_FIRST.some((f) => k === `pre${f}`)) continue;
+    if (FILL_FIRST.includes(k)) out[`pre${k}`] = FILL;
+    if (k === 'serve') out[k] = v.startsWith(FILL) ? v : `${FILL} && ${v}`;
+    else if (k === 'release') out[k] = `${FILL} && node src/kit/release.ts`;
     else out[k] = v;
+    if (k === 'start' && !('open' in scripts)) {
+      out.preopen = FILL;
+      out.open = 'node src/cli.ts open';
+    }
   }
   return out;
 }
+
+/** What the kit's section says fills the kit first. */
+export const FILLS_FIRST_LINE =
+  '`npm test`, `npm run typecheck`, `npm run serve`, `npm run release`, `npm start`, `npm stop`, `npm run status` and `npm run open` fill it first.';
 
 /** The README's references to the old kit, pointed at the Steward's. */
 export function readmeLinks(text: string): string {
@@ -70,7 +85,7 @@ export function readmeLinks(text: string): string {
 export function kitSection(name: string): string {
   return `## The kit
 
-The parts every agent shares (the page and its server, Settings, install and release, the accelerators and the NPU queue) are the Steward's kit, kept once in [Jcollier0120/Steward](${STEWARD_URL}). ${name} doesn't carry the kit's code: \`kit.json\` pins a kit version and its parts, and \`npm run kit\` (\`node tools/kit.ts\`) fills \`src/kit/\`, which git ignores. \`npm test\`, \`npm run typecheck\`, \`npm run serve\` and \`npm run release\` fill it first. A release carries \`src/kit/\`, so an installed ${name} needs neither the Steward nor GitHub.
+The parts every agent shares (the page and its server, Settings, install and release, the accelerators and the NPU queue) are the Steward's kit, kept once in [Jcollier0120/Steward](${STEWARD_URL}). ${name} doesn't carry the kit's code: \`kit.json\` pins a kit version and its parts, and \`npm run kit\` (\`node tools/kit.ts\`) fills \`src/kit/\`, which git ignores. ${FILLS_FIRST_LINE} A release carries \`src/kit/\`, so an installed ${name} needs neither the Steward nor GitHub.
 
 \`tools/kit.ts\` takes the pinned version from a Steward checkout beside this one (\`..\\Steward\\kit\`) when it is at that version, or else downloads the kit release \`kit-v<version>\` from GitHub (no sign-in; through \`gh\` if that fails), checks it against its SHA256SUMS.txt and keeps it in \`%USERPROFILE%\\.steward\\kits\`. To try a kit change before it's released: \`node tools/kit.ts --from ..\\Steward\\kit\` (or set \`STEWARD_KIT\`). Never edit \`src/kit/\`: change the kit in the Steward, and a new version arrives here as the Steward's PR, which changes \`kit.json\` and the version and nothing else. \`test/agent.test.ts\` runs the kit's checks of ${name} (its \`src/app.ts\`, \`src/settings.ts\`, \`package.json\` and icon, the agent interface in the Steward's README).
 
