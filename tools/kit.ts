@@ -65,7 +65,7 @@ async function download(version: string): Promise<string> {
         writeFileSync(path.join(tmp, name), Buffer.from(await res.arrayBuffer()));
       }
     } catch (e) {
-      console.warn(`  the kit release over HTTPS: ${(e as Error).message}; trying gh`);
+      const https = (e as Error).message;
       const gh = ['gh', 'C:\\tools\\gh\\bin\\gh.exe'].find((g) => {
         try {
           execFileSync(g, ['--version'], { stdio: 'ignore', windowsHide: true });
@@ -74,8 +74,16 @@ async function download(version: string): Promise<string> {
           return false;
         }
       });
-      if (!gh) throw new Error(`couldn't download kit-v${version}, and there's no gh to try`);
-      execFileSync(gh, ['release', 'download', `kit-v${version}`, '--repo', REPO, '--pattern', zipName, '--pattern', 'SHA256SUMS.txt', '--dir', tmp, '--clobber'], { stdio: 'inherit', windowsHide: true });
+      try {
+        if (!gh) throw new Error('no gh to try');
+        execFileSync(gh, ['release', 'download', `kit-v${version}`, '--repo', REPO, '--pattern', zipName, '--pattern', 'SHA256SUMS.txt', '--dir', tmp, '--clobber'], { stdio: 'pipe', windowsHide: true });
+      } catch (e2) {
+        const why = String((e2 as { stderr?: Buffer }).stderr ?? '').trim() || (e2 as Error).message;
+        throw new Error(
+          `couldn't get the Steward's kit ${version}: the release kit-v${version} of ${REPO} didn't download (HTTPS: ${https}; gh: ${why}).\n` +
+            `  Publish it from the Steward (npm run kit-release -- --publish), or fill from a kit tree: node tools/kit.ts --from <Steward checkout>\\kit`,
+        );
+      }
     }
     const zip = path.join(tmp, zipName);
     const listed = readFileSync(path.join(tmp, 'SHA256SUMS.txt'), 'utf8')
