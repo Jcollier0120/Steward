@@ -235,8 +235,12 @@ export function ordered(list: Accelerator[], order: 'auto' | string[]): Accelera
  * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a PC
  * without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
  * serves anything. The same words in each case.
+ *
+ * Like every message the kit's model code gives (a config's error, `npu.problem`, an NpuError's or
+ * NpuBusy's message), it is a clause with no full stop of its own: agents put it into their own sentences
+ * ("No notes: …." or "Busy: notes deferred to a later round (…)") and end them as they need.
  */
-export const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`).";
+export const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)";
 
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves

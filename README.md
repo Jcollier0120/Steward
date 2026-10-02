@@ -213,7 +213,6 @@ It points at the installed copy (see Install). Its role in Manor's roles is `ste
 - **Checks count as green when there are none.** The hires have no CI, so a PR's mergeability is the only check GitHub makes; the bump ran their tests before the commit.
 - **Reeve and Heiward don't take the kit yet** (above), and Manor isn't an employee: it is the next candidate to take the `node` and `web` parts (its settings-kit.ts and settings-panel.js are the kit's already).
 - **Kit releases come from GitHub** for the installed copy. Without network it can still bump with `--kit-from`.
-- **An agent that adds its own full stop after the kit's model problem** shows two now, since the kit's "Reeve isn't set up here" message ends with one.
 
 ## Next
 

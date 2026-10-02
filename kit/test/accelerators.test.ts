@@ -176,7 +176,7 @@ test('an older config with only chatEndpoint still works: one accelerator, the N
 
 test('Reeve not set up reads the same whichever way: no config.json, an empty list, or nothing that serves anything', async () => {
   const want = A.REEVE_NOT_SET_UP;
-  assert.equal(want, "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`).");
+  assert.equal(want, "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)");
   const dir = path.join(home, 'reeve-unset');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'config.json');
@@ -211,6 +211,24 @@ test('set up, but nothing serves the kind asked for: the message names the kind'
   assert.equal(npu.problem, null, 'Reeve is set up: chat is served');
   await assert.rejects(npu.vision('C:\\x.png', 'what is it?'), (e: Error) => e instanceof NpuError && /no vision model/.test(e.message) && e.message !== A.REEVE_NOT_SET_UP);
   await assert.rejects(npu.embed(['x']), (e: Error) => e instanceof NpuError && /serves embed/.test(e.message) && e.message !== A.REEVE_NOT_SET_UP);
+});
+
+test('the model messages are clauses with no full stop of their own, for an agent to end its sentence with', async () => {
+  const dir = path.join(home, 'messages');
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'config.json');
+  const messages: string[] = [A.REEVE_NOT_SET_UP];
+  writeFileSync(file, '{ not json');
+  messages.push((A.loadAccelerators(file) as { error: string }).error);
+  writeFileSync(file, JSON.stringify({ accelerators: [{ name: 'no id' }] }));
+  messages.push((A.loadAccelerators(file) as { error: string }).error);
+  const setUp = new Npu(config({ accelerators: [{ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:9', model: 'm' } }] }));
+  for (const p of [setUp.vision('C:\\x.png', 'q'), setUp.embed(['x']), setUp.chat([{ role: 'user', content: 'x'.repeat(9000) }]), new Npu({ error: A.REEVE_NOT_SET_UP }).chat([{ role: 'user', content: 'hi' }])]) {
+    messages.push(await p.then(() => '', (e: Error) => e.message));
+  }
+  for (const m of messages) assert.doesNotMatch(m, /\.$/, m);
+  // As an agent writes it: one full stop, never two.
+  assert.ok(!`No notes: ${new Npu({ error: A.REEVE_NOT_SET_UP }).problem}.`.includes('..'));
 });
 
 test('auto order: cards with 2 GB or more by memory, then the NPU, then shared graphics, then the CPU; a list goes first', () => {
