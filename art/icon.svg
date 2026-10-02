@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- The Steward's mark: a ring of keys, one for every door of the house, held in one hand. Light and Dark. -->
+  <style>
+    .back { fill: #ebe7f8; stroke: #4a3a8a; }
+    .front { fill: #4a3a8a; }
+    .ring { fill: none; stroke: #4a3a8a; }
+    @media (prefers-color-scheme: dark) {
+      .back { fill: #221d38; stroke: #b9a9f5; }
+      .front { fill: #b9a9f5; }
+      .ring { stroke: #b9a9f5; }
+    }
+  </style>
+  <circle class="ring" cx="12" cy="5.6" r="4.1" stroke-width="1.7"/>
+  <g transform="rotate(34 12 9.8)">
+    <path class="front" d="M11.3 13.6h1.4v8.2h-1.4zM12.7 18.4h2v1.2h-2zM12.7 20.4h1.5v1.2h-1.5z"/>
+    <circle class="back" cx="12" cy="12" r="2.1" stroke-width="1.4"/>
+  </g>
+  <g transform="rotate(-34 12 9.8)">
+    <path class="front" d="M11.3 13.6h1.4v8.2h-1.4zM12.7 18.4h2v1.2h-2zM12.7 20.4h1.5v1.2h-1.5z"/>
+    <circle class="back" cx="12" cy="12" r="2.1" stroke-width="1.4"/>
+  </g>
+  <path class="front" d="M11.25 13.8h1.5v8.6h-1.5zM12.75 18.8h2.2v1.3h-2.2zM12.75 21h1.6v1.3h-1.6z"/>
+  <circle class="back" cx="12" cy="12" r="2.3" stroke-width="1.5"/>
+</svg>
