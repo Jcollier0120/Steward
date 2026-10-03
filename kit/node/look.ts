@@ -1,0 +1,255 @@
+/**
+ * A little character per agent, kept here by its id as work.ts keeps its work: page.ts draws every kit agent's
+ * page the same way (Heiward's look, Windows 11's colours) and adds, from this table:
+ * - **its colour** (`accent`, for Light and Dark), for its scene. Every kit agent's icon is drawn in the
+ *   manor's one ink (#4a3a8a on #ebe7f8, #b9a9f5 on #221d38 at night), which the scenes take for their
+ *   outlines (--ink, --ink-soft); each role's own colour comes from what its icon shows: the Aletaster's
+ *   tankard holds amber ale, the Miller's windmill grinds golden grain, the Herald's banner is heraldic red;
+ * - **what it is doing** while a round runs (`busy`), on the title bar's status pill: "Tasting";
+ * - **its scene** in the title bar, about 64 × 40 px of inline SVG: the Aletaster's glasses of ale, the
+ *   Miller's millstone. It sits still while the agent is idle, and moves only while a round runs (and never
+ *   for someone who asks Windows for less motion: page.ts's CSS stops it, leaving the still frame).
+ *
+ * An agent that isn't listed (a new one, before it has a scene) gets DEFAULT_LOOK: a quiet grey cog.
+ *
+ * The scenes use page.ts's colours by class: sc-line (an ink outline), sc-back (ink outline on the icon's
+ * pale fill), sc-front (ink), sc-role (the role's colour), sc-soft (a pale wash of it, ink outline),
+ * sc-role-line (a line in the role's colour), sc-ground. `motion` is the scene's CSS, applied only while
+ * busy (page.ts scopes it under `.titlebar.busy`). Its animations last a whole fraction of 12 seconds and
+ * start from `--phase`, set from the clock as the page loads, so a busy page that reloads itself every few
+ * seconds carries on where it was instead of starting over.
+ */
+export interface Look {
+  /** The role's own colour, for its scene, on a light page and a dark one. */
+  accent: { light: string; dark: string };
+  /** The status pill while a round runs: what it is doing, in a word or three. */
+  busy: string;
+  /** The scene: SVG content for a 0 0 64 40 viewBox, drawn still. */
+  scene: string;
+  /** The scene's motion: CSS rules and keyframes, each rule under `.titlebar.busy .scene`. */
+  motion: string;
+}
+
+const B = '.titlebar.busy .scene';
+const r1 = (n: number) => Math.round(n * 10) / 10;
+/** An animation that keeps time with the clock across reloads (--phase), `delay` seconds into its cycle. */
+const run = (name: string, seconds: number, delay = 0, timing = 'linear') =>
+  `animation: ${name} ${seconds}s ${timing} calc(var(--phase, 0s) - ${delay}s) infinite;`;
+const GROUND = '<path class="sc-ground" d="M2 35.5h60"/>';
+
+/** Bounces between `from`% and `to`% of a cycle: `n` hops of `height` px, still otherwise. */
+function hops(name: string, from: number, to: number, n: number, height: number): string {
+  const step = (to - from) / n;
+  const frames = [`0%, ${from}% { transform: translateY(0); }`];
+  for (let i = 0; i < n; i++) frames.push(`${r1(from + step * (i + 0.5))}% { transform: translateY(-${height}px); }`, `${r1(from + step * (i + 1))}% { transform: translateY(0); }`);
+  frames.push('100% { transform: translateY(0); }');
+  return `@keyframes ${name} { ${frames.join(' ')} }`;
+}
+
+/* ---- The Aletaster: glasses of ale, drunk one after another as the tasting goes on, then poured again. */
+const GLASSES = [6, 26, 46];
+const ALE_SIP: [number, number][] = [[6, 24], [33, 51], [60, 78]];
+const glass = (i: number, x: number) => `<g class="sc-glass sc-g${i}">
+<clipPath id="kit-sc-glass${i}"><path d="M${x} 13h12l-1.2 21h-9.6z"/></clipPath>
+<path class="sc-glass-back" d="M${x} 13h12l-1.2 21h-9.6z"/>
+<g clip-path="url(#kit-sc-glass${i})"><g class="sc-ale sc-a${i}">
+<rect class="sc-role" x="${x - 1}" y="17" width="14" height="18"/>
+<path class="sc-foam" d="M${x - 1} 18.6v-3.2q1.75-2.4 3.5 0t3.5 0t3.5 0t3.5 0v3.2z"/>
+<circle class="sc-bubble sc-b1" cx="${x + 4}" cy="31" r=".7"/><circle class="sc-bubble sc-b2" cx="${x + 8}" cy="28" r=".55"/>
+</g></g>
+<path class="sc-glass-line" d="M${x} 13h12l-1.2 21h-9.6z"/>
+<path class="sc-shine" d="M${x + 2.3} 16.5v13.5"/>
+</g>`;
+const aletaster: Look = {
+  accent: { light: '#b35f0c', dark: '#f6b04e' },
+  busy: 'Tasting',
+  scene: `${GROUND}${GLASSES.map((x, i) => glass(i + 1, x)).join('')}`,
+  motion: [
+    ...GLASSES.map((x, i) => {
+      const [s, e] = ALE_SIP[i];
+      return `@keyframes sc-ale${i + 1} { 0%, ${s}% { transform: translateY(0); } ${e}%, 88% { transform: translateY(22px); } 96%, 100% { transform: translateY(0); } }
+@keyframes sc-sip${i + 1} { 0%, ${s - 3}% { transform: none; } ${s + 2}%, ${e - 2}% { transform: translate(1px, -3px) rotate(-14deg); } ${e + 3}%, 100% { transform: none; } }
+${B} .sc-a${i + 1} { ${run(`sc-ale${i + 1}`, 6, 0, 'ease-in-out')} }
+${B} .sc-g${i + 1} { transform-origin: ${x + 6}px 34px; ${run(`sc-sip${i + 1}`, 6, 0, 'ease-in-out')} }`;
+    }),
+    '@keyframes sc-rise { 0% { transform: translateY(0); opacity: 0; } 25% { opacity: .9; } 100% { transform: translateY(-13px); opacity: 0; } }',
+    `${B} .sc-b1 { ${run('sc-rise', 1.5)} } ${B} .sc-b2 { ${run('sc-rise', 1.5, 0.7)} }`,
+  ].join('\n'),
+};
+
+/* ---- The Miller: grain falls from the hopper into the eye of the turning millstone; the flour heap grows. */
+const furrows = (() => {
+  const d: string[] = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (k * Math.PI) / 3;
+    const p = (r: number, t: number) => `${r1(32 + r * Math.cos(t))} ${r1(24 + r * Math.sin(t))}`;
+    d.push(`M${p(3.6, a)}L${p(10.4, a + 0.52)}`, `M${p(6.4, a + 0.52)}L${p(10.4, a + 0.86)}`);
+  }
+  return d.join('');
+})();
+const miller: Look = {
+  accent: { light: '#8c6d00', dark: '#e2c25a' },
+  busy: 'At the mill',
+  scene: `${GROUND}<path class="sc-back" d="M24.5 2h15l-5 6h-5z"/><path class="sc-line" d="M32 8v2.5"/>
+<g class="sc-stone"><circle class="sc-soft" cx="32" cy="24" r="11.3"/><path class="sc-role-line" d="${furrows}"/><circle class="sc-back" cx="32" cy="24" r="2.6"/></g>
+<ellipse class="sc-grain sc-gr1" cx="32" cy="10.5" rx="1" ry="1.3"/><ellipse class="sc-grain sc-gr2" cx="32" cy="10.5" rx="1" ry="1.3"/><ellipse class="sc-grain sc-gr3" cx="32" cy="10.5" rx="1" ry="1.3"/>
+<path class="sc-flour" d="M45 35.5c1.6-5.4 12.4-5.4 14 0z"/>`,
+  motion: `@keyframes sc-turn { to { transform: rotate(360deg); } }
+@keyframes sc-fall { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translateY(11px); opacity: 0; } }
+@keyframes sc-heap { from { transform: scaleY(.82); } to { transform: scaleY(1.06); } }
+${B} .sc-stone { transform-origin: 32px 24px; ${run('sc-turn', 6)} }
+${B} .sc-grain { ${run('sc-fall', 1, 0, 'ease-in')} } ${B} .sc-gr2 { animation-delay: calc(var(--phase, 0s) - .33s); } ${B} .sc-gr3 { animation-delay: calc(var(--phase, 0s) - .66s); }
+${B} .sc-flour { transform-origin: 52px 35.5px; animation: sc-heap 3s ease-in-out calc(var(--phase, 0s)) infinite alternate; }`,
+};
+
+/* ---- The Porter: the gate swings open and shut; the lantern sways and flickers. */
+const ARCH = 'M7 35.5V19.5a10 10 0 0 1 20 0v16z';
+const porter: Look = {
+  accent: { light: '#3f6280', dark: '#9dbad6' },
+  busy: 'Checking the gate',
+  scene: `${GROUND}<path class="sc-back" d="M3 35.5V19a14 14 0 0 1 28 0v16.5z"/><path class="sc-hole" d="${ARCH}"/>
+<g class="sc-leaf"><path class="sc-soft" d="${ARCH}" vector-effect="non-scaling-stroke"/><path class="sc-line" d="M12 10.9v24.6M17 9.5v26M22 10.9v24.6M7 22h20M7 29h20" vector-effect="non-scaling-stroke"/></g>
+<path class="sc-line" d="M44 35.5V6.5h10"/>
+<g class="sc-lantern"><path class="sc-line" d="M53 6.5v3"/><circle class="sc-halo" cx="53" cy="15" r="6.5"/><path class="sc-front" d="M50 9.5h6l-1 2h-4z"/><rect class="sc-glow" x="50.6" y="11.5" width="4.8" height="6.5" rx="1"/><path class="sc-front" d="M50 18h6v1.6h-6z"/></g>`,
+  motion: `@keyframes sc-swing { 0%, 18% { transform: scaleX(1); } 34%, 64% { transform: scaleX(.12); } 80%, 100% { transform: scaleX(1); } }
+@keyframes sc-sway { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes sc-flicker { 0%, 100% { opacity: .2; } 30% { opacity: .42; } 55% { opacity: .26; } 80% { opacity: .38; } }
+${B} .sc-leaf { transform-origin: 7px 22px; ${run('sc-swing', 6, 0, 'ease-in-out')} }
+${B} .sc-lantern { transform-origin: 53px 6.5px; ${run('sc-sway', 3, 0, 'ease-in-out')} }
+${B} .sc-halo { ${run('sc-flicker', 1)} }`,
+};
+
+/* ---- The Clerk: a quill writes line after line on the roll. */
+function wave(x0: number, x1: number, y: number): string {
+  const n = Math.floor((x1 - x0) / 2.8);
+  return `M${x0} ${y}q1.4-1.8 2.8 0${'t2.8 0'.repeat(n - 1)}`;
+}
+const LINES: [number, number, number][] = [[12, 46, 14], [12, 46, 19.5], [12, 46, 25], [12, 36, 30.5]];
+const WRITE: [number, number][] = [[0, 22], [25, 47], [50, 72], [75, 92]];
+const clerk: Look = {
+  accent: { light: '#3949ab', dark: '#a3abff' },
+  busy: 'Writing the rolls',
+  scene: `<rect class="sc-paper" x="8" y="8.5" width="44" height="25.5" rx="1"/><rect class="sc-back" x="4" y="6.5" width="5.5" height="29.5" rx="2.75"/><rect class="sc-back" x="50.5" y="6.5" width="5.5" height="29.5" rx="2.75"/>
+${LINES.map(([a, b, y], i) => `<path class="sc-role-line sc-write sc-w${i + 1}" pathLength="1" d="${wave(a, b, y)}"/>`).join('')}
+<g class="sc-quill" transform="translate(36 30.5)"><path class="sc-back" d="M0 0C2.5-5 8-11 14-13C12.5-7 6.5-2.5 0 0z"/><path class="sc-line" d="M0 0L9.5-8.5"/></g>`,
+  motion: `${WRITE.map(([s, e], i) => `@keyframes sc-write${i + 1} { 0%, ${s}% { stroke-dashoffset: 1.03; } ${e}%, 100% { stroke-dashoffset: 0; } }
+${B} .sc-w${i + 1} { stroke-dasharray: 1 1.05; ${run(`sc-write${i + 1}`, 6)} }`).join('\n')}
+@keyframes sc-pen { ${LINES.map(([a, b, y], i) => `${WRITE[i][0]}% { transform: translate(${a}px, ${y}px); } ${WRITE[i][1]}% { transform: translate(${b}px, ${y}px); }`).join(' ')} 100% { transform: translate(36px, 30.5px); } }
+${B} .sc-quill { ${run('sc-pen', 6)} }`,
+};
+
+/* ---- The Herald: the trumpet sounds, and the banner on it flutters. */
+const herald: Look = {
+  accent: { light: '#b4233f', dark: '#ff8fa3' },
+  busy: 'Gathering the news',
+  scene: `<g class="sc-horn"><path class="sc-front" d="M4 9.6h2.4v3.6H4z"/><rect class="sc-front" x="6.4" y="10.6" width="31" height="1.6" rx=".6"/><path class="sc-front" d="M37 10.4c5 0 9-2.4 12.5-6.4v14.8c-3.5-4-7.5-6.4-12.5-6.4z"/>
+<g class="sc-banner"><path class="sc-line" d="M14 12.2v1.4M32 12.2v1.4"/><path class="sc-role" d="M13 13.4h20v13l-10 7-10-7z"/><path class="sc-motif" d="M23 17.2l3.2 4.4-3.2 4.4-3.2-4.4z"/></g></g>
+<path class="sc-role-line sc-wave sc-v1" d="M52.5 7.4q3 4 0 8"/><path class="sc-role-line sc-wave sc-v2" d="M56 5.2q4.6 6.2 0 12.4"/><path class="sc-role-line sc-wave sc-v3" d="M59.5 3q6.2 8.4 0 16.8"/>`,
+  motion: `@keyframes sc-flutter { 0%, 100% { transform: skewX(0deg) scaleX(1); } 25% { transform: skewX(-7deg) scaleX(.96); } 50% { transform: skewX(2deg) scaleX(1); } 75% { transform: skewX(6deg) scaleX(1.03); } }
+@keyframes sc-blow { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-3deg); } }
+@keyframes sc-sound { 0% { opacity: 0; transform: translateX(-2px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateX(2px); } }
+${B} .sc-banner { transform-origin: 23px 13.4px; ${run('sc-flutter', 1.5, 0, 'ease-in-out')} }
+${B} .sc-horn { transform-origin: 5px 11.4px; ${run('sc-blow', 3, 0, 'ease-in-out')} }
+${B} .sc-wave { ${run('sc-sound', 1.5)} } ${B} .sc-v2 { animation-delay: calc(var(--phase, 0s) - 1.25s); } ${B} .sc-v3 { animation-delay: calc(var(--phase, 0s) - 1s); }`,
+};
+
+/* ---- The Warrener: two rabbits hop across the grass and into the burrow. */
+const rabbit = `<ellipse class="sc-role" cx="0" cy="-3.6" rx="4.4" ry="3.4"/><circle class="sc-role" cx="4" cy="-6.6" r="2.3"/>
+<ellipse class="sc-role" cx="3.1" cy="-10.4" rx=".9" ry="2.6" transform="rotate(-12 3.1 -10.4)"/><ellipse class="sc-role" cx="4.9" cy="-10.2" rx=".9" ry="2.6" transform="rotate(14 4.9 -10.2)"/>
+<circle class="sc-tail" cx="-4.2" cy="-4.4" r="1.3"/><circle class="sc-front" cx="4.9" cy="-7" r=".45"/>`;
+const BUNNIES: { x: number; to: number; hop: [number, number] }[] = [
+  { x: 8, to: 41, hop: [8, 56] },
+  { x: 21, to: 28, hop: [36, 72] },
+];
+const warrener: Look = {
+  accent: { light: '#8a5a2b', dark: '#d8a878' },
+  busy: 'Tending the warren',
+  scene: `${GROUND}<path class="sc-soft" d="M37.5 35.5c3-9.5 20-9.5 23 0z"/><ellipse class="sc-hole" cx="49" cy="33" rx="4.4" ry="2.7"/><path class="sc-line" d="M5 35.5l1-2.6 1 2.6M15.5 35.5l1-2.2 1 2.2M31 35.5l1-2.6 1 2.6"/>
+${BUNNIES.map((b, i) => `<g class="sc-run sc-r${i + 1}"><g class="sc-hop sc-h${i + 1}"><g transform="translate(${b.x} 35.5)">${rabbit}</g></g></g>`).join('')}`,
+  motion: BUNNIES.map((b, i) => {
+    const [s, e] = b.hop;
+    return `@keyframes sc-run${i + 1} { 0% { transform: translateX(0); opacity: 0; } 5%, ${s}% { transform: translateX(0); opacity: 1; } ${e}% { transform: translateX(${b.to}px) scale(1); opacity: 1; } ${e + 7}%, 100% { transform: translateX(${b.to}px) scale(.3); opacity: 0; } }
+${hops(`sc-hop${i + 1}`, s, e, 6, 5)}
+${B} .sc-r${i + 1} { transform-origin: ${b.x}px 35px; ${run(`sc-run${i + 1}`, 6)} }
+${B} .sc-h${i + 1} { ${run(`sc-hop${i + 1}`, 6)} }`;
+  }).join('\n'),
+};
+
+/* ---- The Pinder: a stray walks into the pound, the gate shuts behind it, and the lock goes on. */
+const pinder: Look = {
+  accent: { light: '#3b7d1f', dark: '#8fd36f' },
+  busy: 'Looking for strays',
+  scene: `${GROUND}<g class="sc-walk"><g class="sc-bob"><g transform="translate(10 35.5)"><path class="sc-line" d="M-3 0v-3.6M3 0v-3.6"/><path class="sc-wool" d="M-5.5-6.5c0-2.6 1.6-3.9 3-3.9.6-1 2.4-1.4 3.4-.4 1.5-.6 3.6.4 3.6 2 1.6.4 1.8 2.6.6 3.4.4 1.8-1 3-2.6 2.8-1 1-3 1-4 .1-1.8.3-3.3-.6-3.2-2.1-.6-.4-.8-1.2-.8-1.9z"/><ellipse class="sc-front" cx="5.6" cy="-8.2" rx="2.1" ry="1.6"/></g></g></g>
+<path class="sc-front" d="M34 20h2.2v15.5H34zM44 20h2.2v15.5H44zM53 20h2.2v15.5H53zM61.4 20h2.2v15.5h-2.2z"/><path class="sc-line" d="M46.2 24h15.2M46.2 30h15.2"/>
+<g class="sc-gate"><path class="sc-role-line sc-rails" d="M36.2 24H44M36.2 30H44M36.6 30l7-6" vector-effect="non-scaling-stroke"/></g>
+<g class="sc-lock"><path class="sc-line" d="M38.4 26.4V25a1.6 1.6 0 0 1 3.2 0v1.4"/><rect class="sc-role" x="37.8" y="26.4" width="4.4" height="3.6" rx=".7"/></g>`,
+  motion: `@keyframes sc-walk { 0% { transform: translateX(0); opacity: 0; } 6% { opacity: 1; } 52%, 90% { transform: translateX(43px); opacity: 1; } 98%, 100% { transform: translateX(43px); opacity: 0; } }
+${hops('sc-bob', 0, 52, 10, 0.9)}
+@keyframes sc-gate { 0%, 18% { transform: scaleX(1); } 30%, 46% { transform: scaleX(.1); } 58%, 100% { transform: scaleX(1); } }
+@keyframes sc-lock { 0%, 60% { opacity: 0; transform: translateY(-2px); } 66%, 92% { opacity: 1; transform: translateY(0); } 98%, 100% { opacity: 0; } }
+${B} .sc-walk { ${run('sc-walk', 6)} }
+${B} .sc-bob { ${run('sc-bob', 6)} }
+${B} .sc-gate { transform-origin: 44px 27px; ${run('sc-gate', 6, 0, 'ease-in-out')} }
+${B} .sc-lock { ${run('sc-lock', 6)} }`,
+};
+
+/* ---- The Auditor: a tally stick notched, one cut at a time. */
+const NOTCHES = [11, 17, 23, 29, 35, 41, 47, 53];
+const auditor: Look = {
+  accent: { light: '#0e7470', dark: '#5fcfc5' },
+  busy: 'Checking the accounts',
+  scene: `<rect class="sc-wood" x="4" y="22" width="56" height="9" rx="4.5"/><path class="sc-split" d="M9 26.5h46"/>
+${NOTCHES.map((x, i) => `<path class="sc-role sc-notch sc-n${i + 1}" d="${i === 4 ? `M${x - 2.2} 22.2l2.2 4.4 2.2-4.4z` : `M${x - 1.4} 22.2l1.4 3.6 1.4-3.6z`}"/>`).join('')}
+<g class="sc-knife" transform="translate(57 16)"><path class="sc-steel" d="M0 0l-1.6-6.5h3.2z"/><rect class="sc-front" x="-1.3" y="-12" width="2.6" height="5.6" rx="1"/></g>`,
+  motion: `${NOTCHES.map((x, i) => `@keyframes sc-notch${i + 1} { 0%, ${i * 11 + 4}% { opacity: 0; } ${i * 11 + 5}%, 100% { opacity: 1; } }
+${B} .sc-n${i + 1} { ${run(`sc-notch${i + 1}`, 6, 0, 'steps(1, end)')} }`).join('\n')}
+@keyframes sc-cut { ${NOTCHES.map((x, i) => `${i * 11}% { transform: translate(${x}px, 16px); } ${i * 11 + 4}% { transform: translate(${x}px, 22.4px); } ${i * 11 + 7}% { transform: translate(${x}px, 16px); }`).join(' ')} 100% { transform: translate(${NOTCHES[0]}px, 16px); } }
+${B} .sc-knife { ${run('sc-cut', 6)} }`,
+};
+
+/* ---- The Steward: a ring of keys, one for every door of the house, jingling as it goes about. */
+const key = `<circle class="sc-back" cx="0" cy="0" r="2.4"/><rect class="sc-role" x="-.75" y="2.2" width="1.5" height="14"/><path class="sc-role" d="M.75 12.4h2.6v1.5H.75zM.75 14.8h1.8v1.5H.75z"/>`;
+const KEYS = [-30, 0, 30];
+const steward: Look = {
+  accent: { light: '#9c2f74', dark: '#f39ad3' },
+  busy: 'Seeing to the staff',
+  scene: `<path class="sc-line" d="M24 1.6h16M32 1.6v2"/><g class="sc-bunch"><circle class="sc-ring" cx="32" cy="9" r="5.5"/>
+${KEYS.map((a, i) => `<g class="sc-key sc-k${i + 1}" transform="rotate(${a} 32 9)"><g transform="translate(32 14.5)">${key}</g></g>`).join('')}</g>`,
+  motion: `@keyframes sc-bunch { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+${KEYS.map((a, i) => `@keyframes sc-jingle${i + 1} { 0%, 100% { transform: rotate(${a}deg); } 30% { transform: rotate(${a + 7}deg); } 65% { transform: rotate(${a - 6}deg); } }
+${B} .sc-k${i + 1} { transform-origin: 32px 9px; ${run(`sc-jingle${i + 1}`, 1, i * 0.2, 'ease-in-out')} }`).join('\n')}
+${B} .sc-bunch { transform-origin: 32px 2px; ${run('sc-bunch', 2, 0, 'ease-in-out')} }`,
+};
+
+/* ---- The Surveyor: the theodolite sweeps across the estate, sighting the staff. */
+const surveyor: Look = {
+  accent: { light: '#0b6aa2', dark: '#6cc6f2' },
+  busy: 'Surveying',
+  scene: `${GROUND}<path class="sc-line" d="M30 21 20 35.5M30 21v14.5M30 21l10 14.5"/><rect class="sc-front" x="25.5" y="19" width="9" height="2.6" rx=".6"/><rect class="sc-back" x="27" y="13.5" width="6" height="5.5"/>
+<g class="sc-scope"><path class="sc-sight" d="M41 12.6H55"/><rect class="sc-back" x="20" y="10.6" width="16" height="4"/><rect class="sc-front" x="36" y="10" width="3.6" height="5.2"/></g><circle class="sc-front" cx="30" cy="12.6" r="1.2"/>
+<rect class="sc-staff" x="56.5" y="10" width="3.4" height="25.5"/><path class="sc-role" d="M56.5 10h3.4v4.2h-3.4zM56.5 18.4h3.4v4.2h-3.4zM56.5 26.8h3.4v4.2h-3.4z"/>`,
+  motion: `@keyframes sc-sweep { 0%, 100% { transform: rotate(-12deg); } 45%, 55% { transform: rotate(0deg); } }
+@keyframes sc-sight { 0%, 38% { opacity: 0; } 45%, 55% { opacity: 1; } 62%, 100% { opacity: 0; } }
+${B} .sc-scope { transform-origin: 30px 12.6px; ${run('sc-sweep', 4, 0, 'ease-in-out')} }
+${B} .sc-sight { ${run('sc-sight', 4)} }`,
+};
+
+/** Any other agent: a cog, turning while it works. */
+export const DEFAULT_LOOK: Look = {
+  accent: { light: '#66717c', dark: '#a7b1bc' },
+  busy: 'Working',
+  scene: `<g class="sc-cog sc-c1"><circle class="sc-teeth" cx="27" cy="20" r="10" stroke-dasharray="3.1 4.75"/><circle class="sc-soft" cx="27" cy="20" r="8"/><circle class="sc-back" cx="27" cy="20" r="2.6"/></g>
+<g class="sc-cog sc-c2"><circle class="sc-teeth" cx="42.5" cy="28" r="6.2" stroke-dasharray="2.6 4.9"/><circle class="sc-soft" cx="42.5" cy="28" r="4.6"/><circle class="sc-back" cx="42.5" cy="28" r="1.6"/></g>`,
+  motion: `@keyframes sc-turn { to { transform: rotate(360deg); } } @keyframes sc-turn-back { to { transform: rotate(-360deg); } }
+${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { transform-origin: 42.5px 28px; ${run('sc-turn-back', 4)} }`,
+};
+
+/** Each kit agent's look, by its id. */
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor };
+
+/** This agent's look, or the default for one not listed. */
+export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);
+
+/** The scene as page.ts puts it in the title bar: decorative, so hidden from screen readers. */
+export const sceneSvg = (look: Look) =>
+  `<svg class="scene" viewBox="0 0 64 40" width="64" height="40" aria-hidden="true" focusable="false">${look.scene}</svg>`;

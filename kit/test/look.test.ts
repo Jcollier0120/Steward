@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, test } from 'node:test';
+
+// The page's look: Heiward's title bar and a scene per role (look.ts). Nothing here reads the real Reeve's config.
+const home = mkdtempSync(path.join(os.tmpdir(), 'kit-look-test-'));
+const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
+process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
+process.env.REEVE_HOME = path.join(home, 'reeve');
+process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
+after(() => rmSync(home, { recursive: true, force: true }));
+
+const { APP } = await import('./fixture/src/app.ts');
+const { DEFAULT_LOOK, LOOK, lookFor, sceneSvg } = await import('./fixture/src/kit/look.ts');
+const { WORK } = await import('./fixture/src/kit/work.ts');
+const { page, statusPill, until } = await import('./fixture/src/kit/page.ts');
+const { setDuty } = await import('./fixture/src/kit/duty.ts');
+type Look = import('./fixture/src/kit/look.ts').Look;
+
+const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor'];
+const HEX = /^#[0-9a-f]{6}$/;
+
+/** A scene's motion without its @keyframes blocks: the rules left, as [selector, declarations]. */
+function rules(css: string): [string, string][] {
+  let out = '';
+  for (let i = 0; i < css.length; i++) {
+    if (css.startsWith('@keyframes', i)) {
+      let depth = 0;
+      for (i = css.indexOf('{', i); i < css.length; i++) {
+        if (css[i] === '{') depth++;
+        else if (css[i] === '}' && --depth === 0) break;
+      }
+      continue;
+    }
+    out += css[i];
+  }
+  return [...out.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => [m[1].trim(), m[2].trim()]);
+}
+
+test('every kit agent has its look: a colour for Light and Dark, its words while busy, a scene and its motion', () => {
+  for (const id of KIT_AGENTS) {
+    const l: Look = LOOK[id];
+    assert.ok(l, `${id} has a look`);
+    assert.match(l.accent.light, HEX, `${id}: its Light colour`);
+    assert.match(l.accent.dark, HEX, `${id}: its Dark colour`);
+    assert.ok(l.busy.trim() && l.busy.length <= 24, `${id}: a word or three for the pill`);
+    assert.doesNotMatch(l.busy, /NPU/, `${id}: the pill says what it does, not where`);
+    assert.match(l.scene, /<(path|rect|circle|ellipse|g)\b/, `${id}: a scene`);
+    assert.match(l.motion, /@keyframes /, `${id}: its motion`);
+  }
+  assert.deepEqual(Object.keys(LOOK).sort(), [...KIT_AGENTS].sort(), 'no look for an agent the kit has no work for');
+  for (const id of Object.keys(WORK)) assert.ok(LOOK[id], `${id}, which has its work in work.ts, has a look`);
+  const colours = KIT_AGENTS.map((id) => LOOK[id].accent.light);
+  assert.equal(new Set(colours).size, colours.length, 'each role its own colour');
+});
+
+test('an agent not listed gets the quiet default, and so does a name that is not an agent', () => {
+  assert.equal(lookFor('someone-new'), DEFAULT_LOOK);
+  assert.equal(lookFor('toString'), DEFAULT_LOOK);
+  assert.equal(lookFor('constructor'), DEFAULT_LOOK);
+  assert.equal(lookFor('aletaster'), LOOK.aletaster);
+  assert.equal(DEFAULT_LOOK.busy, 'Working');
+  assert.match(DEFAULT_LOOK.accent.light, HEX);
+  assert.match(DEFAULT_LOOK.accent.dark, HEX);
+});
+
+test('a scene moves only while busy, and keeps time across reloads', () => {
+  for (const [id, l] of [...Object.entries(LOOK), ['default', DEFAULT_LOOK]] as [string, Look][]) {
+    const rs = rules(l.motion);
+    assert.ok(rs.length, `${id}: its motion has rules`);
+    for (const [sel] of rs) for (const one of sel.split(',')) assert.match(one.trim(), /^\.titlebar\.busy \.scene /, `${id}: "${one.trim()}" applies only while busy`);
+    for (const m of l.motion.matchAll(/animation: [\w-]+ ([\d.]+)s/g)) {
+      const s = Number(m[1]);
+      assert.ok(Number.isInteger(Math.round((12 / s) * 1000) / 1000), `${id}: a ${s} s animation divides the 12 s clock`);
+    }
+    assert.ok(l.motion.includes('var(--phase'), `${id}: its animations start from the clock`);
+    const ids = [...l.scene.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+    for (const x of ids) assert.match(x, /^kit-sc-/, `${id}: the scene's id "${x}" can't meet an agent's own`);
+  }
+  const svg = sceneSvg(LOOK.miller);
+  assert.match(svg, /^<svg class="scene" viewBox="0 0 64 40" width="64" height="40" aria-hidden="true" focusable="false">/);
+});
+
+test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, and a place for Run now', () => {
+  setDuty(true);
+  const html = page({ token: 'tok', body: '<button data-post="/api/run">Run now</button>' });
+  assert.match(html, /<header class="titlebar" data-agent="fixture">/);
+  assert.match(html, new RegExp(`<h1>${APP.name}</h1><p class="role">`));
+  assert.match(html, /<img class="brand-mark" src="\/favicon\.svg" alt=""/);
+  assert.ok(html.includes(sceneSvg(DEFAULT_LOOK)), 'the fixture is not a listed agent: the default scene');
+  assert.match(html, /<span class="status-pill on"[^>]*>On duty<\/span>/);
+  assert.match(html, /<span class="titlebar-action" id="titlebar-action"><\/span>/);
+  assert.ok(html.includes(`button[data-post="/api/run"]:not([data-form]):not([data-body])`), 'the script lifts a plain Run now');
+  assert.ok(html.includes('button[data-titlebar]'), 'or a button the agent marks');
+  // The theme: Match Windows, Light or Dark, read before the page paints and kept per agent, storage or not.
+  assert.equal((html.match(/class="theme-item"/g) ?? []).length, 3);
+  for (const t of ['system', 'light', 'dark']) assert.ok(html.includes(`data-theme="${t}"`));
+  assert.ok(html.includes(`localStorage.getItem("${APP.id}:theme")`), 'its own key');
+  assert.match(html, /try \{ var t = localStorage\.getItem/);
+  assert.match(html, /try \{ localStorage\.setItem/);
+  assert.match(html, /:root\[data-theme="dark"\] \{/);
+  assert.match(html, /@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme\]\)/);
+  // Its colour and motion, and none for someone who asks for less.
+  assert.ok(html.includes(`:root { --role: ${DEFAULT_LOOK.accent.light}; }`));
+  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \}/);
+  assert.match(html, /setProperty\('--phase'/);
+  // No external fonts or scripts: the page's CSP allows its own origin only.
+  assert.doesNotMatch(html, /https?:\/\/(?!www\.w3\.org)/);
+});
+
+test('busy: the title bar moves, the pill says what it is doing, the page refreshes', () => {
+  const html = page({ token: 'tok', body: '', busy: true });
+  assert.match(html, /<header class="titlebar busy" data-agent="fixture">/);
+  assert.match(html, /<span class="status-pill busy"[^>]*>Working<\/span>/);
+  assert.match(html, /const REFRESH = 3;/);
+});
+
+test('off duty: the pill and a notice under the title bar, with its button back', () => {
+  setDuty(false);
+  try {
+    const html = page({ token: 'tok', body: '' });
+    assert.match(html, /<span class="status-pill off" title="Off duty since just now[^"]*">Off duty<\/span>/);
+    assert.match(html, /<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since just now/);
+    assert.match(html, /<button class="quiet" data-post="\/api\/duty" data-body='\{"onDuty":true\}'>Back on duty<\/button>/);
+    assert.ok(html.indexOf('class="banners"') < html.indexOf('<main'), 'above the page, so Settings shows it too');
+  } finally {
+    setDuty(true);
+  }
+});
+
+test('the pill: busy first, then off duty, then on duty with its next round when the agent says', () => {
+  const now = Date.parse('2026-10-02T12:00:00Z');
+  const on = { onDuty: true, since: null };
+  const off = { onDuty: false, since: '2026-10-02T09:00:00Z' };
+  assert.match(statusPill({ look: LOOK.aletaster, busy: true, duty: off, now }), />Tasting<\/span>$/);
+  assert.match(statusPill({ look: LOOK.aletaster, duty: off, now }), /title="Off duty since 3 hours ago: [^"]+">Off duty</);
+  assert.match(statusPill({ look: LOOK.aletaster, duty: on, now }), />On duty<\/span>$/);
+  assert.match(statusPill({ look: LOOK.aletaster, duty: on, nextAt: now + 25 * 60_000, now }), />On duty · next round in 25 min<\/span>$/);
+  assert.match(statusPill({ look: LOOK.aletaster, duty: on, nextAt: '2026-10-02T18:00:00Z', now }), />On duty · next round in 6 hours<\/span>$/);
+  assert.equal(until(null, now), null);
+  assert.equal(until('not a time', now), null);
+  assert.equal(until(now - 5000, now), 'within a minute');
+  assert.equal(until(now + 3 * 86400_000, now), 'in 3 days');
+});

@@ -16,7 +16,7 @@ The kit lives in `kit\`, versioned by `kit\VERSION` (1.0.0) with `kit\CHANGELOG.
 
 | Part | In the kit | In a Node agent | What |
 |---|---|---|---|
-| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerators.ts, agent-checks.ts, duty.ts, gpu-load.ps1, install.ts, lock.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, store.ts. |
+| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerators.ts, agent-checks.ts, duty.ts, gpu-load.ps1, install.ts, lock.ts, look.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, store.ts, work.ts. page.ts draws every agent's page in Heiward's look (Windows 11's colours, Light or Dark, a title bar with a status pill), and look.ts gives each agent its own colour and a small scene in its title bar that moves while a round runs. |
 | `web` | `kit\web\` | `src\kit\web\` | Browser files any agent's page can use, whatever its server: settings-panel.js and settings-panel.css. A page includes them as plain files; the panel needs an element with `data-settings-panel`, a `<meta name="page-token">`, and `GET`/`POST /api/settings` on its own origin. |
 | `spec` | `kit\spec\` | `src\kit\spec\` | The language-neutral rules: [NPU-QUEUE.md](kit/spec/NPU-QUEUE.md) (was Reeve's), [ACCELERATORS.md](kit/spec/ACCELERATORS.md) (was Manor's) and npu-queue-vectors.json, the cases every implementation of the queue runs. This is now their home. |
 
