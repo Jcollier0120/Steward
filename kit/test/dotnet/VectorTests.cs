@@ -172,6 +172,8 @@ public sealed class VectorTests {
 			Assert.True(n["valid"]!.GetValue<bool>() == Core.IsId(id), id);
 			Assert.Equal(n["kind"]?.GetValue<string>(), Core.KindOf(id));
 		}
+		foreach (JsonNode c in Each(Accel, "lockFolders"))
+			Assert.Equal(Each(c, "folders").Select(f => f.GetValue<string>()), Core.LockFolders(c["id"]!.GetValue<string>(), c["slots"]?.GetValue<int>() ?? 1));
 		foreach (JsonNode c in Each(Accel, "cards")) {
 			var adapters = Each(c, "adapters").Select(a => new CardName(a["index"]!.GetValue<int>(), a["name"]!.GetValue<string>(), a["vendorId"]!.GetValue<uint>(), a["software"]!.GetValue<bool>()));
 			Assert.Equal(Each(c, "keys").Select(k => k.GetValue<string>()), Core.CardKeys(adapters, c["software"]!.GetValue<bool>()).Select(k => k.Key));

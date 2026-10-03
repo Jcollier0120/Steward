@@ -48,6 +48,7 @@ function fill(tree: string, how: string): void {
   const version = text(path.join(tree, 'VERSION'));
   if (!version) throw new Error(`${tree} isn't a kit tree: it has no VERSION`);
   rmSync(into, { recursive: true, force: true });
+  const filled: string[] = [];
   for (const part of parts) {
     if (!(part in PARTS)) throw new Error(`kit.json: no kit part "${part}" (the parts are ${Object.keys(PARTS).join(', ')})`);
     if (!existsSync(path.join(tree, part))) {
@@ -55,10 +56,12 @@ function fill(tree: string, how: string): void {
       throw new Error(`${tree} has no ${part} part`);
     }
     cpSync(path.join(tree, part), path.join(into, PARTS[part]), { recursive: true });
+    filled.push(part);
   }
-  writeFileSync(path.join(into, 'PARTS'), `${parts.join(' ')}\n`);
+  // PARTS says what kit.json pins, as it always has (an agent's tests may compare them); the log says what came.
+  writeFileSync(path.join(into, 'PARTS'), `${pinned.join(' ')}\n`);
   writeFileSync(path.join(into, 'VERSION'), `${version}\n`);
-  console.log(`src\\kit: the Steward's kit ${version} (${parts.join(', ')}), from ${how}`);
+  console.log(`src\\kit: the Steward's kit ${version} (${filled.join(', ')}), from ${how}`);
   if (pin.kit && version !== pin.kit) console.warn(`  kit.json pins ${pin.kit}: this is for development, and a release refuses it`);
 }
 
@@ -122,7 +125,7 @@ try {
     const version = pin.kit;
     if (!version) throw new Error(`${pinFile} pins no kit: it needs {"kit": "<version>"}`);
     const sibling = path.join(root, '..', 'Steward', 'kit');
-    if (text(path.join(into, 'VERSION')) === version && text(path.join(into, 'PARTS')) === parts.join(' ')) {
+    if (text(path.join(into, 'VERSION')) === version && text(path.join(into, 'PARTS')) === pinned.join(' ')) {
       // Already filled at the pinned version.
     } else if (text(path.join(sibling, 'VERSION')) === version) fill(sibling, sibling);
     else fill(await download(version), `the kit release kit-v${version}`);

@@ -79,8 +79,7 @@
     { "case": "the NPU: one slot, its folder as always", "id": "npu", "slots": 1, "folders": ["npu"], "queue": "npu.queue" },
     { "case": "a card with two slots", "id": "gpu-nvidia-geforce-rtx-4090", "slots": 2, "folders": ["gpu-nvidia-geforce-rtx-4090", "gpu-nvidia-geforce-rtx-4090.2"], "queue": "gpu-nvidia-geforce-rtx-4090.queue" },
     { "case": "the second card of a name", "id": "gpu-nvidia-geforce-rtx-4090-2", "slots": 3, "folders": ["gpu-nvidia-geforce-rtx-4090-2", "gpu-nvidia-geforce-rtx-4090-2.2", "gpu-nvidia-geforce-rtx-4090-2.3"], "queue": "gpu-nvidia-geforce-rtx-4090-2.queue" },
-    { "case": "the processor", "id": "cpu", "slots": 1, "folders": ["cpu"], "queue": "cpu.queue" },
-    { "case": "the NPU has one slot, whatever an entry says", "id": "npu", "slots": 4, "folders": ["npu"], "queue": "npu.queue" }
+    { "case": "the processor", "id": "cpu", "slots": 1, "folders": ["cpu"], "queue": "cpu.queue" }
   ],
   "holders": [
     { "case": "a live holder within its 10 minutes keeps the lock", "owner": true, "sinceAgeMs": 60000, "pidAlive": true, "stale": false },

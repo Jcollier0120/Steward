@@ -171,6 +171,10 @@ test('accelerator vectors: ids, and the names behind them', () => {
     assert.equal(core.isId(id), valid, id);
     assert.equal(core.kindOfId(id), kind, id);
   }
+  for (const c of accel.lockFolders) {
+    assert.deepEqual(core.lockFoldersOf(c), c.folders, c.case);
+    assert.deepEqual(A.lockDirsOf(c).map((d) => path.relative(locksDir, d)), c.folders, c.case);
+  }
   for (const c of accel.cards) {
     assert.deepEqual(core.keyedCards(c.adapters, { software: c.software }).map((x) => x.key), c.keys, c.case);
     if (!c.software) assert.deepEqual(A.keyedCards(c.adapters).map((x) => x.key), c.keys, c.case);

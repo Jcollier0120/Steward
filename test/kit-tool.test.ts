@@ -54,8 +54,8 @@ test('--from fills the parts kit.json names: node in src/kit, web and spec besid
   assert.ok(has(root, 'a.ts') && has(root, 'web/b.js') && has(root, 'spec/c.md'));
   assert.ok(!has(root, 'CHANGELOG.md') && !has(root, 'node'), 'only the parts, the node part flat');
   assert.equal(read(root, 'VERSION').trim(), '1.0.0');
-  assert.equal(read(root, 'PARTS').trim(), 'node web spec core', 'the node part needs the core');
-  assert.ok(!has(root, 'core'), 'a kit from before 2.0.0 has none');
+  assert.equal(read(root, 'PARTS').trim(), 'node web spec', 'the parts kit.json pins');
+  assert.ok(!has(root, 'core'), 'the node part needs the core, but a kit from before 2.0.0 has none');
 });
 
 test('a part brings the parts it needs: node the core, the core the spec, dotnet the core; none brings web', async () => {
@@ -64,7 +64,8 @@ test('a part brings the parts it needs: node the core, the core the spec, dotnet
   assert.equal((await tool(node.root, ['--from', tree])).code, 0);
   assert.ok(has(node.root, 'a.ts') && has(node.root, 'core/d.js') && has(node.root, 'spec/c.md'));
   assert.ok(!has(node.root, 'web') && !has(node.root, 'dotnet'));
-  assert.equal(read(node.root, 'PARTS').trim(), 'node core spec');
+  assert.equal(read(node.root, 'PARTS').trim(), 'node', 'PARTS says what kit.json pins');
+  assert.match((await tool(node.root, ['--from', tree])).out, /\(node, core, spec\)/, 'the log says what came');
   const dotnet = hire('2.0.0', ['dotnet']);
   assert.equal((await tool(dotnet.root, ['--from', tree])).code, 0);
   assert.ok(has(dotnet.root, 'dotnet/E.cs') && has(dotnet.root, 'core/d.js') && has(dotnet.root, 'spec/c.md'));

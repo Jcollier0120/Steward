@@ -231,6 +231,11 @@ export function makeAcceleratorVectors() {
     nowMs: NOW,
     ids: names.map((name) => ({ name, id: core.acceleratorId('gpu', name) })),
     isId: ids.map((id) => ({ id, valid: core.isId(id), kind: core.kindOfId(id) })),
+    lockFolders: [
+      { case: 'the NPU has one slot, whatever its entry says', id: 'npu', slots: 4 },
+      { case: 'a card has a folder a slot', id: 'gpu-x', slots: 3 },
+      { case: 'no slots given is one', id: 'cpu' },
+    ].map((c) => ({ ...c, folders: core.lockFoldersOf(c) })),
     cards: [
       { case: "software adapters left out; a second card of a name, in any case, is #2; no name is 'Graphics card <n>'", adapters, software: false, keys: core.keyedCards(adapters).map((c) => c.key) },
       { case: 'software adapters listed when asked', adapters, software: true, keys: core.keyedCards(adapters, { software: true }).map((c) => c.key) },

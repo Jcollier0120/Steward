@@ -59,7 +59,7 @@ Each agent pins one exact kit version and its parts in `kit.json`:
 }
 ```
 
-**A part brings the parts it needs**, whatever kit.json names: `node` brings `core`, `core` brings `spec` (its rules.json), `dotnet` brings `core`. So a hire's pin names the three it always did, and gets four. A kit from before 2.0.0 has no core, and then none is filled. tools/kit.ts writes the parts it was asked for, with those, to `src\kit\PARTS`.
+**A part brings the parts it needs**, whatever kit.json names: `node` brings `core`, `core` brings `spec` (its rules.json), `dotnet` brings `core`. So a hire's pin names the three it always did, and gets four. A kit from before 2.0.0 has no core, and then none is filled. `src\kit\PARTS` still says the parts kit.json pins, and tools/kit.ts's line says what it filled.
 
 Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file left in each repository: small, dependency-free, the same in every agent. This repository's `tools/kit.ts` is the canonical one, and `bump` hands it out with each new pin (below), so a change to it reaches every agent as a kit change does. `npm run kit` runs it, and so does every npm script that runs the kit: `pretest`, `pretypecheck`, `prestart`, `prestop`, `prestatus` and `preopen`, and `serve` and `release` before their command. So a fresh clone works whichever it runs first. It writes `src\kit\VERSION` (and `PARTS`), and does nothing when they already match the pin. Otherwise it takes the pinned version from the first of:
 

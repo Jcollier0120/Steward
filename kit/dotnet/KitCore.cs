@@ -90,15 +90,16 @@ namespace Steward.Kit {
 		public string? KindOf(string? id) => id == null ? null : Node(Call("kindOfId", id))?.GetValue<string>();
 
 		/// <summary>
-		/// The graphics cards' names, as every program keys them: Windows' software adapters left out (unless
-		/// <paramref name="software"/>), a second card of a name "name #2", in DXGI's order. One key per card kept, with its index.
+		/// The graphics cards as every program names them: Windows' software adapters left out (unless
+		/// <paramref name="software"/>), a nameless one "Graphics card n" (its index plus one), a second card of a name
+		/// "name #2", in DXGI's order. Each card kept: its index, its name (trimmed), and its key (the name, or "name #2").
 		/// </summary>
-		public IReadOnlyList<(int Index, string Key)> CardKeys(IEnumerable<CardName> adapters, bool software = false) {
+		public IReadOnlyList<(int Index, string Name, string Key)> CardKeys(IEnumerable<CardName> adapters, bool software = false) {
 			var list = new JsonArray();
 			foreach (CardName a in adapters)
 				list.Add((JsonNode)new JsonObject { ["index"] = a.Index, ["name"] = a.Name ?? "", ["vendorId"] = a.VendorId, ["software"] = a.Software });
 			JsonArray keyed = Node(Call("keyedCards", list, new JsonObject { ["software"] = software }))!.AsArray();
-			return keyed.Select(k => (k!["index"]!.GetValue<int>(), k["key"]!.GetValue<string>())).ToList();
+			return keyed.Select(k => (k!["index"]!.GetValue<int>(), k["name"]!.GetValue<string>(), k["key"]!.GetValue<string>())).ToList();
 		}
 
 		/// <summary>An accelerator's lock folders, one per slot (the NPU always one): <c>id</c>, <c>id.2</c> ….</summary>
