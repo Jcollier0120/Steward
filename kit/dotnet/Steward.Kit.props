@@ -1,0 +1,31 @@
+<Project>
+  <!--
+    The Steward's kit, its dotnet part, in a .NET project: <Import Project="..\kit\dotnet\Steward.Kit.props" />.
+    It compiles this folder's C# into the project (namespace Steward.Kit), embeds the core's JavaScript and
+    the spec's rules.json (so the core, its rules and their version travel inside the assembly: nothing is
+    read from disk at run time), and references Jint, the JavaScript interpreter the core runs in.
+
+    It expects the kit's parts side by side, as the kit tree and a kit release lay them out: core\, dotnet\
+    and spec\ (filling dotnet brings core and spec). Jint is pure managed code: no native library, so the
+    same build runs on x64 and Arm64, in a self-contained or single-file publish and in an MSIX package.
+    Values cross between C# and the core as JSON text, so trimming has nothing of the core's to cut.
+  -->
+  <PropertyGroup>
+    <StewardKitDir>$(MSBuildThisFileDirectory)..\</StewardKitDir>
+    <!-- Jint, pinned: the version the kit's own .NET tests run with (kit\test\dotnet). -->
+    <StewardKitJintVersion>4.16.4</StewardKitJintVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jint" Version="$(StewardKitJintVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Removed first, so a project whose folder holds the kit doesn't compile it twice. -->
+    <Compile Remove="$(MSBuildThisFileDirectory)*.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)*.cs" Link="Steward.Kit\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(StewardKitDir)core\*.js" LogicalName="Steward.Kit/core/%(Filename)%(Extension)" Link="Steward.Kit\core\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(StewardKitDir)spec\rules.json" LogicalName="Steward.Kit/spec/rules.json" Link="Steward.Kit\spec\rules.json" />
+    <EmbeddedResource Include="$(StewardKitDir)VERSION" Condition="Exists('$(StewardKitDir)VERSION')" LogicalName="Steward.Kit/VERSION" Link="Steward.Kit\VERSION" />
+  </ItemGroup>
+</Project>

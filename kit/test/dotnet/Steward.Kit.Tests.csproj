@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The kit's dotnet part, tested: the spec's vectors (the queue's, the turn's step by step, the
+    accelerators') against the core in Jint, and turns, locks and failure markers on a real disk.
+    npm run test:dotnet runs it (dotnet test, with the .NET 10 SDK).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Steward.Kit.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="..\..\dotnet\Steward.Kit.props" />
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <None Include="..\..\spec\*.json" Link="spec\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
