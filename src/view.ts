@@ -1,5 +1,6 @@
 import { ago, esc, settingsPanel } from './kit/page.ts';
 import { afterWords } from './after.ts';
+import type { Alarm, AlarmState } from './alarms.ts';
 import type { EmployeeResult, StageResult } from './stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from './stages/staff.ts';
 
@@ -109,7 +110,26 @@ function roundLine(r: RoundView | undefined, busy: boolean): string {
   return `<div class="row round"><span class="muted">${esc(when)}</span><button class="quiet" data-post="/api/run" data-confirm="${esc(`A round now: it ${what}?`)}"${busy ? ' disabled' : ''}>Run now</button></div>`;
 }
 
-export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean; team?: string[]; round?: RoundView }): string {
+/** What needs the person (alarms.ts), at the top: each open one with its facts and a Dismiss; the dismissed and the lately cleared folded away. */
+export function alarmsCard(a: AlarmState | undefined): string {
+  if (!a) return '';
+  const showing = a.open.filter((x) => !x.dismissedAt);
+  const dismissed = a.open.filter((x) => x.dismissedAt);
+  const item = (x: Alarm, i: number, button: boolean) => `<div class="alarm">
+<div class="row alarm-head"><strong>${x.url ? link(x.url, x.title) : esc(x.title)}</strong>${button ? `<form id="alarm-${i}"><input type="hidden" name="id" value="${esc(x.id)}"></form><button class="quiet" data-post="/api/alarms/dismiss" data-form="#alarm-${i}">Dismiss</button>` : ''}</div>
+${x.detail.length ? `<ul class="notes">${x.detail.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}
+<span class="muted">Since ${esc(ago(x.since))}${x.dismissedAt ? `, dismissed ${esc(ago(x.dismissedAt))}` : ''}</span></div>`;
+  const folded = [
+    dismissed.length ? `<details><summary class="muted">${dismissed.length} dismissed: back if they clear and return</summary>${dismissed.map((x, i) => item(x, i, false)).join('')}</details>` : '',
+    a.cleared.length ? `<details><summary class="muted">Lately cleared</summary><ul class="notes">${a.cleared.slice(0, 10).map((x) => `<li>${esc(x.title)} <span class="muted">(cleared ${esc(ago(x.clearedAt))})</span></li>`).join('')}</ul></details>` : '',
+  ].join('');
+  if (!showing.length && !folded) return '';
+  const head = showing.length ? `<h2>Needs you</h2>` : '';
+  const body = showing.length ? showing.map((x) => item(x, a.open.indexOf(x), true)).join('') : '<p class="muted">Nothing needs you.</p>';
+  return `<a id="alarms"></a>${head}<div class="card${showing.length ? ' alarms' : ''}">${body}${folded}</div>`;
+}
+
+export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean; team?: string[]; round?: RoundView; alarms?: AlarmState }): string {
   const s = o.staff;
   const kit = s?.kit ?? null;
   const kitLine = s
@@ -140,7 +160,7 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
 <p class="muted">Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).${esc(offKitNote)}</p>
 ${roundLine(o.round, !!o.running)}
 </div>`;
-  return `${running}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}.</p>` : ''}</div>
+  return `${running}${alarmsCard(o.alarms)}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}.</p>` : ''}</div>
 <h2>Staff</h2>
 ${s ? staffTable(s) : '<div class="card empty">Looking at each employee…</div>'}
 <h2>Roll out the kit</h2>
@@ -156,6 +176,10 @@ ${settingsPanel()}
 .stages { margin-bottom: 6px; }
 .round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
 .pr + .pr { margin-top: 6px; }
+.alarms { border-left: 3px solid var(--alert, #c0392b); }
+.alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }
+.alarm-head { justify-content: space-between; align-items: center; gap: 10px; }
+.alarm .notes { margin: 4px 0; }
 .pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
 td a { color: var(--accent); }

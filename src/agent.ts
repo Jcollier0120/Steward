@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dismiss, loadAlarms } from './alarms.ts';
 import { APP, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
@@ -109,11 +110,16 @@ export async function serveSteward(o: { run?: Runner } = {}) {
         const s = loadSettings();
         const state = rounds?.state;
         const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null };
-        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round });
+        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round, alarms: s.alarms.on ? loadAlarms() : undefined });
         return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
       },
       '/api/staff': () => ({ json: loadStaff() }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
+      // What needs the person (alarms.ts): Manor shows the open ones that aren't dismissed.
+      '/api/alarms': () => {
+        const a = loadAlarms();
+        return { json: { on: loadSettings().alarms.on, at: a.at, open: a.open, cleared: a.cleared, page: '/#alarms' } };
+      },
     },
     post: {
       '/api/stage/bump': stagePost('bump'),
@@ -127,6 +133,10 @@ export async function serveSteward(o: { run?: Runner } = {}) {
         if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
         void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true } };
+      },
+      '/api/alarms/dismiss': ({ body }) => {
+        const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
+        return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
       '/api/staff/refresh': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; the table is refreshed when it's done.` } };

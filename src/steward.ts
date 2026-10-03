@@ -1,11 +1,12 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { watchAlarms, type Held } from './alarms.ts';
 import { dataDir } from './app.ts';
 import { kitInfo, chooseKit, localChangelog, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
 import { run as realRun, type Runner } from './run.ts';
-import { loadSettings, type Settings } from './settings.ts';
+import { loadSettings, type Employee, type Settings } from './settings.ts';
 import { bump } from './stages/bump.ts';
 import { pick, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
@@ -13,7 +14,7 @@ import { merge } from './stages/merge.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
-import { releaseUnreleased, roundDidSomething } from './stages/round.ts';
+import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { staff, type Staff } from './stages/staff.ts';
 
 /**
@@ -71,7 +72,7 @@ export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean } = {}): Promi
 }
 
 /** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
-export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo } = {}): Promise<StageResult> {
+export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo; alarms?: Parameters<typeof watchAlarms>[1] } = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
     lines.push(line);
@@ -84,6 +85,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (o.kitInfo) ctx.kit = o.kitInfo;
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
+      let held: { employee: Employee; prs: Held[] }[] = [];
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -92,7 +94,11 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const round = name === 'round';
           const yes = round || !!ask.yes;
           const merged = await merge(ctx, picked.employees, { yes, team: round || !!ask.team });
-          out.results = merged.map(({ merged: _m, ...r }) => r);
+          out.results = merged.map(({ merged: _m, held: _h, ...r }) => r);
+          held = merged.flatMap((r) => {
+            const employee = picked.employees.find((e) => e.id === r.id);
+            return employee && r.held.length ? [{ employee, prs: r.held }] : [];
+          });
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
@@ -142,6 +148,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         log(`${name}: ${out.error}`);
       }
       out.finished = new Date().toISOString();
+      // After every round, done or not: what needs the person (alarms.ts).
+      if (name === 'round') {
+        try {
+          const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, employees: ctx.settings.employees, log }, o.alarms);
+        } catch (e) {
+          log(`alarms: ${(e as Error).message}`);
+        }
+      }
       // A round with nothing done or failed leaves no trace: the last stage stays what last happened.
       if (name === 'round' && !roundDidSomething(out.results, out.error)) return out;
       writeJson(lastStageFile(), out);
