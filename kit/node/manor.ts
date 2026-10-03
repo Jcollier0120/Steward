@@ -2,13 +2,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { themeNamed } from './themes.ts';
 
 /**
- * The manor this agent works at, for the title bar's "Back to <manor>" (page.ts). Manor's settings say its name
- * and port (settings.json in %USERPROFILE%\.manor, or MANOR_HOME, as Manor itself reads it), and Manor's own page
- * serves its icon, the one its banner shows, which this agent serves from its own address as /manor-icon.svg
- * (its page loads images from itself only). Without Manor installed there's nothing to go back to, and the title
- * bar says nothing.
+ * The manor this agent works at, for the title bar's "Back to <manor>" and for its theme (page.ts). Manor's
+ * settings say its name, its port and the manor's theme (settings.json in %USERPROFILE%\.manor, or MANOR_HOME, as
+ * Manor itself reads it), and Manor's own page serves its icon, the one its banner shows, which this agent serves
+ * from its own address as /manor-icon.svg (its page loads images from itself only). Without Manor installed there's
+ * nothing to go back to: the title bar says nothing, and the agent's own Theme menu chooses its theme.
  */
 export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
 
@@ -16,23 +17,35 @@ export interface ManorLink {
   name: string;
   port: number;
   url: string;
+  /**
+   * The manor's theme (themes.ts), chosen in Manor's Theme menu: every page in the manor wears it. "system" (Match
+   * Windows) when settings.json names none, or names one there isn't.
+   */
+  theme: string;
 }
 
 const DEFAULT_PORT = 18585;
 
-/** Manor's name and page, or null when Manor isn't installed here (no settings.json, or no app beside it). */
+/** Manor's name, page and theme, read afresh; null when Manor isn't installed here (no settings.json, or no app beside it). */
 export function manorLink(home = manorHome()): ManorLink | null {
   const file = path.join(home, 'settings.json');
   if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown } = {};
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
   } catch {
     // Unreadable settings: Manor uses its defaults, and so does this link.
   }
   const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : 'Manor';
   const port = Number.isInteger(raw.port) && (raw.port as number) >= 1024 && (raw.port as number) <= 65535 ? (raw.port as number) : DEFAULT_PORT;
-  return { name, port, url: `http://manor.localhost:${port}/` };
+  let theme = 'system';
+  try {
+    theme = themeNamed(raw.theme)?.name ?? 'system';
+  } catch {
+    // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to Manor still works.
+  }
+  return { name, port, url: `http://manor.localhost:${port}/`, theme };
 }
 
 /** A plain house, for when Manor's own icon can't be had. */

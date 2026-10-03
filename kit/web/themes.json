@@ -1,0 +1,15 @@
+{
+  "about": "The manor's colour themes, for the Theme menus (the Steward's kit, web/themes.json); themes.css has their colours. name is <html data-theme>'s value (system: none, the page follows Windows); scheme is light or dark; swatch is the page's colour, its accent and its text, as the menu's little circle shows them; group is the menu's heading.",
+  "themes": [
+    { "name": "system", "label": "Match Windows", "description": "Light or dark, as Windows is set.", "swatch": ["#f3f3f3", "#1c1c1c", "#5f5f5f"], "group": "windows", "scheme": null },
+    { "name": "light", "label": "Light", "description": "Windows 11, light.", "swatch": ["#f3f3f3", "#005fb8", "#1a1a1a"], "group": "windows", "scheme": "light" },
+    { "name": "dark", "label": "Dark", "description": "Windows 11, dark.", "swatch": ["#1c1c1c", "#60cdff", "#f1f1f1"], "group": "windows", "scheme": "dark" },
+    { "name": "arcade", "label": "Arcade", "description": "Neon retro, 90s arcade.", "swatch": ["#1a0b2e", "#ff2e97", "#00f0ff"], "group": "colour", "scheme": "dark" },
+    { "name": "onyx", "label": "Onyx", "description": "Black stone and polished brass.", "swatch": ["#0c0b09", "#d4a843", "#f0eadc"], "group": "colour", "scheme": "dark" },
+    { "name": "carbon", "label": "Carbon", "description": "Carbon fibre with a volt green edge.", "swatch": ["#0a0b0c", "#bef228", "#eceef0"], "group": "colour", "scheme": "dark" },
+    { "name": "tinsel", "label": "Tinsel", "description": "Silver and antique gold.", "swatch": ["#cdd0d4", "#8f6b12", "#1b1f26"], "group": "colour", "scheme": "light" },
+    { "name": "rosegold", "label": "Rose Gold", "description": "Blush pink and rose gold.", "swatch": ["#f2e6e2", "#a0524c", "#2b1d1e"], "group": "colour", "scheme": "light" },
+    { "name": "quest", "label": "Quest", "description": "An old map in ink and parchment.", "swatch": ["#ece0c4", "#284078", "#2c2014"], "group": "colour", "scheme": "light" }
+  ],
+  "groups": { "windows": "Windows", "colour": "Colour themes" }
+}

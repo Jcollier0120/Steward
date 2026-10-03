@@ -2,8 +2,9 @@ import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.t
 import { APP, dataDir } from '../app.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
-import { manorLink } from './manor.ts';
+import { manorLink, type ManorLink } from './manor.ts';
 import { roundTimes } from './schedule.ts';
+import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
 
 /** Text made safe for HTML. */
@@ -58,18 +59,41 @@ const GEAR = icon('<path d="M6.9 1.8h2.2l.4 1.7 1.2.6 1.5-.9 1.6 1.6-.9 1.5.6 1.
 const PALETTE = icon('<path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c.9 0 1.5-.6 1.5-1.4 0-.9-.8-1.3-.8-2.1 0-.8.6-1.3 1.4-1.3h1.6a2.5 2.5 0 0 0 2.5-2.5C14.2 4.2 11.5 1.8 8 1.8z"/><circle cx="5" cy="7.2" r=".6" fill="currentColor"/><circle cx="7.4" cy="4.6" r=".6" fill="currentColor"/><circle cx="10.6" cy="5.3" r=".6" fill="currentColor"/><circle cx="5.3" cy="10.5" r=".6" fill="currentColor"/>');
 const CHECK = icon('<path d="M3 8.5 6.5 12 13 4.5"/>', 'ti-check');
 
-/** The Theme menu's choices, as on Heiward's and Manor's: Windows' own setting, or Light or Dark. */
-const THEMES = [
-  { name: 'system', label: 'Match Windows', description: 'Light or dark, as Windows is set.', swatch: ['#f3f3f3', '#1c1c1c', '#5f5f5f'] },
-  { name: 'light', label: 'Light', description: 'Windows 11, light.', swatch: ['#f3f3f3', '#005fb8', '#1a1a1a'] },
-  { name: 'dark', label: 'Dark', description: 'Windows 11, dark.', swatch: ['#1c1c1c', '#60cdff', '#f1f1f1'] },
-];
+/** A theme in the Theme menu, as on Heiward's and Manor's: its swatch (page, accent, text), its name and its words. */
+const themeItem = (t: Theme, tag: 'button' | 'div', attrs: string) =>
+  `<${tag}${tag === 'button' ? ' type="button"' : ''} class="theme-item" role="menuitemradio" ${attrs} data-theme="${esc(t.name)}"><span class="swatch">${['sw-bg', 'sw-accent', 'sw-fg'].map((c, i) => `<span class="${c}" style="background:${esc(t.swatch[i])}"></span>`).join('')}</span><span class="ti-text"><span class="ti-label">${esc(t.label)}</span><span class="ti-desc">${esc(t.description)}</span></span>${CHECK}</${tag}>`;
 
-const themeMenu = () => `<div class="theme-picker" id="theme-picker" hidden>
-<button type="button" class="icon-btn" id="theme-btn" title="Theme" aria-label="Theme" aria-haspopup="menu" aria-expanded="false" aria-controls="theme-menu">${PALETTE}</button>
+/**
+ * The Theme menu. With Manor installed (manor.ts), the theme is the manor's, chosen in Manor's own Theme menu for
+ * every page in the manor: the menu shows it, and links to Manor to change it. Without Manor, the nine themes
+ * (themes.ts) under Windows and Colour themes, as Heiward's menu has them, kept in this browser for this agent.
+ */
+function themeMenu(m: ManorLink | null): string {
+  const all = themes();
+  const button = (title: string) =>
+    `<button type="button" class="icon-btn" id="theme-btn" title="${esc(title)}" aria-label="${esc(title)}" aria-haspopup="menu" aria-expanded="false" aria-controls="theme-menu">${PALETTE}</button>`;
+  if (m) {
+    const t = all.find((x) => x.name === m.theme) ?? all[0];
+    return `<div class="theme-picker" id="theme-picker" hidden>
+${button(`Theme (${m.name}'s)`)}
 <div class="theme-menu" id="theme-menu" role="menu" aria-label="Theme" hidden><div class="menu-label">Theme</div>
-${THEMES.map((t) => `<button type="button" class="theme-item" role="menuitemradio" aria-checked="${t.name === 'system'}" data-theme="${t.name}"><span class="swatch">${['sw-bg', 'sw-accent', 'sw-fg'].map((c, i) => `<span class="${c}" style="background:${t.swatch[i]}"></span>`).join('')}</span><span class="ti-text"><span class="ti-label">${esc(t.label)}</span><span class="ti-desc">${esc(t.description)}</span></span>${CHECK}</button>`).join('\n')}
+${themeItem(t, 'div', 'aria-checked="true" aria-disabled="true"')}
+<p class="menu-note">${esc(m.name)} chooses the theme, for every page in the manor.</p>
+<a class="menu-link" role="menuitem" href="${esc(m.url)}">Change it in ${esc(m.name)}</a>
 </div></div>`;
+  }
+  let group = '';
+  const items = all.map((t) => {
+    const head = t.group === group ? '' : `<div class="menu-label">${esc(groupLabel(t.group))}</div>\n`;
+    group = t.group;
+    return head + themeItem(t, 'button', `aria-checked="${t.name === 'system'}"`);
+  });
+  return `<div class="theme-picker" id="theme-picker" hidden>
+${button('Theme')}
+<div class="theme-menu" id="theme-menu" role="menu" aria-label="Theme" hidden>
+${items.join('\n')}
+</div></div>`;
+}
 
 /**
  * The status pill, from what the page knows: a round under way (the agent's own words for it: "Tasting"),
@@ -89,8 +113,10 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
  * the page refreshes itself every few seconds, unless something on it is ticked or being typed in, or
  * the Settings panel has changes not yet saved, or Settings or the Theme menu is open.
  *
- * The look is Heiward's (and Manor's): Windows 11's colours, Light or Dark as Windows is set or as the
- * Theme menu chooses (kept in this browser, per agent), a compact title bar, and the body on one panel.
+ * The look is Heiward's (and Manor's): the manor's themes (themes.ts: Windows 11's Light and Dark, and six colour
+ * themes), a compact title bar, and the body on one panel. With Manor installed, the page wears the manor's theme,
+ * chosen in Manor (manor.ts), stamped on <html> as the page is drawn, so it's right at first paint; without Manor,
+ * Match Windows unless the Theme menu chooses another (kept in this browser, per agent).
  * The title bar has the agent's icon, name and role, its scene (look.ts: still while idle, moving while a
  * round runs), a status pill, the Settings gear, the Theme menu, and the agent's Run now: the script
  * lifts the body's first button that POSTs /api/run and says "Run now" (or a button marked
@@ -114,8 +140,16 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   const look = lookFor(APP.id);
   const d = duty();
   const themeKey = JSON.stringify(`${APP.id}:theme`);
+  const manor = manorLink();
+  // With Manor, the manor's theme, and the marks that say it's Manor's (as Heiward's and Reeve's pages have them).
+  const htmlTheme = manor
+    ? `${manor.theme === 'system' ? '' : ` data-theme="${esc(manor.theme)}"`} data-manor="${esc(manor.name)}" data-manor-url="${esc(manor.url)}"`
+    : '';
+  const savedTheme = manor
+    ? ''
+    : `\n  try { var t = localStorage.getItem(${themeKey}); if (t !== 'system' && ${JSON.stringify(themes().map((t) => t.name))}.indexOf(t) >= 0) document.documentElement.dataset.theme = t; } catch (e) { /* storage blocked: the page follows Windows */ }`;
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${htmlTheme}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -123,24 +157,23 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 <title>${esc(o.title ?? APP.name)}</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script>
-// The saved theme, before the page paints; and the scene's clock, so a page reloaded mid-round moves on from where it was.
-(function () {
-  try { var t = localStorage.getItem(${themeKey}); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) { /* storage blocked: the page follows Windows */ }
+// ${manor ? "The scene's clock" : "The saved theme, before the page paints; and the scene's clock"}, so a page reloaded mid-round moves on from where it was.
+(function () {${savedTheme}
   document.documentElement.style.setProperty('--phase', -(Date.now() % 12000) / 1000 + 's');
 })();
 </script>
-<style>${CSS}${lookCss(look)}</style>
+<style>${themesCss()}${CSS}${lookCss(look)}</style>
 <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
 <header class="titlebar${o.busy ? ' busy' : ''}" data-agent="${esc(APP.id)}">
-  ${backToManor()}
+  ${backToManor(manor)}
   <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
     ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt })}
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
-    ${themeMenu()}
+    ${themeMenu(manor)}
     <span class="titlebar-action" id="titlebar-action"></span>
   </div>
 </header>
@@ -194,13 +227,15 @@ document.addEventListener('click', (e) => {
   const run = main.querySelector('button[data-titlebar]') || [...main.querySelectorAll('button[data-post="/api/run"]:not([data-form]):not([data-body])')].find((b) => /^\\s*run now\\s*$/i.test(b.textContent));
   if (run) slot.append(run);
 })();
-// The Theme menu: Match Windows, Light or Dark, kept in this browser for this agent.
+// The Theme menu: the nine themes, kept in this browser for this agent; or, with Manor, the manor's theme and a
+// link to Manor, where it is chosen (a theme there isn't a button).
 (function () {
   const picker = document.getElementById('theme-picker');
   const btn = document.getElementById('theme-btn');
   const menu = document.getElementById('theme-menu');
   if (!picker || !btn || !menu) return;
-  const items = [...menu.querySelectorAll('.theme-item')];
+  const items = [...menu.querySelectorAll('button.theme-item')];
+  const stops = [...menu.querySelectorAll('button.theme-item, a')];
   const current = () => document.documentElement.dataset.theme || 'system';
   const mark = () => { for (const i of items) i.setAttribute('aria-checked', String(i.dataset.theme === current())); };
   const set = (name) => {
@@ -212,7 +247,7 @@ document.addEventListener('click', (e) => {
   const show = (open) => {
     menu.hidden = !open;
     btn.setAttribute('aria-expanded', String(open));
-    if (open) (items.find((i) => i.getAttribute('aria-checked') === 'true') || items[0]).focus();
+    if (open) (items.find((i) => i.getAttribute('aria-checked') === 'true') || stops[0]).focus();
   };
   mark();
   picker.hidden = false;
@@ -221,10 +256,13 @@ document.addEventListener('click', (e) => {
   for (const i of items) i.addEventListener('click', () => set(i.dataset.theme));
   document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) show(false); });
   menu.addEventListener('keydown', (e) => {
-    const at = items.indexOf(document.activeElement);
+    const at = stops.indexOf(document.activeElement);
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+      stops[(at + (e.key === 'ArrowDown' ? 1 : stops.length - 1)) % stops.length].focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      stops[e.key === 'Home' ? 0 : stops.length - 1].focus();
     } else if (e.key === 'Escape') {
       show(false);
       btn.focus();
@@ -289,8 +327,7 @@ if (REFRESH) setInterval(() => {
  * "Back to <manor>", first in the title bar, with Manor's icon, when Manor is installed here (manor.ts): the way
  * back from every agent's page to the manor's. Nothing without Manor.
  */
-function backToManor(): string {
-  const m = manorLink();
+function backToManor(m: ManorLink | null): string {
   if (!m) return '';
   return `<a class="manor-back" href="${esc(m.url)}" title="Back to ${esc(m.name)}"><img src="/manor-icon.svg" alt="" width="22" height="22"><span>Back to ${esc(m.name)}</span></a><span class="manor-sep" aria-hidden="true"></span>`;
 }
@@ -303,42 +340,27 @@ function offDuty(d: Duty): string {
 `;
 }
 
-/** The agent's own colour for its scene (Light, and Dark as Windows or the Theme menu has it), and its scene's motion. */
+/**
+ * The agent's own colour for its scene, and its scene's motion: its Light colour on a light theme, its Dark colour on
+ * a dark one (Dark and the dark colour themes, or Match Windows while Windows is dark).
+ */
 function lookCss(look: Look): string {
+  const dark = themes().filter((t) => t.scheme === 'dark').map((t) => `:root[data-theme="${t.name}"]`);
   return `
 :root { --role: ${look.accent.light}; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) { --role: ${look.accent.dark}; } }
-:root[data-theme="dark"] { --role: ${look.accent.dark}; }
+${dark.join(', ')} { --role: ${look.accent.dark}; }
 ${look.motion}
 `;
 }
 
-/** Windows 11's colours at night, as Heiward's and Manor's pages have them. */
-const DARK = `
-  --bg: #1c1c1c; --surface: #272727; --surface-2: #2c2c2c; --fg: #f1f1f1; --muted: #a8a8a8; --faint: #707070; --line: #3a3a3a;
-  --hover: rgba(255, 255, 255, .06); --selected: #1f3a52; --accent: #60cdff; --accent-fg: #000000; --accent-soft: #1f3a52; --accent-text: #60cdff;
-  --ok: #6ccb8f; --ok-bg: #173323; --warn: #fcd679; --warn-bg: #3a2f10; --alert: #ff99a4; --alert-bg: #44272a;
-  --npu: #cdb6ff; --npu-bg: #33294a; --quiet-bg: #333333; --ink: #b9a9f5; --ink-soft: #221d38; --ink-deep: #0f0c1a; --paper: #34302a;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
-  color-scheme: dark;`;
-
 /**
- * Windows 11's colours, as Heiward's and Manor's pages have them, and the kit's classes in their look. The
- * kit's older names stay for the agents' own styles: --card (a card's background) and --soft (a quiet fill).
- * --ink and --ink-soft are the agents' icons' own colours, for the scenes' outlines.
+ * The kit's classes, in Heiward's and Manor's look; their colours are the manor's themes (web/themes.css, which
+ * page() puts before these). The kit's older names stay for the agents' own styles: --card (a card's background)
+ * and --soft (a quiet fill). --ink and --ink-soft are the agents' icons' own colours, for the scenes' outlines.
  */
 const CSS = `
-:root {
-  --bg: #f3f3f3; --surface: #ffffff; --surface-2: #f9f9f9; --fg: #1a1a1a; --muted: #5f5f5f; --faint: #9a9a9a; --line: #e5e5e5;
-  --hover: rgba(0, 0, 0, .045); --selected: #e0eefa; --accent: #005fb8; --accent-fg: #ffffff; --accent-soft: #e0eefa; --accent-text: #005fb8;
-  --ok: #0f7b3f; --ok-bg: #dff6e8; --warn: #8a5300; --warn-bg: #fff4ce; --alert: #c42b1c; --alert-bg: #fde7e9;
-  --npu: #6941a8; --npu-bg: #efe8fa; --quiet-bg: #ededed; --ink: #4a3a8a; --ink-soft: #ebe7f8; --ink-deep: #2b2150; --paper: #fffdf7;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 2px 6px rgba(0, 0, 0, .04);
-  --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg));
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) { :root:not([data-theme]) {${DARK} } }
-:root[data-theme="dark"] {${DARK} }
+:root { --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg)); }
 * { box-sizing: border-box; }
 html { background: var(--bg); }
 body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
@@ -387,7 +409,7 @@ p { margin: 8px 0; }
 
 /* The Theme menu, as Heiward's and Manor's */
 .theme-picker { position: relative; }
-.theme-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 272px; max-width: calc(100vw - 24px); padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.theme-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 272px; max-width: calc(100vw - 24px); max-height: calc(100vh - 72px); overflow-y: auto; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .menu-label { font-size: 11px; font-weight: 600; color: var(--muted); padding: 8px 10px 4px; }
 .theme-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--fg); font-weight: 400; text-align: left; cursor: pointer; }
 .theme-item:hover:not(:disabled), .theme-item:focus-visible { background: var(--hover); outline: none; filter: none; }
@@ -397,6 +419,11 @@ p { margin: 8px 0; }
 .ti-desc { font-size: 12px; color: var(--muted); }
 .ti-check { flex: none; color: var(--accent-text); visibility: hidden; }
 .theme-item[aria-checked="true"] .ti-check { visibility: visible; }
+.theme-item[aria-disabled="true"] { cursor: default; }
+/* With Manor, the manor's theme: what it is, and the way to Manor's own Theme menu. */
+.menu-note { margin: 6px 10px 2px; color: var(--muted); font-size: 12px; }
+.menu-link { display: block; padding: 6px 10px; border-radius: 6px; color: var(--accent-text); font-size: 13px; font-weight: 600; text-decoration: none; }
+.menu-link:hover, .menu-link:focus-visible { background: var(--hover); outline: none; }
 .swatch { position: relative; flex: none; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; border: 1px solid var(--line); }
 .swatch span { position: absolute; inset: 0; }
 .swatch .sw-accent { clip-path: polygon(100% 0, 100% 100%, 0 100%); }
