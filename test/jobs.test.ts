@@ -11,7 +11,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-jobs-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { approveMerged, noteApproved } = await import('../src/stages/jobs.ts');
+const { approveMerged, noteApproved, runApprove } = await import('../src/stages/jobs.ts');
 const { ctxFor, employee, fakeEmployee, runner, sh } = await import('./helpers.ts');
 
 const MANIFEST = JSON.stringify({ jobs: [{ name: 'fast-forward', script: 'fast-forward.ps1', every: '1h' }, { name: 'repo-sync', script: 'repo-sync.ps1', every: '1h' }, { name: 'sneaky', script: '../evil.ps1' }] });
@@ -131,4 +131,41 @@ console.log(name + '\\n  sha256: ' + crypto.createHash('sha256').update(fs.readF
   assert.equal(r?.outcome, 'failed');
   assert.match(r!.message, /^approved fast-forward: its installed script is the one merged on main at .{7}; couldn't approve repo-sync: the script approved \(sha256 [0-9a-f]{12}\) isn't the one checked \([0-9a-f]{12}\), so it changed while being approved and may run unchecked: look at it now$/);
   assert.equal(await go(), null, 'said once');
+});
+
+test('with {sha256}, the approve command is given the hash checked, and a Reeve that takes it refuses a script swapped in between: nothing unchecked is approved', async () => {
+  const g = fakeEmployee(path.join(tmp, 'sha'), { files: { 'jobs/jobs.json': MANIFEST, 'jobs/fast-forward.ps1': "'ff'\n", 'jobs/repo-sync.ps1': "'rs'\n" } });
+  const at = sh(g.checkout, 'rev-parse', 'HEAD');
+  const shaApp = path.join(tmp, 'sha-app');
+  mkdirSync(path.join(shaApp, 'jobs'), { recursive: true });
+  writeFileSync(path.join(shaApp, 'release.json'), JSON.stringify({ id: 'reeve', version: '0.4.3', commit: at.slice(0, 7), dirty: false }));
+  writeFileSync(path.join(shaApp, 'jobs', 'jobs.json'), MANIFEST);
+  writeFileSync(path.join(shaApp, 'jobs', 'fast-forward.ps1'), "'ff'\n");
+  writeFileSync(path.join(shaApp, 'jobs', 'repo-sync.ps1'), "'rs'\n");
+  // As Reeve 0.4.3's `jobs approve <name> --sha256 <hex>`: it reads the script once, and pins it only if that is the
+  // hash given. For repo-sync, the script is swapped just before it reads it.
+  const reeve = path.join(tmp, 'reeve-sha.cjs');
+  const pinnedLog = path.join(tmp, 'sha-pinned.txt');
+  writeFileSync(
+    reeve,
+    `const fs = require('fs'), crypto = require('crypto');
+const [dir, log, name, flag, expected] = process.argv.slice(2);
+if (flag !== '--sha256' || !/^[0-9a-f]{64}$/.test(expected)) { console.error('no --sha256'); process.exit(2); }
+const file = dir + '/' + name + '.ps1';
+if (name === 'repo-sync') fs.writeFileSync(file, "'rs, swapped'\\n");
+const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+if (sha !== expected) { console.error(name + '\\n  sha256: ' + sha + '\\n  refused: not the expected ' + expected + ', so nothing was approved'); process.exit(1); }
+fs.appendFileSync(log, name + '\\n');
+console.log(name + '\\n  sha256: ' + sha + '\\n  approved');
+`,
+  );
+  const s = employee(g.checkout, { id: 'sha', name: 'Sha', approve: `node ${reeve} ${path.join(shaApp, 'jobs')} ${pinnedLog} {job} --sha256 {sha256}`, installed: shaApp });
+  const r = await approveMerged(ctxFor({ employees: [s], workRoot: tmp, run: runner().run, neutralDir: tmp }), s);
+  assert.equal(r?.outcome, 'failed');
+  assert.match(r!.message, /^approved fast-forward: its installed script is the one merged on main at .{7}; couldn't approve repo-sync \(exit 1: refused: not the expected [0-9a-f]{64}, so nothing was approved\)$/);
+  assert.deepEqual(readFileSync(pinnedLog, 'utf8').split('\n').filter(Boolean), ['fast-forward'], 'the swapped script was never approved');
+
+  // An approve command that takes {sha256} and has no installed script to take it from: not run.
+  const none = await runApprove(ctxFor({ employees: [s], workRoot: tmp, run: runner().run, neutralDir: tmp }), s, 'missing', null);
+  assert.equal(none.code, 2);
 });

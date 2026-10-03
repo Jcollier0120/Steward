@@ -41,30 +41,37 @@ function installedJobs(app: string): { name: string; script: string }[] | null {
   }
 }
 
-/** Notes that the Steward approved a job's installed script as it is now (after a PR's approve-jobs, say), so a round doesn't again. */
-export function noteApproved(e: Employee, job: string): void {
-  if (!e.installed) return;
+/** The sha256 of a job's script in the installed copy as it is now, or null when there's none. */
+export function installedHash(e: Employee, job: string): string | null {
+  if (!e.installed) return null;
   const app = path.resolve(expandEnv(e.installed));
   const script = installedJobs(app)?.find((j) => j.name === job)?.script;
   const file = script ? path.join(app, 'jobs', script) : null;
-  if (!file || !existsSync(file)) return;
+  return file && existsSync(file) ? sha256(readFileSync(file)) : null;
+}
+
+/** Notes that the Steward approved a job's installed script (`hash`), after a PR's approve-jobs say, so a round doesn't again. */
+export function noteApproved(e: Employee, job: string, hash = installedHash(e, job)): void {
+  if (!hash) return;
   const kept = readJson<Record<string, Record<string, string>>>(jobsApprovedFile(), {});
-  kept[e.id] = { ...kept[e.id], [job]: sha256(readFileSync(file)) };
+  kept[e.id] = { ...kept[e.id], [job]: hash };
   writeJson(jobsApprovedFile(), kept);
 }
 
 /**
- * Runs the employee's approve command for one job: its exit code, whether it was approved already, and the sha256 it
- * pinned when it says (Reeve prints "sha256: <hex>"), else null.
+ * Runs the employee's approve command for one job, {job} its name and {sha256} the hash of the script that was
+ * checked (Reeve's `--sha256 {sha256}` then approves that script only, read once, or refuses): its exit code, whether
+ * it was approved already, and the sha256 it pinned when it says (Reeve prints "sha256: <hex>"), else null.
  */
-export async function runApprove(ctx: Ctx, e: Employee, job: string): Promise<{ code: number; already: boolean; said: string; pinned: string | null }> {
-  // A job's name stays one word (NAME), so it can't add words to the command.
-  const line = expandEnv(e.approve).replaceAll('{job}', job);
+export async function runApprove(ctx: Ctx, e: Employee, job: string, checked: string | null): Promise<{ code: number; already: boolean; said: string; pinned: string | null }> {
+  if (e.approve.includes('{sha256}') && !checked) return { code: 2, already: false, said: "its approve command takes the script's sha256, and there's no installed script to take it from", pinned: null };
+  // A job's name stays one word (NAME), and a sha256 is hex, so neither can add words to the command.
+  const line = expandEnv(e.approve).replaceAll('{job}', job).replaceAll('{sha256}', checked ?? '');
   ctx.log(`[${e.id}] approving ${job}: ${line}`);
   const r = await runLine(ctx.run, line, { cwd: ctx.neutralDir, timeoutMs: 2 * 60_000 });
   for (const l of tail(`${r.out}\n${r.err}`, 6).split('\n')) ctx.log(`[${e.id}]   ${l}`);
   const pinned = /sha256:\s*([0-9a-f]{64})\b/i.exec(r.out)?.[1]?.toLowerCase() ?? null;
-  return { code: r.code, already: /already approved/i.test(r.out), said: (r.err || r.out).trim().split('\n').pop() ?? '', pinned };
+  return { code: r.code, already: /already approved/i.test(r.out), said: (r.err || r.out).trim().split('\n').pop()?.trim() ?? '', pinned };
 }
 
 /**
@@ -114,7 +121,7 @@ export async function approveMerged(ctx: Ctx, e: Employee): Promise<EmployeeResu
       turnedDown.push(j.name);
       continue;
     }
-    const r = await runApprove(ctx, e, j.name);
+    const r = await runApprove(ctx, e, j.name, j.hash);
     if (r.code !== 0) {
       failed.push(`${j.name} (exit ${r.code}: ${r.said})`);
       continue;
