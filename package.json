@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
@@ -25,9 +25,14 @@
     "prestatus": "node tools/kit.ts --from kit",
     "status": "node src/cli.ts status",
     "test": "node --test \"test/**/*.test.ts\" \"kit/test/**/*.test.ts\"",
+    "posttest": "node kit/test/dotnet.ts --if-present",
+    "test:dotnet": "node kit/test/dotnet.ts",
+    "test:dotnet-publish": "node kit/test/dotnet.ts --publish",
     "typecheck": "tsc -p .",
     "release": "node tools/kit.ts --from kit && node src/kit/release.ts",
-    "kit-release": "node tools/kit-release.ts"
+    "kit-release": "node tools/kit-release.ts",
+    "core-types": "node kit/test/core-types.ts --write",
+    "vectors": "node kit/test/turn-scenarios.ts --write && node kit/test/accelerator-scenarios.ts --write"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",

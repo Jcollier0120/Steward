@@ -75,8 +75,8 @@ test("kit\\VERSION has its changelog entry, the Steward pins it, and its fixture
   assert.ok(!existsSync(path.join(kitDir, 'test', 'fixture', 'kit.json')));
 });
 
-test('a kit release carries VERSION, CHANGELOG.md and the parts, never the tests', () => {
-  assert.deepEqual(KIT_RELEASE_PATHS, ['VERSION', 'CHANGELOG.md', 'node', 'web', 'spec']);
+test('a kit release carries VERSION, CHANGELOG.md and the parts (the core and dotnet too), never the tests', () => {
+  assert.deepEqual(KIT_RELEASE_PATHS, ['VERSION', 'CHANGELOG.md', 'node', 'web', 'spec', 'core', 'dotnet']);
   assert.ok(filesUnder(kitDir).some((f) => f.startsWith('test/')));
 });
 

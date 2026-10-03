@@ -4,13 +4,15 @@ import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git
 import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
+import { needsNpmCi } from './bump.ts';
 import { appReleasesIn, readPin } from './staff.ts';
 import { checkoutOf, NOT_ON_KIT, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
  * no GitHub release yet, a worktree at that very commit, and its release command run there. Releases come
- * from the branch, never from a PR's, so a release and its branch never drift apart.
+ * from the branch, never from a PR's, so a release and its branch never drift apart. A Node agent's worktree
+ * gets its packages first (`npm ci`, as bump does): Reeve's release builds its dashboard with them.
  */
 
 export interface ReleaseCandidate {
@@ -59,6 +61,14 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null 
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
+    if (needsNpmCi(dir)) {
+      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
+      ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
+      if (ci.code !== 0) {
+        for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
+        return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built`, { version, commit: commit.slice(0, 7) });
+      }
+    }
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})`, { version, commit: commit.slice(0, 7) });

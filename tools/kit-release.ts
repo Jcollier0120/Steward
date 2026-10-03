@@ -5,7 +5,7 @@
  *   npm run kit-release                artifacts\kit\kit-<version>.zip and artifacts\kit\SHA256SUMS.txt
  *   npm run kit-release -- --publish   builds it, then makes the GitHub release kit-v<version> with both files
  *
- * The zip holds VERSION, CHANGELOG.md and the parts (node\, web\, spec\), as kit\ has them at HEAD (git
+ * The zip holds VERSION, CHANGELOG.md and the parts (node\, web\, spec\, core\ and dotnet\), as kit\ has them at HEAD (git
  * archive), never the kit's tests. Every agent's tools/kit.ts downloads it, checks it against
  * SHA256SUMS.txt, and fills its src\kit\ with the parts its kit.json names. The Steward's own releases
  * (v<version>, src/kit/release.ts) are separate: a kit release needs no Steward release.
@@ -22,8 +22,14 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const kitDir = path.join(root, 'kit');
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
 
+/**
+ * The kit's parts: the three a Node agent places (src/kitfiles.ts's PARTS), and, from kit 2.0.0, the core,
+ * which the node and dotnet parts run, and dotnet, the C# driver (Heiward's). tools/kit.ts fills any of them.
+ */
+export const KIT_PARTS = [...PARTS, 'core', 'dotnet'];
+
 /** What the zip carries, as paths in the kit tree. */
-export const KIT_RELEASE_PATHS = [...KIT_META, ...PARTS];
+export const KIT_RELEASE_PATHS = [...KIT_META, ...KIT_PARTS];
 
 /** The changelog's entry for a version, or null when it has none. */
 export const entryFor = (changelog: string, version: string) => changelogBetween(changelog, null, version).split(/\n(?=## )/)[0].trim() || null;
