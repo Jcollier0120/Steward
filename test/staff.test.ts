@@ -232,14 +232,19 @@ test('merge without --yes merges nothing; with it, only the mergeable and green,
 });
 
 test("merge --team takes the team's PRs as well, to any employee, and leaves their branches; without it they aren't touched", async () => {
+  // A real checkout: a team PR's version is read there before it merges. #11 has CI passing, so it isn't tested here.
+  const f = fakeEmployee(path.join(tmp, 'team-prs'));
+  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/pull/11/head`);
+  const green = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }];
   const prs = [
     pr({ number: 30 }),
-    pr({ number: 11, headRefName: 'claude/infallible-tesla-96fcf9' }),
+    pr({ number: 11, headRefName: 'claude/infallible-tesla-96fcf9', headRefOid: sha, statusCheckRollup: green }),
     pr({ number: 12, headRefName: 'claude/stacked', baseRefName: 'claude/infallible-tesla-96fcf9' }),
     pr({ number: 13, headRefName: 'patch-1', author: stranger, isCrossRepository: true }),
   ];
   const script = (args: string[]) => (args[1] === 'list' ? ok(prs) : args[1] === 'merge' ? ok('') : undefined);
-  const e = employee(path.join(tmp, 'nowhere'), { repo: 'Jcollier0120/Miller' });
+  const e = employee(f.checkout, { repo: 'Jcollier0120/Miller' });
   const ctx = (run: ReturnType<typeof runner>['run'], team?: string[]) => ctxFor({ employees: [e], workRoot: tmp, run, neutralDir: tmp, team });
 
   const plain = runner(script);

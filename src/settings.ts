@@ -152,7 +152,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'team',
     kind: 'list',
     label: 'Team',
-    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Claude Code opens its PRs with your account, so yours covers them. Their branches are left as they are.",
+    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Claude Code opens its PRs with your account, so yours covers them. A team PR that isn't a draft is ready to merge: open one that needs review as a draft. One with no checks on GitHub is tested here first, and the version it sets must be new. Their branches are left as they are.",
     item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like Jcollier0120, or app/<name> for a GitHub App' },
     maxItems: 20,
   },
@@ -171,7 +171,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'byItself',
     kind: 'switch',
     label: 'Merges and releases by itself',
-    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released. Off: only when asked.",
+    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released. Off: only when asked.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
 ];

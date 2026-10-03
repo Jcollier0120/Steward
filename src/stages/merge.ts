@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
-import { fetchBranch, gh, git, removeWorktree, showFile } from '../git.ts';
+import { fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
+import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -19,9 +20,13 @@ import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
  * install, approve-jobs. One whose block can't be read waits, and so does one whose steps couldn't happen: an
  * install with no install command in Settings, or a release of a version that is already released. With
  * --yes, the steps run after the merge (stages/aftermerge.ts).
+ *
+ * A team PR is held to more, since no one asked for it here: the version it sets must be new (not released, above
+ * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
+ * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump.
  */
 
-/** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none). */
+/** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
   if (pr.draft) return 'a draft';
@@ -49,12 +54,27 @@ export function mergeSelection(prs: PrInfo[], branch?: string): { merge: PrInfo[
 
 const describe = (pr: PrInfo) => `#${pr.number} (${pr.head}${pr.whose === 'team' ? `, ${pr.author}'s` : ''}; checks ${pr.checks}; ${pr.mergeable.toLowerCase()}${pr.after ? `; then ${afterWords(pr.after)}` : ''})`;
 
-/** What the after-merge checks need from origin, looked up once per employee: its released versions, and its branch's version. */
+/** What the checks before a merge need from origin, looked up once per employee (and again after a merge): its released versions, and its branch's version. */
 type Lookup = () => Promise<{ released: string[]; base: string | null }>;
+
+/** A PR's version at its head, and where it started (at its merge base with the branch); null where none can be read. */
+export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null }> {
+  const { run } = ctx;
+  const repo = checkoutOf(e);
+  // The PR's head, fetched by its number (a fork's too), read at the commit GitHub named.
+  await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  const at = pr.headOid || 'FETCH_HEAD';
+  const read = async (ref: string) => {
+    const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, ref, f)] as [string, string | null])));
+    return 'version' in v ? v.version : null;
+  };
+  const start = (await gitMaybe(run, repo, 'merge-base', `origin/${e.branch}`, at))?.trim();
+  return { head: await read(at), from: start ? await read(start) : null };
+}
 
 /**
  * Why the steps a mergeable PR asks for couldn't happen, or null: an install or approval with no command for it in
- * Settings, or a release whose version (the PR's, or its branch's when that is higher) is already released.
+ * Settings, or a release whose version once merged (the PR's when it sets one, else its branch's) is already released.
  */
 export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<string | null> {
   const a = pr.after;
@@ -65,15 +85,32 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return `it asks for a release, but there's no checkout at ${repo} to read its version from`;
   const { released, base } = await lookup();
-  // The PR's head, fetched by its number (a fork's too), read at the commit GitHub named.
-  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
-  const at = pr.headOid || 'FETCH_HEAD';
-  const head = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, repo, at, f)] as [string, string | null])));
-  if ('error' in head) return `it asks for a release, but its branch has ${head.error}`;
-  const version = base && compareVersions(base, head.version) > 0 ? base : head.version;
+  const v = await prVersions(ctx, e, pr);
+  if (!v.head) return `it asks for a release, but its branch has no version the Steward can read (${e.versionFiles.join(', ')})`;
+  const version = v.head !== v.from ? v.head : (base ?? v.head);
   if (released.includes(version)) return `it asks for a release, but v${version}, its version once merged, is already released: raise the version in the PR`;
   return null;
 }
+
+/**
+ * Why a team PR waits for its version, or null; and the version it sets (null when it leaves the version as it found
+ * it). A version it sets must be new: not released, and above its branch's, so that two changes never share one
+ * version and a merge never leaves a version conflict behind. (The Steward's own bumps raise the patch by one.)
+ */
+export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<{ why: string | null; sets: string | null }> {
+  const repo = checkoutOf(e);
+  if (!existsSync(repo)) return { why: `there's no checkout at ${repo} to read its version from, or test it in`, sets: null };
+  const { released, base } = await lookup();
+  const v = await prVersions(ctx, e, pr);
+  if (!v.head) return { why: `its branch has no version the Steward can read (${e.versionFiles.join(', ')})`, sets: null };
+  if (v.head === v.from) return { why: null, sets: null };
+  if (released.includes(v.head)) return { why: `it sets v${v.head}, which is already released: raise it`, sets: v.head };
+  if (base && compareVersions(v.head, base) <= 0) return { why: `it sets v${v.head}, but ${e.branch} is at v${base} already: raise it above`, sets: v.head };
+  return { why: null, sets: v.head };
+}
+
+/** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
+const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
 export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<EmployeeResult & { merged: PrInfo[] }> {
   const { run } = ctx;
@@ -92,26 +129,68 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       const released = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')).map((r) => r.version);
       return { released, base: 'version' in base ? base.version : null };
     })());
-  const merge: PrInfo[] = [];
-  for (const pr of mergeable) {
-    let why: string | null;
+  /** Why it waits, after its steps and, for a team PR, its version; and the version it sets. */
+  const check = async (pr: PrInfo): Promise<{ why: string | null; sets: string | null }> => {
     try {
-      why = await afterHold(ctx, e, pr, lookup);
+      const why = await afterHold(ctx, e, pr, lookup);
+      if (why) return { why, sets: null };
+      return pr.whose === 'team' ? await teamHold(ctx, e, pr, lookup) : { why: null, sets: null };
     } catch (err) {
-      why = `couldn't check what it asks for after merging: ${(err as Error).message}`;
+      return { why: `couldn't check it before merging: ${(err as Error).message}`, sets: null };
     }
-    if (why) hold.push({ pr, why });
-    else merge.push(pr);
+  };
+  const ready: { pr: PrInfo; sets: string | null }[] = [];
+  for (const pr of mergeable) {
+    const c = await check(pr);
+    if (c.why) hold.push({ pr, why: c.why });
+    else ready.push({ pr, sets: c.sets });
+  }
+  // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version.
+  const merge: PrInfo[] = [];
+  for (const r of ready) {
+    const same = r.sets ? ready.filter((x) => x.sets === r.sets) : [];
+    if (same.length > 1) hold.push({ pr: r.pr, why: `${same.map((x) => `#${x.pr.number}`).join(' and ')} ${same.length === 2 ? 'both' : 'all'} set v${r.sets}: each needs a version of its own` });
+    else merge.push(r.pr);
   }
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
   if (!o.yes) {
-    const would = merge.map((pr) => `${describe(pr)} would be merged`);
+    const would = merge.map((pr) => {
+      const before = untested(pr) ? testedBefore(e, pr) : null;
+      const how = !untested(pr) ? '' : !before ? ', once its checks pass here' : before.ok ? ` (${before.note})` : '';
+      return before && !before.ok ? `${describe(pr)} waits: ${before.note}` : `${describe(pr)} would be merged${how}`;
+    });
     return { ...result(e, 'skipped', [...would, ...waits].join('; ') + (merge.length ? ` (merge --yes${o.team ? ' --team' : ''} merges them)` : ''), { url: prs[0].url }), merged: [] };
   }
   const merged: PrInfo[] = [];
+  const notes = new Map<number, string>();
   const failed: string[] = [];
   for (const pr of merge) {
+    // A merge before this one moved the branch: what this one sets is checked again, against the branch as it is now.
+    if (merged.length && pr.whose === 'team') {
+      looked = null;
+      const c = await check(pr);
+      if (c.why) {
+        waits.push(`${describe(pr)} waits: ${c.why}`);
+        continue;
+      }
+    }
+    if (untested(pr)) {
+      const before = testedBefore(e, pr);
+      let t: Tested;
+      try {
+        t = await testAtHead(ctx, e, pr);
+      } catch (err) {
+        t = { ok: false, note: `couldn't test it here: ${(err as Error).message}`, at: new Date().toISOString() };
+      }
+      if (!t.ok) {
+        // Failing here for the first time is worth a word; after that it waits quietly for a new push.
+        if (before) waits.push(`${describe(pr)} waits: ${t.note}`);
+        else failed.push(`#${pr.number}: ${t.note}`);
+        continue;
+      }
+      notes.set(pr.number, t.note);
+    }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
@@ -120,7 +199,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       continue;
     }
     merged.push(pr);
-    ctx.log(`[${e.id}] merged #${pr.number} (${pr.head}${mine ? '' : `, ${pr.author}'s`})`);
+    ctx.log(`[${e.id}] merged #${pr.number} (${pr.head}${mine ? '' : `, ${pr.author}'s`}${notes.has(pr.number) ? `; ${notes.get(pr.number)}` : ''})`);
     // The Steward's own worktree and branch for it are done with.
     const repo = checkoutOf(e);
     if (mine && pr.head.startsWith('steward/kit-') && existsSync(repo)) {
@@ -131,7 +210,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
     }
   }
-  const parts = [...(merged.length ? [`merged ${merged.map((p) => `#${p.number}`).join(', ')}`] : []), ...failed.map((f) => `couldn't merge ${f}`), ...waits];
+  const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
+  const parts = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`), ...waits];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
   return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged };
 }

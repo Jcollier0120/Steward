@@ -30,7 +30,7 @@ const releaseCmd = `node -e "const fs=require('fs');const v=JSON.parse(fs.readFi
 writeFileSync(
   path.join(home, 'settings.json'),
   JSON.stringify({
-    employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: 'node tools/kit.ts', test: [], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' }],
+    employees: [{ id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: f.checkout, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '' }],
     team: ['Jcollier0120'],
     workRoot: path.join(home, 'work'),
   }),
@@ -65,7 +65,7 @@ test("a round merges the team's ready PR and does what it asks: its release", as
   assert.equal(out.error, undefined);
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
   assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
-    ['done', 'merged #7'],
+    ['done', `merged #7 (checks passed here at ${prSha.slice(0, 7)})`],
     ['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0'],
   ]);
   assert.deepEqual(released(), ['0.4.1'], 'released once: the round adds no second release of what the PR asked for');
