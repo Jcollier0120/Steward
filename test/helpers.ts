@@ -58,6 +58,7 @@ export function employee(checkout: string, more: Partial<Employee> = {}): Employ
     release: 'node -e process.exit(0)',
     install: 'node src/cli.ts install',
     approve: '',
+    installed: '',
     ...more,
   };
 }

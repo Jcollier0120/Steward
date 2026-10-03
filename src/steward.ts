@@ -7,11 +7,12 @@ import { gh } from './git.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { loadSettings, type Settings } from './settings.ts';
 import { bump } from './stages/bump.ts';
-import { pick, type Ctx, type StageName, type StageResult } from './stages/common.ts';
+import { pick, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
+import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething } from './stages/round.ts';
 import { staff, type Staff } from './stages/staff.ts';
 
@@ -111,6 +112,17 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
             const released = await releaseUnreleased(ctx, picked.employees.filter((e) => !releasedNow.has(e.id)));
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
+            // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
+            for (const e of picked.employees) {
+              let r: EmployeeResult | null;
+              try {
+                r = await approveMerged(ctx, e);
+              } catch (err) {
+                log(`[${e.id}] jobs: ${(err as Error).message}`);
+                r = null;
+              }
+              if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
+            }
           }
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
