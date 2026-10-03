@@ -104,6 +104,14 @@ export declare const say: Readonly<{
     couldNotStart: (command: string, why: string) => string;
     /** @param {string} program @param {string} baseUrl @param {number} seconds */
     didNotAnswer: (program: string, baseUrl: string, seconds: number) => string;
+    /** @param {string} program @param {number | null} code @param {string} baseUrl */
+    exitedWhileStarting: (program: string, code: number | null, baseUrl: string) => string;
+    /** @param {string} baseUrl @param {number} seconds */
+    stillBusy: (baseUrl: string, seconds: number) => string;
+    /** @param {string} route @param {string} baseUrl @param {number} seconds */
+    modelLoadTimedOut: (route: string, baseUrl: string, seconds: number) => string;
+    /** @param {string} where @param {string} why @param {string} deferred */
+    modelLoading: (where: string, why: string, deferred: string) => string;
     /** @param {string} route @param {string} baseUrl @param {number} seconds */
     requestTimedOut: (route: string, baseUrl: string, seconds: number) => string;
     /** @param {string} route @param {string} baseUrl @param {string} why */

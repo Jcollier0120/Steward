@@ -35,6 +35,12 @@
  * @property {number} defaultMaxContextTokens An accelerator's cap when its entry gives none.
  * @property {number} defaultRequestTimeoutMs The config's requestTimeoutMs when it gives none.
  * @property {number} startWaitMs How long a model server may take to come up after its startCommand.
+ * @property {number} probeMs How long a look at a server's /v1/models waits. A server that took the connection and gave no
+ *   answer in that time is busy, not down: GenieX answers nothing while it loads a model or answers a request.
+ * @property {number} readyWaitMs How long a busy server (no answer yet, or a 503 while it loads its model) may take to be ready.
+ * @property {number} requestBaseMs A background chat or vision request's timeout is this, plus requestPerTokenMs per token it may answer.
+ * @property {number} requestPerTokenMs What each token a background request may answer adds to its timeout.
+ * @property {number} coldLoadMs What loading a model may take besides: a server just started, or GenieX swapping models.
  */
 
 /**
@@ -65,7 +71,7 @@
 const SHAPE = {
   queue: ['heartbeatMs', 'lateMs', 'deadMs', 'ageMs', 'headPollMs', 'pollMs'],
   lock: ['waitMs', 'staleMs', 'ownerGraceMs', 'pollMs', 'takeTries', 'removeTries', 'removeRetryMs'],
-  accelerators: ['failedForMs', 'reasonMaxChars', 'gamePercent', 'gamesFreshMs', 'maxAhead', 'maxSlots', 'ownMemoryGb', 'defaultMaxContextTokens', 'defaultRequestTimeoutMs', 'startWaitMs'],
+  accelerators: ['failedForMs', 'reasonMaxChars', 'gamePercent', 'gamesFreshMs', 'maxAhead', 'maxSlots', 'ownMemoryGb', 'defaultMaxContextTokens', 'defaultRequestTimeoutMs', 'startWaitMs', 'probeMs', 'readyWaitMs', 'requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'],
   manners: ['maxWaitMs', 'backOffMs'],
   tokens: ['charsPerToken', 'messageChars', 'quirkRoomChars', 'imageTokens', 'minPieceChars'],
 };

@@ -27,7 +27,12 @@
     "ownMemoryGb": 2,
     "defaultMaxContextTokens": 2400,
     "defaultRequestTimeoutMs": 180000,
-    "startWaitMs": 30000
+    "startWaitMs": 30000,
+    "probeMs": 3000,
+    "readyWaitMs": 180000,
+    "requestBaseMs": 15000,
+    "requestPerTokenMs": 300,
+    "coldLoadMs": 90000
   },
   "manners": {
     "maxWaitMs": 600000,
