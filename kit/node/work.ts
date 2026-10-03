@@ -74,7 +74,10 @@ export const WORK: Record<string, AgentWork> = {
     model: true,
     lines: [
       { what: "Comparing each project's versions, tags, changelog and release files, and the checksums of its local build", where: 'the network, and the processor and disk for the checksums', when: 'every 6 hours, or Run now' },
+      { what: 'Asking Manor and the Steward who works at the manor, so each agent is tasted too', where: "Manor's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all' },
+      { what: "Cloning a project that isn't on this PC (gh repo clone), and fetching each clone (git fetch), fast-forwarding its default branch when it's checked out and clean", where: 'the network and the disk', when: 'in the same round, just before each project is tasted; a first clone takes longer' },
       { what: 'A changelog line for each merged change that has none', where: MODEL, when: 'at most 12 a round, about 25 seconds on the NPU' },
+      { what: "Handing a project's work orders to a worker, when Settings → Work orders names one (it's off by default), in a git worktree of its own", where: "Claude Code (claude -p), which runs on Anthropic's servers, with its tool calls on this PC's processor; or a command of yours, on this PC", when: 'at the end of the round, at most 2 projects, one at a time, each for at most 45 minutes (Time for each)' },
     ],
   },
   miller: {
