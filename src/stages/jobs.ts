@@ -53,14 +53,18 @@ export function noteApproved(e: Employee, job: string): void {
   writeJson(jobsApprovedFile(), kept);
 }
 
-/** Runs the employee's approve command for one job; its exit code and whether it was approved already. */
-export async function runApprove(ctx: Ctx, e: Employee, job: string): Promise<{ code: number; already: boolean; said: string }> {
+/**
+ * Runs the employee's approve command for one job: its exit code, whether it was approved already, and the sha256 it
+ * pinned when it says (Reeve prints "sha256: <hex>"), else null.
+ */
+export async function runApprove(ctx: Ctx, e: Employee, job: string): Promise<{ code: number; already: boolean; said: string; pinned: string | null }> {
   // A job's name stays one word (NAME), so it can't add words to the command.
   const line = expandEnv(e.approve).replaceAll('{job}', job);
   ctx.log(`[${e.id}] approving ${job}: ${line}`);
   const r = await runLine(ctx.run, line, { cwd: ctx.neutralDir, timeoutMs: 2 * 60_000 });
   for (const l of tail(`${r.out}\n${r.err}`, 6).split('\n')) ctx.log(`[${e.id}]   ${l}`);
-  return { code: r.code, already: /already approved/i.test(r.out), said: (r.err || r.out).trim().split('\n').pop() ?? '' };
+  const pinned = /sha256:\s*([0-9a-f]{64})\b/i.exec(r.out)?.[1]?.toLowerCase() ?? null;
+  return { code: r.code, already: /already approved/i.test(r.out), said: (r.err || r.out).trim().split('\n').pop() ?? '', pinned };
 }
 
 /**
@@ -113,6 +117,15 @@ export async function approveMerged(ctx: Ctx, e: Employee): Promise<EmployeeResu
     const r = await runApprove(ctx, e, j.name);
     if (r.code !== 0) {
       failed.push(`${j.name} (exit ${r.code}: ${r.said})`);
+      continue;
+    }
+    // The approve command reads the script again: what it pinned must be what was checked. (When it doesn't say,
+    // the script as it is now.) A script that changed in between is approved unchecked, and there's no undoing that
+    // here, so it's said loudly, once.
+    const pinned = r.pinned ?? sha256(readFileSync(j.file));
+    if (pinned !== j.hash) {
+      mine[`!${j.name}`] = pinned;
+      failed.push(`${j.name}: the script approved (sha256 ${pinned.slice(0, 12)}) isn't the one checked (${j.hash.slice(0, 12)}), so it changed while being approved and may run unchecked: look at it now`);
       continue;
     }
     mine[j.name] = j.hash;
