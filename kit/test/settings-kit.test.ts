@@ -12,6 +12,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), `${id}-settings-test-`));
 process.env[`${ENV}_HOME`] = home;
 process.env[`${ENV}_PORT`] = String(50000 + Math.floor(Math.random() * 9000));
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
+process.env.REEVE_HOME = path.join(home, 'reeve'); // the page names this PC's accelerators: never the real Reeve's
 
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
@@ -47,6 +48,13 @@ test('the page carries the panel and loads its script, which the server serves',
   assert.match(html, /<script src="\/settings\.js" defer><\/script>/);
   assert.match(html, /<meta name="page-token" content="tok">/);
   assert.match(html, /<link rel="stylesheet" href="\/settings\.css">/);
+  // Settings is a page of its own: the header's gear link (hidden until the script finds a panel to move),
+  // the script that lifts the Settings section into #settings-view, and the rule that hides the rest.
+  assert.match(html, /<a class="settings-link" id="settings-link" href="#\/settings" hidden><svg[^>]*>.*<\/svg><span>Settings<\/span><\/a>/s);
+  assert.match(html, /view\.id = 'settings-view'/);
+  assert.ok(html.includes('/^#\\/?settings$/'), 'the route matches #/settings and #settings, as written into the page');
+  assert.match(html, /body\.on-settings main > :not\(#settings-view\)/);
+  assert.ok(html.includes("[data-dirty], body.on-settings')"), 'no refresh while Settings is open');
   const r = await fetch(`${base}/settings.js`);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type') ?? '', /^text\/javascript/);

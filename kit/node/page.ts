@@ -1,6 +1,7 @@
 import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.ts';
 import { APP, dataDir } from '../app.ts';
 import { duty } from './duty.ts';
+import { workSection } from './work.ts';
 
 /** Text made safe for HTML. */
 export const esc = (s: unknown) =>
@@ -36,12 +37,25 @@ export const unverified = (text: string, from?: AcceleratorRef | null) =>
 export const settingsPanel = () =>
   `<div class="card sf-panel" data-settings-panel><p class="muted">Loading the settings…</p><noscript><p>The settings need JavaScript, which this page uses only for its buttons.</p></noscript></div>`;
 
+/** The gear on the header's Settings link (Manor's, as on its own title bar). */
+const GEAR = `<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M6.9 1.8h2.2l.4 1.7 1.2.6 1.5-.9 1.6 1.6-.9 1.5.6 1.2 1.7.4v2.2l-1.7.4-.6 1.2.9 1.5-1.6 1.6-1.5-.9-1.2.6-.4 1.7H6.9l-.4-1.7-1.2-.6-1.5.9-1.6-1.6.9-1.5-.6-1.2-1.7-.4V6.9l1.7-.4.6-1.2-.9-1.5 1.6-1.6 1.5.9 1.2-.6z"/><circle cx="8" cy="8" r="2.2"/></svg>`;
+
 /**
  * The agent's page: its header, `body`, and a small script for buttons. A button with data-post="/api/x"
  * POSTs (with the page token) and reloads; data-body='{"json":1}' sends that, data-form="#id" sends the
  * form's fields (ticked boxes of one name become a list), data-confirm="text" asks first. While `busy`,
  * the page refreshes itself every few seconds, unless something on it is ticked or being typed in, or
- * the Settings panel has changes not yet saved.
+ * the Settings panel has changes not yet saved, or Settings is open.
+ *
+ * Settings is a page of its own, as on Manor's, Reeve's and Heiward's: the header's Settings link (a gear)
+ * opens it at #/settings, and its back link returns. The agent's body still carries its Settings section
+ * where it always did (its "Settings" heading, anything of its own there, the panel, the version line);
+ * the script lifts that section out of the page and into the Settings view: from the panel back to the
+ * heading before it when that heading says Settings, and on to the next heading. Without JavaScript (which
+ * the panel needs anyway) the page stays as it was, Settings at the end, and the link stays hidden.
+ *
+ * The kit adds its own to the Settings page after the agent's: everything at the top of the body marked
+ * data-settings-extra, which is "Where its work runs" (work.ts).
  */
 export function page(o: { token: string; body: string; title?: string; busy?: boolean; refreshSec?: number }): string {
   const refresh = o.busy ? 3 : o.refreshSec ?? 0;
@@ -60,9 +74,11 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 <header>
   <img src="/favicon.svg" alt="" width="40" height="40">
   <div><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div>
+  <a class="settings-link" id="settings-link" href="#/settings" hidden>${GEAR}<span>Settings</span></a>
 </header>
 <main>
 ${offDuty()}${o.body}
+${workSection()}
 </main>
 <footer>${esc(APP.name)} ${esc(APP.version)} · this PC only · its files are in <code>${esc(dataDir)}</code></footer>
 <script>
@@ -102,8 +118,52 @@ document.addEventListener('click', (e) => {
   b.disabled = true;
   act(b.dataset.post, data, b.dataset.confirm).finally(() => { b.disabled = false; });
 });
+// Settings, a page of its own: the section the panel sits in moves into #settings-view, shown at #/settings.
+(function () {
+  const main = document.querySelector('main');
+  const panel = main && main.querySelector('[data-settings-panel]');
+  const link = document.getElementById('settings-link');
+  if (!panel || !link) return;
+  let top = panel;
+  while (top.parentElement !== main) top = top.parentElement;
+  let first = top;
+  for (let el = top.previousElementSibling; el; el = el.previousElementSibling) {
+    if (el.tagName !== 'H2') continue;
+    if (/^\\s*settings\\s*$/i.test(el.textContent)) first = el;
+    break;
+  }
+  const moving = [];
+  let passed = false;
+  for (let el = first; el; el = el.nextElementSibling) {
+    if (el.hasAttribute('data-settings-extra') || (passed && el.tagName === 'H2')) break;
+    moving.push(el);
+    if (el === top) passed = true;
+  }
+  const view = document.createElement('section');
+  view.id = 'settings-view';
+  const back = document.createElement('a');
+  back.className = 'back-link';
+  back.href = '#/';
+  back.textContent = 'Back to ' + ${JSON.stringify(APP.name)};
+  view.append(back);
+  if (moving[0].tagName !== 'H2') {
+    const h = document.createElement('h2');
+    h.textContent = 'Settings';
+    view.append(h);
+  }
+  view.append(...moving, ...main.querySelectorAll(':scope > [data-settings-extra]'));
+  main.append(view);
+  const route = () => {
+    const on = /^#\\/?settings$/.test(location.hash);
+    document.body.classList.toggle('on-settings', on);
+    link.setAttribute('aria-current', on ? 'page' : 'false');
+  };
+  window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });
+  route();
+  link.hidden = false;
+})();
 if (REFRESH) setInterval(() => {
-  const busy = document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty]');
+  const busy = document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings');
   if (!busy) location.reload();
 }, REFRESH * 1000);
 </script>
@@ -168,6 +228,16 @@ button.small { padding: 3px 10px; font-size: 13px; }
 .npu { color: var(--npu); background: var(--npu-bg); }
 .note { color: var(--muted); }
 .empty { color: var(--muted); padding: 18px 0; text-align: center; }
-@media (max-width: 640px) { header { padding: 14px 16px; } th, td { padding: 6px 4px; } }
+.settings-link { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; color: var(--accent); font-weight: 600; text-decoration: none; }
+.settings-link:hover, .settings-link[aria-current=page] { background: var(--card); border-color: var(--line); }
+.settings-link[hidden] { display: none; }
+body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-view { display: none; }
+.back-link { display: inline-block; margin-top: 2px; color: var(--accent); font-size: 14px; text-decoration: none; }
+.back-link:hover { text-decoration: underline; }
+#settings-view > h2:first-of-type { font-size: 22px; margin: 10px 0 12px; }
+.work-runs .work-table td:first-child { width: 42%; }
+.work-runs .small { font-size: 13px; }
+.work-runs p { margin: 8px 0; }
+@media (max-width: 640px) { header { padding: 14px 16px; } th, td { padding: 6px 4px; } .settings-link span { display: none; } }
 `;
 /* The Settings panel's own styles are the kit's web part: web/settings-panel.css, linked as /settings.css. */
