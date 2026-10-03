@@ -57,6 +57,8 @@ test('the section: the agent\'s table and notes, then its model work on this PC;
   const stranger = workSection({ id: 'someone-new', name: 'Someone', config: legacyNpu });
   assert.doesNotMatch(stranger, /<table/, 'an agent not listed: the shared part only');
   assert.match(stranger, /Its model work/);
+  // Some agents test that their page never says "NPU:" or "NPU note" (from when the NPU was all there was): the section mustn't either.
+  for (const id of Object.keys(WORK)) assert.doesNotMatch(workSection({ id, name: id, config: legacyNpu }), /NPU note|NPU:/, `${id}'s section`);
 });
 
 test('the page carries the section, which the script moves into Settings after the agent\'s own', () => {
