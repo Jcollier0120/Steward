@@ -48,13 +48,15 @@ test('the page carries the panel and loads its script, which the server serves',
   assert.match(html, /<script src="\/settings\.js" defer><\/script>/);
   assert.match(html, /<meta name="page-token" content="tok">/);
   assert.match(html, /<link rel="stylesheet" href="\/settings\.css">/);
-  // Settings is a page of its own: the header's gear link (hidden until the script finds a panel to move),
-  // the script that lifts the Settings section into #settings-view, and the rule that hides the rest.
-  assert.match(html, /<a class="settings-link" id="settings-link" href="#\/settings" hidden><svg[^>]*>.*<\/svg><span>Settings<\/span><\/a>/s);
+  // Settings is a page of its own: the title bar's gear (hidden until the script finds a panel to move; its
+  // label only at wide widths), the script that lifts the Settings section into #settings-view, and the rule
+  // that hides the rest.
+  assert.match(html, /<a class="tool-link" id="settings-link" href="#\/settings" title="Settings" hidden><svg[^>]*>.*?<\/svg><span>Settings<\/span><\/a>/s);
+  assert.match(html, /\.tool-link span \{ display: none; \}/, "the label goes at a phone's width");
   assert.match(html, /view\.id = 'settings-view'/);
   assert.ok(html.includes('/^#\\/?settings$/'), 'the route matches #/settings and #settings, as written into the page');
   assert.match(html, /body\.on-settings main > :not\(#settings-view\)/);
-  assert.ok(html.includes("[data-dirty], body.on-settings')"), 'no refresh while Settings is open');
+  assert.ok(html.includes('[data-dirty], body.on-settings, #theme-menu:not([hidden])'), 'no refresh while Settings or the Theme menu is open');
   const r = await fetch(`${base}/settings.js`);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type') ?? '', /^text\/javascript/);

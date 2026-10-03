@@ -1,11 +1,13 @@
 /*
  * The Settings panel (settings-panel.js): the kit's web part. A kit agent's page links it as /settings.css.
- * Any page can use it: it styles only what is inside [data-settings-panel] (class sf-panel), and reads the
- * page's colours from these CSS variables, which the page defines (the kit's page.ts does, Manor's colours):
- * --bg, --fg, --muted, --card, --line, --accent, --accent-fg, --warn, --alert.
+ * Any page can use it: it styles only what is inside [data-settings-panel] (class sf-panel), in Windows 11's
+ * look as Heiward's and Manor's pages have it, and reads the page's colours from these CSS variables, which
+ * the page defines (the kit's page.ts does): --bg, --fg, --muted, --card, --line, --accent, --accent-fg,
+ * --warn, --alert, and where it has them --surface, --hover and --accent-text.
  */
 .card.sf-panel { overflow: visible; padding-bottom: 0; }
 .sf-intro, .sf-problems { margin: 0 0 6px; }
+.sf-intro code { overflow-wrap: anywhere; }
 .sf { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .sf-form > .sf:last-child { border-bottom: 0; }
 .sf-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -16,7 +18,7 @@
 .sf-meta { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }
 .sf-control { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .sf-panel input[type=text], .sf-panel input[type=number], .sf-panel select {
-  font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); max-width: 100%;
+  font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface, var(--bg)); color: var(--fg); max-width: 100%;
 }
 .sf-panel input[type=text] { width: min(100%, 560px); }
 .sf-panel input[type=number] { width: 130px; }
@@ -24,19 +26,21 @@
 .sf-panel :is(input, select, button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sf-panel [aria-invalid="true"] { border-color: var(--alert); }
 .sf-switch { display: inline-flex; gap: 8px; align-items: flex-start; cursor: pointer; }
-.sf-switch input[type=checkbox] { margin-top: 3px; }
+.sf-switch input[type=checkbox] { margin-top: 2px; }
 .sf-choices { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-top: 4px; }
 .sf-choices label { display: inline-flex; gap: 6px; align-items: center; }
 .sf-msg { margin: 4px 0 0; font-size: 13px; }
 .sf-msg.error { color: var(--alert); font-weight: 600; }
 .sf-msg.warning { color: var(--warn); }
 /* The panel's buttons, for a page that doesn't style buttons the kit's way (page.ts has the same rules). */
-.sf-panel button { font: inherit; padding: 6px 14px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); cursor: pointer; }
-.sf-panel button.quiet { background: transparent; color: var(--accent); }
-.sf-panel button:disabled { opacity: .55; cursor: progress; }
-.sf-panel button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 13px; }
+.sf-panel button { font: inherit; font-weight: 500; padding: 5px 14px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+.sf-panel button:hover:not(:disabled) { filter: brightness(1.08); }
+.sf-panel button.quiet { background: var(--surface, transparent); color: var(--fg); border-color: var(--line); }
+.sf-panel button.quiet:hover:not(:disabled) { background: var(--hover, transparent); filter: none; }
+.sf-panel button:disabled { opacity: .5; cursor: default; }
+.sf-panel button.link { background: none; border: 0; padding: 0; color: var(--accent-text, var(--accent)); text-decoration: underline; font-size: 13px; font-weight: 400; }
 .sf-panel button.link:disabled { color: var(--muted); text-decoration: none; opacity: 1; cursor: default; }
-.sf-panel button.small { padding: 3px 10px; font-size: 13px; }
+.sf-panel button.small { padding: 2px 10px; font-size: 12px; }
 .sf-list { list-style: none; margin: 6px 0; padding: 0; }
 .sf-list > li { margin: 4px 0; }
 .sf-item { display: flex; gap: 6px; align-items: center; }
@@ -46,7 +50,7 @@
 .sf-panel fieldset.sf-plain > legend { padding: 0; }
 .sf-panel fieldset .sf, .sf-record .sf { padding: 8px 0; }
 .sf-panel fieldset .sf:last-child { border-bottom: 0; }
-.sf-record { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; margin: 8px 0 0; }
+.sf-record { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; margin: 8px 0 0; background: var(--surface, transparent); }
 .sf-record > summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
 .sf-record[open] > summary { margin-bottom: 4px; }
 .sf-record > .row { margin-top: 6px; }
