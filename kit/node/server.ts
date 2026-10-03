@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
+import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
 
@@ -113,7 +114,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   };
   const get: Record<string, Handler> = {
     // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract).
-    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, running: duty().onDuty, ...opts.ping?.() } }),
+    // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way.
+    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, running: duty().onDuty, ...roundTimes(), rounds: rounds(), ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     '/settings.js': webFile('/settings.js'),
     '/settings.css': webFile('/settings.css'),

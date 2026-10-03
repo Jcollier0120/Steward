@@ -2,6 +2,7 @@ import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.t
 import { APP, dataDir } from '../app.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
+import { roundTimes } from './schedule.ts';
 import { workSection } from './work.ts';
 
 /** Text made safe for HTML. */
@@ -104,7 +105,8 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
  * The kit adds its own to the Settings page after the agent's: everything at the top of the body marked
  * data-settings-extra, which is "Where its work runs" (work.ts).
  *
- * `nextAt` is when the next scheduled round is due, if the agent knows: the pill says "next round in 25 min".
+ * `nextAt` is when the next scheduled round is due: the pill says "next round in 25 min". Left out, it is the kit's
+ * own schedule's (schedule.ts), so every agent that runs its rounds with every() says it without passing it.
  */
 export function page(o: { token: string; body: string; title?: string; busy?: boolean; refreshSec?: number; nextAt?: number | string | null }): string {
   const refresh = o.busy ? 3 : o.refreshSec ?? 0;
@@ -134,7 +136,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
-    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt })}
+    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt })}
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
     ${themeMenu()}
     <span class="titlebar-action" id="titlebar-action"></span>
