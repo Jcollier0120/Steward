@@ -2,6 +2,16 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.6.0
+
+**Every agent leaves its rounds' outcome in one file, the same way.** schedule.ts's `every()` writes `round.json` in the agent's data folder at the end of each round that runs (scheduled, or Run now), so the Surveyor reads one file per agent instead of guessing from each agent's own report.json, status.json or state.json. spec/ROUND.md is new, and says the shape for any reader:
+- **The shape:** `{ "rounds": { "<name>": { "started", "finished", "ok", "error", "everyMs", "next" } } }`. `<name>` is the `name` given to `every()`, or `"round"`; several schedules in one process each keep their own entry. `started` and `finished` are ISO times; `ok` says whether the round went through; `error` is the thrown error's message, its first line, at most 500 characters (null when `ok`); `everyMs` is the interval; `next` is when the next round is due, null off duty or once stopped (as `/api/ping`'s `nextRunAt`).
+- **Written whole:** read, the schedule's own entry replaced, every other entry and key kept, and written through a rename (store.ts's `writeJson`). A file that isn't JSON is started afresh.
+- **Never at the round's cost:** a round.json that can't be written (a data folder that can't be written to) is said once in the log, and the rounds go on.
+- schedule.ts also exports `roundFile()`, `RoundRecord` and `roundError()`.
+- **Node only for now:** the dotnet part has no scheduler, so Heiward doesn't write round.json yet.
+- **Nothing for an agent to do.** Every agent whose rounds run with `every()` writes it from this version on.
+
 ## 2.5.0
 
 **The manor's Developer options, passed down.** Manor's Settings page has a Developer options switch (Heiward's Developer mode, copied), saved as `"developerOptions": true | false` in its settings.json: on, its developer roles are held (Reeve, the Auditor, the Herald, the Aletaster, the Pinder and the Steward); off, they're vacant. An agent with developer features of its own follows it in place of its own switch, while Manor is installed and says. node/manor.ts:

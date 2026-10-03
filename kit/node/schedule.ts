@@ -1,4 +1,5 @@
 import { duty } from './duty.ts';
+import { dataFile, readJson, writeJson } from './store.ts';
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
 export interface RoundState {
@@ -11,6 +12,54 @@ export interface RoundState {
   nextRunAt: string | null;
   /** When the round under way began; null when none is. */
   runningSince: string | null;
+}
+
+/**
+ * One schedule's last round, as round.json keeps it (spec/ROUND.md): when it started and finished (ISO),
+ * whether it went through, the error's first line when it didn't, the interval, and when the next is due.
+ */
+export interface RoundRecord {
+  started: string;
+  finished: string;
+  ok: boolean;
+  /** The thrown error's message, its first line, at most 500 characters; null when it went through. */
+  error: string | null;
+  /** The interval between rounds when the round ended (each wait varies by ±10% about it). */
+  everyMs: number;
+  /** When the next scheduled round is due; null off duty, or once stopped (as /api/ping's nextRunAt). */
+  next: string | null;
+}
+
+/** round.json, in the agent's data folder: `{ "rounds": { "<name>": RoundRecord } }`, one entry per schedule. */
+export const roundFile = () => dataFile('round.json');
+
+/** A thrown thing as round.json says it: the first line of its message, at most 500 characters. */
+export function roundError(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e);
+  const line = (message ?? '').split(/\r?\n|\r/)[0].trim();
+  return (line || 'it failed').slice(0, 500);
+}
+
+let roundFileWarned = false;
+const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+
+/**
+ * Keeps `record` as schedule `name`'s entry in round.json, the other schedules' entries as they were (read,
+ * changed, written whole through a rename). A file that can't be read is started afresh. Never throws: a
+ * round.json that can't be written says so once in the log, and the rounds go on.
+ */
+function recordRound(name: string, record: RoundRecord): void {
+  try {
+    const file = roundFile();
+    const was = readJson<unknown>(file, {});
+    const doc = isObject(was) ? was : {};
+    const kept = isObject(doc.rounds) ? doc.rounds : {};
+    writeJson(file, { ...doc, rounds: { ...kept, [name]: record } });
+  } catch (e) {
+    if (roundFileWarned) return;
+    roundFileWarned = true;
+    console.error(`${new Date().toISOString()} couldn't keep the round in round.json (said once; the rounds go on): ${roundError(e)}`);
+  }
 }
 
 /** Every schedule this process runs, each read when asked. */
@@ -54,7 +103,9 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'next
  * in /api/ping's `rounds` ("round" unless said).
  *
  * Each schedule records its rounds (rounds(), roundTimes()): when the last ended and whether it went
- * through, when the next is due, and since when one has been running.
+ * through, when the next is due, and since when one has been running. Each round that runs also leaves its
+ * outcome in the data folder's round.json, under the schedule's name (spec/ROUND.md), for readers outside
+ * the agent (the Surveyor); a round.json that can't be written never fails the round.
  */
 export function every(everyMs: number | (() => number), job: () => Promise<void>, opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string } = {}) {
   let running = false;
@@ -86,7 +137,9 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
       return;
     }
     running = true;
-    startedAt = Date.now();
+    const started = Date.now();
+    startedAt = started;
+    let error: string | null = null;
     try {
       await job();
       lastError = null;
@@ -94,13 +147,23 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     } catch (e) {
       lastError = (e as Error).message;
       lastOk = false;
+      error = roundError(e);
       console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
     } finally {
       running = false;
       startedAt = null;
-      lastEnded = Date.now();
+      const ended = Date.now();
+      lastEnded = ended;
       // A round still running when stop() was called must not set up the next one.
       if (!stopped) wait();
+      recordRound(opts.name ?? 'round', {
+        started: new Date(started).toISOString(),
+        finished: new Date(ended).toISOString(),
+        ok: error === null,
+        error,
+        everyMs: interval(),
+        next: state().nextRunAt,
+      });
     }
   };
   waitFor(opts.firstDelayMs ?? 30_000 + Math.random() * 150_000);
