@@ -34,10 +34,13 @@ export interface Employee {
   /** Installs it on this PC, run in its release unpacked, when a merged PR asks (after: install). Empty: never. */
   install: string;
   /**
-   * Approves one of its jobs in the installed copy, {job} its name, when a merged PR names it (after: approve-jobs),
-   * after that PR's install: merging the PR counts as reading the script. %NAME% is expanded. Empty: never.
+   * Approves one of its jobs in the installed copy, {job} its name: when a merged PR names it (after: approve-jobs),
+   * after that PR's install; and in each round, a job whose installed script is the one merged on its branch
+   * (stages/jobs.ts). Merging counts as reading the script. %NAME% is expanded. Empty: never.
    */
   approve: string;
+  /** Its installed copy (%USERPROFILE%\.<id>\app), laid out as its repository is: its jobs, and its release.json. Empty: none. */
+  installed: string;
 }
 
 export interface Settings {
@@ -67,6 +70,7 @@ const hire = (name: string): Employee => ({
   release: 'npm run release -- --publish',
   install: 'node src/cli.ts install',
   approve: '',
+  installed: `%USERPROFILE%\\.${name.toLowerCase()}\\app`,
 });
 
 /**
@@ -99,6 +103,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     // Heiward installs as a Windows app (Settings > Apps), not from a zip with src\cli.ts: the Steward doesn't install it.
     install: '',
     approve: '',
+    installed: '',
   },
   hire('Surveyor'),
 ];
@@ -131,7 +136,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Employees',
     help: 'Every agent the Steward looks after: where its code is, which kit parts it takes, and how to fill its kit, test it, bump its version and release it.',
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '', installed: '' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like porter' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
@@ -145,7 +150,8 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
       { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
-      { key: 'approve', kind: 'text', label: 'Approve a job', help: 'Run for each job a merged PR names, {job} its name, after that PR\'s install: merging the PR counts as reading the script. %USERPROFILE% and the like are expanded.', empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
+      { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name: for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
+      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, laid out as its repository is (jobs\\jobs.json, release.json): where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
     ],
   },
   {
@@ -171,7 +177,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'byItself',
     kind: 'switch',
     label: 'Merges and releases by itself',
-    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released. Off: only when asked.",
+    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve). Off: only when asked.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
 ];
@@ -196,6 +202,7 @@ function normalizeEmployee(e: any): Employee | null {
     release: typeof e.release === 'string' ? e.release.trim() : known.release,
     install: typeof e.install === 'string' ? e.install.trim() : known.install,
     approve: typeof e.approve === 'string' ? e.approve.trim() : known.approve,
+    installed: typeof e.installed === 'string' ? e.installed.trim() : known.installed,
   };
 }
 

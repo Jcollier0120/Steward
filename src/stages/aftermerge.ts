@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:f
 import path from 'node:path';
 import type { AfterStep } from '../after.ts';
 import { gh } from '../git.ts';
-import { expandEnv } from '../kit/settings-kit.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
 
@@ -93,12 +93,12 @@ export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise
   const failed: string[] = [];
   for (const job of jobs) {
     // A job's name is letters, digits, dots, dashes and underscores (src/after.ts), so it stays one word.
-    const line = expandEnv(e.approve).replaceAll('{job}', job);
-    ctx.log(`[${e.id}] approving ${job}: ${line}`);
-    const r = await runLine(ctx.run, line, { cwd: ctx.neutralDir, timeoutMs: 2 * 60_000 });
-    for (const l of tail(`${r.out}\n${r.err}`, 6).split('\n')) ctx.log(`[${e.id}]   ${l}`);
-    if (r.code === 0) approved.push(job);
-    else failed.push(`${job} (exit ${r.code}: ${(r.err || r.out).trim().split('\n').pop()})`);
+    const r = await runApprove(ctx, e, job);
+    if (r.code === 0) {
+      approved.push(job);
+      // The round's own look at the jobs (stages/jobs.ts) needn't approve it again.
+      noteApproved(e, job);
+    } else failed.push(`${job} (exit ${r.code}: ${r.said})`);
   }
   const by = asking.map((p) => `#${p.number}`).join(', ');
   const parts = [

@@ -33,6 +33,8 @@ test('eleven employees, all on the kit: the eight hires, Reeve and Heiward, then
   // After merging: every Node agent installs from its release; only Reeve has jobs to approve; Heiward is a Windows app.
   assert.equal(reeve.install, 'node src/cli.ts install');
   assert.equal(reeve.approve, 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job}');
+  assert.equal(reeve.installed, '%USERPROFILE%\\.reeve\\app', 'where the rounds look for its jobs to approve');
+  assert.equal(heiward.installed, '');
   assert.deepEqual([e[0].approve, heiward.install, heiward.approve], ['', '', '']);
   assert.equal(heiward.usesKit, true);
   assert.equal(heiward.fill, 'powershell -NoProfile -File tools\\kit.ps1');
