@@ -1,27 +1,32 @@
-// The NPU queue (the kit's spec/NPU-QUEUE.md): the original, which Reeve's src/npu-queue.ts copies until
-// Reeve takes the kit. Every NPU user on the PC must order the line the same way, so a change here is a
-// change to the spec and its vectors too. Its tests are the Steward's kit/test/npu-queue.test.ts.
+// The NPU queue (the kit's spec/NPU-QUEUE.md): Node's driver of the kit's core. The rules (the ticket
+// order, the late, dead and aged tickets, a holder's eviction, the turn step by step) are the core's
+// (src/kit/core/queue.js and turn.js), shared with every other driver; this file does the disk work they
+// ask for, with Node's fs, and the waiting, with timers, so a turn never blocks an agent's server. Its
+// tests, and the spec's vectors, are the Steward's kit/test.
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import * as core from './core/index.js';
+import type { Action, Result, Step } from './core/index.js';
+import { RULES } from './rules.ts';
 
 /**
  * The NPU queue: first come, first served turns on the machine-wide NPU lock. Every NPU user on this
- * PC takes part: Reeve (here), npu-embed (npu_lock.py), Heiward (HEI.Core/AI/NpuLock.cs) and Manor's
- * agents. The protocol, which all of them implement, is docs/NPU-QUEUE.md.
+ * PC takes part: Reeve, npu-embed (npu_lock.py), Heiward (the kit's dotnet part) and Manor's agents. The
+ * protocol, which all of them implement, is the kit's spec/NPU-QUEUE.md.
  *
- * In short: the lock is still the `mkdir` of the lock folder (src/lock.ts), so a program that predates
- * the queue still can't run alongside anyone. To queue, a waiter drops a ticket file into
- * `<lock>.queue`, keeps it fresh (a heartbeat), and tries the lock only when its ticket heads the line.
- * When the holder lets go, the head of the line takes it within ~50 ms.
+ * In short: the lock is still the `mkdir` of the lock folder (lock.ts), so a program that predates the
+ * queue still can't run alongside anyone. To queue, a waiter drops a ticket file into `<lock>.queue`,
+ * keeps it fresh (a heartbeat), and tries the lock only when its ticket heads the line. When the holder
+ * lets go, the head of the line takes it within ~50 ms.
  *
  * Every accelerator (the NPU, each graphics card, the processor) has its own lock and line, by the
- * same rules (Manor's docs/ACCELERATORS.md). One with several slots serves that many requests at once:
- * its lock folders are `<id>`, `<id>.2` … `<id>.<slots>`, its line is `<id>.queue`, and the head of
- * the line takes any free slot (withAcceleratorTurn). The NPU has one slot, its folder `npu` as before.
+ * same rules (spec/ACCELERATORS.md). One with several slots serves that many requests at once: its lock
+ * folders are `<id>`, `<id>.2` … `<id>.<slots>`, its line is `<id>.queue`, and the head of the line
+ * takes any free slot (withAcceleratorTurn). The NPU has one slot, its folder `npu` as before.
  */
 
-export type Lane = 'interactive' | 'background';
+export type Lane = core.Lane;
 
 /** No turn came within the wait. */
 export class LockTimeout extends Error {}
@@ -29,57 +34,32 @@ export class LockTimeout extends Error {}
 /** The line was longer than the caller was willing to join (`maxAhead`). */
 export class QueueFull extends Error {}
 
-/** Timings every implementation shares: a ticket is fresh, late or dead by the same clock everywhere. */
-export const QUEUE = {
-  /** A waiter touches its ticket at least this often. */
-  heartbeatMs: 2_000,
-  /** A ticket this stale is late: its process is checked, and the ticket is dead if that's gone. */
-  lateMs: 5_000,
-  /** A ticket this stale is dead whatever its pid says (pids get reused). */
-  deadMs: 15_000,
-  /** A background ticket this old is served as if it were interactive, so nothing waits forever. */
-  ageMs: 120_000,
-  /** How often the head of the line tries the lock, and how often the rest look. */
-  headPollMs: 50,
-  pollMs: 100,
-};
+/** Timings every implementation shares (the spec's rules.json): a ticket is fresh, late or dead by the same clock everywhere. */
+export const QUEUE: { heartbeatMs: number; lateMs: number; deadMs: number; ageMs: number; headPollMs: number; pollMs: number } = { ...RULES.queue };
 
-export interface Ticket {
-  name: string;
-  /** 0 = interactive (a person is waiting), 1 = background. */
-  lane: 0 | 1;
-  /** When it joined, in microseconds since the Unix epoch. */
-  timeUs: number;
-  pid: number;
-  nonce: string;
-}
-
-const TICKET = /^([01])-(\d{17})-(\d+)-([0-9a-z]+)\.ticket$/;
+export type Ticket = core.Ticket;
 
 export function parseTicket(name: string): Ticket | null {
-  const m = TICKET.exec(name);
-  return m ? { name, lane: Number(m[1]) as 0 | 1, timeUs: Number(m[2]), pid: Number(m[3]), nonce: m[4] } : null;
+  return core.parseTicket(name);
 }
 
 /** The order of the line: interactive first, then by arrival; a background ticket that waited `ageMs` counts as interactive. */
 export function compareTickets(a: Ticket, b: Ticket, nowUs: number): number {
-  const lane = (t: Ticket) => (t.lane === 0 || nowUs - t.timeUs >= QUEUE.ageMs * 1000 ? 0 : 1);
-  return lane(a) - lane(b) || a.timeUs - b.timeUs || a.pid - b.pid || (a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : 0);
+  return core.compareTickets(RULES, a, b, nowUs);
 }
 
-/** Whether a ticket's waiter is gone: no heartbeat for `deadMs`, or a late heartbeat and no such process. */
+/** Whether a ticket's waiter is gone: no heartbeat for `deadMs`, or a late heartbeat and no such process (asked only then). */
 export function isDeadTicket(ageMs: number, pidAlive: () => boolean): boolean {
-  return ageMs > QUEUE.deadMs || (ageMs > QUEUE.lateMs && !pidAlive());
+  const s = core.ticketState(RULES, ageMs);
+  return s === 'dead' || (s === 'late' && !pidAlive());
 }
 
-export const queueDirFor = (lockDir: string) => `${lockDir}.queue`;
+export const queueDirFor = (lockDir: string) => path.join(path.dirname(lockDir), core.queueName(path.basename(lockDir)));
 
 let lastUs = 0;
 /** Wall-clock microseconds, strictly increasing within this process. */
 function nowUs(): number {
-  const t = Math.floor((performance.timeOrigin + performance.now()) * 1000);
-  lastUs = t > lastUs ? t : lastUs + 1;
-  return lastUs;
+  return (lastUs = core.nextUs(lastUs, Math.floor((performance.timeOrigin + performance.now()) * 1000)));
 }
 
 export function pidAlive(pid: number): boolean {
@@ -91,71 +71,64 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** The live tickets in line order. Dead ones are removed on the way (anyone in line may), except `keep`. */
-export function readLine(queueDir: string, keep?: string): Ticket[] {
+/** A folder's files with their modification times (null for one gone meanwhile), and, with `texts`, their contents. */
+function listFolder(dir: string, texts = false): core.Entry[] {
   let names: string[];
   try {
-    names = readdirSync(queueDir);
+    names = readdirSync(dir);
   } catch {
     return [];
   }
-  const now = Date.now();
-  const live: Ticket[] = [];
-  for (const name of names) {
-    const t = parseTicket(name);
-    if (!t) continue;
-    let age: number;
+  return names.map((name) => {
+    const file = path.join(dir, name);
+    let mtimeMs: number | null = null;
+    let text: string | undefined;
     try {
-      age = now - statSync(path.join(queueDir, name)).mtimeMs;
-    } catch {
-      continue; // left the line just now
-    }
-    if (name !== keep && isDeadTicket(age, () => pidAlive(t.pid))) {
-      try {
-        unlinkSync(path.join(queueDir, name));
-      } catch {}
-      continue;
-    }
-    live.push(t);
-  }
-  const us = nowUs();
-  return live.sort((a, b) => compareTickets(a, b, us));
+      mtimeMs = statSync(file).mtimeMs;
+      if (texts) text = readFileSync(file, 'utf8');
+    } catch {}
+    return { name, mtimeMs, ...(text === undefined ? {} : { text }) };
+  });
 }
+
+/** The core's verdict on a line, its processes asked about when it needs them. */
+function judge(entries: core.Entry[], keep?: string): core.LineVerdict {
+  const now = Date.now();
+  const v = core.judgeLine(RULES, entries, now, { keep });
+  return v.ask ? core.judgeLine(RULES, entries, now, { keep, alive: Object.fromEntries(v.ask.map((pid) => [pid, pidAlive(pid)])) }) : v;
+}
+
+/** The live tickets in line order. Dead ones are removed on the way (anyone in line may), except `keep`. */
+export function readLine(queueDir: string, keep?: string): Ticket[] {
+  const v = judge(listFolder(queueDir), keep);
+  for (const name of v.dead) {
+    try {
+      unlinkSync(path.join(queueDir, name));
+    } catch {}
+  }
+  return v.live;
+}
+
+const readText = (file: string) => {
+  try {
+    return readFileSync(file, 'utf8'); // Node's reads share delete
+  } catch {
+    return null;
+  }
+};
 
 /** Who holds the NPU and who is waiting, for status pages. Reads only. */
 export function queueSnapshot(lockDir: string): {
   holder: { pid: number; since: number } | null;
   waiting: { pid: number; lane: Lane; since: number; who?: string }[];
 } {
-  let holder: { pid: number; since: number } | null = null;
-  try {
-    holder = JSON.parse(readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
-  } catch {
-    if (existsSync(lockDir)) holder = { pid: 0, since: 0 };
-  }
-  const queueDir = queueDirFor(lockDir);
+  let holder: { pid: number; since: number } | null = core.readOwner(readText(path.join(lockDir, 'owner.json')));
+  if (!holder && existsSync(lockDir)) holder = { pid: 0, since: 0 };
+  const entries = listFolder(queueDirFor(lockDir), true);
   const now = Date.now();
-  const waiting: { t: Ticket; entry: { pid: number; lane: Lane; since: number; who?: string } }[] = [];
-  let names: string[] = [];
-  try {
-    names = readdirSync(queueDir);
-  } catch {}
-  for (const name of names) {
-    const t = parseTicket(name);
-    if (!t) continue;
-    let who: string | undefined;
-    let age: number;
-    try {
-      age = now - statSync(path.join(queueDir, name)).mtimeMs;
-      who = JSON.parse(readFileSync(path.join(queueDir, name), 'utf8'))?.who;
-    } catch {
-      continue;
-    }
-    if (isDeadTicket(age, () => pidAlive(t.pid))) continue;
-    waiting.push({ t, entry: { pid: t.pid, lane: t.lane === 0 ? 'interactive' : 'background', since: Math.floor(t.timeUs / 1000), who } });
-  }
-  const us = nowUs();
-  return { holder, waiting: waiting.sort((a, b) => compareTickets(a.t, b.t, us)).map((w) => w.entry) };
+  let w = core.waitingOf(RULES, entries, now);
+  if ('ask' in w) w = core.waitingOf(RULES, entries, now, Object.fromEntries(w.ask.map((pid) => [pid, pidAlive(pid)])));
+  return { holder, waiting: 'waiting' in w ? w.waiting : [] };
 }
 
 let defaultLane: Lane = 'background';
@@ -180,7 +153,8 @@ export function currentLane(lane?: Lane): Lane {
  * lock folder as before), the others `<first>.2` … `<first>.<slots>`. Its line is `<first>.queue`.
  */
 export function slotDirs(first: string, slots: number): string[] {
-  return Array.from({ length: Math.max(1, slots) }, (_, i) => (i === 0 ? first : `${first}.${i + 1}`));
+  const base = path.dirname(first);
+  return core.slotNames(path.basename(first), slots).map((name, i) => (i === 0 ? first : path.join(base, name)));
 }
 
 /** How full an accelerator is: its slots, how many are held (by a live holder), and how many wait in its line. */
@@ -190,7 +164,7 @@ export interface LineState {
   waiting: number;
 }
 
-export function lineState(lockDirs: string[], staleMs = 600_000): LineState {
+export function lineState(lockDirs: string[], staleMs = RULES.lock.staleMs): LineState {
   const held = lockDirs.filter((d) => existsSync(d) && !isStaleHolder(d, staleMs)).length;
   return { slots: lockDirs.length, held, waiting: readLine(queueDirFor(lockDirs[0])).length };
 }
@@ -200,6 +174,20 @@ export function lineSnapshot(lockDirs: string[]): { holders: ({ pid: number; sin
   const first = queueSnapshot(lockDirs[0]);
   const holders = lockDirs.map((d, i) => (i === 0 ? first.holder : queueSnapshot(d).holder));
   return { holders, waiting: first.waiting };
+}
+
+/** The core's stale rules, read from disk now. */
+function isStaleHolder(dir: string, staleMs: number): boolean {
+  const owner = core.readOwner(readText(path.join(dir, 'owner.json')));
+  let folderMtimeMs: number | null = null;
+  if (!owner) {
+    try {
+      folderMtimeMs = statSync(dir).mtimeMs;
+    } catch {}
+  }
+  const o = { owner, folderMtimeMs, nowMs: Date.now(), staleMs };
+  const h = core.holderState(RULES, o);
+  return (h === 'ask' ? core.holderState(RULES, { ...o, pidAlive: pidAlive(owner!.pid) }) : h) === 'stale';
 }
 
 export interface TurnOptions {
@@ -212,11 +200,129 @@ export interface TurnOptions {
   who?: string;
   /** Don't join when this many are already waiting: throws QueueFull at once. */
   maxAhead?: number;
+  /** Told what's worth a line in a log: waiting behind others, taking over from a holder that died. */
+  onNote?: (text: string) => void;
+}
+
+// ---------------------------------------------------------------- the driver
+
+/** How a machine of the core's is carried out: its actions, the clock, and the waits. */
+export interface DriveEnv {
+  perform: (action: Action) => Result | Promise<Result>;
+  clock: () => number;
+  sleep: (ms: number) => Promise<unknown>;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** One of the core's actions, on disk below `base` (the folder that holds the locks), with Node's fs. */
+export function performOnDisk(base: string, a: Action, onNote?: (text: string) => void): Result {
+  const at = (p: string[]) => path.join(base, ...p);
+  try {
+    switch (a.op) {
+      case 'mkdirs':
+        mkdirSync(at(a.path), { recursive: true });
+        return null;
+      case 'write':
+        writeFileSync(at(a.path), a.text);
+        return null;
+      case 'touch': {
+        const now = new Date();
+        utimesSync(at(a.path), now, now);
+        return null;
+      }
+      case 'list': {
+        const dir = at(a.path);
+        const names = readdirSync(dir);
+        return { entries: names.map((name) => ({ name, mtimeMs: mtimeOf(path.join(dir, name)) })) };
+      }
+      case 'alive':
+        return { alive: a.pids.map(pidAlive) };
+      case 'remove':
+        unlinkSync(at(a.path));
+        return null;
+      case 'mkdir':
+        mkdirSync(at(a.path));
+        return null;
+      case 'read':
+        return { text: readFileSync(at(a.path), 'utf8') }; // Node's reads share delete
+      case 'stat':
+        return { mtimeMs: statSync(at(a.path)).mtimeMs };
+      case 'rmdir':
+        rmSync(at(a.path), { recursive: true, force: true });
+        return null;
+      case 'note':
+        onNote?.(a.text);
+        return null;
+    }
+  } catch (e: any) {
+    return { error: typeof e?.code === 'string' ? e.code : 'EIO', message: String(e?.message ?? e) };
+  }
+}
+
+function mtimeOf(file: string): number | null {
+  try {
+    return statSync(file).mtimeMs;
+  } catch {
+    return null; // left the line just now
+  }
+}
+
+/** The disk below `base`, the wall clock and timers. */
+export function onDisk(base: string, onNote?: (text: string) => void): DriveEnv {
+  return { perform: (a) => performOnDisk(base, a, onNote), clock: Date.now, sleep };
+}
+
+/**
+ * Runs one of the core's machines (a turn, the plain lock, a release) from its first step until it ends:
+ * each step's actions in order, its wait, then the next step from what they gave. Its last step is
+ * returned: its `done` says how it ended, and its state is what `release` takes. When anything throws on
+ * the way, the machine is aborted (its ticket leaves the line) and the error passed on.
+ */
+export async function drive(first: Step, env: DriveEnv): Promise<Step> {
+  let r = first;
+  try {
+    for (;;) {
+      const results: Result[] = [];
+      for (const a of r.actions) results.push(await env.perform(a));
+      if (r.done) return r;
+      if (r.waitMs > 0) await env.sleep(r.waitMs);
+      r = core.step(r.state, { nowMs: env.clock(), results });
+    }
+  } catch (e) {
+    for (const a of core.abort(r.state).actions) {
+      try {
+        await env.perform(a);
+      } catch {}
+    }
+    throw e;
+  }
+}
+
+/** The error a machine that ended without the lock stands for. */
+function noTurn(done: core.Done | undefined): Error {
+  if (done && 'error' in done) return done.error === 'timeout' ? new LockTimeout(done.message) : done.error === 'full' ? new QueueFull(done.message) : new Error(done.message);
+  return new Error('the turn ended without the lock');
+}
+
+/** Holds the lock the machine took while `fn` runs, then lets it go (by the release rule: only while it is still ours). */
+export async function holding<T>(taken: Step, env: DriveEnv, fn: (slot: number) => Promise<T>): Promise<T> {
+  const done = taken.done;
+  if (!done || !('held' in done)) throw noTurn(done);
+  try {
+    return await fn(done.held.slot);
+  } finally {
+    try {
+      await drive(core.release(taken.state, env.clock()), env);
+    } catch {
+      // Left for the next taker's stale check.
+    }
+  }
 }
 
 /**
  * Runs `fn` holding the NPU lock, after waiting its turn in the NPU queue. Use it for every request
- * that runs on the NPU; src/lock.ts's withLock stays for locks nobody queues for.
+ * that runs on the NPU; lock.ts's withLock stays for locks nobody queues for.
  */
 export async function withNpuTurn<T>(lockDir: string, fn: () => Promise<T>, opts: TurnOptions = {}): Promise<T> {
   return withAcceleratorTurn([lockDir], () => fn(), opts);
@@ -227,163 +333,23 @@ export async function withNpuTurn<T>(lockDir: string, fn: () => Promise<T>, opts
  * head of the line takes whichever slot is free; `fn` is told which (0 for the first).
  */
 export async function withAcceleratorTurn<T>(lockDirs: string[], fn: (slot: number) => Promise<T>, opts: TurnOptions = {}): Promise<T> {
-  const waitMs = opts.waitMs ?? 300_000;
-  const staleMs = opts.staleMs ?? 600_000;
-  const lane = currentLane(opts.lane);
-  const lockDir = lockDirs[0];
-  const queueDir = queueDirFor(lockDir);
-  const what = path.basename(lockDir) === 'npu' ? 'the NPU' : path.basename(lockDir);
-  mkdirSync(queueDir, { recursive: true });
-
-  if (opts.maxAhead !== undefined) {
-    const ahead = readLine(queueDir).length;
-    if (ahead >= opts.maxAhead) throw new QueueFull(`${ahead} already waiting for ${what}`);
-  }
-
-  const us = nowUs();
-  const name = `${lane === 'interactive' ? 0 : 1}-${String(us).padStart(17, '0')}-${process.pid}-${randomBytes(4).toString('hex')}.ticket`;
-  const ticket = path.join(queueDir, name);
-  const body = JSON.stringify({ pid: process.pid, since: Math.floor(us / 1000), lane, who: opts.who ?? path.basename(process.argv[1] ?? 'node') });
-  /** Writes the ticket, putting the queue folder back if it was removed. */
-  const writeTicket = () => {
-    try {
-      writeFileSync(ticket, body);
-    } catch (e: any) {
-      if (e?.code !== 'ENOENT') throw e;
-      mkdirSync(queueDir, { recursive: true });
-      writeFileSync(ticket, body);
-    }
-  };
-  writeTicket();
-
-  const deadline = Date.now() + waitMs;
-  let beat = Date.now();
-  let me: { pid: number; since: number } | null = null;
-  let slot = -1;
-  /** The head of the line takes any free slot, the first first. */
-  const trySlots = async (): Promise<boolean> => {
-    for (let i = 0; i < lockDirs.length; i++) {
-      if ((me = await tryLock(lockDirs[i], staleMs))) {
-        slot = i;
-        return true;
-      }
-    }
-    return false;
-  };
-  try {
-    for (;;) {
-      const now = Date.now();
-      if (now - beat >= QUEUE.heartbeatMs) {
-        try {
-          utimesSync(ticket, new Date(now), new Date(now));
-        } catch {
-          writeTicket(); // someone took it for dead (a long pause): back in, in the same place
-        }
-        beat = now;
-      }
-      const line = readLine(queueDir, name);
-      if (!line.some((t) => t.name === name)) {
-        writeTicket();
-        beat = Date.now();
-        continue;
-      }
-      const head = line[0].name === name;
-      if (head && (await trySlots())) break;
-      if (now > deadline) throw new LockTimeout(`timed out after ${waitMs} ms waiting for ${what} (${line.length} in line)`);
-      await sleep(head ? QUEUE.headPollMs : QUEUE.pollMs);
-    }
-  } finally {
-    try {
-      unlinkSync(ticket);
-    } catch {}
-  }
-  try {
-    return await fn(slot);
-  } finally {
-    await release(lockDirs[slot], me);
-  }
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** One try at the lock folder: ours (with the owner written), or null. Evicts a dead or overstayed holder. */
-async function tryLock(dir: string, staleMs: number): Promise<{ pid: number; since: number } | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      mkdirSync(dir);
-      const me = { pid: process.pid, since: Date.now() };
-      writeFileSync(path.join(dir, 'owner.json'), JSON.stringify(me));
-      return me;
-    } catch (e: any) {
-      if (e?.code !== 'EEXIST') throw e;
-      if (!(await removeLock(dir, () => isStaleHolder(dir, staleMs)))) return null;
-    }
-  }
-  return null;
-}
-
-function readOwner(dir: string): { pid: number; since: number } | null {
-  try {
-    return JSON.parse(readFileSync(path.join(dir, 'owner.json'), 'utf8')); // Node's reads share delete
-  } catch {
-    return null;
-  }
-}
-
-/** The same stale rules as src/lock.ts. */
-function isStaleHolder(dir: string, staleMs: number): boolean {
-  const info = readOwner(dir);
-  if (!info) {
-    try {
-      return Date.now() - statSync(dir).mtimeMs > 10_000;
-    } catch {
-      return false;
-    }
-  }
-  return Date.now() - info.since > staleMs || !pidAlive(info.pid);
-}
-
-/** How often, and how many times, a removal of the lock tries again while a file in it is open: about a second in all. */
-const REMOVE_TRIES = 40;
-const REMOVE_RETRY_MS = 25;
-/** What a delete fails with while a file in the folder is open (EBUSY, usually) or half removed. */
-const BUSY = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
-
-/**
- * Removes the lock folder while `still()` holds, checking before every try: true once it's gone.
- * On Windows a delete fails while another process has a file in it open without sharing delete.
- * Node's reads share delete, but other tools' may not (Python's open(), .NET's File.ReadAllText),
- * and a waiter checking the holder has owner.json open at times. So try again for about a second
- * rather than leave the lock taken until it goes stale. False when `still()` stopped holding or the
- * file stayed open.
- */
-async function removeLock(dir: string, still: () => boolean): Promise<boolean> {
-  for (let attempt = 1; still(); attempt++) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return true;
-    } catch (e: any) {
-      if (!BUSY.has(e?.code)) throw e;
-      if (attempt >= REMOVE_TRIES) return false;
-    }
-    await sleep(REMOVE_RETRY_MS);
-  }
-  return false;
-}
-
-/**
- * Lets go of the lock only while owner.json still names us. A holder that overstayed may have been
- * evicted, and the next holder's folder can exist a moment before its owner.json does: removing on
- * anything less than a match would break someone else's turn.
- */
-async function release(dir: string, me: { pid: number; since: number } | null): Promise<void> {
-  if (!me) return;
-  try {
-    await removeLock(dir, () => {
-      const owner = readOwner(dir);
-      return owner?.pid === me.pid && owner?.since === me.since;
-    });
-  } catch {
-    // Left for the next taker's stale check.
-  }
+  const base = path.dirname(lockDirs[0]);
+  if (lockDirs.some((d) => path.dirname(d) !== base)) throw new Error(`an accelerator's lock folders are side by side: ${lockDirs.join(', ')}`);
+  const env = onDisk(base, opts.onNote);
+  const taken = await drive(
+    core.startTurn(RULES, {
+      slots: lockDirs.map((d) => path.basename(d)),
+      pid: process.pid,
+      nowMs: Date.now(),
+      nowUs: nowUs(),
+      nonce: randomBytes(4).toString('hex'),
+      lane: currentLane(opts.lane),
+      who: opts.who ?? path.basename(process.argv[1] ?? 'node'),
+      waitMs: opts.waitMs,
+      staleMs: opts.staleMs,
+      maxAhead: opts.maxAhead,
+    }),
+    env,
+  );
+  return holding(taken, env, fn);
 }

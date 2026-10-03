@@ -1,4 +1,5 @@
 import { APP } from '../app.ts';
+import * as core from './core/index.js';
 import {
   AcceleratorDown,
   candidates,
@@ -16,7 +17,6 @@ import {
   pick as pickFrom,
   ping,
   postJson,
-  QUIRK_ROOM_CHARS,
   readFailure,
   readGames,
   refOf,
@@ -34,6 +34,7 @@ import {
 } from './accelerators.ts';
 import { npuLockDir } from './lock.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
+import { RULES } from './rules.ts';
 
 export { npuLockDir };
 export { noteLabel, reeveHome, theAccelerator, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
@@ -128,8 +129,8 @@ export class NpuBusy extends NpuError {}
 // background work: it takes its own ticket at once, always joins, and a short wait that runs out
 // defers nothing else.
 
-const MAX_WAIT_MS = 10 * 60_000;
-const BACK_OFF_MS = 5 * 60_000;
+const MAX_WAIT_MS = RULES.manners.maxWaitMs;
+const BACK_OFF_MS = RULES.manners.backOffMs;
 
 /** Per accelerator: this process's serial line, its requests headed there, and its back-off. */
 const lines = new Map<string, Promise<unknown>>();
@@ -175,7 +176,7 @@ export function acceleratorTurn<T>(
   const background = lane === 'background';
   const run = async (): Promise<T> => {
     const rest = background ? deferredMs(acc.id) : 0;
-    if (rest > 0) throw new NpuBusy(`${where} was busy; work on it resumes in ${Math.ceil(rest / 60_000)} min`);
+    if (rest > 0) throw new NpuBusy(core.say.restingFor(where, Math.ceil(rest / 60_000)));
     try {
       return await withAcceleratorTurn(lockDirsOf(acc), () => fn(), {
         lane,
@@ -184,10 +185,10 @@ export function acceleratorTurn<T>(
         maxAhead: opts.maxAhead ?? (background ? MAX_AHEAD : undefined),
       });
     } catch (e) {
-      const deferred = background ? `; work on it deferred for ${BACK_OFF_MS / 60_000} min` : '';
+      const deferred = background ? core.say.deferredFor(BACK_OFF_MS / 60_000) : '';
       if (background && (e instanceof QueueFull || e instanceof LockTimeout)) busyUntil.set(acc.id, Date.now() + BACK_OFF_MS);
-      if (e instanceof QueueFull) throw new NpuBusy(`${where} is busy (${e.message})${deferred}`);
-      if (e instanceof LockTimeout) throw new NpuBusy(`no turn on ${where} within ${Math.round((opts.maxWaitMs ?? MAX_WAIT_MS) / 1000)} s${deferred}`);
+      if (e instanceof QueueFull) throw new NpuBusy(core.say.lineTooLong(where, e.message, deferred));
+      if (e instanceof LockTimeout) throw new NpuBusy(core.say.noTurnWithin(where, Math.round((opts.maxWaitMs ?? MAX_WAIT_MS) / 1000), deferred));
       throw e;
     }
   };
@@ -208,36 +209,15 @@ export function npuTurn<T>(fn: () => Promise<T>, opts: { maxWaitMs?: number; max
 /** Reeve's config.json's accelerators, or why none can be used (accelerators.ts). */
 export const loadNpuConfig = loadAccelerators;
 
-/** The pessimistic estimate Reeve uses for its cap: one token per 3 characters. */
-export const estimateTokens = (text: string) => Math.ceil(text.length / 3);
+/** The pessimistic estimate Reeve uses for its cap: one token per 3 characters (the core's, and the spec's rules.json). */
+export const estimateTokens = (text: string) => core.estimateTokens(RULES, text);
 
 /**
  * Splits text into pieces whose estimated size fits `budgetTokens`, at line breaks where it can, so a
  * long input is asked about piece by piece (map-reduce) and never sent whole.
  */
 export function pieces(text: string, budgetTokens: number): string[] {
-  const max = Math.max(200, budgetTokens * 3);
-  const out: string[] = [];
-  let cur = '';
-  for (const line of text.split(/\r?\n/)) {
-    for (let rest = line; ; ) {
-      const room = max - cur.length - 1;
-      if (rest.length <= room) {
-        cur += (cur ? '\n' : '') + rest;
-        break;
-      }
-      if (cur) {
-        out.push(cur);
-        cur = '';
-        continue;
-      }
-      out.push(rest.slice(0, max));
-      rest = rest.slice(max);
-      if (!rest) break;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
+  return core.pieces(RULES, text, budgetTokens);
 }
 
 /** An older config's one server as an accelerator config. */
@@ -265,10 +245,8 @@ function answerOf(json: any, model: string, ms: number) {
 
 /** Why no accelerator could take a request: busy (deferred) while any is only resting or held by a game. */
 function noCandidate(skipped: Skipped[], first: { acc: Accelerator; reason: string } | null): NpuError {
-  const why = skipped.map((s) => s.detail).join('; ');
-  if (first) return new NpuError(`${theAccelerator(first.acc)} failed (${first.reason}), and no other accelerator could take the request${why ? `: ${why}` : ''}`);
-  if (skipped.some((s) => s.why !== 'failed')) return new NpuBusy(why);
-  return new NpuError(why || 'no accelerator could take the request');
+  const why = core.whyNone(skipped, first);
+  return why.busy ? new NpuBusy(why.message) : new NpuError(why.message);
 }
 
 export class Npu {
@@ -322,7 +300,7 @@ export class Npu {
    */
   async chat(messages: ChatMessage[], opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 300;
-    const promptTokens = Math.ceil((messages.reduce((n, m) => n + m.content.length + 8, 0) + QUIRK_ROOM_CHARS) / 3);
+    const promptTokens = core.chatTokens(RULES, messages);
     return this.ask('chat', promptTokens, maxTokens, opts, async (acc, ep, timeoutMs) => {
       const { json, ms } = await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, messages, maxTokens), timeoutMs);
       return answerOf(json, ep.model, ms);
@@ -336,8 +314,8 @@ export class Npu {
    */
   async vision(image: string, question: string, opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 64;
-    // The image is a fixed 256 tokens in the NPU's bundle; count 400 to be safe.
-    return this.ask('vision', 400 + estimateTokens(question), maxTokens, opts, async (acc, ep, timeoutMs) => {
+    // The image is a fixed 256 tokens in the NPU's bundle; count 400 to be safe (the spec's rules.json).
+    return this.ask('vision', core.visionTokens(RULES, question), maxTokens, opts, async (acc, ep, timeoutMs) => {
       const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, image, question, maxTokens), timeoutMs);
       return answerOf(json, ep.model, ms);
     });
@@ -350,7 +328,7 @@ export class Npu {
       const { json, ms } = await postJson(ep, '/v1/embeddings', { model: ep.model, input: texts }, timeoutMs);
       const vectors: number[][] = [];
       for (const row of (json?.data ?? []) as { index: number; embedding: number[] }[]) vectors[row.index] = row.embedding;
-      if (vectors.length !== texts.length || vectors.some((v) => !Array.isArray(v))) throw new Error('the embedding server returned too few vectors');
+      if (vectors.length !== texts.length || vectors.some((v) => !Array.isArray(v))) throw new Error(core.say.tooFewVectors());
       return { vectors, model: ep.model, ms };
     });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
@@ -383,19 +361,11 @@ export class Npu {
     const lane = opts.lane ?? 'background';
     const serving = cfg.accelerators.filter((a) => serves(a, work) && (!opts.accelerator || a.id === opts.accelerator));
     if (!serving.length) {
-      throw new NpuError(
-        opts.accelerator
-          ? `${opts.accelerator} isn't in Reeve's config, or doesn't serve ${work}`
-          : work === 'vision'
-            ? 'no vision model in Reeve\'s config.json (an accelerator\'s "vision", or "visionModel" in an older config)'
-            : `no accelerator in Reeve's config.json serves ${work}`,
-      );
+      throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }
     const tokens = promptTokens + maxTokens;
-    if (!serving.some((a) => tokens <= a.maxContextTokens)) {
-      const cap = Math.max(...serving.map((a) => a.maxContextTokens));
-      throw new NpuError(`refusing a request of ~${promptTokens}+${maxTokens} tokens (${serving.length > 1 ? 'the largest cap is' : 'cap'} ${cap}); split the input`);
-    }
+    const refused = core.tooBig(serving, promptTokens, maxTokens);
+    if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
     let first: { acc: Accelerator; reason: string } | null = null;
     const tried = new Set<string>();
@@ -409,14 +379,14 @@ export class Npu {
       if (!list.length) {
         if (notRunning.length && !first) {
           const also = skipped.map((s) => s.detail).join('; ');
-          throw new NpuError(`${notRunning.map((a) => `${theAccelerator(a)}'s server`).join(' and ')} isn't running${also ? `; ${also}` : ''}`);
+          throw new NpuError(core.say.serversNotRunning(notRunning, also));
         }
         throw noCandidate(skipped, first);
       }
       const choice = pick(list, lane);
       if ('deferred' in choice) {
         for (const a of list) busyUntil.set(a.id, Date.now() + BACK_OFF_MS);
-        throw new NpuBusy(`${choice.deferred}; model work deferred for ${BACK_OFF_MS / 60_000} min`);
+        throw new NpuBusy(core.say.modelWorkDeferred(choice.deferred, BACK_OFF_MS / 60_000));
       }
       const acc = choice.acc;
       tried.add(acc.id);
@@ -441,10 +411,10 @@ export class Npu {
           notRunning.push(acc);
           continue;
         }
-        if (!(e instanceof AcceleratorDown)) throw new NpuError(`${theAccelerator(acc)}: ${(e as Error).message}`);
+        if (!(e instanceof AcceleratorDown)) throw new NpuError(core.say.onAccelerator(acc, (e as Error).message));
         markFailed(acc.id, `${work}: ${e.message}`, APP.id);
-        if (first) throw new NpuError(`${theAccelerator(first.acc)} failed (${first.reason}), and then ${theAccelerator(acc)} (${e.message})`);
-        if (opts.accelerator) throw new NpuError(`${theAccelerator(acc)} failed: ${e.message}`);
+        if (first) throw new NpuError(core.say.failedTwice(first.acc, first.reason, acc, e.message));
+        if (opts.accelerator) throw new NpuError(core.say.acceleratorFailed(acc, e.message));
         first = { acc, reason: e.message };
       }
     }

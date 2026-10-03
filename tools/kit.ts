@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
  * Fills src\kit\ with the Steward's kit (https://github.com/Jcollier0120/Steward), at the version and with
- * the parts kit.json pins: {"kit": "1.0.0", "parts": ["node", "web", "spec"]}. The node part lands in
- * src\kit\, web in src\kit\web\, spec in src\kit\spec\. src\kit\ is git-ignored: never edit it here.
+ * the parts kit.json pins: {"kit": "2.0.0", "parts": ["node", "web", "spec"]}. The node part lands in
+ * src\kit\, web in src\kit\web\, spec in src\kit\spec\, core in src\kit\core\ and dotnet in src\kit\dotnet\.
+ * A part brings the parts it needs, so a pin needn't name them: node runs the core, and the core (and
+ * dotnet's C#, which runs it too) takes its timings from the spec's rules.json. A kit from before 2.0.0
+ * has no core, and then none is filled. src\kit\ is git-ignored: never edit it here.
  *
  *   node tools/kit.ts                  the pinned kit; nothing to do when src\kit\VERSION already says it
  *   node tools/kit.ts --from <dir>     a kit tree on this PC (a Steward checkout's kit\), copied every time;
@@ -23,7 +26,9 @@ import { fileURLToPath } from 'node:url';
 const REPO = process.env.STEWARD_REPO ?? 'Jcollier0120/Steward';
 /** Where the kit releases are downloaded from (a test serves its own). */
 const RELEASES = process.env.STEWARD_RELEASES ?? `https://github.com/${REPO}/releases/download`;
-const PARTS: Record<string, string> = { node: '', web: 'web', spec: 'spec' };
+const PARTS: Record<string, string> = { node: '', web: 'web', spec: 'spec', core: 'core', dotnet: 'dotnet' };
+/** What each part needs: node runs the core, the core takes its rules from the spec, dotnet runs the core. */
+const NEEDS: Record<string, string[]> = { node: ['core'], core: ['spec'], dotnet: ['core'] };
 const TAR = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
 const args = process.argv.slice(2);
@@ -33,7 +38,10 @@ const into = path.join(root, 'src', 'kit');
 const text = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim() : null);
 const pinFile = path.join(root, 'kit.json');
 const pin: { kit?: string; parts?: string[] } = existsSync(pinFile) ? JSON.parse(text(pinFile)!) : {};
-const parts = pin.parts ?? Object.keys(PARTS);
+/** The pinned parts (a Node agent's three when kit.json names none), then the parts they need. */
+const pinned = pin.parts ?? ['node', 'web', 'spec'];
+const parts = [...pinned];
+for (let i = 0; i < parts.length; i++) for (const need of NEEDS[parts[i]] ?? []) if (!parts.includes(need)) parts.push(need);
 const from = opt('--from') ?? process.env.STEWARD_KIT;
 
 function fill(tree: string, how: string): void {
@@ -42,7 +50,10 @@ function fill(tree: string, how: string): void {
   rmSync(into, { recursive: true, force: true });
   for (const part of parts) {
     if (!(part in PARTS)) throw new Error(`kit.json: no kit part "${part}" (the parts are ${Object.keys(PARTS).join(', ')})`);
-    if (!existsSync(path.join(tree, part))) throw new Error(`${tree} has no ${part} part`);
+    if (!existsSync(path.join(tree, part))) {
+      if (!pinned.includes(part)) continue; // needed by another part, but a kit from before 2.0.0 has none
+      throw new Error(`${tree} has no ${part} part`);
+    }
     cpSync(path.join(tree, part), path.join(into, PARTS[part]), { recursive: true });
   }
   writeFileSync(path.join(into, 'PARTS'), `${parts.join(' ')}\n`);

@@ -6,20 +6,15 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { withLock } from './fixture/src/kit/lock.ts';
 import {
-  compareTickets,
-  isDeadTicket,
   LockTimeout,
-  parseTicket,
   queueDirFor,
   queueSnapshot,
   QueueFull,
   readLine,
   withNpuTurn,
-  type Ticket,
 } from './fixture/src/kit/npu-queue.ts';
 
-// The queue's shared vectors: the kit's spec part, which every implementation (Reeve's, Heiward's C#) runs.
-const vectors = JSON.parse(readFileSync(new URL('../spec/npu-queue-vectors.json', import.meta.url), 'utf8'));
+// The node part's turns on a real disk. The spec's vectors run in vectors.test.ts.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const scratch = () => path.join(mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-')), 'locks', 'npu');
 
@@ -39,20 +34,6 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
 }
 
 const tickets = (lockDir: string) => (existsSync(queueDirFor(lockDir)) ? readdirSync(queueDirFor(lockDir)).filter((n) => n.endsWith('.ticket')) : []);
-
-for (const c of vectors.order) {
-  test(`shared vectors: ${c.case}`, () => {
-    const parsed = (c.tickets as string[]).map(parseTicket).filter((t): t is Ticket => !!t);
-    parsed.sort((a, b) => compareTickets(a, b, vectors.nowUs));
-    assert.deepEqual(parsed.map((t) => t.name), c.expected);
-  });
-}
-
-for (const d of vectors.dead) {
-  test(`shared vectors: ${d.case}`, () => {
-    assert.equal(isDeadTicket(d.ageMs, () => d.pidAlive), d.dead);
-  });
-}
 
 test('waiters in one process are served in the order they joined', async () => {
   const lockDir = scratch();
