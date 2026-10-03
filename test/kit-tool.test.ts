@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -154,6 +154,21 @@ test('a kit release is downloaded, checked against SHA256SUMS.txt, unpacked, cac
   const r = await tool(root, [], { STEWARD_RELEASES: 'http://127.0.0.1:9/gone', STEWARD_KITS: cache });
   assert.equal(r.code, 0, r.out);
   assert.equal(read(root, 'VERSION').trim(), '3.1.4');
+});
+
+test('agents filling the same kit at once all succeed: the cache goes into place whole, and the last one in uses the first', async () => {
+  // The Steward bumps two agents at a time; kit 2.0.0's rollout lost the Auditor to two fills sharing the cache.
+  const rel = await releases('3.1.5');
+  const cache = path.join(tmp, 'cache-race');
+  try {
+    const roots = [hire('3.1.5'), hire('3.1.5'), hire('3.1.5'), hire('3.1.5')].map((h) => h.root);
+    const runs = await Promise.all(roots.map((root) => tool(root, [], { STEWARD_RELEASES: rel.url, STEWARD_KITS: cache })));
+    runs.forEach((r, i) => assert.equal(r.code, 0, `fill ${i}: ${r.out}`));
+    for (const root of roots) assert.equal(read(root, 'VERSION').trim(), '3.1.5');
+    assert.deepEqual(readdirSync(cache), ['3.1.5'], 'one cached kit, no staging folders left');
+  } finally {
+    await rel.close();
+  }
 });
 
 test("a release that doesn't match its SHA256SUMS.txt is refused, and nothing is filled or cached", async () => {

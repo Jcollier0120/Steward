@@ -18,7 +18,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,9 +110,18 @@ async function download(version: string): Promise<string> {
     mkdirSync(out);
     execFileSync(TAR, ['-x', '-f', zip, '-C', out], { stdio: 'ignore', windowsHide: true });
     if (text(path.join(out, 'VERSION')) !== version) throw new Error(`${zipName} holds no kit ${version}`);
-    rmSync(cache, { recursive: true, force: true });
+    // Into place whole, by a rename: the Steward fills two agents at once, and both may download the same kit.
+    // Whoever renames first wins; the other uses that copy. A folder left without its VERSION is replaced.
     mkdirSync(path.dirname(cache), { recursive: true });
-    cpSync(out, cache, { recursive: true });
+    const staged = `${cache}.${process.pid}.${Date.now()}`;
+    cpSync(out, staged, { recursive: true });
+    if (existsSync(cache) && text(path.join(cache, 'VERSION')) !== version) rmSync(cache, { recursive: true, force: true });
+    try {
+      renameSync(staged, cache);
+    } catch (e) {
+      rmSync(staged, { recursive: true, force: true });
+      if (text(path.join(cache, 'VERSION')) !== version) throw e;
+    }
     return cache;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
