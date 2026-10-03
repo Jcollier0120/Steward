@@ -2,6 +2,14 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.7.0
+
+**The Lamplighter's scene, and its lines in Where its work runs.** The manor's new general role, the Lamplighter, keeps the last good graphics drivers and rolls a new one back when it leaves the screen dark (a guard that runs as SYSTEM, in Windows PowerShell). Its look and its work are kept here by its id, as every kit agent's are:
+- **look.ts:** its scene, a street lamp on its post. While a round runs, the lamplighter's long pole rises to the lantern, its little flame lights the lamp, and the pole comes down again. Its colour is a flame's vermilion (#c4471a, #ff9a6b on a dark theme); its pill says "Lighting the lamps".
+- **work.ts:** its four lines (the guard's look and its archive of drivers, a rollback, its page, a few plain words on a rollback), and a note that the guard is the one part of the manor that runs as an administrator, and uses no model.
+- **`AgentWork.npuOnly`** is new: an agent whose model work goes to the NPU only. Its "Its model work" paragraph says so, and whether this PC has an NPU, in place of the shared order (graphics cards first). The Lamplighter's does: the GPU is what it guards, and right after a driver failure it may be the broken part, so it never asks a graphics card or the processor.
+- **Nothing for an agent to do.** The Lamplighter shows its scene from this version on; before it, the grey cog.
+
 ## 2.6.0
 
 **A model server that is busy loading is waited on, not started twice, and a slow model load is no failure.** GenieX answers nothing, not even `/v1/models`, while it loads a model or answers a request (measured 2026-10-03), and the kit took that for a server that wasn't running: it started a second geniex.exe (which exits at once, its port taken), waited 30 s for an answer, and marked the NPU failed for every agent for 10 minutes. And a background request had 180 s whatever its size, while a load can come on any turn: GenieX keeps one model at a time, so a chat request after a vision one loads the chat model again (9 to 15 s), as does the first after 5 idle minutes. spec/ACCELERATORS.md's new "Model servers" section has the rules; node/accelerators.ts and node/npu.ts carry them out:

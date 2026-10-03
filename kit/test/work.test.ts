@@ -19,7 +19,7 @@ const { page } = await import('./fixture/src/kit/page.ts');
 const legacyNpu = parseAccelerators({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181', model: 'qualcomm/Qwen3-4B-Instruct-2507:W4A16', device: 'Npu' }, visionModel: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16' });
 
 test('every kit agent has its lines, each with what, where and when', () => {
-  for (const id of ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor']) {
+  for (const id of ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter']) {
     const w = WORK[id];
     assert.ok(w && w.lines.length, `${id} has lines`);
     for (const l of w.lines) for (const k of ['what', 'where', 'when'] as const) assert.ok(l[k].trim(), `${id}: "${l.what}" has its ${k}`);
@@ -60,6 +60,25 @@ test('the section: the agent\'s table and notes, then its model work on this PC;
   assert.match(stranger, /Its model work/);
   // Some agents test that their page never says "NPU:" or "NPU note" (from when the NPU was all there was): the section mustn't either.
   for (const id of Object.keys(WORK)) assert.doesNotMatch(workSection({ id, name: id, config: legacyNpu }), /NPU note|NPU:/, `${id}'s section`);
+});
+
+test("the Lamplighter's model work: the NPU only, never a graphics card or the processor, and none on a PC without an NPU", () => {
+  const both = parseAccelerators({
+    accelerators: [
+      { id: 'gpu-rtx', kind: 'gpu', name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, slots: 2, maxContextTokens: 8192, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } },
+      { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', maxContextTokens: 2400, chat: { baseUrl: 'http://127.0.0.1:18181', model: 'q' } },
+    ],
+  });
+  const gpuOnly = parseAccelerators({ accelerators: [{ id: 'gpu-rtx', kind: 'gpu', name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, slots: 2, maxContextTokens: 8192, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } }] });
+  assert.ok(!('error' in both) && !('error' in gpuOnly));
+  assert.equal(WORK.lamplighter.npuOnly, true);
+  const withNpu = workSection({ id: 'lamplighter', name: 'Lamplighter', config: both });
+  assert.match(withNpu, /goes to the NPU only/);
+  assert.match(withNpu, /Never to a graphics card or the processor/);
+  assert.match(withNpu, /This PC has one\./);
+  assert.doesNotMatch(withNpu, /Each request goes to the first one in Reeve&#39;s order/, 'not the shared order');
+  assert.match(workSection({ id: 'lamplighter', name: 'Lamplighter', config: gpuOnly }), /This PC has none, so it asks no model/);
+  assert.doesNotMatch(workSection({ id: 'surveyor', name: 'Surveyor', config: both }), /NPU only/, 'only an agent that says so');
 });
 
 test('the page carries the section, which the script moves into Settings after the agent\'s own', () => {
