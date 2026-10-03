@@ -1,4 +1,5 @@
 import { ago, esc, settingsPanel } from './kit/page.ts';
+import { afterWords } from './after.ts';
 import type { EmployeeResult, StageResult } from './stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from './stages/staff.ts';
 
@@ -38,7 +39,9 @@ function prCell(prs: PrInfo[], branch: string): string {
       const team = p.whose === 'team';
       const who = team ? ` ${badge('', 'team', `Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`)}` : '';
       const what = team ? `<br><span class="pr-title">${esc(p.title)}</span>` : '';
-      return `<div class="pr">${link(p.url, `#${p.number}`)}${who} ${checks} ${merges}${p.draft ? ` ${badge('warn', 'draft')}` : ''}${into}${what}<br><span class="muted">${esc(p.head)}${team ? `, ${esc(p.author)}'s` : ''}</span></div>`;
+      // What it asks for once merged (its steward block), or why that can't be read.
+      const then = p.afterError ? `<br>${badge('alert', 'steward block', p.afterError)}` : p.after ? `<br><span class="muted">then: ${esc(afterWords(p.after))}</span>` : '';
+      return `<div class="pr">${link(p.url, `#${p.number}`)}${who} ${checks} ${merges}${p.draft ? ` ${badge('warn', 'draft')}` : ''}${into}${what}${then}<br><span class="muted">${esc(p.head)}${team ? `, ${esc(p.author)}'s` : ''}</span></div>`;
     })
     .join('');
 }
@@ -104,14 +107,14 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
   const who = `the ticked employees (${onKit.length} take the kit)`;
   const disabled = o.running || !kit ? ' disabled' : '';
   const team = o.team ?? [];
-  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? The team's branches are left as they are.`;
+  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block (release, install), and the jobs it names to approve, for you. The team's branches are left as they are.`;
   const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${offKit.length === 1 ? "doesn't" : "don't"} take the kit yet: the stages pass over ${offKit.length === 1 ? 'it' : 'them'}, but the team's PRs to ${offKit.length === 1 ? 'it' : 'them'} can be merged.` : '';
   const stages = `<div class="card">
 <form id="stage-form"><input type="hidden" name="kit" value="${esc(kit ?? '')}"><div class="picks">${boxes}</div></form>
 <div class="row stages">
 <button data-post="/api/stage/bump" data-form="#stage-form" data-confirm="${esc(`Bump ${who} to kit ${kit}? For each: a worktree of its branch, kit.json pinned to ${kit}, its patch version up, its kit filled and its checks run, then a commit. Nothing is pushed.`)}"${disabled}>1. Bump</button>
 <button data-post="/api/stage/push" data-form="#stage-form" data-confirm="${esc(`Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`)}"${disabled}>2. Push</button>
-<button data-post="/api/stage/merge" data-form="#stage-form" data-confirm="Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits?"${o.running ? ' disabled' : ''}>3. Merge</button>
+<button data-post="/api/stage/merge" data-form="#stage-form" data-confirm="Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for."${o.running ? ' disabled' : ''}>3. Merge</button>
 <button data-post="/api/stage/release" data-form="#stage-form" data-confirm="${esc(`Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`)}"${disabled}>4. Release</button>
 <button data-post="/api/stage/merge-team" data-form="#stage-form" data-confirm="${esc(teamAsk)}"${o.running || !team.length ? ' disabled' : ''}${team.length ? '' : ' title="No team in Settings"'}>Merge the team's PRs</button>
 <button class="quiet" data-post="/api/staff/refresh"${o.running || o.refreshing ? ' disabled' : ''}>${o.refreshing ? 'Refreshing…' : 'Refresh'}</button>

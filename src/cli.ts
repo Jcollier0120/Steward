@@ -23,7 +23,9 @@ const USAGE = `${APP.id}: ${APP.role}
   merge [--yes] [--team] [--employees a,b]
                    list the Steward's open PRs, with their checks and whether they merge; with --yes,
                    merge those that merge cleanly with no failing or running checks. --team: the team's
-                   PRs too (the GitHub accounts in Settings), to any employee; their branches stay
+                   PRs too (the GitHub accounts in Settings), to any employee; their branches stay.
+                   Then what each merged PR's steward block asks for: release, install (and the jobs
+                   it names to approve, which stay yours)
   release [--kit <version>] [--employees a,b]
                    release each employee whose branch has the kit and an unreleased version, from its branch
   staff [--json] [--no-fetch]

@@ -100,6 +100,21 @@ Each stage is a command and a button on the page (each asks first, and only the 
 3. **`steward merge [--yes] [--team]`**: the Steward's open PRs (head `steward/…`, a branch of the employee's repository itself, never a fork's), with their checks and whether they merge. With `--yes` (or the page's button, which asks first), those that merge cleanly into the employee's branch, aren't drafts, and have no failing or running checks (none counts as green; the hires have no CI) are merged with a merge commit and their branch deleted (`gh pr merge --merge --delete-branch`), and the Steward's worktree for each is removed. The rest wait, and say why. With "Release right after merging" on in Settings, release follows for the merged.
 
    **`--team`** (the page's **Merge the team's PRs**) takes the team's open PRs as well: those opened by one of the GitHub accounts in Settings' **Team**, from any branch. By default that is `Jcollier0120`, you, which covers Claude Code too, since it opens its PRs with your account. They wait and merge by the same rules, and only into the employee's branch: a PR stacked on another branch waits for that one. A team member's branch is theirs, so it isn't deleted (it may still be checked out in a worktree). `--team` covers an employee that doesn't take the kit yet too: merging has nothing to do with the kit. A PR anyone else opened is never merged, nor listed.
+
+   **After merging: what a PR asks for.** A PR says what it needs once merged in a fenced block in its description, which the Steward reads, checks before merging, and runs after, reporting each step per employee with the merge:
+
+   ````markdown
+   ```steward
+   {"after": ["release", "install", "approve-jobs"], "jobs": ["aletaster-orders"]}
+   ```
+   ````
+
+   The steps are words the Steward knows, never commands: whoever can edit a PR's description chooses among them, not what runs, and each employee's commands are its own, in Settings.
+   - **`release`**: the version on its branch, released from the branch as `steward release` does, whatever kit it pins. Before merging, the Steward reads the version the PR would leave on the branch (fetching `refs/pull/<n>/head`), and holds a PR whose version is already released: "raise the version in the PR".
+   - **`install`**: its newest release on this PC. The zip is downloaded from GitHub, checked against its `SHA256SUMS.txt`, unpacked in the work folder, its `release.json` checked, and its install command (Settings, `node src/cli.ts install` by default) run there. After a release the PR asked for, only when that release was made. An employee with no install command (Heiward, a Windows app) holds the PR.
+   - **`approve-jobs`**, with `jobs`: never run. A job's approval says a person read its script, so the Steward names each job and its command (`reeve jobs approve aletaster-orders`, in the installed copy) and leaves it to you; it also names any `jobs/*.ps1` the PR changed but didn't list.
+
+   A block the Steward can't read, two blocks, an unknown step or key, or jobs without `approve-jobs` (or the other way round) hold the PR, and say why: merged without it, what the PR asked for would silently not happen. "Release right after merging" in Settings still releases every merged employee, at the kit the Steward hands out; a PR that asks for a release gets its own.
 4. **`steward release`**: for each employee whose branch on origin pins the kit and carries a version with no GitHub release yet, a worktree at that very commit, and its release command run there (`npm run release -- --publish` for a hire). Releases come from the branch, never from a PR's, so a release and its branch never drift apart.
 5. **`steward staff [--json] [--no-fetch]`**, and the page's table: each employee's checkout and its branch, the version and kit on its branch (and whether its tools/kit.ts is the Steward's), its latest release and the kit that release carries, the open PRs of the Steward and the team (checks, mergeable, and whose), a bump prepared here, and the kit version the Steward hands out (the newest kit release, and this checkout's `kit\VERSION`).
 
@@ -170,7 +185,7 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Employees (`employees`) | the eight hires, Reeve and Heiward | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, and its `release` command. |
+| Employees (`employees`) | the eight hires, Reeve and Heiward | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty, as Heiward's, for none). |
 | Team (`team`) | Jcollier0120 | The GitHub accounts whose PRs `merge --team` merges as well as the Steward's (a GitHub App's as gh names it, `app/<name>`). Claude Code opens its PRs with your account, so yours covers them. Empty: `--team` merges only the Steward's. |
 | Work folder (`workRoot`) | `%USERPROFILE%\.steward\work` | Where the Steward makes its worktrees, one folder per employee. |
 | Release right after merging (`releaseAfterMerge`) | off | Release is a stage of its own unless this is on. |

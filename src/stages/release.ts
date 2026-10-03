@@ -22,19 +22,24 @@ export interface ReleaseCandidate {
   released: string[];
 }
 
-/** Whether to release an employee now, or why not. */
-export function releaseDecision(c: ReleaseCandidate, kit: string): { release: true } | { release: false; why: string } {
-  if (!c.usesKit) return { release: false, why: NOT_ON_KIT };
-  if (!c.kit) return { release: false, why: 'its branch has no kit.json' };
-  if (c.kit !== kit) return { release: false, why: `its branch pins kit ${c.kit}, not ${kit}: merge the bump first` };
+/**
+ * Whether to release an employee now, or why not. `kit` is the kit its branch must pin (the rollout's), or null
+ * for a release a merged PR asked for, which carries whatever its branch has.
+ */
+export function releaseDecision(c: ReleaseCandidate, kit: string | null): { release: true } | { release: false; why: string } {
+  if (kit !== null) {
+    if (!c.usesKit) return { release: false, why: NOT_ON_KIT };
+    if (!c.kit) return { release: false, why: 'its branch has no kit.json' };
+    if (c.kit !== kit) return { release: false, why: `its branch pins kit ${c.kit}, not ${kit}: merge the bump first` };
+  }
   if (!c.version) return { release: false, why: 'no version found on its branch' };
   if (c.released.includes(c.version)) return { release: false, why: `v${c.version} is already released` };
   return { release: true };
 }
 
-export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string }): Promise<EmployeeResult> {
+export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null }): Promise<EmployeeResult> {
   const { run } = ctx;
-  if (!e.usesKit) return result(e, 'skipped', NOT_ON_KIT);
+  if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
   await fetchBranch(run, repo, e.branch);
@@ -43,7 +48,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string }): Pro
   if (!commit) return result(e, 'refused', `no ${remote}`);
   const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])));
   const released = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')).map((r) => r.version);
-  const decision = releaseDecision({ usesKit: e.usesKit, kit: readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null, version: 'version' in v ? v.version : null, released }, o.kit);
+  const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
+  const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
   if (!decision.release) return result(e, 'skipped', 'error' in v ? v.error : decision.why);
   const version = (v as { version: string }).version;
 
@@ -56,7 +62,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string }): Pro
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})`, { version, commit: commit.slice(0, 7) });
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)}), with kit ${o.kit}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

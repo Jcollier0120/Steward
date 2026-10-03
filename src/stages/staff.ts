@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readAfter, type After } from '../after.ts';
 import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
@@ -26,6 +27,11 @@ export interface PrInfo {
   author: string;
   /** The Steward's (a bump's PR, from the repository itself), or one a team member opened. */
   whose: 'steward' | 'team';
+  /** Its head commit. */
+  headOid: string;
+  /** What its description's steward block asks for after merging (src/after.ts), or why that can't be read. */
+  after: After | null;
+  afterError: string | null;
   /** GitHub's: MERGEABLE, CONFLICTING or UNKNOWN (still working it out). */
   mergeable: string;
   mergeState: string;
@@ -114,19 +120,25 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
   return list
     .map((p) => ({ p, whose: whosePr(p, team) }))
     .filter((x): x is { p: any; whose: PrInfo['whose'] } => x.whose !== null)
-    .map(({ p, whose }) => ({
-      number: Number(p.number),
-      title: String(p.title ?? ''),
-      url: String(p.url ?? ''),
-      head: p.headRefName,
-      base: String(p.baseRefName ?? ''),
-      author: String(p.author?.login ?? ''),
-      whose,
-      mergeable: String(p.mergeable ?? 'UNKNOWN'),
-      mergeState: String(p.mergeStateStatus ?? 'UNKNOWN'),
-      draft: p.isDraft === true,
-      checks: checksOf(p.statusCheckRollup),
-    }))
+    .map(({ p, whose }) => {
+      const after = readAfter(p.body);
+      return {
+        number: Number(p.number),
+        title: String(p.title ?? ''),
+        url: String(p.url ?? ''),
+        head: p.headRefName,
+        base: String(p.baseRefName ?? ''),
+        author: String(p.author?.login ?? ''),
+        whose,
+        headOid: String(p.headRefOid ?? ''),
+        after: 'after' in after ? after.after : null,
+        afterError: 'error' in after ? after.error : null,
+        mergeable: String(p.mergeable ?? 'UNKNOWN'),
+        mergeState: String(p.mergeStateStatus ?? 'UNKNOWN'),
+        draft: p.isDraft === true,
+        checks: checksOf(p.statusCheckRollup),
+      };
+    })
     .sort((a, b) => a.number - b.number);
 }
 
@@ -150,7 +162,7 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
   }
 }
 
-export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,headRefName,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
+export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
 
 export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null; tool?: string | null }): Promise<StaffRow> {
   const { run } = ctx;

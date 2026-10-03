@@ -180,7 +180,7 @@ test("gh failing doesn't lose the row: what git knows is there, and the failure 
   assert.equal(readPin('not json'), null);
 });
 
-const info = (o: Partial<PrInfo>): PrInfo => ({ number: 1, title: '', url: '', head: 'steward/kit-1.0.1', base: 'main', author: 'Jcollier0120', whose: 'steward', mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', ...o });
+const info = (o: Partial<PrInfo>): PrInfo => ({ number: 1, title: '', url: '', head: 'steward/kit-1.0.1', base: 'main', author: 'Jcollier0120', whose: 'steward', headOid: '', after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', ...o });
 
 test('merge takes only PRs that merge cleanly with checks passing or none; the rest wait, and say why', () => {
   const { merge, hold } = mergeSelection([

@@ -31,6 +31,8 @@ export interface Employee {
   versionFiles: string[];
   /** Publishes the GitHub release of the version on its branch. */
   release: string;
+  /** Installs it on this PC, run in its release unpacked, when a merged PR asks (after: install). Empty: never. */
+  install: string;
 }
 
 export interface Settings {
@@ -55,6 +57,7 @@ const hire = (name: string): Employee => ({
   test: ['npx tsc -p . --noEmit', 'npm test'],
   versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
   release: 'npm run release -- --publish',
+  install: 'node src/cli.ts install',
 });
 
 /**
@@ -81,6 +84,8 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     test: ['dotnet test HEI.Core.Tests'],
     versionFiles: ['HEI.Agent/HEI.Agent.csproj'],
     release: 'powershell -NoProfile -File HEI.Agent\\release.ps1 -Publish',
+    // Heiward installs as a Windows app (Settings > Apps), not from a zip with src\cli.ts: the Steward doesn't install it.
+    install: '',
   },
 ];
 
@@ -110,7 +115,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Employees',
     help: 'Every agent the Steward looks after: where its code is, which kit parts it takes, and how to fill its kit, test it, bump its version and release it.',
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like porter' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
@@ -123,6 +128,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass before a bump is committed.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
+      { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
     ],
   },
   {
@@ -164,6 +170,7 @@ function normalizeEmployee(e: any): Employee | null {
     test: strings(e.test, known.test),
     versionFiles: strings(e.versionFiles, known.versionFiles),
     release: typeof e.release === 'string' ? e.release.trim() : known.release,
+    install: typeof e.install === 'string' ? e.install.trim() : known.install,
   };
 }
 

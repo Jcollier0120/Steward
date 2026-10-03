@@ -56,6 +56,7 @@ export function employee(checkout: string, more: Partial<Employee> = {}): Employ
     test: ['node -e process.exit(0)'],
     versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
     release: 'node -e process.exit(0)',
+    install: 'node src/cli.ts install',
     ...more,
   };
 }
