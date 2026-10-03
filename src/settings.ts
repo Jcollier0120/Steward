@@ -55,12 +55,15 @@ const hire = (name: string): Employee => ({
   release: 'npm run release -- --publish',
 });
 
-/** The eight hires, then Reeve and Heiward, which don't take the kit yet (the README's "Reeve and Heiward"). */
+/**
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"). Reeve takes the node and spec parts and
+ * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
+ * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
+ */
 export const DEFAULT_EMPLOYEES: Employee[] = [
   ...['Porter', 'Auditor', 'Clerk', 'Herald', 'Warrener', 'Aletaster', 'Miller', 'Pinder'].map(hire),
   {
     ...hire('Reeve'),
-    usesKit: false,
     parts: ['node', 'spec'],
     versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
   },
@@ -70,7 +73,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     repo: 'Jcollier0120/Heiward',
     checkout: 'C:\\Projects\\Heiward',
     branch: 'master',
-    usesKit: false,
+    usesKit: true,
     parts: ['spec'],
     fill: 'powershell -NoProfile -File tools\\kit.ps1',
     test: ['dotnet test HEI.Core.Tests'],

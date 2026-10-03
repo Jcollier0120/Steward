@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 /** What a command did: its exit code, and what it printed. */
@@ -66,12 +66,38 @@ export function resolveCommand(cmd: string, args: string[]): [string, string[]] 
   return [cmd, args];
 }
 
-/** The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one. */
+/** Whether a .NET folder holds an SDK (a runtime alone can't build or test). */
+const hasSdk = (dir: string) => {
+  try {
+    return existsSync(path.join(dir, 'dotnet.exe')) && readdirSync(path.join(dir, 'sdk')).length > 0;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A .NET with an SDK, for a .NET employee's tests and release (Heiward's `dotnet test`, its release.ps1):
+ * DOTNET_ROOT, then where Manor's PCs keep the SDK, then Program Files'. Started by Task Scheduler, the
+ * Steward's PATH has Program Files' dotnet first, which on Manor's PCs is a runtime with no SDK.
+ */
+export function dotnetWithSdk(candidates: (string | undefined)[] = [process.env.DOTNET_ROOT, 'C:\\tools\\dotnet10', path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'dotnet')]): string | null {
+  for (const dir of candidates) if (dir && hasSdk(dir)) return dir;
+  return null;
+}
+
+let dotnetDir: string | null | undefined;
+
+/**
+ * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
+ * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
+ */
 export const run: Runner = (cmd, args, opts = {}) => {
   const [file, argv] = resolveCommand(cmd, args);
   const env = { ...process.env, ...opts.env };
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  env[pathKey] = `${nodeDir}${path.delimiter}${env[pathKey] ?? ''}`;
+  if (dotnetDir === undefined) dotnetDir = dotnetWithSdk();
+  env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
+  if (dotnetDir) env.DOTNET_ROOT = dotnetDir;
   return new Promise((resolve) => {
     execFile(
       file,

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { git } from './git.ts';
-import { newPathOfOld, oldKitFilesIn, OLD_KIT_PATHS, pinText } from './kitfiles.ts';
+import { carriedOldKit, newPathOfOld, OLD_KIT_HIRES, oldKitFilesIn, OLD_KIT_PATHS, pinText } from './kitfiles.ts';
 import { relocate } from './relocate.ts';
 import type { Runner } from './run.ts';
 import { agreedVersion, setVersion } from './versions.ts';
@@ -113,6 +113,17 @@ export async function convert(o: ConvertOptions): Promise<Converted> {
     writeFileSync(path.join(dir, f), t);
   };
   const notes: string[] = [];
+  // Only the eight hires carried the old kit. Another agent's files at its paths are its own (Reeve's
+  // src/accelerators.ts, tools/release.ts and the rest), and converting would delete them.
+  let name: unknown = null;
+  try {
+    name = JSON.parse(read('package.json').replace(/^﻿/, '')).name;
+  } catch {
+    // no package.json, or not JSON: no hire
+  }
+  if (typeof name !== 'string' || !carriedOldKit(name)) {
+    throw new Error(`${dir} is ${typeof name === 'string' ? name : 'no Node agent'}, not one of the hires that carried the old kit (${OLD_KIT_HIRES.join(', ')}): its files at the old kit's paths are its own, and converting would delete them`);
+  }
   const tracked = (await git(run, dir, 'ls-files')).split('\n').filter(Boolean);
   const removed = oldKitFilesIn(tracked);
   if (!removed.length) throw new Error(`${dir} tracks none of the old kit's files: is it converted already?`);
