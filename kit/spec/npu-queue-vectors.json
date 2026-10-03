@@ -1,5 +1,5 @@
 {
-  "about": "Shared test data for the NPU queue (NPU-QUEUE.md, beside this file). Its home is the Steward's kit, the spec part (kit/spec in Jcollier0120/Steward); it was Reeve's. Every implementation (the kit's npu-queue.ts, Reeve's src/npu-queue.ts, npu-embed's npu_lock.py, Heiward's NpuLock.cs) must order these tickets and judge these heartbeats exactly as listed. Take this file from a kit release, unchanged.",
+  "about": "Shared test data for the NPU queue (NPU-QUEUE.md, beside this file). Its home is the Steward's kit, the spec part (kit/spec in Jcollier0120/Steward); it was Reeve's. Every implementation (the kit's core, which its node and dotnet parts run, Reeve's src/npu-queue.ts until it takes the kit, and npu-embed's npu_lock.py) must order these tickets (order), judge these heartbeats (dead) and lock holders (holders: owner says whether owner.json reads as {pid, since}; sinceAgeMs is now less its since, folderAgeMs now less the lock folder's modification time, null when it is gone; staleMs, when given, the caller's limit, else 10 minutes) and name these folders (slots) exactly as listed. Keys a reader doesn't know are for others: skip them. The timings are rules.json's, beside this file. Take this file from a kit release, unchanged.",
   "nowUs": 1790000000000000,
   "order": [
     {
@@ -79,6 +79,18 @@
     { "case": "the NPU: one slot, its folder as always", "id": "npu", "slots": 1, "folders": ["npu"], "queue": "npu.queue" },
     { "case": "a card with two slots", "id": "gpu-nvidia-geforce-rtx-4090", "slots": 2, "folders": ["gpu-nvidia-geforce-rtx-4090", "gpu-nvidia-geforce-rtx-4090.2"], "queue": "gpu-nvidia-geforce-rtx-4090.queue" },
     { "case": "the second card of a name", "id": "gpu-nvidia-geforce-rtx-4090-2", "slots": 3, "folders": ["gpu-nvidia-geforce-rtx-4090-2", "gpu-nvidia-geforce-rtx-4090-2.2", "gpu-nvidia-geforce-rtx-4090-2.3"], "queue": "gpu-nvidia-geforce-rtx-4090-2.queue" },
-    { "case": "the processor", "id": "cpu", "slots": 1, "folders": ["cpu"], "queue": "cpu.queue" }
+    { "case": "the processor", "id": "cpu", "slots": 1, "folders": ["cpu"], "queue": "cpu.queue" },
+    { "case": "the NPU has one slot, whatever an entry says", "id": "npu", "slots": 4, "folders": ["npu"], "queue": "npu.queue" }
+  ],
+  "holders": [
+    { "case": "a live holder within its 10 minutes keeps the lock", "owner": true, "sinceAgeMs": 60000, "pidAlive": true, "stale": false },
+    { "case": "a holder whose process is gone is evicted", "owner": true, "sinceAgeMs": 1000, "pidAlive": false, "stale": true },
+    { "case": "a holder over 10 minutes is evicted, whatever its pid says", "owner": true, "sinceAgeMs": 600001, "pidAlive": true, "stale": true },
+    { "case": "exactly 10 minutes is not over", "owner": true, "sinceAgeMs": 600000, "pidAlive": true, "stale": false },
+    { "case": "a caller's longer limit keeps an older holder", "owner": true, "sinceAgeMs": 900000, "staleMs": 1200000, "pidAlive": true, "stale": false },
+    { "case": "no owner.json and the folder 2 s old: a holder about to write it", "owner": false, "folderAgeMs": 2000, "stale": false },
+    { "case": "no owner.json for over 10 s: a crash leftover", "owner": false, "folderAgeMs": 10001, "stale": true },
+    { "case": "no owner.json, the folder exactly 10 s old: not yet", "owner": false, "folderAgeMs": 10000, "stale": false },
+    { "case": "no owner.json and the folder gone: nothing to evict", "owner": false, "folderAgeMs": null, "stale": false }
   ]
 }
