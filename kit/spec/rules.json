@@ -1,0 +1,43 @@
+{
+  "about": "The timings and limits of the kit's rules (NPU-QUEUE.md and ACCELERATORS.md, beside this file), as data. Every driver of the kit's core hands them to it (the node part reads this file, the dotnet part embeds it), and any other implementation (Reeve's npu-embed/npu_lock.py) may read them from here. Milliseconds unless a name says otherwise. Take this file from a kit release, unchanged.",
+  "queue": {
+    "heartbeatMs": 2000,
+    "lateMs": 5000,
+    "deadMs": 15000,
+    "ageMs": 120000,
+    "headPollMs": 50,
+    "pollMs": 100
+  },
+  "lock": {
+    "waitMs": 300000,
+    "staleMs": 600000,
+    "ownerGraceMs": 10000,
+    "pollMs": 150,
+    "takeTries": 2,
+    "removeTries": 40,
+    "removeRetryMs": 25
+  },
+  "accelerators": {
+    "failedForMs": 600000,
+    "reasonMaxChars": 300,
+    "gamePercent": 25,
+    "gamesFreshMs": 15000,
+    "maxAhead": 4,
+    "maxSlots": 16,
+    "ownMemoryGb": 2,
+    "defaultMaxContextTokens": 2400,
+    "defaultRequestTimeoutMs": 180000,
+    "startWaitMs": 30000
+  },
+  "manners": {
+    "maxWaitMs": 600000,
+    "backOffMs": 300000
+  },
+  "tokens": {
+    "charsPerToken": 3,
+    "messageChars": 8,
+    "quirkRoomChars": 40,
+    "imageTokens": 400,
+    "minPieceChars": 200
+  }
+}

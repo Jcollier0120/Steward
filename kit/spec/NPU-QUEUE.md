@@ -1,19 +1,19 @@
 # The NPU queue
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/NPU-QUEUE.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). It was Reeve's `docs/NPU-QUEUE.md`. A change to the protocol is a kit change: made here, with the vectors beside it, released as a kit version, and taken by every agent from that release. The kit's `node/npu-queue.ts` is now the original implementation; Reeve's `src/npu-queue.ts` is a copy of it until Reeve takes the kit.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/NPU-QUEUE.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). It was Reeve's `docs/NPU-QUEUE.md`. A change to the protocol is a kit change: made here, with the vectors beside it, released as a kit version, and taken by every agent from that release. Since kit 2.0.0 the original implementation is the kit's core (`core/queue.js` for the rules, `core/turn.js` for a turn step by step), which the kit's node and dotnet parts carry out; Reeve's `src/npu-queue.ts` is a copy of kit 1.0.0's until Reeve takes the kit.
 
-Every program on this PC that runs work on the Hexagon NPU takes turns through one machine-wide lock. The NPU queue makes those turns first come, first served, and hands the NPU straight to the next in line when the holder lets go. Four implementations follow this page, and they must agree to the letter:
+Every program on this PC that runs work on the Hexagon NPU takes turns through one machine-wide lock. The NPU queue makes those turns first come, first served, and hands the NPU straight to the next in line when the holder lets go. The implementations that follow this page must agree to the letter:
 
 Every other accelerator (each graphics card, the processor; [ACCELERATORS.md](ACCELERATORS.md), beside this page) has a lock and a line of its own, by exactly these rules; see [Every accelerator, with slots](#every-accelerator-with-slots). The NPU's stay where they are.
 
 | Program | Implementation | Lane |
 |---|---|---|
-| The kit (Manor's agents: Auditor, Clerk, Herald, …) | the kit's `node/npu-queue.ts` (an agent's `src/kit/npu-queue.ts`), the original | background |
+| The kit (Manor's agents: Auditor, Clerk, Herald, …) | the kit's core, the original, carried out by its node part (an agent's `src/kit/npu-queue.ts`) | background |
 | Reeve | `src/npu-queue.ts`, a copy of the kit's until Reeve takes it | interactive for MCP and terminal commands; background for the rounds and the home page |
 | npu-embed | Reeve's `npu-embed/npu_lock.py` | background (model compile and load), or `NPU_QUEUE_LANE` |
-| Heiward | `HEI.Core/AI/NpuLock.cs` | background |
+| Heiward | `HEI.Core/AI/NpuLock.cs`, on the kit's dotnet part (the core, in Jint) once it takes it | background |
 
-[npu-queue-vectors.json](npu-queue-vectors.json) holds the cases every implementation's tests run unchanged: the kit's tests, Reeve's, npu-embed's and Heiward's C# tests.
+[npu-queue-vectors.json](npu-queue-vectors.json) holds the cases every implementation's tests run unchanged: the kit's tests (against the core, the node part and the dotnet part), Reeve's, npu-embed's and Heiward's. Its `order`, `dead`, `holders` and `slots` are the rules any implementation follows; [turn-vectors.json](turn-vectors.json) is the turn step by step, for the drivers of the kit's core. The timings below are [rules.json](rules.json)'s, which the core takes and anyone may read.
 
 ## Why
 
@@ -25,7 +25,7 @@ The lock alone has no queue. Whoever retries first after a release gets in, so a
 ## The lock (unchanged)
 
 - The lock is the folder `%USERPROFILE%\.npu-agent\locks\npu` (override: `NPU_AGENT_NPU_LOCK`). Taking it is an atomic create of that folder. The holder then writes `owner.json`: `{"pid": <int>, "since": <ms since epoch>}`.
-- A holder is evicted when its process is gone or its `since` is over 10 minutes old (callers may set a longer limit). A folder with no `owner.json` for 10 s is a crash leftover.
+- A holder is evicted when its process is gone or its `since` is over 10 minutes old (callers may set a longer limit). A folder with no `owner.json` for 10 s is a crash leftover. (`holders` in the vectors.)
 - **Release:** remove the folder only while `owner.json` still names you, pid and since both. An evicted holder must not remove the next holder's lock, and the next holder's folder exists for a moment before its `owner.json` does.
 - **Reading and removing on Windows:** a delete fails while another process has a file in the folder open without sharing delete. So read `owner.json` sharing read, write *and delete* (Python's `open()` and .NET's `File.ReadAllText` don't; Node's reads do), and when removing the folder (a release or an eviction) fails, check again that it's still yours (or still stale) and retry every 25 ms for up to a second. A remove given up on leaves the lock taken until it goes stale. A ticket write that finds the queue folder gone creates it again.
 
@@ -100,6 +100,8 @@ Each accelerator has its own lock and line, with the rules above unchanged: tick
 
 ## Timings
 
+As data in [rules.json](rules.json) (`queue` and `lock`), which is the source: this table says the same in words.
+
 | | |
 |---|---|
 | Heartbeat | every 2 s |
@@ -109,3 +111,5 @@ Each accelerator has its own lock and line, with the rules above unchanged: tick
 | Head of the line tries the lock every | 50 ms |
 | Everyone else looks every | 100 ms |
 | Holder overstayed after | 10 min (callers may set more) |
+| A lock folder with no owner.json is a crash leftover after | 10 s |
+| A removal that finds a file open tries again | every 25 ms, 40 times |

@@ -3,8 +3,8 @@ import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { dataFile, readJson } from './kit/store.ts';
 
-/** The kit's parts (src/kitfiles.ts). */
-export const PART_NAMES = ['node', 'web', 'spec'];
+/** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
+export const PART_NAMES = ['node', 'web', 'spec', 'core', 'dotnet'];
 
 /**
  * One of Manor's employees, as the Steward deals with it: where its code is, which kit parts it takes,
@@ -56,7 +56,8 @@ const hire = (name: string): Employee => ({
 });
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"). Reeve takes the node and spec parts and
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, built on the kit from the
+ * start as a hire is (it never carried a copy, so it isn't one of the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
  */
@@ -80,6 +81,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     versionFiles: ['HEI.Agent/HEI.Agent.csproj'],
     release: 'powershell -NoProfile -File HEI.Agent\\release.ps1 -Publish',
   },
+  hire('Surveyor'),
 ];
 
 export const DEFAULT_SETTINGS: Settings = {
