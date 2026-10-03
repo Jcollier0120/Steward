@@ -5,17 +5,20 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { afterWords, readAfter } from '../src/after.ts';
-import { afterMerge, installOne, listedSum } from '../src/stages/aftermerge.ts';
-import { mergeOne } from '../src/stages/merge.ts';
-import { releaseDecision } from '../src/stages/release.ts';
-import { parsePrs } from '../src/stages/staff.ts';
-import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // What a PR asks for after merging (its steward block): read, checked before the merge, and run after it,
-// against a fake employee's git, gh standing in, and a release zip made here with Windows' tar.
+// against a fake employee's git, gh standing in, and a release zip made here with Windows' tar. The Steward's
+// data folder is one of its own (a team PR tested here is kept there).
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-after-'));
+process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
+
+const { afterWords, readAfter } = await import('../src/after.ts');
+const { afterMerge, installOne, listedSum } = await import('../src/stages/aftermerge.ts');
+const { mergeOne } = await import('../src/stages/merge.ts');
+const { releaseDecision } = await import('../src/stages/release.ts');
+const { parsePrs } = await import('../src/stages/staff.ts');
+const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const block = (json: string) => `Adds a job.\r\n\r\n## After merging (for the Steward)\r\n\r\n\`\`\`steward\r\n${json}\r\n\`\`\`\r\n\r\nMore words.`;
 const REEVE13 = '{"after": ["release", "install", "approve-jobs"], "jobs": ["aletaster-orders"]}';
@@ -148,6 +151,7 @@ test('merge --yes --team, then what the PR asks for: its release from the branch
   const e = employee(f.checkout, {
     release: `node -e "require('fs').writeFileSync(process.argv[1], process.cwd())" ${releasedMarker}`,
     approve: `node -e "require('fs').appendFileSync(process.argv[1], 'approve ' + process.argv[2] + ' after ' + require('fs').readFileSync(process.argv[3], 'utf8').split(' ')[0])" %STEWARD_TEST_APPROVED% {job} ${installedMarker}`,
+    fill: '',
   });
   const ctx = ctxFor({ employees: [e], workRoot: work, run: r.run, neutralDir: tmp });
 

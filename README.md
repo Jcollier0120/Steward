@@ -119,13 +119,17 @@ The Steward's own releases stay **`v<version>`** (`npm run release`), and are se
 
 ## The rollout
 
-Each stage is a command and a button on the page (each asks first, and only the ticked employees are touched). Each reports for every employee (done, skipped, refused or failed, and why), and the page shows the last stage's results and log. Stages run one at a time on this PC: a lock in the data folder keeps the page and a terminal apart.
+Each stage is a command and a button on the page (each asks first, and only the ticked employees are touched). Each reports for every employee (done, skipped, refused or failed, and why), and the page shows the last stage's results and log. Stages run one at a time on this PC: a lock in the data folder keeps the page and a terminal apart. On duty it also merges and releases by itself, in its round (Page and commands, below).
 
 1. **`steward bump [--kit <version>] [--employees a,b]`**: for each employee that takes the kit, a fresh git worktree of its branch on origin (fetched first), on the branch `steward/kit-<version>`, in the work folder (`%USERPROFILE%\.steward\work\<id>`). Never the person's own checkout. There `kit.json`'s pin moves to the kit, `tools/kit.ts` becomes the Steward's when it differs (for an agent whose kit is filled by it), and the patch version goes up in every version file (package.json, both of package-lock.json's own entries, and src/app.ts, which release.ts requires to agree). Then, for a Node agent, `npm ci` if it has no node_modules; its kit is filled with the new tools/kit.ts, and its checks run (`npx tsc -p . --noEmit` and `npm test` for a hire). When every one passes, the changes are committed: "Porter 0.4.1: the Steward's kit 1.0.1". The Steward's tools/kit.ts is its checkout's, or, installed, the one its release carries. A failure leaves the worktree for a look. `--kit` defaults to the newest kit release; one that isn't released is refused, since the employees couldn't fetch it, unless `--kit-from <kit folder>` fills from a kit tree instead (for a trial). `--base <ref>` starts from a local ref instead of origin's branch. A bump made before and not pushed is made again from scratch; one already on origin is refused until its PR is merged or closed.
 2. **`steward push`**: each prepared branch is pushed (a plain push, never forced) and gets a PR against the employee's branch, titled "Porter 0.4.1: the Steward's kit 1.0.1", its body the changelog's entries since the kit it had. A PR already open is left as it is.
 3. **`steward merge [--yes] [--team]`**: the Steward's open PRs (head `steward/…`, a branch of the employee's repository itself, never a fork's), with their checks and whether they merge. With `--yes` (or the page's button, which asks first), those that merge cleanly into the employee's branch, aren't drafts, and have no failing or running checks (none counts as green; the hires have no CI) are merged with a merge commit and their branch deleted (`gh pr merge --merge --delete-branch`), and the Steward's worktree for each is removed. The rest wait, and say why. With "Release right after merging" on in Settings, release follows for the merged.
 
-   **`--team`** (the page's **Merge the team's PRs**) takes the team's open PRs as well: those opened by one of the GitHub accounts in Settings' **Team**, from any branch. By default that is `Jcollier0120`, you, which covers Claude Code too, since it opens its PRs with your account. They wait and merge by the same rules, and only into the employee's branch: a PR stacked on another branch waits for that one. A team member's branch is theirs, so it isn't deleted (it may still be checked out in a worktree). `--team` covers an employee that doesn't take the kit yet too: merging has nothing to do with the kit. A PR anyone else opened is never merged, nor listed. A team PR that isn't a draft is ready to merge: that is the team's rule, so work still in progress is opened as a draft.
+   **`--team`** (the page's **Merge the team's PRs**) takes the team's open PRs as well: those opened by one of the GitHub accounts in Settings' **Team**, from any branch. By default that is `Jcollier0120`, you, which covers Claude Code too, since it opens its PRs with your account. They wait and merge by the same rules, and only into the employee's branch: a PR stacked on another branch waits for that one. A team member's branch is theirs, so it isn't deleted (it may still be checked out in a worktree). `--team` covers an employee that doesn't take the kit yet too: merging has nothing to do with the kit. A PR anyone else opened is never merged, nor listed.
+
+   **A team PR that isn't a draft is ready to merge**: that is the team's rule. A person or a session that wants a PR reviewed first (by you, or the session coordinating the rollouts) **opens it as a draft**, and marks it ready once reviewed. Since no one asked for a team PR here, it is held to more than the Steward's own, which their bump tested:
+   - **Tested here when GitHub runs no checks on it.** Reeve and the hires have no CI, so the Steward runs the employee's own checks (Settings, as bump runs them: `npm ci` for a Node agent, its kit filled, then each test command: the typecheck and `npm test` for a hire, `dotnet test` for Heiward) at the PR's head commit, in a worktree of its own, before it merges it. The result is kept by commit (`pr-checks.json`): a failure is said once, as a failed merge, and the PR then waits quietly until a new push is tested afresh; a pass is said with the merge ("merged #17 (checks passed here at abc1234)"). A PR whose CI passes on GitHub isn't tested again here. Only the team's PRs are tested here, so only code from your own accounts runs on this PC this way.
+   - **The version it sets must be new.** A team PR that changes the version waits when that version is already released, isn't above the version on its branch, or is the one another ready PR sets too (both wait: "#17 and #20 both set v0.3.9: each needs a version of its own"), so a merge never leaves a version conflict behind, and two changes never share a version. After a merge in the same run, the next PR is checked again against the branch as it is then.
 
    **After merging: what a PR asks for.** A PR says what it needs once merged in a fenced block in its description, which the Steward reads, checks before merging, and runs after, reporting each step per employee with the merge:
 
@@ -190,6 +194,7 @@ node src/cli.ts bump [--kit <version>] [--employees a,b] [--kit-from <dir>] [--b
 node src/cli.ts push [--kit <version>] [--employees a,b]
 node src/cli.ts merge [--yes] [--team] [--employees a,b]
 node src/cli.ts release [--kit <version>] [--employees a,b]
+node src/cli.ts round [--employees a,b]   # one round, as it runs by itself on duty (Run now)
 node src/cli.ts staff [--json] [--no-fetch]
 node src/cli.ts start            # on duty, and its page up (Manor's Start)
 node src/cli.ts stop             # off duty (Manor's Stop); the page stays up
@@ -203,7 +208,12 @@ node src/cli.ts uninstall        # remove the installed copy and its sign-in tas
 
 `--hires` is the same as `--employees`. An unknown option is refused, so a mistyped `--yes` never merges.
 
-Its duty works as the hires' does, but it has no rounds of their kind yet: on duty or off, the stages run only when asked. The place for a scheduled check is marked in src/agent.ts, through the kit's `every()`, which pauses off duty (a daily `staff` that notices a new kit release, say).
+Its duty works as the hires' does, and its round is this: **it merges and releases by itself.** While it's on duty, and "Merges and releases by itself" is on in Settings (it is, by default), a round comes every 10 minutes ("A round every"), through the kit's `every()`, which pauses off duty:
+
+1. **Merge**, as `merge --yes --team`: every open PR of its own and the team's that is ready (not a draft, merges cleanly into the employee's branch, no failing or running checks; for a team PR, tested here when GitHub runs no checks, and with a new version if it sets one: above) is merged, and then what each asks for after merging is done (release, install, approve-jobs: its steward block, above). A PR that isn't ready waits for a later round.
+2. **Release**: every employee whose branch carries a version with no GitHub release yet is released from its branch, whatever kit it pins, as `steward release` would: a PR that raised the version, or a version pushed straight to the branch. A release that fails isn't tried again at the same commit (it's kept in `round-failed.json`): the round says so, and leaves it to you, the Release button or a new commit on the branch.
+
+A round with nothing merged, released or failed leaves no trace; one that did something is the last stage on the page, and a line in stages.log, as any stage is. A round passes while a stage runs (the stage lock). **Run now** (`steward round` in a terminal) does one round, on duty or not. Manor's employee card shows the rounds, from `/api/ping`. With "Merges and releases by itself" off, the stages run only when asked.
 
 ## Settings
 
@@ -217,6 +227,8 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Release right after merging (`releaseAfterMerge`) | off | Release is a stage of its own unless this is on. |
 | The Steward's repository (`stewardRepo`) | Jcollier0120/Steward | Where the kit releases are. |
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
+| Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released (Page and commands, below). Off: only when asked. |
+| A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. |
 
 ## Files
 
@@ -228,7 +240,9 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `home-page.task.xml` | The sign-in task, as it was registered. |
 | `settings.json` | Settings. |
 | `staff.json` | The staff's table, as last refreshed. |
-| `last-stage.json`, `stages.log` | The last stage, with its log; every stage's results, one line each. |
+| `last-stage.json`, `stages.log` | The last stage, with its log; every stage's results, one line each (a round's only when it did something). |
+| `round-failed.json` | The commit, for each employee, whose release failed in a round: the rounds don't try it again. |
+| `pr-checks.json` | What testing each team PR here said, by its head commit: tested once, and a new push afresh. |
 | `work\` | The worktrees of the employees' bumps and releases. |
 | `kits\` | The kit releases tools/kit.ts downloaded, by version, for every agent on this PC. Always `%USERPROFILE%\.steward\kits`, for a checkout too (`STEWARD_KITS` overrides it). |
 | `duty.json`, `server.json`, `serve.log` | On duty or not; the running page's pid, port and token; its output. |
@@ -250,7 +264,8 @@ It points at the installed copy (see Install). Its role in Manor's roles is `ste
 
 ## Limits
 
-- **It acts with your git and gh.** Pushes, PRs, merges and releases are yours. It never force-pushes, never touches your checkouts' working trees (it fetches, and adds and removes worktrees of them), and merges only what is mergeable and green: its own PRs, and, with `--team`, those the team opened. It deletes only its own branches.
+- **It acts with your git and gh.** Pushes, PRs, merges and releases are yours. It never force-pushes, never touches your checkouts' working trees (it fetches, and adds and removes worktrees of them), and merges only what is mergeable and green: its own PRs, and, with `--team` or in its rounds, those the team opened. It deletes only its own branches.
+- **In its rounds it merges and releases with no one asking.** A team PR that isn't a draft is ready: open a PR that needs review as a draft. A team PR with no CI is merged only once its employee's own checks pass here, so it is only as safe as those checks. Switch "Merges and releases by itself" off in Settings to have it act only when asked.
 - **An employee's checks run on this PC**, with the commands in Settings. A bump is only as good as its tests.
 - **A kit version must be released before the employees pin it**, or a fresh clone of theirs couldn't fill its kit. `--kit-from` is for trials only.
 - **tools/kit.ts reaches an agent with a bump**, so a change to it waits for the next kit version, and the old one does the filling until then: keep it small, stable and able to read the kit releases it will meet.
@@ -265,7 +280,7 @@ Planned, not in 0.1.0:
 - **"Back to Manor" in every agent's header** (a kit change, rolled out by the Steward, after the Surveyor is hired). When an agent is installed alongside Manor, its page header shows Manor's icon and a "Back to <manor name>" link beside the agent's own icon and title, so people move between Manor and the agents easily. The kit's page.ts finds Manor through `%USERPROFILE%\.manor\settings.json`: its name, port, and icon (a path inside `%USERPROFILE%\.manor\app`). The agent serves Manor's icon itself, at `/manor-icon.svg` say, because the page's CSP allows images from `'self'` only. The header shows nothing when Manor isn't installed. It belongs in the `web` part as one script and its CSS, reading `/api/manor` from the agent's own server, so a page that isn't the kit's can include it too. Reeve and Heiward don't use the kit's page, so each needs it separately (Reeve's React dashboard, Heiward's wwwroot).
 - **src/cli.ts into the kit.** Six hires have the same cli.ts; the Auditor's adds `audit` and the Clerk's `search`. A kit `agentCli({ run, extra })` with each agent's own commands passed in would take it.
 - **Heiward on the dotnet part** (kit 2.0.0, above): its tools\kit.ps1 bringing the parts a part needs, its NpuLock.cs and Accelerators.cs on the part, and Settings' kit parts listing `core` and `dotnet` (src/settings.ts's `PART_NAMES`, which keeps only the parts it lists). **Manor** takes the kit after it.
-- **Scheduled checks** in the Steward's duty: a daily `staff`, noticing a new kit release or a release lagging its branch.
+- **More in its rounds**: a daily `staff`, noticing a new kit release (its rounds already merge and release).
 - **app.ts's shared half** (`isDevCheckout`, `placeFor` and the place they compute) could be the kit's too, leaving the agent's app.ts its `APP` and port.
 
 ## Development

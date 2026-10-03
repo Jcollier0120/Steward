@@ -91,7 +91,25 @@ ${rows ? `<table><thead><tr><th>Employee</th><th>Result</th><th></th></tr></thea
 </div>`;
 }
 
-export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean; team?: string[] }): string {
+/** Its rounds, as the page says them: merging and releasing by itself, or only when asked. (The title bar's pill says when the next is due.) */
+export interface RoundView {
+  on: boolean;
+  minutes: number;
+  onDuty: boolean;
+  lastRunAt: string | null;
+}
+
+function roundLine(r: RoundView | undefined, busy: boolean): string {
+  if (!r) return '';
+  const what = "merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release";
+  const when = !r.on
+    ? 'It merges and releases only when asked: "Merges and releases by itself" is off in Settings. Run now does one round.'
+    : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${r.onDuty ? '' : ' Off duty, the rounds wait.'}${r.lastRunAt ? ` The last ended ${ago(r.lastRunAt)}.` : ''}`;
+  // The kit lifts this into the title bar: the body's first button that POSTs /api/run and says Run now.
+  return `<div class="row round"><span class="muted">${esc(when)}</span><button class="quiet" data-post="/api/run" data-confirm="${esc(`A round now: it ${what}?`)}"${busy ? ' disabled' : ''}>Run now</button></div>`;
+}
+
+export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean; team?: string[]; round?: RoundView }): string {
   const s = o.staff;
   const kit = s?.kit ?? null;
   const kitLine = s
@@ -120,6 +138,7 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
 <button class="quiet" data-post="/api/staff/refresh"${o.running || o.refreshing ? ' disabled' : ''}>${o.refreshing ? 'Refreshing…' : 'Refresh'}</button>
 </div>
 <p class="muted">Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).${esc(offKitNote)}</p>
+${roundLine(o.round, !!o.running)}
 </div>`;
   return `${running}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}.</p>` : ''}</div>
 <h2>Staff</h2>
@@ -135,6 +154,7 @@ ${settingsPanel()}
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
 .stages { margin-bottom: 6px; }
+.round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
 .pr + .pr { margin-top: 6px; }
 .pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }

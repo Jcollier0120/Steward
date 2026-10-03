@@ -28,13 +28,16 @@ const USAGE = `${APP.id}: ${APP.role}
                    approve-jobs (merging counts as reading the scripts it names)
   release [--kit <version>] [--employees a,b]
                    release each employee whose branch has the kit and an unreleased version, from its branch
+  round [--employees a,b]
+                   one round, as the Steward runs by itself on duty (Settings): merge --yes --team, with
+                   what each merged PR asks for after, then a release of every version not yet released
   staff [--json] [--no-fetch]
                    each employee: its checkout, its branch's version and kit, its latest release and the
                    kit in it, the open PRs of the Steward and the team (--hires is the same as --employees,
                    everywhere)
 
   start            on duty, and its page up at ${pageUrl}
-  stop             off duty (it has no rounds yet, so this only says so; the page stays up)
+  stop             off duty: its rounds wait until it is back on duty (the page stays up)
   open             make sure its page is up, without changing duty
   shutdown         end its page process
   status [--json]  on duty or not; --json prints what Manor reads
@@ -60,6 +63,7 @@ const STAGE_FLAGS: Record<string, string[]> = {
   push: ['--kit', '--employees', '--hires'],
   merge: ['--yes', '--team', '--employees', '--hires', '--kit'],
   release: ['--kit', '--employees', '--hires'],
+  round: ['--employees', '--hires'],
   staff: ['--json', '--no-fetch'],
 };
 const VALUED = ['--kit', '--employees', '--hires', '--kit-from', '--base'];
@@ -99,7 +103,7 @@ function printStaff(s: Staff): void {
 const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
-async function stage(name: 'bump' | 'push' | 'merge' | 'release'): Promise<number> {
+async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Promise<number> {
   const bad = unknownFlags(name, rest);
   if (bad.length) {
     console.error(`${name}: unknown ${bad.join(' ')} (it takes ${STAGE_FLAGS[name].join(' ')})`);
@@ -148,6 +152,7 @@ switch (cmd) {
   case 'push':
   case 'merge':
   case 'release':
+  case 'round':
     process.exitCode = await stage(cmd);
     break;
   case 'staff': {

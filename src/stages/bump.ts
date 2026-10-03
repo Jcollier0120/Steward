@@ -37,6 +37,28 @@ export interface BumpOptions {
 export const needsNpmCi = (dir: string) =>
   existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'package-lock.json')) && !existsSync(path.join(dir, 'node_modules'));
 
+/**
+ * An employee's checks in a worktree, as a fresh clone would run them: dependencies (npm's, for a Node agent; a .NET
+ * one restores its own packages as it builds), the kit, then each test command (Settings). The first that failed, or
+ * null when all passed. A bump runs them before its commit, and merge on a team PR GitHub runs no checks on.
+ */
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void }): Promise<string | null> {
+  const steps: string[] = [];
+  if (needsNpmCi(dir)) steps.push('npm ci --no-audit --no-fund');
+  if (e.fill) steps.push(e.fill);
+  steps.push(...e.test);
+  for (const step of steps) {
+    const t0 = Date.now();
+    const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
+    o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    if (r.code !== 0) {
+      for (const line of tail(`${r.out}\n${r.err}`, 25).split('\n')) o.say(`  ${line}`);
+      return `${step} failed (exit ${r.code})`;
+    }
+  }
+  return null;
+}
+
 /** kit.json's text with its pin moved to `kit`, everything else as it was. */
 export function repin(text: string, kit: string): string {
   return pinText({ ...JSON.parse(text.replace(/^﻿/, '')), kit });
@@ -94,22 +116,8 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   }
   say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
 
-  // Its checks, as a fresh clone would run them: dependencies (npm's, for a Node agent; a .NET one restores its own
-  // packages as it builds), the kit, then each test command.
-  const env = o.kitFrom ? { STEWARD_KIT: path.resolve(o.kitFrom) } : {};
-  const steps: string[] = [];
-  if (needsNpmCi(dir)) steps.push('npm ci --no-audit --no-fund');
-  if (e.fill) steps.push(e.fill);
-  steps.push(...e.test);
-  for (const step of steps) {
-    const t0 = Date.now();
-    const r = await runLine(run, step, { cwd: dir, env });
-    say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
-    if (r.code !== 0) {
-      for (const line of tail(`${r.out}\n${r.err}`, 25).split('\n')) say(`  ${line}`);
-      return result(e, 'failed', `${step} failed (exit ${r.code}); the worktree is left at ${dir}`, { version: next });
-    }
-  }
+  const failed = await runChecks(ctx, e, dir, { env: o.kitFrom ? { STEWARD_KIT: path.resolve(o.kitFrom) } : {}, say });
+  if (failed) return result(e, 'failed', `${failed}; the worktree is left at ${dir}`, { version: next });
 
   await git(run, dir, 'add', '--', 'kit.json', ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
