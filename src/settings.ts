@@ -85,8 +85,9 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     ...hire('Reeve'),
     parts: ['node', 'spec'],
     versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
-    // Reeve's jobs run only while their script's sha256 is the approved one: `reeve jobs approve <name>`.
-    approve: 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job}',
+    // Reeve's jobs run only while their script's sha256 is the approved one: `reeve jobs approve <name>`, and with
+    // --sha256 (Reeve 0.4.3 and later) only the script the Steward checked, or none.
+    approve: 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}',
   },
   {
     id: 'heiward',
@@ -150,7 +151,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
       { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
-      { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name: for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
+      { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name, and {sha256} the hash of the script the Steward checked (so only that script is approved): for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
       { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, laid out as its repository is (jobs\\jobs.json, release.json): where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
     ],
   },

@@ -6,7 +6,7 @@ import { gh } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
-import { noteApproved, runApprove } from './jobs.ts';
+import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
 
@@ -93,11 +93,13 @@ export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise
   const failed: string[] = [];
   for (const job of jobs) {
     // A job's name is letters, digits, dots, dashes and underscores (src/after.ts), so it stays one word.
-    const r = await runApprove(ctx, e, job);
+    // The installed script as it is now: with {sha256} in the approve command, that one or none is approved.
+    const hash = installedHash(e, job);
+    const r = await runApprove(ctx, e, job, hash);
     if (r.code === 0) {
       approved.push(job);
       // The round's own look at the jobs (stages/jobs.ts) needn't approve it again.
-      noteApproved(e, job);
+      noteApproved(e, job, r.pinned ?? hash);
     } else failed.push(`${job} (exit ${r.code}: ${r.said})`);
   }
   const by = asking.map((p) => `#${p.number}`).join(', ');
