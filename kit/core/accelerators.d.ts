@@ -418,6 +418,24 @@ export declare function tooBig(serving: {
     maxContextTokens: number;
 }[], promptTokens: number, maxTokens: number): string | null;
 /**
+ * How long one request may take, in ms. A background chat or vision request gets requestBaseMs plus
+ * requestPerTokenMs for each token it may answer (GenieX on the NPU writes about 34 a second, so that is
+ * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
+ * person waiting, and embeddings, get the config's. A request that may load its model on the way
+ * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
+ * then is the model loading slowly, not the server failing.
+ * @param {Rules} rules
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @returns {number}
+ */
+export declare function requestTimeoutMs(rules: Rules, r: {
+    lane: 'interactive' | 'background';
+    work: Work;
+    maxTokens: number;
+    ceilingMs: number;
+    coldLoad?: boolean;
+}): number;
+/**
  * Splits text into pieces whose estimated size fits `budgetTokens`, at line breaks where it can, so a long
  * input is asked about piece by piece (map-reduce) and never sent whole.
  * @param {Rules} rules

@@ -96,6 +96,27 @@ export type AcceleratorRules = {
      * How long a model server may take to come up after its startCommand.
      */
     startWaitMs: number;
+    /**
+     * How long a look at a server's /v1/models waits. A server that took the connection and gave no
+     * answer in that time is busy, not down: GenieX answers nothing while it loads a model or answers a request.
+     */
+    probeMs: number;
+    /**
+     * How long a busy server (no answer yet, or a 503 while it loads its model) may take to be ready.
+     */
+    readyWaitMs: number;
+    /**
+     * A background chat or vision request's timeout is this, plus requestPerTokenMs per token it may answer.
+     */
+    requestBaseMs: number;
+    /**
+     * What each token a background request may answer adds to its timeout.
+     */
+    requestPerTokenMs: number;
+    /**
+     * What loading a model may take besides: a server just started, or GenieX swapping models.
+     */
+    coldLoadMs: number;
 };
 export type MannersRules = {
     /**

@@ -552,11 +552,15 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
     noGames();
     await assert.rejects(ask(['gpu-broken', 'gpu-slow', 'npu']), (e: Error) => e instanceof NpuError && /then/.test(e.message));
     assert.ok(A.readFailure('gpu-broken') && A.readFailure('gpu-slow'));
-    assert.equal(good.seen.length, 3, 'the NPU was not asked a fourth time');
+    const asked = good.seen.filter((b) => b.max_tokens !== 1);
+    assert.equal(asked.length, 3, 'the NPU was not asked a fourth time');
+    assert.equal(good.seen.length, 6, 'each turn on the NPU warmed its model up first, with a one-token request');
 
-    // A server that won't come up (its command exits at once) counts as failed too; its start is
-    // given 30 s, so this one is checked directly, with a shorter wait.
-    await assert.rejects(A.ensureServer(accs[0].chat as any, { waitMs: 600 }), (e: Error) => e instanceof A.AcceleratorDown && /didn't answer within/.test(e.message));
+    // A server that won't come up counts as failed too: one whose command exits at once, with nothing
+    // answering, at once; one that never answers, after its start's wait (30 s; shorter here).
+    await assert.rejects(A.ensureServer(accs[0].chat as any, { waitMs: 5000 }), (e: Error) => e instanceof A.AcceleratorDown && /exited \(code 0\)/.test(e.message));
+    const silent = { baseUrl: `http://127.0.0.1:${refusing}`, model: 'm', startCommand: [process.execPath, '-e', 'setTimeout(() => {}, 3000)'] };
+    await assert.rejects(A.ensureServer(silent, { waitMs: 600 }), (e: Error) => e instanceof A.AcceleratorDown && /didn't answer within/.test(e.message));
     await assert.rejects(A.postJson({ baseUrl: `http://127.0.0.1:${refusing}`, model: 'm' }, '/v1/chat/completions', {}, 1000), (e: Error) => e instanceof A.AcceleratorDown && /refused the connection/.test(e.message));
 
     // After 10 minutes it is tried again, and a success removes the marker.
@@ -573,6 +577,79 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
     await broken.close();
     await slow.close();
     await good.close();
+  }
+});
+
+test('a busy server is waited on, never started twice, and looked at afresh each turn; a model still loading is no failure', async () => {
+  fresh();
+  noGames();
+  // A model server as GenieX is: it takes connections, but answers nothing (not even /v1/models) while it
+  // loads a model; npu-embed answers 503 instead. `warmMs` is how long its one-token warm-up takes.
+  let mode: 'ok' | 'hang' | '503' = 'hang';
+  let warmMs = 0;
+  const seen: any[] = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    if (req.url === '/v1/models') {
+      if (mode === '503') return res.writeHead(503).end('loading');
+      while (mode === 'hang' && !res.destroyed) await sleep(20);
+      if (!res.destroyed) res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[]}');
+      return;
+    }
+    const body = JSON.parse(raw);
+    seen.push(body);
+    if (body.max_tokens === 1) await sleep(warmMs);
+    if (!res.destroyed) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: 'warm' }, finish_reason: 'stop' }] }));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  // Started a second time, this would exit with code 3, and the request would fail.
+  const ep = { baseUrl, model: 'm', startCommand: [process.execPath, '-e', 'process.exit(3)'] };
+  try {
+    assert.equal(await A.probe(baseUrl, 300), 'busy', 'no answer from a server that took the connection: busy');
+    mode = '503';
+    assert.equal(await A.probe(baseUrl, 300), 'busy', 'a 503: busy loading');
+    assert.equal(await A.probe(`http://127.0.0.1:${await closedPort()}`, 300), 'down');
+    assert.equal(await A.ping(baseUrl), false, 'ping is ready or not');
+
+    mode = 'hang';
+    setTimeout(() => (mode = 'ok'), 3600); // longer than one look (3 s)
+    const t0 = Date.now();
+    assert.deepEqual(await A.ensureServer(ep), { started: false, waited: true }, 'waited on, not started again');
+    assert.ok(Date.now() - t0 >= 3500);
+    assert.equal(await A.probe(baseUrl), 'ready');
+    mode = 'hang';
+    await assert.rejects(A.ensureServer(ep, { readyMs: 400 }), (e: Error) => e instanceof A.AcceleratorDown && /still busy/.test(e.message));
+
+    // A model that loads too slowly (the warm-up times out) isn't the accelerator failing: nothing is
+    // marked, the work is deferred, and this agent leaves the NPU alone a while.
+    mode = 'ok';
+    warmMs = 800;
+    const model = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: ep, quirks: ['prefix-leak'] }] }));
+    await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10, timeoutMs: 300 }), (e: Error) => e instanceof NpuBusy && /still loading its model/.test(e.message) && /not counted as a failure/.test(e.message));
+    assert.equal(A.readFailure('npu'), null);
+    await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), (e: Error) => e instanceof NpuBusy && /resumes in 5 min/.test(e.message));
+    resetNpuManners();
+    warmMs = 0;
+    seen.length = 0;
+    const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.equal(a.text, 'warm');
+    assert.deepEqual(seen.map((b) => b.max_tokens), [1, 10], 'the warm-up, then the request');
+    assert.match(seen[0].messages[0].content, /^\[req /, "the warm-up has GenieX's nonce too");
+    await assert.rejects(A.postJson({ baseUrl, model: 'm' }, '/v1/chat/completions', { max_tokens: 1 }, 1, { loading: true }), (e: Error) => e instanceof A.ModelLoading && e instanceof A.AcceleratorDown);
+
+    // Each turn looks afresh: a server stopped since (Reeve stops an idle GenieX) is started again, not
+    // sent a request it can't take.
+    await new Promise<void>((r) => {
+      server.closeAllConnections();
+      server.close(() => r());
+    });
+    await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10, start: false }), /isn't running/);
+    assert.equal(A.readFailure('npu'), null);
+  } finally {
+    server.closeAllConnections();
+    server.close();
   }
 });
 

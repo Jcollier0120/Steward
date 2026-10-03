@@ -123,6 +123,14 @@ export const say = Object.freeze({
   couldNotStart: (command, why) => `couldn't start "${command}": ${why}`,
   /** @param {string} program @param {string} baseUrl @param {number} seconds */
   didNotAnswer: (program, baseUrl, seconds) => `started "${program}" but ${baseUrl} didn't answer within ${seconds} s`,
+  /** @param {string} program @param {number | null} code @param {string} baseUrl */
+  exitedWhileStarting: (program, code, baseUrl) => `started "${program}", but it exited (code ${code}) and ${baseUrl} isn't answering`,
+  /** @param {string} baseUrl @param {number} seconds */
+  stillBusy: (baseUrl, seconds) => `${baseUrl} took the connection but was still busy (loading a model, or answering another request) after ${seconds} s`,
+  /** @param {string} route @param {string} baseUrl @param {number} seconds */
+  modelLoadTimedOut: (route, baseUrl, seconds) => `${route} on ${baseUrl} timed out after ${seconds} s while its model loaded`,
+  /** @param {string} where @param {string} why @param {string} deferred */
+  modelLoading: (where, why, deferred) => `${where} was still loading its model (${why}); not counted as a failure${deferred}`,
   /** @param {string} route @param {string} baseUrl @param {number} seconds */
   requestTimedOut: (route, baseUrl, seconds) => `${route} on ${baseUrl} timed out after ${seconds} s`,
   /** @param {string} route @param {string} baseUrl @param {string} why */
