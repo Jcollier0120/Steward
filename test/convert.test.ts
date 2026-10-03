@@ -16,6 +16,7 @@ test('a hire is converted: the old kit gone, its imports in src/kit, kit.json, t
     version: '0.3.1',
     kit: null,
     files: {
+      'package.json': '{\n  "name": "porter",\n  "version": "0.3.1",\n  "private": true,\n  "type": "module"\n}\n',
       'src/npu.ts': 'export class Npu {}\n',
       'src/server.ts': "import { APP } from './app.ts';\n",
       'src/settings-panel.js': '// panel\n',
@@ -54,6 +55,29 @@ test('a hire is converted: the old kit gone, its imports in src/kit, kit.json, t
   assert.equal(sh(f.checkout, 'status', '--porcelain').split('\n').filter((l) => !/^[MADR] /.test(l)).length, 0);
   assert.ok(!existsSync(path.join(f.checkout, 'tools', 'release.ts')));
   await assert.rejects(convert({ dir: f.checkout, kit: '1.0.0', parts: ['node'], version: '0.4.1', kitTool: '', run }), /tracks none of the old kit's files/);
+});
+
+/** Reeve's own files at six of the old kit's paths: they were never the kit's copy. */
+const REEVE_OWN = ['src/accelerators.ts', 'src/duty.ts', 'src/install.ts', 'tools/release.ts', 'test/accelerators.test.ts', 'test/install.test.ts'];
+
+test('Reeve, or any agent but the eight hires, is refused: its files at the old kit\'s paths are its own, and stay', async () => {
+  const f = fakeEmployee(path.join(tmp, 'reeve'), {
+    kit: null,
+    files: {
+      'package.json': '{\n  "name": "reeve",\n  "version": "0.2.9",\n  "private": true,\n  "type": "module"\n}\n',
+      ...Object.fromEntries(REEVE_OWN.map((p) => [p, `// Reeve's own ${p}\n`])),
+    },
+  });
+  await assert.rejects(
+    convert({ dir: f.checkout, kit: '1.0.0', parts: ['node', 'spec'], version: '0.3.0', kitTool: '// tools/kit.ts\n', run }),
+    /is reeve, not one of the hires that carried the old kit \(porter, auditor, clerk, herald, warrener, aletaster, miller, pinder\): its files at the old kit's paths are its own/,
+  );
+  for (const p of REEVE_OWN) assert.ok(existsSync(path.join(f.checkout, p)), p);
+  assert.equal(sh(f.checkout, 'status', '--porcelain'), '', 'nothing removed, nothing staged');
+  // A folder with no package.json is no hire either.
+  const g = fakeEmployee(path.join(tmp, 'dotnet'), { kit: null, files: { 'tools/release.ts': '' } });
+  sh(g.checkout, 'rm', '--quiet', 'package.json');
+  await assert.rejects(convert({ dir: g.checkout, kit: '1.0.0', parts: ['spec'], version: '1.7.0', kitTool: '', run }), /is no Node agent, not one of the hires/);
 });
 
 test("npm's scripts fill the kit first, so a fresh clone works whichever it runs first", () => {

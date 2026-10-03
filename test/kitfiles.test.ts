@@ -3,7 +3,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_EMPLOYEES } from '../src/settings.ts';
 import {
+  carriedOldKit,
   changelogBetween,
   compareVersions,
   filesUnder,
@@ -11,6 +13,7 @@ import {
   kitPathOfHire,
   kitVersionOf,
   newPathOfOld,
+  OLD_KIT_HIRES,
   oldKitFilesIn,
   OLD_KIT_PATHS,
   partFiles,
@@ -40,6 +43,12 @@ test('the old kit: where each file was, where it is now, and which a hire still 
   assert.equal(newPathOfOld('test/kit.test.ts'), null);
   assert.equal(newPathOfOld('src/app.ts'), null, "an agent's own file isn't the kit's");
   assert.deepEqual(oldKitFilesIn(['src/app.ts', 'src\\npu.ts', 'tools/release.ts', 'src/kit/npu.ts']), ['src/npu.ts', 'tools/release.ts']);
+});
+
+test('only the eight hires carried the old kit: in Reeve, Heiward or a new employee its paths are their own', () => {
+  assert.deepEqual(OLD_KIT_HIRES, ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder']);
+  assert.deepEqual(DEFAULT_EMPLOYEES.filter((e) => carriedOldKit(e.id)).map((e) => e.id), OLD_KIT_HIRES, "Settings' hires");
+  for (const id of ['reeve', 'heiward', 'surveyor', '', null, undefined]) assert.equal(carriedOldKit(id), false, String(id));
 });
 
 test("every old kit file is in the kit now, and every kit file came from the old kit or is new in the changelog", () => {
