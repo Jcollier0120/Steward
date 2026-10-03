@@ -3,8 +3,8 @@ import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { dataFile, readJson } from './kit/store.ts';
 
-/** The kit's parts (src/kitfiles.ts). */
-export const PART_NAMES = ['node', 'web', 'spec'];
+/** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
+export const PART_NAMES = ['node', 'web', 'spec', 'core', 'dotnet'];
 
 /**
  * One of Manor's employees, as the Steward deals with it: where its code is, which kit parts it takes,
