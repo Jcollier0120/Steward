@@ -30,6 +30,10 @@ test('eleven employees, all on the kit: the eight hires, Reeve and Heiward, then
   assert.deepEqual(reeve.parts, ['node', 'spec']);
   assert.equal(reeve.fill, 'node tools/kit.ts');
   assert.deepEqual(reeve.versionFiles, ['package.json', 'package-lock.json', 'src/mcp.ts']);
+  // After merging: every Node agent installs from its release; only Reeve has jobs to approve; Heiward is a Windows app.
+  assert.equal(reeve.install, 'node src/cli.ts install');
+  assert.equal(reeve.approve, 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job}');
+  assert.deepEqual([e[0].approve, heiward.install, heiward.approve], ['', '', '']);
   assert.equal(heiward.usesKit, true);
   assert.equal(heiward.fill, 'powershell -NoProfile -File tools\\kit.ps1');
   assert.equal(heiward.branch, 'master');

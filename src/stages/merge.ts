@@ -53,13 +53,14 @@ const describe = (pr: PrInfo) => `#${pr.number} (${pr.head}${pr.whose === 'team'
 type Lookup = () => Promise<{ released: string[]; base: string | null }>;
 
 /**
- * Why the steps a mergeable PR asks for couldn't happen, or null: an install with no install command, or a release
- * whose version (the PR's, or its branch's when that is higher) is already released.
+ * Why the steps a mergeable PR asks for couldn't happen, or null: an install or approval with no command for it in
+ * Settings, or a release whose version (the PR's, or its branch's when that is higher) is already released.
  */
 export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<string | null> {
   const a = pr.after;
   if (!a) return null;
   if (a.steps.includes('install') && !e.install) return `it asks for install, but Settings give ${e.name} no install command`;
+  if (a.steps.includes('approve-jobs') && !e.approve) return `it asks for approve-jobs, but Settings give ${e.name} no approve command`;
   if (!a.steps.includes('release')) return null;
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return `it asks for a release, but there's no checkout at ${repo} to read its version from`;

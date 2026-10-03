@@ -34,6 +34,7 @@ test("a PR's steward block: what it asks for, in the Steward's order; anything i
   assert.match(error('{"after": ["approve-jobs"]}'), /asks for approve-jobs, but names no jobs/);
   assert.match(error('{"after": ["release"], "jobs": ["x"]}'), /names jobs, but doesn't ask for approve-jobs/);
   assert.match(error('{"after": ["approve-jobs"], "jobs": ["../evil"]}'), /"jobs" isn't a list of job names/);
+  assert.match(error('{"after": ["release", "approve-jobs"], "jobs": ["x"]}'), /asks for approve-jobs without install: the scripts approved are the installed copy's/);
   assert.match((readAfter(block(REEVE13) + '\n' + block(REEVE13)) as { error: string }).error, /more than one steward block/);
   assert.equal(afterWords({ steps: ['release', 'install', 'approve-jobs'], jobs: ['aletaster-orders'] }), 'release, install, approve-jobs (aletaster-orders)');
 });
@@ -87,16 +88,18 @@ test("parsePrs keeps a PR's steward block, or why it can't be read; merge holds 
   const same = withPr('same-version', null);
   const releases = [{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
   const r = runner((args) => (args[1] === 'list' && args[0] === 'pr' ? ok([listed({ headRefOid: same.sha }), listed({ number: 8, body: block('{"after": ["deploy"]}') })]) : args[0] === 'release' && args[1] === 'list' ? ok(releases) : undefined));
-  const e = employee(same.checkout);
+  const e = employee(same.checkout, { approve: 'node -e process.exit(0) {job}' });
   const look = await mergeOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-same'), run: r.run, neutralDir: tmp }), e, { yes: true, team: true });
   assert.equal(look.outcome, 'skipped');
   assert.ok(!r.gh.some((a) => a[1] === 'merge'), 'nothing merged');
   assert.match(look.message, /#7 \(.*; then release, install, approve-jobs \(aletaster-orders\)\) waits: it asks for a release, but v0\.4\.0, its version once merged, is already released: raise the version in the PR/);
   assert.match(look.message, /#8 .* waits: its steward block asks for "deploy"/);
 
-  // Install with no install command in Settings waits too.
+  // Install or approve-jobs with no command for it in Settings waits too.
   const none = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, install: '' }, { yes: false, team: true });
   assert.match(none.message, /#7 .* waits: it asks for install, but Settings give Fake no install command/);
+  const noApprove = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, approve: '' }, { yes: false, team: true });
+  assert.match(noApprove.message, /#7 .* waits: it asks for approve-jobs, but Settings give Fake no approve command/);
 });
 
 /** A release zip as an agent's release.ts makes it (flat, release.json at the top), with its SHA256SUMS.txt. */
@@ -120,7 +123,7 @@ const download = (args: string[], zip: string, sums: string) => {
   return ok('');
 };
 
-test('merge --yes --team, then what the PR asks for: its release from the branch, that release installed from its checked zip, and the job left to you to approve', async () => {
+test('merge --yes --team, then what the PR asks for: its release from the branch, that release installed from its checked zip, and its job approved in the installed copy', async () => {
   const f = withPr('whole', '0.4.1');
   const work = path.join(tmp, 'work-whole');
   const releasedMarker = path.join(tmp, 'whole-released.txt');
@@ -139,7 +142,13 @@ test('merge --yes --team, then what the PR asks for: its release from the branch
     if (args[0] === 'release' && args[1] === 'list') return ok([...(existsSync(releasedMarker) ? [{ tagName: 'v0.4.1', isDraft: false }] : []), { tagName: 'v0.4.0', isDraft: false }]);
     if (args[0] === 'release' && args[1] === 'download') return download(args, made.zip, made.sums);
   });
-  const e = employee(f.checkout, { release: `node -e "require('fs').writeFileSync(process.argv[1], process.cwd())" ${releasedMarker}` });
+  // The approve command, as Settings hold it: %NAME% expanded, {job} each job's name.
+  const approvedMarker = path.join(tmp, 'whole-approved.txt');
+  process.env.STEWARD_TEST_APPROVED = approvedMarker;
+  const e = employee(f.checkout, {
+    release: `node -e "require('fs').writeFileSync(process.argv[1], process.cwd())" ${releasedMarker}`,
+    approve: `node -e "require('fs').appendFileSync(process.argv[1], 'approve ' + process.argv[2] + ' after ' + require('fs').readFileSync(process.argv[3], 'utf8').split(' ')[0])" %STEWARD_TEST_APPROVED% {job} ${installedMarker}`,
+  });
   const ctx = ctxFor({ employees: [e], workRoot: work, run: r.run, neutralDir: tmp });
 
   const m = await mergeOne(ctx, e, { yes: true, team: true });
@@ -148,17 +157,17 @@ test('merge --yes --team, then what the PR asks for: its release from the branch
   assert.deepEqual(r.gh.find((a) => a[1] === 'merge'), ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'], "a team member's branch stays");
 
   const steps = await afterMerge(ctx, [e], [{ id: e.id, merged: m.merged }], { releaseKit: null });
-  assert.deepEqual(steps.map((s) => [s.outcome, s.message.split(':')[0]]), [['done', 'release'], ['done', 'install'], ['skipped', 'approve-jobs']]);
+  assert.deepEqual(steps.map((s) => [s.outcome, s.message.split(':')[0]]), [['done', 'release'], ['done', 'install'], ['done', 'approve-jobs']]);
   assert.match(steps[0].message, /^release: released v0\.4\.1 from origin\/main \(.{7}\), with kit 1\.0\.0$/);
   assert.match(readFileSync(releasedMarker, 'utf8'), /fake-release$/, 'released from a worktree of the branch, not the checkout');
   assert.equal(steps[1].message, 'install: installed v0.4.1 on this PC');
   assert.match(readFileSync(installedMarker, 'utf8'), /^install in .*fake-install[\\/]release$/, 'its own installer, run in the unpacked release');
   assert.ok(!existsSync(path.join(work, 'fake-install')), 'the unpacked release is removed once installed');
-  assert.equal(steps[2].message, "approve-jobs: yours to do, once you've read each script: fake jobs approve aletaster-orders, in the installed copy; #7 also changed jobs/other.ps1, which it doesn't name");
-  assert.ok(!r.gh.some((a) => a.includes('approve')), 'the Steward approves nothing');
+  assert.equal(steps[2].message, "approve-jobs: approved aletaster-orders, as merging #7 counts as reading its script; #7 also changed jobs/other.ps1, which it doesn't name: not approved, yours to review");
+  assert.equal(readFileSync(approvedMarker, 'utf8'), 'approve aletaster-orders after install', 'approved once, by name, after the install; not jobs/other.ps1');
 });
 
-test("install refuses a zip that doesn't match its SHA256SUMS.txt, or a release.json of another version; and nothing is installed after a release that wasn't made", async () => {
+test("install refuses a zip that doesn't match its SHA256SUMS.txt, or a release.json of another version; and nothing is installed or approved after a release that wasn't made", async () => {
   const dir = path.join(tmp, 'refuse');
   const marker = path.join(tmp, 'refuse-installed.txt');
   const made = releaseZip(dir, '0.4.1', marker);
@@ -176,12 +185,12 @@ test("install refuses a zip that doesn't match its SHA256SUMS.txt, or a release.
   // A release asked for, and refused (its version is out already): no install after it.
   const f = withPr('no-release', '0.4.1');
   const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : args[0] === 'pr' && args[1] === 'view' ? ok({ files: [] }) : undefined));
-  const g = employee(f.checkout);
+  const g = employee(f.checkout, { approve: 'node -e process.exit(1) {job}' });
   const pr = parsePrs(JSON.stringify([listed({ headRefOid: f.sha })]), ['Jcollier0120'])[0];
   const steps = await afterMerge(ctxFor({ employees: [g], workRoot: path.join(tmp, 'work-no-release'), run: r.run, neutralDir: tmp }), [g], [{ id: g.id, merged: [pr] }], { releaseKit: null });
   assert.deepEqual(steps.map((s) => s.message), [
     'release: v0.4.0 is already released',
     'install: not without the release #7 asked for',
-    "approve-jobs: yours to do, once you've read each script: fake jobs approve aletaster-orders, in the installed copy",
+    'approve-jobs: not without the install #7 asked for',
   ]);
 });

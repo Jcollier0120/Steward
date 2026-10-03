@@ -12,8 +12,10 @@
  *   pins). Merge holds a PR that asks for one when its version after merging is already released.
  * - install: its newest release on this PC: the zip downloaded, checked against SHA256SUMS.txt, unpacked, and
  *   its install command (Settings) run in it. After a release it asked for, only when that release was made.
- * - approve-jobs: never run. A job's approval says a person read its script; the Steward names the jobs and
- *   the command, and leaves it to you.
+ * - approve-jobs, with jobs: each job approved in the installed copy, with the employee's approve command
+ *   (Settings), after the PR's install. Merging the PR counts as reading its scripts (your decision): an
+ *   approval pins the script's sha256, so it is the merged script that runs unattended. It needs install,
+ *   since the scripts approved are the installed copy's.
  *
  * A block the Steward can't read, or a step it doesn't know, holds the PR: merged without it, what the PR
  * asked for would silently not happen.
@@ -54,6 +56,7 @@ export function readAfter(body: unknown): { after: After | null } | { error: str
   const steps = AFTER_STEPS.filter((s) => j.after.includes(s));
   if (steps.includes('approve-jobs') && !jobs.length) return { error: 'its steward block asks for approve-jobs, but names no jobs' };
   if (jobs.length && !steps.includes('approve-jobs')) return { error: "its steward block names jobs, but doesn't ask for approve-jobs" };
+  if (steps.includes('approve-jobs') && !steps.includes('install')) return { error: "its steward block asks for approve-jobs without install: the scripts approved are the installed copy's" };
   return { after: { steps, jobs: [...new Set(jobs as string[])] } };
 }
 

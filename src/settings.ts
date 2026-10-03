@@ -33,6 +33,11 @@ export interface Employee {
   release: string;
   /** Installs it on this PC, run in its release unpacked, when a merged PR asks (after: install). Empty: never. */
   install: string;
+  /**
+   * Approves one of its jobs in the installed copy, {job} its name, when a merged PR names it (after: approve-jobs),
+   * after that PR's install: merging the PR counts as reading the script. %NAME% is expanded. Empty: never.
+   */
+  approve: string;
 }
 
 export interface Settings {
@@ -58,6 +63,7 @@ const hire = (name: string): Employee => ({
   versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
   release: 'npm run release -- --publish',
   install: 'node src/cli.ts install',
+  approve: '',
 });
 
 /**
@@ -72,6 +78,8 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     ...hire('Reeve'),
     parts: ['node', 'spec'],
     versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
+    // Reeve's jobs run only while their script's sha256 is the approved one: `reeve jobs approve <name>`.
+    approve: 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job}',
   },
   {
     id: 'heiward',
@@ -87,6 +95,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     release: 'powershell -NoProfile -File HEI.Agent\\release.ps1 -Publish',
     // Heiward installs as a Windows app (Settings > Apps), not from a zip with src\cli.ts: the Steward doesn't install it.
     install: '',
+    approve: '',
   },
   hire('Surveyor'),
 ];
@@ -117,7 +126,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Employees',
     help: 'Every agent the Steward looks after: where its code is, which kit parts it takes, and how to fill its kit, test it, bump its version and release it.',
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like porter' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
@@ -131,6 +140,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
       { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
+      { key: 'approve', kind: 'text', label: 'Approve a job', help: 'Run for each job a merged PR names, {job} its name, after that PR\'s install: merging the PR counts as reading the script. %USERPROFILE% and the like are expanded.', empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
     ],
   },
   {
@@ -173,6 +183,7 @@ function normalizeEmployee(e: any): Employee | null {
     versionFiles: strings(e.versionFiles, known.versionFiles),
     release: typeof e.release === 'string' ? e.release.trim() : known.release,
     install: typeof e.install === 'string' ? e.install.trim() : known.install,
+    approve: typeof e.approve === 'string' ? e.approve.trim() : known.approve,
   };
 }
 

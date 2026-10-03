@@ -107,7 +107,7 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
   const who = `the ticked employees (${onKit.length} take the kit)`;
   const disabled = o.running || !kit ? ' disabled' : '';
   const team = o.team ?? [];
-  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block (release, install), and the jobs it names to approve, for you. The team's branches are left as they are.`;
+  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
   const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${offKit.length === 1 ? "doesn't" : "don't"} take the kit yet: the stages pass over ${offKit.length === 1 ? 'it' : 'them'}, but the team's PRs to ${offKit.length === 1 ? 'it' : 'them'} can be merged.` : '';
   const stages = `<div class="card">
 <form id="stage-form"><input type="hidden" name="kit" value="${esc(kit ?? '')}"><div class="picks">${boxes}</div></form>

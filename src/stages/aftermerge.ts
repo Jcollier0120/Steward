@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:f
 import path from 'node:path';
 import type { AfterStep } from '../after.ts';
 import { gh } from '../git.ts';
+import { expandEnv } from '../kit/settings-kit.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
@@ -68,10 +69,14 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   return result(e, 'done', `installed ${latest.tag} on this PC`, { version: latest.version, url: `https://github.com/${e.repo}/releases/tag/${latest.tag}` });
 }
 
-/** The jobs a merged PR asks you to approve, and the command; with any job script it changed but didn't name. */
-async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<EmployeeResult> {
+/**
+ * The jobs the merged PRs name, approved in the installed copy with the employee's approve command: merging a PR
+ * counts as reading its scripts. A job script a PR changed but didn't name isn't approved; the result says so.
+ */
+export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<EmployeeResult> {
   const asking = prs.filter((p) => p.after?.steps.includes('approve-jobs'));
   const jobs = [...new Set(asking.flatMap((p) => p.after!.jobs))];
+  if (!e.approve) return result(e, 'refused', `Settings give ${e.name} no approve command, so ${jobs.join(', ')} ${jobs.length === 1 ? 'waits' : 'wait'} for you`);
   const unnamed: string[] = [];
   for (const p of asking) {
     try {
@@ -84,9 +89,24 @@ async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<Employ
       ctx.log(`[${e.id}] couldn't list #${p.number}'s files: ${(err as Error).message}`);
     }
   }
-  const commands = jobs.map((j) => `${e.id} jobs approve ${j}`).join(', then ');
-  const also = unnamed.length ? `; ${asking.map((p) => `#${p.number}`).join(', ')} also changed ${unnamed.map((u) => `jobs/${u}.ps1`).join(', ')}, which ${unnamed.length === 1 ? "it doesn't" : "they don't"} name` : '';
-  return result(e, 'skipped', `yours to do, once you've read each script: ${commands}, in the installed copy${also}`);
+  const approved: string[] = [];
+  const failed: string[] = [];
+  for (const job of jobs) {
+    // A job's name is letters, digits, dots, dashes and underscores (src/after.ts), so it stays one word.
+    const line = expandEnv(e.approve).replaceAll('{job}', job);
+    ctx.log(`[${e.id}] approving ${job}: ${line}`);
+    const r = await runLine(ctx.run, line, { cwd: ctx.neutralDir, timeoutMs: 2 * 60_000 });
+    for (const l of tail(`${r.out}\n${r.err}`, 6).split('\n')) ctx.log(`[${e.id}]   ${l}`);
+    if (r.code === 0) approved.push(job);
+    else failed.push(`${job} (exit ${r.code}: ${(r.err || r.out).trim().split('\n').pop()})`);
+  }
+  const by = asking.map((p) => `#${p.number}`).join(', ');
+  const parts = [
+    ...(approved.length ? [`approved ${approved.join(', ')}, as merging ${by} counts as reading ${approved.length === 1 ? 'its script' : 'their scripts'}`] : []),
+    ...(failed.length ? [`couldn't approve ${failed.join(', ')}`] : []),
+    ...(unnamed.length ? [`${by} also changed ${unnamed.map((u) => `jobs/${u}.ps1`).join(', ')}, which ${unnamed.length === 1 ? "it doesn't" : "they don't"} name: not approved, yours to review`] : []),
+  ];
+  return result(e, failed.length ? 'failed' : 'done', parts.join('; '));
 }
 
 /**
@@ -119,14 +139,19 @@ export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: 
     } else if (o.releaseKit) {
       await step('release', () => releaseOne(ctx, e, { kit: o.releaseKit! }));
     }
+    let install: EmployeeResult | null = null;
     if (asking('install').length) {
       if (release && release.outcome !== 'done') out.push(result(e, 'skipped', `install: not without the release ${by(asking('install'))} asked for`));
       else {
         ctx.log(`[${e.id}] install, as ${by(asking('install'))} asks`);
-        await step('install', () => installOne(ctx, e));
+        install = await step('install', () => installOne(ctx, e));
       }
     }
-    if (asking('approve-jobs').length) await step('approve-jobs', () => approveJobs(ctx, e, m.merged));
+    if (asking('approve-jobs').length) {
+      // The approval pins the installed script: only after the install those PRs asked for.
+      if (install?.outcome !== 'done') out.push(result(e, 'skipped', `approve-jobs: not without the install ${by(asking('approve-jobs'))} asked for`));
+      else await step('approve-jobs', () => approveJobs(ctx, e, m.merged));
+    }
   }
   return out;
 }
