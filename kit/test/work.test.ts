@@ -10,6 +10,7 @@ const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.met
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
 process.env.REEVE_HOME = path.join(home, 'reeve');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
+process.env.MANOR_HOME = path.join(home, 'no-manor'); // the title bar's Back to Manor: never the real Manor's settings
 
 const { WORK, thisPc, workSection } = await import('./fixture/src/kit/work.ts');
 const { parseAccelerators, REEVE_NOT_SET_UP } = await import('./fixture/src/kit/accelerators.ts');

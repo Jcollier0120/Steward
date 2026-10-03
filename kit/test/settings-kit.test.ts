@@ -12,6 +12,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), `${id}-settings-test-`));
 process.env[`${ENV}_HOME`] = home;
 process.env[`${ENV}_PORT`] = String(50000 + Math.floor(Math.random() * 9000));
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
+process.env.MANOR_HOME = path.join(home, 'no-manor'); // the title bar's Back to Manor: never the real Manor's settings
 process.env.REEVE_HOME = path.join(home, 'reeve'); // the page names this PC's accelerators: never the real Reeve's
 
 const { port } = await import('./fixture/src/app.ts');

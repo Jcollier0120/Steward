@@ -2,6 +2,7 @@ import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.t
 import { APP, dataDir } from '../app.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
+import { manorLink } from './manor.ts';
 import { roundTimes } from './schedule.ts';
 import { workSection } from './work.ts';
 
@@ -133,6 +134,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 </head>
 <body>
 <header class="titlebar${o.busy ? ' busy' : ''}" data-agent="${esc(APP.id)}">
+  ${backToManor()}
   <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
@@ -283,6 +285,16 @@ if (REFRESH) setInterval(() => {
 </html>`;
 }
 
+/**
+ * "Back to <manor>", first in the title bar, with Manor's icon, when Manor is installed here (manor.ts): the way
+ * back from every agent's page to the manor's. Nothing without Manor.
+ */
+function backToManor(): string {
+  const m = manorLink();
+  if (!m) return '';
+  return `<a class="manor-back" href="${esc(m.url)}" title="Back to ${esc(m.name)}"><img src="/manor-icon.svg" alt="" width="22" height="22"><span>Back to ${esc(m.name)}</span></a><span class="manor-sep" aria-hidden="true"></span>`;
+}
+
 /** A notice under the title bar while the agent is off duty: its scheduled rounds are paused (Manor's Stop, or `stop`). */
 function offDuty(d: Duty): string {
   if (d.onDuty) return '';
@@ -343,6 +355,12 @@ p { margin: 8px 0; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
 .brand:hover { background: var(--hover); }
 .brand-mark { width: 28px; height: 28px; flex: none; }
+/* Back to the manor, first in the title bar: Manor's icon and its name; the icon alone in a narrow window. */
+.manor-back { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 6px; margin-left: -6px; border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.manor-back:hover { background: var(--hover); color: var(--fg); }
+.manor-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.manor-back img { flex: none; }
+.manor-sep { width: 1px; height: 24px; background: var(--line); flex: none; }
 .brand-text { min-width: 0; }
 .brand h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
 .brand .role { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.35; max-width: 90ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -479,6 +497,7 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
 
 @media (max-width: 640px) {
   .titlebar { padding: 8px 12px; }
+  .manor-back span { display: none; }
   .brand { flex: 1 1 0; }
   .brand .role { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .scene { width: 52px; height: 33px; }
