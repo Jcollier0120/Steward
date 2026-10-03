@@ -1,6 +1,7 @@
 import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.ts';
 import { APP, dataDir } from '../app.ts';
 import { duty } from './duty.ts';
+import { workSection } from './work.ts';
 
 /** Text made safe for HTML. */
 export const esc = (s: unknown) =>
@@ -52,6 +53,9 @@ const GEAR = `<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"
  * the script lifts that section out of the page and into the Settings view: from the panel back to the
  * heading before it when that heading says Settings, and on to the next heading. Without JavaScript (which
  * the panel needs anyway) the page stays as it was, Settings at the end, and the link stays hidden.
+ *
+ * The kit adds its own to the Settings page after the agent's: everything at the top of the body marked
+ * data-settings-extra, which is "Where its work runs" (work.ts).
  */
 export function page(o: { token: string; body: string; title?: string; busy?: boolean; refreshSec?: number }): string {
   const refresh = o.busy ? 3 : o.refreshSec ?? 0;
@@ -74,6 +78,7 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 </header>
 <main>
 ${offDuty()}${o.body}
+${workSection()}
 </main>
 <footer>${esc(APP.name)} ${esc(APP.version)} · this PC only · its files are in <code>${esc(dataDir)}</code></footer>
 <script>
@@ -130,7 +135,7 @@ document.addEventListener('click', (e) => {
   const moving = [];
   let passed = false;
   for (let el = first; el; el = el.nextElementSibling) {
-    if (passed && el.tagName === 'H2') break;
+    if (el.hasAttribute('data-settings-extra') || (passed && el.tagName === 'H2')) break;
     moving.push(el);
     if (el === top) passed = true;
   }
@@ -146,7 +151,7 @@ document.addEventListener('click', (e) => {
     h.textContent = 'Settings';
     view.append(h);
   }
-  view.append(...moving);
+  view.append(...moving, ...main.querySelectorAll(':scope > [data-settings-extra]'));
   main.append(view);
   const route = () => {
     const on = /^#\\/?settings$/.test(location.hash);
@@ -230,6 +235,9 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
 .back-link { display: inline-block; margin-top: 2px; color: var(--accent); font-size: 14px; text-decoration: none; }
 .back-link:hover { text-decoration: underline; }
 #settings-view > h2:first-of-type { font-size: 22px; margin: 10px 0 12px; }
+.work-runs .work-table td:first-child { width: 42%; }
+.work-runs .small { font-size: 13px; }
+.work-runs p { margin: 8px 0; }
 @media (max-width: 640px) { header { padding: 14px 16px; } th, td { padding: 6px 4px; } .settings-link span { display: none; } }
 `;
 /* The Settings panel's own styles are the kit's web part: web/settings-panel.css, linked as /settings.css. */
