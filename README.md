@@ -48,6 +48,14 @@ What the kit needs from the agent it sits in, kept small:
 
 `agent-checks.ts` checks all of it: each agent's `test/agent.test.ts` is one line, `import '../src/kit/agent-checks.ts';`, and fails when the agent and the kit disagree (its schema and defaults too, as each hire's settings-kit.test.ts used to check).
 
+### With Manor: manor.ts
+
+An agent works at a manor when Manor is installed here: its folder (`MANOR_HOME`, else `%USERPROFILE%\.manor`) has `settings.json` and `app`. `manorLink()` reads that settings.json afresh each time, as Manor does, and is null without Manor. It gives:
+
+- **Manor's name, port and page**, for the title bar's "Back to <manor>", with Manor's icon served from the agent's own address as `/manor-icon.svg` (`manorIcon()`).
+- **The manor's theme**, which page.ts stamps on `<html data-theme>`; the agent's Theme menu then says it's Manor's, with a link to change it there.
+- **Its Developer options** (kit 2.5.0): `"developerOptions"`, the switch on Manor's Settings page that holds or vacates the developer roles, or null when Manor hasn't said. An agent with developer features of its own asks `developerOptions(ownSwitch)` on each page load and each round: `{ on, setBy }`, where Manor's value wins when it says (`setBy` is Manor), else the agent's own switch. While `setBy` is set, the agent shows page.ts's `developerOptionsNote(setBy)` in place of its own switch: "<manor>'s Developer options set this", with "Change it in <manor>" to Manor's Settings (`manorSettingsUrl()`, its page at `#/settings`). Without Manor, or before Manor says, its own switch works as ever. No hire has developer options yet; Heiward, whose page isn't the kit's, follows the same key itself.
+
 ### kit.json, and filling src\kit
 
 Each agent pins one exact kit version and its parts in `kit.json`:

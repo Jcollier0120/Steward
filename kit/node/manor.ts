@@ -5,11 +5,12 @@ import path from 'node:path';
 import { themeNamed } from './themes.ts';
 
 /**
- * The manor this agent works at, for the title bar's "Back to <manor>" and for its theme (page.ts). Manor's
- * settings say its name, its port and the manor's theme (settings.json in %USERPROFILE%\.manor, or MANOR_HOME, as
- * Manor itself reads it), and Manor's own page serves its icon, the one its banner shows, which this agent serves
- * from its own address as /manor-icon.svg (its page loads images from itself only). Without Manor installed there's
- * nothing to go back to: the title bar says nothing, and the agent's own Theme menu chooses its theme.
+ * The manor this agent works at, for the title bar's "Back to <manor>", for its theme (page.ts), and for its
+ * developer features, if it has any. Manor's settings say its name, its port, the manor's theme and its Developer
+ * options (settings.json in %USERPROFILE%\.manor, or MANOR_HOME, as Manor itself reads it), and Manor's own page
+ * serves its icon, the one its banner shows, which this agent serves from its own address as /manor-icon.svg (its page
+ * loads images from itself only). Without Manor installed there's nothing to go back to: the title bar says nothing,
+ * the agent's own Theme menu chooses its theme, and its own switch its developer features.
  */
 export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
 
@@ -22,15 +23,21 @@ export interface ManorLink {
    * Windows) when settings.json names none, or names one there isn't.
    */
   theme: string;
+  /**
+   * The manor's Developer options (settings.json's "developerOptions", the switch on Manor's Settings page): whether
+   * its developer roles are held, and so whether an agent shows developer features of its own (developerOptions(),
+   * below). Null when Manor hasn't said: no key, or not true or false.
+   */
+  developerOptions: boolean | null;
 }
 
 const DEFAULT_PORT = 18585;
 
-/** Manor's name, page and theme, read afresh; null when Manor isn't installed here (no settings.json, or no app beside it). */
+/** Manor's name, page, theme and Developer options, read afresh; null when Manor isn't installed here (no settings.json, or no app beside it). */
 export function manorLink(home = manorHome()): ManorLink | null {
   const file = path.join(home, 'settings.json');
   if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown; theme?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown } = {};
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
@@ -45,7 +52,22 @@ export function manorLink(home = manorHome()): ManorLink | null {
   } catch {
     // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to Manor still works.
   }
-  return { name, port, url: `http://manor.localhost:${port}/`, theme };
+  const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
+  return { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions };
+}
+
+/** Manor's Settings page, where its Developer options switch is (Manor's page at #/settings). */
+export const manorSettingsUrl = (m: ManorLink) => `${m.url}#/settings`;
+
+/**
+ * Whether an agent's developer features are on. With Manor installed and saying (its Developer options), Manor's
+ * value wins, and `setBy` is Manor: the agent shows developerOptionsNote() (page.ts) in place of its own switch.
+ * Otherwise it's the agent's own switch, `own`. Read afresh: call it on each page load and each round, so a change in
+ * Manor shows at once.
+ */
+export function developerOptions(own: boolean, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
+  const m = manorLink(home);
+  return m && m.developerOptions !== null ? { on: m.developerOptions, setBy: m } : { on: own, setBy: null };
 }
 
 /** A plain house, for when Manor's own icon can't be had. */
