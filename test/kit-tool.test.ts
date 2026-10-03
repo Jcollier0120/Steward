@@ -17,9 +17,11 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-kit-tool-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 let n = 0;
-/** A kit tree at `version`: VERSION and a file in each part. */
+/** A kit tree at `version`: VERSION and a file in each part; from 2.0.0 the core and dotnet parts too. */
 function kitTree(dir: string, version: string): string {
-  for (const [p, f, t] of [['node', 'a.ts', `export const v = '${version}';\n`], ['web', 'b.js', '// web\n'], ['spec', 'c.md', '# spec\n']]) {
+  const parts = [['node', 'a.ts', `export const v = '${version}';\n`], ['web', 'b.js', '// web\n'], ['spec', 'c.md', '# spec\n']];
+  if (Number(version.split('.')[0]) >= 2) parts.push(['core', 'd.js', 'export const d = 1;\n'], ['dotnet', 'E.cs', '// dotnet\n']);
+  for (const [p, f, t] of parts) {
     mkdirSync(path.join(dir, p), { recursive: true });
     writeFileSync(path.join(dir, p, f), t);
   }
@@ -52,7 +54,30 @@ test('--from fills the parts kit.json names: node in src/kit, web and spec besid
   assert.ok(has(root, 'a.ts') && has(root, 'web/b.js') && has(root, 'spec/c.md'));
   assert.ok(!has(root, 'CHANGELOG.md') && !has(root, 'node'), 'only the parts, the node part flat');
   assert.equal(read(root, 'VERSION').trim(), '1.0.0');
-  assert.equal(read(root, 'PARTS').trim(), 'node web spec');
+  assert.equal(read(root, 'PARTS').trim(), 'node web spec', 'the parts kit.json pins');
+  assert.ok(!has(root, 'core'), 'the node part needs the core, but a kit from before 2.0.0 has none');
+});
+
+test('a part brings the parts it needs: node the core, the core the spec, dotnet the core; none brings web', async () => {
+  const tree = kitTree(path.join(tmp, 'tree-two'), '2.0.0');
+  const node = hire('2.0.0', ['node']);
+  assert.equal((await tool(node.root, ['--from', tree])).code, 0);
+  assert.ok(has(node.root, 'a.ts') && has(node.root, 'core/d.js') && has(node.root, 'spec/c.md'));
+  assert.ok(!has(node.root, 'web') && !has(node.root, 'dotnet'));
+  assert.equal(read(node.root, 'PARTS').trim(), 'node', 'PARTS says what kit.json pins');
+  assert.match((await tool(node.root, ['--from', tree])).out, /\(node, core, spec\)/, 'the log says what came');
+  const dotnet = hire('2.0.0', ['dotnet']);
+  assert.equal((await tool(dotnet.root, ['--from', tree])).code, 0);
+  assert.ok(has(dotnet.root, 'dotnet/E.cs') && has(dotnet.root, 'core/d.js') && has(dotnet.root, 'spec/c.md'));
+  assert.ok(!has(dotnet.root, 'a.ts'));
+  const web = hire('2.0.0', ['web']);
+  assert.equal((await tool(web.root, ['--from', tree])).code, 0);
+  assert.equal(read(web.root, 'PARTS').trim(), 'web');
+  // A part pinned by name must be there, even one another part would bring.
+  const pinnedCore = hire('1.0.0', ['spec', 'core']);
+  const r = await tool(pinnedCore.root, ['--from', kitTree(path.join(tmp, 'tree-one'), '1.0.0')]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /has no core part/);
 });
 
 test('only the pinned parts are filled, and a part from before is gone', async () => {
@@ -95,7 +120,8 @@ test('with src/kit at the pinned version and parts, it does nothing; else a sibl
 async function releases(version: string, o: { badSum?: boolean } = {}) {
   const tree = kitTree(path.join(tmp, `release-${version}-${++n}`), version);
   const zip = path.join(tmp, `kit-${version}-${n}.zip`);
-  execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', tree, 'VERSION', 'CHANGELOG.md', 'node', 'web', 'spec']);
+  const parts = ['node', 'web', 'spec', 'core', 'dotnet'].filter((p) => existsSync(path.join(tree, p)));
+  execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', tree, 'VERSION', 'CHANGELOG.md', ...parts]);
   const bytes = readFileSync(zip);
   const sum = o.badSum ? '0'.repeat(64) : createHash('sha256').update(bytes).digest('hex');
   const served: string[] = [];

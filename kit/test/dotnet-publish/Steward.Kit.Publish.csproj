@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The dotnet part published as Heiward publishes (HEI.Agent\release.ps1 and store.ps1): self-contained,
+    single-file or not, x64 and Arm64; and trimmed, to see what trimming would do. npm run test:dotnet-publish
+    builds each and runs it: it takes a turn on a scratch lock, and prints what the core answered.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>kit-publish-check</AssemblyName>
+  </PropertyGroup>
+
+  <Import Project="..\..\dotnet\Steward.Kit.props" />
+</Project>

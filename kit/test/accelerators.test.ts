@@ -318,15 +318,6 @@ test("each accelerator has its own lock folders and line; the NPU's stays where 
   assert.equal(queueDirFor(g), `${g}.queue`);
 });
 
-const vectors = JSON.parse(readFileSync(new URL('../spec/npu-queue-vectors.json', import.meta.url), 'utf8'));
-for (const c of vectors.slots) {
-  test(`shared vectors: ${c.case}`, () => {
-    const dirs = A.lockDirsOf({ id: c.id, slots: c.slots });
-    assert.deepEqual(dirs.map((d) => path.relative(locksDir, d)), c.folders);
-    assert.equal(path.relative(locksDir, queueDirFor(dirs[0])), c.queue);
-  });
-}
-
 test('the head of the line takes any free slot: two at once on a two-slot accelerator, never three', async () => {
   const lock = lockDirFor('gpu-slots');
   let inside = 0;

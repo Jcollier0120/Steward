@@ -1,0 +1,494 @@
+{
+ "about": "The kit's core, step by step (core/turn.js): a turn on an accelerator and the plain lock, in the situations a driver meets, with the timings of rules.json beside this file. Each case gives the start's options and then every step: what the driver saw (`observe`: the clock and each action's result) or a `release`, and what the core then decides (`actions` in order, `waitMs` when it waits, `done` when it has ended). Every driver of the core replays them: the core directly, the node part through its drive loop, the dotnet part through Jint. Made by kit/test/turn-scenarios.ts; take this file from a kit release, unchanged.",
+ "rules": "rules.json",
+ "cases": [
+  {
+    "case": "a free NPU: the ticket goes in, heads the line, takes the lock and leaves the line; the release removes the lock",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000003}"}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000003}}}},
+      {"release":{"nowMs":1790000000005},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[{"text":"{\"pid\":4100,\"since\":1790000000003}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a person waiting is named lane 0 and goes ahead of background work that came first",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"interactive","who":"person"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","0-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"interactive\",\"who\":\"person\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"0-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000},{"name":"1-01789999991000000-5200-b2b2b2b2.ticket","mtimeMs":1789999999500}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000003}"}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","0-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000003}}}},
+      {"release":{"nowMs":1790000000005},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[{"text":"{\"pid\":4100,\"since\":1790000000003}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "behind a holder and a live ticket: look every 100 ms; at the head, try every 50 ms; take the lock when it is let go",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01789999999000000-5300-c3c3c3c3.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"note","text":"waiting for the NPU: 1 ahead in line"}],"waitMs":100},
+      {"observe":{"nowMs":1790000000103,"results":[null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000104,"results":[{"entries":[{"name":"1-01789999999000000-5300-c3c3c3c3.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000205,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000206,"results":[{"entries":[{"name":"1-01789999999000000-5300-c3c3c3c3.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000307,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000308,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000309,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000310,"results":[{"text":"{\"pid\":5300,\"since\":1790000000307}"},{"mtimeMs":1790000000307}]},"actions":[{"op":"alive","pids":[5300]}]},
+      {"observe":{"nowMs":1790000000311,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000362,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000363,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000364,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000365,"results":[{"text":"{\"pid\":5300,\"since\":1790000000307}"},{"mtimeMs":1790000000307}]},"actions":[{"op":"alive","pids":[5300]}]},
+      {"observe":{"nowMs":1790000000366,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000417,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000418,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000419,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000419}"}]},
+      {"observe":{"nowMs":1790000000420,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000419}}}},
+      {"release":{"nowMs":1790000000421},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000422,"results":[{"text":"{\"pid\":4100,\"since\":1790000000419}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000423,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a late ticket ahead whose process is gone is dead: deleted, and the line moves on",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01789999970000000-6300-deadbeef.ticket","mtimeMs":1789999994000},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"alive":[false]}]},"actions":[{"op":"remove","path":["npu.queue","1-01789999970000000-6300-deadbeef.ticket"]},{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[null,null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000004}"}]},
+      {"observe":{"nowMs":1790000000005,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000004}}}},
+      {"release":{"nowMs":1790000000006},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[{"text":"{\"pid\":4100,\"since\":1790000000004}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000008,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a late ticket ahead whose process runs is still waiting",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":150},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01789999970000000-5200-e5e5e5e5.ticket","mtimeMs":1789999994000},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"alive":[true]}]},"actions":[{"op":"note","text":"waiting for the NPU: 1 ahead in line"}],"waitMs":100},
+      {"observe":{"nowMs":1790000000104,"results":[null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000105,"results":[{"entries":[{"name":"1-01789999970000000-5200-e5e5e5e5.ticket","mtimeMs":1789999994000},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000106,"results":[{"alive":[true]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000207,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000208,"results":[{"entries":[{"name":"1-01789999970000000-5200-e5e5e5e5.ticket","mtimeMs":1789999994000},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000209,"results":[{"alive":[true]}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 150 ms waiting for the NPU (2 in line)"}}
+    ]
+  },
+  {
+    "case": "a ticket with no heartbeat for over 15 s is dead whatever its pid says, and nobody is asked",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01789999970000000-5200-f6f6f6f6.ticket","mtimeMs":1789999984000},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"remove","path":["npu.queue","1-01789999970000000-5200-f6f6f6f6.ticket"]},{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[null,null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000003}"}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000003}}}},
+      {"release":{"nowMs":1790000000005},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[{"text":"{\"pid\":4100,\"since\":1790000000003}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "the heartbeat: the ticket is touched every 2 s; a touch that fails writes the ticket again",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":2300},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"note","text":"waiting for the NPU: 1 ahead in line"}],"waitMs":100},
+      {"observe":{"nowMs":1790000000103,"results":[null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000104,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000205,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000206,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000307,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000308,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000409,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000410,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000511,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000512,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000613,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000614,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000715,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000716,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000817,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000818,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000000919,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000920,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001021,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001022,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001123,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001124,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001225,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001226,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001327,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001328,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001429,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001430,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001531,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001532,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001633,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001634,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001735,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001736,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001837,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001838,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000001939,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000001940,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000002041,"results":[]},"actions":[{"op":"touch","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}]},
+      {"observe":{"nowMs":1790000002042,"results":[{"error":"EPERM"}]},"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000002043,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000002044,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000002042}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000002145,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000002146,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000002042}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000002247,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000002248,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000002042}]}]},"actions":[],"waitMs":100},
+      {"observe":{"nowMs":1790000002349,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000002350,"results":[{"entries":[{"name":"0-01789999999000000-5200-abababab.ticket","mtimeMs":1789999999500},{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000002042}]}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 2300 ms waiting for the NPU (2 in line)"}}
+    ]
+  },
+  {
+    "case": "a ticket taken for dead (a long pause) goes back in under the same name, which keeps its place",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":180},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000056,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000057,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000058,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000059,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000060,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000111,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000112,"results":[{"entries":[]}]},"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000113,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000114,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000115,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000116,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000117,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000168,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000169,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000170,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000171,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000172,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000223,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000224,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000225,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000226,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000227,"results":[{"alive":[true]}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 180 ms waiting for the NPU (1 in line)"}}
+    ]
+  },
+  {
+    "case": "the line folder removed: the ticket write puts it back",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":180},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000056,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000057,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000058,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000059,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000060,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000111,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000112,"results":[{"error":"ENOENT"}]},"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000113,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000114,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000115,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000116,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000117,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000168,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000169,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000170,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000171,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000172,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000223,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000224,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000112}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000225,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000226,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000227,"results":[{"alive":[true]}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 180 ms waiting for the NPU (1 in line)"}}
+    ]
+  },
+  {
+    "case": "a holder that overstayed 10 minutes is evicted, whatever its pid says",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":5200,\"since\":1789999340000}"},{"mtimeMs":1789999340000}]},"actions":[{"op":"note","text":"the NPU was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000005,"results":[null,null]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000006}"}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000006}}}},
+      {"release":{"nowMs":1790000000008},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000009,"results":[{"text":"{\"pid\":4100,\"since\":1790000000006}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000010,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a holder whose process is gone is evicted",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[false]}]},"actions":[{"op":"note","text":"the NPU was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null,null]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000007}"}]},
+      {"observe":{"nowMs":1790000000008,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000007}}}},
+      {"release":{"nowMs":1790000000009},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000010,"results":[{"text":"{\"pid\":4100,\"since\":1790000000007}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000011,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a lock folder with no owner.json for over 10 s is a crash leftover: evicted",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"error":"ENOENT"},{"mtimeMs":1789999989000}]},"actions":[{"op":"note","text":"the NPU was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000005,"results":[null,null]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000006}"}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000006}}}},
+      {"release":{"nowMs":1790000000008},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000009,"results":[{"text":"{\"pid\":4100,\"since\":1790000000006}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000010,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a lock folder with no owner.json yet is a holder about to write it: the waiter gives up when the wait is over, and leaves the line",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":120},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"error":"ENOENT"},{"mtimeMs":1789999998000}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000055,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000056,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000057,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000058,"results":[{"error":"ENOENT"},{"mtimeMs":1789999998000}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000109,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000110,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000111,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000112,"results":[{"error":"ENOENT"},{"mtimeMs":1789999998000}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000163,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000164,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000165,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000166,"results":[{"error":"ENOENT"},{"mtimeMs":1789999998000}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 120 ms waiting for the NPU (1 in line)"}}
+    ]
+  },
+  {
+    "case": "an eviction that finds a file open in the folder tries again every 25 ms, checking it is still stale",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[false]}]},"actions":[{"op":"note","text":"the NPU was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null,{"error":"EBUSY"}]},"actions":[],"waitMs":25},
+      {"observe":{"nowMs":1790000000032,"results":[]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000033,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000034,"results":[{"alive":[false]}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000035,"results":[{"error":"EPERM"}]},"actions":[],"waitMs":25},
+      {"observe":{"nowMs":1790000000061,"results":[]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000062,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000063,"results":[{"alive":[false]}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000064,"results":[null]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000065,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000065}"}]},
+      {"observe":{"nowMs":1790000000066,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000065}}}},
+      {"release":{"nowMs":1790000000067},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000068,"results":[{"text":"{\"pid\":4100,\"since\":1790000000065}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000069,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a holder that comes back to life during an eviction is left alone",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","waitMs":100},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[false]}]},"actions":[{"op":"note","text":"the NPU was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null,{"error":"EBUSY"}]},"actions":[],"waitMs":25},
+      {"observe":{"nowMs":1790000000032,"results":[]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000033,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000034,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000085,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000086,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000087,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000088,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000089,"results":[{"alive":[true]}]},"actions":[],"waitMs":50},
+      {"observe":{"nowMs":1790000000140,"results":[]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000141,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000142,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["npu","owner.json"]},{"op":"stat","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000143,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000144,"results":[{"alive":[true]}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"timeout","message":"timed out after 100 ms waiting for the NPU (1 in line)"}}
+    ]
+  },
+  {
+    "case": "two slots: the first held by a live holder (a program that knows no slots), the second taken",
+    "start": {"machine":"turn","slots":["gpu-x","gpu-x.2"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","what":"the graphics card"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["gpu-x.queue"]},{"op":"write","path":["gpu-x.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["gpu-x.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["gpu-x"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["gpu-x","owner.json"]},{"op":"stat","path":["gpu-x"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"alive":[true]}]},"actions":[{"op":"mkdir","path":["gpu-x.2"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null]},"actions":[{"op":"write","path":["gpu-x.2","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000006}"}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[{"op":"remove","path":["gpu-x.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":1,"owner":{"pid":4100,"since":1790000000006}}}},
+      {"release":{"nowMs":1790000000008},"actions":[{"op":"read","path":["gpu-x.2","owner.json"]}]},
+      {"observe":{"nowMs":1790000000009,"results":[{"text":"{\"pid\":4100,\"since\":1790000000006}"}]},"actions":[{"op":"rmdir","path":["gpu-x.2"]}]},
+      {"observe":{"nowMs":1790000000010,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "maxAhead: a line already that long ends at once, full, without joining",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","maxAhead":2},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,{"entries":[{"name":"0-01789999999000000-5300-b0b0b0b0.ticket","mtimeMs":1789999999500},{"name":"1-01789999998000000-5200-a0a0a0a0.ticket","mtimeMs":1789999999500}]}]},"actions":[],"done":{"error":"full","message":"2 already waiting for the NPU"}}
+    ]
+  },
+  {
+    "case": "maxAhead: dead tickets are cleared before counting, and with room it joins",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test","maxAhead":1},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,{"entries":[{"name":"1-01789999960000000-5200-c0c0c0c0.ticket","mtimeMs":1789999980000}]}]},"actions":[{"op":"remove","path":["npu.queue","1-01789999960000000-5200-c0c0c0c0.ticket"]},{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000002,"results":[null,null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000001}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000004}"}]},
+      {"observe":{"nowMs":1790000000005,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000004}}}},
+      {"release":{"nowMs":1790000000006},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[{"text":"{\"pid\":4100,\"since\":1790000000004}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000008,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "a release lets go only while owner.json still names this holder: an evicted holder leaves the next one's lock",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000003}"}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000003}}}},
+      {"release":{"nowMs":1790000000005},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[{"text":"{\"pid\":5200,\"since\":1790000000004}"}]},"actions":[],"done":{"released":false}}
+    ]
+  },
+  {
+    "case": "a release that finds a file open in the folder tries again every 25 ms",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[null]},"actions":[{"op":"write","path":["npu","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000003}"}]},
+      {"observe":{"nowMs":1790000000004,"results":[null]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000003}}}},
+      {"release":{"nowMs":1790000000005},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[{"text":"{\"pid\":4100,\"since\":1790000000003}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000007,"results":[{"error":"EBUSY"}]},"actions":[],"waitMs":25},
+      {"observe":{"nowMs":1790000000033,"results":[]},"actions":[{"op":"read","path":["npu","owner.json"]}]},
+      {"observe":{"nowMs":1790000000034,"results":[{"text":"{\"pid\":4100,\"since\":1790000000003}"}]},"actions":[{"op":"rmdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000035,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "the disk refuses the lock folder: no turn, and the ticket leaves the line",
+    "start": {"machine":"turn","slots":["npu"],"pid":4100,"nowMs":1790000000000,"nowUs":1790000000000000,"nonce":"a1b2c3d4","lane":"background","who":"test"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":["npu.queue"]},{"op":"write","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"],"text":"{\"pid\":4100,\"since\":1790000000000,\"lane\":\"background\",\"who\":\"test\"}"}]},
+      {"observe":{"nowMs":1790000000001,"results":[null,null]},"actions":[{"op":"list","path":["npu.queue"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"entries":[{"name":"1-01790000000000000-4100-a1b2c3d4.ticket","mtimeMs":1790000000000}]}]},"actions":[{"op":"mkdir","path":["npu"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"error":"EACCES"}]},"actions":[{"op":"remove","path":["npu.queue","1-01790000000000000-4100-a1b2c3d4.ticket"]}],"done":{"error":"io","message":"couldn't take turns on the NPU: EACCES"}}
+    ]
+  },
+  {
+    "case": "the plain lock: free, taken, and released",
+    "start": {"machine":"lock","folder":"build","pid":4100,"nowMs":1790000000000,"what":"C:\\locks\\build"},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":[]}]},
+      {"observe":{"nowMs":1790000000001,"results":[null]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[null]},"actions":[{"op":"write","path":["build","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000002}"}]},
+      {"observe":{"nowMs":1790000000003,"results":[null]},"actions":[],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000002}}}},
+      {"release":{"nowMs":1790000000004},"actions":[{"op":"read","path":["build","owner.json"]}]},
+      {"observe":{"nowMs":1790000000005,"results":[{"text":"{\"pid\":4100,\"since\":1790000000002}"}]},"actions":[{"op":"rmdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  },
+  {
+    "case": "the plain lock: held by a live holder, tried every 150 ms until the wait runs out",
+    "start": {"machine":"lock","folder":"build","pid":4100,"nowMs":1790000000000,"waitMs":400},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":[]}]},
+      {"observe":{"nowMs":1790000000001,"results":[null]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["build","owner.json"]},{"op":"stat","path":["build"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"alive":[true]}]},"actions":[],"waitMs":150},
+      {"observe":{"nowMs":1790000000155,"results":[]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000156,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["build","owner.json"]},{"op":"stat","path":["build"]}]},
+      {"observe":{"nowMs":1790000000157,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000158,"results":[{"alive":[true]}]},"actions":[],"waitMs":150},
+      {"observe":{"nowMs":1790000000309,"results":[]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000310,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["build","owner.json"]},{"op":"stat","path":["build"]}]},
+      {"observe":{"nowMs":1790000000311,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000312,"results":[{"alive":[true]}]},"actions":[],"waitMs":150},
+      {"observe":{"nowMs":1790000000463,"results":[]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000464,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["build","owner.json"]},{"op":"stat","path":["build"]}]},
+      {"observe":{"nowMs":1790000000465,"results":[{"text":"{\"pid\":5200,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[5200]}]},
+      {"observe":{"nowMs":1790000000466,"results":[{"alive":[true]}]},"actions":[],"done":{"error":"timeout","message":"timed out after 400 ms waiting for build"}}
+    ]
+  },
+  {
+    "case": "the plain lock: a dead holder is evicted",
+    "start": {"machine":"lock","folder":"build","pid":4100,"nowMs":1790000000000},
+    "steps": [
+      {"actions":[{"op":"mkdirs","path":[]}]},
+      {"observe":{"nowMs":1790000000001,"results":[null]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000002,"results":[{"error":"EEXIST"}]},"actions":[{"op":"read","path":["build","owner.json"]},{"op":"stat","path":["build"]}]},
+      {"observe":{"nowMs":1790000000003,"results":[{"text":"{\"pid\":6300,\"since\":1789999999000}"},{"mtimeMs":1789999999000}]},"actions":[{"op":"alive","pids":[6300]}]},
+      {"observe":{"nowMs":1790000000004,"results":[{"alive":[false]}]},"actions":[{"op":"note","text":"build was held by a process that died or overstayed: taking it over"},{"op":"rmdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000005,"results":[null,null]},"actions":[{"op":"mkdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000006,"results":[null]},"actions":[{"op":"write","path":["build","owner.json"],"text":"{\"pid\":4100,\"since\":1790000000006}"}]},
+      {"observe":{"nowMs":1790000000007,"results":[null]},"actions":[],"done":{"held":{"slot":0,"owner":{"pid":4100,"since":1790000000006}}}},
+      {"release":{"nowMs":1790000000008},"actions":[{"op":"read","path":["build","owner.json"]}]},
+      {"observe":{"nowMs":1790000000009,"results":[{"text":"{\"pid\":4100,\"since\":1790000000006}"}]},"actions":[{"op":"rmdir","path":["build"]}]},
+      {"observe":{"nowMs":1790000000010,"results":[null]},"actions":[],"done":{"released":true}}
+    ]
+  }
+ ]
+}

@@ -6,20 +6,15 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { withLock } from './fixture/src/kit/lock.ts';
 import {
-  compareTickets,
-  isDeadTicket,
   LockTimeout,
-  parseTicket,
   queueDirFor,
   queueSnapshot,
   QueueFull,
   readLine,
   withNpuTurn,
-  type Ticket,
 } from './fixture/src/kit/npu-queue.ts';
 
-// The queue's shared vectors: the kit's spec part, which every implementation (Reeve's, Heiward's C#) runs.
-const vectors = JSON.parse(readFileSync(new URL('../spec/npu-queue-vectors.json', import.meta.url), 'utf8'));
+// The node part's turns on a real disk. The spec's vectors run in vectors.test.ts.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const scratch = () => path.join(mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-')), 'locks', 'npu');
 
@@ -39,20 +34,6 @@ async function until(check: () => boolean, ms = 5000): Promise<void> {
 }
 
 const tickets = (lockDir: string) => (existsSync(queueDirFor(lockDir)) ? readdirSync(queueDirFor(lockDir)).filter((n) => n.endsWith('.ticket')) : []);
-
-for (const c of vectors.order) {
-  test(`shared vectors: ${c.case}`, () => {
-    const parsed = (c.tickets as string[]).map(parseTicket).filter((t): t is Ticket => !!t);
-    parsed.sort((a, b) => compareTickets(a, b, vectors.nowUs));
-    assert.deepEqual(parsed.map((t) => t.name), c.expected);
-  });
-}
-
-for (const d of vectors.dead) {
-  test(`shared vectors: ${d.case}`, () => {
-    assert.equal(isDeadTicket(d.ageMs, () => d.pidAlive), d.dead);
-  });
-}
 
 test('waiters in one process are served in the order they joined', async () => {
   const lockDir = scratch();
@@ -201,4 +182,35 @@ test('a program that predates the queue still never runs alongside a queued one'
   };
   await Promise.all([withLock(lockDir, work), withNpuTurn(lockDir, work), withLock(lockDir, work), withNpuTurn(lockDir, work)]);
   assert.equal(most, 1);
+});
+
+test('the plain lock lets go only while owner.json still names it, and evicts a holder that died', async () => {
+  const lockDir = scratch();
+  await withLock(lockDir, async () => {
+    // Evicted for overstaying, and someone else took the lock meanwhile.
+    writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, since: 1 }));
+  });
+  assert.ok(existsSync(lockDir), "the other holder's lock stays");
+  writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: 2 ** 31 - 3, since: Date.now() }));
+  let ran = false;
+  await withLock(lockDir, async () => void (ran = true), { waitMs: 2000 });
+  assert.ok(ran && !existsSync(lockDir), 'a dead holder is evicted, and the lock let go after');
+  await assert.rejects(withLock(lockDir, async () => withLock(lockDir, async () => {}, { waitMs: 200 })), (e: Error) => e instanceof LockTimeout && e.message === `timed out after 200 ms waiting for ${lockDir}`);
+});
+
+test("a turn's notes: waiting behind others, and taking over from a holder that died", async () => {
+  const lockDir = scratch();
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: 2 ** 31 - 3, since: Date.now() }));
+  const notes: string[] = [];
+  await withNpuTurn(lockDir, async () => {}, { onNote: (t) => notes.push(t), waitMs: 2000 });
+  assert.deepEqual(notes, ['the NPU was held by a process that died or overstayed: taking it over']);
+  const free = hold(lockDir);
+  const first = withNpuTurn(lockDir, async () => {}, { lane: 'interactive' });
+  await until(() => tickets(lockDir).length === 1);
+  const second = withNpuTurn(lockDir, async () => {}, { onNote: (t) => notes.push(t) });
+  await until(() => notes.length === 2);
+  assert.equal(notes[1], 'waiting for the NPU: 1 ahead in line');
+  free();
+  await Promise.all([first, second]);
 });

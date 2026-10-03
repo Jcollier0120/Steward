@@ -1,0 +1,2926 @@
+{
+ "about": "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; accelerators are given as a config's raw entries, read by parseAccelerators first. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
+ "nowMs": 1790000000000,
+ "ids": [
+  {
+   "name": "NVIDIA GeForce RTX 4090",
+   "id": "gpu-nvidia-geforce-rtx-4090"
+  },
+  {
+   "name": "NVIDIA GeForce RTX 4090 #2",
+   "id": "gpu-nvidia-geforce-rtx-4090-2"
+  },
+  {
+   "name": "Qualcomm(R) Adreno(TM) X2-90 GPU",
+   "id": "gpu-qualcomm-r-adreno-tm-x2-90-gpu"
+  },
+  {
+   "name": "AMD Radeon(TM) Graphics (TM)",
+   "id": "gpu-amd-radeon-tm-graphics-tm"
+  },
+  {
+   "name": "AMD Radeon(TM) 890M Graphics",
+   "id": "gpu-amd-radeon-tm-890m-graphics"
+  },
+  {
+   "name": "  Intel(R) Arc(TM) A770  ",
+   "id": "gpu-intel-r-arc-tm-a770"
+  },
+  {
+   "name": "",
+   "id": "gpu-graphics-card"
+  },
+  {
+   "name": "(™)",
+   "id": "gpu-graphics-card"
+  }
+ ],
+ "isId": [
+  {
+   "id": "npu",
+   "valid": true,
+   "kind": "npu"
+  },
+  {
+   "id": "cpu",
+   "valid": true,
+   "kind": "cpu"
+  },
+  {
+   "id": "gpu-nvidia-geforce-rtx-4090-2",
+   "valid": true,
+   "kind": "gpu"
+  },
+  {
+   "id": "gpu-",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "gpu-Upper",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "gpu-a--b",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "..\\npu",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "npu.2",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "tpu-1",
+   "valid": false,
+   "kind": null
+  },
+  {
+   "id": "GPU 1",
+   "valid": false,
+   "kind": null
+  }
+ ],
+ "lockFolders": [
+  {
+   "case": "the NPU has one slot, whatever its entry says",
+   "id": "npu",
+   "slots": 4,
+   "folders": [
+    "npu"
+   ]
+  },
+  {
+   "case": "a card has a folder a slot",
+   "id": "gpu-x",
+   "slots": 3,
+   "folders": [
+    "gpu-x",
+    "gpu-x.2",
+    "gpu-x.3"
+   ]
+  },
+  {
+   "case": "no slots given is one",
+   "id": "cpu",
+   "folders": [
+    "cpu"
+   ]
+  }
+ ],
+ "cards": [
+  {
+   "case": "software adapters left out; a second card of a name, in any case, is #2; no name is 'Graphics card <n>'",
+   "adapters": [
+    {
+     "index": 0,
+     "name": "NVIDIA GeForce RTX 4090",
+     "luid": "0x00000000_0x0000d1a5",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    },
+    {
+     "index": 1,
+     "name": "Microsoft Basic Render Driver",
+     "luid": "0x00000000_0x00000001",
+     "dedicatedMemory": 0,
+     "vendorId": 5140,
+     "software": true
+    },
+    {
+     "index": 2,
+     "name": "NVIDIA GeForce RTX 4090 ",
+     "luid": "0x00000000_0x0000d1f1",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    },
+    {
+     "index": 3,
+     "name": "",
+     "luid": "0x00000000_0x0000e2b6",
+     "dedicatedMemory": 8000000000,
+     "vendorId": 4098,
+     "software": false
+    },
+    {
+     "index": 4,
+     "name": "nvidia geforce rtx 4090",
+     "luid": "0x00000000_0x0000f3c7",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    }
+   ],
+   "software": false,
+   "keys": [
+    "NVIDIA GeForce RTX 4090",
+    "NVIDIA GeForce RTX 4090 #2",
+    "Graphics card 4",
+    "nvidia geforce rtx 4090 #3"
+   ]
+  },
+  {
+   "case": "software adapters listed when asked",
+   "adapters": [
+    {
+     "index": 0,
+     "name": "NVIDIA GeForce RTX 4090",
+     "luid": "0x00000000_0x0000d1a5",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    },
+    {
+     "index": 1,
+     "name": "Microsoft Basic Render Driver",
+     "luid": "0x00000000_0x00000001",
+     "dedicatedMemory": 0,
+     "vendorId": 5140,
+     "software": true
+    },
+    {
+     "index": 2,
+     "name": "NVIDIA GeForce RTX 4090 ",
+     "luid": "0x00000000_0x0000d1f1",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    },
+    {
+     "index": 3,
+     "name": "",
+     "luid": "0x00000000_0x0000e2b6",
+     "dedicatedMemory": 8000000000,
+     "vendorId": 4098,
+     "software": false
+    },
+    {
+     "index": 4,
+     "name": "nvidia geforce rtx 4090",
+     "luid": "0x00000000_0x0000f3c7",
+     "dedicatedMemory": 24000000000,
+     "vendorId": 4318,
+     "software": false
+    }
+   ],
+   "software": true,
+   "keys": [
+    "NVIDIA GeForce RTX 4090",
+    "Microsoft Basic Render Driver",
+    "NVIDIA GeForce RTX 4090 #2",
+    "Graphics card 4",
+    "nvidia geforce rtx 4090 #3"
+   ]
+  }
+ ],
+ "configs": [
+  {
+   "case": "Reeve's config lists the accelerators: auto order by memory, a vision model without an address on the chat server, a bad id and a second npu named as problems",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "Snapdragon X2 Elite NPU",
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
+       "startCommand": [
+        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
+        "serve"
+       ]
+      },
+      "vision": {
+       "model": "Qwen3-VL-4B-Instruct:W4A16"
+      },
+      "quirks": [
+       "prefix-leak",
+       "image-path",
+       "unknown"
+      ]
+     },
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090",
+      "kind": "gpu",
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24,
+      "slots": 2,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18191/v1/",
+       "model": "qwen3-4b-instruct-2507",
+       "startCommand": [
+        "llama-server.exe",
+        "--port",
+        "18191"
+       ]
+      },
+      "vision": {
+       "model": "qwen3-vl-4b-instruct"
+      },
+      "embed": {
+       "baseUrl": "http://127.0.0.1:18192",
+       "model": "qwen3-embedding-0.6b"
+      },
+      "quirks": []
+     },
+     {
+      "id": "gpu-off",
+      "kind": "gpu",
+      "name": "Off",
+      "memoryGb": 48,
+      "chat": {
+       "baseUrl": "http://127.0.0.1:2",
+       "model": "m"
+      },
+      "enabled": false
+     },
+     {
+      "id": "GPU 1",
+      "kind": "gpu"
+     },
+     {
+      "id": "npu",
+      "kind": "npu",
+      "chat": {
+       "baseUrl": "http://127.0.0.1:1",
+       "model": "m"
+      }
+     }
+    ],
+    "acceleratorOrder": "auto"
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "gpu-off",
+      "kind": "gpu",
+      "name": "Off",
+      "memoryGb": 48,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "enabled": false,
+      "chat": {
+       "baseUrl": "http://127.0.0.1:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090",
+      "kind": "gpu",
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24,
+      "slots": 2,
+      "maxContextTokens": 16384,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18191",
+       "model": "qwen3-4b-instruct-2507",
+       "startCommand": [
+        "llama-server.exe",
+        "--port",
+        "18191"
+       ]
+      },
+      "vision": {
+       "baseUrl": "http://127.0.0.1:18191",
+       "model": "qwen3-vl-4b-instruct",
+       "startCommand": [
+        "llama-server.exe",
+        "--port",
+        "18191"
+       ]
+      },
+      "embed": {
+       "baseUrl": "http://127.0.0.1:18192",
+       "model": "qwen3-embedding-0.6b"
+      }
+     },
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "Snapdragon X2 Elite NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
+       "startCommand": [
+        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
+        "serve"
+       ]
+      },
+      "vision": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "Qwen3-VL-4B-Instruct:W4A16",
+       "startCommand": [
+        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
+        "serve"
+       ]
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": [
+     "accelerators[3] GPU 1: an id is npu, cpu, or gpu- and the card's name in lowercase with dashes",
+     "accelerators[4]: npu is listed twice; the first is used"
+    ]
+   }
+  },
+  {
+   "case": "a card has at most 16 slots, the NPU always 1; a name left out is the kind's; no cap is 2400",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "gpu-big",
+      "slots": 40,
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "slots": 3,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "  ",
+      "embed": {
+       "baseUrl": "http://x:3",
+       "model": "e"
+      }
+     }
+    ],
+    "requestTimeoutMs": 5000
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "gpu-big",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 24,
+      "slots": 16,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "Processor",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "embed": {
+       "baseUrl": "http://x:3",
+       "model": "e"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 5000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "acceleratorOrder: the ids it lists first, in its order, then the rest in auto order",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "cpu",
+      "name": "Oryon",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-igpu",
+      "memoryGb": 0.5,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-small",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-big",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-unknown",
+      "chat": {
+       "baseUrl": "http://x:6",
+       "model": "m"
+      }
+     }
+    ],
+    "acceleratorOrder": [
+     "cpu",
+     "npu",
+     "nope",
+     3
+    ]
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "Oryon",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-big",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 24,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-small",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 8,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-igpu",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-unknown",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:6",
+       "model": "m"
+      }
+     }
+    ],
+    "order": [
+     "cpu",
+     "npu",
+     "nope"
+    ],
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "auto: cards with 2 GB or more by memory, then the NPU, then shared graphics, then the CPU",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "cpu",
+      "name": "Oryon",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-igpu",
+      "memoryGb": 0.5,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-small",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-big",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-unknown",
+      "chat": {
+       "baseUrl": "http://x:6",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "gpu-big",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 24,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-small",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 8,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-igpu",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 0.5,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-unknown",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:6",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "Oryon",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "an older config with only chatEndpoint: one accelerator, the NPU, with GenieX's quirks; its embed endpoint never started",
+   "raw": {
+    "chatEndpoint": {
+     "baseUrl": "http://127.0.0.1:18181/v1",
+     "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
+     "device": "Npu",
+     "startCommand": [
+      "geniex.exe",
+      "serve"
+     ]
+    },
+    "visionModel": "Qwen3-VL-4B-Instruct:W4A16",
+    "npuMaxContextTokens": 2000,
+    "requestTimeoutMs": 5000,
+    "embedEndpoint": {
+     "baseUrl": "http://127.0.0.1:18282",
+     "model": "nomic-embed-text-v1.5",
+     "device": "Npu"
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2000,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
+       "startCommand": [
+        "geniex.exe",
+        "serve"
+       ]
+      },
+      "vision": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "Qwen3-VL-4B-Instruct:W4A16",
+       "startCommand": [
+        "geniex.exe",
+        "serve"
+       ]
+      },
+      "embed": {
+       "baseUrl": "http://127.0.0.1:18282",
+       "model": "nomic-embed-text-v1.5"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 5000,
+    "legacy": true,
+    "problems": []
+   }
+  },
+  {
+   "case": "an older config on a graphics card",
+   "raw": {
+    "chatEndpoint": {
+     "baseUrl": "http://x:1",
+     "model": "m",
+     "device": "Gpu"
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "gpu-graphics-card",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": true,
+    "problems": []
+   }
+  },
+  {
+   "case": "an older config: an embed endpoint on another device is an accelerator of its own; start false never starts it",
+   "raw": {
+    "chatEndpoint": {
+     "baseUrl": "http://x:1",
+     "model": "m"
+    },
+    "embedEndpoint": {
+     "baseUrl": "http://x:2",
+     "model": "e",
+     "device": "Cpu",
+     "start": false
+    }
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "Processor",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "embed": {
+       "baseUrl": "http://x:2",
+       "model": "e",
+       "startCommand": []
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": true,
+    "problems": []
+   }
+  },
+  {
+   "case": "an empty list is Reeve not set up, not an older config",
+   "raw": {
+    "accelerators": []
+   },
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "nothing at all is Reeve not set up",
+   "raw": {},
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "a list where nothing serves anything is Reeve not set up",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      },
+      "enabled": false
+     },
+     {
+      "id": "cpu",
+      "name": "Oryon"
+     }
+    ]
+   },
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "an older config with no endpoint is Reeve not set up",
+   "raw": {
+    "npuMaxContextTokens": 2400
+   },
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "entries that can't be read are named, not taken for Reeve not set up",
+   "raw": {
+    "accelerators": [
+     {
+      "name": "no id"
+     },
+     {
+      "id": "tpu-1",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "error": "lists no accelerator that can be used (accelerators[0] has no id; accelerators[1] tpu-1: an id is npu, cpu, or gpu- and the card's name in lowercase with dashes)"
+   }
+  }
+ ],
+ "files": [
+  {
+   "case": "no config.json: Reeve not set up",
+   "file": "C:\\Users\\me\\.reeve\\config.json",
+   "text": null,
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "a config.json that is not JSON names the file",
+   "file": "C:\\Users\\me\\.reeve\\config.json",
+   "text": "{ not json",
+   "expect": {
+    "error": "C:\\Users\\me\\.reeve\\config.json couldn't be read: Expected property name or '}' in JSON at position 2 (line 1 column 3)"
+   }
+  },
+  {
+   "case": "a config.json whose entries cannot be read names the file",
+   "file": "C:\\Users\\me\\.reeve\\config.json",
+   "text": "{\"accelerators\":[{\"name\":\"no id\"}]}",
+   "expect": {
+    "error": "C:\\Users\\me\\.reeve\\config.json lists no accelerator that can be used (accelerators[0] has no id)"
+   }
+  },
+  {
+   "case": "Reeve not set up never names the file",
+   "file": "C:\\Users\\me\\.reeve\\config.json",
+   "text": "{\"accelerators\":[]}",
+   "expect": {
+    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+   }
+  },
+  {
+   "case": "a byte order mark is skipped",
+   "file": "C:\\Users\\me\\.reeve\\config.json",
+   "text": "﻿{\"chatEndpoint\":{\"baseUrl\":\"http://127.0.0.1:18181/v1\",\"model\":\"q\"}}",
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "q"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": true,
+    "problems": []
+   }
+  }
+ ],
+ "failures": [
+  {
+   "case": "a marker 9 minutes old counts",
+   "text": "{\"since\":\"2026-09-21T14:04:20.000Z\",\"reason\":\"chat: refused the connection\",\"by\":\"clerk\"}",
+   "expect": {
+    "since": "2026-09-21T14:04:20.000Z",
+    "reason": "chat: refused the connection",
+    "by": "clerk"
+   }
+  },
+  {
+   "case": "a marker exactly 10 minutes old has expired",
+   "text": "{\"since\":\"2026-09-21T14:03:20.000Z\",\"reason\":\"refused\"}",
+   "expect": null
+  },
+  {
+   "case": "a marker with no by reads as by nobody",
+   "text": "{\"since\":\"2026-09-21T14:12:20.000Z\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T14:12:20.000Z",
+    "reason": "refused",
+    "by": ""
+   }
+  },
+  {
+   "case": "a time with an offset",
+   "text": "{\"since\":\"2026-09-21T16:12:20.000+02:00\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T16:12:20.000+02:00",
+    "reason": "refused",
+    "by": ""
+   }
+  },
+  {
+   "case": "a time without milliseconds",
+   "text": "{\"since\":\"2026-09-21T14:12:20Z\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T14:12:20Z",
+    "reason": "refused",
+    "by": ""
+   }
+  },
+  {
+   "case": "a time with seven decimals, as .NET writes them",
+   "text": "{\"since\":\"2026-09-21T14:12:20.1234567Z\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T14:12:20.1234567Z",
+    "reason": "refused",
+    "by": ""
+   }
+  },
+  {
+   "case": "a marker from a clock ahead still counts",
+   "text": "{\"since\":\"2026-09-21T14:14:20.000Z\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T14:14:20.000Z",
+    "reason": "refused",
+    "by": ""
+   }
+  },
+  {
+   "case": "no marker",
+   "text": null,
+   "expect": null
+  },
+  {
+   "case": "not JSON",
+   "text": "{ half a fi",
+   "expect": null
+  },
+  {
+   "case": "a since that is no ISO time",
+   "text": "{\"since\":\"yesterday-ish\",\"reason\":\"refused\"}",
+   "expect": null
+  },
+  {
+   "case": "a since that is a number",
+   "text": "{ \"since\": 12345, \"reason\": \"x\" }",
+   "expect": null
+  },
+  {
+   "case": "no since",
+   "text": "{ \"reason\": \"no since\" }",
+   "expect": null
+  },
+  {
+   "case": "no reason",
+   "text": "{\"since\":\"2026-09-21T14:12:20.000Z\",\"reason\":5}",
+   "expect": null
+  },
+  {
+   "case": "not an object",
+   "text": "[]",
+   "expect": null
+  },
+  {
+   "case": "a day that does not exist",
+   "text": "{\"since\":\"2026-02-30T12:00:00Z\",\"reason\":\"refused\"}",
+   "expect": null
+  },
+  {
+   "case": "a byte order mark is skipped",
+   "text": "﻿{\"since\":\"2026-09-21T14:12:20.000Z\",\"reason\":\"refused\"}",
+   "expect": {
+    "since": "2026-09-21T14:12:20.000Z",
+    "reason": "refused",
+    "by": ""
+   }
+  }
+ ],
+ "reasons": [
+  {
+   "text": "its server said 503:\n  overloaded",
+   "expect": "its server said 503:"
+  },
+  {
+   "text": "  DirectML could not open the model: 0x887A0005\r\n   at Microsoft.ML.OnnxRuntime...",
+   "expect": "DirectML could not open the model: 0x887A0005"
+  },
+  {
+   "text": "one line   ",
+   "expect": "one line"
+  },
+  {
+   "text": "",
+   "expect": "it failed"
+  },
+  {
+   "text": "   \n second",
+   "expect": "second"
+  },
+  {
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "expect": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "text": "a\rb",
+   "expect": "a"
+  }
+ ],
+ "records": [
+  {
+   "reason": "chat: /v1/chat/completions on http://127.0.0.1:18181 failed (503): busy\nmore",
+   "by": "clerk",
+   "nowMs": 1790000000000,
+   "expect": "{\n  \"since\": \"2026-09-21T14:13:20.000Z\",\n  \"reason\": \"chat: /v1/chat/completions on http://127.0.0.1:18181 failed (503): busy\",\n  \"by\": \"clerk\"\n}\n"
+  }
+ ],
+ "games": [
+  {
+   "case": "a card is busy while another program keeps a 3D engine over 25%: by LUID, not the desktop, not the checker, not a model server",
+   "load": {
+    "adapters": [
+     {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 4090",
+      "luid": "0x00000000_0x0000d1a5",
+      "dedicatedMemory": 24000000000,
+      "vendorId": 4318,
+      "software": false
+     },
+     {
+      "index": 1,
+      "name": "Microsoft Basic Render Driver",
+      "luid": "0x00000000_0x00000001",
+      "dedicatedMemory": 0,
+      "vendorId": 5140,
+      "software": true
+     },
+     {
+      "index": 2,
+      "name": "AMD Radeon RX 7600",
+      "luid": "0x00000000_0x0000e2b6",
+      "dedicatedMemory": 8000000000,
+      "vendorId": 4098,
+      "software": false
+     }
+    ],
+    "counters": "pid_9876_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_3D\t87.5\r\npid_9876_luid_0x00000000_0x0000D1A5_phys_0_eng_1_engtype_3D\t3\r\npid_1200_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t95\r\npid_4242_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t80\r\npid_5555_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t12\r\npid_777_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t99\r\npid_0_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_3D\t50\r\npid_31_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_VideoDecode\t90\r\n_Total\t99",
+    "processes": {
+     "1200": "dwm",
+     "4242": "llama-server",
+     "5555": "msedge.exe",
+     "9876": "Cyberpunk2077"
+    },
+    "compositor": 1200
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090",
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m",
+       "startCommand": [
+        "C:\\servers\\llama-server.exe"
+       ]
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-rx-7600",
+      "name": "AMD Radeon RX 7600",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m",
+       "startCommand": [
+        "%USERPROFILE%\\bin\\My-Server.EXE",
+        "--port",
+        "1"
+       ]
+      }
+     },
+     {
+      "id": "gpu-elsewhere",
+      "name": "A card DXGI does not list",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "self": 777,
+   "expect": {
+    "gpu-nvidia-geforce-rtx-4090": {
+     "busy": true,
+     "percent": 88,
+     "by": [
+      "Cyberpunk2077.exe"
+     ]
+    },
+    "gpu-amd-radeon-rx-7600": {
+     "busy": false,
+     "percent": 12,
+     "by": []
+    }
+   }
+  },
+  {
+   "case": "a card DXGI does not list is not busy",
+   "load": {
+    "adapters": [],
+    "counters": "pid_9876_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_3D\t87.5\r\npid_9876_luid_0x00000000_0x0000D1A5_phys_0_eng_1_engtype_3D\t3\r\npid_1200_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t95\r\npid_4242_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t80\r\npid_5555_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t12\r\npid_777_luid_0x00000000_0x0000E2B6_phys_0_eng_0_engtype_3D\t99\r\npid_0_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_3D\t50\r\npid_31_luid_0x00000000_0x0000D1A5_phys_0_eng_0_engtype_VideoDecode\t90\r\n_Total\t99",
+    "processes": {
+     "1200": "dwm",
+     "4242": "llama-server",
+     "5555": "msedge.exe",
+     "9876": "Cyberpunk2077"
+    },
+    "compositor": 1200
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090",
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m",
+       "startCommand": [
+        "C:\\servers\\llama-server.exe"
+       ]
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-rx-7600",
+      "name": "AMD Radeon RX 7600",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m",
+       "startCommand": [
+        "%USERPROFILE%\\bin\\My-Server.EXE",
+        "--port",
+        "1"
+       ]
+      }
+     },
+     {
+      "id": "gpu-elsewhere",
+      "name": "A card DXGI does not list",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "self": 777,
+   "expect": {}
+  }
+ ],
+ "serverNames": [
+  {
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090",
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m",
+       "startCommand": [
+        "C:\\servers\\llama-server.exe"
+       ]
+      }
+     },
+     {
+      "id": "gpu-amd-radeon-rx-7600",
+      "name": "AMD Radeon RX 7600",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m",
+       "startCommand": [
+        "%USERPROFILE%\\bin\\My-Server.EXE",
+        "--port",
+        "1"
+       ]
+      }
+     },
+     {
+      "id": "gpu-elsewhere",
+      "name": "A card DXGI does not list",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "npu",
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "expect": [
+    "dwm",
+    "llama-server",
+    "geniex",
+    "ollama",
+    "ollama_llama_server",
+    "my-server"
+   ]
+  }
+ ],
+ "gamesStale": [
+  {
+   "case": "none",
+   "games": null,
+   "stale": true
+  },
+  {
+   "case": "10 s old",
+   "games": {
+    "checkedAt": "2026-09-21T14:13:10.000Z",
+    "cards": {}
+   },
+   "stale": false
+  },
+  {
+   "case": "exactly 15 s old",
+   "games": {
+    "checkedAt": "2026-09-21T14:13:05.000Z",
+    "cards": {}
+   },
+   "stale": false
+  },
+  {
+   "case": "over 15 s old",
+   "games": {
+    "checkedAt": "2026-09-21T14:13:04.999Z",
+    "cards": {}
+   },
+   "stale": true
+  },
+  {
+   "case": "from a clock 16 s ahead",
+   "games": {
+    "checkedAt": "2026-09-21T14:13:36.000Z",
+    "cards": {}
+   },
+   "stale": true
+  },
+  {
+   "case": "an unreadable time",
+   "games": {
+    "checkedAt": "soon",
+    "cards": {}
+   },
+   "stale": true
+  }
+ ],
+ "candidates": [
+  {
+   "case": "chat: those that serve it, in order",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-a",
+     "gpu-b",
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "vision: only the card with a vision model",
+   "need": {
+    "work": "vision",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-b"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "embed: only the processor",
+   "need": {
+    "work": "embed",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "cpu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "a request over the NPU's cap goes to the cards",
+   "need": {
+    "work": "chat",
+    "tokens": 3000,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-a",
+     "gpu-b"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "a failed card and a card a game is using are skipped, and say why",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "failures": {
+    "gpu-a": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "games": {
+    "checkedAt": "2026-09-21T14:13:15.000Z",
+    "cards": {
+     "gpu-b": {
+      "busy": true,
+      "percent": 87,
+      "by": [
+       "game.exe"
+      ]
+     }
+    }
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-a",
+      "why": "failed",
+      "detail": "the Card A failed (refused); it is tried again in 8 min"
+     },
+     {
+      "id": "gpu-b",
+      "why": "game",
+      "detail": "the Card B is in use by game.exe"
+     }
+    ]
+   }
+  },
+  {
+   "case": "a person waiting may use the card a game is using",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "interactive"
+   },
+   "failures": {
+    "gpu-a": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "games": {
+    "checkedAt": "2026-09-21T14:13:15.000Z",
+    "cards": {
+     "gpu-b": {
+      "busy": true,
+      "percent": 87,
+      "by": [
+       "game.exe"
+      ]
+     }
+    }
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-b",
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-a",
+      "why": "failed",
+      "detail": "the Card A failed (refused); it is tried again in 8 min"
+     }
+    ]
+   }
+  },
+  {
+   "case": "one the agent leaves alone after a line too long is skipped until it resumes",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "deferredMs": {
+    "npu": 60000,
+    "gpu-a": 0
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-a",
+     "gpu-b"
+    ],
+    "skipped": [
+     {
+      "id": "npu",
+      "why": "deferred",
+      "detail": "work on the NPU resumes in 1 min"
+     }
+    ]
+   }
+  },
+  {
+   "case": "the last resort: every one that would do has failed, so they are all tried again",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "failures": {
+    "gpu-a": {
+     "since": "2026-09-21T14:12:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    },
+    "gpu-b": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    },
+    "npu": {
+     "since": "2026-09-21T14:10:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-a",
+     "gpu-b",
+     "npu"
+    ],
+    "skipped": []
+   }
+  },
+  {
+   "case": "the last resort still keeps background work off a card a game is using",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "failures": {
+    "gpu-a": {
+     "since": "2026-09-21T14:12:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    },
+    "gpu-b": {
+     "since": "2026-09-21T14:11:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    },
+    "npu": {
+     "since": "2026-09-21T14:10:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "games": {
+    "checkedAt": "2026-09-21T14:13:15.000Z",
+    "cards": {
+     "gpu-b": {
+      "busy": true,
+      "percent": 87,
+      "by": [
+       "game.exe"
+      ]
+     }
+    }
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "gpu-a",
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-b",
+      "why": "game",
+      "detail": "the Card B is in use by game.exe"
+     }
+    ]
+   }
+  },
+  {
+   "case": "one working is enough: the failed stay skipped",
+   "need": {
+    "work": "chat",
+    "tokens": 500,
+    "lane": "background"
+   },
+   "failures": {
+    "gpu-a": {
+     "since": "2026-09-21T14:12:20.000Z",
+     "reason": "refused",
+     "by": "x"
+    },
+    "gpu-b": {
+     "since": "2026-09-21T14:03:50.000Z",
+     "reason": "refused",
+     "by": "x"
+    }
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [
+     "npu"
+    ],
+    "skipped": [
+     {
+      "id": "gpu-a",
+      "why": "failed",
+      "detail": "the Card A failed (refused); it is tried again in 9 min"
+     },
+     {
+      "id": "gpu-b",
+      "why": "failed",
+      "detail": "the Card B failed (refused); it is tried again in 1 min"
+     }
+    ]
+   }
+  },
+  {
+   "case": "nothing fits: no candidates and nothing skipped",
+   "need": {
+    "work": "chat",
+    "tokens": 20000,
+    "lane": "background"
+   },
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "expect": {
+    "list": [],
+    "skipped": []
+   }
+  }
+ ],
+ "pick": [
+  {
+   "case": "the first in order with a free slot and nobody waiting",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": true,
+     "waiting": 0
+    },
+    "npu": {
+     "freeSlot": true,
+     "waiting": 0
+    }
+   },
+   "expect": {
+    "acc": "gpu-a"
+   }
+  },
+  {
+   "case": "the free one",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": false,
+     "waiting": 0
+    },
+    "npu": {
+     "freeSlot": true,
+     "waiting": 0
+    }
+   },
+   "expect": {
+    "acc": "npu"
+   }
+  },
+  {
+   "case": "else the shortest line",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": true,
+     "waiting": 1
+    },
+    "npu": {
+     "freeSlot": false,
+     "waiting": 2
+    }
+   },
+   "expect": {
+    "acc": "gpu-a"
+   }
+  },
+  {
+   "case": "ties by order",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": false,
+     "waiting": 2
+    },
+    "npu": {
+     "freeSlot": false,
+     "waiting": 2
+    }
+   },
+   "expect": {
+    "acc": "gpu-a"
+   }
+  },
+  {
+   "case": "background work waits when every line has 4 or more",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": false,
+     "waiting": 4
+    },
+    "npu": {
+     "freeSlot": false,
+     "waiting": 5
+    }
+   },
+   "expect": {
+    "deferred": "every line is full (4 waiting for the Card A, 5 waiting for the NPU)"
+   }
+  },
+  {
+   "case": "one line under 4 takes it",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": false,
+     "waiting": 4
+    },
+    "npu": {
+     "freeSlot": false,
+     "waiting": 3
+    }
+   },
+   "expect": {
+    "acc": "npu"
+   }
+  },
+  {
+   "case": "a person waiting always joins",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "gpu-a",
+    "npu"
+   ],
+   "lane": "interactive",
+   "looks": {
+    "gpu-a": {
+     "freeSlot": false,
+     "waiting": 6
+    },
+    "npu": {
+     "freeSlot": false,
+     "waiting": 5
+    }
+   },
+   "expect": {
+    "acc": "npu"
+   }
+  },
+  {
+   "case": "one candidate, its line full",
+   "config": {
+    "accelerators": [
+     {
+      "id": "gpu-a",
+      "name": "Card A",
+      "memoryGb": 24,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-b",
+      "name": "Card B",
+      "memoryGb": 12,
+      "maxContextTokens": 16384,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      },
+      "vision": {
+       "model": "v"
+      }
+     },
+     {
+      "id": "npu",
+      "name": "NPU",
+      "maxContextTokens": 2400,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Processor",
+      "maxContextTokens": 4000,
+      "embed": {
+       "baseUrl": "http://x:4",
+       "model": "e"
+      }
+     }
+    ]
+   },
+   "candidates": [
+    "npu"
+   ],
+   "lane": "background",
+   "looks": {
+    "npu": {
+     "freeSlot": false,
+     "waiting": 4
+    }
+   },
+   "expect": {
+    "deferred": "4 already waiting for the NPU"
+   }
+  }
+ ],
+ "whyNone": [
+  {
+   "case": "one failed first and none could take it after",
+   "skipped": [
+    {
+     "id": "npu",
+     "why": "game",
+     "detail": "the NPU is in use by game.exe"
+    }
+   ],
+   "first": {
+    "acc": {
+     "id": "gpu-a",
+     "name": "Card A"
+    },
+    "reason": "chat: 503"
+   },
+   "expect": {
+    "busy": false,
+    "message": "the Card A failed (chat: 503), and no other accelerator could take the request: the NPU is in use by game.exe"
+   }
+  },
+  {
+   "case": "busy while any is only resting or held by a game",
+   "skipped": [
+    {
+     "id": "gpu-a",
+     "why": "failed",
+     "detail": "a"
+    },
+    {
+     "id": "npu",
+     "why": "deferred",
+     "detail": "b"
+    }
+   ],
+   "first": null,
+   "expect": {
+    "busy": true,
+    "message": "a; b"
+   }
+  },
+  {
+   "case": "an error when they all failed",
+   "skipped": [
+    {
+     "id": "gpu-a",
+     "why": "failed",
+     "detail": "the Card A failed (x); it is tried again in 3 min"
+    }
+   ],
+   "first": null,
+   "expect": {
+    "busy": false,
+    "message": "the Card A failed (x); it is tried again in 3 min"
+   }
+  },
+  {
+   "case": "nothing at all",
+   "skipped": [],
+   "first": null,
+   "expect": {
+    "busy": false,
+    "message": "no accelerator could take the request"
+   }
+  }
+ ],
+ "messages": [
+  {
+   "case": "the NPU's own name",
+   "ref": {
+    "id": "npu",
+    "name": "Snapdragon X2 Elite NPU"
+   },
+   "theAccelerator": "the Snapdragon X2 Elite NPU",
+   "noteLabel": "note from the Snapdragon X2 Elite NPU, unverified"
+  },
+  {
+   "case": "an older config's card",
+   "ref": {
+    "id": "gpu-graphics-card",
+    "name": "Graphics card"
+   },
+   "theAccelerator": "the graphics card",
+   "noteLabel": "note from the graphics card, unverified"
+  },
+  {
+   "case": "the processor",
+   "ref": {
+    "id": "cpu",
+    "name": "Processor"
+   },
+   "theAccelerator": "the processor",
+   "noteLabel": "note from the processor, unverified"
+  },
+  {
+   "case": "a name that says \"the\"",
+   "ref": {
+    "id": "cpu",
+    "name": "The Oryon CPU"
+   },
+   "theAccelerator": "The Oryon CPU",
+   "noteLabel": "note from The Oryon CPU, unverified"
+  },
+  {
+   "case": "none: a note from before the accelerators came from the NPU",
+   "ref": null,
+   "theAccelerator": "the NPU",
+   "noteLabel": "note from the NPU, unverified"
+  }
+ ],
+ "tokens": [
+  {
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "estimate": 3000
+  },
+  {
+   "text": "Hi",
+   "estimate": 1
+  },
+  {
+   "chat": [
+    {
+     "role": "system",
+     "content": "Be brief."
+    },
+    {
+     "role": "user",
+     "content": "Hi"
+    }
+   ],
+   "estimate": 23
+  },
+  {
+   "vision": "What is the title?",
+   "estimate": 406
+  }
+ ],
+ "pieces": [
+  {
+   "text": "line 0 line 0 line 0 line 0 line 0 line 0 line 0 line 0 line 0 \nline 1 line 1 line 1 line 1 line 1 line 1 line 1 line 1 line 1 \nline 2 line 2 line 2 line 2 line 2 line 2 line 2 line 2 line 2 \nline 3 line 3 line 3 line 3 line 3 line 3 line 3 line 3 line 3 \nline 4 line 4 line 4 line 4 line 4 line 4 line 4 line 4 line 4 \nline 5 line 5 line 5 line 5 line 5 line 5 line 5 line 5 line 5 \nline 6 line 6 line 6 line 6 line 6 line 6 line 6 line 6 line 6 \nline 7 line 7 line 7 line 7 line 7 line 7 line 7 line 7 line 7 \nline 8 line 8 line 8 line 8 line 8 line 8 line 8 line 8 line 8 \nline 9 line 9 line 9 line 9 line 9 line 9 line 9 line 9 line 9 \nline 10 line 10 line 10 line 10 line 10 line 10 line 10 line 10 line 10 \nline 11 line 11 line 11 line 11 line 11 line 11 line 11 line 11 line 11 ",
+   "budget": 50,
+   "expect": [
+    "line 0 line 0 line 0 line 0 line 0 line 0 line 0 line 0 line 0 \nline 1 line 1 line 1 line 1 line 1 line 1 line 1 line 1 line 1 \nline 2 line 2 line 2 line 2 line 2 line 2 line 2 line 2 line 2 ",
+    "line 3 line 3 line 3 line 3 line 3 line 3 line 3 line 3 line 3 \nline 4 line 4 line 4 line 4 line 4 line 4 line 4 line 4 line 4 \nline 5 line 5 line 5 line 5 line 5 line 5 line 5 line 5 line 5 ",
+    "line 6 line 6 line 6 line 6 line 6 line 6 line 6 line 6 line 6 \nline 7 line 7 line 7 line 7 line 7 line 7 line 7 line 7 line 7 \nline 8 line 8 line 8 line 8 line 8 line 8 line 8 line 8 line 8 ",
+    "line 9 line 9 line 9 line 9 line 9 line 9 line 9 line 9 line 9 \nline 10 line 10 line 10 line 10 line 10 line 10 line 10 line 10 line 10 ",
+    "line 11 line 11 line 11 line 11 line 11 line 11 line 11 line 11 line 11 "
+   ]
+  }
+ ]
+}
