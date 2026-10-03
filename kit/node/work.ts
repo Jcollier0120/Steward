@@ -21,6 +21,8 @@ export interface WorkLine {
 export interface AgentWork {
   /** It sends requests to Reeve's model. */
   model: boolean;
+  /** Its requests go to the NPU only, never a graphics card or the processor (the Lamplighter's: the GPU is what it guards). */
+  npuOnly?: boolean;
   lines: WorkLine[];
   /** Anything else worth knowing, a sentence each. */
   notes?: string[];
@@ -110,6 +112,17 @@ export const WORK: Record<string, AgentWork> = {
       { what: 'Explanations, the daily report, suggestions and what is new', where: MODEL, when: 'only when no other agent holds or waits for an accelerator; at most 8 a round' },
     ],
   },
+  lamplighter: {
+    model: true,
+    npuOnly: true,
+    lines: [
+      { what: "Its guard: reading the graphics cards, the event log and who signed in, and archiving a new driver (pnputil /export-driver) with each file's SHA-256", where: 'the processor and the disk, as SYSTEM (Windows PowerShell); never the graphics card', when: 'at start-up and sign-in, when a driver is installed or the display resets, and every 5 minutes, about a second; an export takes longer (a driver can be 500 MB)' },
+      { what: 'Rolling a driver back: removing the new one, and installing the last good one from the archive (pnputil)', where: 'the processor and the disk, as SYSTEM', when: 'only after a new graphics driver nobody kept at sign-in, or that left the screen dark' },
+      { what: 'Its page: reading what the guard did, and the graphics cards', where: 'the processor (PowerShell)', when: 'every 5 minutes (Settings), a moment' },
+      { what: 'A few plain sentences on a rollback', where: "Reeve's model on the NPU only (below)", when: 'after a rollback, only when no other agent holds or waits for the NPU' },
+    ],
+    notes: ['The guard is the one part of the manor that runs as an administrator (SYSTEM), and it uses no model: detecting a dark screen and rolling back are code.'],
+  },
 };
 
 const esc = (s: unknown) =>
@@ -140,9 +153,17 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
   const rows = (w?.lines ?? []).map((l) => `<tr><td>${esc(l.what)}</td><td>${esc(l.where)}</td><td>${esc(l.when)}</td></tr>`).join('');
   const table = rows ? `<table class="work-table"><tr><th>What</th><th>Where it runs</th><th>When</th></tr>${rows}</table>` : '';
   const notes = (w?.notes ?? []).map((n) => `<p class="muted small">${esc(n)}</p>`).join('');
+  const cfg = () => o.config ?? loadAccelerators();
+  const hasNpu = () => {
+    const c = cfg();
+    return !('error' in c) && c.accelerators.some((a) => a.kind === 'npu' && a.enabled !== false && serves(a, 'chat'));
+  };
   const model = w && !w.model
     ? `<p>${esc(name)} uses no model.</p>`
-    : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. Each request goes to the first one in Reeve's order that is free and hasn't failed in the last 10 minutes (by default: graphics cards with 2 GB or more of their own memory, then the NPU, then graphics that share the PC's memory, then the processor). Background work keeps off a graphics card a game is using. ${esc(thisPc(o.config ?? loadAccelerators()))}</p>
+    : w?.npuOnly
+      ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${hasNpu() ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
+<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
+      : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. Each request goes to the first one in Reeve's order that is free and hasn't failed in the last 10 minutes (by default: graphics cards with 2 GB or more of their own memory, then the NPU, then graphics that share the PC's memory, then the processor). Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg()))}</p>
 <p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`;
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>

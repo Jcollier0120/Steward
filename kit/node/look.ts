@@ -234,6 +234,25 @@ ${B} .sc-scope { transform-origin: 30px 12.6px; ${run('sc-sweep', 4, 0, 'ease-in
 ${B} .sc-sight { ${run('sc-sight', 4)} }`,
 };
 
+/* ---- The Lamplighter: the long pole rises to the lantern, its little flame lights the lamp, and the pole comes down. */
+const lamplighter: Look = {
+  accent: { light: '#c4471a', dark: '#ff9a6b' },
+  busy: 'Lighting the lamps',
+  scene: `${GROUND}<path class="sc-line" d="M46 35.5V16.6M42.4 19.2h7.2"/><path class="sc-front" d="M42.9 34.2h6.2v1.3h-6.2z"/>
+<circle class="sc-halo sc-lamp-halo" cx="46" cy="11.6" r="7.6"/>
+<path class="sc-back" d="M41.6 8.6h8.8l-1.6 6.2h-5.6z"/><path class="sc-glow sc-lamp" d="M42.9 9.5h6.2l-1.1 4.3h-4z"/><path class="sc-role sc-lamp" d="M46 10c1 1.1 1.4 1.9 1.4 2.4a1.4 1.4 0 0 1-2.8 0c0-.5.4-1.3 1.4-2.4z"/>
+<path class="sc-front" d="M40.6 8.9h10.8L46 4.8z"/><path class="sc-front" d="M43.2 14.6h5.6v1.5h-5.6z"/>
+<g class="sc-pole" transform="rotate(16 10 35.5)"><path class="sc-line" d="M10 35.5 41.6 13.4"/><path class="sc-role sc-tip" d="M42.3 10.2c1 1.1 1.4 1.9 1.4 2.4a1.4 1.4 0 0 1-2.8 0c0-.5.4-1.3 1.4-2.4z"/></g>`,
+  motion: `@keyframes sc-raise { 0%, 8% { transform: rotate(16deg); } 34%, 56% { transform: rotate(0deg); } 80%, 100% { transform: rotate(16deg); } }
+@keyframes sc-light { 0%, 36% { opacity: .15; } 44%, 90% { opacity: 1; } 98%, 100% { opacity: .15; } }
+@keyframes sc-glowing { 0%, 36% { opacity: 0; } 44%, 90% { opacity: .22; } 98%, 100% { opacity: 0; } }
+@keyframes sc-flicker-tip { 0%, 100% { opacity: 1; } 40% { opacity: .55; } 70% { opacity: .85; } }
+${B} .sc-pole { transform-origin: 10px 35.5px; ${run('sc-raise', 6, 0, 'ease-in-out')} }
+${B} .sc-lamp { ${run('sc-light', 6)} }
+${B} .sc-lamp-halo { ${run('sc-glowing', 6)} }
+${B} .sc-tip { ${run('sc-flicker-tip', 1)} }`,
+};
+
 /** Any other agent: a cog, turning while it works. */
 export const DEFAULT_LOOK: Look = {
   accent: { light: '#66717c', dark: '#a7b1bc' },
@@ -245,7 +264,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);

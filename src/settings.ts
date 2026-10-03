@@ -74,8 +74,8 @@ const hire = (name: string): Employee => ({
 });
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, built on the kit from the
- * start as a hire is (it never carried a copy, so it isn't one of the old kit's hires). Reeve takes the node and spec parts and
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor and the Lamplighter, built on
+ * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
  */
@@ -107,6 +107,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     installed: '',
   },
   hire('Surveyor'),
+  hire('Lamplighter'),
 ];
 
 /** The team: you, and Claude Code, which opens its PRs with your account. */
