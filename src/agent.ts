@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { APP, port } from './app.ts';
+import { duty } from './kit/duty.ts';
+import { LockTimeout } from './kit/lock.ts';
 import { page } from './kit/page.ts';
+import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import type { Runner } from './run.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
@@ -12,10 +15,10 @@ import { renderBody } from './view.ts';
  * process, one at a time (and never beside one run from a terminal: the stage lock), and the page
  * refreshes itself while it runs.
  *
- * Its duty (start and stop, from Manor) works as every agent's does. It has no rounds of its own yet. A
- * scheduled check goes here when it has one, through the kit's every() in schedule.ts, which already
- * pauses while it's off duty: for instance a daily `staff` refresh that notices a new kit release, or an
- * employee whose release lags its branch.
+ * Its duty (start and stop, from Manor) works as every agent's does. Its round (stages/round.ts) comes every
+ * few minutes while it's on duty and Settings say it merges and releases by itself, through the kit's every()
+ * in schedule.ts: every ready PR of its own and the team's merged, with what each asks for after, and every
+ * version not yet released released. Run now does one round, on duty or not.
  */
 
 const ICON = readFileSync(new URL('../art/icon.svg', import.meta.url), 'utf8');
@@ -70,6 +73,32 @@ export async function serveSteward(o: { run?: Runner } = {}) {
   };
   if (staleTable()) void refresh();
 
+  // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
+  // release what isn't. It passes while a stage runs here or in a terminal (the stage lock).
+  const roundJob = async () => {
+    if (running) return;
+    running = { stage: 'round', since: new Date().toISOString() };
+    try {
+      await runStage('round', {}, { run: o.run, log: (line) => console.log(`round: ${line}`) });
+    } catch (e) {
+      if (!(e instanceof LockTimeout)) throw e;
+    } finally {
+      running = null;
+    }
+  };
+  // On duty, every few minutes while Settings say it merges and releases by itself; the kit's every() pauses off
+  // duty. Saving Settings starts, stops or re-times it.
+  let rounds: ReturnType<typeof every> | null = null;
+  const arrange = () => {
+    const s = loadSettings();
+    if (s.byItself && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, roundJob, { name: 'round' });
+    else if (!s.byItself && rounds) {
+      rounds.stop();
+      rounds = null;
+    } else rounds?.reschedule();
+  };
+  arrange();
+
   const served = await serve({
     port,
     icon: ICON,
@@ -77,7 +106,10 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     get: {
       '/': ({ token }) => {
         if (!running && staleTable()) void refresh();
-        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: loadSettings().team });
+        const s = loadSettings();
+        const state = rounds?.state;
+        const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null };
+        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round });
         return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
       },
       '/api/staff': () => ({ json: loadStaff() }),
@@ -90,16 +122,30 @@ export async function serveSteward(o: { run?: Runner } = {}) {
       '/api/stage/merge': ({ body }) => start('merge', { ...askOf(body), yes: true }),
       '/api/stage/merge-team': ({ body }) => start('merge', { ...askOf(body), yes: true, team: true }),
       '/api/stage/release': stagePost('release'),
+      // A round now, as the schedule would run one (the button asks first), on duty or not.
+      '/api/run': () => {
+        if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
+        void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+        return { json: { started: true } };
+      },
       '/api/staff/refresh': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; the table is refreshed when it's done.` } };
         void refresh();
         return { json: { started: true } };
       },
     },
-    settings: SETTINGS_SPEC,
+    settings: { ...SETTINGS_SPEC, onSaved: arrange },
   });
   console.log(`${APP.name} is serving http://${APP.id}.localhost:${port}/`);
-  return { ...served, idle: async () => {
-    while (running || refreshing) await new Promise((r) => setTimeout(r, 25));
-  } };
+  return {
+    ...served,
+    idle: async () => {
+      while (running || refreshing) await new Promise((r) => setTimeout(r, 25));
+    },
+    close: async () => {
+      rounds?.stop();
+      rounds = null;
+      await served.close();
+    },
+  };
 }

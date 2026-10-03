@@ -12,6 +12,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
+import { releaseUnreleased, roundDidSomething } from './stages/round.ts';
 import { staff, type Staff } from './stages/staff.ts';
 
 /**
@@ -68,7 +69,7 @@ export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean } = {}): Promi
   return s;
 }
 
-/** Runs a stage under the lock, records it, and refreshes the staff's table. */
+/** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
 export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo } = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
@@ -85,11 +86,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
-        if (name === 'merge') {
-          const merged = await merge(ctx, picked.employees, { yes: !!ask.yes, team: !!ask.team });
+        if (name === 'merge' || name === 'round') {
+          // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
+          const round = name === 'round';
+          const yes = round || !!ask.yes;
+          const merged = await merge(ctx, picked.employees, { yes, team: round || !!ask.team });
           out.results = merged.map(({ merged: _m, ...r }) => r);
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
-          if (ask.yes && done.length) {
+          if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
             let releaseKit: string | null = null;
             if (ctx.settings.releaseAfterMerge) {
@@ -102,6 +106,11 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               }
             }
             out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit })));
+          }
+          if (round) {
+            const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
+            const released = await releaseUnreleased(ctx, picked.employees.filter((e) => !releasedNow.has(e.id)));
+            out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
           }
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
@@ -121,6 +130,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         log(`${name}: ${out.error}`);
       }
       out.finished = new Date().toISOString();
+      // A round with nothing done or failed leaves no trace: the last stage stays what last happened.
+      if (name === 'round' && !roundDidSomething(out.results, out.error)) return out;
       writeJson(lastStageFile(), out);
       appendFileSync(dataFile('stages.log'), `${JSON.stringify({ ...out, log: undefined })}\n`);
       try {

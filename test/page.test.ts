@@ -50,6 +50,12 @@ test('the page shows the kit, the stages and Settings, and carries its token', a
   for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
   assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team's PRs</);
   assert.match(html, /data-settings-panel/);
+  // By itself (Settings' default): its rounds, and Run now, which the kit lifts into the title bar.
+  assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team&#39;s that is ready/);
+  assert.match(html, /data-post="\/api\/run" data-confirm="A round now: [^"]*"[^>]*>Run now</);
+  const ping = await (await fetch(`${base()}/api/ping`)).json();
+  assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
+  assert.equal(typeof ping.nextRunAt, 'string');
 });
 
 test('a stage needs the token, from its own origin or none: without it nothing starts', async () => {
@@ -76,6 +82,12 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   assert.equal(merged.stage, 'merge');
   assert.equal(merged.asked.yes, true);
   assert.equal(merged.asked.team, true);
+  // Run now: a round, with the same token. With no employees it does nothing, and leaves no trace.
+  assert.equal((await post('/api/run', {})).status, 403);
+  const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  assert.deepEqual(await round.json(), { started: true });
+  await served.idle();
+  assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'merge', 'a round with nothing done is not recorded');
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {

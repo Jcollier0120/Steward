@@ -39,7 +39,11 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
   return { release: true };
 }
 
-export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null }): Promise<EmployeeResult> {
+/**
+ * `unless`, given the commit to release and its version, may say why not (a round leaves a commit whose release
+ * failed before to a person).
+ */
+export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null }): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
   const repo = checkoutOf(e);
@@ -54,6 +58,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null 
   const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
   if (!decision.release) return result(e, 'skipped', 'error' in v ? v.error : decision.why);
   const version = (v as { version: string }).version;
+  const not = o.unless?.(commit, version);
+  if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
 
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);

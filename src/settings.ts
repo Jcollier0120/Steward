@@ -48,6 +48,9 @@ export interface Settings {
   releaseAfterMerge: boolean;
   stewardRepo: string;
   parallel: number;
+  /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
+  byItself: boolean;
+  roundMinutes: number;
 }
 
 const hire = (name: string): Employee => ({
@@ -110,6 +113,8 @@ export const DEFAULT_SETTINGS: Settings = {
   releaseAfterMerge: false,
   stewardRepo: 'Jcollier0120/Steward',
   parallel: 2,
+  byItself: true,
+  roundMinutes: 10,
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -162,6 +167,13 @@ export const SETTINGS_SCHEMA: Field[] = [
   { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', help: 'Off: Release is a stage of its own.' },
   { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: 'Where the kit releases (kit-v<version>) are.', maxLength: 140, ...REPO },
   { key: 'parallel', kind: 'whole', min: 1, max: 10, unit: 'employees', label: 'Checked at once', help: 'How many employees a bump tests at the same time.' },
+  {
+    key: 'byItself',
+    kind: 'switch',
+    label: 'Merges and releases by itself',
+    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released. Off: only when asked.",
+  },
+  { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
 ];
 
 const str = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
@@ -198,6 +210,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);
   }
   const parallel = Number(r.parallel);
+  const roundMinutes = Number(r.roundMinutes);
   return {
     settings: {
       employees,
@@ -206,6 +219,8 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       releaseAfterMerge: typeof r.releaseAfterMerge === 'boolean' ? r.releaseAfterMerge : d.releaseAfterMerge,
       stewardRepo: str(r.stewardRepo, d.stewardRepo),
       parallel: Number.isInteger(parallel) ? Math.min(10, Math.max(1, parallel)) : d.parallel,
+      byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
+      roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
     },
     problems,
   };

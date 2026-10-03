@@ -19,7 +19,7 @@ export interface EmployeeResult {
   commit?: string;
 }
 
-export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'staff';
+export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
 
 export interface StageResult {
   stage: StageName;

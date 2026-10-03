@@ -45,6 +45,8 @@ test('eleven employees, all on the kit: the eight hires, Reeve and Heiward, then
   const saved = normalizeSettings({ employees: [{ id: 'reeve' }, { id: 'heiward' }, { id: 'porter', usesKit: false }] }).settings.employees;
   assert.deepEqual(saved.map((x) => [x.id, x.usesKit, x.branch]), [['reeve', true, 'main'], ['heiward', true, 'master'], ['porter', false, 'main']]);
   assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
+  assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [true, 10], 'it merges and releases by itself, a round every 10 minutes on duty');
+  assert.deepEqual([normalizeSettings({ roundMinutes: 1 }).settings.roundMinutes, normalizeSettings({ byItself: false }).settings.byItself], [2, false]);
   assert.deepEqual(DEFAULT_SETTINGS.team, ['Jcollier0120'], 'you, and Claude Code, which opens its PRs with your account');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
 });
