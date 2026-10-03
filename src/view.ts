@@ -1,4 +1,5 @@
 import { ago, esc, settingsPanel } from './kit/page.ts';
+import { afterWords } from './after.ts';
 import type { EmployeeResult, StageResult } from './stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from './stages/staff.ts';
 
@@ -27,13 +28,20 @@ function releaseCell(r: StaffRow): string {
   return parts.join('<br>');
 }
 
-function prCell(prs: PrInfo[]): string {
+/** The Steward's PRs and the team's: a team member's says whose, and what it is. */
+function prCell(prs: PrInfo[], branch: string): string {
   if (!prs.length) return '';
   return prs
     .map((p) => {
       const checks = badge(p.checks === 'failing' ? 'alert' : p.checks === 'pending' ? 'warn' : 'ok', `checks ${p.checks}`);
       const merges = badge(p.mergeable === 'MERGEABLE' ? 'ok' : p.mergeable === 'CONFLICTING' ? 'alert' : 'warn', p.mergeable.toLowerCase());
-      return `<div>${link(p.url, `#${p.number}`)} ${checks} ${merges}${p.draft ? ` ${badge('warn', 'draft')}` : ''}<br><span class="muted">${esc(p.head)}</span></div>`;
+      const into = p.base && p.base !== branch ? ` ${badge('warn', `into ${p.base}`, `Merge only takes a PR into ${branch}`)}` : '';
+      const team = p.whose === 'team';
+      const who = team ? ` ${badge('', 'team', `Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`)}` : '';
+      const what = team ? `<br><span class="pr-title">${esc(p.title)}</span>` : '';
+      // What it asks for once merged (its steward block), or why that can't be read.
+      const then = p.afterError ? `<br>${badge('alert', 'steward block', p.afterError)}` : p.after ? `<br><span class="muted">then: ${esc(afterWords(p.after))}</span>` : '';
+      return `<div class="pr">${link(p.url, `#${p.number}`)}${who} ${checks} ${merges}${p.draft ? ` ${badge('warn', 'draft')}` : ''}${into}${what}${then}<br><span class="muted">${esc(p.head)}${team ? `, ${esc(p.author)}'s` : ''}</span></div>`;
     })
     .join('');
 }
@@ -52,13 +60,13 @@ function staffTable(s: Staff): string {
 <td>${main}</td>
 <td>${kitCell(r, s.kit)}</td>
 <td>${releaseCell(r)}</td>
-<td>${prCell(r.prs)}${prepared}</td>
+<td>${prCell(r.prs, r.branch)}${prepared}</td>
 <td>${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}</td>
 </tr>`;
     })
     .join('\n');
   return `<div class="card"><table>
-<thead><tr><th>Employee</th><th>Checkout</th><th>Branch on origin</th><th>Kit</th><th>Latest release</th><th>Steward PRs</th><th>Notes</th></tr></thead>
+<thead><tr><th>Employee</th><th>Checkout</th><th>Branch on origin</th><th>Kit</th><th>Latest release</th><th>Open PRs</th><th>Notes</th></tr></thead>
 <tbody>
 ${rows}
 </tbody></table></div>`;
@@ -83,7 +91,7 @@ ${rows ? `<table><thead><tr><th>Employee</th><th>Result</th><th></th></tr></thea
 </div>`;
 }
 
-export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean }): string {
+export function renderBody(o: { staff: Staff | null; last: StageResult | null; running: { stage: string; since: string } | null; refreshing: boolean; team?: string[] }): string {
   const s = o.staff;
   const kit = s?.kit ?? null;
   const kitLine = s
@@ -91,21 +99,27 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
     : '<p class="muted">Looking at the staff for the first time…</p>';
   const running = o.running ? `<div class="card row">${badge('warn', 'Working')} <span>${esc(o.running.stage)}, started ${esc(ago(o.running.since))}. This page refreshes itself until it's done.</span></div>` : '';
   const onKit = s?.rows.filter((r) => r.usesKit) ?? [];
+  const offKit = s?.rows.filter((r) => !r.usesKit) ?? [];
+  // One that doesn't take the kit starts unticked: the stages pass over it, but the team's PRs to it can be merged.
   const boxes = (s?.rows ?? [])
-    .map((r) => `<label class="pick"><input type="checkbox" name="employees" value="${esc(r.id)}" data-keep${r.usesKit ? ' checked' : ' disabled'}> ${esc(r.name)}</label>`)
+    .map((r) => `<label class="pick"${r.usesKit ? '' : ` title="Doesn't take the kit yet: only the team's PRs are merged for it"`}><input type="checkbox" name="employees" value="${esc(r.id)}" data-keep${r.usesKit ? ' checked' : ''}> ${esc(r.name)}</label>`)
     .join(' ');
   const who = `the ticked employees (${onKit.length} take the kit)`;
   const disabled = o.running || !kit ? ' disabled' : '';
+  const team = o.team ?? [];
+  const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
+  const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${offKit.length === 1 ? "doesn't" : "don't"} take the kit yet: the stages pass over ${offKit.length === 1 ? 'it' : 'them'}, but the team's PRs to ${offKit.length === 1 ? 'it' : 'them'} can be merged.` : '';
   const stages = `<div class="card">
 <form id="stage-form"><input type="hidden" name="kit" value="${esc(kit ?? '')}"><div class="picks">${boxes}</div></form>
 <div class="row stages">
 <button data-post="/api/stage/bump" data-form="#stage-form" data-confirm="${esc(`Bump ${who} to kit ${kit}? For each: a worktree of its branch, kit.json pinned to ${kit}, its patch version up, its kit filled and its checks run, then a commit. Nothing is pushed.`)}"${disabled}>1. Bump</button>
 <button data-post="/api/stage/push" data-form="#stage-form" data-confirm="${esc(`Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`)}"${disabled}>2. Push</button>
-<button data-post="/api/stage/merge" data-form="#stage-form" data-confirm="Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits?"${o.running ? ' disabled' : ''}>3. Merge</button>
+<button data-post="/api/stage/merge" data-form="#stage-form" data-confirm="Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for."${o.running ? ' disabled' : ''}>3. Merge</button>
 <button data-post="/api/stage/release" data-form="#stage-form" data-confirm="${esc(`Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`)}"${disabled}>4. Release</button>
+<button data-post="/api/stage/merge-team" data-form="#stage-form" data-confirm="${esc(teamAsk)}"${o.running || !team.length ? ' disabled' : ''}${team.length ? '' : ' title="No team in Settings"'}>Merge the team's PRs</button>
 <button class="quiet" data-post="/api/staff/refresh"${o.running || o.refreshing ? ' disabled' : ''}>${o.refreshing ? 'Refreshing…' : 'Refresh'}</button>
 </div>
-<p class="muted">Each stage asks first, works through the ticked employees, and reports for each below. Reeve and Heiward are listed, but don't take the kit yet.</p>
+<p class="muted">Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).${esc(offKitNote)}</p>
 </div>`;
   return `${running}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}.</p>` : ''}</div>
 <h2>Staff</h2>
@@ -121,6 +135,8 @@ ${settingsPanel()}
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
 .stages { margin-bottom: 6px; }
+.pr + .pr { margin-top: 6px; }
+.pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
 td a { color: var(--accent); }
 </style>`;

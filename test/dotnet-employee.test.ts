@@ -167,7 +167,7 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.match(body, /- new vectors/);
 
   // merge --yes: GitHub (standing in) merges the PR into master, and the Steward's worktree goes.
-  const pr = { number: 60, title: "Heiward 1.7.1: the Steward's kit 1.0.1", url: 'https://github.com/Jcollier0120/Heiward/pull/60', headRefName: branch, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
+  const pr = { number: 60, title: "Heiward 1.7.1: the Steward's kit 1.0.1", url: 'https://github.com/Jcollier0120/Heiward/pull/60', headRefName: branch, baseRefName: 'master', isCrossRepository: false, author: { login: 'Jcollier0120', is_bot: false }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
   const m = runner((args) => {
     if (args[1] === 'list') return ok([pr]);
     if (args[1] === 'merge') {

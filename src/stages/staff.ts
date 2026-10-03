@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { readAfter, type After } from '../after.ts';
 import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
@@ -9,8 +10,8 @@ import { bumpBranch, checkoutOf, NOT_ON_KIT, type Ctx } from './common.ts';
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
  * branch on origin (version, pinned kit, old kit files still tracked, whether its tools/kit.ts is the
- * Steward's), its latest release and the kit that release carries, the Steward's open PRs, and a bump
- * prepared here but not pushed.
+ * Steward's), its latest release and the kit that release carries, the open PRs of the Steward and the
+ * team, and a bump prepared here but not pushed.
  */
 
 export type Checks = 'none' | 'passing' | 'pending' | 'failing';
@@ -20,6 +21,17 @@ export interface PrInfo {
   title: string;
   url: string;
   head: string;
+  /** The branch it merges into. */
+  base: string;
+  /** The GitHub account that opened it (a GitHub App's as app/<name>). */
+  author: string;
+  /** The Steward's (a bump's PR, from the repository itself), or one a team member opened. */
+  whose: 'steward' | 'team';
+  /** Its head commit. */
+  headOid: string;
+  /** What its description's steward block asks for after merging (src/after.ts), or why that can't be read. */
+  after: After | null;
+  afterError: string | null;
   /** GitHub's: MERGEABLE, CONFLICTING or UNKNOWN (still working it out). */
   mergeable: string;
   mergeState: string;
@@ -90,21 +102,43 @@ export function checksOf(rollup: unknown): Checks {
   return states.includes('failing') ? 'failing' : states.includes('pending') ? 'pending' : 'passing';
 }
 
-/** The Steward's PRs (head steward/…) in a `gh pr list --json number,title,url,headRefName,mergeable,mergeStateStatus,isDraft,statusCheckRollup` answer. */
-export function parsePrs(json: string): PrInfo[] {
+/**
+ * Whose a PR in a `gh pr list` answer is: the Steward's when its head is a steward/… branch of the
+ * repository itself (a fork's branch can be called anything), the team's when one of `team`'s accounts
+ * opened it (GitHub's accounts ignore case), or nobody's the Steward deals with (null).
+ */
+export function whosePr(p: any, team: string[]): PrInfo['whose'] | null {
+  if (typeof p?.headRefName !== 'string') return null;
+  if (p.headRefName.startsWith('steward/') && p.isCrossRepository === false) return 'steward';
+  const author = String(p.author?.login ?? '').toLowerCase();
+  return author && team.some((t) => t.toLowerCase() === author) ? 'team' : null;
+}
+
+/** The Steward's PRs and the team's in a `gh pr list --json` answer (prListArgs), by number. */
+export function parsePrs(json: string, team: string[]): PrInfo[] {
   const list = JSON.parse(json || '[]') as any[];
   return list
-    .filter((p) => typeof p?.headRefName === 'string' && p.headRefName.startsWith('steward/'))
-    .map((p) => ({
-      number: Number(p.number),
-      title: String(p.title ?? ''),
-      url: String(p.url ?? ''),
-      head: p.headRefName,
-      mergeable: String(p.mergeable ?? 'UNKNOWN'),
-      mergeState: String(p.mergeStateStatus ?? 'UNKNOWN'),
-      draft: p.isDraft === true,
-      checks: checksOf(p.statusCheckRollup),
-    }))
+    .map((p) => ({ p, whose: whosePr(p, team) }))
+    .filter((x): x is { p: any; whose: PrInfo['whose'] } => x.whose !== null)
+    .map(({ p, whose }) => {
+      const after = readAfter(p.body);
+      return {
+        number: Number(p.number),
+        title: String(p.title ?? ''),
+        url: String(p.url ?? ''),
+        head: p.headRefName,
+        base: String(p.baseRefName ?? ''),
+        author: String(p.author?.login ?? ''),
+        whose,
+        headOid: String(p.headRefOid ?? ''),
+        after: 'after' in after ? after.after : null,
+        afterError: 'error' in after ? after.error : null,
+        mergeable: String(p.mergeable ?? 'UNKNOWN'),
+        mergeState: String(p.mergeStateStatus ?? 'UNKNOWN'),
+        draft: p.isDraft === true,
+        checks: checksOf(p.statusCheckRollup),
+      };
+    })
     .sort((a, b) => a.number - b.number);
 }
 
@@ -128,7 +162,7 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
   }
 }
 
-export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,headRefName,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
+export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
 
 export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null; tool?: string | null }): Promise<StaffRow> {
   const { run } = ctx;
@@ -189,7 +223,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   })().catch((err) => void notes.push((err as Error).message));
 
   const prs = gh(run, ctx.neutralDir, ...prListArgs(e.repo))
-    .then((out) => void (row.prs = parsePrs(out)))
+    .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
     .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
 
   const releases = gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')

@@ -20,14 +20,18 @@ const USAGE = `${APP.id}: ${APP.role}
                    from a local ref instead of origin (both for a trial)
   push [--kit <version>] [--employees a,b]
                    push each bump (never forced) and open its PR
-  merge [--yes] [--employees a,b]
+  merge [--yes] [--team] [--employees a,b]
                    list the Steward's open PRs, with their checks and whether they merge; with --yes,
-                   merge those that merge cleanly with no failing or running checks
+                   merge those that merge cleanly with no failing or running checks. --team: the team's
+                   PRs too (the GitHub accounts in Settings), to any employee; their branches stay.
+                   Then what each merged PR's steward block asks for: release, install, and
+                   approve-jobs (merging counts as reading the scripts it names)
   release [--kit <version>] [--employees a,b]
                    release each employee whose branch has the kit and an unreleased version, from its branch
   staff [--json] [--no-fetch]
                    each employee: its checkout, its branch's version and kit, its latest release and the
-                   kit in it, the Steward's open PRs (--hires is the same as --employees, everywhere)
+                   kit in it, the open PRs of the Steward and the team (--hires is the same as --employees,
+                   everywhere)
 
   start            on duty, and its page up at ${pageUrl}
   stop             off duty (it has no rounds yet, so this only says so; the page stays up)
@@ -54,7 +58,7 @@ function opt(args: string[], ...names: string[]): string | undefined {
 const STAGE_FLAGS: Record<string, string[]> = {
   bump: ['--kit', '--employees', '--hires', '--kit-from', '--base'],
   push: ['--kit', '--employees', '--hires'],
-  merge: ['--yes', '--employees', '--hires', '--kit'],
+  merge: ['--yes', '--team', '--employees', '--hires', '--kit'],
   release: ['--kit', '--employees', '--hires'],
   staff: ['--json', '--no-fetch'],
 };
@@ -83,7 +87,7 @@ function printStaff(s: Staff): void {
   for (const r of s.rows) {
     const main = r.main ? `${r.branch} ${r.main.version ?? '?'} (${r.main.commit}), ${r.main.oldKitFiles.length ? `old kit (${r.main.oldKitFiles.length} files)` : r.main.kit ? `kit ${r.main.kit}` : 'no kit.json'}` : `${r.branch} unknown`;
     const rel = r.release ? `${r.release.tag}${r.release.kit === 'unknown' ? '' : r.release.kit ? ` with kit ${r.release.kit}` : ' with no kit'}` : 'no release';
-    const prs = r.prs.length ? `; PRs ${r.prs.map((p) => `#${p.number} ${p.checks}/${p.mergeable.toLowerCase()}`).join(', ')}` : '';
+    const prs = r.prs.length ? `; PRs ${r.prs.map((p) => `#${p.number} ${p.checks}/${p.mergeable.toLowerCase()}${p.whose === 'team' ? ` (${p.author}'s)` : ''}`).join(', ')}` : '';
     console.log(`\n${r.name} (${r.repo})`);
     console.log(`  checkout ${r.checkout.path}${r.checkout.exists ? ` on ${r.checkout.branch}${r.checkout.changes ? `, ${r.checkout.changes} changed` : ''}` : ' (missing)'}`);
     console.log(`  ${main}; latest release ${rel}${r.releaseNeeded ? `; ${r.main?.version} not released` : ''}${prs}`);
@@ -108,6 +112,7 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release'): Promise<numbe
     base: opt(rest, '--base') ?? null,
     kitFrom: opt(rest, '--kit-from') ?? null,
     yes: rest.includes('--yes'),
+    team: rest.includes('--team'),
   };
   try {
     return printStage(await runStage(name, ask, { log: (line) => console.log(line) }));

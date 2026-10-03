@@ -31,10 +31,19 @@ export interface Employee {
   versionFiles: string[];
   /** Publishes the GitHub release of the version on its branch. */
   release: string;
+  /** Installs it on this PC, run in its release unpacked, when a merged PR asks (after: install). Empty: never. */
+  install: string;
+  /**
+   * Approves one of its jobs in the installed copy, {job} its name, when a merged PR names it (after: approve-jobs),
+   * after that PR's install: merging the PR counts as reading the script. %NAME% is expanded. Empty: never.
+   */
+  approve: string;
 }
 
 export interface Settings {
   employees: Employee[];
+  /** The GitHub accounts whose PRs to the employees `merge --team` merges, as well as the Steward's own. */
+  team: string[];
   workRoot: string;
   releaseAfterMerge: boolean;
   stewardRepo: string;
@@ -53,6 +62,8 @@ const hire = (name: string): Employee => ({
   test: ['npx tsc -p . --noEmit', 'npm test'],
   versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
   release: 'npm run release -- --publish',
+  install: 'node src/cli.ts install',
+  approve: '',
 });
 
 /**
@@ -67,6 +78,8 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     ...hire('Reeve'),
     parts: ['node', 'spec'],
     versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
+    // Reeve's jobs run only while their script's sha256 is the approved one: `reeve jobs approve <name>`.
+    approve: 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job}',
   },
   {
     id: 'heiward',
@@ -80,12 +93,19 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     test: ['dotnet test HEI.Core.Tests'],
     versionFiles: ['HEI.Agent/HEI.Agent.csproj'],
     release: 'powershell -NoProfile -File HEI.Agent\\release.ps1 -Publish',
+    // Heiward installs as a Windows app (Settings > Apps), not from a zip with src\cli.ts: the Steward doesn't install it.
+    install: '',
+    approve: '',
   },
   hire('Surveyor'),
 ];
 
+/** The team: you, and Claude Code, which opens its PRs with your account. */
+export const DEFAULT_TEAM = ['Jcollier0120'];
+
 export const DEFAULT_SETTINGS: Settings = {
   employees: DEFAULT_EMPLOYEES,
+  team: DEFAULT_TEAM,
   workRoot: path.join(dataDir, 'work'),
   releaseAfterMerge: false,
   stewardRepo: 'Jcollier0120/Steward',
@@ -106,20 +126,30 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Employees',
     help: 'Every agent the Steward looks after: where its code is, which kit parts it takes, and how to fill its kit, test it, bump its version and release it.',
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like porter' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
       { key: 'repo', kind: 'text', label: 'GitHub repository', maxLength: 140, ...REPO },
       { key: 'checkout', kind: 'text', label: 'Checkout', help: 'Your clone. The Steward adds worktrees of it in the work folder and fetches; it never changes your working tree.', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
       { key: 'branch', kind: 'text', label: 'Branch', help: 'Where releases come from and PRs go.', maxLength: 100, pattern: '[A-Za-z0-9._/-]+', patternHint: 'a branch name, like main' },
-      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: 'Off: listed, but the stages pass over it ("not using the kit yet").' },
+      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the stages pass over it (\"not using the kit yet\"), except merging the team's PRs." },
       { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })) },
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', ...command },
       { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass before a bump is committed.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
+      { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
+      { key: 'approve', kind: 'text', label: 'Approve a job', help: 'Run for each job a merged PR names, {job} its name, after that PR\'s install: merging the PR counts as reading the script. %USERPROFILE% and the like are expanded.', empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
     ],
+  },
+  {
+    key: 'team',
+    kind: 'list',
+    label: 'Team',
+    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Claude Code opens its PRs with your account, so yours covers them. Their branches are left as they are.",
+    item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like Jcollier0120, or app/<name> for a GitHub App' },
+    maxItems: 20,
   },
   {
     key: 'workRoot',
@@ -152,6 +182,8 @@ function normalizeEmployee(e: any): Employee | null {
     test: strings(e.test, known.test),
     versionFiles: strings(e.versionFiles, known.versionFiles),
     release: typeof e.release === 'string' ? e.release.trim() : known.release,
+    install: typeof e.install === 'string' ? e.install.trim() : known.install,
+    approve: typeof e.approve === 'string' ? e.approve.trim() : known.approve,
   };
 }
 
@@ -169,6 +201,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   return {
     settings: {
       employees,
+      team: strings(r.team, d.team),
       workRoot: str(r.workRoot, d.workRoot),
       releaseAfterMerge: typeof r.releaseAfterMerge === 'boolean' ? r.releaseAfterMerge : d.releaseAfterMerge,
       stewardRepo: str(r.stewardRepo, d.stewardRepo),

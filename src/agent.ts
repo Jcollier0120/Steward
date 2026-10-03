@@ -3,7 +3,7 @@ import { APP, port } from './app.ts';
 import { page } from './kit/page.ts';
 import { serve, type Handler } from './kit/server.ts';
 import type { Runner } from './run.ts';
-import { SETTINGS_SPEC } from './settings.ts';
+import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { renderBody } from './view.ts';
 
@@ -77,7 +77,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     get: {
       '/': ({ token }) => {
         if (!running && staleTable()) void refresh();
-        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null });
+        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: loadSettings().team });
         return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
       },
       '/api/staff': () => ({ json: loadStaff() }),
@@ -86,8 +86,9 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     post: {
       '/api/stage/bump': stagePost('bump'),
       '/api/stage/push': stagePost('push'),
-      // The page's button asked first: that is merge --yes.
+      // The page's buttons asked first: that is merge --yes, and merge --yes --team.
       '/api/stage/merge': ({ body }) => start('merge', { ...askOf(body), yes: true }),
+      '/api/stage/merge-team': ({ body }) => start('merge', { ...askOf(body), yes: true, team: true }),
       '/api/stage/release': stagePost('release'),
       '/api/staff/refresh': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; the table is refreshed when it's done.` } };

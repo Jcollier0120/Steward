@@ -8,6 +8,7 @@ import { run as realRun, type Runner } from './run.ts';
 import { loadSettings, type Settings } from './settings.ts';
 import { bump } from './stages/bump.ts';
 import { pick, type Ctx, type StageName, type StageResult } from './stages/common.ts';
+import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
@@ -28,6 +29,8 @@ export interface StageAsk {
   kitFrom?: string | null;
   /** merge: merge, not only list. */
   yes?: boolean;
+  /** merge: the team's PRs too, not only the Steward's. */
+  team?: boolean;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
@@ -83,18 +86,22 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
         if (name === 'merge') {
-          const merged = await merge(ctx, picked.employees, { yes: !!ask.yes });
+          const merged = await merge(ctx, picked.employees, { yes: !!ask.yes, team: !!ask.team });
           out.results = merged.map(({ merged: _m, ...r }) => r);
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
-          if (ask.yes && ctx.settings.releaseAfterMerge && done.length) {
-            const chosen = chooseKit(ctx.kit, ask.kit);
-            if ('error' in chosen) log(`release after merge: ${chosen.error}`);
-            else {
-              log(`release after merge (Settings): ${done.join(', ')}`);
-              out.kit = chosen.version;
-              const released = await release(ctx, picked.employees.filter((e) => done.includes(e.id)), { kit: chosen.version });
-              out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
+          if (ask.yes && done.length) {
+            // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
+            let releaseKit: string | null = null;
+            if (ctx.settings.releaseAfterMerge) {
+              const chosen = chooseKit(ctx.kit, ask.kit);
+              if ('error' in chosen) log(`release after merge: ${chosen.error}`);
+              else {
+                log(`release after merge (Settings): ${done.join(', ')}`);
+                out.kit = chosen.version;
+                releaseKit = chosen.version;
+              }
             }
+            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit })));
           }
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
