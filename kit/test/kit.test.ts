@@ -20,7 +20,7 @@ const { esc, ago } = await import('./fixture/src/kit/page.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
 const { duty, setDuty } = await import('./fixture/src/kit/duty.ts');
-const { every } = await import('./fixture/src/kit/schedule.ts');
+const { every, rounds } = await import('./fixture/src/kit/schedule.ts');
 const { statusJson } = await import('./fixture/src/kit/service.ts');
 
 test('only its own host names are answered', () => {
@@ -56,6 +56,64 @@ test('the server pings as this app, guards hosts and actions, and records its to
   } finally {
     await close();
   }
+});
+
+test("rounds are recorded: the last to end and whether it went through, the next due, one under way; ping gives them", async () => {
+  setDuty(true);
+  let fail = false;
+  let release: () => void = () => {};
+  const job = every(60_000, async () => {
+    await new Promise<void>((r) => (release = r));
+    if (fail) throw new Error('no network');
+  }, { firstDelayMs: 50_000, name: 'mill' });
+  try {
+    let s = job.state;
+    assert.equal(s.name, 'mill');
+    assert.equal(s.lastRunAt, null);
+    assert.equal(s.lastRunOk, null);
+    assert.ok(s.nextRunAt && Date.parse(s.nextRunAt) > Date.now() + 40_000, 'the first round is due in its first delay');
+    assert.equal(s.runningSince, null);
+
+    assert.ok(job.runNow());
+    await new Promise((r) => setTimeout(r, 10));
+    s = job.state;
+    assert.ok(s.runningSince, 'a round under way says since when');
+    assert.equal(s.nextRunAt, null, 'no next while one runs');
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    s = job.state;
+    assert.ok(s.lastRunAt && Date.now() - Date.parse(s.lastRunAt) < 5_000);
+    assert.equal(s.lastRunOk, true);
+    assert.ok(s.nextRunAt && Date.parse(s.nextRunAt) > Date.now() + 50_000, 'the next is about an interval on');
+
+    fail = true;
+    job.runNow();
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(job.state.lastRunOk, false);
+    assert.equal(job.state.lastError, 'no network');
+
+    setDuty(false);
+    assert.equal(job.state.nextRunAt, null, 'off duty, no round is coming');
+    setDuty(true);
+
+    const { close } = await serve({ port, icon: '<svg/>' });
+    try {
+      const ping = await (await fetch(`http://127.0.0.1:${port}/api/ping`)).json();
+      assert.equal(ping.lastRunAt, job.state.lastRunAt);
+      assert.equal(ping.lastRunOk, false);
+      assert.equal(ping.nextRunAt, job.state.nextRunAt);
+      assert.equal(ping.runningSince, null);
+      assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['mill']);
+    } finally {
+      await close();
+    }
+  } finally {
+    job.stop();
+    setDuty(true);
+  }
+  assert.ok(!rounds().some((r) => r.name === 'mill'), 'a stopped schedule leaves the record');
 });
 
 test('the NPU lock lets one holder in at a time', async () => {
