@@ -19,12 +19,16 @@ const pr = (o: Record<string, unknown>) => ({
   title: "Porter 0.4.1: the Steward's kit 1.0.1",
   url: 'https://github.com/Jcollier0120/Porter/pull/12',
   headRefName: 'steward/kit-1.0.1',
+  baseRefName: 'main',
+  isCrossRepository: false,
+  author: { login: 'Jcollier0120', is_bot: false },
   mergeable: 'MERGEABLE',
   mergeStateStatus: 'CLEAN',
   isDraft: false,
   statusCheckRollup: [],
   ...o,
 });
+const stranger = { login: 'someone-else', is_bot: false };
 
 test("a PR's checks in one word: CheckRuns and StatusContexts, failing beats running beats passing", () => {
   assert.equal(checksOf([]), 'none');
@@ -36,9 +40,36 @@ test("a PR's checks in one word: CheckRuns and StatusContexts, failing beats run
   assert.equal(checksOf([{ state: 'PENDING' }]), 'pending');
 });
 
-test("only the Steward's PRs (head steward/…) are read from gh pr list", () => {
-  const prs = parsePrs(JSON.stringify([pr({ number: 14, headRefName: 'release-0.3.1' }), pr({ number: 13, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }] }), pr({ number: 9, headRefName: 'steward/use-kit-1.0.0', mergeable: 'CONFLICTING' })]));
-  assert.deepEqual(prs.map((p) => [p.number, p.head, p.checks, p.mergeable]), [[9, 'steward/use-kit-1.0.0', 'none', 'CONFLICTING'], [13, 'steward/kit-1.0.1', 'failing', 'MERGEABLE']]);
+test("with no team, only the Steward's PRs (head steward/…) are read from gh pr list", () => {
+  const prs = parsePrs(JSON.stringify([pr({ number: 14, headRefName: 'release-0.3.1' }), pr({ number: 13, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }] }), pr({ number: 9, headRefName: 'steward/use-kit-1.0.0', mergeable: 'CONFLICTING' })]), []);
+  assert.deepEqual(prs.map((p) => [p.number, p.head, p.checks, p.mergeable, p.whose]), [[9, 'steward/use-kit-1.0.0', 'none', 'CONFLICTING', 'steward'], [13, 'steward/kit-1.0.1', 'failing', 'MERGEABLE', 'steward']]);
+});
+
+test("the team's PRs are those its accounts opened, from any branch; a stranger's are left out, and a fork's steward/… branch isn't the Steward's", () => {
+  const prs = parsePrs(
+    JSON.stringify([
+      pr({ number: 11, headRefName: 'claude/infallible-tesla-96fcf9', title: 'Encoder: D3D12 falls back from VBR to CBR' }),
+      pr({ number: 12, headRefName: 'fix/npu', author: { login: 'jcollier0120' } }),
+      pr({ number: 13, headRefName: 'claude/x', author: { login: 'app/claude', is_bot: true } }),
+      pr({ number: 14, headRefName: 'patch-1', author: stranger, isCrossRepository: true }),
+      pr({ number: 15, headRefName: 'steward/kit-9.9.9', author: stranger, isCrossRepository: true }),
+      pr({ number: 16, headRefName: 'steward/kit-1.0.1', author: stranger }),
+      pr({ number: 17, headRefName: 'feature', author: { login: 'app/dependabot', is_bot: true } }),
+    ]),
+    ['Jcollier0120', 'app/claude'],
+  );
+  assert.deepEqual(
+    prs.map((p) => [p.number, p.whose, p.author, p.base]),
+    [
+      [11, 'team', 'Jcollier0120', 'main'],
+      [12, 'team', 'jcollier0120', 'main'],
+      [13, 'team', 'app/claude', 'main'],
+      [16, 'steward', 'someone-else', 'main'],
+    ],
+  );
+  assert.equal(prs[0].title, 'Encoder: D3D12 falls back from VBR to CBR');
+  // The Steward's own pushes, made with your gh: its branch in the repository decides, whoever opened it.
+  assert.equal(parsePrs(JSON.stringify([pr({})]), ['Jcollier0120'])[0].whose, 'steward');
 });
 
 test("releases and kit releases are each picked out by their tags, newest version first, drafts left out", () => {
@@ -68,7 +99,7 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   const f = fakeEmployee(path.join(tmp, 'row'), { version: '0.4.0', kit: '1.0.0' });
   const sha = sh(f.checkout, 'rev-parse', 'HEAD');
   const r = runner((args) => {
-    if (args[0] === 'pr' && args[1] === 'list') return ok([pr({ number: 3 }), pr({ number: 4, headRefName: 'feature/x' })]);
+    if (args[0] === 'pr' && args[1] === 'list') return ok([pr({ number: 3 }), pr({ number: 4, headRefName: 'feature/x' }), pr({ number: 5, headRefName: 'patch-1', author: stranger, isCrossRepository: true })]);
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.3.1', isDraft: false, publishedAt: '2026-10-02T22:20:41Z' }]);
     if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: sha });
   });
@@ -79,7 +110,7 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   assert.equal(row.main?.version, '0.4.0');
   assert.equal(row.main?.kit, '1.0.0');
   assert.deepEqual(row.main?.parts, ['node']);
-  assert.deepEqual(row.prs.map((p) => p.number), [3]);
+  assert.deepEqual(row.prs.map((p) => [p.number, p.whose]), [[3, 'steward'], [4, 'team']], "the Steward's and the team's; not a stranger's");
   assert.deepEqual(row.release, { tag: 'v0.3.1', version: '0.3.1', published: '2026-10-02T22:20:41Z', kit: '1.0.0' });
   assert.equal(row.releaseNeeded, true, '0.4.0 has no release yet');
   assert.deepEqual(row.notes, []);
@@ -123,7 +154,7 @@ test("gh failing doesn't lose the row: what git knows is there, and the failure 
   assert.equal(readPin('not json'), null);
 });
 
-const info = (o: Partial<PrInfo>): PrInfo => ({ number: 1, title: '', url: '', head: 'steward/kit-1.0.1', mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', ...o });
+const info = (o: Partial<PrInfo>): PrInfo => ({ number: 1, title: '', url: '', head: 'steward/kit-1.0.1', base: 'main', author: 'Jcollier0120', whose: 'steward', mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', ...o });
 
 test('merge takes only PRs that merge cleanly with checks passing or none; the rest wait, and say why', () => {
   const { merge, hold } = mergeSelection([
@@ -151,6 +182,9 @@ test('merge takes only PRs that merge cleanly with checks passing or none; the r
     ],
   );
   assert.equal(holdReason(info({})), null);
+  // Only into the employee's own branch: a PR stacked on another branch waits for that one.
+  assert.equal(holdReason(info({ base: 'claude/accelerators' }), 'main'), 'it merges into claude/accelerators, not main');
+  assert.equal(holdReason(info({ base: 'main' }), 'main'), null);
 });
 
 test('merge without --yes merges nothing; with it, only the mergeable and green, with merge commits and the branch deleted', async () => {
@@ -169,6 +203,50 @@ test('merge without --yes merges nothing; with it, only the mergeable and green,
   assert.match(merged.message, /merged #21; #22 .* waits: checks failing/);
   const off = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: go.run, neutralDir: tmp }), { ...e, usesKit: false }, { yes: true });
   assert.equal(off.message, 'not using the kit yet');
+});
+
+test("merge --team takes the team's PRs as well, to any employee, and leaves their branches; without it they aren't touched", async () => {
+  const prs = [
+    pr({ number: 30 }),
+    pr({ number: 11, headRefName: 'claude/infallible-tesla-96fcf9' }),
+    pr({ number: 12, headRefName: 'claude/stacked', baseRefName: 'claude/infallible-tesla-96fcf9' }),
+    pr({ number: 13, headRefName: 'patch-1', author: stranger, isCrossRepository: true }),
+  ];
+  const script = (args: string[]) => (args[1] === 'list' ? ok(prs) : args[1] === 'merge' ? ok('') : undefined);
+  const e = employee(path.join(tmp, 'nowhere'), { repo: 'Jcollier0120/Miller' });
+  const ctx = (run: ReturnType<typeof runner>['run'], team?: string[]) => ctxFor({ employees: [e], workRoot: tmp, run, neutralDir: tmp, team });
+
+  const plain = runner(script);
+  const own = await mergeOne(ctx(plain.run), e, { yes: true });
+  assert.deepEqual(plain.gh.filter((a) => a[1] === 'merge').map((a) => a[2]), ['30'], "the Steward's only");
+  assert.equal(own.message, 'merged #30');
+
+  const look = runner(script);
+  const listed = await mergeOne(ctx(look.run), e, { yes: false, team: true });
+  assert.match(listed.message, /^#11 \(claude\/infallible-tesla-96fcf9, Jcollier0120's; .*\) would be merged; #30 \(steward\/kit-1\.0\.1; .*\) would be merged; #12 .* waits: it merges into claude\/infallible-tesla-96fcf9, not main \(merge --yes --team merges them\)$/);
+  assert.doesNotMatch(listed.message, /#13/, "a stranger's PR isn't even listed");
+
+  const go = runner(script);
+  const goCtx = ctx(go.run);
+  const merged = await mergeOne(goCtx, e, { yes: true, team: true });
+  assert.equal(merged.outcome, 'done');
+  assert.deepEqual(go.gh.filter((a) => a[1] === 'merge'), [
+    ['pr', 'merge', '11', '--repo', 'Jcollier0120/Miller', '--merge'],
+    ['pr', 'merge', '30', '--repo', 'Jcollier0120/Miller', '--merge', '--delete-branch'],
+  ]);
+  assert.deepEqual(merged.merged.map((p) => p.number), [11, 30]);
+  assert.match(goCtx.lines.join('\n'), /\[fake\] merged #11 \(claude\/infallible-tesla-96fcf9, Jcollier0120's\)/);
+
+  // An employee not on the kit: the team's PRs to it are merged all the same.
+  const off = runner(script);
+  const offKit = await mergeOne(ctx(off.run), { ...e, usesKit: false }, { yes: true, team: true });
+  assert.equal(offKit.outcome, 'done');
+  assert.deepEqual(off.gh.filter((a) => a[1] === 'merge').map((a) => a[2]), ['11', '30']);
+
+  // No team in Settings: --team is the Steward's alone.
+  const none = runner(script);
+  await mergeOne(ctx(none.run, []), e, { yes: true, team: true });
+  assert.deepEqual(none.gh.filter((a) => a[1] === 'merge').map((a) => a[2]), ['30']);
 });
 
 test('release takes an employee whose branch has the kit and an unreleased version, and says why for the others', () => {

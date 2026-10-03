@@ -47,7 +47,8 @@ test('the page shows the kit, the stages and Settings, and carries its token', a
   const html = await (await fetch(`${base()}/`)).text();
   assert.match(html, /<meta name="page-token" content="[0-9a-f]{48}">/);
   assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
-  for (const stage of ['bump', 'push', 'merge', 'release']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
+  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
+  assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team's PRs</);
   assert.match(html, /data-settings-panel/);
 });
 
@@ -64,7 +65,17 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   const last = JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8'));
   assert.equal(last.stage, 'merge');
   assert.equal(last.asked.yes, true, "the page's button asked first: that is merge --yes");
+  assert.equal(last.asked.team, undefined, "Merge is the Steward's PRs only");
   assert.deepEqual(last.results, []);
+  // Merge the team's PRs is merge --yes --team, with the same token.
+  assert.equal((await post('/api/stage/merge-team', {})).status, 403);
+  const team = await post('/api/stage/merge-team', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  assert.deepEqual(await team.json(), { started: true });
+  await served.idle();
+  const merged = JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8'));
+  assert.equal(merged.stage, 'merge');
+  assert.equal(merged.asked.yes, true);
+  assert.equal(merged.asked.team, true);
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {

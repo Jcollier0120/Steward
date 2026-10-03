@@ -35,6 +35,7 @@ test('ten employees: the eight hires on the kit, then Reeve and Heiward, listed 
   assert.deepEqual(heiward.versionFiles, ['HEI.Agent/HEI.Agent.csproj']);
   assert.match(heiward.release, /HEI\.Agent\\release\.ps1 -Publish/);
   assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
+  assert.deepEqual(DEFAULT_SETTINGS.team, ['Jcollier0120'], 'you, and Claude Code, which opens its PRs with your account');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
 });
 
@@ -51,14 +52,24 @@ test('a repository not owner/name, an id twice, or an employee with no version f
   assert.throws(() => readFileSync(SETTINGS_SPEC.file()), /ENOENT/);
 });
 
-test('a good change is saved and read back; release after merge can be switched on', async () => {
-  const r = await save({ releaseAfterMerge: true, parallel: 4 });
+test('a team account that isn\'t one, or one listed twice in any case, is refused', async () => {
+  const r = await save({ team: ['Jcollier0120', 'not an account', 'jcollier0120'] });
+  assert.equal(r.status, 400);
+  assert.match(r.json.errors['team.1'], /a GitHub account/);
+  assert.match(r.json.errors['team.2'], /Listed twice/);
+});
+
+test('a good change is saved and read back; release after merge can be switched on, and the team grown', async () => {
+  const r = await save({ releaseAfterMerge: true, parallel: 4, team: ['Jcollier0120', 'app/claude'] });
   assert.equal(r.status, undefined);
   assert.equal(r.json.ok, true);
   const s = loadSettings();
   assert.equal(s.releaseAfterMerge, true);
   assert.equal(s.parallel, 4);
+  assert.deepEqual(s.team, ['Jcollier0120', 'app/claude']);
   assert.equal(s.employees.length, 10);
+  assert.deepEqual(normalizeSettings({}).settings.team, ['Jcollier0120'], 'no team in the file is the default team');
+  assert.deepEqual(normalizeSettings({ team: [] }).settings.team, [], 'an empty one stays empty');
 });
 
 test('an employee without a usable id is left out, and said so; the stages take only known employees', () => {

@@ -28,6 +28,8 @@ export interface StageAsk {
   kitFrom?: string | null;
   /** merge: merge, not only list. */
   yes?: boolean;
+  /** merge: the team's PRs too, not only the Steward's. */
+  team?: boolean;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
@@ -83,7 +85,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
         if (name === 'merge') {
-          const merged = await merge(ctx, picked.employees, { yes: !!ask.yes });
+          const merged = await merge(ctx, picked.employees, { yes: !!ask.yes, team: !!ask.team });
           out.results = merged.map(({ merged: _m, ...r }) => r);
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (ask.yes && ctx.settings.releaseAfterMerge && done.length) {

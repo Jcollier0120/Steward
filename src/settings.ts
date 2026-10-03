@@ -35,6 +35,8 @@ export interface Employee {
 
 export interface Settings {
   employees: Employee[];
+  /** The GitHub accounts whose PRs to the employees `merge --team` merges, as well as the Steward's own. */
+  team: string[];
   workRoot: string;
   releaseAfterMerge: boolean;
   stewardRepo: string;
@@ -79,8 +81,12 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   },
 ];
 
+/** The team: you, and Claude Code, which opens its PRs with your account. */
+export const DEFAULT_TEAM = ['Jcollier0120'];
+
 export const DEFAULT_SETTINGS: Settings = {
   employees: DEFAULT_EMPLOYEES,
+  team: DEFAULT_TEAM,
   workRoot: path.join(dataDir, 'work'),
   releaseAfterMerge: false,
   stewardRepo: 'Jcollier0120/Steward',
@@ -115,6 +121,14 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
     ],
+  },
+  {
+    key: 'team',
+    kind: 'list',
+    label: 'Team',
+    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Claude Code opens its PRs with your account, so yours covers them. Their branches are left as they are.",
+    item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like Jcollier0120, or app/<name> for a GitHub App' },
+    maxItems: 20,
   },
   {
     key: 'workRoot',
@@ -164,6 +178,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   return {
     settings: {
       employees,
+      team: strings(r.team, d.team),
       workRoot: str(r.workRoot, d.workRoot),
       releaseAfterMerge: typeof r.releaseAfterMerge === 'boolean' ? r.releaseAfterMerge : d.releaseAfterMerge,
       stewardRepo: str(r.stewardRepo, d.stewardRepo),
