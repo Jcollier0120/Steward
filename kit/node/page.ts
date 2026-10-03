@@ -2,7 +2,7 @@ import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.t
 import { APP, dataDir } from '../app.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
-import { manorLink, type ManorLink } from './manor.ts';
+import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
 import { roundTimes } from './schedule.ts';
 import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
@@ -332,6 +332,16 @@ function backToManor(m: ManorLink | null): string {
   return `<a class="manor-back" href="${esc(m.url)}" title="Back to ${esc(m.name)}"><img src="/manor-icon.svg" alt="" width="22" height="22"><span>Back to ${esc(m.name)}</span></a><span class="manor-sep" aria-hidden="true"></span>`;
 }
 
+/**
+ * What stands in place of an agent's own Developer options switch while Manor sets them (manor.ts's
+ * developerOptions() gives `setBy`): "<manor>'s Developer options set this", and "Change it in <manor>", to Manor's
+ * Settings page, where its switch is. Nothing when the agent's own switch applies (no Manor, or Manor hasn't said).
+ */
+export function developerOptionsNote(setBy: ManorLink | null): string {
+  if (!setBy) return '';
+  return `<p class="manor-decides"><span>${esc(setBy.name)}'s Developer options set this.</span> <a href="${esc(manorSettingsUrl(setBy))}">Change it in ${esc(setBy.name)}</a></p>`;
+}
+
 /** A notice under the title bar while the agent is off duty: its scheduled rounds are paused (Manor's Stop, or `stop`). */
 function offDuty(d: Duty): string {
   if (d.onDuty) return '';
@@ -424,6 +434,9 @@ p { margin: 8px 0; }
 .menu-note { margin: 6px 10px 2px; color: var(--muted); font-size: 12px; }
 .menu-link { display: block; padding: 6px 10px; border-radius: 6px; color: var(--accent-text); font-size: 13px; font-weight: 600; text-decoration: none; }
 .menu-link:hover, .menu-link:focus-visible { background: var(--hover); outline: none; }
+/* With Manor, its Developer options in place of the agent's own switch: who sets them, and the way to change them. */
+.manor-decides { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.manor-decides a { font-weight: 600; white-space: nowrap; }
 .swatch { position: relative; flex: none; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; border: 1px solid var(--line); }
 .swatch span { position: absolute; inset: 0; }
 .swatch .sw-accent { clip-path: polygon(100% 0, 100% 100%, 0 100%); }
