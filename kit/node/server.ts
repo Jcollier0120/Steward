@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
+import { manorIcon } from './manor.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
@@ -117,6 +118,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way.
     '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, running: duty().onDuty, ...roundTimes(), rounds: rounds(), ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
+    // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
+    '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),
     '/settings.js': webFile('/settings.js'),
     '/settings.css': webFile('/settings.css'),
     ...opts.get,

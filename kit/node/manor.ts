@@ -1,0 +1,88 @@
+import { existsSync, readFileSync } from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * The manor this agent works at, for the title bar's "Back to <manor>" (page.ts). Manor's settings say its name
+ * and port (settings.json in %USERPROFILE%\.manor, or MANOR_HOME, as Manor itself reads it), and Manor's own page
+ * serves its icon, the one its banner shows, which this agent serves from its own address as /manor-icon.svg
+ * (its page loads images from itself only). Without Manor installed there's nothing to go back to, and the title
+ * bar says nothing.
+ */
+export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
+
+export interface ManorLink {
+  name: string;
+  port: number;
+  url: string;
+}
+
+const DEFAULT_PORT = 18585;
+
+/** Manor's name and page, or null when Manor isn't installed here (no settings.json, or no app beside it). */
+export function manorLink(home = manorHome()): ManorLink | null {
+  const file = path.join(home, 'settings.json');
+  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
+  let raw: { name?: unknown; port?: unknown } = {};
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+  } catch {
+    // Unreadable settings: Manor uses its defaults, and so does this link.
+  }
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : 'Manor';
+  const port = Number.isInteger(raw.port) && (raw.port as number) >= 1024 && (raw.port as number) <= 65535 ? (raw.port as number) : DEFAULT_PORT;
+  return { name, port, url: `http://manor.localhost:${port}/` };
+}
+
+/** A plain house, for when Manor's own icon can't be had. */
+export const HOUSE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M2 7.5 8 2.5l6 5V14H9.8v-4H6.2v4H2z" fill="none" stroke="#5f5f5f" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+
+/** An SVG fit to serve from this agent's address: an SVG, and nothing in it that runs. */
+export const safeSvg = (s: string) => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(s) && !/<script|\son[a-z]+\s*=|javascript:|<foreignObject/i.test(s);
+
+function getText(url: string, ms: number): Promise<{ status: number; type: string; body: string } | null> {
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: ms }, (res) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on('data', (c: Buffer) => {
+        size += c.length;
+        if (size > 512 * 1024) req.destroy();
+        else chunks.push(c);
+      });
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, type: String(res.headers['content-type'] ?? ''), body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('error', () => resolve(null));
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+  });
+}
+
+let kept: { at: number; port: number; svg: string } | null = null;
+const KEEP_MS = 10 * 60_000;
+
+/**
+ * Manor's icon: as its page serves it (the banner it shows), kept for ten minutes; else the generic one in its
+ * app folder; else a plain house. Never anything that runs.
+ */
+export async function manorIcon(home = manorHome(), now = Date.now()): Promise<string> {
+  const link = manorLink(home);
+  if (!link) return HOUSE_SVG;
+  if (kept && kept.port === link.port && now - kept.at < KEEP_MS) return kept.svg;
+  const r = await getText(`http://127.0.0.1:${link.port}/favicon.svg`, 1500);
+  if (r && r.status === 200 && safeSvg(r.body)) {
+    kept = { at: now, port: link.port, svg: r.body };
+    return r.body;
+  }
+  try {
+    const own = readFileSync(path.join(home, 'app', 'art', 'manor-icon.svg'), 'utf8');
+    if (safeSvg(own)) return own;
+  } catch { /* no art: the house */ }
+  return HOUSE_SVG;
+}
+
+/** For tests: forget the kept icon. */
+export const forgetManorIcon = () => {
+  kept = null;
+};
