@@ -140,7 +140,7 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
   const model = w && !w.model
     ? `<p>${esc(name)} uses no model.</p>`
     : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. Each request goes to the first one in Reeve's order that is free and hasn't failed in the last 10 minutes (by default: graphics cards with 2 GB or more of their own memory, then the NPU, then graphics that share the PC's memory, then the processor). Background work keeps off a graphics card a game is using. ${esc(thisPc(o.config ?? loadAccelerators()))}</p>
-<p class="muted small">Task Manager shows the NPU's work under Performance, NPU: it isn't processor or graphics use.</p>`;
+<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`;
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>
 <div class="card">
