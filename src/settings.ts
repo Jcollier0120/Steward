@@ -57,12 +57,15 @@ const hire = (name: string): Employee => ({
   release: 'npm run release -- --publish',
 });
 
-/** The eight hires, then Reeve and Heiward, which don't take the kit yet (the README's "Reeve and Heiward"). */
+/**
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"). Reeve takes the node and spec parts and
+ * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
+ * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
+ */
 export const DEFAULT_EMPLOYEES: Employee[] = [
   ...['Porter', 'Auditor', 'Clerk', 'Herald', 'Warrener', 'Aletaster', 'Miller', 'Pinder'].map(hire),
   {
     ...hire('Reeve'),
-    usesKit: false,
     parts: ['node', 'spec'],
     versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
   },
@@ -72,7 +75,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     repo: 'Jcollier0120/Heiward',
     checkout: 'C:\\Projects\\Heiward',
     branch: 'master',
-    usesKit: false,
+    usesKit: true,
     parts: ['spec'],
     fill: 'powershell -NoProfile -File tools\\kit.ps1',
     test: ['dotnet test HEI.Core.Tests'],
@@ -114,7 +117,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'repo', kind: 'text', label: 'GitHub repository', maxLength: 140, ...REPO },
       { key: 'checkout', kind: 'text', label: 'Checkout', help: 'Your clone. The Steward adds worktrees of it in the work folder and fetches; it never changes your working tree.', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
       { key: 'branch', kind: 'text', label: 'Branch', help: 'Where releases come from and PRs go.', maxLength: 100, pattern: '[A-Za-z0-9._/-]+', patternHint: 'a branch name, like main' },
-      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: 'Off: listed, but the stages pass over it ("not using the kit yet").' },
+      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the stages pass over it (\"not using the kit yet\"), except merging the team's PRs." },
       { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })) },
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', ...command },
       { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass before a bump is committed.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },

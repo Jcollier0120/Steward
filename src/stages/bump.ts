@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
+import { carriedOldKit, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
 import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile, trackedAt } from '../git.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { runLine, tail } from '../run.ts';
@@ -15,7 +15,9 @@ import { readPin } from './staff.ts';
  * folder. There kit.json's pin goes to the new kit, tools/kit.ts becomes the Steward's (for an agent that
  * fills its kit with it), and the employee's patch version goes up in every version file; then its kit is
  * filled, with the new tools/kit.ts, its checks run, and, when every one passes, the changes are
- * committed. A failure leaves the worktree as it was, for a look.
+ * committed. A failure leaves the worktree as it was, for a look. An employee that isn't a Node agent
+ * (Heiward, in C#) gets the same, but for npm and tools/kit.ts: its own fill command fills its kit, and its
+ * version files may be a .csproj's <VersionPrefix>.
  */
 
 export interface BumpOptions {
@@ -27,6 +29,13 @@ export interface BumpOptions {
   /** The tools/kit.ts to hand out (default: the Steward's own). */
   tool?: string;
 }
+
+/**
+ * Whether a fresh worktree needs `npm ci` before its checks: a Node project (package.json and its lockfile) without
+ * node_modules. A .NET employee has no package.json, and gets no npm.
+ */
+export const needsNpmCi = (dir: string) =>
+  existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'package-lock.json')) && !existsSync(path.join(dir, 'node_modules'));
 
 /** kit.json's text with its pin moved to `kit`, everything else as it was. */
 export function repin(text: string, kit: string): string {
@@ -47,7 +56,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const pinRaw = await showFile(run, repo, base, 'kit.json');
   const pin = readPin(pinRaw);
   if (!pin) {
-    const old = oldKitFilesIn(await trackedAt(run, repo, base));
+    const old = carriedOldKit(e.id) ? oldKitFilesIn(await trackedAt(run, repo, base)) : [];
     return result(e, 'refused', old.length ? `${base} still carries the old kit (${old.length} files, ${old[0]} …): convert it to the Steward's kit first` : `${base} has no kit.json`);
   }
   if (pin.kit === o.kit) return result(e, 'skipped', `already on kit ${o.kit}`);
@@ -85,10 +94,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   }
   say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
 
-  // Its checks, as a fresh clone would run them: dependencies, the kit, then each test command.
+  // Its checks, as a fresh clone would run them: dependencies (npm's, for a Node agent; a .NET one restores its own
+  // packages as it builds), the kit, then each test command.
   const env = o.kitFrom ? { STEWARD_KIT: path.resolve(o.kitFrom) } : {};
   const steps: string[] = [];
-  if (existsSync(path.join(dir, 'package-lock.json')) && !existsSync(path.join(dir, 'node_modules'))) steps.push('npm ci --no-audit --no-fund');
+  if (needsNpmCi(dir)) steps.push('npm ci --no-audit --no-fund');
   if (e.fill) steps.push(e.fill);
   steps.push(...e.test);
   for (const step of steps) {

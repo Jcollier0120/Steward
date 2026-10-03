@@ -15,7 +15,7 @@ const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
 const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values })) as { status?: number; json: any };
 
-test('ten employees: the eight hires on the kit, then Reeve and Heiward, listed but not on it yet', () => {
+test('ten employees, all on the kit: the eight hires, then Reeve and Heiward, each with the parts and commands of its own', () => {
   const e = DEFAULT_SETTINGS.employees;
   assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward']);
   for (const h of e.slice(0, 8)) {
@@ -26,14 +26,20 @@ test('ten employees: the eight hires on the kit, then Reeve and Heiward, listed 
     assert.deepEqual(h.versionFiles, ['package.json', 'package-lock.json', 'src/app.ts']);
   }
   const [reeve, heiward] = e.slice(8);
-  assert.equal(reeve.usesKit, false);
+  assert.equal(reeve.usesKit, true);
+  assert.deepEqual(reeve.parts, ['node', 'spec']);
+  assert.equal(reeve.fill, 'node tools/kit.ts');
   assert.deepEqual(reeve.versionFiles, ['package.json', 'package-lock.json', 'src/mcp.ts']);
-  assert.equal(heiward.usesKit, false);
+  assert.equal(heiward.usesKit, true);
+  assert.equal(heiward.fill, 'powershell -NoProfile -File tools\\kit.ps1');
   assert.equal(heiward.branch, 'master');
   assert.deepEqual(heiward.parts, ['spec']);
   assert.deepEqual(heiward.test, ['dotnet test HEI.Core.Tests']);
   assert.deepEqual(heiward.versionFiles, ['HEI.Agent/HEI.Agent.csproj']);
   assert.match(heiward.release, /HEI\.Agent\\release\.ps1 -Publish/);
+  // A settings.json that names them with nothing more takes these defaults; one that turned the kit off keeps it off.
+  const saved = normalizeSettings({ employees: [{ id: 'reeve' }, { id: 'heiward' }, { id: 'porter', usesKit: false }] }).settings.employees;
+  assert.deepEqual(saved.map((x) => [x.id, x.usesKit, x.branch]), [['reeve', true, 'main'], ['heiward', true, 'master'], ['porter', false, 'main']]);
   assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
   assert.deepEqual(DEFAULT_SETTINGS.team, ['Jcollier0120'], 'you, and Claude Code, which opens its PRs with your account');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));

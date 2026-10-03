@@ -118,9 +118,35 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   const off = await staffRow(ctx, { ...e, usesKit: false }, { fetch: false, kit: '1.0.0' });
   assert.deepEqual(off.notes, ['not using the kit yet']);
   const g = fakeEmployee(path.join(tmp, 'old'), { kit: null, files: { 'src/npu.ts': '', 'src/server.ts': '', 'test/kit.test.ts': '' } });
-  const old = await staffRow(ctx, employee(g.checkout), { fetch: false, kit: '1.0.0' });
+  const old = await staffRow(ctx, employee(g.checkout, { id: 'porter', name: 'Porter' }), { fetch: false, kit: '1.0.0' });
   assert.deepEqual(old.main?.oldKitFiles, ['src/npu.ts', 'src/server.ts', 'test/kit.test.ts']);
   assert.match(old.notes.join(' '), /still tracks 3 old kit files at their old paths/);
+});
+
+/** Reeve's own files at six of the old kit's paths: they were never the kit's copy. */
+const REEVE_OWN = ['src/accelerators.ts', 'src/duty.ts', 'src/install.ts', 'tools/release.ts', 'test/accelerators.test.ts', 'test/install.test.ts'];
+
+test("Reeve's own files at the old kit's paths are never taken for the old kit: only the eight hires carried it", async () => {
+  const reeve = (checkout: string) => employee(checkout, { id: 'reeve', name: 'Reeve', parts: ['node', 'spec'], versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'] });
+  const own = Object.fromEntries(REEVE_OWN.map((p) => [p, `// Reeve's own ${p}\n`]));
+  const mcp = { 'src/mcp.ts': "export const SERVER = { name: 'reeve', version: '0.3.0' };\n" };
+  const r = runner(() => ok([]));
+  // Converted: kit.json, and those files, which are its own.
+  const on = fakeEmployee(path.join(tmp, 'reeve-on'), { version: '0.3.0', files: { ...own, ...mcp, 'kit.json': '{\n  "kit": "1.0.0",\n  "parts": ["node", "spec"]\n}\n' } });
+  const ctx = ctxFor({ employees: [reeve(on.checkout)], workRoot: tmp, run: r.run, neutralDir: tmp });
+  const row = await staffRow(ctx, reeve(on.checkout), { fetch: false, kit: '1.0.0' });
+  assert.equal(row.main?.version, '0.3.0');
+  assert.equal(row.main?.kit, '1.0.0');
+  assert.deepEqual(row.main?.oldKitFiles, []);
+  assert.deepEqual(row.notes, []);
+  // Not converted yet: it has no kit.json, and that's all it's told; never "convert it".
+  const off = fakeEmployee(path.join(tmp, 'reeve-off'), { version: '0.2.9', kit: null, files: { ...own, ...mcp, 'src/mcp.ts': "export const SERVER = { version: '0.2.9' };\n" } });
+  const before = await staffRow(ctx, reeve(off.checkout), { fetch: false, kit: '1.0.0' });
+  assert.deepEqual(before.main?.oldKitFiles, []);
+  assert.deepEqual(before.notes, ['no kit.json on origin/main']);
+  // The same files in a hire are the old kit.
+  const porter = await staffRow(ctx, employee(off.checkout, { id: 'porter', name: 'Porter', versionFiles: ['package.json'] }), { fetch: false, kit: '1.0.0' });
+  assert.deepEqual(porter.main?.oldKitFiles, [...REEVE_OWN].sort());
 });
 
 test("the table says whether an employee's tools/kit.ts is the Steward's", async () => {

@@ -45,7 +45,8 @@ export function kitPathOfHire(hirePath: string): string | null {
 
 /**
  * The kit as every hire carried it before kit 1.0.0: a copy in each repo, at these paths. History, so a
- * fixed list: `steward status` flags a hire that still tracks any of them, and tools/convert.ts removes them.
+ * fixed list: `steward staff` flags a hire that still tracks any of them, and tools/convert.ts removes them.
+ * Only in the hires that carried it (OLD_KIT_HIRES): another employee's files at these paths are its own.
  */
 export const OLD_KIT_PATHS = [
   'src/accelerators.ts',
@@ -88,6 +89,17 @@ export function newPathOfOld(oldPath: string): string | null {
 
 /** The old kit files among a hire's tracked files. */
 export const oldKitFilesIn = (tracked: string[]) => tracked.map((f) => f.replace(/\\/g, '/')).filter((f) => OLD_KIT_PATHS.includes(f)).sort();
+
+/**
+ * The hires that carried that copy of the kit, by id (their Settings id and their package.json's name): the
+ * kit was seeded from them. History, so a fixed list. Only in these do OLD_KIT_PATHS mean the old kit: Reeve,
+ * say, has src/accelerators.ts, src/duty.ts, src/install.ts, tools/release.ts and their tests of its own,
+ * which neither `staff` nor `bump` take for the old kit and tools/convert.ts never removes.
+ */
+export const OLD_KIT_HIRES = ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder'];
+
+/** Whether an employee (by id, or a package.json's name) is one of the hires that carried the old kit. */
+export const carriedOldKit = (id: string | null | undefined) => !!id && OLD_KIT_HIRES.includes(id);
 
 /** Text with CRLF made LF, as git stores it here. */
 export const lf = (text: string) => text.replace(/\r\n/g, '\n');

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
+import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
 import { agreedVersion } from '../versions.ts';
@@ -190,7 +190,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     const texts = await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, dir, remote, f)] as [string, string | null]));
     const v = agreedVersion(texts);
     const pin = readPin(await showFile(run, dir, remote, 'kit.json'));
-    const oldKitFiles = e.usesKit ? oldKitFilesIn(await trackedAt(run, dir, remote)) : [];
+    // Only a hire that carried the old kit can still track it; Reeve's files at those paths are its own.
+    const oldKitFiles = e.usesKit && carriedOldKit(e.id) ? oldKitFilesIn(await trackedAt(run, dir, remote)) : [];
     let tool: 'current' | 'differs' | 'missing' | null = null;
     if (e.usesKit && pin && opts.tool && takesTool(e.fill)) {
       const theirs = await showFile(run, dir, remote, TOOL);
