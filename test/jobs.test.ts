@@ -104,3 +104,31 @@ test('a job you approved already is quiet; one a PR\'s approve-jobs approved is 
   assert.equal(await look(), null);
   assert.equal(approvals().filter((n) => n === 'repo-sync').length, 2, 'not asked again');
 });
+
+test('what the approve command pinned must be what was checked: a script swapped while being approved is said loudly, once', async () => {
+  const g = fakeEmployee(path.join(tmp, 'swap'), { files: { 'jobs/jobs.json': MANIFEST, 'jobs/fast-forward.ps1': "'ff'\n", 'jobs/repo-sync.ps1': "'rs'\n" } });
+  const at = sh(g.checkout, 'rev-parse', 'HEAD');
+  const swapApp = path.join(tmp, 'swap-app');
+  mkdirSync(path.join(swapApp, 'jobs'), { recursive: true });
+  writeFileSync(path.join(swapApp, 'release.json'), JSON.stringify({ id: 'reeve', version: '0.4.1', commit: at.slice(0, 7), dirty: false }));
+  writeFileSync(path.join(swapApp, 'jobs', 'jobs.json'), MANIFEST);
+  writeFileSync(path.join(swapApp, 'jobs', 'fast-forward.ps1'), "'ff'\n");
+  writeFileSync(path.join(swapApp, 'jobs', 'repo-sync.ps1'), "'rs'\n");
+  // As Reeve does, it prints the sha256 it pinned; for repo-sync, the script is swapped just before it reads it.
+  const pinner = path.join(tmp, 'pin.cjs');
+  writeFileSync(
+    pinner,
+    `const fs = require('fs'), crypto = require('crypto');
+const [dir, name] = process.argv.slice(2);
+const file = dir + '/' + name + '.ps1';
+if (name === 'repo-sync') fs.writeFileSync(file, "'rs, swapped'\\n");
+console.log(name + '\\n  sha256: ' + crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') + '\\n  approved');
+`,
+  );
+  const s = employee(g.checkout, { id: 'swap', name: 'Swap', approve: `node ${pinner} ${path.join(swapApp, 'jobs')} {job}`, installed: swapApp });
+  const go = () => approveMerged(ctxFor({ employees: [s], workRoot: tmp, run: runner().run, neutralDir: tmp }), s);
+  const r = await go();
+  assert.equal(r?.outcome, 'failed');
+  assert.match(r!.message, /^approved fast-forward: its installed script is the one merged on main at .{7}; couldn't approve repo-sync: the script approved \(sha256 [0-9a-f]{12}\) isn't the one checked \([0-9a-f]{12}\), so it changed while being approved and may run unchecked: look at it now$/);
+  assert.equal(await go(), null, 'said once');
+});
