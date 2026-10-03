@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
+import { carriedOldKit, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
 import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile, trackedAt } from '../git.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { runLine, tail } from '../run.ts';
@@ -56,7 +56,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const pinRaw = await showFile(run, repo, base, 'kit.json');
   const pin = readPin(pinRaw);
   if (!pin) {
-    const old = oldKitFilesIn(await trackedAt(run, repo, base));
+    const old = carriedOldKit(e.id) ? oldKitFilesIn(await trackedAt(run, repo, base)) : [];
     return result(e, 'refused', old.length ? `${base} still carries the old kit (${old.length} files, ${old[0]} …): convert it to the Steward's kit first` : `${base} has no kit.json`);
   }
   if (pin.kit === o.kit) return result(e, 'skipped', `already on kit ${o.kit}`);

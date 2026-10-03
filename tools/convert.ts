@@ -4,6 +4,9 @@
  *
  *   node tools/convert.ts <hire folder> --version <new version> [--kit <version>] [--parts node,web,spec]
  *
+ * Only for the eight hires that carried the old kit (OLD_KIT_HIRES, by package.json's name): it refuses any
+ * other agent, Reeve say, whose files at the old kit's paths are its own.
+ *
  * Run it in a fresh worktree of the hire, never the person's own checkout. It stages its changes and
  * commits nothing: then fill the kit (node tools/kit.ts --from <the Steward's kit>), run the hire's
  * typecheck and tests, and commit. The README's "Converting a hire" has the whole round.

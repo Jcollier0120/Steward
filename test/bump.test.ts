@@ -106,12 +106,28 @@ test('already on the kit: skipped; not taking the kit: skipped; still carrying t
   const r = await bumpOne(reeve.ctx, reeve.e, { kit: '1.0.1' });
   assert.equal(r.outcome, 'skipped');
   assert.equal(r.message, 'not using the kit yet');
-  const old = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } });
+  const old = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } }, { id: 'porter', name: 'Porter' });
   const o = await bumpOne(old.ctx, old.e, { kit: '1.0.1' });
   assert.equal(o.outcome, 'refused');
   assert.match(o.message, /still carries the old kit \(2 files, src\/npu\.ts …\): convert it/);
   const none = setup({ kit: null });
   assert.match((await bumpOne(none.ctx, none.e, { kit: '1.0.1' })).message, /has no kit\.json/);
+  // The same files in an agent that never carried the old kit are its own: it isn't told to convert.
+  const own = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } }, { id: 'reeve', name: 'Reeve' });
+  assert.equal((await bumpOne(own.ctx, own.e, { kit: '1.0.1' })).message, 'origin/main has no kit.json');
+});
+
+test("Reeve's own files at the old kit's paths don't stop its bump", async () => {
+  const own = ['src/accelerators.ts', 'src/duty.ts', 'src/install.ts', 'tools/release.ts', 'test/accelerators.test.ts', 'test/install.test.ts'];
+  const s = setup(
+    { version: '0.3.0', files: { ...Object.fromEntries(own.map((p) => [p, `// Reeve's own ${p}\n`])), 'src/mcp.ts': "export const SERVER = { name: 'reeve', version: '0.3.0' };\n" } },
+    { id: 'reeve', name: 'Reeve', versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'] },
+  );
+  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
+  assert.equal(res.version, '0.3.1');
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', 'steward/kit-1.0.1').split('\n').sort(), ['kit.json', 'package-lock.json', 'package.json', 'src/mcp.ts']);
+  for (const p of own) assert.equal(sh(s.checkout, 'show', `steward/kit-1.0.1:${p}`), `// Reeve's own ${p}`, `${p} is still there`);
 });
 
 test("tools/kit.ts rides with the pin: an agent's old one is replaced with the Steward's before its kit is filled, and committed", async () => {
