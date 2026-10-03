@@ -12,15 +12,29 @@ The hires (Porter, Auditor, Clerk, Herald, Warrener, Aletaster, Miller and Pinde
 
 ## The kit
 
-The kit lives in `kit\`, versioned by `kit\VERSION` (1.0.0) with `kit\CHANGELOG.md`. It comes in **parts**, and an agent takes the ones that fit it:
+The kit lives in `kit\`, versioned by `kit\VERSION` (2.0.0) with `kit\CHANGELOG.md`. It comes in **parts**, and an agent takes the ones that fit it:
 
 | Part | In the kit | In a Node agent | What |
 |---|---|---|---|
-| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerators.ts, agent-checks.ts, duty.ts, gpu-load.ps1, install.ts, lock.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, store.ts. |
+| `core` | `kit\core\` | `src\kit\core\` | Every rule the agents share, written once ([below](#one-core-two-drivers)): plain JavaScript (ES2022 modules, typed with JSDoc, a `.d.ts` beside each), with no I/O. node and dotnet bring it. |
+| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerators.ts, agent-checks.ts, duty.ts, gpu-load.ps1, install.ts, lock.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, rules.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, store.ts, work.ts. The queue, the lock and the accelerators are the core's rules, carried out with Node's fs and timers. |
 | `web` | `kit\web\` | `src\kit\web\` | Browser files any agent's page can use, whatever its server: settings-panel.js and settings-panel.css. A page includes them as plain files; the panel needs an element with `data-settings-panel`, a `<meta name="page-token">`, and `GET`/`POST /api/settings` on its own origin. |
-| `spec` | `kit\spec\` | `src\kit\spec\` | The language-neutral rules: [NPU-QUEUE.md](kit/spec/NPU-QUEUE.md) (was Reeve's), [ACCELERATORS.md](kit/spec/ACCELERATORS.md) (was Manor's) and npu-queue-vectors.json, the cases every implementation of the queue runs. This is now their home. |
+| `spec` | `kit\spec\` | `src\kit\spec\` | The language-neutral rules: [NPU-QUEUE.md](kit/spec/NPU-QUEUE.md) (was Reeve's), [ACCELERATORS.md](kit/spec/ACCELERATORS.md) (was Manor's), rules.json (the timings and limits, as data, which the core takes), and the vectors every implementation runs: npu-queue-vectors.json (the queue), turn-vectors.json (a turn, step by step) and accelerator-vectors.json. This is now their home. The core brings it. |
+| `dotnet` | `kit\dotnet\` | (a .NET agent: `kit\dotnet\`) | C# source a .NET project compiles by importing `Steward.Kit.props`: the core run in Jint, and its turns, locks and failure markers carried out with .NET and Win32. Heiward's. |
 
-`kit\test\` holds the kit's own tests, which run here against a fixture agent (`kit\test\fixture`, the smallest agent the kit runs in). Agents don't get them; each runs only its own tests, and the kit's checks of itself (below).
+`kit\test\` holds the kit's own tests, which run here against a fixture agent (`kit\test\fixture`, the smallest agent the kit runs in), and the dotnet part's (`kit\test\dotnet`). Agents don't get them; each runs only its own tests, and the kit's checks of itself (below).
+
+### One core, two drivers
+
+All the shared decision logic is the **core**: the ticket order and the late, dead and aged rules, a lock holder's eviction, the turn and the plain lock as a state machine, reading, checking and auto-ordering Reeve's accelerator config, the candidates and the pick, failure-marker expiry, games-busy, the id slug, a request's size, and the messages. It reads no file and has no clock or randomness of its own, so it gives the same answer in any engine: a driver hands it what it read and the time, and does what it says.
+
+- **The turn** is `startTurn(rules, options)`, then `step(state, observation)` until it ends: each step is the actions to take in order (`mkdirs`, `write`, `touch`, `list`, `alive`, `remove`, `mkdir`, `read`, `stat`, `rmdir`, `note`, with paths as names below the locks folder), how long to wait after them, and, once it has, how it ended (`held`, `timeout`, `full`, `io`). The driver performs them, waits, and calls `step` with the clock and each action's result. `release(state, now)` lets go the same way. A state is plain data.
+- **The timings and limits** are data, `spec\rules.json`, which a driver reads once and passes to the core (`checkRules`).
+- **The node part** carries it out with Node's fs and timers, and stays async, so a turn never blocks an agent's server. Its modules keep 1.0.0's boundaries and exports, so the hires' imports didn't change.
+- **The dotnet part** carries it out with .NET and Win32 I/O, running the core's JavaScript in [Jint](https://github.com/sebastienros/jint) (4.16.4, pinned in `Steward.Kit.props`), a JavaScript interpreter written in C#: no native code, so it runs on x64 and Arm64, in a Store package and in a self-contained or single-file exe, trimmed too. The core's modules and rules.json are embedded in the assembly, and values cross as JSON text, with no reflection. `KitCore.Shared` hosts it (thread-safe); `AcceleratorLock.Acquire` takes a turn, blocking or async; `FailureMarkers` reads, writes and clears markers in any folder.
+- **The vectors** in `spec\` run against the core directly and through each driver: here, `kit\test\vectors.test.ts` (the core, the node part) and `kit\test\dotnet` (the core in Jint, the dotnet part). Reeve's npu-embed/npu_lock.py, a Python implementation of the lock, runs npu-queue-vectors.json.
+
+A logic change is one edit to the core; only a new kind of action touches the drivers. WebAssembly was considered and rejected: it needs another toolchain and a native runtime in C#, and gains nothing over JavaScript, which the TypeScript agents already run.
 
 ### The agent interface
 
@@ -40,10 +54,12 @@ Each agent pins one exact kit version and its parts in `kit.json`:
 
 ```json
 {
-  "kit": "1.0.0",
+  "kit": "2.0.0",
   "parts": ["node", "web", "spec"]
 }
 ```
+
+**A part brings the parts it needs**, whatever kit.json names: `node` brings `core`, `core` brings `spec` (its rules.json), `dotnet` brings `core`. So a hire's pin names the three it always did, and gets four. A kit from before 2.0.0 has no core, and then none is filled. tools/kit.ts writes the parts it was asked for, with those, to `src\kit\PARTS`.
 
 Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file left in each repository: small, dependency-free, the same in every agent. This repository's `tools/kit.ts` is the canonical one, and `bump` hands it out with each new pin (below), so a change to it reaches every agent as a kit change does. `npm run kit` runs it, and so does every npm script that runs the kit: `pretest`, `pretypecheck`, `prestart`, `prestop`, `prestatus` and `preopen`, and `serve` and `release` before their command. So a fresh clone works whichever it runs first. It writes `src\kit\VERSION` (and `PARTS`), and does nothing when they already match the pin. Otherwise it takes the pinned version from the first of:
 
@@ -52,7 +68,7 @@ Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file 
 3. `%USERPROFILE%\.steward\kits\<version>`, the cache.
 4. The kit release: `https://github.com/Jcollier0120/Steward/releases/download/kit-v<version>/kit-<version>.zip` and its `SHA256SUMS.txt`, over plain HTTPS with no sign-in (the repository is public), or through `gh release download` if that fails. The zip is checked against SHA256SUMS.txt, unpacked with Windows' own tar.exe, and kept in the cache.
 
-An agent's release (`src/kit/release.ts`, `npm run release`) carries `src\kit\`, with `kit.json` and `tools/kit.ts`, and its release.json says `"kit": "1.0.0"`. It refuses to build when `src\kit\VERSION` isn't the pinned version. So an installed agent needs neither the Steward nor GitHub.
+An agent's release (`src/kit/release.ts`, `npm run release`) carries `src\kit\`, with `kit.json` and `tools/kit.ts`, and its release.json says `"kit": "2.0.0"`. It refuses to build when `src\kit\VERSION` isn't the pinned version. So an installed agent needs neither the Steward nor GitHub.
 
 **A fresh clone of a hire builds** with `npm install`, `npm run kit` and `npm test`. `npm run kit` needs one of the sources above: the kit release on GitHub (no sign-in once this repository is public; `gh`, signed in, while it's private), or a Steward checkout beside the hire.
 
@@ -79,13 +95,15 @@ What it found, across 150 files:
 
 ## Kit releases
 
-A kit version is released once, as **`kit-v<version>`** in this repository, with `kit-<version>.zip` (VERSION, CHANGELOG.md and the parts, from `kit\` at HEAD through `git archive`, never the tests) and `SHA256SUMS.txt`. Its notes are the changelog's entry. `npm run kit-release` builds them into `artifacts\kit\`; `npm run kit-release -- --publish` makes the release, from a committed and pushed tree, and refuses a version already released.
+A kit version is released once, as **`kit-v<version>`** in this repository, with `kit-<version>.zip` (VERSION, CHANGELOG.md and the parts, `core\` and `dotnet\` too, from `kit\` at HEAD through `git archive`, never the tests) and `SHA256SUMS.txt`. Its notes are the changelog's entry. `npm run kit-release` builds them into `artifacts\kit\`; `npm run kit-release -- --publish` makes the release, from a committed and pushed tree, and refuses a version already released.
 
 The Steward's own releases stay **`v<version>`** (`npm run release`), and are separate: a kit release needs no Steward release, and a kit release is never marked Latest.
 
 ## Making a kit change
 
-1. Edit `kit\` (and its tests in `kit\test\`), or `tools/kit.ts`, raise `kit\VERSION`, add its entry to `kit\CHANGELOG.md`, and set this repository's own `kit.json` to the new version (a test checks they agree). `npm test` runs the kit's tests on the fixture, and tools/kit.ts's.
+1. Edit `kit\` (and its tests in `kit\test\`), or `tools/kit.ts`, raise `kit\VERSION`, add its entry to `kit\CHANGELOG.md`, and set this repository's own `kit.json` to the new version (a test checks they agree). `npm test` runs the kit's tests on the fixture, tools/kit.ts's, and the vectors against the core and the node part; then the dotnet part's, when a .NET 10 SDK is found (`npm run test:dotnet` runs those alone, and fails without one).
+   - **A rule** is a change to `kit\core\`. `npm run core-types` then writes its `.d.ts` again (a test says when they're stale), and `npm run vectors` writes turn-vectors.json and accelerator-vectors.json from the scenarios in `kit\test\*-scenarios.ts`: their diff is the change in behaviour, for review. A timing or a limit is a change to `kit\spec\rules.json`.
+   - **The dotnet part**: `npm run test:dotnet-publish` publishes it as Heiward does (self-contained, single-file or not, Arm64 and x64) and trimmed, and runs each exe. Jint's version is pinned in `kit\dotnet\Steward.Kit.props`.
 2. To try it in an agent before releasing it: `node tools/kit.ts --from ..\Steward\kit` there, or `steward bump --kit-from kit` (below).
 3. PR it to the Steward, and merge it.
 4. Release it: `npm run kit-release -- --publish`.
@@ -117,10 +135,10 @@ The eight hires were converted that way, each on a branch **`steward/use-kit-1.0
 
 Both are employees, listed in Settings with everything the stages need, but in 0.1.0 their kit isn't hooked up: `staff` says "not using the kit yet", and every stage passes over them with that reason. Converting each is a PR of its own, after this repository is published.
 
-- **Reeve** (Node, with a React dashboard) will take `node`, for the NPU queue (the kit's npu-queue.ts is now the original, and Reeve's src/npu-queue.ts its copy) and the accelerators config reading; `spec`; and later `web`, for the header widget. Its version is in package.json, package-lock.json and src/mcp.ts, and its release is `npm run release -- --publish`. It fills its kit with `node tools/kit.ts`, as a hire does.
-- **Heiward** (C#/.NET, public) will take `spec`: its NpuLock tests run the queue's vectors, so the C# lock follows the same protocol. Later `web`, for the header widget. It fills `kit\` with a small PowerShell script of its own, `tools\kit.ps1`, which pins a version in `kit.json` and downloads the public kit release as tools/kit.ts does; Heiward's CI on GitHub fetches it the same way. Its version is `<VersionPrefix>` in HEI.Agent/HEI.Agent.csproj, its tests `dotnet test HEI.Core.Tests`, its release `powershell -File HEI.Agent\release.ps1 -Publish`, on its `master` branch.
+- **Reeve** (Node, with a React dashboard) will take `node` (which brings the core and spec), for the NPU queue (the kit's core is now the original, and Reeve's src/npu-queue.ts a copy of kit 1.0.0's) and the accelerators config reading; and later `web`, for the header widget. Its npu-embed/npu_lock.py stays Python, the lock's one implementation outside the core, and keeps running npu-queue-vectors.json. Its version is in package.json, package-lock.json and src/mcp.ts, and its release is `npm run release -- --publish`. It fills its kit with `node tools/kit.ts`, as a hire does.
+- **Heiward** (C#/.NET, public) will take `dotnet` (which brings the core and spec): HEI.Core imports `kit\dotnet\Steward.Kit.props`, and its NpuLock.cs and Accelerators.cs keep their callers and hand their insides to the part (its turns, the ids, the failure markers' rules, files and messages). Later `web`, for the header widget. It fills `kit\` with a small PowerShell script of its own, `tools\kit.ps1`, which pins a version in `kit.json` and downloads the public kit release as tools/kit.ts does, bringing the parts a part needs as tools/kit.ts does, laid out as the kit tree is (`kit\core`, `kit\dotnet`, `kit\spec`); Heiward's CI on GitHub fetches it the same way. Its version is `<VersionPrefix>` in HEI.Agent/HEI.Agent.csproj, its tests `dotnet test HEI.Core.Tests`, its release `powershell -File HEI.Agent\release.ps1 -Publish`, on its `master` branch.
 
-**How a logic change reaches Heiward:** the rule changes in the `spec` part, as a document and new or changed vectors, released as a kit version; the Steward's bump moves Heiward's pin, and Heiward's C# tests run the new vectors and fail until a Heiward PR changes the C# side. Kit 2.0 (Next) takes the C# side away.
+**How a logic change reaches Heiward:** the rule changes in the core (and, for a timing, rules.json), with the vectors that show it, released as a kit version; the Steward's bump moves Heiward's pin, its build embeds the new core, and its tests run the new vectors. No C# changes, unless the core asks for a new kind of action.
 
 ## Install
 
@@ -219,7 +237,6 @@ It points at the installed copy (see Install). Its role in Manor's roles is `ste
 Planned, not in 0.1.0:
 
 - **"Back to Manor" in every agent's header** (a kit change, rolled out by the Steward, after the Surveyor is hired). When an agent is installed alongside Manor, its page header shows Manor's icon and a "Back to <manor name>" link beside the agent's own icon and title, so people move between Manor and the agents easily. The kit's page.ts finds Manor through `%USERPROFILE%\.manor\settings.json`: its name, port, and icon (a path inside `%USERPROFILE%\.manor\app`). The agent serves Manor's icon itself, at `/manor-icon.svg` say, because the page's CSP allows images from `'self'` only. The header shows nothing when Manor isn't installed. It belongs in the `web` part as one script and its CSS, reading `/api/manor` from the agent's own server, so a page that isn't the kit's can include it too. Reeve and Heiward don't use the kit's page, so each needs it separately (Reeve's React dashboard, Heiward's wwwroot).
-- **Kit 2.0: one core, two thin drivers.** All decision logic written once, as plain JavaScript (ES2022 modules, JSDoc-typed, with a .d.ts for the TypeScript agents), with no I/O and no Node APIs: a pure, sans-IO **`core`** part. It covers the queue and lock as a state machine (`step(state, observation) → { actions, waitMs }`), ticket ordering and the late, dead and aged rules, holder eviction, the accelerator config's reading, validation and auto order, candidates and pick, failure-marker expiry, games-busy, the id slug, the timings and limits as data in `spec/rules.json`, and the user-facing messages. The TypeScript driver (`node`) performs the core's actions with Node's fs and timers, and stays async so it never blocks an agent's server. A new **`dotnet`** part, C# source files, performs the same actions with Win32/.NET I/O, running the core's JavaScript in **Jint** (pure managed, on NuGet, no native parts, so it works on Arm64, in the Store package and in a self-contained exe); Heiward is its first consumer, its NpuLock internals and Accelerators.cs moving onto it. The `spec` vectors run against both drivers, and the Steward's tests include a small .NET test project, run with the .NET 10 SDK. A logic change is then one edit to the core; only a new kind of I/O action touches the drivers. WebAssembly was considered and rejected: it needs another toolchain and a native runtime in C#, and gains nothing over JavaScript, which the TypeScript agents already run. Kit 1.0.0 is ready for it: the queue, lock and accelerator code sit behind the same module boundaries as before (npu-queue.ts, lock.ts, accelerators.ts, npu.ts), so 2.0 can change their insides without the agents' imports changing much, and the vectors are plain JSON.
 - **src/cli.ts into the kit.** Six hires have the same cli.ts; the Auditor's adds `audit` and the Clerk's `search`. A kit `agentCli({ run, extra })` with each agent's own commands passed in would take it.
 - **Reeve, Heiward and Manor take the kit** (above), and the stages stop passing them over.
 - **Scheduled checks** in the Steward's duty: a daily `staff`, noticing a new kit release or a release lagging its branch.
@@ -232,10 +249,14 @@ Node 22.18+ runs the TypeScript directly; there is no build step and no runtime 
 ```powershell
 npm install          # TypeScript and @types/node, for the typecheck
 npm run kit          # fill src\kit (and the fixture's) from kit\
-npm test             # the Steward's tests and the kit's, on the fixture; pretest fills the kit
+npm test             # the Steward's tests and the kit's, on the fixture; pretest fills the kit, posttest runs test:dotnet when it can
+npm run test:dotnet  # the dotnet part's tests (kit\test\dotnet), with a .NET 10 SDK: DOTNET_ROOT, PATH, C:\tools\dotnet10 or %ProgramFiles%\dotnet
+npm run test:dotnet-publish  # the dotnet part published as Heiward publishes it, and run
+npm run core-types   # the core's .d.ts, from its JSDoc
+npm run vectors      # spec\turn-vectors.json and spec\accelerator-vectors.json, from the core's answers
 npm run typecheck
 npm run release      # artifacts\steward\Steward-<version>.zip and its SHA256SUMS.txt; -- --install installs it
 npm run kit-release  # artifacts\kit\kit-<version>.zip and its SHA256SUMS.txt; -- --publish makes kit-v<version>
 ```
 
-The Steward takes its own kit the way a hire does: `kit.json` pins it (the `node` and `web` parts), and `npm run kit` fills `src\kit\` from this checkout's `kit\` (`--from kit`). The tests make fake employees with git in temporary folders, with gh standing in, and serve tools/kit.ts a kit release from a local server; nothing reaches GitHub but one lookup of a release that isn't there. A checkout runs as the development copy, in `%USERPROFILE%\.steward-dev` on port 29494.
+The Steward takes its own kit the way a hire does: `kit.json` pins it (the `node` and `web` parts, which bring the core and spec), and `npm run kit` fills `src\kit\` from this checkout's `kit\` (`--from kit`). The dotnet tests restore Jint and xUnit from nuget.org (`kit\test\nuget.config`), whatever this PC's NuGet config lists. The tests make fake employees with git in temporary folders, with gh standing in, and serve tools/kit.ts a kit release from a local server; nothing reaches GitHub but one lookup of a release that isn't there. A checkout runs as the development copy, in `%USERPROFILE%\.steward-dev` on port 29494.

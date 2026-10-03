@@ -183,3 +183,34 @@ test('a program that predates the queue still never runs alongside a queued one'
   await Promise.all([withLock(lockDir, work), withNpuTurn(lockDir, work), withLock(lockDir, work), withNpuTurn(lockDir, work)]);
   assert.equal(most, 1);
 });
+
+test('the plain lock lets go only while owner.json still names it, and evicts a holder that died', async () => {
+  const lockDir = scratch();
+  await withLock(lockDir, async () => {
+    // Evicted for overstaying, and someone else took the lock meanwhile.
+    writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, since: 1 }));
+  });
+  assert.ok(existsSync(lockDir), "the other holder's lock stays");
+  writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: 2 ** 31 - 3, since: Date.now() }));
+  let ran = false;
+  await withLock(lockDir, async () => void (ran = true), { waitMs: 2000 });
+  assert.ok(ran && !existsSync(lockDir), 'a dead holder is evicted, and the lock let go after');
+  await assert.rejects(withLock(lockDir, async () => withLock(lockDir, async () => {}, { waitMs: 200 })), (e: Error) => e instanceof LockTimeout && e.message === `timed out after 200 ms waiting for ${lockDir}`);
+});
+
+test("a turn's notes: waiting behind others, and taking over from a holder that died", async () => {
+  const lockDir = scratch();
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: 2 ** 31 - 3, since: Date.now() }));
+  const notes: string[] = [];
+  await withNpuTurn(lockDir, async () => {}, { onNote: (t) => notes.push(t), waitMs: 2000 });
+  assert.deepEqual(notes, ['the NPU was held by a process that died or overstayed: taking it over']);
+  const free = hold(lockDir);
+  const first = withNpuTurn(lockDir, async () => {}, { lane: 'interactive' });
+  await until(() => tickets(lockDir).length === 1);
+  const second = withNpuTurn(lockDir, async () => {}, { onNote: (t) => notes.push(t) });
+  await until(() => notes.length === 2);
+  assert.equal(notes[1], 'waiting for the NPU: 1 ahead in line');
+  free();
+  await Promise.all([first, second]);
+});
