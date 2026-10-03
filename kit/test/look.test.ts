@@ -95,16 +95,26 @@ test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, 
   assert.match(html, /<span class="titlebar-action" id="titlebar-action"><\/span>/);
   assert.ok(html.includes(`button[data-post="/api/run"]:not([data-form]):not([data-body])`), 'the script lifts a plain Run now');
   assert.ok(html.includes('button[data-titlebar]'), 'or a button the agent marks');
-  // The theme: Match Windows, Light or Dark, read before the page paints and kept per agent, storage or not.
-  assert.equal((html.match(/class="theme-item"/g) ?? []).length, 3);
-  for (const t of ['system', 'light', 'dark']) assert.ok(html.includes(`data-theme="${t}"`));
+  // The theme, without Manor: the nine, under Windows and Colour themes, read before the page paints and kept per
+  // agent, storage or not.
+  const names = ['system', 'light', 'dark', 'arcade', 'onyx', 'carbon', 'tinsel', 'rosegold', 'quest'];
+  assert.match(html, /<html lang="en">/, 'no theme stamped: the saved one, or Windows');
+  assert.equal((html.match(/<button type="button" class="theme-item" role="menuitemradio"/g) ?? []).length, 9);
+  for (const t of names) assert.ok(html.includes(`data-theme="${t}">`), t);
+  assert.ok(html.indexOf('<div class="menu-label">Windows</div>') < html.indexOf('data-theme="system">'));
+  assert.ok(html.indexOf('data-theme="dark">') < html.indexOf('<div class="menu-label">Colour themes</div>'));
+  assert.ok(html.indexOf('<div class="menu-label">Colour themes</div>') < html.indexOf('data-theme="arcade">'));
   assert.ok(html.includes(`localStorage.getItem("${APP.id}:theme")`), 'its own key');
+  assert.ok(html.includes(`${JSON.stringify(names)}.indexOf(t) >= 0`), 'only a theme there is');
   assert.match(html, /try \{ var t = localStorage\.getItem/);
   assert.match(html, /try \{ localStorage\.setItem/);
-  assert.match(html, /:root\[data-theme="dark"\] \{/);
-  assert.match(html, /@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme\]\)/);
-  // Its colour and motion, and none for someone who asks for less.
+  assert.doesNotMatch(html, /<p class="menu-note"|data-manor=/);
+  // Every theme's colours, the manor's (web/themes.css). Light is :root's own: any data-theme keeps Windows' dark away.
+  for (const t of names.slice(2)) assert.match(html, new RegExp(`:root\\[data-theme="${t}"\\] \\{`), t);
+  assert.match(html, /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme\]\)/);
+  // Its colour and motion, and none for someone who asks for less: its Dark colour on every dark theme.
   assert.ok(html.includes(`:root { --role: ${DEFAULT_LOOK.accent.light}; }`));
+  assert.ok(html.includes(`:root[data-theme="dark"], :root[data-theme="arcade"], :root[data-theme="onyx"], :root[data-theme="carbon"] { --role: ${DEFAULT_LOOK.accent.dark}; }`));
   assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \}/);
   assert.match(html, /setProperty\('--phase'/);
   // No external fonts or scripts: the page's CSP allows its own origin only.

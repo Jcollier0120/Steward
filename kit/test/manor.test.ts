@@ -27,11 +27,15 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
   return home;
 }
 
-test("Manor's name and page from its settings; nothing without an installed Manor", () => {
-  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585 })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/' });
-  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/' }, 'Manor\'s own defaults');
-  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80 })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/' });
+test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
+  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx' })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx' });
+  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system' }, 'Manor\'s own defaults');
+  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system' });
   assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Manor');
+  assert.equal(manorLink(manorAt('not-an-object', 'null'))!.theme, 'system');
+  assert.equal(manorLink(manorAt('bom', '﻿{"theme": "quest"}'))!.theme, 'quest');
+  for (const theme of ['system', 'light', 'dark', 'arcade', 'onyx', 'carbon', 'tinsel', 'rosegold', 'quest']) assert.equal(manorLink(manorAt(`theme-${theme}`, { theme }))!.theme, theme);
+  ([7, null, ['dark'], 'Dark', 'toString'] as unknown[]).forEach((theme, i) => assert.equal(manorLink(manorAt(`odd-theme-${i}`, { theme }))!.theme, 'system', String(theme)));
   assert.equal(manorLink(manorAt('leftover', { name: 'Old' }, { installed: false })), null, 'a settings.json without the app is no Manor');
   assert.equal(manorLink(path.join(tmp, 'nowhere')), null);
 });
@@ -45,6 +49,33 @@ test('the title bar says Back to <manor> first, with its icon, only when Manor i
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
   assert.doesNotMatch(page({ token: 't', body: '' }), /manor-back"/, 'no Manor, no link');
+});
+
+test("with Manor, the page wears the manor's theme from its first paint, and its Theme menu says it's Manor's", () => {
+  process.env.MANOR_HOME = manorAt('themed', { name: 'Weasel "&" Manor', port: 18600, theme: 'arcade' });
+  try {
+    const html = page({ token: 't', body: '' });
+    assert.match(html, /^<!doctype html>\n<html lang="en" data-theme="arcade" data-manor="Weasel &quot;&amp;&quot; Manor" data-manor-url="http:\/\/manor\.localhost:18600\/">/);
+    assert.doesNotMatch(html, /localStorage\.getItem/, "the agent's own choice doesn't apply");
+    // The menu: the manor's theme, not a button, and the way to Manor to change it.
+    assert.match(html, /title="Theme \(Weasel &quot;&amp;&quot; Manor&#39;s\)"/);
+    assert.equal((html.match(/class="theme-item"/g) ?? []).length, 1);
+    assert.match(html, /<div class="theme-item" role="menuitemradio" aria-checked="true" aria-disabled="true" data-theme="arcade">.*<span class="ti-label">Arcade<\/span>/);
+    assert.match(html, /<p class="menu-note">Weasel &quot;&amp;&quot; Manor chooses the theme, for every page in the manor\.<\/p>/);
+    assert.match(html, /<a class="menu-link" role="menuitem" href="http:\/\/manor\.localhost:18600\/">Change it in Weasel &quot;&amp;&quot; Manor<\/a>/);
+    assert.doesNotMatch(html, /<button type="button" class="theme-item"/);
+  } finally {
+    process.env.MANOR_HOME = path.join(tmp, 'no-manor');
+  }
+  process.env.MANOR_HOME = manorAt('windows', { name: 'Weasel Manor' });
+  try {
+    const html = page({ token: 't', body: '' });
+    assert.match(html, /<html lang="en" data-manor="Weasel Manor" data-manor-url="http:\/\/manor\.localhost:18585\/">/, "Match Windows: no data-theme, and still Manor's");
+    assert.match(html, /aria-disabled="true" data-theme="system">.*<span class="ti-label">Match Windows<\/span>/);
+    assert.doesNotMatch(html, /localStorage\.getItem/);
+  } finally {
+    process.env.MANOR_HOME = path.join(tmp, 'no-manor');
+  }
 });
 
 test("Manor's icon: as its page serves it, else its app's own, else a house; never one that runs", async () => {

@@ -1,0 +1,321 @@
+/* The manor's colour themes: every page in the manor takes its colours from here (the Steward's kit, web/themes.css).
+   <html data-theme="..."> picks one; with none, the page is Light or Dark as Windows is set (Match Windows).
+   themes.json lists them, for the Theme menus: a theme is added there and here, and nowhere else.
+   Light and Dark are Windows 11's colours, as Heiward's and Manor's pages have them. The six colour themes are the
+   user's own Gamer Nexus themes (@gamernexus/theme), with Heiward's values for the tokens Heiward has; the manor's
+   own tokens follow the same rules: --npu is Gamer Nexus's host text, its -bg 20% of the host colour over
+   --surface-2 (Heiward's rule for badge tints), --gold its star, --quiet-bg 6% of --fg over --surface-2.
+   Every text pair (--fg on the backgrounds, --muted, --accent-text, --accent-fg on --accent, each badge on its -bg)
+   is 4.5:1 or more.
+   The tokens: --bg, --surface, --surface-2 (the page, a panel, a card); --fg, --muted, --faint; --line; --hover,
+   --selected; --accent, --accent-fg (text on it), --accent-soft, --accent-text (links); --ok, --warn, --alert,
+   --npu and their -bg; --quiet-bg (a quiet fill); --gold (an accelerator in use); --drive-bar, --drive-low (a
+   usage bar); --ink, --ink-soft, --ink-deep, --paper (the agents' icons' ink, for their scenes); --shadow. */
+:root {
+  --bg: #f3f3f3;
+  --surface: #ffffff;
+  --surface-2: #f9f9f9;
+  --fg: #1a1a1a;
+  --muted: #5f5f5f;
+  --faint: #9a9a9a;
+  --line: #e5e5e5;
+  --hover: rgba(0, 0, 0, 0.045);
+  --selected: #e0eefa;
+  --accent: #005fb8;
+  --accent-fg: #ffffff;
+  --accent-soft: #e0eefa;
+  --accent-text: #005fb8;
+  --ok: #0f7b3f;
+  --ok-bg: #dff6e8;
+  --warn: #8a5300;
+  --warn-bg: #fff4ce;
+  --alert: #c42b1c;
+  --alert-bg: #fde7e9;
+  --npu: #6941a8;
+  --npu-bg: #efe8fa;
+  --quiet-bg: #ededed;
+  --gold: #c99400;
+  --drive-bar: #26a0da;
+  --drive-low: #da2626;
+  --ink: #4a3a8a;
+  --ink-soft: #ebe7f8;
+  --ink-deep: #2b2150;
+  --paper: #fffdf7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #1c1c1c;
+    --surface: #272727;
+    --surface-2: #2c2c2c;
+    --fg: #f1f1f1;
+    --muted: #a8a8a8;
+    --faint: #707070;
+    --line: #3a3a3a;
+    --hover: rgba(255, 255, 255, 0.06);
+    --selected: #1f3a52;
+    --accent: #60cdff;
+    --accent-fg: #000000;
+    --accent-soft: #1f3a52;
+    --accent-text: #60cdff;
+    --ok: #6ccb8f;
+    --ok-bg: #173323;
+    --warn: #fcd679;
+    --warn-bg: #3a2f10;
+    --alert: #ff99a4;
+    --alert-bg: #44272a;
+    --npu: #cdb6ff;
+    --npu-bg: #33294a;
+    --quiet-bg: #333333;
+    --gold: #f2c94c;
+    --drive-bar: #3aa8e8;
+    --drive-low: #ff6b5e;
+    --ink: #b9a9f5;
+    --ink-soft: #221d38;
+    --ink-deep: #0f0c1a;
+    --paper: #34302a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+}
+/* Dark: Windows 11, dark. */
+:root[data-theme="dark"] {
+  --bg: #1c1c1c;
+  --surface: #272727;
+  --surface-2: #2c2c2c;
+  --fg: #f1f1f1;
+  --muted: #a8a8a8;
+  --faint: #707070;
+  --line: #3a3a3a;
+  --hover: rgba(255, 255, 255, 0.06);
+  --selected: #1f3a52;
+  --accent: #60cdff;
+  --accent-fg: #000000;
+  --accent-soft: #1f3a52;
+  --accent-text: #60cdff;
+  --ok: #6ccb8f;
+  --ok-bg: #173323;
+  --warn: #fcd679;
+  --warn-bg: #3a2f10;
+  --alert: #ff99a4;
+  --alert-bg: #44272a;
+  --npu: #cdb6ff;
+  --npu-bg: #33294a;
+  --quiet-bg: #333333;
+  --gold: #f2c94c;
+  --drive-bar: #3aa8e8;
+  --drive-low: #ff6b5e;
+  --ink: #b9a9f5;
+  --ink-soft: #221d38;
+  --ink-deep: #0f0c1a;
+  --paper: #34302a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+/* ---- The six colour themes ---- */
+/* Arcade: Neon retro, 90s arcade. */
+:root[data-theme="arcade"] {
+  --bg: #0d0221;
+  --surface: #1a0b2e;
+  --surface-2: #2a1245;
+  --fg: #f2e9ff;
+  --muted: #b388ff;
+  --faint: #937cb4;
+  --line: #47217a;
+  --hover: rgba(242, 233, 255, 0.06);
+  --selected: #2a1245;
+  --accent: #ff2e97;
+  --accent-fg: #0d0221;
+  --accent-soft: #2a1245;
+  --accent-text: #00f0ff;
+  --ok: #00ff9f;
+  --ok-bg: #224157;
+  --warn: #ffcc00;
+  --warn-bg: #553737;
+  --alert: #ff5c5c;
+  --alert-bg: #4c153d;
+  --npu: #d8b4fe;
+  --npu-bg: #48296a;
+  --quiet-bg: #361f50;
+  --gold: #ffea00;
+  --drive-bar: #ff2e97;
+  --drive-low: #d61f1f;
+  --ink: #b9a9f5;
+  --ink-soft: #221d38;
+  --ink-deep: #0f0c1a;
+  --paper: #34302a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+/* Onyx: Black stone and polished brass. */
+:root[data-theme="onyx"] {
+  --bg: #0c0b09;
+  --surface: #181612;
+  --surface-2: #26221b;
+  --fg: #f0eadc;
+  --muted: #b0a692;
+  --faint: #9e9583;
+  --line: #342f26;
+  --hover: rgba(240, 234, 220, 0.06);
+  --selected: #3a2e14;
+  --accent: #d4a843;
+  --accent-fg: #141008;
+  --accent-soft: #3a2e14;
+  --accent-text: #e2b95a;
+  --ok: #4ac480;
+  --ok-bg: #2d422f;
+  --warn: #f08c3c;
+  --warn-bg: #4e3722;
+  --alert: #f46e64;
+  --alert-bg: #442a23;
+  --npu: #d8b4fe;
+  --npu-bg: #453748;
+  --quiet-bg: #322e27;
+  --gold: #f0c450;
+  --drive-bar: #d4a843;
+  --drive-low: #eb5a50;
+  --ink: #b9a9f5;
+  --ink-soft: #221d38;
+  --ink-deep: #0f0c1a;
+  --paper: #34302a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+/* Carbon: Carbon fibre with a volt green edge. */
+:root[data-theme="carbon"] {
+  --bg: #0a0b0c;
+  --surface: #16181a;
+  --surface-2: #222528;
+  --fg: #eceef0;
+  --muted: #a0a6ac;
+  --faint: #8c9298;
+  --line: #34383c;
+  --hover: rgba(236, 238, 240, 0.06);
+  --selected: #28340e;
+  --accent: #bef228;
+  --accent-fg: #0e1204;
+  --accent-soft: #28340e;
+  --accent-text: #c8f550;
+  --ok: #3cd2be;
+  --ok-bg: #274846;
+  --warn: #ffaa32;
+  --warn-bg: #4e402a;
+  --alert: #ff6e6e;
+  --alert-bg: #452e31;
+  --npu: #d2b4ff;
+  --npu-bg: #3f3853;
+  --quiet-bg: #2e3134;
+  --gold: #ffc83c;
+  --drive-bar: #bef228;
+  --drive-low: #f05a5a;
+  --ink: #b9a9f5;
+  --ink-soft: #221d38;
+  --ink-deep: #0f0c1a;
+  --paper: #34302a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+/* Tinsel: Silver and antique gold. */
+:root[data-theme="tinsel"] {
+  --bg: #cdd0d4;
+  --surface: #e9ecf1;
+  --surface-2: #dfdbd1;
+  --fg: #1b1f26;
+  --muted: #474e58;
+  --faint: #535963;
+  --line: #aaaeb5;
+  --hover: rgba(27, 31, 38, 0.06);
+  --selected: #f1e7cb;
+  --accent: #8f6b12;
+  --accent-fg: #ffffff;
+  --accent-soft: #f1e7cb;
+  --accent-text: #6b500a;
+  --ok: #12623c;
+  --ok-bg: #c5cdbf;
+  --warn: #8d3e08;
+  --warn-bg: #d7c7b5;
+  --alert: #a01b1b;
+  --alert-bg: #d8bfb6;
+  --npu: #5b21b6;
+  --npu-bg: #c8b7d3;
+  --quiet-bg: #d3d0c7;
+  --gold: #946e11;
+  --drive-bar: #8f6b12;
+  --drive-low: #b21e1e;
+  --ink: #4a3a8a;
+  --ink-soft: #ebe7f8;
+  --ink-deep: #2b2150;
+  --paper: #fffdf7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+/* Rose Gold: Blush pink and rose gold. */
+:root[data-theme="rosegold"] {
+  --bg: #f2e6e2;
+  --surface: #fcf6f3;
+  --surface-2: #ecdcd6;
+  --fg: #2b1d1e;
+  --muted: #634a4a;
+  --faint: #705656;
+  --line: #d6c4be;
+  --hover: rgba(43, 29, 30, 0.06);
+  --selected: #f5ded8;
+  --accent: #a0524c;
+  --accent-fg: #ffffff;
+  --accent-soft: #f5ded8;
+  --accent-text: #8a423e;
+  --ok: #12623c;
+  --ok-bg: #cacbbf;
+  --warn: #7d4800;
+  --warn-bg: #ddc5af;
+  --alert: #9c1426;
+  --alert-bg: #e0b5b4;
+  --npu: #5b21b6;
+  --npu-bg: #d3b8d7;
+  --quiet-bg: #e0d1cb;
+  --gold: #a06818;
+  --drive-bar: #a0524c;
+  --drive-low: #b0182c;
+  --ink: #4a3a8a;
+  --ink-soft: #ebe7f8;
+  --ink-deep: #2b2150;
+  --paper: #fffdf7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+/* Quest: An old map in ink and parchment. */
+:root[data-theme="quest"] {
+  --bg: #ece0c4;
+  --surface: #f6eeda;
+  --surface-2: #e2d4b4;
+  --fg: #2c2014;
+  --muted: #5c4a34;
+  --faint: #604e36;
+  --line: #c4b28c;
+  --hover: rgba(44, 32, 20, 0.06);
+  --selected: #dee2ea;
+  --accent: #284078;
+  --accent-fg: #ffffff;
+  --accent-soft: #dee2ea;
+  --accent-text: #22386c;
+  --ok: #1e5428;
+  --ok-bg: #bcbd99;
+  --warn: #783c06;
+  --warn-bg: #d2b993;
+  --alert: #8c1a1a;
+  --alert-bg: #d4b096;
+  --npu: #5b21b6;
+  --npu-bg: #cbb2bb;
+  --quiet-bg: #d7c9aa;
+  --gold: #8c6212;
+  --drive-bar: #284078;
+  --drive-low: #9c1e1e;
+  --ink: #4a3a8a;
+  --ink-soft: #ebe7f8;
+  --ink-deep: #2b2150;
+  --paper: #fffdf7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
