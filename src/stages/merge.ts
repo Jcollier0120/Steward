@@ -6,6 +6,7 @@ import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
+import type { Held } from '../alarms.ts';
 import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -109,16 +110,18 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   return { why: null, sets: v.head };
 }
 
+const heldOf = (pr: PrInfo, why: string): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft });
+
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
-export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<EmployeeResult & { merged: PrInfo[] }> {
+export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<EmployeeResult & { merged: PrInfo[]; held: Held[] }> {
   const { run } = ctx;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
-  if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [] };
+  if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [], held: [] };
   // With no team, only the Steward's are read.
   const prs = parsePrs(await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
-  if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [] };
+  if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [], held: [] };
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
@@ -154,13 +157,15 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   }
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
+  // The same, for the alarms (alarms.ts): each PR that waits, and why.
+  const held = hold.map((h) => heldOf(h.pr, h.why));
   if (!o.yes) {
     const would = merge.map((pr) => {
       const before = untested(pr) ? testedBefore(e, pr) : null;
       const how = !untested(pr) ? '' : !before ? ', once its checks pass here' : before.ok ? ` (${before.note})` : '';
       return before && !before.ok ? `${describe(pr)} waits: ${before.note}` : `${describe(pr)} would be merged${how}`;
     });
-    return { ...result(e, 'skipped', [...would, ...waits].join('; ') + (merge.length ? ` (merge --yes${o.team ? ' --team' : ''} merges them)` : ''), { url: prs[0].url }), merged: [] };
+    return { ...result(e, 'skipped', [...would, ...waits].join('; ') + (merge.length ? ` (merge --yes${o.team ? ' --team' : ''} merges them)` : ''), { url: prs[0].url }), merged: [], held };
   }
   const merged: PrInfo[] = [];
   const notes = new Map<number, string>();
@@ -172,6 +177,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       const c = await check(pr);
       if (c.why) {
         waits.push(`${describe(pr)} waits: ${c.why}`);
+        held.push(heldOf(pr, c.why));
         continue;
       }
     }
@@ -187,6 +193,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         // Failing here for the first time is worth a word; after that it waits quietly for a new push.
         if (before) waits.push(`${describe(pr)} waits: ${t.note}`);
         else failed.push(`#${pr.number}: ${t.note}`);
+        held.push(heldOf(pr, t.note));
         continue;
       }
       notes.set(pr.number, t.note);
@@ -195,7 +202,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     const mine = pr.whose === 'steward';
     const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
     if (r.code !== 0) {
-      failed.push(`#${pr.number}: ${(r.err || r.out).trim().split('\n').pop()}`);
+      const why = (r.err || r.out).trim().split('\n').pop();
+      failed.push(`#${pr.number}: ${why}`);
+      held.push(heldOf(pr, `couldn't merge it: ${why}`));
       continue;
     }
     merged.push(pr);
@@ -213,17 +222,17 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
   const parts = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`), ...waits];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
-  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged };
+  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held };
 }
 
-export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<(EmployeeResult & { merged: PrInfo[] })[]> {
-  const out: (EmployeeResult & { merged: PrInfo[] })[] = [];
+export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<(EmployeeResult & { merged: PrInfo[]; held: Held[] })[]> {
+  const out: (EmployeeResult & { merged: PrInfo[]; held: Held[] })[] = [];
   for (const e of employees) {
     try {
       out.push(await mergeOne(ctx, e, o));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
-      out.push({ ...result(e, 'failed', (err as Error).message), merged: [] });
+      out.push({ ...result(e, 'failed', (err as Error).message), merged: [], held: [] });
     }
   }
   return out;

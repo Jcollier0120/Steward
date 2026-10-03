@@ -54,6 +54,22 @@ export interface Settings {
   /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
   byItself: boolean;
   roundMinutes: number;
+  /** What needs the person, after each round (alarms.ts). */
+  alarms: AlarmSettings;
+}
+
+export interface AlarmSettings {
+  on: boolean;
+  /** A Windows toast when one is raised. */
+  toast: boolean;
+  /** A PR held this long is an alarm. */
+  waitingHours: number;
+  /** A problem the Surveyor has reported this long is an alarm. */
+  problemHours: number;
+  /** Manor's page, read for updates it couldn't install; empty: not read. */
+  manorUrl: string;
+  /** The Surveyor's page, read for its problems; empty: not read. */
+  surveyorUrl: string;
 }
 
 const hire = (name: string): Employee => ({
@@ -122,6 +138,7 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595' },
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -182,6 +199,20 @@ export const SETTINGS_SCHEMA: Field[] = [
     help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve). Off: only when asked.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
+  {
+    key: 'alarms',
+    kind: 'group',
+    label: 'Alarms',
+    help: "After each round, what needs you: a PR that has waited, a release the rounds gave up on, an update Manor couldn't install, a problem the Surveyor has reported a while. Each is raised once, kept at the top of this page and in Manor until it clears.",
+    fields: [
+      { key: 'on', kind: 'switch', label: 'Raise alarms' },
+      { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
+      { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
+      { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
+      { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
+      { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
+    ],
+  },
 ];
 
 const str = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
@@ -208,6 +239,26 @@ function normalizeEmployee(e: any): Employee | null {
   };
 }
 
+const LOCAL_URL = /^https?:\/\/(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?\/?$/;
+
+function normalizeAlarms(raw: unknown): AlarmSettings {
+  const a = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_SETTINGS.alarms;
+  const whole = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : Number.NaN;
+    return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  const url = (v: unknown, fallback: string) => (typeof v === 'string' && (v.trim() === '' || LOCAL_URL.test(v.trim())) ? v.trim() : fallback);
+  return {
+    on: typeof a.on === 'boolean' ? a.on : d.on,
+    toast: typeof a.toast === 'boolean' ? a.toast : d.toast,
+    waitingHours: whole(a.waitingHours, 1, 168, d.waitingHours),
+    problemHours: whole(a.problemHours, 1, 168, d.problemHours),
+    manorUrl: url(a.manorUrl, d.manorUrl),
+    surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
+  };
+}
+
 /** settings.json over the defaults, each value checked: a bad one falls back to its default. */
 export function normalizeSettings(raw: unknown): { settings: Settings; problems: string[] } {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -230,6 +281,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       parallel: Number.isInteger(parallel) ? Math.min(10, Math.max(1, parallel)) : d.parallel,
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
+      alarms: normalizeAlarms(r.alarms),
     },
     problems,
   };

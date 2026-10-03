@@ -216,6 +216,23 @@ Its duty works as the hires' does, and its round is this: **it merges and releas
 
 A round with nothing merged, released or failed leaves no trace; one that did something is the last stage on the page, and a line in stages.log, as any stage is. A round passes while a stage runs (the stage lock). **Run now** (`steward round` in a terminal) does one round, on duty or not. Manor's employee card shows the rounds, from `/api/ping`. With "Merges and releases by itself" off, the stages run only when asked.
 
+### Alarms
+
+After every round, done or not, the Steward lists what needs you: the few things no one in the manor can see to by themselves (`src/alarms.ts`). Code decides each one; no model is asked. A condition becomes an alarm once it has lasted its while:
+
+| Condition | After |
+|---|---|
+| A PR to an employee that the round holds: a draft no one marked ready, conflicts, failing checks, a version that clashes, a base that isn't the employee's branch | 24 hours (`waitingHours`) |
+| A release that failed, which the rounds won't try again at that commit (`round-failed.json`) | at once |
+| The round can't run at all (gh signed out, say) | an hour |
+| An update Manor couldn't install (`/api/state`'s updates) | two hours |
+| Manor's update checks failing | twelve hours |
+| Manor's page not answering | an hour |
+| A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it | 6 hours (`problemHours`) |
+| The Surveyor's page not answering | two hours |
+
+An alarm is raised once, with one Windows notification for all raised in a round (clicking it opens this page), and stays at the top of the page under **Needs you**, and at `GET /api/alarms` for Manor, until its condition clears. **Dismiss** quiets one until it clears and comes back. The Steward never acts on an alarm: it says what it saw and what to do.
+
 ## Settings
 
 Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\settings.json`. They are used from the next stage on.
@@ -230,6 +247,7 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
 | Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released (Page and commands, below). Off: only when asked. |
 | A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. |
+| Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595` | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`) and a Surveyor's problem lasts (`problemHours`), 1 to 168, before it is one; Manor's page (`manorUrl`) and the Surveyor's (`surveyorUrl`), local addresses only, empty for not read. |
 
 ## Files
 
@@ -243,6 +261,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `staff.json` | The staff's table, as last refreshed. |
 | `last-stage.json`, `stages.log` | The last stage, with its log; every stage's results, one line each (a round's only when it did something). |
 | `round-failed.json` | The commit, for each employee, whose release failed in a round: the rounds don't try it again. |
+| `alarms.json` | The alarms: open, dismissed and lately cleared, and each condition watched since it was first seen. |
 | `pr-checks.json` | What testing each team PR here said, by its head commit: tested once, and a new push afresh. |
 | `jobs-approved.json` | Each employee's job scripts the Steward approved (or turned down) as merged, by sha256: each is looked at once. |
 | `work\` | The worktrees of the employees' bumps and releases. |
