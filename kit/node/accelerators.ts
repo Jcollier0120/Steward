@@ -180,6 +180,45 @@ export function clearFailure(id: string): void {
   } catch {}
 }
 
+// ---------------------------------------------------------------- the model last served
+
+/**
+ * The model an accelerator's server last answered, and when: `{baseUrl, model, at}`, written by every agent after each
+ * answer, so one agent's turn tells the next whether that model is still loaded and its warm-up can be skipped.
+ */
+export const servedFile = (id: string) => path.join(acceleratorsDir, `${id}.served.json`);
+
+export function noteServed(id: string, ep: Pick<Endpoint, 'baseUrl' | 'model'>, now = Date.now()): void {
+  try {
+    writeWhole(servedFile(id), { baseUrl: ep.baseUrl, model: ep.model, at: new Date(now).toISOString() });
+  } catch {
+    // Only a hint for the next turn: without it, that turn warms up as before.
+  }
+}
+
+/** How long GenieX keeps a model loaded unused: its start command's `--keepalive` (seconds), else its default, 300. */
+export function keepaliveMs(startCommand?: string[]): number {
+  const i = startCommand ? startCommand.indexOf('--keepalive') : -1;
+  const s = i >= 0 ? Number(startCommand![i + 1]) : NaN;
+  return (Number.isFinite(s) && s > 0 ? s : 300) * 1000;
+}
+
+/**
+ * Whether this server answered this same model recently enough that it still has it loaded: within its keepalive,
+ * less half a minute. Another model answered since (one GenieX keeping one model at a time), another server, or no
+ * record: not recent, and the turn warms up.
+ */
+export function servedRecently(id: string, ep: Pick<Endpoint, 'baseUrl' | 'model' | 'startCommand'>, now = Date.now()): boolean {
+  try {
+    const s = JSON.parse(readText(servedFile(id)) ?? 'null');
+    if (!s || s.baseUrl !== ep.baseUrl || s.model !== ep.model) return false;
+    const age = now - Date.parse(s.at);
+    return age >= 0 && age < keepaliveMs(ep.startCommand) - 30_000;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- games
 
 /** A card counts as in use by a game while another program keeps one of its 3D engines over this. */

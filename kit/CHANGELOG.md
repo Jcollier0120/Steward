@@ -2,6 +2,14 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.9.1
+
+**An NPU turn skips its warm-up while the model is still loaded.** Since 2.6.0 every chat or vision turn on the NPU began with a one-token warm-up request, in case GenieX had to load the model. With Reeve keeping one model loaded for hours (`--keepalive`, one model for chat and vision), that was a second request on every turn. Now a turn skips the warm-up when the server was already up and answered this same model within its keepalive (less 30 s; GenieX's default 300 s when its `startCommand` names none):
+- accelerators.ts: **`servedFile(id)`**, **`noteServed(id, ep)`**, **`servedRecently(id, ep)`** and **`keepaliveMs(startCommand)`**. Every agent writes `<accelerators>/<id>.served.json` after each NPU answer, so one agent's turn tells the next.
+- A server just started or found busy, another model answered since, or no record: the turn warms up as before.
+- spec/ACCELERATORS.md says so.
+- **Nothing for an agent to do.**
+
 ## 2.9.0
 
 **`/api/ping` says since when an agent is off duty, so Manor needn't run its status command.** The ping said `running` (on duty) but not since when, which only `status --json` said; so for an agent off duty, Manor ran `node src\cli.ts status --json` on every look to learn it. Now the ping carries what that command says:
