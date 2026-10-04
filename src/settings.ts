@@ -56,7 +56,21 @@ export interface Settings {
   roundMinutes: number;
   /** What needs the person, after each round (alarms.ts). */
   alarms: AlarmSettings;
+  /** The Steward's look at the Wright's drafts (review.ts). */
+  wrightReview: WrightReviewSettings;
 }
+
+export interface WrightReviewSettings {
+  /** In its rounds, a draft the Wright opened that passes the look is marked ready, then merged as any team PR. */
+  on: boolean;
+  /** Larger than this (lines added and removed), it stays a draft for the person. */
+  maxLines: number;
+  /** A changed file matching one of these keeps it a draft for the person (the Wright's own list, checked again). */
+  sensitive: string[];
+}
+
+/** What a person reviews: the Wright's defaults (its Settings: For a person to review). */
+export const DEFAULT_REVIEW_SENSITIVE = ['jobs/**', '**/*.ps1', '**/*install*', 'setup/**', '**/*release*', '.github/**', 'tools/**', 'kit.json', '**/*.csproj'];
 
 export interface AlarmSettings {
   on: boolean;
@@ -142,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
   byItself: true,
   roundMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: 'http://127.0.0.1:19797' },
+  wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -217,6 +232,17 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797' },
     ],
   },
+  {
+    key: 'wrightReview',
+    kind: 'group',
+    label: "The Wright's drafts",
+    help: "The Wright opens every pull request as a draft. In its rounds the Steward looks at each, in code: not labelled wright:needs-you, no changed file a person reviews, no dependency changes, not too large. One that passes is marked ready, then tested here and merged as any team PR; one that doesn't stays a draft for you, and says why.",
+    fields: [
+      { key: 'on', kind: 'switch', label: 'Look at the Wright\'s drafts, and merge the ones that pass' },
+      { key: 'maxLines', kind: 'whole', min: 10, max: 5000, unit: 'lines', label: 'At most', help: 'Lines added and removed; a larger draft waits for you.' },
+      { key: 'sensitive', kind: 'list', label: 'For a person to review', help: 'A draft changing a file that matches one of these waits for you. * is any part of a name, ** any folders.', item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
+    ],
+  },
 ];
 
 const str = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
@@ -264,6 +290,17 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
   };
 }
 
+function normalizeReview(raw: unknown): WrightReviewSettings {
+  const a = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const d = DEFAULT_SETTINGS.wrightReview;
+  const n = typeof a.maxLines === 'number' ? a.maxLines : typeof a.maxLines === 'string' && a.maxLines.trim() ? Number(a.maxLines) : Number.NaN;
+  return {
+    on: typeof a.on === 'boolean' ? a.on : d.on,
+    maxLines: Number.isInteger(n) ? Math.min(5000, Math.max(10, n)) : d.maxLines,
+    sensitive: strings(a.sensitive, d.sensitive),
+  };
+}
+
 /** settings.json over the defaults, each value checked: a bad one falls back to its default. */
 export function normalizeSettings(raw: unknown): { settings: Settings; problems: string[] } {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -287,6 +324,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
       alarms: normalizeAlarms(r.alarms),
+      wrightReview: normalizeReview(r.wrightReview),
     },
     problems,
   };
