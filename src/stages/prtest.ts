@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { git, removeWorktree } from '../git.ts';
+import { commitOf, fetchBranch, git, removeWorktree } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks } from './bump.ts';
@@ -12,7 +12,9 @@ import type { PrInfo } from './staff.ts';
  * as bump runs them: npm ci for a Node agent, its kit filled, each test command) at the PR's head commit, in a
  * worktree of its own in the work folder. Only the team's PRs come here (strangers' are never touched), so their
  * code runs on this PC as yours would. Each result is kept by commit (pr-checks.json): a round tests a commit
- * once, and a new push is tested afresh.
+ * once, and a new push is tested afresh. A failure is tried once more at once, so one flaky test doesn't hold a PR
+ * (the note says when it passed the second time); one that fails twice waits, and is caught up (catchup.ts) once its
+ * branch has moved on, to be tested again with what the branch gained.
  */
 
 export const prChecksFile = () => dataFile('pr-checks.json');
@@ -23,6 +25,8 @@ export interface Tested {
   /** "checks passed here at abc1234", or what failed. */
   note: string;
   at: string;
+  /** The employee's branch on origin when it was tested: the branch moving on since is a reason to try again. */
+  branch?: string;
 }
 
 const keyOf = (e: Employee, pr: PrInfo) => `${e.id}#${pr.number}@${pr.headOid}`;
@@ -49,14 +53,22 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const repo = checkoutOf(e);
   const sha = pr.headOid.slice(0, 7);
   await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  await fetchBranch(run, repo, e.branch);
+  const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
   if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, pr.headOid);
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {
-    const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] ${line}`) });
-    return failed ? { ok: false, note: `its checks failed here at ${sha}: ${failed}`, at: now() } : { ok: true, note: `checks passed here at ${sha}`, at: now() };
+    const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
+    const failed = await runChecks(ctx, e, dir, { say });
+    if (!failed) return { ok: true, note: `checks passed here at ${sha}`, at: now(), branch };
+    say(`#${pr.number}: its checks once more (${failed})`);
+    const again = await runChecks(ctx, e, dir, { say });
+    return again
+      ? { ok: false, note: `its checks failed here at ${sha}, twice: ${again}`, at: now(), branch }
+      : { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch };
   } finally {
     try {
       await removeWorktree(run, repo, dir);

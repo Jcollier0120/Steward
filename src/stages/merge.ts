@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
-import { fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
+import { catchUp, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import type { Held } from '../alarms.ts';
@@ -26,6 +27,10 @@ import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
  * A team PR is held to more, since no one asked for it here: the version it sets must be new (not released, above
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
  * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump.
+ *
+ * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
+ * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
+ * checks failed here before the branch moved on. The next round tests it at its new head, and merges it.
  */
 
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
@@ -74,6 +79,9 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
   return { head: await read(at), from: start ? await read(start) : null };
 }
 
+/** How a hold that a new version would clear ends: such a PR can be caught up. */
+export const RAISE = 'raise the version in the PR';
+
 /**
  * Why the steps a mergeable PR asks for couldn't happen, or null: an install or approval with no command for it in
  * Settings, or a release whose version once merged (the PR's when it sets one, else its branch's) is already released.
@@ -90,7 +98,7 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
   const v = await prVersions(ctx, e, pr);
   if (!v.head) return `it asks for a release, but its branch has no version the Steward can read (${e.versionFiles.join(', ')})`;
   const version = v.head !== v.from ? v.head : (base ?? v.head);
-  if (released.includes(version)) return `it asks for a release, but v${version}, its version once merged, is already released: raise the version in the PR`;
+  if (released.includes(version)) return `it asks for a release, but v${version}, its version once merged, is already released: ${RAISE}`;
   return null;
 }
 
@@ -99,19 +107,23 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
  * it). A version it sets must be new: not released, and above its branch's, so that two changes never share one
  * version and a merge never leaves a version conflict behind. (The Steward's own bumps raise the patch by one.)
  */
-export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<{ why: string | null; sets: string | null }> {
+export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<{ why: string | null; sets: string | null; raise?: boolean }> {
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return { why: `there's no checkout at ${repo} to read its version from, or test it in`, sets: null };
   const { released, base } = await lookup();
   const v = await prVersions(ctx, e, pr);
   if (!v.head) return { why: `its branch has no version the Steward can read (${e.versionFiles.join(', ')})`, sets: null };
   if (v.head === v.from) return { why: null, sets: null };
-  if (released.includes(v.head)) return { why: `it sets v${v.head}, which is already released: raise it`, sets: v.head };
-  if (base && compareVersions(v.head, base) <= 0) return { why: `it sets v${v.head}, but ${e.branch} is at v${base} already: raise it above`, sets: v.head };
+  if (released.includes(v.head)) return { why: `it sets v${v.head}, which is already released: raise it`, sets: v.head, raise: true };
+  if (base && compareVersions(v.head, base) <= 0) return { why: `it sets v${v.head}, but ${e.branch} is at v${base} already: raise it above`, sets: v.head, raise: true };
   return { why: null, sets: v.head };
 }
 
 const heldOf = (pr: PrInfo, why: string): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft });
+
+/** A ready team PR from the repository itself that waits only on its branch: conflicting with it, or behind it. */
+export const behindItsBranch = (pr: PrInfo, branch: string) =>
+  pr.whose === 'team' && !pr.fork && !pr.draft && !pr.afterError && pr.base === branch && (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY' || pr.mergeState === 'BEHIND');
 
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
@@ -167,27 +179,35 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       return { released, base: 'version' in base ? base.version : null };
     })());
   /** Why it waits, after its steps and, for a team PR, its version; and the version it sets. */
-  const check = async (pr: PrInfo): Promise<{ why: string | null; sets: string | null }> => {
+  const check = async (pr: PrInfo): Promise<{ why: string | null; sets: string | null; raise?: boolean }> => {
     try {
       const why = await afterHold(ctx, e, pr, lookup);
-      if (why) return { why, sets: null };
+      if (why) return { why, sets: null, raise: why.endsWith(RAISE) };
       return pr.whose === 'team' ? await teamHold(ctx, e, pr, lookup) : { why: null, sets: null };
     } catch (err) {
       return { why: `couldn't check it before merging: ${(err as Error).message}`, sets: null };
     }
   };
+  // The ones a catch-up (stages/catchup.ts) could clear, after the merges.
+  const catchable = new Map<number, PrInfo>(hold.filter((h) => behindItsBranch(h.pr, e.branch)).map((h) => [h.pr.number, h.pr]));
+  const failedHere: { pr: PrInfo; t: Tested }[] = [];
   const ready: { pr: PrInfo; sets: string | null }[] = [];
   for (const pr of mergeable) {
     const c = await check(pr);
-    if (c.why) hold.push({ pr, why: c.why });
-    else ready.push({ pr, sets: c.sets });
+    if (c.why) {
+      hold.push({ pr, why: c.why });
+      if (c.raise && pr.whose === 'team') catchable.set(pr.number, pr);
+    } else ready.push({ pr, sets: c.sets });
   }
   // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version.
   const merge: PrInfo[] = [];
   for (const r of ready) {
     const same = r.sets ? ready.filter((x) => x.sets === r.sets) : [];
-    if (same.length > 1) hold.push({ pr: r.pr, why: `${same.map((x) => `#${x.pr.number}`).join(' and ')} ${same.length === 2 ? 'both' : 'all'} set v${r.sets}: each needs a version of its own` });
-    else merge.push(r.pr);
+    if (same.length > 1) {
+      hold.push({ pr: r.pr, why: `${same.map((x) => `#${x.pr.number}`).join(' and ')} ${same.length === 2 ? 'both' : 'all'} set v${r.sets}: each needs a version of its own` });
+      // The first keeps its version; each after it gets one of its own.
+      if (r.pr.whose === 'team' && r.pr.number !== Math.min(...same.map((x) => x.pr.number))) catchable.set(r.pr.number, r.pr);
+    } else merge.push(r.pr);
   }
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
@@ -212,6 +232,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (c.why) {
         waits.push(`${describe(pr)} waits: ${c.why}`);
         held.push(heldOf(pr, c.why));
+        if (c.raise) catchable.set(pr.number, pr);
         continue;
       }
     }
@@ -228,6 +249,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         if (before) waits.push(`${describe(pr)} waits: ${t.note}`);
         else failed.push(`#${pr.number}: ${t.note}`);
         held.push(heldOf(pr, t.note));
+        failedHere.push({ pr, t });
         continue;
       }
       notes.set(pr.number, t.note);
@@ -253,10 +275,40 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
     }
   }
+  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : [];
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
-  const parts = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`), ...waits];
+  const parts = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`), ...waits, ...caught];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
   return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held };
+}
+
+/**
+ * After the merges: each PR that waits only on its branch, caught up (stages/catchup.ts), lowest number first, each
+ * new version then taken; a PR whose checks failed here only when its branch has moved since. Each one's hold then
+ * says what happened. One line each, for the stage's result.
+ */
+async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<string[]> {
+  for (const { pr, t } of o.failedHere) if (pr.whose === 'team' && !pr.fork) o.catchable.set(pr.number, pr);
+  if (!o.catchable.size) return [];
+  const { released } = await o.lookup();
+  const now = await commitOf(ctx.run, checkoutOf(e), `origin/${e.branch}`);
+  for (const { pr, t } of o.failedHere) if (t.branch && t.branch === now) o.catchable.delete(pr.number);
+  const merged = new Set(o.merged.map((p) => p.number));
+  const taken = o.ready.filter((r) => r.sets && !merged.has(r.pr.number) && !o.catchable.has(r.pr.number)).map((r) => r.sets!);
+  const lines: string[] = [];
+  for (const pr of [...o.catchable.values()].sort((a, b) => a.number - b.number)) {
+    let c: CaughtUp;
+    try {
+      c = await catchUp(ctx, e, pr, { released, taken });
+    } catch (err) {
+      c = { done: false, note: `couldn't: ${(err as Error).message}` };
+    }
+    if (c.version) taken.push(c.version);
+    const h = o.held.find((x) => x.number === pr.number);
+    if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : `${h.why} (not caught up: ${c.note})`;
+    lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
+  }
+  return lines;
 }
 
 export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<(EmployeeResult & { merged: PrInfo[]; held: Held[] })[]> {

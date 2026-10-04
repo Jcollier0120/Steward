@@ -74,7 +74,7 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
 
   const first = await round();
   assert.equal(first.m.outcome, 'failed', 'failing here for the first time is worth a word');
-  assert.match(first.m.message, new RegExp(`^didn't merge #7: its checks failed here at ${broken.slice(0, 7)}: node -e .* failed \\(exit 1\\)$`));
+  assert.match(first.m.message, new RegExp(`^didn't merge #7: its checks failed here at ${broken.slice(0, 7)}, twice: node -e .* failed \\(exit 1\\)$`));
   assert.match(first.lines, /#7 has no checks on GitHub: testing it here at/);
   assert.ok(!r.gh.some((a) => a[1] === 'merge'), 'not merged');
 
@@ -94,6 +94,22 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
   assert.equal(fixed.m.message, `merged #7 (checks passed here at ${head.slice(0, 7)})`);
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(prChecksFile(), 'utf8'))), [`fake#7@${broken}`, `fake#7@${head}`], 'kept by commit');
+});
+
+test('a check that fails once and passes on a second try merges the PR, and says so', async () => {
+  const f = employeeWithPrs('flaky');
+  const sha = f.make(8, { files: { feature: 'yes\n' } });
+  // Fails the first time it runs in a folder, passes the next.
+  const e = employee(f.checkout, { fill: '', test: [`node -e "const fs=require('fs');if(fs.existsSync('ran'))process.exit(0);fs.writeFileSync('ran','');process.exit(1)"`] });
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([listed(8, sha, { statusCheckRollup: [] })]);
+    if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+    if (args[0] === 'pr' && args[1] === 'merge') return ok('');
+  });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-flaky'), run: r.run, neutralDir: tmp });
+  const m = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(m.outcome, 'done');
+  assert.match(m.message, new RegExp(`^merged #8 \\(checks passed here at ${sha.slice(0, 7)} on a second try \\(the first: node -e .* failed \\(exit 1\\)\\)\\)$`));
 });
 
 test("a team PR whose CI passes on GitHub isn't tested here again", async () => {
