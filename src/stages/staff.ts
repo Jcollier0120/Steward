@@ -42,6 +42,8 @@ export interface PrInfo {
   /** Lines added and removed, and the files it changes (gh pr list's, at most 100). */
   changed: number;
   files: string[];
+  /** From a fork (gh's isCrossRepository): never pushed to. */
+  fork?: boolean;
   /** For one of the Wright's drafts: why the Steward's look (review.ts) leaves it to the person. Not from gh. */
   reviewHold?: string;
 }

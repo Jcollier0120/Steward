@@ -60,6 +60,8 @@ export interface Settings {
   alarms: AlarmSettings;
   /** The Steward's look at the Wright's drafts (review.ts). */
   wrightReview: WrightReviewSettings;
+  /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
+  catchUp: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -169,6 +171,7 @@ export const DEFAULT_SETTINGS: Settings = {
   roundMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '' },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
+  catchUp: true,
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -227,6 +230,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: 'Merges and releases by itself',
     help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve). Off: only when asked.",
+  },
+  {
+    key: 'catchUp',
+    kind: 'switch',
+    label: 'Catches PRs up with their branch',
+    help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict waits for you.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
   {
@@ -338,6 +347,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
+      catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
     },
     problems,
   };
