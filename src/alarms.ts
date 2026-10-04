@@ -138,10 +138,20 @@ export function roundConditions(o: { round: StageResult; held: { employee: Emplo
   return out;
 }
 
+/**
+ * Why a page gave no answer (getJson's own { error }, and nothing else), or null when it answered. An answer that carries
+ * an error field of its own (the Wright's work says error: null) is still an answer.
+ */
+export function noAnswer(v: unknown): string | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return 'no answer';
+  const keys = Object.keys(v);
+  return keys.length === 1 && keys[0] === 'error' ? String((v as any).error) : null;
+}
+
 /** From Manor's /api/state: updates it couldn't install or check; or no answer at all. */
 export function manorConditions(state: unknown): Condition[] {
-  if (!state || typeof state !== 'object' || 'error' in state) {
-    const why = state && typeof state === 'object' && 'error' in state ? String((state as any).error) : 'no answer';
+  const why = noAnswer(state);
+  if (why !== null) {
     return [{ id: 'manor:down', who: 'manor', title: "Manor's page doesn't answer", detail: [why, 'Open Manor from the Start menu, or restart the PC: its sign-in task starts it.'], afterMs: HOUR }];
   }
   const u = (state as any).updates;
@@ -156,8 +166,8 @@ export function manorConditions(state: unknown): Condition[] {
 
 /** From the Surveyor's /api/survey: its problems, from when it first saw each; or no answer at all. */
 export function surveyorConditions(survey: unknown, settings: Settings): Condition[] {
-  if (!survey || typeof survey !== 'object' || 'error' in survey) {
-    const why = survey && typeof survey === 'object' && 'error' in survey ? String((survey as any).error) : 'no answer';
+  const why = noAnswer(survey);
+  if (why !== null) {
     return [{ id: 'surveyor:down', who: 'surveyor', title: "The Surveyor's page doesn't answer, so nothing watches the manor's repair", detail: [why], afterMs: 2 * HOUR }];
   }
   const findings = (survey as any).findings;
@@ -175,8 +185,8 @@ export function surveyorConditions(survey: unknown, settings: Settings): Conditi
 
 /** From the Wright's /api/work: issues it got stuck on, and its PRs a person reviews, at once; or no answer at all. */
 export function wrightConditions(work: unknown): Condition[] {
-  if (!work || typeof work !== 'object' || 'error' in work) {
-    const why = work && typeof work === 'object' && 'error' in work ? String((work as any).error) : 'no answer';
+  const why = noAnswer(work);
+  if (why !== null) {
     return [{ id: 'wright:down', who: 'wright', title: "The Wright's page doesn't answer, so the queued work waits", detail: [why], afterMs: 2 * HOUR }];
   }
   const needs = (work as any).needsYou;
