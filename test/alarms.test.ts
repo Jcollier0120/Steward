@@ -10,7 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-alarms-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { alarmsFile, dismiss, loadAlarms, manorConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms } = await import('../src/alarms.ts');
+const { alarmsFile, dismiss, loadAlarms, manorConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
 const { alarmsCard } = await import('../src/view.ts');
 
@@ -89,7 +89,7 @@ test("from the Surveyor: its problems from when it first saw them, never its war
 test('after a round: everything reconciled into alarms.json, and one toast for what was raised', async () => {
   rmSync(alarmsFile(), { force: true });
   const toasts: [string, string][] = [];
-  const pages = { 'http://m/api/state': { updates: { items: [{ id: 'miller', name: 'Miller', error: 'EBUSY' }] } }, 'http://127.0.0.1:19595/api/survey': { findings: [] } } as Record<string, unknown>;
+  const pages = { 'http://m/api/state': { updates: { items: [{ id: 'miller', name: 'Miller', error: 'EBUSY' }] } }, 'http://127.0.0.1:19595/api/survey': { findings: [] }, 'http://127.0.0.1:19797/api/work': { needsYou: [] } } as Record<string, unknown>;
   const s = structuredClone(settings);
   const deps = (h: number) => ({ getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(h), manorUrl: 'http://m' });
   const run = (h: number) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: { porter: 'abc1234' }, employees: DEFAULT_EMPLOYEES, log: () => {} }, deps(h));
@@ -127,4 +127,20 @@ test('the page: what needs you at the top, each with Dismiss; the dismissed and 
   assert.match(html, /data-post="\/api\/alarms\/dismiss"/);
   assert.match(html, /1 dismissed/);
   assert.equal(alarmsCard({ ...empty() }), '', 'nothing to say');
+});
+
+test("from the Wright: an issue it got stuck on and a PR a person reviews, at once; its page down, after two hours", () => {
+  const c = wrightConditions({ needsYou: [
+    { id: 'stuck:Jcollier0120/Porter#28', kind: 'stuck', repo: 'Jcollier0120/Porter', number: 28, title: 'Drop the dead feed', url: 'https://github.com/Jcollier0120/Porter/issues/28' },
+    { id: 'review:Jcollier0120/Reeve#33', kind: 'review', repo: 'Jcollier0120/Reeve', number: 33, title: 'Reeve 0.4.6: fast-forward release branches too', url: 'https://github.com/Jcollier0120/Reeve/pull/33' },
+    { not: 'one' },
+  ] });
+  assert.deepEqual(c.map((x) => [x.id, x.afterMs, x.url]), [
+    ['wright:stuck:Jcollier0120/Porter#28', 0, 'https://github.com/Jcollier0120/Porter/issues/28'],
+    ['wright:review:Jcollier0120/Reeve#33', 0, 'https://github.com/Jcollier0120/Reeve/pull/33'],
+  ]);
+  assert.equal(c[0].title, 'The Wright got stuck on Porter #28: Drop the dead feed');
+  assert.equal(c[1].title, 'Reeve #33 needs your review: the Wright changed what a person reviews');
+  assert.equal(wrightConditions({ needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: "Claude Code isn't signed in", url: 'http://wright.localhost:19797/' }] })[0].title, "The Wright can't work: Claude Code isn't signed in");
+  assert.deepEqual(wrightConditions({ error: 'ECONNREFUSED' }).map((x) => [x.id, x.afterMs / HOUR]), [['wright:down', 2]]);
 });
