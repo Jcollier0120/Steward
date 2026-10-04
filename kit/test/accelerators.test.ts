@@ -469,6 +469,9 @@ test("quirks: the nonce only for GenieX's prefix leak; an image as a path only w
   assert.match((A.chatBody(genie, ep, msgs, 10) as any).messages[0].content, /^\[req [0-9a-z]+\] Be brief\.$/);
   assert.equal((A.chatBody(card, ep, msgs, 10) as any).messages[0].content, 'Be brief.');
   assert.match((A.chatBody(card, { ...ep, model: 'Qwen3-4B' }, msgs, 10) as any).messages[1].content, /\/no_think$/, 'a Qwen3 that thinks is told not to');
+  for (const model of ['qualcomm/Qwen3-VL-4B-Instruct:W4A16', 'qualcomm/Qwen3-4B-Instruct-2507:W4A16', 'Qwen3.5-4B'])
+    assert.equal((A.chatBody(card, { ...ep, model }, msgs, 10) as any).messages[1].content, 'Hi', `${model} doesn't think: never told /no_think`);
+  assert.equal(A.thinks('qualcomm/Qwen3-VL-4B-Thinking'), true);
   const png = path.join(home, 'pixel.png');
   writeFileSync(png, Buffer.from('89504e470d0a1a0a', 'hex'));
   const url = (b: any) => b.messages[1].content[0].image_url.url;
