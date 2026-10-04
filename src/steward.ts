@@ -1,9 +1,8 @@
-import { mkdirSync, readFileSync } from 'node:fs';
-import path from 'node:path';
+import { mkdirSync } from 'node:fs';
 import { watchAlarms, type Held } from './alarms.ts';
-import { appRoot, dataDir } from './app.ts';
+import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
-import { kitInfo, kitInfoFrom, chooseKit, localChangelog, stewardTool, type KitInfo } from './kitsource.ts';
+import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
@@ -18,7 +17,9 @@ import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
-import { readPin, staff, type Staff } from './stages/staff.ts';
+import { clearRolloutHolds, loadRolloutFailures, rollout } from './stages/rollout.ts';
+import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
+import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 
 /**
@@ -128,19 +129,44 @@ function pruneKitsNow(s: Staff, kit: KitInfo): void {
   if (process.env.NODE_TEST_CONTEXT && !process.env.STEWARD_KITS) return;
   const last = Date.parse(readJson<{ at?: string }>(kitsPrunedFile(), {}).at ?? '') || 0;
   if (Date.now() - last < 24 * 3600_000) return;
-  let own: string | null = null;
-  try {
-    own = readPin(readFileSync(path.join(appRoot, 'kit.json'), 'utf8'))?.kit ?? null;
-  } catch {
-    // An installed Steward without kit.json: its kit is in src\kit.
-  }
-  const pinned = [own, kit.released[0], ...s.rows.flatMap((r) => [r.main?.kit, typeof r.release?.kit === 'string' && r.release.kit !== 'unknown' ? r.release.kit : null])];
+  // An installed Steward without kit.json has none: its kit is in src\kit.
+  const pinned = [ownKit(), kit.released[0], ...s.rows.flatMap((r) => [r.main?.kit, typeof r.release?.kit === 'string' && r.release.kit !== 'unknown' ? r.release.kit : null])];
   const removed = pruneKits(kitsDir(), pinned);
   writeJson(kitsPrunedFile(), { at: new Date().toISOString(), removed });
 }
 
+export interface StageOptions {
+  run?: Runner;
+  log?: (line: string) => void;
+  kitInfo?: KitInfo;
+  alarms?: Parameters<typeof watchAlarms>[1];
+  tell?: Poke;
+  now?: () => Date;
+  /** The kit this Steward carries (default: its own kit.json), which a rollout waits for (stages/rollout.ts). */
+  ownKit?: string | null;
+  /**
+   * The Steward's own releases in a round (stages/self.ts): the checkout they're made from, instead of Settings'. Under
+   * node --test they're made only when this is given, so a test never touches the real checkout.
+   */
+  self?: { checkout: string };
+}
+
+/** The round's look at the Steward's own versions: from its glance at GitHub, else asked on their own. */
+async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
+  if (!ctx.settings.releaseSelf) return [];
+  if (process.env.NODE_TEST_CONTEXT && !o.self) return [];
+  const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  try {
+    const facts = ctx.glance ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
+    return await releaseSelf(ctx, { checkout, ...facts });
+  } catch (e) {
+    ctx.log(`[steward] its own releases: ${(e as Error).message}`);
+    return [];
+  }
+}
+
 /** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
-export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo; alarms?: Parameters<typeof watchAlarms>[1]; tell?: Poke; now?: () => Date } = {}): Promise<StageResult> {
+export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: StageOptions = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
     lines.push(line);
@@ -157,6 +183,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // A round looks only at the employees with something new on GitHub since the last (stages/changes.ts).
       const seen = name === 'round' ? loadSeen() : null;
       let plan: RoundPlan | null = null;
+      const own = o.ownKit !== undefined ? o.ownKit : ownKit();
+      /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
+      let rolloutWaits: { kit: string; own: string } | null = null;
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -166,7 +195,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const yes = round || !!ask.yes;
           let employees = picked.employees;
           if (round) {
-            plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.() });
+            plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
@@ -197,6 +226,18 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
             const released = await releaseUnreleased(ctx, employees.filter((e) => !releasedNow.has(e.id)));
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
+            // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
+            if (!ask.employees?.length) out.results.push(...(await selfRound(ctx, o)));
+            // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
+            // merged and released by later rounds.
+            const newest = latestKit(ctx.kit);
+            try {
+              const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
+              out.results.push(...rolled.results);
+              if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
+            } catch (err) {
+              log(`rollout: ${(err as Error).message}`);
+            }
             // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
             for (const e of picked.employees) {
               let r: EmployeeResult | null;
@@ -219,9 +260,13 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             if (!ctx.kit.released.includes(chosen.version) && !ask.kitFrom) {
               throw new Error(`kit ${chosen.version} has no release kit-v${chosen.version}, so the employees couldn't fetch it: publish it first (npm run kit-release -- --publish in the Steward's checkout), or try it with --kit-from <kit folder>`);
             }
+            // A person's Bump lets the rounds try these again, whatever failed before (stages/rollout.ts).
+            clearRolloutHolds(picked.employees.map((e) => e.id));
             out.results = await bump(ctx, picked.employees, { kit: chosen.version, base: ask.base, kitFrom: ask.kitFrom });
-          } else if (name === 'push') out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });
-          else out.results = await release(ctx, picked.employees, { kit: chosen.version });
+          } else if (name === 'push') {
+            clearRolloutHolds(picked.employees.map((e) => e.id));
+            out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });
+          } else out.results = await release(ctx, picked.employees, { kit: chosen.version });
         }
       } catch (e) {
         out.error = (e as Error).message;
@@ -232,7 +277,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, employees: ctx.settings.employees, log }, o.alarms);
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, employees: ctx.settings.employees, log }, o.alarms);
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

@@ -98,11 +98,15 @@ export interface RoundView {
   minutes: number;
   onDuty: boolean;
   lastRunAt: string | null;
+  /** Settings' rollout and releaseSelf. */
+  rollout?: boolean;
+  releaseSelf?: boolean;
 }
 
 function roundLine(r: RoundView | undefined, busy: boolean): string {
   if (!r) return '';
-  const what = "merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, and approves the jobs whose installed scripts are the merged ones";
+  const more = [r.releaseSelf ? 'releases its own new versions' : '', r.rollout ? 'rolls a new kit out to each employee behind it' : ''].filter(Boolean);
+  const what = `merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the merged ones`;
   const when = !r.on
     ? 'It merges and releases only when asked: "Merges and releases by itself" is off in Settings. Run now does one round.'
     : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${r.onDuty ? '' : ' Off duty, the rounds wait.'}${r.lastRunAt ? ` The last ended ${ago(r.lastRunAt)}.` : ''}`;

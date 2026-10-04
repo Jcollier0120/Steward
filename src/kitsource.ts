@@ -34,6 +34,19 @@ export const stewardToolFile = () => path.join(appRoot, 'tools', 'kit.ts');
 /** The canonical tools/kit.ts's text, or null when this copy has none. */
 export const stewardTool = () => (existsSync(stewardToolFile()) ? readFileSync(stewardToolFile(), 'utf8') : null);
 
+/**
+ * The kit this Steward carries: its own kit.json's pin (a checkout's, or the one its release carries), or null when it
+ * has none. Its tools/kit.ts, the one a bump hands out, is the one released with that kit.
+ */
+export function ownKit(root = appRoot): string | null {
+  try {
+    const kit = JSON.parse(readFileSync(path.join(root, 'kit.json'), 'utf8').replace(/^﻿/, '')).kit;
+    return typeof kit === 'string' && KIT_VERSION.test(kit) ? kit : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether an employee fills its kit with tools/kit.ts (the Node agents), and so takes the Steward's. */
 export const takesTool = (fill: string) => /(^|[\s"'])tools[\\/]kit\.ts\b/.test(fill);
 

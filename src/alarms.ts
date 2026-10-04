@@ -15,6 +15,9 @@ import type { StageResult } from './stages/common.ts';
  * - a PR to an employee that has waited a day: a draft no one marked ready, conflicts, failing checks, a version
  *   that clashes (Settings: waitingHours);
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
+ * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
+ *   and one of the Steward's own releases that failed (self-failed.json): at once; a new kit that waits for the
+ *   Steward itself to carry it, a day (waitingHours);
  * - a round that couldn't run at all (gh signed out, say) for an hour;
  * - an update Manor couldn't install, for two hours; Manor's update checks failing, for twelve; Manor's page down,
  *   for an hour;
@@ -107,8 +110,35 @@ export interface Held {
   draft: boolean;
 }
 
-/** From the round: PRs held a while, releases the rounds gave up on, a round that couldn't run. */
-export function roundConditions(o: { round: StageResult; held: { employee: Employee; prs: Held[] }[]; failedReleases: Record<string, string>; employees: Employee[]; settings: Settings }): Condition[] {
+/** A bump or push of a kit that failed in a round (stages/rollout.ts's rollout-failed.json), as the alarms read it. */
+export interface FailedRollout {
+  kit: string;
+  head: string;
+  stage: 'bump' | 'push';
+  message: string;
+}
+
+/** One of the Steward's own releases that failed in a round (stages/self.ts's self-failed.json), by tag. */
+export interface FailedSelf {
+  commit: string;
+  message: string;
+}
+
+/**
+ * From the round: PRs held a while, releases the rounds gave up on, a round that couldn't run; and, while the rounds
+ * roll kits out, a bump or push they gave up on, and a new kit waiting a while for the Steward itself to carry it; and,
+ * while they release the Steward's own versions, one of those that failed.
+ */
+export function roundConditions(o: {
+  round: StageResult;
+  held: { employee: Employee; prs: Held[] }[];
+  failedReleases: Record<string, string>;
+  failedRollouts?: Record<string, FailedRollout>;
+  failedSelf?: Record<string, FailedSelf>;
+  rolloutWaits?: { kit: string; own: string } | null;
+  employees: Employee[];
+  settings: Settings;
+}): Condition[] {
   const out: Condition[] = [];
   const wait = o.settings.alarms.waitingHours;
   for (const { employee: e, prs } of o.held) {
@@ -133,6 +163,45 @@ export function roundConditions(o: { round: StageResult; held: { employee: Emplo
       detail: [...(said ? [said] : []), "Release it on the Steward's page once it's fixed, or push a new commit: the next round tries that."],
       afterMs: 0,
     });
+  }
+  if (o.settings.rollout) {
+    for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
+      const e = o.employees.find((x) => x.id === id);
+      if (!e) continue;
+      out.push({
+        id: `rollout:${id}:${f.kit}`,
+        who: id,
+        title: `${e.name}'s ${f.stage} to kit ${f.kit} failed, and the rounds won't try it again until its branch moves`,
+        detail: [
+          f.message,
+          f.stage === 'bump'
+            ? `Its worktree is left in the Steward's work folder for a look. Once it's fixed, push to ${e.branch} (the next round bumps it again), or press Bump on the Steward's page.`
+            : "The bump is ready on its branch here. Press Push on the Steward's page once GitHub takes it, or push a new commit: the next round bumps again.",
+        ],
+        afterMs: 0,
+      });
+    }
+    if (o.rolloutWaits) {
+      const w = o.rolloutWaits;
+      out.push({
+        id: `rollout:waits:${w.kit}`,
+        who: 'steward',
+        title: `Kit ${w.kit} isn't rolled out: the Steward carries kit ${w.own}, and waits for a release of itself that carries ${w.kit}`,
+        detail: [`A bump hands out the Steward's own tools/kit.ts, the one released with its kit. Release a Steward version whose kit.json pins ${w.kit} (the rounds do when its version on main has no release), and let Manor install it.`],
+        afterMs: o.settings.alarms.waitingHours * HOUR,
+      });
+    }
+  }
+  if (o.settings.releaseSelf) {
+    for (const [tag, f] of Object.entries(o.failedSelf ?? {})) {
+      out.push({
+        id: `self:${tag}:${f.commit.slice(0, 7)}`,
+        who: 'steward',
+        title: `The Steward couldn't release ${tag} at ${f.commit.slice(0, 7)}, and the rounds won't try it again`,
+        detail: [f.message, `Release it in the Steward's checkout (npm run ${tag.startsWith('kit-') ? 'kit-release' : 'release'} -- --publish) once it's fixed, or push a new commit to main: the next round tries that.`],
+        afterMs: 0,
+      });
+    }
   }
   if (o.round.error) out.push({ id: 'round', who: 'steward', title: "The Steward's rounds can't run", detail: [o.round.error], afterMs: HOUR });
   return out;
@@ -261,7 +330,7 @@ export function toastWords(raised: Alarm[]): { title: string; body: string } {
  * new ones. Manor's and the Surveyor's pages are read here; `deps` stands in for them, the toast and the clock.
  */
 export async function watchAlarms(
-  o: { settings: Settings; round: StageResult; held: { employee: Employee; prs: Held[] }[]; failedReleases: Record<string, string>; employees: Employee[]; log: (line: string) => void },
+  o: Parameters<typeof roundConditions>[0] & { log: (line: string) => void },
   deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;

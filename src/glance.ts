@@ -30,10 +30,22 @@ export interface RepoGlance {
   releases: GlanceRelease[];
 }
 
+/** The Steward's own main on GitHub: its head, and the versions there (kit/VERSION, package.json's), for its own releases (stages/self.ts). */
+export interface StewardMain {
+  head: string | null;
+  kit: string | null;
+  version: string | null;
+}
+
+/** The branch the Steward's own releases come from. */
+export const STEWARD_BRANCH = 'main';
+
 export interface Glance {
   at: string;
   /** The Steward's own releases (its v<x.y.z> and the kit's kit-v<x.y.z>), or null when they couldn't be read. */
   stewardReleases: { tagName: string; isDraft: boolean }[] | null;
+  /** The Steward's own main, or null when it couldn't be read (left out: an older glance). */
+  stewardMain?: StewardMain | null;
   /** By employee id. One GitHub gave no answer for is left out, and `errors` says why. */
   repos: Record<string, RepoGlance>;
   errors: Record<string, string>;
@@ -59,7 +71,13 @@ const ownerName = (repo: string) => {
 /** The query for these employees (aliased e0, e1, …, in order), and the Steward's releases when `stewardRepo` is given. */
 export function glanceQuery(employees: Employee[], stewardRepo: string | null): string {
   const parts = employees.map((e, i) => `e${i}: repository(${ownerName(e.repo)}) { ...R ref(qualifiedName: ${JSON.stringify(`refs/heads/${e.branch}`)}) { target { oid } } }`);
-  if (stewardRepo) parts.unshift(`steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } } }`);
+  if (stewardRepo) {
+    const main = (file: string) => `object(expression: ${JSON.stringify(`${STEWARD_BRANCH}:${file}`)}) { ... on Blob { text } }`;
+    parts.unshift(
+      `steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } } ` +
+        `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} }`,
+    );
+  }
   const fragment = employees.length ? `fragment R on Repository { ${PRS} ${RELEASES} } ` : '';
   return `${fragment}query { ${parts.join(' ')} }`.replace(/\s+/g, ' ');
 }
@@ -101,6 +119,20 @@ function repoFromGraph(r: any): RepoGlance {
   };
 }
 
+const VERSION = /^\d+\.\d+\.\d+$/;
+
+/** The Steward's main as the glance read it: its head, kit/VERSION and package.json's version (null where it isn't one). */
+export function stewardMainFrom(s: any): StewardMain {
+  const kit = typeof s?.kitVersion?.text === 'string' ? s.kitVersion.text.trim() : '';
+  let version = '';
+  try {
+    version = String(JSON.parse(String(s?.packageJson?.text ?? '').replace(/^﻿/, ''))?.version ?? '');
+  } catch {
+    // No package.json, or not JSON: no version.
+  }
+  return { head: typeof s?.main?.target?.oid === 'string' ? s.main.target.oid : null, kit: VERSION.test(kit) ? kit : null, version: VERSION.test(version) ? version : null };
+}
+
 /**
  * GitHub's answer to a glanceQuery, read: `gh api graphql` exits 1 when any part of the query failed (a repository
  * that isn't there, say), but still prints what it could answer, with `errors` for the rest.
@@ -118,7 +150,10 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     const err = (Array.isArray(j.errors) ? j.errors : []).find((x: any) => Array.isArray(x?.path) && x.path[0] === alias);
     return String(err?.message ?? 'GitHub gave no answer for it');
   };
-  if (stewardRepo) into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true })) : null;
+  if (stewardRepo) {
+    into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true })) : null;
+    into.stewardMain = data.steward ? stewardMainFrom(data.steward) : null;
+  }
   employees.forEach((e, i) => {
     const r = data[`e${i}`];
     if (r) into.repos[e.id] = repoFromGraph(r);
@@ -132,7 +167,7 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
  * couldn't answer for is in `errors`.
  */
 export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>): Promise<Glance> {
-  const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, repos: {}, errors: {} };
+  const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
   const all = settings.employees;
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {
     const chunk = all.slice(i, i + PER_QUERY);
@@ -153,8 +188,10 @@ export function repoSig(g: RepoGlance): string {
 
 /**
  * What a round's work for an employee rests on: its repository on GitHub, and the Settings that decide what a round
- * does with it (the employee's own, the team, the look at the Wright's drafts, catching up, releasing after merging).
+ * does with it (the employee's own, the team, the look at the Wright's drafts, catching up, releasing after merging,
+ * rolling a kit out); and, while it rolls kits out, the kit it would roll out: the newest kit release, and the kit this
+ * Steward carries (stages/rollout.ts). So a new kit release, or the Steward updated to one, is something new for everyone.
  */
-export function roundSig(e: Employee, g: RepoGlance, s: Pick<Settings, 'team' | 'wrightReview' | 'catchUp' | 'releaseAfterMerge'>): string {
-  return sha({ repo: repoSig(g), employee: e, team: s.team, wrightReview: s.wrightReview, catchUp: s.catchUp, releaseAfterMerge: s.releaseAfterMerge });
+export function roundSig(e: Employee, g: RepoGlance, s: Pick<Settings, 'team' | 'wrightReview' | 'catchUp' | 'releaseAfterMerge' | 'rollout'>, kit: { newest: string | null; own: string | null } | null = null): string {
+  return sha({ repo: repoSig(g), employee: e, team: s.team, wrightReview: s.wrightReview, catchUp: s.catchUp, releaseAfterMerge: s.releaseAfterMerge, ...(s.rollout ? { rollout: kit } : {}) });
 }
