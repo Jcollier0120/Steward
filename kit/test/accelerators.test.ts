@@ -575,7 +575,7 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
     assert.ok(A.readFailure('gpu-broken') && A.readFailure('gpu-slow'));
     const asked = good.seen.filter((b) => b.max_tokens !== 1);
     assert.equal(asked.length, 3, 'the NPU was not asked a fourth time');
-    assert.equal(good.seen.length, 6, 'each turn on the NPU warmed its model up first, with a one-token request');
+    assert.equal(good.seen.length, 4, 'the first turn on the NPU warmed its model up with a one-token request; the next two found it answered just now, and went straight to the request');
 
     // A server that won't come up counts as failed too: one whose command exits at once, with nothing
     // answering, at once; one that never answers, after its start's wait (30 s; shorter here).
@@ -768,5 +768,36 @@ setTimeout(() => process.exit(0), 8000);
     // The server it started ends with the test, not 8 s later.
     writeFileSync(stop, '');
     await until(async () => (await A.probe(`http://127.0.0.1:${port}`, 300)) === 'down');
+  }
+});
+
+test("the warm-up is skipped while the server answered this same model within its keepalive; another model, an older answer or a server just started warms up", async () => {
+  fresh();
+  noGames();
+  const seen: number[] = [];
+  const server = await fakeServer((body: any) => (seen.push(body.max_tokens), { text: 'ok' }));
+  try {
+    const ep = { baseUrl: server.baseUrl, model: 'vl', startCommand: ['geniex.exe', 'serve', '--keepalive', '86400'] };
+    const npu = () => new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: ep, quirks: ['prefix-leak'] }] }));
+    await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.deepEqual(seen, [1, 10, 10], 'warmed once; the next turn (a new Npu, as another agent would be) found it loaded');
+    assert.equal(JSON.parse(readFileSync(A.servedFile('npu'), 'utf8')).model, 'vl');
+    // Another model answered since: one GenieX keeps one model, so this one warms up again.
+    A.noteServed('npu', { baseUrl: server.baseUrl, model: 'chat' });
+    seen.length = 0;
+    await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.deepEqual(seen, [1, 10]);
+    // Older than its keepalive (less half a minute): unloaded by now, warmed up.
+    A.noteServed('npu', ep, Date.now() - 86_400_000);
+    seen.length = 0;
+    await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.deepEqual(seen, [1, 10]);
+    // GenieX's default keepalive is 300 s.
+    assert.equal(A.keepaliveMs(['geniex.exe', 'serve']), 300_000);
+    assert.equal(A.keepaliveMs(['geniex.exe', 'serve', '--keepalive', '3600']), 3_600_000);
+    assert.equal(A.servedRecently('npu', { ...ep, startCommand: undefined }, Date.now() + 280_000), false, 'within 300 s, less the margin');
+  } finally {
+    await server.close();
   }
 });

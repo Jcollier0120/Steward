@@ -14,6 +14,7 @@ import {
   markFailed,
   MAX_AHEAD,
   ModelLoading,
+  noteServed,
   parseAccelerators,
   pick as pickFrom,
   postJson,
@@ -22,6 +23,7 @@ import {
   readGames,
   refOf,
   ServerNotRunning,
+  servedRecently,
   serves,
   theAccelerator,
   visionBody,
@@ -404,12 +406,16 @@ export class Npu {
           acc,
           async () => {
             const server = await ensureServer(ep, { start: opts.start });
-            const warmed = warmsUp(acc, work);
+            // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
+            const fresh = server.started || server.waited;
+            const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
             if (warmed) await warmUp(acc, ep, opts.timeoutMs);
             // With no warm-up, a server just started or found busy may still be loading the model.
-            const loading = !warmed && (server.started || server.waited);
+            const loading = !warmed && fresh;
             const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading });
-            return send(acc, ep, timeoutMs, loading);
+            const answer = await send(acc, ep, timeoutMs, loading);
+            if (warmsUp(acc, work)) noteServed(acc.id, ep);
+            return answer;
           },
           { maxWaitMs: opts.maxWaitMs, lane },
         );
@@ -444,6 +450,7 @@ export class Npu {
  * Whether a turn starts with a warm-up: chat and vision on the NPU. GenieX keeps one model loaded at a
  * time, unloads it after 5 idle minutes, and takes 9 to 15 s to load one (measured 2026-10-03; a chat
  * request after a vision one loads the chat model again). Graphics cards' servers each keep their model.
+ * A turn skips it when the server, already up, answered this same model within its keepalive (servedRecently).
  */
 const warmsUp = (acc: Accelerator, work: Work) => acc.kind === 'npu' && work !== 'embed';
 
