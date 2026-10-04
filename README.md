@@ -230,6 +230,8 @@ After every round, done or not, the Steward lists what needs you: the few things
 | Manor's page not answering | an hour |
 | A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it | 6 hours (`problemHours`) |
 | The Surveyor's page not answering | two hours |
+| An issue the Wright got stuck on (`wright:stuck`), its PR that changes what a person reviews (`wright:needs-you`), or Claude Code unusable for it (not found, or not signed in), from its `/api/work` | at once |
+| The Wright's page not answering | two hours |
 
 An alarm is raised once, with one Windows notification for all raised in a round (clicking it opens this page), and stays at the top of the page under **Needs you**, and at `GET /api/alarms` for Manor, until its condition clears. **Dismiss** quiets one until it clears and comes back. The Steward never acts on an alarm: it says what it saw and what to do.
 
@@ -239,7 +241,7 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Employees (`employees`) | the eight hires, Reeve and Heiward | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty, as Heiward's, for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked (Reeve's only), with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
+| Employees (`employees`) | the eight hires, Reeve and Heiward, the Surveyor, the Lamplighter and the Wright | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty, as Heiward's, for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked (Reeve's only), with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
 | Team (`team`) | Jcollier0120 | The GitHub accounts whose PRs `merge --team` merges as well as the Steward's (a GitHub App's as gh names it, `app/<name>`). Claude Code opens its PRs with your account, so yours covers them. Empty: `--team` merges only the Steward's. |
 | Work folder (`workRoot`) | `%USERPROFILE%\.steward\work` | Where the Steward makes its worktrees, one folder per employee. |
 | Release right after merging (`releaseAfterMerge`) | off | Release is a stage of its own unless this is on. |
@@ -247,7 +249,7 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
 | Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released (Page and commands, below). Off: only when asked. |
 | A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. |
-| Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595` | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`) and a Surveyor's problem lasts (`problemHours`), 1 to 168, before it is one; Manor's page (`manorUrl`) and the Surveyor's (`surveyorUrl`), local addresses only, empty for not read. |
+| Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595`, `http://127.0.0.1:19797` | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`) and a Surveyor's problem lasts (`problemHours`), 1 to 168, before it is one; Manor's page (`manorUrl`), the Surveyor's (`surveyorUrl`) and the Wright's (`wrightUrl`), local addresses only, empty for not read. |
 
 ## Files
 

@@ -18,7 +18,8 @@ import type { StageResult } from './stages/common.ts';
  * - a round that couldn't run at all (gh signed out, say) for an hour;
  * - an update Manor couldn't install, for two hours; Manor's update checks failing, for twelve; Manor's page down,
  *   for an hour;
- * - a problem the Surveyor has reported for six hours (Settings: problemHours); the Surveyor's page down, for two.
+ * - a problem the Surveyor has reported for six hours (Settings: problemHours); the Surveyor's page down, for two;
+ * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two.
  */
 
 export interface Condition {
@@ -172,6 +173,31 @@ export function surveyorConditions(survey: unknown, settings: Settings): Conditi
     }));
 }
 
+/** From the Wright's /api/work: issues it got stuck on, and its PRs a person reviews, at once; or no answer at all. */
+export function wrightConditions(work: unknown): Condition[] {
+  if (!work || typeof work !== 'object' || 'error' in work) {
+    const why = work && typeof work === 'object' && 'error' in work ? String((work as any).error) : 'no answer';
+    return [{ id: 'wright:down', who: 'wright', title: "The Wright's page doesn't answer, so the queued work waits", detail: [why], afterMs: 2 * HOUR }];
+  }
+  const needs = (work as any).needsYou;
+  return (Array.isArray(needs) ? needs : [])
+    .filter((n: any) => n && typeof n.id === 'string' && typeof n.repo === 'string')
+    .map((n: any) => {
+      // Claude Code can't be used on this PC (not there, or not signed in): its title says which.
+      if (n.kind === 'blocked') return { id: `wright:${n.id}`, who: 'wright', title: `The Wright can't work: ${String(n.title)}`, detail: ['Its queue waits until then; each round tries again.'], url: typeof n.url === 'string' ? n.url : undefined, afterMs: 0 };
+      const where = `${String(n.repo).split('/')[1]} #${n.number}`;
+      const stuck = n.kind === 'stuck';
+      return {
+        id: `wright:${n.id}`,
+        who: 'wright',
+        title: stuck ? `The Wright got stuck on ${where}: ${n.title}` : `${where} needs your review: the Wright changed what a person reviews`,
+        detail: stuck ? [`Its comment on the issue says why. Remove the wright:stuck label to have it tried again.`] : [String(n.title), 'Review it, then mark it ready, or close it.'],
+        url: typeof n.url === 'string' ? n.url : undefined,
+        afterMs: 0,
+      };
+    });
+}
+
 export type GetJson = (url: string) => Promise<unknown>;
 
 /** GET a local page's JSON; { error } when it doesn't answer. Never under node --test: a test must not read the live manor. */
@@ -235,6 +261,7 @@ export async function watchAlarms(
   const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
   if (manor) conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
   if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
+  if (a.wrightUrl) conditions.push(...wrightConditions(await get(new URL('/api/work', a.wrightUrl).href)));
   const { state, raised } = reconcile(loadAlarms(), conditions, deps.now ?? new Date());
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);

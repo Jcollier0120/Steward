@@ -70,6 +70,8 @@ export interface AlarmSettings {
   manorUrl: string;
   /** The Surveyor's page, read for its problems; empty: not read. */
   surveyorUrl: string;
+  /** The Wright's page, read for the issues it got stuck on and its PRs a person reviews; empty: not read. */
+  wrightUrl: string;
 }
 
 const hire = (name: string): Employee => ({
@@ -90,7 +92,7 @@ const hire = (name: string): Employee => ({
 });
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor and the Lamplighter, built on
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, the Lamplighter and the Wright, built on
  * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
@@ -124,6 +126,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   },
   hire('Surveyor'),
   hire('Lamplighter'),
+  hire('Wright'),
 ];
 
 /** The team: you, and Claude Code, which opens its PRs with your account. */
@@ -138,7 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595' },
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: 'http://127.0.0.1:19797' },
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -211,6 +214,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
       { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
+      { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797' },
     ],
   },
 ];
@@ -256,6 +260,7 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     problemHours: whole(a.problemHours, 1, 168, d.problemHours),
     manorUrl: url(a.manorUrl, d.manorUrl),
     surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
+    wrightUrl: url(a.wrightUrl, d.wrightUrl),
   };
 }
 
