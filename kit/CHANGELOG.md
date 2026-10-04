@@ -2,6 +2,11 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.8.2
+
+**spec/ACCELERATORS.md says what Reeve's reaper stops: every model server it can start again, not only GenieX.** Reeve 0.4.7 (Reeve#31) extended it: a graphics card's and the processor's llama-servers (chat, vision and embeddings) stop after `gpuIdleStopMinutes` (10 by default; 0 never) with nobody holding or waiting on that accelerator's lock, and a card's stop once `games.json` says a game is using the card and nobody has used it for 2 minutes. The not-answering restart (3 minutes) applies to each of them; the 9 GB working-set restart stays GenieX's. On a card with more than one slot, the reaper takes one slot through the line (background, `maxAhead` 1) and holds the other slot folders as plain locks (2 s wait), so no request starts on a server being stopped.
+- **Nothing for an agent to do.** The kit's code is unchanged: `ensureServer()` already looks at its server afresh in every turn, so the next request starts a server Reeve stopped.
+
 ## 2.8.1
 
 **A JSON file's rename that Windows refuses for a moment is tried again.** store.ts's `writeJson` writes a temporary file and renames it over the old one, and Windows sometimes refuses that rename with EPERM, EACCES or EBUSY while an antivirus or the search indexer has the file open: about one rename in a thousand in %TEMP% or a scanned folder (the Wright measured it for the Miller, Miller#22, where it failed a test now and then and could fail a round part-way through a save). Now such a rename is tried again every 25 ms for up to half a second (`RENAME_TRIES`, 20); after that, or on any other error, the temporary file is removed and the error thrown, as before.
