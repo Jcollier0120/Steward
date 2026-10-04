@@ -119,7 +119,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
         if (!running && !roundsKeepIt() && staleTable()) void refresh();
         const s = loadSettings();
         const state = rounds?.state;
-        const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null };
+        const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf };
         const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round, alarms: s.alarms.on ? loadAlarms() : undefined });
         return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
       },

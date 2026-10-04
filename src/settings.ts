@@ -65,6 +65,12 @@ export interface Settings {
   catchUp: boolean;
   /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
   afterRelease: string[];
+  /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
+  rollout: boolean;
+  /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
+  releaseSelf: boolean;
+  /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
+  stewardCheckout: string;
 }
 
 export interface WrightReviewSettings {
@@ -182,6 +188,9 @@ export const DEFAULT_SETTINGS: Settings = {
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
+  rollout: true,
+  releaseSelf: true,
+  stewardCheckout: 'C:\\Projects\\Steward',
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -239,13 +248,33 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'byItself',
     kind: 'switch',
     label: 'Merges and releases by itself',
-    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve). Off: only when asked.",
+    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve); and, as the two switches below say, a new kit is rolled out and its own new versions released. Off: only when asked.",
   },
   {
     key: 'catchUp',
     kind: 'switch',
     label: 'Catches PRs up with their branch',
     help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict waits for you.",
+  },
+  {
+    key: 'rollout',
+    kind: 'switch',
+    label: 'Rolls out a new kit by itself',
+    help: "In its rounds, each employee whose branch pins a kit older than the newest kit release is bumped (a worktree of its branch, the new pin and the next patch version, its checks run) and its PR pushed, a few at a time; later rounds merge and release it. Not one with a kit PR already open. A bump whose checks fail is an alarm, and isn't tried again for that kit until a new commit lands on its branch, or you press Bump or Push. It waits while this Steward carries a kit older than the newest release, since its tools/kit.ts is the one handed out. Off: Bump and Push only when asked.",
+  },
+  {
+    key: 'releaseSelf',
+    kind: 'switch',
+    label: 'Releases its own new versions',
+    help: "In its rounds, when the Steward's own main carries a kit version with no kit-v release, or a Steward version with no v release, it is released from a clean worktree of main, as a person would: npm run kit-release -- --publish, then npm run release -- --publish. Never a version already released; a release that fails is an alarm, and isn't tried again at that commit.",
+  },
+  {
+    key: 'stewardCheckout',
+    kind: 'text',
+    label: "The Steward's checkout",
+    help: 'Your clone of the Steward, which its own releases are made from: a worktree of it at origin/main, in the work folder. Your working tree is never touched.',
+    maxLength: 260,
+    path: { is: 'folder', missing: 'warn', missingNote: "Without it, the Steward's own versions are left to you.", env: true },
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
   {
@@ -367,6 +396,9 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       wrightReview: normalizeReview(r.wrightReview),
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
+      rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
+      releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,
+      stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),
     },
     problems,
   };

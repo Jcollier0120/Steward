@@ -6,8 +6,9 @@ import { releaseOne } from './release.ts';
 /**
  * The Steward's round (`steward round`, and on duty every few minutes when Settings say it merges and releases
  * by itself): the merge stage with --yes --team, each merged PR's steps after it, and then a release for every
- * employee whose branch carries a version with no GitHub release yet, whatever kit it pins. A round with nothing
- * done or failed is not recorded: last-stage.json and stages.log keep what last happened.
+ * employee whose branch carries a version with no GitHub release yet, whatever kit it pins; then the Steward's own new
+ * versions (stages/self.ts) and a new kit rolled out to each employee behind it (stages/rollout.ts). A round with
+ * nothing done or failed is not recorded: last-stage.json and stages.log keep what last happened.
  *
  * A release that fails isn't tried again at the same commit, round after round: the commit is kept in
  * round-failed.json, and the round says so until a person releases it (Release on the page, or `steward

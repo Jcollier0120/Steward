@@ -12,7 +12,8 @@ import type { EmployeeResult } from './common.ts';
  *
  * Every employee is looked at when the round is asked for (Run now, `steward round`), when GitHub couldn't be asked,
  * after a round that failed, and at least once an hour whatever happened, so nothing waits on a change GitHub doesn't
- * show (a check that failed for a reason that has since gone, say).
+ * show (a check that failed for a reason that has since gone, say), and no rollout of a new kit waits on a glance
+ * that missed it.
  */
 
 export const roundSeenFile = () => dataFile('round-seen.json');
@@ -43,12 +44,15 @@ export interface RoundPlan {
   sigs: Record<string, string>;
 }
 
-/** Which employees this round looks at (see above). Pure. */
-export function planRound(o: { employees: Employee[]; glance: Glance | null | undefined; seen: Seen; settings: Settings; force?: boolean; now?: Date }): RoundPlan {
+/**
+ * Which employees this round looks at (see above). `kit` is the kit a rollout would bring (the newest kit release, and
+ * the kit this Steward carries: stages/rollout.ts), so a new one is something new for every employee. Pure.
+ */
+export function planRound(o: { employees: Employee[]; glance: Glance | null | undefined; seen: Seen; settings: Settings; force?: boolean; now?: Date; kit?: { newest: string | null; own: string | null } | null }): RoundPlan {
   const sigs: Record<string, string> = {};
   for (const e of o.employees) {
     const g = o.glance?.repos[e.id];
-    if (g) sigs[e.id] = roundSig(e, g, o.settings);
+    if (g) sigs[e.id] = roundSig(e, g, o.settings, o.kit ?? null);
   }
   const now = (o.now ?? new Date()).getTime();
   const why = o.force ? 'asked for' : !o.glance ? "GitHub couldn't be asked at once" : !o.seen.full && !Object.keys(o.seen.repos).length ? 'no round before' : !o.seen.ok ? 'the last round failed' : !o.seen.full || now - Date.parse(o.seen.full) >= FULL_EVERY_MS ? 'a full look, as each hour' : null;
