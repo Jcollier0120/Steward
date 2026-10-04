@@ -7,6 +7,7 @@ import { agreedVersion } from '../versions.ts';
 import { bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import type { Held } from '../alarms.ts';
+import { dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -30,7 +31,7 @@ import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
-  if (pr.draft) return 'a draft';
+  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return 'GitHub is still working out whether it merges: try again in a minute';
@@ -115,6 +116,37 @@ const heldOf = (pr: PrInfo, why: string): Held => ({ number: pr.number, url: pr.
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
+/**
+ * Each of the Wright's drafts, looked at (review.ts): one that passes is marked ready on GitHub, with a comment saying
+ * what was looked at, and goes on as any ready team PR (tested here at its head, then merged); one that doesn't keeps
+ * the reason, which its hold then says.
+ */
+export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<void> {
+  const s = ctx.settings.wrightReview;
+  for (const pr of prs.filter(isWrightDraft)) {
+    let why = reviewHold(pr, s);
+    if (!why) {
+      try {
+        why = await dependencyHold(ctx, e, pr);
+      } catch (err) {
+        why = `the Steward couldn't compare its dependencies: ${(err as Error).message}`;
+      }
+    }
+    if (why) {
+      pr.reviewHold = why;
+      continue;
+    }
+    const ready = await ctx.run('gh', ['pr', 'ready', String(pr.number), '--repo', e.repo], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    if (ready.code !== 0) {
+      pr.reviewHold = `the Steward couldn't mark it ready: ${(ready.err || ready.out).trim().split('\n').pop()}`;
+      continue;
+    }
+    await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', reviewedComment(pr, s)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    pr.draft = false;
+    ctx.log(`[${e.id}] the Wright's #${pr.number}: looked at, and marked ready (${pr.files.length} files, ${pr.changed} lines)`);
+  }
+}
+
 export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<EmployeeResult & { merged: PrInfo[]; held: Held[] }> {
   const { run } = ctx;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
@@ -122,6 +154,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // With no team, only the Steward's are read.
   const prs = parsePrs(await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
   if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [], held: [] };
+  // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
+  if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>

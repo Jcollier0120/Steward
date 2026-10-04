@@ -235,6 +235,17 @@ After every round, done or not, the Steward lists what needs you: the few things
 
 An alarm is raised once, with one Windows notification for all raised in a round (clicking it opens this page), and stays at the top of the page under **Needs you**, and at `GET /api/alarms` for Manor, until its condition clears. **Dismiss** quiets one until it clears and comes back. The Steward never acts on an alarm: it says what it saw and what to do.
 
+### The Wright's drafts
+
+The Wright opens every pull request as a draft, so nothing it wrote merges without a look. In each round the Steward looks at each draft the Wright opened (labelled `wright`, by the team), in code (`src/review.ts`):
+
+- it isn't labelled `wright:needs-you`, the Wright's own word that a person reviews it;
+- none of its changed files is one a person reviews: Reeve's job scripts, PowerShell, installers and setup, release tooling, CI, `tools/`, `kit.json`, `.csproj` files (Settings). The files are checked here again, not only trusted from the label;
+- it changes no dependencies (package.json's `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, at its head against where it started);
+- it changes at most 600 lines (Settings).
+
+One that passes is marked ready, with a comment saying what was looked at, and goes on as any ready team PR: tested here at its head with the employee's own checks, then merged, with what its steward block asks for after. One that doesn't stays a draft for you; the round says why (`a draft from the Wright, waiting for you: …`), and after a day the alarm does too. A draft of your own is never the Steward's to look at.
+
 ## Settings
 
 Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\settings.json`. They are used from the next stage on.
@@ -249,6 +260,7 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
 | Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released (Page and commands, below). Off: only when asked. |
 | A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. |
+| The Wright's drafts (`wrightReview`) | on; 600 lines; the Wright's list | Whether rounds look at the Wright's drafts and mark ready the ones that pass (`on`), the most lines one may change (`maxLines`, 10 to 5000), and the path patterns a person reviews (`sensitive`). |
 | Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595`, `http://127.0.0.1:19797` | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`) and a Surveyor's problem lasts (`problemHours`), 1 to 168, before it is one; Manor's page (`manorUrl`), the Surveyor's (`surveyorUrl`) and the Wright's (`wrightUrl`), local addresses only, empty for not read. |
 
 ## Files
