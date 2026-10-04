@@ -99,4 +99,8 @@ test("a release that fails is tried once at its commit; later rounds leave it to
   assert.match(again.results.at(-1)!.message, new RegExp(`^release: v0\\.4\\.3 at ${sha.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you`));
   assert.equal(readFileSync(lastStageFile(), 'utf8'), before, 'not recorded again');
   assert.equal(readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length, 1, 'tried once');
+  // And it needs the person: an alarm, raised by the round (alarms.ts); Manor and the Surveyor aren't read under node --test.
+  const alarms = JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8'));
+  assert.deepEqual(alarms.open.map((a: any) => a.id), [`release:fake:${sha.slice(0, 7)}`]);
+  assert.ok('manor:down' in alarms.watching && !alarms.open.some((a: any) => a.id === 'manor:down'), 'watched, not yet an hour');
 });

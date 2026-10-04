@@ -13,7 +13,7 @@ import path from 'node:path';
  */
 
 /** The kit tree's own files, beside its parts and test\. */
-export const KIT_META = ['VERSION', 'CHANGELOG.md'];
+export const KIT_META = ['VERSION', 'CHANGELOG.md', 'LICENSE'];
 
 /** The kit's parts, and where each lands in a Node agent. */
 export const PARTS = ['node', 'web', 'spec'] as const;

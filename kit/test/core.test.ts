@@ -51,6 +51,18 @@ test("rules.json is checked: every timing and limit, a whole number; anything el
   assert.throws(() => core.checkRules(null), /no object/);
 });
 
+test("a request's timeout: a background chat's scales with its answer, under the config's ceiling; a model loading adds its allowance", () => {
+  const rules = core.checkRules(JSON.parse(readFileSync(new URL('../spec/rules.json', import.meta.url), 'utf8')));
+  const t = (r: Partial<Parameters<typeof core.requestTimeoutMs>[1]>) => core.requestTimeoutMs(rules, { lane: 'background', work: 'chat', maxTokens: 100, ceilingMs: 180_000, ...r });
+  assert.equal(t({}), 45_000, '15 s, and 0.3 s for each of 100 tokens');
+  assert.equal(t({ work: 'vision', maxTokens: 64 }), 34_200);
+  assert.equal(t({ maxTokens: 1000 }), 180_000, 'never past the ceiling');
+  assert.equal(t({ ceilingMs: 5000 }), 5000, "a config's shorter ceiling holds");
+  assert.equal(t({ lane: 'interactive' }), 180_000, 'a person waiting: the config');
+  assert.equal(t({ work: 'embed' }), 180_000, 'embeddings: the config');
+  assert.equal(t({ coldLoad: true }), 135_000, 'a model that may be loading: 90 s more');
+});
+
 test('the turn never hands a driver a state it changed, and never ends twice', () => {
   const rules = core.checkRules(JSON.parse(readFileSync(new URL('../spec/rules.json', import.meta.url), 'utf8')));
   const first = core.startTurn(rules, { slots: ['npu'], pid: 1, nowMs: 0, nowUs: 0, nonce: 'aaaaaaaa', who: 't' });

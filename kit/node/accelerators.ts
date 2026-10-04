@@ -22,6 +22,8 @@ import { RULES } from './rules.ts';
  *   first with a free slot and nobody waiting, else to the shortest line;
  * - a server that won't start within 30 s, refuses the connection, answers 5xx or times out marks its
  *   accelerator failed (a file every agent reads), and the request goes once to the next candidate;
+ *   a busy server (loading a model, or answering) is waited on, and a timeout while a model loads
+ *   (ModelLoading) marks nothing;
  * - the servers' quirks: GenieX's prefix leak (a nonce first), and whether images go as a local path.
  * The turns themselves (locks, lines, this agent's manners) are the kit's npu.ts's.
  */
@@ -320,21 +322,46 @@ export function pick(list: Accelerator[], lane: Lane, look: (a: Accelerator) => 
  */
 export class AcceleratorDown extends Error {}
 
+/**
+ * The request timed out while its model loaded (a server just started, or one busy loading when the
+ * turn began, or the warm-up GenieX's model swaps need). That is the model being slow to load, not the
+ * server failing: nothing is marked, and the work waits for a later round.
+ */
+export class ModelLoading extends AcceleratorDown {}
+
 /** The server isn't running and the caller asked not to start it. Not a failure: nothing is marked. */
 export class ServerNotRunning extends Error {}
 
 /** How long a server may take to come up after its startCommand. */
 export const START_WAIT_MS = RULES.accelerators.startWaitMs;
+/** How long a look at /v1/models waits for an answer. */
+export const PROBE_MS = RULES.accelerators.probeMs;
+/** How long a busy server (loading its model, or answering a request) may take to be ready. */
+export const READY_WAIT_MS = RULES.accelerators.readyWaitMs;
 
-/** Whether an endpoint answers, without starting it. */
-export async function ping(baseUrl: string, ms = 3000): Promise<boolean> {
+/**
+ * A server as one look at its /v1/models finds it:
+ * - `ready`: it answered;
+ * - `busy`: it took the connection but gave no answer in time, or answered 503. GenieX answers nothing
+ *   while it loads a model or answers a request (measured on GenieX v0.7.0, 2026-10-03), and npu-embed
+ *   answers 503 while it loads: either way it is running, and another server must not be started;
+ * - `down`: nothing took the connection, or it answered something else.
+ */
+export type ServerState = 'ready' | 'busy' | 'down';
+
+export async function probe(baseUrl: string, ms = PROBE_MS): Promise<ServerState> {
   try {
     const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(ms) });
     await res.body?.cancel();
-    return res.ok;
-  } catch {
-    return false;
+    return res.ok ? 'ready' : res.status === 503 ? 'busy' : 'down';
+  } catch (e: any) {
+    return e?.name === 'TimeoutError' || e?.name === 'AbortError' ? 'busy' : 'down';
   }
+}
+
+/** Whether an endpoint answers now, without starting it. */
+export async function ping(baseUrl: string, ms = PROBE_MS): Promise<boolean> {
+  return (await probe(baseUrl, ms)) === 'ready';
 }
 
 /** %NAME% expanded from the environment, as Windows does (any case); an unknown name stays as it is. */
@@ -345,41 +372,63 @@ export function expandEnv(s: string, env: Record<string, string | undefined> = p
   });
 }
 
-const up = new Set<string>();
-const starting = new Map<string, Promise<void>>();
+const starting = new Map<string, Promise<ServerReady>>();
 
-/** Forget which servers this process has seen up (tests). */
-export function forgetServers(): void {
-  up.clear();
+/** Kept for callers from before 2.6.0: servers are looked at afresh on every turn, so there is nothing to forget. */
+export function forgetServers(): void {}
+
+/** How a server was found: `started` by this call, or `waited` on while it was busy. Either way its model may be loading. */
+export interface ServerReady {
+  started: boolean;
+  waited: boolean;
 }
 
 /**
- * Makes sure an endpoint's server is up: it answers, or it is started from its startCommand (detached,
- * hidden, in the home folder so it never holds an agent's folder, shared by everyone after) and given
- * 30 s to answer. Once per server, however many requests wait on it.
+ * Makes sure an endpoint's server is up and ready, looking afresh each time: Reeve stops an idle
+ * GenieX, and starts it again on demand, as this does. A server that is running but busy is waited on
+ * (up to readyWaitMs), never started a second time. One that isn't running is started from its
+ * startCommand (detached, hidden, in the home folder so it never holds an agent's folder, shared by
+ * everyone after) and given 30 s to take connections: once per server, however many requests wait on it.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number } = {}): Promise<void> {
-  if (up.has(ep.baseUrl)) return;
-  if (await ping(ep.baseUrl)) {
-    up.add(ep.baseUrl);
-    return;
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number } = {}): Promise<ServerReady> {
+  const readyMs = opts.readyMs ?? READY_WAIT_MS;
+  const state = await probe(ep.baseUrl);
+  if (state === 'ready') return { started: false, waited: false };
+  if (state === 'busy') {
+    await untilReady(ep.baseUrl, readyMs);
+    return { started: false, waited: true };
   }
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
   let pending = starting.get(ep.baseUrl);
   if (!pending) {
-    pending = start(ep, opts.waitMs ?? START_WAIT_MS).finally(() => starting.delete(ep.baseUrl));
+    pending = start(ep, opts.waitMs ?? START_WAIT_MS, readyMs).finally(() => starting.delete(ep.baseUrl));
     starting.set(ep.baseUrl, pending);
   }
-  await pending;
+  return pending;
 }
 
-async function start(ep: Endpoint, waitMs: number): Promise<void> {
+/** Waits until a busy server answers /v1/models; AcceleratorDown when it stops answering, or is still busy after `ms`. */
+async function untilReady(baseUrl: string, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 250));
+    const state = await probe(baseUrl, Math.max(250, Math.min(PROBE_MS, deadline - Date.now())));
+    if (state === 'ready') return;
+    if (state === 'down') throw new AcceleratorDown(core.say.connectionRefused('/v1/models', baseUrl, 'it stopped answering while busy'));
+    if (Date.now() >= deadline) throw new AcceleratorDown(core.say.stillBusy(baseUrl, Math.round(ms / 1000)));
+  }
+}
+
+async function start(ep: Endpoint, waitMs: number, readyMs: number): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
+  const program = path.win32.basename(cmd);
   let spawnError: Error | undefined;
+  let exited: number | null | undefined;
   try {
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, cwd: os.homedir() });
     child.on('error', (e) => (spawnError = e));
+    child.on('exit', (code) => (exited = code));
     child.unref();
   } catch (e) {
     spawnError = e as Error;
@@ -388,24 +437,30 @@ async function start(ep: Endpoint, waitMs: number): Promise<void> {
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
     if (spawnError) throw new AcceleratorDown(core.say.couldNotStart(cmd, spawnError.message));
-    if (await ping(ep.baseUrl, 2000)) {
-      up.add(ep.baseUrl);
-      return;
+    const state = await probe(ep.baseUrl, 2000);
+    if (state === 'ready') return { started: true, waited: false };
+    if (state === 'busy') {
+      await untilReady(ep.baseUrl, readyMs);
+      return { started: true, waited: true };
     }
+    // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
+    if (exited !== undefined) throw new AcceleratorDown(core.say.exitedWhileStarting(program, exited, ep.baseUrl));
   }
-  throw new AcceleratorDown(core.say.didNotAnswer(path.win32.basename(cmd), ep.baseUrl, Math.round(waitMs / 1000)));
+  throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));
 }
 
 /**
- * One POST to a server. Down (AcceleratorDown): no connection, no answer in time, or a 5xx. Any other
+ * One POST to a server. Down (AcceleratorDown): no connection, no answer in time, or a 5xx. With
+ * `loading`, a timeout is ModelLoading instead: the model was loading, and that is no failure. Any other
  * refusal (a 4xx: a request it won't take) is a plain Error, and says nothing about the accelerator.
  */
-export async function postJson(ep: Endpoint, route: string, body: unknown, timeoutMs: number): Promise<{ json: any; ms: number }> {
+export async function postJson(ep: Endpoint, route: string, body: unknown, timeoutMs: number, opts: { loading?: boolean } = {}): Promise<{ json: any; ms: number }> {
   const t0 = performance.now();
   const down = (e: any) => {
-    up.delete(ep.baseUrl);
     const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError';
-    return new AcceleratorDown(timedOut ? core.say.requestTimedOut(route, ep.baseUrl, Math.round(timeoutMs / 1000)) : core.say.connectionRefused(route, ep.baseUrl, String(e?.cause?.code ?? e?.message ?? e)));
+    const seconds = Math.round(timeoutMs / 1000);
+    if (timedOut && opts.loading) return new ModelLoading(core.say.modelLoadTimedOut(route, ep.baseUrl, seconds));
+    return new AcceleratorDown(timedOut ? core.say.requestTimedOut(route, ep.baseUrl, seconds) : core.say.connectionRefused(route, ep.baseUrl, String(e?.cause?.code ?? e?.message ?? e)));
   };
   let res: Response;
   let text: string;
@@ -421,10 +476,7 @@ export async function postJson(ep: Endpoint, route: string, body: unknown, timeo
     throw down(e);
   }
   const ms = Math.round(performance.now() - t0);
-  if (res.status >= 500) {
-    up.delete(ep.baseUrl);
-    throw new AcceleratorDown(core.say.serverFailed(route, ep.baseUrl, res.status, text.slice(0, 200)));
-  }
+  if (res.status >= 500) throw new AcceleratorDown(core.say.serverFailed(route, ep.baseUrl, res.status, text.slice(0, 200)));
   if (!res.ok) throw new Error(core.say.serverRefused(res.status, text.slice(0, 300)));
   try {
     return { json: JSON.parse(text), ms };

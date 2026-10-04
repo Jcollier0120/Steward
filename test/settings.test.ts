@@ -8,6 +8,8 @@ import { after, test } from 'node:test';
 // kit's own checks of the schema and its defaults, as in every agent.)
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-settings-'));
 process.env.STEWARD_HOME = home;
+// The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
+process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, loadSettings, normalizeSettings } = await import('../src/settings.ts');
@@ -15,9 +17,9 @@ const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
 const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values })) as { status?: number; json: any };
 
-test('eleven employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor, each with the parts and commands of its own', () => {
+test('twelve employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor and the Lamplighter, each with the parts and commands of its own', () => {
   const e = DEFAULT_SETTINGS.employees;
-  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor']);
+  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor', 'lamplighter']);
   for (const h of e.slice(0, 8)) {
     assert.equal(h.usesKit, true);
     assert.equal(h.repo, `Jcollier0120/${h.name}`);
@@ -81,7 +83,7 @@ test('a good change is saved and read back; release after merge can be switched 
   assert.equal(s.releaseAfterMerge, true);
   assert.equal(s.parallel, 4);
   assert.deepEqual(s.team, ['Jcollier0120', 'app/claude']);
-  assert.equal(s.employees.length, 11);
+  assert.equal(s.employees.length, 12);
   assert.deepEqual(normalizeSettings({}).settings.team, ['Jcollier0120'], 'no team in the file is the default team');
   assert.deepEqual(normalizeSettings({ team: [] }).settings.team, [], 'an empty one stays empty');
 });
@@ -93,4 +95,20 @@ test('an employee without a usable id is left out, and said so; the stages take 
   assert.match(problems.join(' '), /2 employee\(s\) without a usable id/);
   assert.deepEqual((pick(DEFAULT_SETTINGS.employees, ['Pinder', 'porter']) as any).employees.map((e: any) => e.id), ['porter', 'pinder']);
   assert.match((pick(DEFAULT_SETTINGS.employees, ['porter', 'reve']) as { error: string }).error, /no employee called reve/);
+});
+
+test("the Wright is ours alone: an employee, and its page read for alarms, only where it is installed", async () => {
+  const { mkdirSync } = await import('node:fs');
+  const { defaultEmployees, WRIGHT_URL } = await import('../src/settings.ts');
+  assert.ok(!DEFAULT_SETTINGS.employees.some((e) => e.id === 'wright'), 'not among anyone else\'s employees');
+  assert.equal(DEFAULT_SETTINGS.alarms.wrightUrl, '');
+  assert.ok(!defaultEmployees().some((e) => e.id === 'wright'));
+  assert.equal(normalizeSettings({}).settings.alarms.wrightUrl, '', 'not installed: not read');
+  mkdirSync(path.join(process.env.WRIGHT_HOME!, 'app'), { recursive: true });
+  const w = defaultEmployees().find((e) => e.id === 'wright')!;
+  assert.deepEqual([w.repo, w.checkout, w.installed], ['Jcollier0120/Wright', 'C:\\Projects\\Wright', '%USERPROFILE%\\.wright\\app']);
+  assert.equal(normalizeSettings({}).settings.employees.at(-1)!.id, 'wright', 'installed: taken on');
+  assert.equal(normalizeSettings({}).settings.alarms.wrightUrl, WRIGHT_URL);
+  assert.equal(normalizeSettings({ alarms: { wrightUrl: '' } }).settings.alarms.wrightUrl, '', 'Settings still decide when they say');
+  assert.ok(!normalizeSettings({ employees: [{ id: 'porter' }] }).settings.employees.some((e) => e.id === 'wright'), 'and when they name the employees');
 });

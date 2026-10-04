@@ -664,6 +664,25 @@ export function tooBig(serving, promptTokens, maxTokens) {
   return say.tooBig(promptTokens, maxTokens, cap, serving.length > 1);
 }
 
+// ---------------------------------------------------------------- how long a request may take
+
+/**
+ * How long one request may take, in ms. A background chat or vision request gets requestBaseMs plus
+ * requestPerTokenMs for each token it may answer (GenieX on the NPU writes about 34 a second, so that is
+ * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
+ * person waiting, and embeddings, get the config's. A request that may load its model on the way
+ * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
+ * then is the model loading slowly, not the server failing.
+ * @param {Rules} rules
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @returns {number}
+ */
+export function requestTimeoutMs(rules, r) {
+  const a = rules.accelerators;
+  const own = r.lane === 'background' && r.work !== 'embed' ? Math.min(r.ceilingMs, a.requestBaseMs + a.requestPerTokenMs * Math.max(0, r.maxTokens)) : r.ceilingMs;
+  return own + (r.coldLoad ? a.coldLoadMs : 0);
+}
+
 /**
  * Splits text into pieces whose estimated size fits `budgetTokens`, at line breaks where it can, so a long
  * input is asked about piece by piece (map-reduce) and never sent whole.

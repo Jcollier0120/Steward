@@ -13,10 +13,11 @@ import {
   lockDirsOf,
   markFailed,
   MAX_AHEAD,
+  ModelLoading,
   parseAccelerators,
   pick as pickFrom,
-  ping,
   postJson,
+  probe,
   readFailure,
   readGames,
   refOf,
@@ -287,9 +288,9 @@ export class Npu {
     return Math.max(...(list.length ? list : serving).map((a) => a.maxContextTokens)) - maxTokens;
   }
 
-  /** Whether any chat server answers, without starting one. */
+  /** Whether any chat server is running (ready, or busy loading or answering), without starting one. */
   async reachable(): Promise<boolean> {
-    for (const a of this.accelerators) if (serves(a, 'chat') && (await ping(a.chat!.baseUrl))) return true;
+    for (const a of this.accelerators) if (serves(a, 'chat') && (await probe(a.chat!.baseUrl)) !== 'down') return true;
     return false;
   }
 
@@ -301,8 +302,8 @@ export class Npu {
   async chat(messages: ChatMessage[], opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 300;
     const promptTokens = core.chatTokens(RULES, messages);
-    return this.ask('chat', promptTokens, maxTokens, opts, async (acc, ep, timeoutMs) => {
-      const { json, ms } = await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, messages, maxTokens), timeoutMs);
+    return this.ask('chat', promptTokens, maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
+      const { json, ms } = await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, messages, maxTokens), timeoutMs, { loading });
       return answerOf(json, ep.model, ms);
     });
   }
@@ -315,8 +316,8 @@ export class Npu {
   async vision(image: string, question: string, opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 64;
     // The image is a fixed 256 tokens in the NPU's bundle; count 400 to be safe (the spec's rules.json).
-    return this.ask('vision', core.visionTokens(RULES, question), maxTokens, opts, async (acc, ep, timeoutMs) => {
-      const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, image, question, maxTokens), timeoutMs);
+    return this.ask('vision', core.visionTokens(RULES, question), maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
+      const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, image, question, maxTokens), timeoutMs, { loading });
       return answerOf(json, ep.model, ms);
     });
   }
@@ -324,8 +325,8 @@ export class Npu {
   /** Embeddings for `texts`, in their order, from one accelerator's embedding model. */
   async embed(texts: string[], opts: AskOptions = {}): Promise<Embeddings> {
     const longest = Math.max(0, ...texts.map(estimateTokens));
-    const r = await this.route('embed', longest, 0, opts, async (acc, ep, timeoutMs) => {
-      const { json, ms } = await postJson(ep, '/v1/embeddings', { model: ep.model, input: texts }, timeoutMs);
+    const r = await this.route('embed', longest, 0, opts, async (acc, ep, timeoutMs, loading) => {
+      const { json, ms } = await postJson(ep, '/v1/embeddings', { model: ep.model, input: texts }, timeoutMs, { loading });
       const vectors: number[][] = [];
       for (const row of (json?.data ?? []) as { index: number; embedding: number[] }[]) vectors[row.index] = row.embedding;
       if (vectors.length !== texts.length || vectors.some((v) => !Array.isArray(v))) throw new Error(core.say.tooFewVectors());
@@ -339,7 +340,7 @@ export class Npu {
     promptTokens: number,
     maxTokens: number,
     opts: AskOptions,
-    send: (acc: Accelerator, ep: Endpoint, timeoutMs: number) => Promise<Omit<NpuAnswer, 'accelerator' | 'fellBackFrom'>>,
+    send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<Omit<NpuAnswer, 'accelerator' | 'fellBackFrom'>>,
   ): Promise<NpuAnswer> {
     const r = await this.route(work, promptTokens, maxTokens, opts, send);
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
@@ -354,7 +355,7 @@ export class Npu {
     promptTokens: number,
     maxTokens: number,
     opts: AskOptions,
-    send: (acc: Accelerator, ep: Endpoint, timeoutMs: number) => Promise<T>,
+    send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<T>,
   ): Promise<{ value: T; acc: Accelerator; fellBackFrom?: AcceleratorRef & { reason: string } }> {
     if ('error' in this.cfg) throw new NpuError(this.cfg.error);
     const cfg = this.cfg;
@@ -370,6 +371,7 @@ export class Npu {
     let first: { acc: Accelerator; reason: string } | null = null;
     const tried = new Set<string>();
     const notRunning: Accelerator[] = [];
+    let loadingOn: { acc: Accelerator; reason: string } | null = null;
     for (;;) {
       const { list, skipped } = candidates(
         serving.filter((a) => !tried.has(a.id)),
@@ -377,6 +379,10 @@ export class Npu {
         { failure: readFailure, games, deferredMs: lane === 'background' ? deferredMs : undefined },
       );
       if (!list.length) {
+        if (loadingOn && !first) {
+          const deferred = lane === 'background' ? core.say.deferredFor(BACK_OFF_MS / 60_000) : '';
+          throw new NpuBusy(core.say.modelLoading(theAccelerator(loadingOn.acc), loadingOn.reason, deferred));
+        }
         if (notRunning.length && !first) {
           const also = skipped.map((s) => s.detail).join('; ');
           throw new NpuError(core.say.serversNotRunning(notRunning, also));
@@ -393,12 +399,17 @@ export class Npu {
       const ep = acc[work]!;
       try {
         // In its turn, the server is started if it isn't running; one that won't start fails the request,
-        // which leaves its turn (the contract's fallback).
+        // which leaves its turn (the contract's fallback). One that is busy is waited on, not started again.
         const value = await acceleratorTurn(
           acc,
           async () => {
-            await ensureServer(ep, { start: opts.start });
-            return send(acc, ep, opts.timeoutMs ?? cfg.requestTimeoutMs);
+            const server = await ensureServer(ep, { start: opts.start });
+            const warmed = warmsUp(acc, work);
+            if (warmed) await warmUp(acc, ep, opts.timeoutMs);
+            // With no warm-up, a server just started or found busy may still be loading the model.
+            const loading = !warmed && (server.started || server.waited);
+            const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading });
+            return send(acc, ep, timeoutMs, loading);
           },
           { maxWaitMs: opts.maxWaitMs, lane },
         );
@@ -411,6 +422,14 @@ export class Npu {
           notRunning.push(acc);
           continue;
         }
+        // Its model was still loading: slow, not failed. Nothing is marked; this agent leaves it alone a
+        // while (a background request), and the request goes to the next candidate, if there is one.
+        if (e instanceof ModelLoading) {
+          if (lane === 'background') busyUntil.set(acc.id, Date.now() + BACK_OFF_MS);
+          loadingOn ??= { acc, reason: e.message };
+          if (opts.accelerator) throw new NpuBusy(core.say.modelLoading(theAccelerator(acc), e.message, ''));
+          continue;
+        }
         if (!(e instanceof AcceleratorDown)) throw new NpuError(core.say.onAccelerator(acc, (e as Error).message));
         markFailed(acc.id, `${work}: ${e.message}`, APP.id);
         if (first) throw new NpuError(core.say.failedTwice(first.acc, first.reason, acc, e.message));
@@ -419,6 +438,23 @@ export class Npu {
       }
     }
   }
+}
+
+/**
+ * Whether a turn starts with a warm-up: chat and vision on the NPU. GenieX keeps one model loaded at a
+ * time, unloads it after 5 idle minutes, and takes 9 to 15 s to load one (measured 2026-10-03; a chat
+ * request after a vision one loads the chat model again). Graphics cards' servers each keep their model.
+ */
+const warmsUp = (acc: Accelerator, work: Work) => acc.kind === 'npu' && work !== 'embed';
+
+/**
+ * Loads the turn's model with a one-token request, given the cold-load allowance; its timeout is
+ * ModelLoading, not a failure. The request after it runs warm, on its own timeout, so a timeout there is
+ * the server failing. A warm model answers it in about 0.15 s.
+ */
+async function warmUp(acc: Accelerator, ep: Endpoint, timeoutMs?: number): Promise<void> {
+  const allowance = RULES.accelerators.requestBaseMs + RULES.accelerators.coldLoadMs;
+  await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1), timeoutMs ?? allowance, { loading: true });
 }
 
 /** The pick (accelerators.ts), seeing this process's own requests already headed to each line. */

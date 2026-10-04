@@ -58,7 +58,7 @@ An agent works at a manor when Manor is installed here: its folder (`MANOR_HOME`
 
 ### What the kit leaves in the data folder: round.json
 
-Each round an agent runs with schedule.ts's `every()` leaves its outcome in `round.json` in the agent's data folder (kit 2.6.0), the same in every agent, so the Surveyor reads one file per agent: `{ "rounds": { "<name>": { "started", "finished", "ok", "error", "everyMs", "next" } } }`, one entry per schedule by its `name` ("round" unless said). [spec/ROUND.md](kit/spec/ROUND.md) says the shape and when it is written. A round.json that can't be written never fails the round. The node part only, for now: the dotnet part has no scheduler.
+Each round an agent runs with schedule.ts's `every()` leaves its outcome in `round.json` in the agent's data folder (kit 2.8.0), the same in every agent, so the Surveyor reads one file per agent: `{ "rounds": { "<name>": { "started", "finished", "ok", "error", "everyMs", "next" } } }`, one entry per schedule by its `name` ("round" unless said). [spec/ROUND.md](kit/spec/ROUND.md) says the shape and when it is written. A round.json that can't be written never fails the round. The node part only, for now: the dotnet part has no scheduler.
 
 ### kit.json, and filling src\kit
 
@@ -220,13 +220,43 @@ Its duty works as the hires' does, and its round is this: **it merges and releas
 
 A round with nothing merged, released or failed leaves no trace; one that did something is the last stage on the page, and a line in stages.log, as any stage is. A round passes while a stage runs (the stage lock). **Run now** (`steward round` in a terminal) does one round, on duty or not. Manor's employee card shows the rounds, from `/api/ping`. With "Merges and releases by itself" off, the stages run only when asked.
 
+### Alarms
+
+After every round, done or not, the Steward lists what needs you: the few things no one in the manor can see to by themselves (`src/alarms.ts`). Code decides each one; no model is asked. A condition becomes an alarm once it has lasted its while:
+
+| Condition | After |
+|---|---|
+| A PR to an employee that the round holds: a draft no one marked ready, conflicts, failing checks, a version that clashes, a base that isn't the employee's branch | 24 hours (`waitingHours`) |
+| A release that failed, which the rounds won't try again at that commit (`round-failed.json`) | at once |
+| The round can't run at all (gh signed out, say) | an hour |
+| An update Manor couldn't install (`/api/state`'s updates) | two hours |
+| Manor's update checks failing | twelve hours |
+| Manor's page not answering | an hour |
+| A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it | 6 hours (`problemHours`) |
+| The Surveyor's page not answering | two hours |
+| An issue the Wright got stuck on (`wright:stuck`), its PR that changes what a person reviews (`wright:needs-you`), or Claude Code unusable for it (not found, or not signed in), from its `/api/work` | at once |
+| The Wright's page not answering | two hours |
+
+An alarm is raised once, with one Windows notification for all raised in a round (clicking it opens this page), and stays at the top of the page under **Needs you**, and at `GET /api/alarms` for Manor, until its condition clears. **Dismiss** quiets one until it clears and comes back. The Steward never acts on an alarm: it says what it saw and what to do.
+
+### The Wright's drafts
+
+The Wright opens every pull request as a draft, so nothing it wrote merges without a look. In each round the Steward looks at each draft the Wright opened (labelled `wright`, by the team), in code (`src/review.ts`):
+
+- it isn't labelled `wright:needs-you`, the Wright's own word that a person reviews it;
+- none of its changed files is one a person reviews: Reeve's job scripts, PowerShell, installers and setup, release tooling, CI, `tools/`, `kit.json`, `.csproj` files (Settings). The files are checked here again, not only trusted from the label;
+- it changes no dependencies (package.json's `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`, at its head against where it started);
+- it changes at most 600 lines (Settings).
+
+One that passes is marked ready, with a comment saying what was looked at, and goes on as any ready team PR: tested here at its head with the employee's own checks, then merged, with what its steward block asks for after. One that doesn't stays a draft for you; the round says why (`a draft from the Wright, waiting for you: …`), and after a day the alarm does too. A draft of your own is never the Steward's to look at.
+
 ## Settings
 
 Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\settings.json`. They are used from the next stage on.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Employees (`employees`) | the eight hires, Reeve and Heiward | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty, as Heiward's, for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked (Reeve's only), with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
+| Employees (`employees`) | the eight hires, Reeve and Heiward, the Surveyor and the Lamplighter; and the Wright, where it is installed (it is ours alone, never anyone else's default) | Each: `id`, `name`, `repo` (owner/name), `checkout` (`C:\Projects\<Name>`), `branch` (main; Heiward's master), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty, as Heiward's, for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked (Reeve's only), with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
 | Team (`team`) | Jcollier0120 | The GitHub accounts whose PRs `merge --team` merges as well as the Steward's (a GitHub App's as gh names it, `app/<name>`). Claude Code opens its PRs with your account, so yours covers them. Empty: `--team` merges only the Steward's. |
 | Work folder (`workRoot`) | `%USERPROFILE%\.steward\work` | Where the Steward makes its worktrees, one folder per employee. |
 | Release right after merging (`releaseAfterMerge`) | off | Release is a stage of its own unless this is on. |
@@ -234,6 +264,8 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
 | Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released (Page and commands, below). Off: only when asked. |
 | A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. |
+| The Wright's drafts (`wrightReview`) | on; 600 lines; the Wright's list | Whether rounds look at the Wright's drafts and mark ready the ones that pass (`on`), the most lines one may change (`maxLines`, 10 to 5000), and the path patterns a person reviews (`sensitive`). |
+| Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595`; the Wright's `http://127.0.0.1:19797` only where it is installed | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`) and a Surveyor's problem lasts (`problemHours`), 1 to 168, before it is one; Manor's page (`manorUrl`), the Surveyor's (`surveyorUrl`) and the Wright's (`wrightUrl`), local addresses only, empty for not read. |
 
 ## Files
 
@@ -246,8 +278,9 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `settings.json` | Settings. |
 | `staff.json` | The staff's table, as last refreshed. |
 | `last-stage.json`, `stages.log` | The last stage, with its log; every stage's results, one line each (a round's only when it did something). |
-| `round.json` | Its last round's outcome, as every kit agent leaves it (kit 2.6.0, [spec/ROUND.md](kit/spec/ROUND.md)), for the Surveyor. |
+| `round.json` | Its last round's outcome, as every kit agent leaves it (kit 2.8.0, [spec/ROUND.md](kit/spec/ROUND.md)), for the Surveyor. |
 | `round-failed.json` | The commit, for each employee, whose release failed in a round: the rounds don't try it again. |
+| `alarms.json` | The alarms: open, dismissed and lately cleared, and each condition watched since it was first seen. |
 | `pr-checks.json` | What testing each team PR here said, by its head commit: tested once, and a new push afresh. |
 | `jobs-approved.json` | Each employee's job scripts the Steward approved (or turned down) as merged, by sha256: each is looked at once. |
 | `work\` | The worktrees of the employees' bumps and releases. |

@@ -1,6 +1,6 @@
 # round.json: each round's outcome
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/ROUND.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). A change to the file's shape is a kit change: made here, released as a kit version, and taken by every agent from that release. Since kit 2.6.0.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/ROUND.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). A change to the file's shape is a kit change: made here, released as a kit version, and taken by every agent from that release. Since kit 2.8.0.
 
 Every agent that runs its rounds with the kit's scheduler leaves each round's outcome in one file, the same way, so a reader outside the agent (the Surveyor, which checks every agent's health and changes nothing) reads one file per agent instead of each agent's own report.json, status.json or state.json.
 
@@ -47,7 +47,7 @@ Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 
 ## For a reader
 
-- Read the file with any JSON reader; a byte-order mark may be skipped. A missing file means no round has ended since the agent took kit 2.6.0 (or it doesn't run its rounds with the kit's scheduler).
+- Read the file with any JSON reader; a byte-order mark may be skipped. A missing file means no round has ended since the agent took kit 2.8.0 (or it doesn't run its rounds with the kit's scheduler).
 - Skip keys you don't know: later kit versions may add some, in an entry or beside `rounds`.
 - How long since `finished`, against `everyMs`, says whether the rounds are keeping up; `next` in the past while the agent is on duty says a round is overdue or under way.
 
@@ -55,5 +55,5 @@ Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 
 | Part | Implementation |
 |---|---|
-| node | `schedule.ts`'s `every()`, since kit 2.6.0 (`roundFile()`, `RoundRecord`, `roundError()`). Every Node agent that runs its rounds with `every()` writes it, with nothing to do. |
+| node | `schedule.ts`'s `every()`, since kit 2.8.0 (`roundFile()`, `RoundRecord`, `roundError()`). Every Node agent that runs its rounds with `every()` writes it, with nothing to do. |
 | dotnet | **Node-only for now.** The dotnet part has no scheduler (Heiward schedules its own work), so Heiward doesn't write round.json yet. A .NET agent that does writes this same shape, in its own data folder. |

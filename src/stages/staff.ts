@@ -37,6 +37,13 @@ export interface PrInfo {
   mergeState: string;
   draft: boolean;
   checks: Checks;
+  /** Its labels' names: `wright` on the Wright's PRs, `wright:needs-you` on those a person reviews. */
+  labels: string[];
+  /** Lines added and removed, and the files it changes (gh pr list's, at most 100). */
+  changed: number;
+  files: string[];
+  /** For one of the Wright's drafts: why the Steward's look (review.ts) leaves it to the person. Not from gh. */
+  reviewHold?: string;
 }
 
 export interface ReleaseInfo {
@@ -137,6 +144,9 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
         mergeState: String(p.mergeStateStatus ?? 'UNKNOWN'),
         draft: p.isDraft === true,
         checks: checksOf(p.statusCheckRollup),
+        labels: Array.isArray(p.labels) ? p.labels.map((l: any) => String(l?.name ?? '')).filter(Boolean) : [],
+        changed: (Number(p.additions) || 0) + (Number(p.deletions) || 0),
+        files: Array.isArray(p.files) ? p.files.map((f: any) => String(f?.path ?? '')).filter(Boolean) : [],
       };
     })
     .sort((a, b) => a.number - b.number);
@@ -162,7 +172,7 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
   }
 }
 
-export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup'];
+export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup,labels,additions,deletions,files'];
 
 export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null; tool?: string | null }): Promise<StaffRow> {
   const { run } = ctx;
