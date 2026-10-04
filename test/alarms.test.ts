@@ -10,6 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-alarms-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
+const alarmsModule = await import('../src/alarms.ts');
 const { alarmsFile, dismiss, loadAlarms, manorConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
 const { alarmsCard } = await import('../src/view.ts');
@@ -143,4 +144,14 @@ test("from the Wright: an issue it got stuck on and a PR a person reviews, at on
   assert.equal(c[1].title, 'Reeve #33 needs your review: the Wright changed what a person reviews');
   assert.equal(wrightConditions({ needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: "Claude Code isn't signed in", url: 'http://wright.localhost:19797/' }] })[0].title, "The Wright can't work: Claude Code isn't signed in");
   assert.deepEqual(wrightConditions({ error: 'ECONNREFUSED' }).map((x) => [x.id, x.afterMs / HOUR]), [['wright:down', 2]]);
+});
+
+test("an answer with an error field of its own is still an answer: only getJson's { error } is no answer", () => {
+  const { noAnswer } = alarmsModule;
+  assert.equal(noAnswer({ error: 'ECONNREFUSED' }), 'ECONNREFUSED');
+  assert.equal(noAnswer(null), 'no answer');
+  assert.equal(noAnswer({ at: 'x', needsYou: [], error: null }), null, "the Wright's work, all well");
+  assert.equal(noAnswer({ at: 'x', needsYou: [], error: "Couldn't read the queue" }), null, 'up, though it could not read something');
+  assert.deepEqual(wrightConditions({ at: 'x', needsYou: [], error: null }), [], 'nothing needs you, and it answers');
+  assert.equal(wrightConditions({ needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }], error: null })[0].id, 'wright:claude:blocked');
 });
