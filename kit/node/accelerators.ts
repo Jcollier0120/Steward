@@ -492,8 +492,12 @@ const nonce = () => `[req ${Math.random().toString(36).slice(2, 10)}]`;
 /** Room the estimate keeps for a nonce and Qwen3's /no_think, whichever accelerator takes the request. */
 export const QUIRK_ROOM_CHARS = RULES.tokens.quirkRoomChars;
 
-/** Qwen3 thinks by default and spends the output budget on it; the 2507 Instruct models don't. */
-const thinks = (model: string) => /(^|\/)qwen3(?!\.5)(?!.*instruct-2507)/i.test(model);
+/**
+ * Qwen3 thinks by default and spends the output budget on it; its Instruct models never do (Qwen3-4B-Instruct-2507,
+ * Qwen3-VL-4B-Instruct), and /no_think only costs them: the VL model answered one question in ten fewer with it
+ * (measured 2026-10-04, the Auditor's suite and ten more). So only a Qwen3 that isn't an Instruct model is told.
+ */
+export const thinks = (model: string) => /(^|\/)qwen3(?!\.5)(?!.*instruct)/i.test(model);
 
 /**
  * A chat request at temperature 0, as this accelerator's server needs it. GenieX v0.7.0 leaks state
