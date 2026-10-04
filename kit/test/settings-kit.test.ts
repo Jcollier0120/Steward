@@ -152,11 +152,17 @@ test('a new interval applies to the wait under way', async () => {
   let rounds = 0;
   const job = every(() => ms, async () => void rounds++, { firstDelayMs: 1 });
   try {
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(rounds, 1, 'the first round ran; the next waits a minute');
+    const until = async (check: () => boolean) => {
+      for (const end = Date.now() + 5000; !check(); ) {
+        if (Date.now() > end) throw new Error('timed out waiting for the test condition');
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    };
+    await until(() => rounds === 1 && job.state.lastRunAt !== null);
+    assert.ok(Date.parse(job.state.nextRunAt!) - Date.now() > 50_000, 'the first round ran; the next waits a minute');
     ms = 20;
     job.reschedule();
-    await new Promise((r) => setTimeout(r, 120));
+    await until(() => rounds >= 2);
     assert.ok(rounds >= 2, 'the shorter interval took over the wait');
   } finally {
     job.stop();

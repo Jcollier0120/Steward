@@ -1,3 +1,5 @@
+import { lstatSync, rmSync } from 'node:fs';
+import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
 /** A git or gh command that failed: its words and what it said. */
@@ -74,6 +76,16 @@ export async function onOrigin(run: Runner, repo: string, branch: string): Promi
   return ((await gitMaybe(run, repo, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`)) ?? '').trim() !== '';
 }
 
+/** A worktree's node_modules when it is a link (a junction): removed, and never what it points to. */
+export function unlinkModules(dir: string): void {
+  const at = path.join(dir, 'node_modules');
+  try {
+    if (lstatSync(at).isSymbolicLink()) rmSync(at);
+  } catch {
+    // None there.
+  }
+}
+
 const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 
 /**
@@ -83,6 +95,8 @@ const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/
 export async function removeWorktree(run: Runner, repo: string, dir: string, branch?: string): Promise<string[]> {
   const did: string[] = [];
   const wt = (await worktrees(run, repo)).find((w) => samePath(w.path, dir));
+  // Its node_modules may be a junction to packages other worktrees share (stages/modules.ts): the link goes first, alone.
+  unlinkModules(dir);
   if (wt) {
     await git(run, repo, 'worktree', 'remove', '--force', dir);
     did.push(`removed the worktree ${dir}`);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -17,4 +17,5 @@ test('dotnetWithSdk: the first folder with dotnet.exe and an SDK, never a runtim
   mkdirSync(path.join(sdk, 'sdk', '10.0.100'), { recursive: true });
   assert.equal(dotnetWithSdk([undefined, runtime, sdk]), sdk);
   assert.equal(dotnetWithSdk([runtime, path.join(root, 'missing')]), null);
+  rmSync(root, { recursive: true, force: true });
 });

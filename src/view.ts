@@ -160,7 +160,7 @@ export function renderBody(o: { staff: Staff | null; last: StageResult | null; r
 <p class="muted">Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).${esc(offKitNote)}</p>
 ${roundLine(o.round, !!o.running)}
 </div>`;
-  return `${running}${alarmsCard(o.alarms)}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}.</p>` : ''}</div>
+  return `${running}${alarmsCard(o.alarms)}<div class="card">${kitLine}${s ? `<p class="muted">The table is from ${esc(ago(s.at))}${s.checked && s.checked !== s.at ? `; GitHub had nothing new for it ${esc(ago(s.checked))}` : ''}.</p>` : ''}</div>
 <h2>Staff</h2>
 ${s ? staffTable(s) : '<div class="card empty">Looking at each employee…</div>'}
 <h2>Roll out the kit</h2>

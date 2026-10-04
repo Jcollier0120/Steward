@@ -28,9 +28,9 @@ type AcceleratorConfig = import('./fixture/src/kit/accelerators.ts').Accelerator
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function until(check: () => boolean, ms = 5000): Promise<void> {
+async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
   const end = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > end) throw new Error('timed out waiting for the test condition');
     await sleep(20);
   }
@@ -82,13 +82,23 @@ async function fakeServer(answer: (body: any) => { status?: number; text?: strin
   };
 }
 
-/** A port nothing listens on. */
+/**
+ * A port nothing listens on, from 20000-29999: below the range the OS hands out to listen(0) and to every outgoing
+ * connection on the PC (49152 and up on Windows, 32768 and up on Linux), so no other program is given it the moment
+ * after it's found free, as one taken from listen(0) could be. Checked free by binding it.
+ */
 async function closedPort(): Promise<number> {
-  const s = http.createServer();
-  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
-  const port = (s.address() as AddressInfo).port;
-  await new Promise((r) => s.close(r));
-  return port;
+  for (let i = 0; i < 50; i++) {
+    const port = 20000 + Math.floor(Math.random() * 10000);
+    const s = http.createServer();
+    const free = await new Promise<boolean>((r) => {
+      s.once('error', () => r(false));
+      s.listen(port, '127.0.0.1', () => r(true));
+    });
+    if (free) await new Promise((r) => s.close(r));
+    if (free) return port;
+  }
+  throw new Error('no free port in 20000-29999');
 }
 
 const gpu = (id: string, over: Partial<Accelerator> = {}) => ({ id, kind: 'gpu', name: id, memoryGb: 8, slots: 1, maxContextTokens: 16384, quirks: [], ...over });
@@ -323,14 +333,21 @@ test('the head of the line takes any free slot: two at once on a two-slot accele
   let inside = 0;
   let most = 0;
   const slots: number[] = [];
+  // The work holds its slot until the test lets it go: no sleep standing in for work.
+  let letGo: () => void = () => {};
+  const gate = new Promise<void>((r) => (letGo = r));
   const work = async (slot: number) => {
     inside++;
     most = Math.max(most, inside);
     slots.push(slot);
-    await sleep(80);
+    await gate;
     inside--;
   };
-  await Promise.all([1, 2, 3, 4].map(() => withAcceleratorTurn(slotDirs(lock, 2), work, { who: 'test' })));
+  const all = Promise.all([1, 2, 3, 4].map(() => withAcceleratorTurn(slotDirs(lock, 2), work, { who: 'test' })));
+  // Two inside, and the other two still in the line: they wait for a slot, not for time.
+  await until(() => inside === 2 && lineSnapshot(slotDirs(lock, 2)).waiting.length === 2);
+  letGo();
+  await all;
   assert.equal(most, 2);
   assert.deepEqual([...new Set(slots)].sort(), [0, 1]);
   // With the first slot held by someone who knows nothing of slots, the line still moves through the second.
@@ -356,8 +373,9 @@ test('an agent waits in two lines at once, with one ticket in each', async () =>
     acceleratorTurn({ id: 'gpu-two', name: 'Two' }, async () => 'gpu 2'),
   ];
   try {
+    // Each second turn waits in this process behind its first from the moment it's asked: once each line has
+    // its first ticket, the lines are as they will be.
     await until(() => queueSnapshot(lockDirFor('npu')).waiting.length === 1 && queueSnapshot(lockDirFor('gpu-two')).waiting.length === 1);
-    await sleep(200);
     assert.equal(queueSnapshot(lockDirFor('npu')).waiting.length, 1, 'one ticket in the NPU line');
     assert.equal(queueSnapshot(lockDirFor('gpu-two')).waiting[0].who, APP.id);
   } finally {
@@ -721,20 +739,34 @@ test('a server that is not running is started from its startCommand: %NAME% expa
   writeFileSync(
     script,
     `import http from 'node:http';
+import { existsSync } from 'node:fs';
 const port = Number(process.argv[2]);
+const parent = Number(process.argv[3]);
+const stop = process.argv[4];
 http.createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   if (req.url === '/v1/models') return res.end('{"data":[]}');
   req.resume().on('end', () => res.end(JSON.stringify({ choices: [{ message: { content: process.cwd() }, finish_reason: 'stop' }] })));
 }).listen(port, '127.0.0.1');
+// It ends when the test says (the stop file), or when the test's process is gone; never later than 8 s.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+setInterval(() => { if (existsSync(stop) || !alive(parent)) process.exit(0); }, 50);
 setTimeout(() => process.exit(0), 8000);
 `,
   );
+  const stop = path.join(home, 'fake-server.stop');
+  rmSync(stop, { force: true });
   process.env.ACCEL_TEST_NODE = process.execPath;
-  const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', name: 'CPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'm', startCommand: ['%accel_test_node%', script, String(port)] } }] }));
-  assert.equal(await model.reachable(), false);
-  const a = await model.chat([{ role: 'user', content: 'Where are you?' }], { maxTokens: 8 });
-  assert.equal(a.text.toLowerCase(), os.homedir().toLowerCase());
-  assert.equal(await model.reachable(), true);
-  assert.equal(A.expandEnv('%NOPE_NOT_SET%\\x'), '%NOPE_NOT_SET%\\x');
+  const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', name: 'CPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'm', startCommand: ['%accel_test_node%', script, String(port), String(process.pid), stop] } }] }));
+  try {
+    assert.equal(await model.reachable(), false);
+    const a = await model.chat([{ role: 'user', content: 'Where are you?' }], { maxTokens: 8 });
+    assert.equal(a.text.toLowerCase(), os.homedir().toLowerCase());
+    assert.equal(await model.reachable(), true);
+    assert.equal(A.expandEnv('%NOPE_NOT_SET%\\x'), '%NOPE_NOT_SET%\\x');
+  } finally {
+    // The server it started ends with the test, not 8 s later.
+    writeFileSync(stop, '');
+    await until(async () => (await A.probe(`http://127.0.0.1:${port}`, 300)) === 'down');
+  }
 });

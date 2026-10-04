@@ -7,6 +7,7 @@ import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 
 /**
@@ -38,13 +39,14 @@ export const needsNpmCi = (dir: string) =>
   existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'package-lock.json')) && !existsSync(path.join(dir, 'node_modules'));
 
 /**
- * An employee's checks in a worktree, as a fresh clone would run them: dependencies (npm's, for a Node agent; a .NET
- * one restores its own packages as it builds), the kit, then each test command (Settings). The first that failed, or
- * null when all passed. A bump runs them before its commit, and merge on a team PR GitHub runs no checks on.
+ * An employee's checks in a worktree, as a fresh clone would run them: dependencies (npm's, for a Node agent, linked
+ * from the set installed once for its lockfile (modules.ts), else `npm ci` there; a .NET one restores its own packages
+ * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
+ * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  */
 export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void }): Promise<string | null> {
   const steps: string[] = [];
-  if (needsNpmCi(dir)) steps.push('npm ci --no-audit --no-fund');
+  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) steps.push('npm ci --no-audit --no-fund');
   if (e.fill) steps.push(e.fill);
   steps.push(...e.test);
   for (const step of steps) {

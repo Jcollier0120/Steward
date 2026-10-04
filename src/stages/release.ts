@@ -1,19 +1,49 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git.ts';
-import { runLine, tail } from '../run.ts';
+import { git, removeWorktree, showFile } from '../git.ts';
+import { runLine, splitCommand, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { needsNpmCi } from './bump.ts';
-import { appReleasesIn, readPin } from './staff.ts';
-import { checkoutOf, NOT_ON_KIT, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { readPin } from './staff.ts';
+import { checkoutOf, forgetGlance, freshBranch, mapLimit, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
  * no GitHub release yet, a worktree at that very commit, and its release command run there. Releases come
- * from the branch, never from a PR's, so a release and its branch never drift apart. A Node agent's worktree
- * gets its packages first (`npm ci`, as bump does): Reeve's release builds its dashboard with them.
+ * from the branch, never from a PR's, so a release and its branch never drift apart. A Node agent whose release
+ * builds something gets its packages first (`npm ci`): Reeve's release builds its dashboard with them. The kit's own
+ * release (a hire's) only packs files with Node, and needs none (releaseNeedsPackages).
  */
+
+/** A command in an npm script that needs no packages: the kit's own tools, run with Node. */
+const KIT_ONLY = /^node\s+(tools[\\/]kit\.ts|src[\\/]kit[\\/]release\.ts)(\s|$)/;
+
+/**
+ * Whether an employee's release needs its packages installed (npm ci) in the fresh worktree: a Node project whose
+ * release runs anything but the kit's own tools. A hire's `npm run release -- --publish` runs `node tools/kit.ts &&
+ * node src/kit/release.ts` (pre and release scripts), which packs src with Node alone: no. Reeve's builds its
+ * dashboard with vite: yes. Anything the Steward can't read is taken to need them, as every release did before.
+ */
+export function releaseNeedsPackages(dir: string, release: string): boolean {
+  if (!needsNpmCi(dir)) return false;
+  const words = splitCommand(release);
+  const commands = (line: string) => line.split('&&').map((c) => c.trim()).filter(Boolean);
+  let lines: string[];
+  if (words[0] === 'node') lines = [words.join(' ')];
+  else if (words[0] === 'npm' && (words[1] === 'run' || words[1] === 'run-script') && words[2]) {
+    let scripts: Record<string, unknown>;
+    try {
+      scripts = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8').replace(/^﻿/, '')).scripts ?? {};
+    } catch {
+      return true;
+    }
+    const name = words[2];
+    if (typeof scripts[name] !== 'string') return true;
+    lines = [scripts[`pre${name}`], scripts[name], scripts[`post${name}`]].filter((x): x is string => typeof x === 'string');
+  } else return true;
+  return !lines.flatMap(commands).every((c) => KIT_ONLY.test(c));
+}
 
 export interface ReleaseCandidate {
   usesKit: boolean;
@@ -48,12 +78,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
-  await fetchBranch(run, repo, e.branch);
   const remote = `origin/${e.branch}`;
-  const commit = await commitOf(run, repo, remote);
+  const commit = await freshBranch(ctx, e, repo);
   if (!commit) return result(e, 'refused', `no ${remote}`);
   const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])));
-  const released = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')).map((r) => r.version);
+  const released = (await releasedOf(ctx, e)).map((r) => r.version);
   const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
   const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
   if (!decision.release) return result(e, 'skipped', 'error' in v ? v.error : decision.why);
@@ -67,7 +96,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
-    if (needsNpmCi(dir)) {
+    if (releaseNeedsPackages(dir, e.release)) {
       const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
@@ -78,6 +107,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})`, { version, commit: commit.slice(0, 7) });
+    // Its releases have changed: the glance no longer says how they are.
+    forgetGlance(ctx, e);
     return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
@@ -89,14 +120,12 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
 }
 
 export async function release(ctx: Ctx, employees: Employee[], o: { kit: string }): Promise<EmployeeResult[]> {
-  const out: EmployeeResult[] = [];
-  for (const e of employees) {
+  return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      out.push(await releaseOne(ctx, e, o));
+      return await releaseOne(ctx, e, o);
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
-      out.push(result(e, 'failed', (err as Error).message));
+      return result(e, 'failed', (err as Error).message);
     }
-  }
-  return out;
+  });
 }

@@ -1,6 +1,6 @@
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
-import { result, type Ctx, type EmployeeResult } from './common.ts';
+import { mapLimit, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
 
 /**
@@ -19,21 +19,22 @@ export const roundFailuresFile = () => dataFile('round-failed.json');
 /** Each employee's unreleased version, released from its branch; not a commit whose release failed in a round before. */
 export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promise<EmployeeResult[]> {
   const failed = readJson<Record<string, string>>(roundFailuresFile(), {});
-  const out: EmployeeResult[] = [];
-  for (const e of employees) {
-    let r: EmployeeResult;
+  if (!employees.length) return [];
+  // A few employees at a time (Settings' parallel); what failed is kept once all are done.
+  const out = await mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      r = await releaseOne(ctx, e, {
+      return await releaseOne(ctx, e, {
         kit: null,
         unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
       });
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
-      r = result(e, 'failed', (err as Error).message);
+      return result(e, 'failed', (err as Error).message);
     }
-    if (r.outcome === 'failed' && r.commit) failed[e.id] = r.commit;
-    else if (r.outcome === 'done') delete failed[e.id];
-    out.push(r);
+  });
+  for (const r of out) {
+    if (r.outcome === 'failed' && r.commit) failed[r.id] = r.commit;
+    else if (r.outcome === 'done') delete failed[r.id];
   }
   writeJson(roundFailuresFile(), failed);
   return out;

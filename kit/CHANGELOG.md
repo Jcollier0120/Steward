@@ -2,6 +2,15 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.9.0
+
+**`/api/ping` says since when an agent is off duty, so Manor needn't run its status command.** The ping said `running` (on duty) but not since when, which only `status --json` said; so for an agent off duty, Manor ran `node src\cli.ts status --json` on every look to learn it. Now the ping carries what that command says:
+- **`stoppedSince`**: when it went off duty (ISO), or null while on duty, as `status --json` gives it.
+- **`summary`**: the same line, "On duty." or "Off duty since 2 hours ago: its scheduled rounds are paused."
+- service.ts's **`dutyStatus(duty, pageUp)`** is new, and makes all three for the ping and for `statusJson()`, so they never say different things. On the ping the page is up, so `running` is still whether it's on duty.
+- **The kit's tests clean up after themselves, and wait on conditions, not time.** npu-queue.test.ts keeps every test's lock folder under one temporary folder that it removes (it left one in %TEMP% per test, hundreds by now), and manor.test.ts and work.test.ts remove theirs. The fixed sleeps in kit.test.ts, settings-kit.test.ts and accelerators.test.ts wait for what they were waiting for. accelerators.test.ts's free port comes from below the range Windows hands out to other programs (one from `listen(0)` could be taken by any outgoing connection the moment after), and the fake model server it starts ends with its test, not 8 s later.
+- **Nothing for an agent to do.** Manor already reads `stoppedSince` from a ping when it's there, and runs the status command only when it isn't.
+
 ## 2.8.3
 
 **A Qwen3 Instruct model is never told /no_think.** accelerators.ts appended `/no_think` to every request to a Qwen3 model but the 2507 Instruct ones, so Qwen3-VL-4B-Instruct got it too, though no Instruct model thinks. Measured 2026-10-04 on the NPU (the Auditor's eight golden questions and ten more shaped like the agents' requests), the VL model answered 8/8 and 8/10 without it, 8/8 and 7/10 with it; the chat model 8/8 and 6/10, at the same speed. Now only a Qwen3 that isn't an Instruct model (Qwen3-4B, a -Thinking model) is told; `thinks()` is exported.

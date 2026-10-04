@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 
 // "Back to <manor>" in every agent's title bar. Nothing here reads the real Manor's settings.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'kit-manor-test-'));
+after(() => rmSync(tmp, { recursive: true, force: true }));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(tmp, 'agent');
 process.env.REEVE_HOME = path.join(tmp, 'reeve');

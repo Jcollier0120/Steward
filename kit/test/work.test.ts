@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 
 // "Where its work runs", on every kit agent's Settings page. Nothing here reads the real Reeve's config.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-work-test-'));
+after(() => rmSync(home, { recursive: true, force: true }));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
 process.env.REEVE_HOME = path.join(home, 'reeve');

@@ -23,6 +23,15 @@ const { duty, setDuty } = await import('./fixture/src/kit/duty.ts');
 const { every, rounds } = await import('./fixture/src/kit/schedule.ts');
 const { statusJson } = await import('./fixture/src/kit/service.ts');
 
+/** Waits until `check` holds, a little at a time: never a fixed sleep. */
+async function until(check: () => unknown, ms = 5000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error('timed out waiting for the test condition');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 test('only its own host names are answered', () => {
   const hosts = allowedHosts(18000);
   assert.ok(hostAllowed(hosts, `${APP.id}.localhost:18000`));
@@ -47,6 +56,19 @@ test('the server pings as this app, guards hosts and actions, and records its to
     const ping = await (await fetch(`${base}/api/ping`)).json();
     assert.equal(ping.app, APP.id);
     assert.equal(ping.running, true, 'a new agent is on duty, and its ping says so for Manor');
+    assert.deepEqual([ping.stoppedSince, ping.summary], [null, 'On duty.']);
+    // Off duty, the ping says since when, and in a line, as the status command does: Manor needn't run that.
+    const off = setDuty(false);
+    try {
+      const stopped = await (await fetch(`${base}/api/ping`)).json();
+      assert.equal(stopped.running, false);
+      assert.equal(stopped.stoppedSince, off.since);
+      assert.match(stopped.summary, /^Off duty since .*: its scheduled rounds are paused.$/);
+      const status = await statusJson();
+      assert.deepEqual([status.stoppedSince, status.summary], [stopped.stoppedSince, stopped.summary], 'the same words as status --json');
+    } finally {
+      setDuty(true);
+    }
     assert.equal((await fetch(`${base}/favicon.svg`)).headers.get('content-type'), 'image/svg+xml');
     assert.equal((await fetch(`${base}/api/echo`, { method: 'POST', body: '{}' })).status, 403);
     const ok = await fetch(`${base}/api/echo`, { method: 'POST', headers: { 'x-token': token }, body: '{"a":1}' });
@@ -75,12 +97,12 @@ test("rounds are recorded: the last to end and whether it went through, the next
     assert.equal(s.runningSince, null);
 
     assert.ok(job.runNow());
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => job.state.runningSince);
     s = job.state;
     assert.ok(s.runningSince, 'a round under way says since when');
     assert.equal(s.nextRunAt, null, 'no next while one runs');
     release();
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => job.state.lastRunAt);
     s = job.state;
     assert.ok(s.lastRunAt && Date.now() - Date.parse(s.lastRunAt) < 5_000);
     assert.equal(s.lastRunOk, true);
@@ -88,9 +110,9 @@ test("rounds are recorded: the last to end and whether it went through, the next
 
     fail = true;
     job.runNow();
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => job.state.runningSince);
     release();
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => job.state.lastRunOk === false);
     assert.equal(job.state.lastRunOk, false);
     assert.equal(job.state.lastError, 'no network');
 
@@ -205,7 +227,9 @@ test("an agent keeps one ticket in line at a time, and queues as background unde
   writeFileSync(path.join(npuLockDir, 'owner.json'), JSON.stringify({ pid: process.pid, since: Date.now() }));
   const ran: number[] = [];
   const turns = [1, 2, 3].map((n) => npuTurn(async () => void ran.push(n)));
-  await new Promise((r) => setTimeout(r, 400));
+  // The second and third wait in this process behind the first from the moment they're asked, so once the first's
+  // ticket is in the line, the line is as it will be.
+  await until(() => npuLine().waiting.length > 0);
   const line = npuLine();
   assert.equal(line.waiting.length, 1, 'three requests, one ticket');
   assert.equal(line.waiting[0].who, APP.id);
@@ -245,17 +269,17 @@ test('a PowerShell script too long for a command line runs from a file, and the 
 
 test('off duty, scheduled rounds pause but Run now still runs one; back on duty, they resume', async () => {
   let rounds = 0;
+  // Each wait the schedule sets reads the interval: counting those counts its ticks, the skipped ones too.
+  let waits = 0;
   setDuty(false);
-  const job = every(20, async () => void rounds++, { firstDelayMs: 5 });
+  const job = every(() => (waits++, 20), async () => void rounds++, { firstDelayMs: 5 });
   try {
-    await new Promise((r) => setTimeout(r, 120));
-    assert.equal(rounds, 0);
+    await until(() => waits >= 3);
+    assert.equal(rounds, 0, 'two scheduled ticks came and went off duty, and ran nothing');
     assert.ok(job.runNow());
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(rounds, 1);
+    await until(() => rounds === 1);
     setDuty(true);
-    await new Promise((r) => setTimeout(r, 120));
-    assert.ok(rounds > 1);
+    await until(() => rounds > 1);
   } finally {
     job.stop();
     setDuty(true);

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
+import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
@@ -114,9 +115,10 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     return { json: { ok: true, stopping: true } };
   };
   const get: Record<string, Handler> = {
-    // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract).
+    // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract); off duty, since when
+    // (`stoppedSince`) and a line saying so (`summary`), as its status command says them, so Manor needn't run that.
     // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way.
-    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, running: duty().onDuty, ...roundTimes(), rounds: rounds(), ...opts.ping?.() } }),
+    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
     '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),

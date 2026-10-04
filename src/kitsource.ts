@@ -47,8 +47,17 @@ export function kitReleasesIn(json: string): string[] {
     .sort((a, b) => compareVersions(b, a));
 }
 
+const localKitDir = () => (devCheckout && existsSync(path.join(appRoot, 'kit', 'VERSION')) ? path.join(appRoot, 'kit') : null);
+
+/** The kit releases from a glance at GitHub (glance.ts), which reads the Steward's releases with the employees'. */
+export function kitInfoFrom(stewardReleases: { tagName: string; isDraft: boolean }[]): KitInfo {
+  const localDir = localKitDir();
+  return { released: kitReleasesIn(JSON.stringify(stewardReleases)), releasesError: null, local: localDir ? kitVersionOf(localDir) : null, localDir };
+}
+
+/** The kit releases, asked of GitHub on their own (when there's no glance to read them from). */
 export async function kitInfo(run: Runner, cwd: string, stewardRepo: string): Promise<KitInfo> {
-  const localDir = devCheckout && existsSync(path.join(appRoot, 'kit', 'VERSION')) ? path.join(appRoot, 'kit') : null;
+  const localDir = localKitDir();
   let released: string[] = [];
   let releasesError: string | null = null;
   try {

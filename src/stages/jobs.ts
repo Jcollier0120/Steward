@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, gitMaybe, showFile } from '../git.ts';
+import { commitOf, gitMaybe, showFile } from '../git.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { lf } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
-import { checkoutOf, result, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, freshBranch, result, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * An employee's jobs, approved as merged (each round, for one with an approve command and an installed copy in
@@ -105,7 +105,7 @@ export async function approveMerged(ctx: Ctx, e: Employee): Promise<EmployeeResu
   if (built.dirty !== false || typeof built.commit !== 'string' || !/^[0-9a-f]{7,40}$/i.test(built.commit)) return null;
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return null;
-  await fetchBranch(ctx.run, repo, e.branch);
+  await freshBranch(ctx, e, repo);
   const commit = await commitOf(ctx.run, repo, built.commit);
   const short = built.commit.slice(0, 7);
   // Built from a commit that isn't merged on its branch: not reviewed, so not approved.

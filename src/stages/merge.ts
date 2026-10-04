@@ -1,15 +1,15 @@
 import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
-import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { catchUp, type CaughtUp } from './catchup.ts';
-import { bumpDirOf, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import type { Held } from '../alarms.ts';
 import { dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
-import { appReleasesIn, parsePrs, prListArgs, type PrInfo } from './staff.ts';
+import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -163,8 +163,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const { run } = ctx;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
   if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [], held: [] };
-  // With no team, only the Steward's are read.
-  const prs = parsePrs(await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
+  // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
+  const g = glanceOf(ctx, e);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
   if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [], held: [] };
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
@@ -173,9 +174,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const lookup: Lookup = () =>
     (looked ??= (async () => {
       const repo = checkoutOf(e);
-      await fetchBranch(run, repo, e.branch);
+      await freshBranch(ctx, e, repo);
       const base = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, `origin/${e.branch}`, f)] as [string, string | null])));
-      const released = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')).map((r) => r.version);
+      const released = (await releasedOf(ctx, e)).map((r) => r.version);
       return { released, base: 'version' in base ? base.version : null };
     })());
   /** Why it waits, after its steps and, for a team PR, its version; and the version it sets. */
@@ -264,6 +265,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       continue;
     }
     merged.push(pr);
+    // Its branch has moved: from here on it is read afresh, not from the glance.
+    forgetGlance(ctx, e);
     ctx.log(`[${e.id}] merged #${pr.number} (${pr.head}${mine ? '' : `, ${pr.author}'s`}${notes.has(pr.number) ? `; ${notes.get(pr.number)}` : ''})`);
     // The Steward's own worktree and branch for it are done with.
     const repo = checkoutOf(e);
@@ -311,15 +314,14 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   return lines;
 }
 
+/** Each employee's merges, a few employees at a time (Settings' parallel), each one's PRs in order. */
 export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<(EmployeeResult & { merged: PrInfo[]; held: Held[] })[]> {
-  const out: (EmployeeResult & { merged: PrInfo[]; held: Held[] })[] = [];
-  for (const e of employees) {
+  return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      out.push(await mergeOne(ctx, e, o));
+      return await mergeOne(ctx, e, o);
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
-      out.push({ ...result(e, 'failed', (err as Error).message), merged: [], held: [] });
+      return { ...result(e, 'failed', (err as Error).message), merged: [], held: [] };
     }
-  }
-  return out;
+  });
 }
