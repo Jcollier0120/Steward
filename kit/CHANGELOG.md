@@ -2,6 +2,11 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.8.1
+
+**A JSON file's rename that Windows refuses for a moment is tried again.** store.ts's `writeJson` writes a temporary file and renames it over the old one, and Windows sometimes refuses that rename with EPERM, EACCES or EBUSY while an antivirus or the search indexer has the file open: about one rename in a thousand in %TEMP% or a scanned folder (the Wright measured it for the Miller, Miller#22, where it failed a test now and then and could fail a round part-way through a save). Now such a rename is tried again every 25 ms for up to half a second (`RENAME_TRIES`, 20); after that, or on any other error, the temporary file is removed and the error thrown, as before.
+- **Nothing for an agent to do.** An agent with a retry of its own (the Miller's `writeJsonFirmly`) can drop it for the kit's.
+
 ## 2.8.0
 
 **Every agent leaves its rounds' outcome in one file, the same way.** schedule.ts's `every()` writes `round.json` in the agent's data folder at the end of each round that runs (scheduled, or Run now), so the Surveyor reads one file per agent instead of guessing from each agent's own report.json, status.json or state.json. spec/ROUND.md is new, and says the shape for any reader:
