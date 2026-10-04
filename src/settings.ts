@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
@@ -106,7 +108,15 @@ const hire = (name: string): Employee => ({
 });
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, the Lamplighter and the Wright, built on
+ * The Wright is ours alone (Manor marks it internal): it isn't among the employees anyone else's Steward has. Where
+ * it is installed (%USERPROFILE%\.wright\app, or WRIGHT_HOME's app), and Settings name no employees of their own,
+ * the Steward takes it on, and reads its page for alarms.
+ */
+export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
+export const WRIGHT_URL = 'http://127.0.0.1:19797';
+
+/**
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor and the Lamplighter, built on
  * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
@@ -140,8 +150,10 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   },
   hire('Surveyor'),
   hire('Lamplighter'),
-  hire('Wright'),
 ];
+
+/** The employees when Settings name none: the defaults, and the Wright where it is installed. */
+export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee[] => (wrightInstalled(env) ? [...DEFAULT_EMPLOYEES, hire('Wright')] : DEFAULT_EMPLOYEES);
 
 /** The team: you, and Claude Code, which opens its PRs with your account. */
 export const DEFAULT_TEAM = ['Jcollier0120'];
@@ -155,7 +167,7 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: 'http://127.0.0.1:19797' },
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '' },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
 };
 
@@ -286,7 +298,8 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     problemHours: whole(a.problemHours, 1, 168, d.problemHours),
     manorUrl: url(a.manorUrl, d.manorUrl),
     surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
-    wrightUrl: url(a.wrightUrl, d.wrightUrl),
+    // Not named in settings.json: the Wright's page where it is installed, else none (it is ours alone).
+    wrightUrl: a.wrightUrl === undefined ? (wrightInstalled() ? WRIGHT_URL : '') : url(a.wrightUrl, d.wrightUrl),
   };
 }
 
@@ -306,7 +319,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
   const problems: string[] = [];
-  let employees = d.employees;
+  let employees = defaultEmployees();
   if (Array.isArray(r.employees)) {
     employees = r.employees.map(normalizeEmployee).filter((e): e is Employee => e !== null);
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);

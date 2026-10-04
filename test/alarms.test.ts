@@ -8,6 +8,8 @@ import { after, test } from 'node:test';
 // raised once with one toast, kept until it clears; dismissed until it clears and comes back.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-alarms-'));
 process.env.STEWARD_HOME = home;
+// The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
+process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
