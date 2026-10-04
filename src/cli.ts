@@ -117,6 +117,8 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
     kitFrom: opt(rest, '--kit-from') ?? null,
     yes: rest.includes('--yes'),
     team: rest.includes('--team'),
+    // A round asked for in a terminal looks at every employee, as Run now does.
+    ...(name === 'round' ? { full: true } : {}),
   };
   try {
     return printStage(await runStage(name, ask, { log: (line) => console.log(line) }));

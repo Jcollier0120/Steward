@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { withLock } from './fixture/src/kit/lock.ts';
 import {
   LockTimeout,
@@ -16,7 +16,10 @@ import {
 
 // The node part's turns on a real disk. The spec's vectors run in vectors.test.ts.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const scratch = () => path.join(mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-')), 'locks', 'npu');
+// Every test's lock folder is under one temporary folder, removed when the tests end.
+const root = mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-'));
+after(() => rmSync(root, { recursive: true, force: true }));
+const scratch = () => path.join(mkdtempSync(path.join(root, 't-')), 'locks', 'npu');
 
 /** Holds the lock the way any holder does (a live pid), so waiters line up behind it. */
 function hold(lockDir: string): () => void {

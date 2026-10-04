@@ -24,7 +24,11 @@ import { renderBody } from './view.ts';
 
 const ICON = readFileSync(new URL('../art/icon.svg', import.meta.url), 'utf8');
 
-/** The staff's table counts as stale after this long, and the page refreshes it in the background. */
+/**
+ * The staff's table counts as stale after this long, and the page refreshes it in the background: one glance at GitHub
+ * and each checkout's git. While the rounds run on duty they keep it current (each round's glance says whether
+ * anything changed), so then a page view asks GitHub nothing.
+ */
 const STALE_MS = 10 * 60_000;
 
 /** What a stage's POST asks: the ticked employees, the kit shown on the page. */
@@ -70,17 +74,23 @@ export async function serveSteward(o: { run?: Runner } = {}) {
   // The table on the first visit, and again when it's old; the page shows the last one meanwhile.
   const staleTable = () => {
     const s = loadStaff();
-    return !s || Date.now() - Date.parse(s.at) > STALE_MS;
+    return !s || Date.now() - Date.parse(s.checked ?? s.at) > STALE_MS;
   };
   if (staleTable()) void refresh();
+  /** Whether the rounds are keeping the table current: scheduled, on duty, and the last one not long ago. */
+  const roundsKeepIt = () => {
+    const last = rounds?.state?.lastRunAt;
+    return !!rounds && duty().onDuty && !!last && Date.now() - Date.parse(last) < 2 * loadSettings().roundMinutes * 60_000 + STALE_MS;
+  };
 
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
   // release what isn't. It passes while a stage runs here or in a terminal (the stage lock).
-  const roundJob = async () => {
+  const roundJob = async (full = false) => {
     if (running) return;
     running = { stage: 'round', since: new Date().toISOString() };
     try {
-      await runStage('round', {}, { run: o.run, log: (line) => console.log(`round: ${line}`) });
+      // A scheduled round looks only at what's new on GitHub; Run now looks at everyone.
+      await runStage('round', full ? { full } : {}, { run: o.run, log: (line) => console.log(`round: ${line}`) });
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
@@ -92,7 +102,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
   let rounds: ReturnType<typeof every> | null = null;
   const arrange = () => {
     const s = loadSettings();
-    if (s.byItself && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, roundJob, { name: 'round' });
+    if (s.byItself && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round' });
     else if (!s.byItself && rounds) {
       rounds.stop();
       rounds = null;
@@ -106,7 +116,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     ping: () => ({ busy: running !== null, stage: running?.stage ?? null }),
     get: {
       '/': ({ token }) => {
-        if (!running && staleTable()) void refresh();
+        if (!running && !roundsKeepIt() && staleTable()) void refresh();
         const s = loadSettings();
         const state = rounds?.state;
         const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null };
@@ -131,7 +141,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
       // A round now, as the schedule would run one (the button asks first), on duty or not.
       '/api/run': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
-        void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+        void roundJob(true).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true } };
       },
       '/api/alarms/dismiss': ({ body }) => {

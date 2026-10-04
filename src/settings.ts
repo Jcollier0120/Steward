@@ -4,6 +4,7 @@ import path from 'node:path';
 import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { dataFile, readJson } from './kit/store.ts';
+import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
 /** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
 export const PART_NAMES = ['node', 'web', 'spec', 'core', 'dotnet'];
@@ -62,6 +63,8 @@ export interface Settings {
   wrightReview: WrightReviewSettings;
   /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
   catchUp: boolean;
+  /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
+  afterRelease: string[];
 }
 
 export interface WrightReviewSettings {
@@ -157,6 +160,12 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
 /** The employees when Settings name none: the defaults, and the Wright where it is installed. */
 export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee[] => (wrightInstalled(env) ? [...DEFAULT_EMPLOYEES, hire('Wright')] : DEFAULT_EMPLOYEES);
 
+/**
+ * Told after a release: Manor's update check (so it installs the release within minutes, not at its next look hours
+ * away), and the Aletaster's Run now (so it tastes it). Each is its page's own button, POSTed with its page's token.
+ */
+export const DEFAULT_AFTER_RELEASE = ['http://127.0.0.1:18585/api/updates/check', 'http://127.0.0.1:19191/api/run'];
+
 /** The team: you, and Claude Code, which opens its PRs with your account. */
 export const DEFAULT_TEAM = ['Jcollier0120'];
 
@@ -172,6 +181,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '' },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
+  afterRelease: DEFAULT_AFTER_RELEASE,
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -237,7 +247,15 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Catches PRs up with their branch',
     help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict waits for you.",
   },
-  { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty.' },
+  { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
+  {
+    key: 'afterRelease',
+    kind: 'list',
+    label: 'Told after a release',
+    help: "Pages on this PC that hear when a stage or a round has released something: each address is POSTed as its page's own button would be. Manor's update check, so it installs the release within minutes rather than at its next look; the Aletaster's Run now, so it tastes it. One that doesn't answer is only logged.",
+    item: { label: 'Address', maxLength: 200, pattern: 'http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/[A-Za-z0-9/_.-]*', patternHint: 'a local address with its path, like http://127.0.0.1:18585/api/updates/check' },
+    maxItems: 10,
+  },
   {
     key: 'alarms',
     kind: 'group',
@@ -348,6 +366,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
+      afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
     },
     problems,
   };

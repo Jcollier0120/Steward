@@ -1,5 +1,8 @@
 import path from 'node:path';
 import { expandEnv } from '../kit/settings-kit.ts';
+import { commitOf, fetchBranch, gh } from '../git.ts';
+import type { Glance, RepoGlance } from '../glance.ts';
+import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
 import type { Runner } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -43,6 +46,38 @@ export interface Ctx {
   log: (line: string) => void;
   /** Where gh runs from: no employee's repo, so --repo alone decides. */
   neutralDir: string;
+  /**
+   * GitHub at a glance (glance.ts), taken as the stage began: each employee's open PRs, releases and branch head, read
+   * from here instead of asked for one by one. Null when GitHub couldn't be asked that way. An employee left out of it,
+   * or dropped once the Steward changed its repository (a merge), is asked for one by one, as before.
+   */
+  glance?: Glance | null;
+}
+
+/** An employee's repository from the stage's glance at GitHub, while it still says how things are. */
+export const glanceOf = (ctx: Ctx, e: Employee): RepoGlance | null => ctx.glance?.repos[e.id] ?? null;
+
+/** Once the Steward has changed an employee's repository (a merge), the glance no longer says how it is. */
+export const forgetGlance = (ctx: Ctx, e: Employee) => {
+  if (ctx.glance) delete ctx.glance.repos[e.id];
+};
+
+/** An employee's released versions: from the glance while it says how things are, else asked of GitHub. */
+export async function releasedOf(ctx: Ctx, e: Employee): Promise<ReleaseInfo[]> {
+  const g = glanceOf(ctx, e);
+  return appReleasesIn(g ? JSON.stringify(g.releases) : await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'));
+}
+
+/**
+ * origin/<branch> fresh in the employee's checkout, and its commit: fetched, unless the glance says GitHub's branch is
+ * at the commit the checkout already has (then there's nothing to fetch).
+ */
+export async function freshBranch(ctx: Ctx, e: Employee, repo: string): Promise<string | null> {
+  const head = glanceOf(ctx, e)?.head;
+  const remote = `origin/${e.branch}`;
+  if (head && (await commitOf(ctx.run, repo, remote)) === head) return head;
+  await fetchBranch(ctx.run, repo, e.branch);
+  return commitOf(ctx.run, repo, remote);
 }
 
 /** The employees a stage is asked about: all, or those named (by id, ignoring case). Unknown names are an error. */

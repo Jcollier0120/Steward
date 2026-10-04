@@ -3,9 +3,10 @@ import { readAfter, type After } from '../after.ts';
 import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
+import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import type { Employee } from '../settings.ts';
-import { bumpBranch, checkoutOf, NOT_ON_KIT, type Ctx } from './common.ts';
+import { bumpBranch, checkoutOf, glanceOf, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
@@ -83,7 +84,12 @@ export interface StaffRow {
 }
 
 export interface Staff {
+  /** When the table was made. */
   at: string;
+  /** When GitHub was last seen to say nothing new for it (a round's glance), or when it was made. */
+  checked?: string;
+  /** What GitHub said of each employee's repository when the table was made (glance.ts's repoSig), by id. */
+  seen?: Record<string, string>;
   /** The kit the Steward hands out (the newest release, or this checkout's). */
   kit: string | null;
   kitNote: string | null;
@@ -197,19 +203,24 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   };
   if (!e.usesKit) notes.push(NOT_ON_KIT);
   const remote = `origin/${e.branch}`;
+  // GitHub's side, from the glance when there is one (glance.ts): its PRs, its releases, the commit each release tags.
+  const g = glanceOf(ctx, e);
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
     row.checkout.branch = (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim() || '(detached)';
     row.checkout.changes = ((await gitMaybe(run, dir, '--no-optional-locks', 'status', '--porcelain')) ?? '').split('\n').filter((l) => l.trim()).length;
-    if (opts.fetch) {
+    // Fetched, unless the glance at GitHub says the checkout has its branch's head already.
+    let commit = g?.head ? await commitOf(run, dir, remote) : null;
+    if (opts.fetch && (!g?.head || commit !== g.head)) {
       try {
         await fetchBranch(run, dir, e.branch);
       } catch (err) {
         notes.push(`couldn't fetch ${remote}: ${(err as Error).message}`);
       }
+      commit = null;
     }
-    const commit = await commitOf(run, dir, remote);
+    commit ??= await commitOf(run, dir, remote);
     if (!commit) return void notes.push(`no ${remote} in ${dir}`);
     const texts = await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, dir, remote, f)] as [string, string | null]));
     const v = agreedVersion(texts);
@@ -234,11 +245,11 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
   })().catch((err) => void notes.push((err as Error).message));
 
-  const prs = gh(run, ctx.neutralDir, ...prListArgs(e.repo))
+  const prs = (g ? Promise.resolve(JSON.stringify(g.prs)) : gh(run, ctx.neutralDir, ...prListArgs(e.repo)))
     .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
     .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
 
-  const releases = gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt')
+  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))
     .then((out) => appReleasesIn(out))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
@@ -253,7 +264,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       // The kit a release carries: kit.json at the commit it was built from.
       let kit: string | null | 'unknown' = 'unknown';
       try {
-        const target = JSON.parse(await gh(run, ctx.neutralDir, 'release', 'view', latest.tag, '--repo', e.repo, '--json', 'targetCommitish')).targetCommitish as string;
+        const tagged = g?.releases.find((r) => r.tagName === latest.tag)?.commit;
+        const target = tagged ?? (JSON.parse(await gh(run, ctx.neutralDir, 'release', 'view', latest.tag, '--repo', e.repo, '--json', 'targetCommitish')).targetCommitish as string);
         if (row.checkout.exists && /^[0-9a-f]{40}$/i.test(target ?? '') && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
       } catch {
         // unknown
@@ -265,10 +277,10 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   return row;
 }
 
-/** Every employee's row, a few at a time. */
+/** Every employee's row, a few at a time; with what GitHub said of each (glance.ts's repoSig), so a round can tell when the table is out of date. */
 export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null }): Promise<Staff> {
-  const rows: StaffRow[] = [];
-  const all = ctx.settings.employees;
-  for (let i = 0; i < all.length; i += 5) rows.push(...(await Promise.all(all.slice(i, i + 5).map((e) => staffRow(ctx, e, opts)))));
-  return { at: new Date().toISOString(), kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows };
+  const rows = await mapLimit(ctx.settings.employees, 5, (e) => staffRow(ctx, e, opts));
+  const at = new Date().toISOString();
+  const seen = ctx.glance ? Object.fromEntries(Object.entries(ctx.glance.repos).map(([id, g]) => [id, repoSig(g)])) : undefined;
+  return { at, checked: at, kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows, ...(seen ? { seen } : {}) };
 }

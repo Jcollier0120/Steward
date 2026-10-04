@@ -1,26 +1,30 @@
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { watchAlarms, type Held } from './alarms.ts';
-import { dataDir } from './app.ts';
-import { kitInfo, chooseKit, localChangelog, stewardTool, type KitInfo } from './kitsource.ts';
+import { appRoot, dataDir } from './app.ts';
+import { repoSig, takeGlance, type Glance } from './glance.ts';
+import { kitInfo, kitInfoFrom, chooseKit, localChangelog, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { loadSettings, type Employee, type Settings } from './settings.ts';
 import { bump } from './stages/bump.ts';
-import { pick, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
+import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
+import { pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
-import { staff, type Staff } from './stages/staff.ts';
+import { readPin, staff, type Staff } from './stages/staff.ts';
+import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
  * folder), each recorded in last-stage.json and appended to stages.log, and the staff's table refreshed
- * after each.
+ * after each. Each stage begins with one glance at GitHub (glance.ts) for every employee at once.
  */
 
 export interface StageAsk {
@@ -34,21 +38,38 @@ export interface StageAsk {
   yes?: boolean;
   /** merge: the team's PRs too, not only the Steward's. */
   team?: boolean;
+  /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
+  full?: boolean;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
 export const staffFile = () => dataFile('staff.json');
 const stageLock = () => dataFile('locks', 'stage');
+const kitsPrunedFile = () => dataFile('kits-pruned.json');
 
 export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(), null);
 export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
 
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void } = {}): Promise<Ctx> {
+/** One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way. */
+export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}): Promise<Glance | null> {
+  try {
+    const g = await takeGlance(run, dataDir, settings);
+    for (const [id, why] of Object.entries(g.errors)) log(`[${id}] GitHub said nothing of ${settings.employees.find((e) => e.id === id)?.repo ?? id} at a glance (${why}): it is asked on its own`);
+    return g;
+  } catch (e) {
+    log(`couldn't ask GitHub about everyone at once (${(e as Error).message}): each is asked on its own`);
+    return null;
+  }
+}
+
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean } = {}): Promise<Ctx> {
   const settings = o.settings ?? loadSettings();
   const run = o.run ?? realRun;
+  const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
-  const kit = await kitInfo(run, dataDir, settings.stewardRepo);
-  return { settings, run, kit, log: o.log ?? (() => {}), neutralDir: dataDir };
+  const glance = o.glance === false ? null : await tryGlance(run, settings, log);
+  const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(run, dataDir, settings.stewardRepo);
+  return { settings, run, kit, log, neutralDir: dataDir, glance };
 }
 
 /** The kit's changelog for a PR's body: this checkout's, or the kit release's notes. */
@@ -63,16 +84,63 @@ async function changelogFor(ctx: Ctx, kit: string): Promise<string | null> {
   }
 }
 
-/** The staff's table, refreshed and kept in staff.json. */
-export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean } = {}): Promise<Staff> {
-  const chosen = chooseKit(ctx.kit);
-  const s = await staff(ctx, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool() });
+/** A result that says a release was made (a release stage's, a round's, or a merged PR's step). */
+export const releasedSomething = (r: EmployeeResult) => r.outcome === 'done' && /(^|: )released v\d/.test(r.message);
+
+/**
+ * The staff's table, refreshed and kept in staff.json: GitHub's side from `glance` (default: the stage's, ctx.glance),
+ * else asked employee by employee; each checkout's side from git, fetching only a branch that has moved.
+ */
+export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glance | null } = {}): Promise<Staff> {
+  const c = o.glance === undefined ? ctx : { ...ctx, glance: o.glance };
+  const chosen = chooseKit(c.kit);
+  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool() });
   writeJson(staffFile(), s);
+  try {
+    pruneKitsNow(s, c.kit);
+  } catch (e) {
+    c.log(`couldn't tidy the kits folder: ${(e as Error).message}`);
+  }
   return s;
 }
 
+/**
+ * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
+ * still right, and is only marked as checked; true then. False when it needs making again.
+ */
+export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
+  const s = loadStaff();
+  if (!s?.seen || s.rows.length !== employees.length) return false;
+  for (const e of employees) {
+    const g = glance.repos[e.id];
+    if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;
+  }
+  writeJson(staffFile(), { ...s, checked: now.toISOString() });
+  return true;
+}
+
+/**
+ * The kits folder (tools/kit.ts's downloads, for every agent here), once a day: the versions no employee's branch or
+ * release pins, nor the Steward's own kit.json, beyond the newest few, let go (upkeep.ts). Never the live folder under
+ * node --test.
+ */
+function pruneKitsNow(s: Staff, kit: KitInfo): void {
+  if (process.env.NODE_TEST_CONTEXT && !process.env.STEWARD_KITS) return;
+  const last = Date.parse(readJson<{ at?: string }>(kitsPrunedFile(), {}).at ?? '') || 0;
+  if (Date.now() - last < 24 * 3600_000) return;
+  let own: string | null = null;
+  try {
+    own = readPin(readFileSync(path.join(appRoot, 'kit.json'), 'utf8'))?.kit ?? null;
+  } catch {
+    // An installed Steward without kit.json: its kit is in src\kit.
+  }
+  const pinned = [own, kit.released[0], ...s.rows.flatMap((r) => [r.main?.kit, typeof r.release?.kit === 'string' && r.release.kit !== 'unknown' ? r.release.kit : null])];
+  const removed = pruneKits(kitsDir(), pinned);
+  writeJson(kitsPrunedFile(), { at: new Date().toISOString(), removed });
+}
+
 /** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
-export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo; alarms?: Parameters<typeof watchAlarms>[1] } = {}): Promise<StageResult> {
+export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: { run?: Runner; log?: (line: string) => void; kitInfo?: KitInfo; alarms?: Parameters<typeof watchAlarms>[1]; tell?: Poke; now?: () => Date } = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
     lines.push(line);
@@ -86,6 +154,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
       let held: { employee: Employee; prs: Held[] }[] = [];
+      // A round looks only at the employees with something new on GitHub since the last (stages/changes.ts).
+      const seen = name === 'round' ? loadSeen() : null;
+      let plan: RoundPlan | null = null;
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -93,12 +164,20 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
-          const merged = await merge(ctx, picked.employees, { yes, team: round || !!ask.team });
+          let employees = picked.employees;
+          if (round) {
+            plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.() });
+            employees = plan.look;
+            if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
+          }
+          const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
           out.results = merged.map(({ merged: _m, held: _h, ...r }) => r);
           held = merged.flatMap((r) => {
-            const employee = picked.employees.find((e) => e.id === r.id);
+            const employee = employees.find((e) => e.id === r.id);
             return employee && r.held.length ? [{ employee, prs: r.held }] : [];
           });
+          // Those not looked at still have the PRs that waited when they last were: the alarms go on counting their hours.
+          if (plan) held.push(...heldBefore(seen!, plan.quiet));
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
@@ -116,7 +195,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           if (round) {
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
-            const released = await releaseUnreleased(ctx, picked.employees.filter((e) => !releasedNow.has(e.id)));
+            const released = await releaseUnreleased(ctx, employees.filter((e) => !releasedNow.has(e.id)));
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
             // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
             for (const e of picked.employees) {
@@ -129,6 +208,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               }
               if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
             }
+            if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', 'nothing new on GitHub since the last round')));
           }
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
@@ -157,12 +237,33 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           log(`alarms: ${(e as Error).message}`);
         }
       }
-      // A round with nothing done or failed leaves no trace: the last stage stays what last happened.
-      if (name === 'round' && !roundDidSomething(out.results, out.error)) return out;
+      // What the next round needs to tell what's new.
+      if (plan && seen) {
+        try {
+          saveSeen(afterRound(seen, { plan, results: out.results, held, error: out.error, now: o.now?.() }));
+        } catch (e) {
+          log(`couldn't keep what this round saw: ${(e as Error).message}`);
+        }
+      }
+      // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
+      if (out.results.some(releasedSomething)) await tellAfterRelease(ctx.settings.afterRelease, log, o.tell);
+      // A round with nothing done or failed leaves no trace: the last stage stays what last happened. The staff's table
+      // is made again only when GitHub says something new of anyone, from this round's glance.
+      if (name === 'round' && !roundDidSomething(out.results, out.error)) {
+        if (ctx.glance && !out.error) {
+          try {
+            if (!markStaffChecked(ctx.glance, ctx.settings.employees)) await refreshStaff(ctx, { fetch: true });
+          } catch (e) {
+            log(`couldn't refresh the staff's table: ${(e as Error).message}`);
+          }
+        }
+        return out;
+      }
       writeJson(lastStageFile(), out);
-      appendFileSync(dataFile('stages.log'), `${JSON.stringify({ ...out, log: undefined })}\n`);
+      appendRotating(dataFile('stages.log'), `${JSON.stringify({ ...out, log: undefined })}\n`);
       try {
-        await refreshStaff(ctx, { fetch: true });
+        // The stage changed things on GitHub: a fresh glance for the table.
+        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings) });
       } catch (e) {
         log(`couldn't refresh the staff's table: ${(e as Error).message}`);
       }
