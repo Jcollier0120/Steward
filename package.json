@@ -1,8 +1,8 @@
 {
   "name": "steward",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "private": true,
-  "license": "MIT",
+  "license": "UNLICENSED",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
   "type": "module",
   "bin": {
