@@ -17,7 +17,7 @@ The kit lives in `kit\`, versioned by `kit\VERSION` (2.0.0) with `kit\CHANGELOG.
 | Part | In the kit | In a Node agent | What |
 |---|---|---|---|
 | `core` | `kit\core\` | `src\kit\core\` | Every rule the agents share, written once ([below](#one-core-two-drivers)): plain JavaScript (ES2022 modules, typed with JSDoc, a `.d.ts` beside each), with no I/O. node and dotnet bring it. |
-| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerator-config.ts, accelerators.ts, agent-checks.ts, detect.ts, duty.ts, gpu-load.ps1, install.ts, keeper.ts, lock.ts, look.ts, manor.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, rules.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, setup.ts, store.ts, themes.ts, work.ts. keeper.ts, setup.ts, detect.ts and accelerator-config.ts keep the model servers and own config.json's accelerators: the Smith runs them, and Reeve where there is no Smith. The queue, the lock and the accelerators are the core's rules, carried out with Node's fs and timers. page.ts draws every agent's page in Heiward's look (the manor's themes: Windows 11's Light and Dark and six colour themes, the manor's own when Manor is installed; a title bar with a status pill), and look.ts gives each agent its own colour and a small scene in its title bar that moves while a round runs. |
+| `node` | `kit\node\` | `src\kit\` | The TypeScript modules: accelerator-config.ts, accelerators.ts, agent-checks.ts, detect.ts, duty.ts, gpu-load.ps1, install.ts, keeper.ts, lock.ts, look.ts, manor.ts, npu-queue.ts, npu.ts, page.ts, ps.ts, release.ts, rules.ts, schedule.ts, server.ts, service.ts, settings-kit.ts, setup.ts, store.ts, themes.ts, work.ts. keeper.ts, setup.ts, detect.ts and accelerator-config.ts keep the model servers and own config.json's accelerators: the Smith runs them, and Reeve where there is no Smith. The queue, the lock and the accelerators are the core's rules, carried out with Node's fs and timers. page.ts draws every agent's page in Heiward's look (the manor's themes: Windows 11's Light and Dark and six colour themes, the manor's own when Manor is installed; a title bar with a status pill, which stays at the top as the page scrolls), and look.ts gives each agent its own colour and a small scene in its title bar that moves while a round runs. |
 | `web` | `kit\web\` | `src\kit\web\` | Browser files any agent's page can use, whatever its server: settings-panel.js and settings-panel.css, and the manor's themes, themes.css (every theme's colours) and themes.json (the list the Theme menus show), which page.ts puts in every kit page and Manor carries a copy of. A page includes them as plain files; the panel needs an element with `data-settings-panel`, a `<meta name="page-token">`, and `GET`/`POST /api/settings` on its own origin. |
 | `spec` | `kit\spec\` | `src\kit\spec\` | The language-neutral rules: [NPU-QUEUE.md](kit/spec/NPU-QUEUE.md) (was Reeve's), [ACCELERATORS.md](kit/spec/ACCELERATORS.md) (was Manor's), [ROUND.md](kit/spec/ROUND.md) (round.json, each round's outcome), rules.json (the timings and limits, as data, which the core takes), and the vectors every implementation runs: npu-queue-vectors.json (the queue), turn-vectors.json (a turn, step by step) and accelerator-vectors.json. This is now their home. The core brings it. |
 | `dotnet` | `kit\dotnet\` | (a .NET agent: `kit\dotnet\`) | C# source a .NET project compiles by importing `Steward.Kit.props`: the core run in Jint, and its turns, locks and failure markers carried out with .NET and Win32. Heiward's. |
@@ -349,16 +349,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 
 ## Manor entry
 
-```json
-{ "id": "steward", "name": "Steward", "role": "Keeps the essentials every agent shares, and brings each update to all of them at once",
-  "description": "Keeps the kit the agents share in one place, and rolls each kit version out to every employee: a bump, its PR, the merge and the release, each one stage, reported per employee.",
-  "fills": ["steward"], "app": "steward",
-  "home": "http://steward.localhost:19494/", "ping": "http://127.0.0.1:19494/api/ping",
-  "icon": "%USERPROFILE%\\.steward\\app\\art\\icon.svg",
-  "paths": { "app": ["%USERPROFILE%\\.steward\\app"], "node": ["C:\\tools\\node-v22.23.3-win-arm64\\node.exe", "%ProgramFiles%\\nodejs\\node.exe"] },
-  "cwd": "{app}",
-  "commands": { "start": ["{node}", "{app}\\src\\cli.ts", "start"], "stop": ["{node}", "{app}\\src\\cli.ts", "stop"], "status": ["{node}", "{app}\\src\\cli.ts", "status", "--json"], "open": ["{node}", "{app}\\src\\cli.ts", "open"] } }
-```
+[manor-agent.json](manor-agent.json) is its entry, as Manor's staff.json has it, and its role, as Manor's roles.json has it. Every release publishes it beside the zip, listed in SHA256SUMS.txt (the kit's release.ts, from kit 2.12.0), so a Manor that finds it on GitHub offers Hire on the Steward's card (Manor's "New agents, announced on GitHub"). The release refuses to build when its `release.repo` isn't this repository or its id isn't `steward`. Keep it the same as Manor's staff.json entry.
 
 It points at the installed copy (see Install). Its role in Manor's roles is `steward`.
 
