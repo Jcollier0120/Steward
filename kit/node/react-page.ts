@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { APP, appRoot, dataDir } from '../app.ts';
 import { duty } from './duty.ts';
 import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
+import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
 import { ago, CSS, esc, lookCss, pillOf } from './page.ts';
 import { roundTimes } from './schedule.ts';
@@ -59,10 +61,20 @@ export interface PageShell {
   /** "Where its work runs" (work.ts), the kit's own markup, for the Settings view. */
   work: string;
   dataDir: string;
+  /** Its onboarding (onboarding.ts), drawn as the page's tour at #/tour; null for none. */
+  onboarding: Onboarding | null;
 }
 
+/**
+ * The agent's onboarding (onboarding.ts), from its src/onboarding.ts's ONBOARDING when it has one, read once as it
+ * starts: src/onboarding.js in a release, which is built. An agent adds the file and nothing else; agent-checks.ts checks
+ * it, and pageShell() puts it in the shell, unless a caller passes its own.
+ */
+const ONBOARDING_FILE = ['ts', 'js'].map((x) => path.join(appRoot, 'src', `onboarding.${x}`)).find((f) => existsSync(f));
+const AGENT_ONBOARDING: Onboarding | null = ONBOARDING_FILE ? ((await import(pathToFileURL(ONBOARDING_FILE).href)) as { ONBOARDING?: Onboarding }).ONBOARDING ?? null : null;
+
 /** The frame's data now. `nextAt` as page()'s: left out, the kit's own schedule's. */
-export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: number; nextAt?: number | string | null } = {}): PageShell {
+export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: number; nextAt?: number | string | null; onboarding?: Onboarding | null } = {}): PageShell {
   const look = lookFor(APP.id);
   const d = duty();
   const m = manorLink();
@@ -79,6 +91,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     themeKey: `${APP.id}:theme`,
     work: workSection(),
     dataDir,
+    onboarding: o.onboarding === undefined ? AGENT_ONBOARDING : o.onboarding,
   };
 }
 

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.10.2
+
+**Kit 2.23.0: the Steward's Settings are a React form, and shorter to read** (kit/CHANGELOG.md).
+
+### What changed
+
+- Settings looks as it did, field for field; its groups (Alarms, and the others) are sections you open, with links to each at the top, so the page is no longer one long column.
+- A new hire's tour of its page (#/tour) is the kit's, for the agents whose onboarding is written.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.10.1
 
 **Kit 2.22.0: the page's components are GamerNexus's UI kit, in the manor's look** (kit/CHANGELOG.md).

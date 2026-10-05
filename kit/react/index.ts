@@ -21,7 +21,11 @@ export { BUSY_LOOK_MS, initialData, pageToken, PING_LOOK_MS, post, roundState, u
 export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
 export { ago, useNow } from './time.ts';
 export { Icon, Spinner, type IconName } from './icons.tsx';
-export { Badge, Button, Card, CardFooter, DetailRow, IconButton, Notes, PostButton, ReloadProvider, Section, Text, type BadgeTone, type ButtonProps, type ButtonSize, type ButtonVariant, type TextVariant } from './ui.tsx';
+export { Badge, Button, Card, CardFooter, DetailRow, IconButton, LinkButton, Notes, PostButton, ReloadProvider, Section, Text, type BadgeTone, type ButtonProps, type ButtonSize, type ButtonVariant, type TextVariant } from './ui.tsx';
 export { ChoiceGroup, Input, SaveStatus, Segmented, Select, Switch, type ChoiceLayout, type ChoiceOption, type ChoiceValue, type SegmentedOption, type SelectOption } from './forms.tsx';
 export { EmptyNote, ErrorNote, Loading, ModalCard, QueryView, Toast, type QueryLike } from './feedback.tsx';
 export { UI_CSS } from './styles.ts';
+export { SettingsForm } from './settings-form.tsx';
+export { blank, canon, same, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
+export { Tour } from './tour.tsx';
+export type { Onboarding } from './page-data.ts';

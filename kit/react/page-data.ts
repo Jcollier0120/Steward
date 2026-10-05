@@ -28,6 +28,15 @@ export interface PageShell {
   themeKey: string;
   work: string;
   dataDir: string;
+  /** Its onboarding, drawn as the page's tour at #/tour (tour.tsx); null for none. */
+  onboarding: Onboarding | null;
+}
+
+/** An agent's onboarding, as the node part's onboarding.ts has it: three steps, intro, settings and a tour. */
+export interface Onboarding {
+  intro: { title: string; text: string };
+  settings: string[];
+  tour: { tour: string; title?: string; text: string }[];
 }
 
 export interface PageData<Body> {

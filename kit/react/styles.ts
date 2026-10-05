@@ -66,6 +66,9 @@ button.ui-dimmed { opacity: .5; }
 .ui-switch:checked { background: var(--accent); border-color: var(--accent); }
 .ui-switch:checked::before { transform: translateX(14px); background: var(--accent-fg); }
 .ui-switch:disabled { opacity: .5; cursor: default; }
+/* The Settings panel's stylesheet sizes every checkbox in it (web/settings-panel.css): a switch keeps its own size. */
+.sf-panel input.ui-switch { width: 34px; height: 20px; accent-color: auto; }
+.sf-panel .sf-switch input.ui-switch { margin-top: 0; }
 
 .ui-choices { display: flex; gap: 6px; }
 .ui-choices.ui-row > .ui-choice { flex: 1; }
@@ -94,4 +97,28 @@ button.ui-choice:hover:not(:disabled) { background: var(--hover); filter: none; 
 .ui-toast > span { padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); box-shadow: var(--shadow); }
 .ui-modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .45); }
 .ui-modal-card { width: min(560px, 100%); overflow: auto; padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); outline: none; }
+/* The Settings form (settings-form.tsx): sections, jump links and Advanced, beside settings-panel.css's own. */
+.sf-jump { position: sticky; top: var(--titlebar-h, 0); z-index: 5; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 0; margin-bottom: 4px; background: var(--card); border-bottom: 1px solid var(--line); }
+.sf-panel .sf-jump button.link { text-decoration: none; font-weight: 600; }
+details.sf-section { padding: 0; }
+details.sf-section > summary { padding: 12px 0; font-weight: 600; cursor: pointer; scroll-margin-top: calc(var(--titlebar-h, 0px) + 48px); }
+details.sf-section[open] > summary { margin-bottom: 0; }
+details.sf-section > .sf-help, details.sf-section > div, details.sf-section > .sf-meta { margin-left: 16px; }
+details.sf-section[open] { padding-bottom: 10px; }
+.sf.is-changed > summary .sf-changed { display: inline-block; }
+details.sf-advanced { margin: 12px 0 0; border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
+details.sf-advanced > summary { color: var(--muted); font-weight: 600; cursor: pointer; }
+details.sf-advanced[open] > summary { margin-bottom: 4px; }
+
+/* The tour (tour.tsx): a card in the middle for its first steps, docked at the bottom while it walks the page. */
+.tour-backdrop { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .45); }
+.tour-card { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.tour-card p { margin: 0; }
+.tour-center { width: min(520px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
+.tour-center.tour-wide { width: min(760px, 100%); }
+.tour-dock { position: fixed; right: 20px; bottom: 20px; z-index: 80; width: min(420px, calc(100vw - 40px)); }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.tour-actions .sf-spacer { flex: 1; }
+.tour-card .sf-panel { margin: 4px 0 0; }
+.tour-target { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 8px; position: relative; z-index: 79; }
 `;
