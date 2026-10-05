@@ -1,7 +1,0 @@
-{
-  "//": "The project tools/ui-inventory.ts parses: the Steward's src and the kit's node and web parts (settings-panel.js too). src/kit is a copy of kit, filled by tools/kit.ts.",
-  "extends": "../tsconfig.json",
-  "compilerOptions": { "allowJs": true, "checkJs": false, "jsx": "preserve" },
-  "include": ["../src", "../kit/node", "../kit/web"],
-  "exclude": ["../src/kit"]
-}

@@ -4,15 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.9.3
 
-**A UI inventory, and kit 2.20.0: the page's badge, muted text and card, written once** (kit/CHANGELOG.md).
+**A UI inventory: which components are too big, and which markup is written out again and again, in any agent's page.**
 
 ### What's new
 
-- `npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's): every component of the Steward's page and the kit's, how big each is, which renders which, and the markup written out by hand more than once. It writes docs/UI-INVENTORY.md and docs/UI-INVENTORY.html, a page to open from disk; `--tree` prints the render tree, `--ci` fails on a component past its size ceiling.
-
-### What changed
-
-- The Steward's page uses the kit's new `badge`, `muted` and `card` in place of its own copies. It looks the same.
+- `npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's): every component of a page, how big each is, which renders which, and the markup written out by hand more than once. It reads the Steward and its kit, or any agent's repository or Manor's with `-- --repo <folder>`, in template strings or JSX alike, for the move of every page to React. It writes docs/UI-INVENTORY.md (or UI-INVENTORY-<repository>.md) and a sortable page beside it to open from disk; `--tree` prints the render tree, `--ci` fails on a component past its size ceiling.
 
 ### Before you update
 

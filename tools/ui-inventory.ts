@@ -1,20 +1,21 @@
 /**
- * What the Steward's page is actually made of: every component, how big it is, who renders it, and where
- * the same markup has been written out more than once. Ported from GamerNexus's apps/mobile
- * scripts/ui-inventory.ts, which asks the same questions of a React Native app.
+ * What a page is actually made of: every component, how big it is, who renders it, and where the same
+ * markup has been written out more than once. Ported from GamerNexus's apps/mobile scripts/ui-inventory.ts,
+ * which asks the same questions of a React Native app.
  *
- *   npm run ui:inventory               write docs/UI-INVENTORY.md and .html, print the summary
- *   npm run ui:inventory -- --check    fail if docs/UI-INVENTORY.md is out of date
- *   npm run ui:inventory -- --strict   exit non-zero if anything crosses a threshold below
- *   npm run ui:inventory -- --ci       the gate: the two thresholds that are RULES, not prompts
- *   npm run ui:inventory -- --tree     print the render tree and write nothing
+ *   npm run ui:inventory                       the Steward and its kit: docs/UI-INVENTORY.md and .html
+ *   npm run ui:inventory -- --repo <folder>    any agent's repository, or Manor's: docs/UI-INVENTORY-<name>.*
+ *   npm run ui:inventory -- --check            fail if the report is out of date
+ *   npm run ui:inventory -- --strict           exit non-zero if anything crosses a threshold below
+ *   npm run ui:inventory -- --ci               the gate: the size ceilings, which are RULES, not prompts
+ *   npm run ui:inventory -- --tree             print the render tree and write nothing
  *
- * WHAT A COMPONENT IS HERE. The agents' pages are not React: the kit's page.ts draws the shell, and each
- * agent's body is HTML written in template strings (src/view.ts), with the Settings panel built in the
- * browser by settings-panel.js's h(). So a component is a named function whose body writes markup (a
- * string or template holding a tag, an h('tag', …) call, or JSX, which Reeve's dashboard has); it
- * "renders" the components it calls; and an element is a tag with its classes, written `span.badge.ok`.
- * A ${…} inside a tag or a class is written `…`: decided at run time.
+ * WHAT A COMPONENT IS HERE. The agents' pages are being moved to React; until they are, the kit's page.ts draws
+ * the shell, each agent's body is HTML written in template strings (src/view.ts), and settings-panel.js builds
+ * the Settings panel with h(). So a component is a named function whose body writes markup: JSX, a string or
+ * template holding a tag, or an h('tag', …) call. It "renders" the components it calls or puts in its JSX, and
+ * an element is a tag with its classes, written `span.badge.ok`. A ${…} or {…} inside a tag or a class is
+ * written `…`: decided at run time.
  *
  * WHY. The duplication that costs is invisible while it is small: a muted line, a list of notes, a pill,
  * written out by hand in one place, then copied, then copied slightly wrong. This makes it countable:
@@ -34,7 +35,8 @@
  * component?"), not a defect. `--ci` enforces only the size ceilings, set well clear of the advisory sizes,
  * so it fires when a function has stopped being one component and stays quiet otherwise.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { API } from 'typescript/unstable/sync';
@@ -62,19 +64,36 @@ import {
 }from 'typescript/unstable/ast';
 import { buildHtml } from './ui-inventory-html.ts';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'docs', 'UI-INVENTORY.md');
-/** The browsable view. Generated, git-ignored, opened from disk. */
-const HTML_OUT = path.join(ROOT, 'docs', 'UI-INVENTORY.html');
-/** The project the parser opens: src, the kit's node and web parts (JavaScript too), and nothing generated. */
-const TSCONFIG = path.join(ROOT, 'tools', 'ui-inventory.tsconfig.json');
+const argv = process.argv.slice(2);
+/** This Steward checkout: where the report is written, whichever repository it reads. */
+const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Where the UI lives: the Steward's own code, and the kit it hands out. src\kit\ is left out: it is a copy
- * of kit\ (tools/kit.ts fills it), and would count every kit component twice.
+ * The repository read: this one, or `--repo <folder>`, any agent's or Manor's. Every agent's page and Manor's are
+ * moving to React, so the same questions are asked of each, in JSX or template strings alike.
  */
-const ROOTS = ['src', 'kit/node', 'kit/web'];
-const SKIP = new Set(['src/kit']);
+const repoArg = argv.includes('--repo') ? argv[argv.indexOf('--repo') + 1] : undefined;
+if (argv.includes('--repo') && (!repoArg || !existsSync(repoArg))) {
+  console.error(`--repo needs a folder that exists${repoArg ? `: ${repoArg} doesn't` : ''}.`);
+  process.exit(2);
+}
+const ROOT = repoArg ? path.resolve(repoArg) : STEWARD;
+const SELF = ROOT === STEWARD;
+const NAME = path.basename(ROOT);
+/** Another repository's report is the Steward's to keep: docs\UI-INVENTORY-<name>.md, never written into that repository. */
+const OUT = path.join(STEWARD, 'docs', SELF ? 'UI-INVENTORY.md' : `UI-INVENTORY-${NAME}.md`);
+/** The browsable view. Generated, git-ignored, opened from disk. */
+const HTML_OUT = OUT.replace(/\.md$/, '.html');
+
+/**
+ * Where the UI lives. Here: the Steward's own code and the kit it hands out. Elsewhere: the whole repository. Either
+ * way src\kit\ is left out: it is a copy of the Steward's kit\ (tools/kit.ts fills it), and would count the kit's
+ * components again in every agent; and so are tests, builds and what the package manager installs.
+ */
+const ROOTS = SELF ? ['src', 'kit/node', 'kit/web'] : ['.'];
+// art\ and scripts\ hold build-time tools (Manor's banners are SVG drawn by a script), not a page.
+const SKIP = new Set(['src/kit', 'kit', 'test', 'tests', '__tests__', 'dist', 'build', 'out', 'artifacts', 'coverage', 'docs', 'tools', 'art', 'scripts']);
+const SKIP_NAMES = new Set(['node_modules', 'dist', 'build', 'coverage']);
 
 /**
  * Thresholds. Deliberately generous: a report that cries about everything gets ignored.
@@ -146,9 +165,9 @@ function walkFiles(dir: string, out: string[] = []): string[] {
   if (!existsSync(dir)) return out;
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
-    if (entry.startsWith('.') || entry === 'node_modules' || SKIP.has(rel(full))) continue;
+    if (entry.startsWith('.') || SKIP_NAMES.has(entry) || SKIP.has(rel(full))) continue;
     if (statSync(full).isDirectory()) walkFiles(full, out);
-    else if (/\.(ts|tsx|js)$/.test(entry) && !/\.(test|d)\.[jt]sx?$/.test(entry)) out.push(full);
+    else if (/\.(ts|tsx|js|jsx)$/.test(entry) && !/\.(test|spec|d)\.[jt]sx?$/.test(entry) && !/\.config\.[jt]s$/.test(entry)) out.push(full);
   }
   return out;
 }
@@ -220,10 +239,18 @@ function classValue(v: Node | undefined): string[] {
 
 const files = ROOTS.flatMap((r) => walkFiles(path.join(ROOT, r))).sort();
 
+/**
+ * The project the parser opens: exactly the files read, JavaScript and JSX too, whatever the repository's own
+ * tsconfig says. Only their syntax is read, so it is written to a folder of its own, outside every repository.
+ */
+const projectDir = mkdtempSync(path.join(os.tmpdir(), 'ui-inventory-'));
+const TSCONFIG = path.join(projectDir, 'tsconfig.json');
+writeFileSync(TSCONFIG, JSON.stringify({ compilerOptions: { allowJs: true, checkJs: false, jsx: 'preserve', noEmit: true, skipLibCheck: true, types: [] }, files }));
+
 const api = new API({ cwd: ROOT });
 const snapshot = api.updateSnapshot({ openProjects: [TSCONFIG] });
 const program = snapshot.getProjects()[0]?.program;
-if (!program) throw new Error(`TypeScript opened no project from ${rel(TSCONFIG)}.`);
+if (!program) throw new Error(`TypeScript opened no project for ${ROOT}.`);
 
 const defsByFile = new Map<string, ComponentDef[]>();
 const elements: Element[] = [];
@@ -235,18 +262,23 @@ const functions = new Map<string, [number, number][]>();
 /** Per file: where each module-level constant is (`const GEAR = icon(…)`, a scene built with .map()). */
 const constants = new Map<string, [number, number][]>();
 
-/** An import's file, as this scan names it: src\kit\ is the kit's own copy, so it is kit\node\ or kit\web\. */
+/**
+ * An import's file, as this scan names it. Here src\kit\ is the kit's own copy, so it is kit\node\ or kit\web\. An
+ * import may leave out its extension, or name a folder (`./Card`, `./components`), as a bundler's do.
+ */
 function importedFile(from: string, spec: string): string | null {
   if (!spec.startsWith('.')) return null;
-  const r = rel(path.resolve(path.dirname(path.join(ROOT, from)), spec));
-  if (r.startsWith('src/kit/web/')) return `kit/web/${r.slice('src/kit/web/'.length)}`;
-  if (r.startsWith('src/kit/')) return `kit/node/${r.slice('src/kit/'.length)}`;
+  const abs = path.resolve(path.dirname(path.join(ROOT, from)), spec);
+  const found = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'].map((x) => abs + x).find((p) => existsSync(p) && statSync(p).isFile());
+  const r = rel(found ?? abs);
+  if (SELF && r.startsWith('src/kit/web/')) return `kit/web/${r.slice('src/kit/web/'.length)}`;
+  if (SELF && r.startsWith('src/kit/')) return `kit/node/${r.slice('src/kit/'.length)}`;
   return r;
 }
 
 for (const file of files) {
   const sf = program.getSourceFile(file);
-  if (!sf) throw new Error(`${rel(file)} is not in ${rel(TSCONFIG)}'s project.`);
+  if (!sf) throw new Error(`${rel(file)} is not in the parser's project.`);
   const relFile = rel(file);
   const lineOf = (pos: number) => sf.getLineAndCharacterOfPosition(pos).line + 1;
   const defs: ComponentDef[] = [];
@@ -322,6 +354,7 @@ for (const file of files) {
   if (hasMarkup) defsByFile.set(relFile, defs);
 }
 api.close();
+rmSync(projectDir, { recursive: true, force: true });
 
 type Defs = Map<string, ComponentDef[]>;
 
@@ -382,8 +415,8 @@ interface Use {
   file: string;
   /** The component it is used in; null in code that is not a component. */
   owner: ComponentDef | null;
-  /** Used inside a function (a component, or the server's code), not in a module's constant (GEAR = icon(…)). */
-  inFunction: boolean;
+  /** Used in a module's constant (GEAR = icon(…), a scene built with .map()): markup some component puts in. */
+  inConstant: boolean;
 }
 const uses: Use[] = [];
 for (const r of refs) {
@@ -393,7 +426,7 @@ for (const r of refs) {
   const owner = innermost(defsByFile.get(r.file), r.pos);
   if (owner === def) continue;
   const within = (ranges: [number, number][] | undefined) => (ranges ?? []).some(([a, b]) => r.pos >= a && r.pos < b);
-  uses.push({ def, file: r.file, owner, inFunction: within(functions.get(r.file)) && !within(constants.get(r.file)) });
+  uses.push({ def, file: r.file, owner, inConstant: within(constants.get(r.file)) });
   if (owner && !owner.renders.includes(def.key)) owner.renders.push(def.key);
 }
 
@@ -403,7 +436,7 @@ for (const r of refs) {
  */
 for (const d of all) {
   const u = uses.filter((x) => x.def === d);
-  d.isScreen = u.some((x) => x.owner === null && x.inFunction) && u.every((x) => x.owner === null);
+  d.isScreen = u.some((x) => x.owner === null && !x.inConstant) && u.every((x) => x.owner === null);
 }
 
 /**
@@ -451,13 +484,15 @@ const shared = all
 /** Components defined and used in ONE file, pages excluded: written inline and never pulled out. */
 const fileLocal = all.filter((d) => !d.isScreen && externalUses(d).length === 0 && !unused.includes(d)).sort((a, b) => b.size - a.size);
 
-/** A core component: the kit's page.ts and html.ts, the vocabulary every agent's page is written in. */
-const CORE = new Set(['kit/node/page.ts', 'kit/node/html.ts']);
-const isCore = (d: ComponentDef) => CORE.has(d.file);
+/**
+ * A core component: the shared vocabulary pages are written in. The kit's page.ts today; in a React app, a
+ * components/ui folder (GamerNexus's convention), where the shared components belong.
+ */
+const isCore = (d: ComponentDef) => d.file === 'kit/node/page.ts' || /(^|\/)components\/ui\//.test(d.file);
 
 /**
  * What each file writes BY HAND: HTML elements, as opposed to components it calls. Not a target to drive to
- * zero (a table needs `<td>`), which is why the tag breakdown is shown. page.ts and html.ts are left out: they ARE the
+ * zero (a table needs `<td>`), which is why the tag breakdown is shown. the core (page.ts, components/ui) is left out: it IS the
  * vocabulary, and asking how much of it is hand-written is circular.
  */
 const rawByFile = new Map<string, Map<string, number>>();
@@ -489,7 +524,7 @@ interface TreeNode {
 }
 
 /**
- * The render forest, one root per page, BOTTOMING OUT AT THE CORE COMPONENTS (page.ts's and html.ts's), which are leaves:
+ * The render forest, one root per page, BOTTOMING OUT AT THE CORE COMPONENTS (page.ts's, components/ui's), which are leaves:
  * a page's shape stops being interesting where it reaches the shared vocabulary. A root is always expanded,
  * even page() itself. A component seen before is marked `↑`, and one that renders itself `↺`.
  */
@@ -532,11 +567,16 @@ const screens = all.filter((d) => d.isScreen).sort((a, b) => a.file.localeCompar
 const pct = (n: number, d: number) => (d === 0 ? '0' : ((n / d) * 100).toFixed(0));
 const totalLines = all.reduce((s, d) => s + d.lines, 0);
 /** A Markdown link to a source file, from docs\. Angle-bracketed, so a path with "(" can't end it early. */
-const link = (file: string, text = file) => `[${text}](<../${file}>)`;
+const link = (file: string, text = file) => `[${text}](<${path.relative(path.dirname(OUT), path.join(ROOT, file)).split(path.sep).join('/')}>)`;
+
+/** The command that makes this report, as the report and its messages say it. */
+const command = `npm run ui:inventory${SELF ? '' : ` -- --repo ${ROOT}`}`;
+/** The report's own path, as the messages say it: from the Steward's checkout. */
+const outName = path.relative(STEWARD, OUT).split(path.sep).join('/');
 
 function buildDoc(): string {
   const L: string[] = [];
-  L.push('# UI inventory', '', 'Generated by `npm run ui:inventory` (tools/ui-inventory.ts). Do not edit by hand.', '');
+  L.push(`# UI inventory: ${SELF ? 'the Steward and its kit' : NAME}`, '', `Generated by \`${command}\` (the Steward's tools/ui-inventory.ts). Do not edit by hand.`, '');
   L.push(
     "Every finding here is a QUESTION, not a defect. The thresholds are heuristics over this code's",
     'conventions, and a component can be large, or used once, for a perfectly good reason. What the',
@@ -614,7 +654,7 @@ function buildDoc(): string {
     'What each file writes as raw HTML elements rather than through a component. Not a target to drive to zero',
     '(a table needs `<td>`), which is why the tag breakdown is here. **Ordered by `per def`** (elements per',
     "component in the file), so a file of many small components doesn't look worse than one big one. page.ts",
-    'and html.ts are left out: they ARE the vocabulary.',
+    '(and a components/ui folder) is left out: it IS the vocabulary.',
     '',
   );
   L.push('| raw | defs | per def | file | what it writes |', '|---:|---:|---:|---|---|');
@@ -625,7 +665,7 @@ function buildDoc(): string {
 
   L.push('## Render tree', '');
   L.push(
-    'Rooted at each page, and **bottoming out at the core components** (the kit\'s page.ts and html.ts, marked `●`). `NN L` is the',
+    'Rooted at each page, and **bottoming out at the core components** (the kit\'s page.ts, or components/ui, marked `●`). `NN L` is the',
     "component's size and `N×` how many times it is rendered from outside its own file. A component is printed",
     'in full the first time and marked `↑` afterwards; `↺` marks recursion.',
     '',
@@ -639,8 +679,6 @@ function buildDoc(): string {
 
 // ---------------------------------------------------------------------------- cli
 
-const argv = process.argv.slice(2);
-
 if (argv.includes('--ci')) {
   const tooBig = all.filter((d) => d.size > (d.isScreen ? CI_SCREEN_LINES : CI_COMPONENT_LINES));
   console.log(`UI inventory gate: ${all.length} components across ${defsByFile.size} files with markup.`);
@@ -648,7 +686,7 @@ if (argv.includes('--ci')) {
   if (tooBig.length) {
     console.error('');
     for (const d of tooBig) console.error(`  x ${d.name} is ${d.size} in ${d.file}, over the ${d.isScreen ? CI_SCREEN_LINES : CI_COMPONENT_LINES} ceiling for a ${d.isScreen ? 'page' : 'component'}. Split it.`);
-    console.error('\nRun npm run ui:inventory for the full report.');
+    console.error(`\nRun ${command} for the full report.`);
     process.exit(1);
   }
   console.log('\nOK.');
@@ -665,10 +703,10 @@ const doc = buildDoc();
 if (argv.includes('--check')) {
   // Only the Markdown: the page carries a generated-at time. Both are git-ignored, so this is a local convenience.
   if ((existsSync(OUT) ? readFileSync(OUT, 'utf8') : '') !== doc) {
-    console.error('docs/UI-INVENTORY.md is out of date. Run npm run ui:inventory.');
+    console.error(`${outName} is out of date. Run ${command}.`);
     process.exit(1);
   }
-  console.log('docs/UI-INVENTORY.md is up to date.');
+  console.log(`${outName} is up to date.`);
   process.exit(0);
 }
 
@@ -677,6 +715,7 @@ writeFileSync(OUT, doc);
 writeFileSync(
   HTML_OUT,
   buildHtml({
+    subject: SELF ? 'The Steward and its kit' : NAME,
     all,
     screens,
     shared,
@@ -703,8 +742,8 @@ if (repeated.length > 0) {
   console.log('\n  Top repeated markup - candidates for a named component:');
   for (const [s, v] of repeated.slice(0, 5)) console.log(`    ${String(v.count).padStart(3)}× across ${v.files.size} files  ${s}`);
 }
-console.log('\nWrote docs/UI-INVENTORY.md');
-console.log('      docs/UI-INVENTORY.html   <- open this one in a browser');
+console.log(`\nWrote ${outName}`);
+console.log(`      ${outName.replace(/\.md$/, '.html')}   <- open this one in a browser`);
 
 if (argv.includes('--strict') && (oversized.length > 0 || repeated.length > 0 || unused.length > 0)) {
   console.error('\n--strict: thresholds crossed (see above).');

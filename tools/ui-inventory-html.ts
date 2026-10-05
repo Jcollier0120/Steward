@@ -34,6 +34,8 @@ export interface ComponentLike {
 }
 
 export interface InventoryData {
+  /** What was read: "The Steward and its kit", or a repository's name. */
+  subject: string;
   all: ComponentLike[];
   screens: ComponentLike[];
   shared: { def: ComponentLike; uses: { file: string; count: number }[] }[];
@@ -230,7 +232,7 @@ export function buildHtml(d: InventoryData): string {
 <body>
 <header>
   <h1>UI inventory</h1>
-  <div class="sub">The Steward and its kit &middot; generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} by <code>npm run ui:inventory</code>. Every finding is a question, not a defect.</div>
+  <div class="sub">${esc(d.subject)} &middot; generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} by <code>npm run ui:inventory</code>. Every finding is a question, not a defect.</div>
   <div class="cards">
     ${card(d.all.length, 'components')}
     ${card(d.screens.length, 'pages')}
@@ -270,7 +272,7 @@ ${d.fileLocal.length ? table([['size', true], ['component', false], ['file', fal
 ${d.unused.length ? table([['size', true], ['component', false], ['file', false]], unusedRows) : empty('None.')}</section>
 
 <section id="below"><h2>Written by hand <span class="n">${d.rawRanked.length} files</span></h2>
-<p class="note">Raw HTML elements each file writes itself rather than through a component, <strong>ordered by per def</strong> (elements per component in the file), so a file of many small components doesn't look worse than one big one. Not a target to drive to zero - a table needs <code>&lt;td&gt;</code> - which is why the breakdown is here. page.ts and html.ts are left out: they are the vocabulary.</p>
+<p class="note">Raw HTML elements each file writes itself rather than through a component, <strong>ordered by per def</strong> (elements per component in the file), so a file of many small components doesn't look worse than one big one. Not a target to drive to zero - a table needs <code>&lt;td&gt;</code> - which is why the breakdown is here. The core (the kit's page.ts, or components/ui) is left out: it is the vocabulary.</p>
 <input type="search" data-scope="below" placeholder="Filter files or tags&hellip;">
 ${table([['raw', true], ['defs', true], ['per def', true], ['file', false], ['what it writes', false]], rawRows)}</section>
 
@@ -279,7 +281,7 @@ ${table([['raw', true], ['defs', true], ['per def', true], ['file', false], ['wh
 ${d.shared.length ? table([['uses', true], ['files', true], ['component', false], ['size', true], ['defined in', false]], useRows) : empty('Nothing is used outside its own file.')}</section>
 
 <section id="tree"><h2>Render tree <span class="n">${d.screens.length} pages</span></h2>
-<p class="note">Rooted at each page and <strong>bottoming out at the core components</strong> (page.ts's and html.ts's, <span class="dot">●</span>). <span class="mk">↑</span> means shown in full above; <span class="mk">↺</span> marks recursion.</p>
+<p class="note">Rooted at each page and <strong>bottoming out at the core components</strong> (the kit's page.ts, or components/ui, <span class="dot">●</span>). <span class="mk">↑</span> means shown in full above; <span class="mk">↺</span> marks recursion.</p>
 <p><a href="#" id="tree-toggle" data-open="1">Collapse all</a></p>
 ${treeHtml(d.tree)}</section>
 
