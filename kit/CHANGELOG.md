@@ -2,6 +2,16 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.13.0
+
+**The NPU first.** The NPU does model work without the processor or a graphics card, so it is used as much as it can be, and the others only when it can't do the work. Before, the auto order put graphics cards with 2 GB or more of their own memory ahead of the NPU, and a request the NPU could do went to a free card whenever the NPU was busy.
+- **The auto order** (the core's `autoOrder`, and the keeper's in node/accelerator-config.ts): the NPU, then graphics cards with 2 GB or more of their own memory by memory, then shared graphics, then the processor.
+- **The candidates** (the core's `candidates`, which now also returns `npuFirst`): when the first that serves a request and fits it is the NPU, and it hasn't failed lately, it is the only candidate. Busy, it is waited for; resting after a long line, a background request is deferred; never passed over for a card. A card or the processor takes a request only when the NPU doesn't serve that kind, the request is too big for it, or it failed in the last 10 minutes.
+- **npu.ts:** the NPU's model still loading no longer sends the request to the next accelerator: it waits (NpuBusy). `budget()` sizes pieces to the NPU's cap when it comes first, so long inputs are split to fit the NPU.
+- **An `acceleratorOrder` list that puts something else first** is the person's choice, and kept: then the pick is as before.
+- **"Where its work runs"** on every kit agent's Settings page says so; ACCELERATORS.md's Choosing steps too. accelerator-vectors.json is regenerated.
+- **Nothing for an agent to do** but take this version.
+
 ## 2.12.1
 
 **A release zip's name has no spaces.** `npm run release` named the zip after the agent's name, so the Developer Herald's was `Developer Herald-0.5.2.zip`. GitHub stores a space in an asset's name as a dot (`Developer.Herald-0.5.2.zip`), which no longer matched its SHA256SUMS.txt line, and Manor, which looks for `DeveloperHerald-*.zip`, found no zip at all.

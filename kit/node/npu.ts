@@ -385,7 +385,7 @@ export class Npu {
     const notRunning: Accelerator[] = [];
     let loadingOn: { acc: Accelerator; reason: string } | null = null;
     for (;;) {
-      const { list, skipped } = candidates(
+      const { list, skipped, npuFirst } = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
         { failure: readFailure, games, deferredMs: lane === 'background' ? deferredMs : undefined },
@@ -444,6 +444,9 @@ export class Npu {
           if (lane === 'background') busyUntil.set(acc.id, Date.now() + BACK_OFF_MS);
           loadingOn ??= { acc, reason: e.message };
           if (opts.accelerator) throw new NpuBusy(core.say.modelLoading(theAccelerator(acc), e.message, ''));
+          // The NPU first (the core's candidates): loading is slow, not something it can't do, so the request
+          // waits for it rather than going to a graphics card or the processor.
+          if (npuFirst) throw new NpuBusy(core.say.modelLoading(theAccelerator(acc), e.message, lane === 'background' ? core.say.deferredFor(BACK_OFF_MS / 60_000) : ''));
           continue;
         }
         if (!(e instanceof AcceleratorDown)) throw new NpuError(core.say.onAccelerator(acc, (e as Error).message));
