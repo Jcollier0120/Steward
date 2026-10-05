@@ -246,3 +246,33 @@ test("watching: Reeve's alerts are read only where he is installed, raised at on
   assert.equal(normalizeSettings({}).settings.alarms.reeveUrl, 'http://127.0.0.1:18383');
   assert.equal(normalizeSettings({ alarms: { reeveUrl: '' } }).settings.alarms.reeveUrl, '', 'empty: not read');
 });
+
+test("while this PC is offline, what is only the network's is no alarm; everything else is as ever, and the toast too", async () => {
+  const { withoutOffline } = await import('../src/alarms.ts');
+  const cs = [
+    { id: 'manor:updates', who: 'manor', title: "Manor's update checks fail", detail: ['GitHub said 503'], afterMs: 0 },
+    { id: 'install:miller', who: 'miller', title: "Manor couldn't update Miller", detail: ['EBUSY'], afterMs: 0 },
+    { id: 'survey:herald.round', who: 'herald', title: "Herald's round failed 4 times", detail: ['getaddrinfo ENOTFOUND www.nvidia.com'], afterMs: 0 },
+    { id: 'reeve:docs-refresh', who: 'reeve', title: 'docs-refresh: an alert', detail: ["fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com"], afterMs: 0 },
+    { id: 'survey:pc.disk.C', who: 'pc', title: 'Drive C: has 4.0 GB free (1%)', detail: ['C: 4.0 GB free'], afterMs: 0 },
+    { id: 'manor:down', who: 'manor', title: "Manor's page doesn't answer", detail: ['ECONNREFUSED'], afterMs: 0 },
+  ];
+  assert.deepEqual(withoutOffline(cs, false), cs, 'online: all of them');
+  assert.deepEqual(withoutOffline(cs, true).map((c) => c.id), ['survey:pc.disk.C', 'manor:down'], 'offline: the network\'s are left out');
+
+  rmSync(alarmsFile(), { force: true });
+  const toasts: string[] = [];
+  const pages = { 'http://m/api/state': { updates: { problem: "Manor couldn't ask GitHub for the latest releases: error connecting to api.github.com", items: [] } }, 'http://127.0.0.1:19595/api/survey': { findings: [
+    { id: 'herald.round', subject: 'herald', severity: 'problem', title: "Herald's round failed 4 times", evidence: ['getaddrinfo ENOTFOUND www.nvidia.com'], since: at(-24).toISOString() },
+    { id: 'pc.disk.C', subject: 'pc', severity: 'problem', title: 'Drive C: has 4.0 GB free (1%)', evidence: ['C: 4.0 GB free'], since: at(-24).toISOString() },
+  ] } } as Record<string, unknown>;
+  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', online: async () => online });
+  let state = await watch(false, 0);
+  assert.deepEqual(state.open.map((a) => a.id), ['survey:pc.disk.C'], 'offline: only the disk');
+  assert.equal(toasts.length, 1);
+  state = await watch(false, 13);
+  assert.deepEqual(state.open.map((a) => a.id), ['survey:pc.disk.C'], "13 hours offline: Manor's update look is still no alarm");
+  state = await watch(true, 14);
+  assert.deepEqual(state.open.map((a) => a.id).sort(), ['survey:herald.round', 'survey:pc.disk.C'], "back online and still failing: the finding's own hours count");
+  assert.ok(!state.open.some((a) => a.id === 'manor:updates'), "Manor's look starts its 12 hours afresh");
+});
