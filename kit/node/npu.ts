@@ -36,6 +36,7 @@ import {
   type Work,
 } from './accelerators.ts';
 import { npuLockDir } from './lock.ts';
+import { gpuWithNpu } from './manor.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
 
@@ -265,9 +266,13 @@ export class Npu {
     return 'error' in this.cfg ? this.cfg.error : null;
   }
 
-  /** The accelerators, in the order requests try them (none when there is a problem). */
+  /**
+   * The accelerators, in the order requests try them (none when there is a problem). With Manor's "Use the graphics
+   * card for models when there's an NPU" off and an NPU here, no graphics card (manor.ts's gpuWithNpu(), read afresh
+   * each time, and the core's withoutGpuBesideNpu): a request never goes to one, not even as a fallback.
+   */
   get accelerators(): Accelerator[] {
-    return 'error' in this.cfg ? [] : this.cfg.accelerators;
+    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, gpuWithNpu().on);
   }
 
   get hasVision(): boolean {
@@ -362,8 +367,13 @@ export class Npu {
     if ('error' in this.cfg) throw new NpuError(this.cfg.error);
     const cfg = this.cfg;
     const lane = opts.lane ?? 'background';
-    const serving = cfg.accelerators.filter((a) => serves(a, work) && (!opts.accelerator || a.id === opts.accelerator));
+    const asked = (a: Accelerator) => serves(a, work) && (!opts.accelerator || a.id === opts.accelerator);
+    const usable = this.accelerators;
+    const serving = usable.filter(asked);
     if (!serving.length) {
+      // Only a graphics card set aside beside the NPU would do: say so, rather than that nothing serves it.
+      const aside = cfg.accelerators.find((a) => asked(a) && !usable.includes(a));
+      if (aside) throw new NpuError(core.say.gpuSetAside(aside));
       throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }
     const tokens = promptTokens + maxTokens;

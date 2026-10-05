@@ -14,9 +14,12 @@ const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.met
 process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.join(home, 'agent');
 process.env.REEVE_HOME = path.join(home, 'reeve');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'npu-agent', 'locks', 'npu');
+// Manor's settings (gpuWithNpu) from a scratch folder: none, until a test writes one.
+process.env.MANOR_HOME = path.join(home, 'manor');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const A = await import('./fixture/src/kit/accelerators.ts');
+const core = await import('../core/index.js');
 const { Npu, NpuBusy, NpuError, acceleratorTurn, acceleratorLines, resetNpuManners } = await import('./fixture/src/kit/npu.ts');
 const { acceleratorsDir, lockDirFor, locksDir, npuLockDir } = await import('./fixture/src/kit/lock.ts');
 const { lineSnapshot, queueDirFor, queueSnapshot, slotDirs, withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
@@ -799,5 +802,114 @@ test("the warm-up is skipped while the server answered this same model within it
     assert.equal(A.servedRecently('npu', { ...ep, startCommand: undefined }, Date.now() + 280_000), false, 'within 300 s, less the margin');
   } finally {
     await server.close();
+  }
+});
+
+// ---------------------------------------------------------------- the graphics card beside the NPU
+
+/** Manor installed in the scratch folder, saying `gpuWithNpu` as given (left out for an older Manor). */
+function manorSays(settings: Record<string, unknown>): void {
+  const manor = process.env.MANOR_HOME!;
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify(settings));
+}
+const noManor = () => rmSync(process.env.MANOR_HOME!, { recursive: true, force: true });
+
+/** This laptop's shape: the NPU (chat, vision), the Adreno (chat, vision, embed) and the processor (embed). Nothing listens on port 1. */
+const npuAndCard = () => config({
+  accelerators: [
+    { id: 'npu', kind: 'npu', maxContextTokens: 2400, chat: { baseUrl: 'http://127.0.0.1:1', model: 'm' }, vision: { model: 'v' } },
+    gpu('gpu-adreno', { memoryGb: null, maxContextTokens: 16384, chat: { baseUrl: 'http://127.0.0.1:1', model: 'm' }, vision: { model: 'v' }, embed: { baseUrl: 'http://127.0.0.1:1', model: 'e' } } as any),
+    { id: 'cpu', kind: 'cpu', maxContextTokens: 4000, embed: { baseUrl: 'http://127.0.0.1:1', model: 'e' } },
+  ],
+});
+
+test("the core's withoutGpuBesideNpu: off with an NPU leaves every card out and keeps the processor; on, or no NPU, changes nothing", () => {
+  const list = npuAndCard().accelerators;
+  const ids = (l: { id: string }[]) => l.map((a) => a.id);
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(list, false)), ['npu', 'cpu'], 'off: no card, the processor stays');
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(list, true)), ['npu', 'gpu-adreno', 'cpu'], 'on: as today');
+  const noNpu = list.filter((a) => a.kind !== 'npu');
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(noNpu, false)), ['gpu-adreno', 'cpu'], 'no NPU: the switch means nothing, the card stays');
+  const npuOff = list.map((a) => (a.kind === 'npu' ? { ...a, enabled: false } : a));
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(npuOff, false)), ['npu', 'gpu-adreno', 'cpu'], 'an NPU sent nothing is no NPU');
+  const npuServesNothing = list.map((a) => (a.kind === 'npu' ? { id: a.id, kind: a.kind, memoryGb: null } : a));
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(npuServesNothing as unknown as Accelerator[], false)), ['npu', 'gpu-adreno', 'cpu']);
+  const twoCards = [...list, gpu('gpu-rtx', { memoryGb: 24, chat: { baseUrl: 'http://127.0.0.1:1', model: 'm' } } as any)];
+  assert.deepEqual(ids(core.withoutGpuBesideNpu(twoCards as Accelerator[], false)), ['npu', 'cpu'], 'every card, own memory or shared');
+});
+
+test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even as the fallback; the processor still serves", async () => {
+  fresh();
+  noGames();
+  const cfg = npuAndCard();
+  const ids = (l: { id: string }[]) => l.map((a) => a.id);
+  try {
+    manorSays({ gpuWithNpu: false });
+    const model = new Npu(cfg);
+    assert.deepEqual(ids(model.accelerators), ['npu', 'cpu']);
+    assert.equal(model.hasVision, true, 'the NPU still sees');
+    assert.equal(model.budget(300), 2400 - 300, "the NPU's cap, not the card's 16K");
+    // A request only the card's cap would take is refused before anything is sent, not sent to the card.
+    await assert.rejects(model.chat([{ role: 'user', content: 'x'.repeat(9000) }]), (e: Error) => e instanceof NpuError && /refusing a request/.test(e.message) && /cap 2400/.test(e.message));
+    // Asked for by name, the card is refused, and says why.
+    await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }], { accelerator: 'gpu-adreno' }), (e: Error) => e instanceof NpuError && /isn't used for models beside the NPU/.test(e.message));
+    // The fallback: the NPU failed. With the card allowed it's the next candidate; set aside, the NPU is the last resort.
+    A.markFailed('npu', 'chat: refused', 'tester');
+    const need = { work: 'chat' as const, tokens: 500, lane: 'background' as const };
+    assert.deepEqual(ids(A.candidates(model.accelerators, need, { failure: A.readFailure }).list), ['npu'], 'the NPU again, never the card');
+    // The NPU busy: its line full. Background work waits; it doesn't go to the free card.
+    const free = hold(npuLockDir);
+    const queue = queueDirFor(npuLockDir);
+    mkdirSync(queue, { recursive: true });
+    for (let i = 1; i <= 4; i++) writeFileSync(path.join(queue, `1-${String(Date.now() * 1000 + i).padStart(17, '0')}-${process.pid + 1}-0000000${i}.ticket`), '{}');
+    try {
+      A.clearFailure('npu');
+      await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }]), (e: Error) => e instanceof NpuBusy && /4 already waiting for the NPU/.test(e.message));
+    } finally {
+      rmSync(queue, { recursive: true, force: true });
+      free();
+    }
+    // Embeddings: the card is set aside, the processor serves them.
+    assert.equal(model.hasEmbed, true);
+    assert.deepEqual(ids(model.accelerators.filter((a) => A.serves(a, 'embed'))), ['cpu']);
+    // With only the card serving embeddings, they're refused, and say why.
+    const cardEmbedOnly = new Npu(config({ accelerators: cfg.accelerators.filter((a) => a.kind !== 'cpu') }));
+    assert.equal(cardEmbedOnly.hasEmbed, false);
+    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the gpu-adreno isn't used for models beside the NPU/.test(e.message));
+  } finally {
+    noManor();
+    fresh();
+  }
+});
+
+test("gpuWithNpu on, an older Manor without the key, no Manor, or no NPU: the card is used as today", async () => {
+  fresh();
+  const cfg = npuAndCard();
+  const ids = (l: { id: string }[]) => l.map((a) => a.id);
+  const need = { work: 'chat' as const, tokens: 500, lane: 'background' as const };
+  try {
+    for (const settings of [{ gpuWithNpu: true }, { name: 'Weasel Manor', developerOptions: true }, null]) {
+      if (settings) manorSays(settings);
+      else noManor();
+      const model = new Npu(cfg);
+      assert.deepEqual(ids(model.accelerators), ['npu', 'gpu-adreno', 'cpu'], JSON.stringify(settings));
+      assert.equal(model.budget(300), 16384 - 300);
+      A.markFailed('npu', 'chat: refused', 'tester');
+      assert.deepEqual(ids(A.candidates(model.accelerators, need, { failure: A.readFailure }).list), ['gpu-adreno'], 'the card is the fallback');
+      A.clearFailure('npu');
+    }
+    // No NPU: off means nothing.
+    manorSays({ gpuWithNpu: false });
+    const noNpu = new Npu(config({ accelerators: cfg.accelerators.filter((a) => a.kind !== 'npu') }));
+    assert.deepEqual(ids(noNpu.accelerators), ['gpu-adreno', 'cpu']);
+    // Read afresh: Manor's change applies to the next request of the same Npu.
+    const model = new Npu(cfg);
+    assert.deepEqual(ids(model.accelerators), ['npu', 'cpu']);
+    manorSays({ gpuWithNpu: true });
+    assert.deepEqual(ids(model.accelerators), ['npu', 'gpu-adreno', 'cpu']);
+  } finally {
+    noManor();
+    fresh();
   }
 });
