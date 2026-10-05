@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as core from './core/index.js';
@@ -428,8 +428,10 @@ export interface ServerReady {
  * (up to readyWaitMs), never started a second time. One that isn't running is started from its
  * startCommand (detached, hidden, in the home folder so it never holds an agent's folder, shared by
  * everyone after) and given 30 s to take connections: once per server, however many requests wait on it.
+ * `logFile` takes what a server it starts prints (appended), and `env` is that server's environment: the keeper's
+ * restarts (keeper.ts) keep a log per server; a request's start keeps none, as before.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const state = await probe(ep.baseUrl);
   if (state === 'ready') return { started: false, waited: false };
@@ -441,7 +443,7 @@ export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
   let pending = starting.get(ep.baseUrl);
   if (!pending) {
-    pending = start(ep, opts.waitMs ?? START_WAIT_MS, readyMs).finally(() => starting.delete(ep.baseUrl));
+    pending = start(ep, opts.waitMs ?? START_WAIT_MS, readyMs, opts).finally(() => starting.delete(ep.baseUrl));
     starting.set(ep.baseUrl, pending);
   }
   return pending;
@@ -459,18 +461,25 @@ async function untilReady(baseUrl: string, ms: number): Promise<void> {
   }
 }
 
-async function start(ep: Endpoint, waitMs: number, readyMs: number): Promise<ServerReady> {
+async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   const program = path.win32.basename(cmd);
   let spawnError: Error | undefined;
   let exited: number | null | undefined;
+  let log: number | undefined;
   try {
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, cwd: os.homedir() });
+    if (o.logFile) {
+      mkdirSync(path.dirname(o.logFile), { recursive: true });
+      log = openSync(o.logFile, 'a');
+    }
+    const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env: o.env ?? process.env });
     child.on('error', (e) => (spawnError = e));
     child.on('exit', (code) => (exited = code));
     child.unref();
   } catch (e) {
     spawnError = e as Error;
+  } finally {
+    if (log !== undefined) closeSync(log);
   }
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {

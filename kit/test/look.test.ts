@@ -20,7 +20,7 @@ const { page, statusPill, until } = await import('./fixture/src/kit/page.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 type Look = import('./fixture/src/kit/look.ts').Look;
 
-const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter'];
+const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith'];
 const HEX = /^#[0-9a-f]{6}$/;
 
 /** A scene's motion without its @keyframes blocks: the rules left, as [selector, declarations]. */

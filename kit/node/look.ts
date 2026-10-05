@@ -253,6 +253,24 @@ ${B} .sc-lamp-halo { ${run('sc-glowing', 6)} }
 ${B} .sc-tip { ${run('sc-flicker-tip', 1)} }`,
 };
 
+/* ---- The Smith: the hammer comes down on the iron on the anvil, sparks fly, and the forge behind glows. */
+const smith: Look = {
+  accent: { light: '#a3501c', dark: '#f0a46e' },
+  busy: 'At the forge',
+  scene: `${GROUND}<path class="sc-back" d="M40 35.5V20h20v15.5z"/><path class="sc-hole" d="M44 35.5v-9a6 6 0 0 1 12 0v9z"/><path class="sc-halo sc-fire" d="M45.5 35.5c0-4 2.2-5 2.6-8 1.6 1.8 1.4 3.4 1.4 3.4s1.2-1.6 1.2-3.6c2 2 3.8 4.6 3.8 8.2z"/>
+<path class="sc-front" d="M8 22h22c0 2.6-2.6 4-6 4.4V30h3.2v2.4H11V30h3.6v-3.6C11 26 8.8 24.6 8 22z"/><rect class="sc-role sc-iron" x="15" y="19.6" width="11" height="2.4" rx="1"/>
+<circle class="sc-glow sc-spark sc-s1" cx="19" cy="18" r=".7"/><circle class="sc-glow sc-spark sc-s2" cx="22" cy="18" r=".6"/><circle class="sc-glow sc-spark sc-s3" cx="20.5" cy="18" r=".5"/>
+<g class="sc-hammer" transform="rotate(-38 33 14)"><path class="sc-line" d="M33 14 21 12.5"/><rect class="sc-steel" x="17.2" y="9.4" width="5" height="7" rx="1"/></g>`,
+  motion: `@keyframes sc-strike { 0%, 40% { transform: rotate(-38deg); } 50% { transform: rotate(4deg); } 54% { transform: rotate(0deg); } 100% { transform: rotate(-38deg); } }
+@keyframes sc-sparks1 { 0%, 50% { transform: translate(0, 0); opacity: 0; } 54% { opacity: 1; } 80%, 100% { transform: translate(-6px, -9px); opacity: 0; } }
+@keyframes sc-sparks2 { 0%, 50% { transform: translate(0, 0); opacity: 0; } 54% { opacity: 1; } 80%, 100% { transform: translate(5px, -10px); opacity: 0; } }
+@keyframes sc-sparks3 { 0%, 50% { transform: translate(0, 0); opacity: 0; } 54% { opacity: 1; } 76%, 100% { transform: translate(0, -12px); opacity: 0; } }
+@keyframes sc-fire { 0%, 100% { opacity: .2; } 30% { opacity: .5; } 60% { opacity: .28; } 80% { opacity: .44; } }
+${B} .sc-hammer { transform-origin: 33px 14px; ${run('sc-strike', 1.5, 0, 'ease-in')} }
+${B} .sc-s1 { ${run('sc-sparks1', 1.5)} } ${B} .sc-s2 { ${run('sc-sparks2', 1.5)} } ${B} .sc-s3 { ${run('sc-sparks3', 1.5)} }
+${B} .sc-fire { ${run('sc-fire', 1.5)} }`,
+};
+
 /** Any other agent: a cog, turning while it works. */
 export const DEFAULT_LOOK: Look = {
   accent: { light: '#66717c', dark: '#a7b1bc' },
@@ -264,7 +282,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);

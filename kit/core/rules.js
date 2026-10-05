@@ -50,6 +50,22 @@
  */
 
 /**
+ * @typedef {object} KeeperRules How the model servers are kept (ACCELERATORS.md, "Keeping the servers"): what the keeper
+ *   (the Smith, else Reeve) does once a minute, and the defaults of config.json's idle times.
+ * @property {number} lookEveryMs How often the keeper looks at every server it can start again.
+ * @property {number} npuIdleStopMinutes config.json's npuIdleStopMinutes when it gives none: the NPU unused this long, its servers stop.
+ * @property {number} gpuIdleStopMinutes config.json's gpuIdleStopMinutes when it gives none: a graphics card (or the processor) unused this long, its servers stop.
+ * @property {number} gameGraceMs A card nobody has used this long has its servers stopped as soon as a game is using it.
+ * @property {number} unansweredMs A server that hasn't answered this long, while nobody uses its accelerator, is restarted.
+ * @property {number} recycleBytes GenieX's working set at which it is restarted while nobody uses the NPU: memory kept from earlier loads.
+ * @property {number} turnWaitMs How long the keeper's turn waits for its first slot.
+ * @property {number} turnMaxAhead The keeper's turn joins a line only with fewer than this many waiting: 1 is "only an empty line" (0 refuses every turn).
+ * @property {number} otherSlotsWaitMs How long it waits for each of a card's other slots, held as plain locks.
+ * @property {number} orphanGraceMs A model server on the manor's ports that no configured accelerator names (an orphan: a test's,
+ *   a scratch home's, an old config's) is stopped once seen this long, so nothing nobody tracks keeps a card's memory.
+ */
+
+/**
  * @typedef {object} TokenRules
  * @property {number} charsPerToken The pessimistic estimate: one token per this many characters.
  * @property {number} messageChars What each chat message adds, in characters.
@@ -64,6 +80,7 @@
  * @property {LockRules} lock
  * @property {AcceleratorRules} accelerators
  * @property {MannersRules} manners
+ * @property {KeeperRules} keeper
  * @property {TokenRules} tokens
  */
 
@@ -73,6 +90,7 @@ const SHAPE = {
   lock: ['waitMs', 'staleMs', 'ownerGraceMs', 'pollMs', 'takeTries', 'removeTries', 'removeRetryMs'],
   accelerators: ['failedForMs', 'reasonMaxChars', 'gamePercent', 'gamesFreshMs', 'maxAhead', 'maxSlots', 'ownMemoryGb', 'defaultMaxContextTokens', 'defaultRequestTimeoutMs', 'startWaitMs', 'probeMs', 'readyWaitMs', 'requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'],
   manners: ['maxWaitMs', 'backOffMs'],
+  keeper: ['lookEveryMs', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'gameGraceMs', 'unansweredMs', 'recycleBytes', 'turnWaitMs', 'turnMaxAhead', 'otherSlotsWaitMs', 'orphanGraceMs'],
   tokens: ['charsPerToken', 'messageChars', 'quirkRoomChars', 'imageTokens', 'minPieceChars'],
 };
 

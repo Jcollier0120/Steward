@@ -38,6 +38,18 @@
     "maxWaitMs": 600000,
     "backOffMs": 300000
   },
+  "keeper": {
+    "lookEveryMs": 60000,
+    "npuIdleStopMinutes": 10,
+    "gpuIdleStopMinutes": 10,
+    "gameGraceMs": 120000,
+    "unansweredMs": 180000,
+    "recycleBytes": 9663676416,
+    "turnWaitMs": 5000,
+    "turnMaxAhead": 1,
+    "otherSlotsWaitMs": 2000,
+    "orphanGraceMs": 300000
+  },
   "tokens": {
     "charsPerToken": 3,
     "messageChars": 8,
