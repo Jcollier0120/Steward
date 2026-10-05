@@ -2,6 +2,17 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.18.0
+
+**Non-employee projects: repositories that ride along with the manor.** Each PC's Manor may list, in settings.json's `"projects"` (its Settings page's Non-employee projects), other repositories it looks after without employing them: the agents that clean up and fix repositories (Reeve's rounds, the Surveyor's test runs, the Wright's and the Bailiff's fixes) work on them too, but they take no kit, the Steward never touches them, they hold no role, and the manor never merges or releases them.
+- **node/manor.ts:**
+  - `manorProjects(home = manorHome()): ManorProject[]`: the projects, checked and read afresh; none when Manor isn't installed, its settings can't be read, or it lists none.
+  - `ManorProject` is `{ name, checkout, repo: string | null, branch, test: string | null, versionFiles: string[], cleanBranches: boolean }`. `branch` is "main" unless said; `versionFiles` (paths inside the checkout) are the files the Wright sets the version in, and empty means the manor never changes the project's version; `cleanBranches` (true unless said) is whether Reeve's rounds delete branches already merged into `branch`.
+  - `projectsFrom(raw, own, problems)`: the rules, which Manor's own settings use as well, so they are kept in one place. A wrong entry is left out and said. One whose `repo`, or whose clone's origin, is the manor's own (Manor's, its staff's and announced agents', the Steward's employees'), or whose checkout is, is inside, or holds one of the Steward's employees' checkouts, is refused: an employee is looked after as staff, never as a project.
+  - Also `manorOwn()`, `originRepo(checkout)`, `githubRepo(url)`, `MANOR_REPO`, `MAX_PROJECTS` (50) and `MAX_VERSION_FILES` (20).
+- **work.ts:** the Aletaster's hand-over of work orders says "each for at most 20 minutes" (it was 45), its new limit.
+- **Nothing for an agent to do** but take this version. Reeve, the Surveyor, the Wright and the Bailiff take up `manorProjects()` in their own PRs.
+
 ## 2.17.0
 
 **A release is built, never the readable source, and published in the public Jcollier0120/Manor-releases.** The agents' repositories stay private; what a PC installs comes from one public repository that holds releases alone, so any PC downloads them with no sign-in, and the source can't be read from them. spec/RELEASES.md is new.
