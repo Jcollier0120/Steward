@@ -1,0 +1,95 @@
+import { dataFile, readJson, writeJson } from '../kit/store.ts';
+import { WRIGHT_LABEL } from '../review.ts';
+import type { Employee } from '../settings.ts';
+import type { Ctx } from './common.ts';
+import type { PrInfo } from './staff.ts';
+
+/**
+ * A team PR that conflicts with its branch beyond what a catch-up resolves (stages/catchup.ts: version lines, and a
+ * new entry at the top of the changelog) goes back to whoever wrote it, rather than waiting for a person:
+ * - **The Wright's** (labelled `wright`, or a wright/… branch): closed, with a comment, and the issue it closes
+ *   queued for the Wright again (its `wright:done` label removed), so the Wright does the work afresh from the branch
+ *   as it is now. As the Steward does with a kit PR of its own that conflicts. Its branch is the Wright's, and stays.
+ * - **A Claude Code session's** (a claude/… branch): a comment on the PR that names the files. The desktop app's
+ *   Auto-fix, where it is on for that session, wakes it on the conflict itself.
+ * - **Anyone else's**: the same comment, to its author.
+ * Each is done once for a PR's head and its branch's: a round after that says the same, quietly. A new push to either
+ * is a new conflict, and goes back again.
+ */
+
+export const kickbacksFile = () => dataFile('kickbacks.json');
+
+export type Author = 'wright' | 'claude' | 'person';
+
+/** Whose work a PR is, by its label and branch. */
+export const authorOf = (pr: PrInfo): Author => (pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/') ? 'wright' : pr.head.startsWith('claude/') ? 'claude' : 'person');
+
+/** The issue the Wright's PR was its work for: the one its description closes, else its branch's number (wright/42-…). */
+export function wrightIssueOf(pr: PrInfo): number | null {
+  const n = pr.closes?.[0] ?? Number(/^wright\/(\d+)-/.exec(pr.head)?.[1]);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+interface Kicked {
+  head: string;
+  branch: string;
+  note: string;
+  closed: boolean;
+  at: string;
+}
+
+const code = (s: string) => `\`${s}\``;
+const listOf = (files: string[]) => files.map(code).join(', ');
+
+/** The comment on a PR that goes back to its author. */
+export function kickBackComment(pr: PrInfo, branch: string, files: string[], author: Author): string {
+  const who = author === 'claude' ? 'Over to the Claude Code session that opened it' : `Over to you, @${pr.author}`;
+  return [
+    `The Steward can't merge this yet: it conflicts with ${code(branch)} in ${listOf(files)}, beyond what it resolves by itself (version lines, and a new entry at the top of CHANGELOG.md).`,
+    '',
+    `${who}: merge ${code(branch)} into ${code(pr.head)}, resolve ${files.length === 1 ? 'it' : 'them'}, and push (a merge commit, never a force-push). The Steward's next round tests it again and merges it.`,
+  ].join('\n');
+}
+
+async function ghOk(ctx: Ctx, args: string[]): Promise<string | null> {
+  const r = await ctx.run('gh', args, { cwd: ctx.neutralDir, timeoutMs: 120_000 });
+  return r.code === 0 ? null : (r.err || r.out).trim().split('\n').pop() || `exit ${r.code}`;
+}
+
+/**
+ * Sends a conflicting PR back to its author, as the module's comment says; `branchAt` is its branch's head now. What
+ * happened, for its hold and the round's line; `closed` when the Wright's PR was closed (it then waits for nothing).
+ */
+export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[], branchAt: string | null): Promise<{ note: string; closed: boolean }> {
+  const key = `${e.repo}#${pr.number}`;
+  const kept = readJson<Record<string, Kicked>>(kickbacksFile(), {});
+  const was = kept[key];
+  if (was && was.head === pr.headOid && was.branch === (branchAt ?? '')) return { note: was.note, closed: was.closed };
+  const where = `it conflicts with ${e.branch} in ${files.join(', ')}`;
+  const author = authorOf(pr);
+  let done: { note: string; closed: boolean } | null = null;
+  let said = true;
+
+  const issue = author === 'wright' ? wrightIssueOf(pr) : null;
+  if (issue) {
+    const body = `Closed by the Steward: ${where.replace(/^it /, 'this ')}, beyond what it resolves by itself. #${issue} is queued for the Wright again, to be done afresh from ${e.branch} as it is now.`;
+    const closeFailed = await ghOk(ctx, ['pr', 'close', String(pr.number), '--repo', e.repo, '--comment', body]);
+    if (!closeFailed) {
+      const relabel = await ghOk(ctx, ['issue', 'edit', String(issue), '--repo', e.repo, '--remove-label', 'wright:done']);
+      await ghOk(ctx, ['issue', 'comment', String(issue), '--repo', e.repo, '--body', `#${pr.number} conflicted with ${code(e.branch)} in ${listOf(files)}, so the Steward closed it${relabel ? `; removing ${code('wright:done')} failed (${relabel}), so remove it to queue this again` : ', and this is queued for the Wright again'}.`]);
+      done = { note: `${where}, so the Steward closed it and ${relabel ? `couldn't queue #${issue} again (${relabel})` : `queued #${issue} for the Wright again`}`, closed: true };
+    }
+  }
+  if (!done) {
+    const failed = await ghOk(ctx, ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', kickBackComment(pr, e.branch, files, author)]);
+    const to = author === 'claude' ? 'the Claude Code session that opened it' : author === 'wright' ? 'the Wright (no issue to queue again, so a comment)' : pr.author;
+    done = { note: failed ? `${where}, and the Steward couldn't say so on it (${failed}): that needs a person` : `${where}: back with ${to}, in a comment on it`, closed: false };
+    said = !failed;
+  }
+  ctx.log(`[${e.id}] #${pr.number}: ${done.note}`);
+  // One that couldn't be said is tried again next round.
+  if (!said) return done;
+  kept[key] = { head: pr.headOid, branch: branchAt ?? '', ...done, at: new Date().toISOString() };
+  writeJson(kickbacksFile(), Object.fromEntries(Object.entries(kept).slice(-300)));
+  return done;
+}

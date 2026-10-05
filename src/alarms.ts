@@ -27,6 +27,7 @@ import type { StageResult } from './stages/common.ts';
  * - the Bailiff unable to review (Claude Code not signed in), or a review of its failing twice, at once; its page down,
  *   for two (the Wright's drafts wait for it).
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
+ * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
@@ -145,6 +146,8 @@ export function roundConditions(o: {
   rolloutWaits?: { kit: string; own: string } | null;
   /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
+  /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
+  unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -227,6 +230,19 @@ export function roundConditions(o: {
         afterMs: h * HOUR,
       });
     }
+  }
+  for (const u of Object.values(o.unsafe ?? {})) {
+    out.push({
+      id: `unsafe:${u.version}`,
+      who: 'steward',
+      title: `The Steward's update to ${u.version} failed and was rolled back${u.from ? ` to ${u.from}` : ''}: it isn't installed again until you look`,
+      detail: [
+        u.why,
+        `${u.kept ? `Its copy is kept in ${u.kept} for a look. ` : ''}A newer version installs as usual. Dismiss this once you've looked: that allows ${u.version} again (or node src\cli.ts allow-update ${u.version}), and Manor's next update installs it, behind the same fail-safe.`,
+      ],
+      since: u.at,
+      afterMs: 0,
+    });
   }
   if (o.round.error) out.push({ id: 'round', who: 'steward', title: "The Steward's rounds can't run", detail: [o.round.error], afterMs: HOUR });
   return out;

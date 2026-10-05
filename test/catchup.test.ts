@@ -10,7 +10,8 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-catchup-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { catchUp, catchUpVersion, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
+const { catchUp, catchUpVersion, mergeChangelogs, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
+const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
@@ -43,9 +44,9 @@ test("the version: a PR's own stays while it's new; else the next free one above
 });
 
 /** An employee whose main moved on (0.4.1, released, and a licence in its lock) under a PR that set 0.4.1 too. */
-function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts': 'export const feature = 1;\n' }) {
+function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts': 'export const feature = 1;\n' }, o: { base?: Record<string, string>; main?: Record<string, string> } = {}) {
   const dir = path.join(home, name);
-  const { checkout } = fakeEmployee(dir, { version: '0.4.0' });
+  const { checkout } = fakeEmployee(dir, { version: '0.4.0', files: o.base });
   const write = (f: string, t: string) => writeFileSync(path.join(checkout, f), t);
   const read = (f: string) => readFileSync(path.join(checkout, f), 'utf8');
   const bump = (to: string) => {
@@ -64,6 +65,7 @@ function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts
   bump('0.4.1');
   write('package-lock.json', read('package-lock.json').replace('      "version": "0.4.1"\n', '      "version": "0.4.1",\n      "license": "UNLICENSED"\n'));
   write('LICENSE', 'All rights reserved.\n');
+  for (const [f, t] of Object.entries(o.main ?? {})) write(f, t);
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', 'Fake 0.4.1: all rights reserved');
   sh(checkout, 'push', '--quiet', 'origin', 'main');
@@ -106,6 +108,91 @@ test('a conflict beyond the version lines is left for a person, and the branch u
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'rev-parse', 'origin/claude/feature'), pr.headOid);
   assert.equal(gh.length, 0, 'nothing said on the PR');
+});
+
+// Two PRs written side by side each add an entry at the top of the changelog, under the same next version.
+const log = (...entries: [string, string][]) => ['# Changelog', '', 'Newest first.', '', ...entries.flatMap(([v, t]) => [`## ${v}`, '', t, ''])].join('\n');
+
+test("the changelog: the PR's new entry goes above the branch's, under the version it ends up with; anything else is left", () => {
+  const base = log(['0.4.0', 'The first.']);
+  const ours = log(['0.4.1', 'A feature.\n- and its detail'], ['0.4.0', 'The first.']);
+  const theirs = log(['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']);
+  assert.equal(mergeChangelogs(base, ours, theirs, '0.4.2'), log(['0.4.2', 'A feature.\n- and its detail'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']));
+  assert.ok(mergeChangelogs(base.replace(/\n/g, '\r\n'), ours, theirs.replace(/\n/g, '\r\n'), '0.4.2')!.includes('\r\n## 0.4.2\r\n'), "the branch's line endings");
+  // An older entry changed on either side, two entries from the PR, or a heading with no version: a person's call.
+  assert.equal(mergeChangelogs(base, ours, log(['0.4.1', 'Theirs.'], ['0.4.0', 'The first, reworded.']), '0.4.2'), null);
+  assert.equal(mergeChangelogs(base, log(['0.4.2', 'b'], ['0.4.1', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.3'), null);
+  assert.equal(mergeChangelogs(base, log(['Unreleased', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.2'), null);
+  // The text above the entries changed on one side only: that side's is kept.
+  assert.match(mergeChangelogs(base, ours, theirs.replace('Newest first.', 'Newest first, always.'), '0.4.2')!, /^# Changelog\n\nNewest first, always\.\n\n## 0\.4\.2/);
+  // Renamed alone (no conflict): only when the top entry is the one that names the PR's old version.
+  assert.equal(renumberChangelog(ours, '0.4.1', '0.4.2'), ours.replace('## 0.4.1', '## 0.4.2'));
+  assert.equal(renumberChangelog(theirs, '0.4.3', '0.4.4'), null);
+});
+
+test('a PR whose changelog conflicts only in a new top entry is caught up: both entries kept, its own under its new version', async () => {
+  const { dir, checkout, pr } = moved(
+    'changelog',
+    { 'src/feature.ts': 'export const feature = 1;\n', 'CHANGELOG.md': log(['0.4.1', 'A feature.'], ['0.4.0', 'The first.']) },
+    { base: { 'CHANGELOG.md': log(['0.4.0', 'The first.']) }, main: { 'CHANGELOG.md': log(['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']) } },
+  );
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, c.note);
+  assert.match(c.note, /its version lines and changelog resolved; v0\.4\.2/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'show', 'origin/claude/feature:CHANGELOG.md'), log(['0.4.2', 'A feature.'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']).trimEnd());
+});
+
+test('a conflict that needs judgement says which files, for its author', async () => {
+  const { dir, checkout, pr } = moved('says-files', { LICENSE: 'MIT\n' });
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const c = await catchUp(ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir }), e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.deepEqual(c.conflicts, ['LICENSE']);
+});
+
+test("the round: a conflict that needs judgement goes back to its author, once for a head; the Wright's is closed and its issue queued again", async () => {
+  rmSync(kickbacksFile(), { force: true });
+  const { dir, checkout, pr } = moved('kickback', { LICENSE: 'MIT\n' });
+  const listed = (o: { head?: string; labels?: string[]; body?: string } = {}) => [
+    { number: pr.number, title: pr.title, url: pr.url, body: o.body ?? '', headRefName: o.head ?? pr.head, headRefOid: pr.headOid, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', isDraft: false, statusCheckRollup: [], labels: (o.labels ?? []).map((name) => ({ name })), additions: 5, deletions: 5, files: [] },
+  ];
+  const e = employee(checkout);
+  const round = async (list: unknown) => {
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'list') return ok(list);
+      if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }]);
+      return ok('');
+    });
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+    ctx.settings.catchUp = true;
+    return { out: await mergeOne(ctx, e, { yes: true, team: true }), gh: r.gh };
+  };
+
+  // A Claude Code session's: a comment that names the file, and its hold says it's back with the session.
+  const first = await round(listed());
+  const said = first.gh.find((a) => a[0] === 'pr' && a[1] === 'comment');
+  assert.ok(said, `${first.out.message}
+${JSON.stringify(first.out.held)}`);
+  assert.match(said!.at(-1)!, /conflicts with `main` in `LICENSE`[\s\S]*Over to the Claude Code session that opened it: merge `main` into `claude\/feature`/);
+  assert.match(first.out.held[0].why, /back with the Claude Code session that opened it, in a comment on it/);
+  // The next round, nothing new: said once.
+  const again = await round(listed());
+  assert.equal(again.gh.filter((a) => a[1] === 'comment').length, 0);
+  assert.match(again.out.held[0].why, /back with the Claude Code session/);
+
+  // The Wright's: closed (its branch kept), its issue queued again; it then waits for nothing.
+  rmSync(kickbacksFile(), { force: true });
+  sh(checkout, 'push', '--quiet', 'origin', `${pr.headOid}:refs/heads/wright/7-a-feature`);
+  const wright = await round(listed({ head: 'wright/7-a-feature', labels: ['wright'], body: 'A feature.\n\nCloses #7' }));
+  assert.ok(wright.gh.some((a) => a[0] === 'pr' && a[1] === 'close' && a[2] === '21' && !a.includes('--delete-branch')), JSON.stringify(wright.gh));
+  assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'edit' && a[2] === '7' && a.includes('wright:done')));
+  assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'comment' && a[2] === '7'));
+  assert.equal(wright.out.held.length, 0);
+  assert.match(wright.out.message, /#21 closed: it conflicts with main in LICENSE, so the Steward closed it and queued #7 for the Wright again/);
 });
 
 test("the round: a conflicting team PR is caught up after the merges, and its hold says so", async () => {

@@ -161,7 +161,7 @@ test('never from a tree with anything uncommitted in it, and never from a checko
 
 test("under node --test a round leaves the Steward's own releases alone unless a test names the checkout", async () => {
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
-  const gh = runner(() => ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
+  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
   if (existsSync(ran)) unlinkSync(ran);
   const out = await runStage('round', {}, { run: gh.run });
   assert.deepEqual(out.results, []);
@@ -171,7 +171,7 @@ test("under node --test a round leaves the Steward's own releases alone unless a
   sh(checkout, 'commit', '--quiet', '-am', 'another fix');
   sh(checkout, 'push', '--quiet', 'origin', 'main');
   const named = await runStage('round', {}, { run: gh.run, self: { checkout } });
-  assert.deepEqual(named.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
+  assert.deepEqual(named.results.filter((x) => x.id !== 'steward' || x.outcome !== 'skipped').map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
     ['done', 'self: released kit-v1.1.0 from origin/main (…)'],
     ['done', 'self: released v0.9.0 from origin/main (…)'],
   ]);

@@ -69,6 +69,8 @@ export interface Settings {
   rollout: boolean;
   /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
   releaseSelf: boolean;
+  /** In its rounds, the team's PRs to the Steward's own repository are merged as an employee's are: tested here first. */
+  mergeSelf: boolean;
   /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
   stewardCheckout: string;
   /** Before it publishes an employee's release, a passing tasting from the Aletaster of that very commit (tasting.ts). */
@@ -224,6 +226,7 @@ export const DEFAULT_SETTINGS: Settings = {
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
   releaseSelf: true,
+  mergeSelf: true,
   stewardCheckout: 'C:\\Projects\\Steward',
 };
 
@@ -288,7 +291,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'catchUp',
     kind: 'switch',
     label: 'Catches PRs up with their branch',
-    help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict waits for you.",
+    help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines, or a new entry at the top of CHANGELOG.md on each side), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict goes back to whoever wrote the PR: the Wright's is closed and its issue queued for it again; anyone else's, a Claude Code session's too, gets a comment that names the files.",
   },
   {
     key: 'rollout',
@@ -301,6 +304,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: 'Releases its own new versions',
     help: "In its rounds, when the Steward's own main carries a kit version with no kit-v release, or a Steward version with no v release, it is released from a clean worktree of main, as a person would: npm run kit-release -- --publish, then npm run release -- --publish. Never a version already released; a release that fails is an alarm, and isn't tried again at that commit.",
+  },
+  {
+    key: 'mergeSelf',
+    kind: 'switch',
+    label: 'Merges its own PRs',
+    help: "In its rounds, the team's ready PRs to the Steward's own repository are merged as an employee's are: tested here first (npm run typecheck and npm test, in a worktree of its own), with a new version each, caught up with main or sent back to their author when they conflict. Then it releases itself, and Manor installs it. An update that doesn't come up, or doesn't stay up, is rolled back to the version before it and ignored until you look: its alarm says how to allow it again. Off: its PRs are left to you.",
   },
   {
     key: 'stewardCheckout',
@@ -445,6 +454,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
       releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,
+      mergeSelf: typeof r.mergeSelf === 'boolean' ? r.mergeSelf : d.mergeSelf,
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),
       tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
     },
