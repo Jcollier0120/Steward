@@ -2,6 +2,10 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.22
+
+**A release, bump or self-release cut short by the network is tried again, not held.** A failed command's message said only "failed (exit 1)". So when gh's publish timed out ("net/http: TLS handshake timeout") and the PC was online again by the time the round asked, the commit was kept in round-failed.json for a person to release (the Developer Herald's 0.5.6). The failure's message now carries the output line that says the network failed (`networkNote`). `networkFailure` sees it, along with the network failures the kit's words miss: Go's TLS and HTTP client timeouts, and Windows' "connection attempt failed".
+
 ## 0.8.21
 
 **Kit 2.16.0: every agent's page uses the width of the window.** The kit's page no longer holds its panel's content to a 1180px column, and the title bar shows an agent's whole role when there is room for it (see [kit/CHANGELOG.md](kit/CHANGELOG.md)). The Steward's own page, a kit page, is the first to have it.
