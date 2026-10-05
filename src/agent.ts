@@ -12,6 +12,7 @@ import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAs
 import { renderBody } from './view.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
+import { testedView } from './tested.ts';
 
 /**
  * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
@@ -129,6 +130,8 @@ export async function serveSteward(o: { run?: Runner } = {}) {
       // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
       '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
+      // The commits whose tests passed here, the last 20 of each employee's (tested.ts): the Surveyor's, for its daily runs.
+      '/api/tested': () => ({ json: testedView(loadSettings()) }),
       // What needs the person (alarms.ts): Manor shows the open ones that aren't dismissed.
       '/api/alarms': () => {
         const a = loadAlarms();

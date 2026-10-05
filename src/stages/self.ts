@@ -9,6 +9,7 @@ import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import { networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
+import { recordTested } from '../tested.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -138,6 +139,8 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
     }
+    // Released from this commit of main: the Surveyor's GET /api/tested (tested.ts).
+    recordTested(APP.id, { commit: step.commit, stage: 'release', branch: STEWARD_BRANCH, version: step.version });
     return selfResult('done', `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})`, { version: step.version, commit: at, url: `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}` });
   } finally {
     try {
