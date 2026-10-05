@@ -139,6 +139,30 @@ test('the title bar stays at the top as the page scrolls, and a jump to a #secti
   assert.equal((html.match(/position: fixed/g) ?? []).length, 0);
 });
 
+test('the page uses the width of the window: no column for text, panels or Settings, and the role whole when it fits', () => {
+  const html = page({ token: 'tok', body: '' });
+  const rule = (sel: string) => html.match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+  assert.match(rule('main.view'), /margin: 0 12px 12px; padding: 14px 24px 28px;/, 'its side padding stays');
+  assert.doesNotMatch(rule('main.view'), /max-width/);
+  assert.doesNotMatch(html, /main(\.view)? > \*/, 'nothing caps what the panel holds');
+  // The only widths left cap a control, never a run of text: a text box, the Theme menu, and the 100% guards.
+  const caps = [...html.matchAll(/([^{}\n]+)\{[^{}]*?max-width: ([^;]+);/g)].map((m) => `${m[1].trim()} ${m[2]}`);
+  assert.deepEqual(caps.filter((c) => !/^@media/.test(c)), [
+    '.brand max-content',
+    '.theme-menu calc(100vw - 24px)',
+    ':where(input:not([type=checkbox], [type=radio], [type=range]), select, textarea) 100%',
+  ]);
+  assert.doesNotMatch(html, /max-width: [\d.]+(ch|em|rem)\b/, 'no measure in characters');
+  // The role: one line, up to its own width, cut with an ellipsis only when the bar has no room for it.
+  assert.match(rule('.brand'), /flex: 1 1 220px; min-width: 0; max-width: max-content;/);
+  assert.match(rule('.brand .role'), /overflow: hidden; text-overflow: ellipsis; white-space: nowrap;/);
+  // The Settings panel's sheet: a text box is the one thing it holds to a width.
+  const sheet = readFileSync(new URL('../web/settings-panel.css', import.meta.url), 'utf8');
+  const sheetCaps = [...sheet.matchAll(/([^{}\n]+)\{[^{}]*?(?<![-\w])(max-width|width): ([^;]+);/g)].map((m) => `${m[1].trim()} ${m[2]}: ${m[3]}`);
+  for (const c of sheetCaps) assert.match(c, /input\[type=(text|number|checkbox)\]|100%|^\.sf-table, /, `only a control or a guard: ${c}`);
+  assert.doesNotMatch(sheet, /[\d.]+ch\b/, 'no measure in characters');
+});
+
 test('busy: the title bar moves, the pill says what it is doing, the page refreshes', () => {
   const html = page({ token: 'tok', body: '', busy: true });
   assert.match(html, /<header class="titlebar busy" data-agent="fixture">/);
