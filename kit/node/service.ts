@@ -27,14 +27,24 @@ function alive(pid: number): boolean {
 }
 
 /** Its /api/ping answer, or null when nothing answers as this app on its port. */
-export async function ping(): Promise<Record<string, unknown> | null> {
+export async function ping(at = port): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/ping`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`http://127.0.0.1:${at}/api/ping`, { signal: AbortSignal.timeout(2000) });
     const json = (await res.json()) as Record<string, unknown>;
     return res.ok && json?.app === APP.id ? json : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The port its page answers on: this version's, else the one server.json says the running page took (an older
+ * version's, before an update moved it). Null when it answers on neither.
+ */
+export async function pageAt(): Promise<number | null> {
+  if (await ping()) return port;
+  const was = readJson<{ port?: number } | null>(dataFile('server.json'), null)?.port;
+  return typeof was === 'number' && was !== port && (await ping(was)) ? was : null;
 }
 
 /** Puts it on duty and makes sure its page (and so its rounds) is running. */
@@ -82,20 +92,25 @@ export async function stop(): Promise<number> {
   return 0;
 }
 
-/** Ends the page process (with the token from server.json) and waits until it has gone. Duty is unchanged. */
+/**
+ * Ends the page process (with the token from server.json) and waits until it has gone. Duty is unchanged. The page
+ * is looked for on the port server.json says it took, when that isn't this version's: an update that moves the
+ * agent to a new port stops the old page there (the Chamberlain's 0.1.3 left 0.1.2's on 19898).
+ */
 export async function shutdown(): Promise<number> {
-  if (!(await ping())) {
+  const info = readJson<{ token?: string; pid?: number; port?: number } | null>(dataFile('server.json'), null);
+  const was = (await pageAt()) ?? port;
+  if (!(await ping(was))) {
     console.log(`${APP.name}'s page isn't running.`);
     return 0;
   }
-  const info = readJson<{ token?: string; pid?: number } | null>(dataFile('server.json'), null);
   try {
-    await fetch(`http://127.0.0.1:${port}/api/stop`, { method: 'POST', headers: { 'x-token': info?.token ?? '' }, signal: AbortSignal.timeout(5000) });
+    await fetch(`http://127.0.0.1:${was}/api/stop`, { method: 'POST', headers: { 'x-token': info?.token ?? '' }, signal: AbortSignal.timeout(5000) });
   } catch {
     // It may close the connection as it exits.
   }
   for (let i = 0; i < 40; i++) {
-    if (!(await ping())) {
+    if (!(await ping(was))) {
       // The page stops answering a moment before its process is gone, and its files with it.
       for (let j = 0; j < 40 && typeof info?.pid === 'number' && alive(info.pid); j++) await new Promise((r) => setTimeout(r, 250));
       console.log(`${APP.name}'s page has stopped.`);
