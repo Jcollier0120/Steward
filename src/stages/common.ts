@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch, gh } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
@@ -37,6 +38,8 @@ export interface StageResult {
   asked: Record<string, unknown>;
   /** A word for the whole stage, when it couldn't start (no kit, say). */
   error?: string;
+  /** A round while this PC was offline (the kit's net.ts): nothing was asked of GitHub, and it waited for the network. */
+  offline?: boolean;
   results: EmployeeResult[];
   log: string[];
 }
@@ -57,6 +60,20 @@ export interface Ctx {
   glance?: Glance | null;
   /** Stands in for the Aletaster, its install and the clock, for the release gate (tasting.ts); tests only. */
   tasting?: TastingDeps;
+  /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
+  online?: () => Promise<boolean>;
+}
+
+/**
+ * Whether a failure is only the network's: its words say so, or this PC is offline now (the kit's net.ts). Such a
+ * failure is no fault of the commit: nothing is held against it (round-failed.json, self-failed.json,
+ * rollout-failed.json), and the next round tries again. A message rarely carries the command's output ("npm ci
+ * failed (exit 1)"), so being offline right now counts too.
+ */
+export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string): Promise<boolean> {
+  if (isNetworkError(message)) return true;
+  const look = ctx.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : online);
+  return !(await look().catch(() => true));
 }
 
 /** An employee's repository from the stage's glance at GitHub, while it still says how things are. */

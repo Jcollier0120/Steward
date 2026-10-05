@@ -2,6 +2,13 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.15.0
+
+**Offline is waited out, never a failure.** A PC that is offline knows it, so nothing in the manor says so again: a round that fails only because the network isn't there waits for it, and is tried at its usual time. spec/OFFLINE.md is new, and says what waits where.
+- **node/net.ts is new:** `online()` (a cached look: port 443 of github.com, www.msftconnecttest.com and www.cloudflare.com, any one answering is online; kept a minute online, 20 s offline), `offlineSince()`, `isNetworkError(e)` (by code or by words: Node's, git's, gh's; never `ECONNREFUSED`, which a local server gives), `offlineFailure(e)` (a network failure while offline, or an `Offline` thrown), the `Offline` error, `probeHosts()`, and `setOnlineProbe()` / `forgetOnline()` for tests. `MANOR_OFFLINE=1` says offline without looking, `0` online.
+- **schedule.ts's `every()`:** a round that throws an offline failure waited for the network. `lastRunOk` is null and the new `lastRunOffline` is true (both in `/api/ping`, by `roundTimes()`); round.json says `"ok": null, "offline": true` (spec/ROUND.md: `ok` may be null, and `offline` is new); the log says "this PC is offline, so the round waits for the network", never "run failed". So the Surveyor finds no failed round, and Manor's card says nothing failed, with no change to either.
+- **Nothing for most agents to do** but take this version. An agent whose round catches its own network errors (a feed at a time: the Herald's, the Developer Herald's, the Chamberlain's mailboxes) asks `offlineFailure(e)` and shows that feed as waiting, in its own PR; or throws `Offline` when every feed waited.
+
 ## 2.14.0
 
 **The title bar stays at the top as the page scrolls.** On a long page (the Steward's staff table, the Auditor's findings, Settings) the title bar, with its status pill, Settings, Theme and Run now, scrolled away with the rest.

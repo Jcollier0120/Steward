@@ -1,4 +1,5 @@
 import { duty } from './duty.ts';
+import { offlineFailure } from './net.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
@@ -7,6 +8,8 @@ export interface RoundState {
   /** When the last round ended, and whether it went through (null before the first, or unknown). */
   lastRunAt: string | null;
   lastRunOk: boolean | null;
+  /** Whether the last round waited for the network: it failed while this PC was offline (net.ts), so it's no failure (lastRunOk null). */
+  lastRunOffline: boolean;
   lastError: string | null;
   /** When the next scheduled round is due; null off duty, or once stopped. */
   nextRunAt: string | null;
@@ -21,7 +24,10 @@ export interface RoundState {
 export interface RoundRecord {
   started: string;
   finished: string;
-  ok: boolean;
+  /** true when it went through, false when it threw, null when it waited for the network (offline). */
+  ok: boolean | null;
+  /** true when it failed only because this PC was offline (net.ts's offlineFailure): waited out, never a failure. */
+  offline?: boolean;
   /** The thrown error's message, its first line, at most 500 characters; null when it went through. */
   error: string | null;
   /** The interval between rounds when the round ended (each wait varies by ±10% about it). */
@@ -76,12 +82,14 @@ const earliest = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).s
  * The agent's rounds at a glance, as every agent's /api/ping gives them for Manor's employee cards: the last
  * round to end and whether it went through, the next one due, and since when one has been running.
  */
-export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'nextRunAt' | 'runningSince'> {
+export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'lastRunOffline' | 'nextRunAt' | 'runningSince'> {
   const all = rounds();
   const lastRunAt = latest(all.map((r) => r.lastRunAt));
+  const last = all.find((r) => r.lastRunAt === lastRunAt);
   return {
     lastRunAt,
-    lastRunOk: all.find((r) => r.lastRunAt === lastRunAt)?.lastRunOk ?? null,
+    lastRunOk: last?.lastRunOk ?? null,
+    lastRunOffline: last?.lastRunOffline ?? false,
     nextRunAt: earliest(all.map((r) => r.nextRunAt)),
     runningSince: earliest(all.map((r) => r.runningSince)),
   };
@@ -106,6 +114,11 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'next
  * through, when the next is due, and since when one has been running. Each round that runs also leaves its
  * outcome in the data folder's round.json, under the schedule's name (spec/ROUND.md), for readers outside
  * the agent (the Surveyor); a round.json that can't be written never fails the round.
+ *
+ * A round that fails because this PC is offline (net.ts's offlineFailure: a network error while no host
+ * answers, or an Offline thrown) is no failure: it waited for the network. Its lastRunOk is null and
+ * lastRunOffline true, round.json says `"ok": null, "offline": true`, and the log says it waits, never
+ * "run failed". The next round comes at its usual time.
  */
 export function every(everyMs: number | (() => number), job: () => Promise<void>, opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string } = {}) {
   let running = false;
@@ -115,6 +128,7 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
   /** When the last run ended (null before the first, unless the agent said), and the current wait's jitter. */
   let lastEnded: number | null = opts.lastEndedAt ?? null;
   let lastOk: boolean | null = null;
+  let lastOffline = false;
   let startedAt: number | null = null;
   /** When the wait under way ends. */
   let dueAt: number | null = null;
@@ -140,16 +154,20 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     const started = Date.now();
     startedAt = started;
     let error: string | null = null;
+    let offline = false;
     try {
       await job();
       lastError = null;
       lastOk = true;
     } catch (e) {
       lastError = (e as Error).message;
-      lastOk = false;
       error = roundError(e);
-      console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
+      offline = await offlineFailure(e).catch(() => false);
+      lastOk = offline ? null : false;
+      if (offline) console.log(`${new Date().toISOString()} this PC is offline, so the round waits for the network: ${error}`);
+      else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
     } finally {
+      lastOffline = offline;
       running = false;
       startedAt = null;
       const ended = Date.now();
@@ -159,7 +177,8 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
       recordRound(opts.name ?? 'round', {
         started: new Date(started).toISOString(),
         finished: new Date(ended).toISOString(),
-        ok: error === null,
+        ok: offline ? null : error === null,
+        ...(offline ? { offline: true } : {}),
         error,
         everyMs: interval(),
         next: state().nextRunAt,
@@ -172,6 +191,7 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     name: opts.name ?? 'round',
     lastRunAt: iso(lastEnded),
     lastRunOk: lastOk,
+    lastRunOffline: lastOffline,
     lastError,
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
     nextRunAt: stopped || running || !duty().onDuty ? null : iso(dueAt),

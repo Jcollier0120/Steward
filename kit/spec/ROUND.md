@@ -31,7 +31,8 @@ Every agent that runs its rounds with the kit's scheduler leaves each round's ou
 |---|---|---|
 | `started` | ISO 8601 (UTC) | When the round began. |
 | `finished` | ISO 8601 (UTC) | When it ended, whether or not it went through. |
-| `ok` | boolean | `true` when the round went through, `false` when it threw. |
+| `ok` | boolean or null | `true` when the round went through, `false` when it threw. `null` when it threw only because this PC was offline (kit 2.15.0, OFFLINE.md): it waited for the network, and is no failure. |
+| `offline` | true, or absent | `true` when `ok` is null: the round waited for the network. Absent otherwise. Since kit 2.15.0. |
 | `error` | string or null | When it threw: the error's message, its first line, trimmed, at most 500 characters (`"it failed"` when that is empty). `null` when `ok`. |
 | `everyMs` | number | The interval between rounds, in milliseconds, as it was when the round ended. Each wait varies by ±10% about it. |
 | `next` | ISO 8601 (UTC) or null | When the next scheduled round is due. `null` when none is coming: the agent is off duty (only Run now runs a round then), or the schedule was stopped. The same as `/api/ping`'s `nextRunAt` just after the round. |

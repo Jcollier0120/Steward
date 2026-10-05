@@ -1,6 +1,6 @@
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
-import { mapLimit, result, type Ctx, type EmployeeResult } from './common.ts';
+import { mapLimit, networkFailure, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
 import { clearTastingHold } from '../tasting.ts';
 
@@ -35,7 +35,8 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
     }
   });
   for (const r of out) {
-    if (r.outcome === 'failed' && r.commit) failed[r.id] = r.commit;
+    // A release the network cut short (common.ts's networkFailure) isn't that commit's fault: the next round tries it again.
+    if (r.outcome === 'failed' && r.commit && !(await networkFailure(ctx, r.message))) failed[r.id] = r.commit;
     else if (r.outcome === 'done') delete failed[r.id];
     // Looked at, and not held by the tasting (released, or nothing to release): no hold to count hours for.
     if (!r.again) clearTastingHold(r.id);
