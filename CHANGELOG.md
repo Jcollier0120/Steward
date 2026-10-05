@@ -2,6 +2,13 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.11
+
+**A bump that fails says which test, keeps its output, and is tried once more.** The rollout of kit 2.12.1 failed for two employees with only "npm test failed (exit 1)": the log keeps the last 25 lines of the output, and the failed test was far above them.
+- A failed check's message names the tests that failed and the first lines of their errors, read from `node --test`'s output (`failedTests` in run.ts), so the alarm says what broke: `npm test failed (exit 1): "its name" (each request came after its warm-up: 5 !== 8)`. The log lists them too, before the tail.
+- The failed step's whole output is kept beside its worktree, as `work\<id>.log`, and the message says where.
+- A bump's checks that fail are run once more, as a PR's tested here are: Reeve's failed in the round, under the load of several bumps at once, and passed three times alone. A pass the second time is committed, and its result and commit message say so; failing twice is the failure, as before.
+
 ## 0.8.10
 
 **Kit 2.12.1: a release zip's name has no spaces.** The Steward hands out kit 2.12.1 (kit/CHANGELOG.md). An agent whose name has two words (the Developer Herald) now publishes a zip that GitHub stores under the name SHA256SUMS.txt gives it, and that Manor finds.
