@@ -100,10 +100,16 @@ ${items.join('\n')}
  * on duty (with its next round, when the agent says when that is), or off duty.
  */
 export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number }): string {
-  if (o.busy) return `<span class="status-pill busy" title="A round is under way. This page refreshes itself until it's done.">${esc(o.look.busy)}</span>`;
-  if (!o.duty.onDuty) return `<span class="status-pill off" title="Off duty since ${esc(ago(o.duty.since, o.now))}: its scheduled rounds are paused. Run now still works.">Off duty</span>`;
+  const p = pillOf(o);
+  return `<span class="status-pill ${p.kind}" title="${esc(p.title)}">${esc(p.text)}</span>`;
+}
+
+/** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
+export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+  if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
+  if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
   const next = until(o.nextAt, o.now);
-  return `<span class="status-pill on" title="On duty: its rounds run on their schedule. Manor's Stop pauses them.">On duty${next ? ` · next round ${esc(next)}` : ''}</span>`;
+  return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Manor's Stop pauses them." };
 }
 
 /**
@@ -369,7 +375,7 @@ function offDuty(d: Duty): string {
  * The agent's own colour for its scene, and its scene's motion: its Light colour on a light theme, its Dark colour on
  * a dark one (Dark and the dark colour themes, or Match Windows while Windows is dark).
  */
-function lookCss(look: Look): string {
+export function lookCss(look: Look): string {
   const dark = themes().filter((t) => t.scheme === 'dark').map((t) => `:root[data-theme="${t.name}"]`);
   return `
 :root { --role: ${look.accent.light}; }
@@ -384,7 +390,7 @@ ${look.motion}
  * page() puts before these). The kit's older names stay for the agents' own styles: --card (a card's background)
  * and --soft (a quiet fill). --ink and --ink-soft are the agents' icons' own colours, for the scenes' outlines.
  */
-const CSS = `
+export const CSS = `
 :root { --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg)); --titlebar-h: 57px; }
 * { box-sizing: border-box; }
 /* The title bar stays at the top as the page scrolls, so a jump to #a-section lands below it, not under it.

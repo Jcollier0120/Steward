@@ -32,7 +32,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,7 @@ import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
+import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
 
 /** The public repository every release of the manor's is published in, with no source: any PC downloads from it, signed in or not. */
 export const RELEASES_REPO = 'Jcollier0120/Manor-releases';
@@ -218,6 +219,10 @@ async function build(readable = false): Promise<Built> {
       cpSync(path.join(root, f), path.join(stage, f));
     }
     writeFileSync(path.join(stage, 'release.json'), JSON.stringify(release, null, 2) + '\n');
+    // A React page (react-page.ts) is bundled first, readable or not: the browser can't run its .tsx.
+    const pageEsbuild = existsSync(path.join(stage, PAGE_ENTRY)) ? (esbuild ?? (await loadEsbuild(root))) : null;
+    if (pageEsbuild && 'error' in pageEsbuild) throw new Error(pageEsbuild.error);
+    const page = pageEsbuild ? await releasePage(stage, root, pageEsbuild, readable) : null;
     const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
 
     const outDir = path.join(root, 'artifacts', APP.id);
@@ -239,6 +244,7 @@ async function build(readable = false): Promise<Built> {
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
+    if (page) console.log(`  its page, drawn in the browser: ${PAGE_BUNDLE}, ${page.kb} KB with React`);
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);

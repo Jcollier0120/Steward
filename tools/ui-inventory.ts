@@ -43,6 +43,7 @@ import { API } from 'typescript/unstable/sync';
 import {
   isArrowFunction,
   isCallExpression,
+  isExportDeclaration,
   isFunctionDeclaration,
   isFunctionExpression,
   isIdentifier,
@@ -52,6 +53,7 @@ import {
   isJsxOpeningElement,
   isJsxSelfClosingElement,
   isMethodDeclaration,
+  isNamedExports,
   isNamedImports,
   isNoSubstitutionTemplateLiteral,
   isObjectLiteralExpression,
@@ -90,7 +92,7 @@ const HTML_OUT = OUT.replace(/\.md$/, '.html');
  * way src\kit\ is left out: it is a copy of the Steward's kit\ (tools/kit.ts fills it), and would count the kit's
  * components again in every agent; and so are tests, builds and what the package manager installs.
  */
-const ROOTS = SELF ? ['src', 'kit/node', 'kit/web'] : ['.'];
+const ROOTS = SELF ? ['src', 'kit/node', 'kit/web', 'kit/react'] : ['.'];
 // art\ and scripts\ hold build-time tools (Manor's banners are SVG drawn by a script), not a page.
 const SKIP = new Set(['src/kit', 'kit', 'test', 'tests', '__tests__', 'dist', 'build', 'out', 'artifacts', 'coverage', 'docs', 'tools', 'art', 'scripts']);
 const SKIP_NAMES = new Set(['node_modules', 'dist', 'build', 'coverage']);
@@ -257,6 +259,8 @@ const elements: Element[] = [];
 const refs: Ref[] = [];
 /** Per file: an imported name and the repo-relative file it comes from. */
 const imports = new Map<string, Map<string, string>>();
+/** Per file: the names it exports from another file, and where they come from (a barrel's). */
+const reexports = new Map<string, Map<string, { from: string; name: string }>>();
 /** Per file: where each function is, so a use in a module's constant can be told from one in code. */
 const functions = new Map<string, [number, number][]>();
 /** Per file: where each module-level constant is (`const GEAR = icon(…)`, a scene built with .map()). */
@@ -272,6 +276,7 @@ function importedFile(from: string, spec: string): string | null {
   const found = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'].map((x) => abs + x).find((p) => existsSync(p) && statSync(p).isFile());
   const r = rel(found ?? abs);
   if (SELF && r.startsWith('src/kit/web/')) return `kit/web/${r.slice('src/kit/web/'.length)}`;
+  if (SELF && r.startsWith('src/kit/react/')) return `kit/react/${r.slice('src/kit/react/'.length)}`;
   if (SELF && r.startsWith('src/kit/')) return `kit/node/${r.slice('src/kit/'.length)}`;
   return r;
 }
@@ -283,6 +288,7 @@ for (const file of files) {
   const lineOf = (pos: number) => sf.getLineAndCharacterOfPosition(pos).line + 1;
   const defs: ComponentDef[] = [];
   const imported = new Map<string, string>();
+  const passedOn = new Map<string, { from: string; name: string }>();
   const fns: [number, number][] = [];
   const consts: [number, number][] = [];
   let hasMarkup = false;
@@ -303,6 +309,11 @@ for (const file of files) {
       const from = importedFile(relFile, node.moduleSpecifier.text);
       if (from) for (const s of node.importClause.namedBindings.elements) imported.set(s.name.text, from);
     }
+    // `export { Card } from './ui.tsx'`: a barrel (the kit's react/index.ts), followed to where each name is defined.
+    if (isExportDeclaration(node) && node.moduleSpecifier && isStringLiteral(node.moduleSpecifier) && node.exportClause && isNamedExports(node.exportClause)) {
+      const from = importedFile(relFile, node.moduleSpecifier.text);
+      if (from) for (const e of node.exportClause.elements) passedOn.set(e.name.text, { from, name: (e.propertyName ?? e.name).text });
+    }
 
     // Markup: a tag in a string or template, an h('tag', { class }) call, or JSX.
     const sk = skeleton(node);
@@ -317,7 +328,11 @@ for (const file of files) {
       if (/^[a-z]/.test(name)) {
         const cls = node.attributes.properties.find((a) => isJsxAttribute(a) && /^class(Name)?$/.test(a.name.getText(sf)));
         element(name, cls && isJsxAttribute(cls) ? classValue(cls.initializer) : [], node.getStart(sf));
-      } else refs.push({ name: name.split('.')[0], file: relFile, pos: node.getStart(sf) });
+      } else {
+        // A component in JSX: its file is UI, though all it writes is other components (main.tsx's App).
+        hasMarkup = true;
+        refs.push({ name: name.split('.')[0], file: relFile, pos: node.getStart(sf) });
+      }
     }
 
     // A use: a call, or a function handed to one (`.map(named)`).
@@ -349,6 +364,7 @@ for (const file of files) {
   };
   visit(sf);
   imports.set(relFile, imported);
+  reexports.set(relFile, passedOn);
   functions.set(relFile, fns);
   constants.set(relFile, consts);
   if (hasMarkup) defsByFile.set(relFile, defs);
@@ -379,8 +395,16 @@ const scopeOf = (d: ComponentDef): [number, number] => {
 function resolve(defs: Defs, r: Ref): ComponentDef | null {
   const local = (defs.get(r.file) ?? []).filter((d) => d.name === r.name).map((d) => ({ d, s: scopeOf(d) })).filter(({ s }) => r.pos >= s[0] && r.pos < s[1]);
   if (local.length) return local.sort((x, y) => x.s[1] - x.s[0] - (y.s[1] - y.s[0]))[0].d;
-  const from = imports.get(r.file)?.get(r.name);
-  return from ? (defs.get(from) ?? []).find((d) => d.name === r.name) ?? null : null;
+  let from = imports.get(r.file)?.get(r.name);
+  let name = r.name;
+  for (let hop = 0; from && hop < 5; hop++) {
+    const d = (defs.get(from) ?? []).find((x) => x.name === name);
+    if (d) return d;
+    const next = reexports.get(from)?.get(name);
+    if (!next) return null;
+    ({ from, name } = next);
+  }
+  return null;
 }
 
 /**
@@ -485,10 +509,10 @@ const shared = all
 const fileLocal = all.filter((d) => !d.isScreen && externalUses(d).length === 0 && !unused.includes(d)).sort((a, b) => b.size - a.size);
 
 /**
- * A core component: the shared vocabulary pages are written in. The kit's page.ts today; in a React app, a
- * components/ui folder (GamerNexus's convention), where the shared components belong.
+ * A core component: the shared vocabulary pages are written in. The kit's page.ts for a string-built page, its react
+ * part for a React one (kit/react, or src/kit/react in an agent), and a components/ui folder (GamerNexus's convention).
  */
-const isCore = (d: ComponentDef) => d.file === 'kit/node/page.ts' || /(^|\/)components\/ui\//.test(d.file);
+const isCore = (d: ComponentDef) => d.file === 'kit/node/page.ts' || /(^|\/)(kit\/react|components\/ui)\//.test(d.file);
 
 /**
  * What each file writes BY HAND: HTML elements, as opposed to components it calls. Not a target to drive to

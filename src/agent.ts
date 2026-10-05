@@ -3,13 +3,15 @@ import { dismiss, loadAlarms } from './alarms.ts';
 import { APP, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
-import { page } from './kit/page.ts';
+import { pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
+import { afterWords } from './after.ts';
 import type { Runner } from './run.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
+import type { Staff } from './stages/staff.ts';
 import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
-import { renderBody } from './view.ts';
+import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
@@ -40,6 +42,10 @@ export function askOf(body: any): StageAsk {
   const kit = typeof body?.kit === 'string' && /^\d+\.\d+\.\d+$/.test(body.kit) ? body.kit : null;
   return { employees, kit };
 }
+
+/** The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words. */
+export const staffView = (s: Staff | null): StaffView | null =>
+  s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** `run` stands in for git, gh and the employees' commands in a test. */
 export async function serveSteward(o: { run?: Runner } = {}) {
@@ -113,19 +119,27 @@ export async function serveSteward(o: { run?: Runner } = {}) {
   };
   arrange();
 
+  /** What the page shows (src/web/types.ts's StewardView), in the kit's frame. */
+  const pageData = () => {
+    const s = loadSettings();
+    const busy = running !== null || refreshing !== null;
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf };
+    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round, alarms: s.alarms.on ? loadAlarms() : undefined };
+    return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
+  };
+
   const served = await serve({
     port,
     icon: ICON,
     ping: () => ({ busy: running !== null, stage: running?.stage ?? null }),
     get: {
+      // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
+      // /api/page again every few seconds while a stage runs, and after each button.
       '/': ({ token }) => {
         if (!running && !roundsKeepIt() && staleTable()) void refresh();
-        const s = loadSettings();
-        const state = rounds?.state;
-        const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf };
-        const body = renderBody({ staff: loadStaff(), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round, alarms: s.alarms.on ? loadAlarms() : undefined });
-        return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
+        return { html: reactPage({ token, data: pageData() }) };
       },
+      '/api/page': () => ({ json: pageData() }),
       '/api/staff': () => ({ json: loadStaff() }),
       // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
       '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),

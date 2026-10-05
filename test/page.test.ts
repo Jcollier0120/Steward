@@ -15,6 +15,7 @@ writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [] }
 const { APP, port } = await import('../src/app.ts');
 const { serveSteward, askOf } = await import('../src/agent.ts');
 const { runner } = await import('./helpers.ts');
+const { bundleForNode, importPath } = await import('../kit/test/react-render.ts');
 
 const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? { code: 0, out: JSON.stringify([{ tagName: 'kit-v1.0.0', isDraft: false }]), err: '' } : undefined));
 let served: Awaited<ReturnType<typeof serveSteward>>;
@@ -29,6 +30,16 @@ after(async () => {
 });
 
 const base = () => `http://127.0.0.1:${port}`;
+
+/** The page's body (src/web/steward.tsx), or Run now, as HTML from /api/page's body: what the browser draws. */
+const renderStewardBody = async (name: 'StewardBody' | 'RunNow' = 'StewardBody') => {
+  const m = await bundleForNode<{ render: (body: unknown) => string }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { ${name} } from '${importPath('src/web/steward.tsx')}';
+     export const render = (v) => renderToStaticMarkup(<${name} v={v} />);`,
+  );
+  return m.render;
+};
 const post = (route: string, headers: Record<string, string>, body: unknown = { employees: [], kit: '1.0.0' }) =>
   fetch(`${base()}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
@@ -43,16 +54,30 @@ test('it pings as the Steward, on duty and idle', async () => {
   assert.equal((await fetch(`${base()}/favicon.svg`)).headers.get('content-type'), 'image/svg+xml');
 });
 
-test('the page shows the kit, the stages and Settings, and carries its token', async () => {
+test('the page is drawn in the browser: its shell carries the token, its first data and the bundle', async () => {
   const html = await (await fetch(`${base()}/`)).text();
   assert.match(html, /<meta name="page-token" content="[0-9a-f]{48}">/);
+  assert.match(html, /<div id="root">/);
+  assert.match(html, /<script type="module" src="\/page\.js"><\/script>/);
+  const first = JSON.parse(html.match(/<script type="application\/json" id="page-data">([^<]*)<\/script>/)![1]);
+  const page = await (await fetch(`${base()}/api/page`)).json();
+  assert.equal(first.body.staff?.kit ?? null, page.body.staff?.kit ?? null, 'the first data is /api/page');
+  assert.equal(page.shell.app.name, 'Steward');
+  assert.equal(page.shell.pill.kind, 'on');
+  const js = await fetch(`${base()}/page.js`);
+  assert.equal(js.status, 200, 'a checkout builds its bundle');
+  assert.match(js.headers.get('content-type') ?? '', /javascript/);
+});
+
+test('the page shows the kit, the stages, its rounds and Run now', async () => {
+  const { body } = await (await fetch(`${base()}/api/page`)).json();
+  const html = (await renderStewardBody())(body);
   assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
-  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
-  assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team's PRs</);
-  assert.match(html, /data-settings-panel/);
-  // By itself (Settings' default): its rounds, and Run now, which the kit lifts into the title bar.
-  assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team&#39;s that is ready/);
-  assert.match(html, /data-post="\/api\/run" data-confirm="A round now: [^"]*"[^>]*>Run now</);
+  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
+  assert.match(html, />Merge the team(&#x27;|')s PRs</);
+  // By itself (Settings' default): its rounds; and Run now, in the title bar.
+  assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
+  assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.21.0
+
+**A page drawn in the browser, with React: the kit's react part.** The first step of the manor's move to React and TypeScript. An agent's page can be React components in the browser rather than HTML written in strings on the server; the Steward's page is the first. Nothing changes for an agent that doesn't take the part.
+- **react/ is a new part** (kit.json's `"react"`, which brings node and web; it lands in src\kit\react\). **react/shell.tsx:** `Page`, the kit's frame, element for element and class for class as page.ts draws it, so page.ts's CSS styles both: the title bar (back to the manor, the agent's icon, name and role, its scene, the status pill, Settings, the Theme menu, and the agent's own `action`, such as Run now), the off-duty notice with Back on duty, the Settings view at #/settings (the Settings panel, still web/settings-panel.js, placed once and left to itself; and "Where its work runs"), and the footer. Also `ThemeMenu` and `mount`. **react/ui.tsx:** `Badge`, `Muted`, `Card`, `Notes` and `PostButton` (a POST with the page's token: it asks first with `confirm`, says an error or the server's `message`, then looks for news), the markup every agent wrote out by hand. **react/page-data.ts:** `usePageData` (the page's first data, then /api/page every 3 s while busy, every `refreshSec` otherwise, and after each button: no reloads, so a ticked box or a scroll stays), `post`, `pageToken`, and the `PageShell` type. **react/time.ts:** `ago`, as page.ts's says it, and `useNow`. **react/index.ts** exports them all.
+- **node/react-page.ts is new:** `pageShell()` (the frame's data: the pill, the scene, the manor, the themes, Off duty since, "Where its work runs"), `reactPage({ token, data })` (the HTML: page.ts's head, the manor's theme at first paint, `<div id="root">`, the first data as JSON, `/page.js`), `scriptJson`, `bundlePage` (esbuild: one browser module, React included), `pageScript` and `releasePage`.
+- **node/server.ts serves /page.js** for an agent with a src/web/main.tsx: built on each request in a checkout (again after a change to src/web or src/kit/react), and as released otherwise; 404 without one.
+- **node/release.ts** bundles the page into src/web/page.js, minified unless `--readable`, and leaves its sources out of the zip (src/web's other files, src/kit/react). React is a devDependency: a release runs no React of its own.
+- **node/page.ts:** `pillOf` (the status pill as data, which `statusPill` and the React title bar both draw), and its `CSS` and `lookCss` are exported.
+- **tools/kit.ts** knows the react part.
+- **What an agent must do:** nothing but take this version. One moving to React takes the part, adds react, react-dom, @types/react and @types/react-dom as devDependencies, writes its page in src/web/main.tsx, serves `{ shell: pageShell(…), body }` as /api/page and `reactPage(…)` as /, and type-checks src/web and src/kit/react with a tsconfig of their own (DOM and JSX): the Steward's tsconfig.web.json.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.19.0
 
 **Every release says what it brings: its notes are the agent's CHANGELOG.md entry for the version.** A release's notes said only which commit it was built from and how to unpack it, so Manor's What's new link showed nothing new. spec/RELEASE-NOTES.md is new, and says how an entry is written: a bold headline, then `### What's new`, `### What changed` and `### Before you update` (always there, "Nothing: it updates itself as usual." when updating needs nothing).
