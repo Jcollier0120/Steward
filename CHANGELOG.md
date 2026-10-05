@@ -20,6 +20,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 Nothing: it updates itself as usual.
 
+## 0.9.6
+
+**A UI inventory: which components are too big, and which markup is written out again and again, in any agent's page.**
+
+### What's new
+
+- `npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's): every component of a page, how big each is, which renders which, and the markup written out by hand more than once. It reads the Steward and its kit, or any agent's repository or Manor's with `-- --repo <folder>`, in template strings or JSX alike, for the move of every page to React. It writes docs/UI-INVENTORY.md (or UI-INVENTORY-<repository>.md) and a sortable page beside it to open from disk; `--tree` prints the render tree, `--ci` fails on a component past its size ceiling.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.9.5
 
 **The Thatcher, the Reckoner, the Weigher and the Shepherd are employees.** They are the general agents of the developer offices. Each shares its office with the developer agent there, as the Herald shares the Herald's: the Thatcher (Jcollier0120/Thatcher) keeps your apps upgraded in Reeve's office, the Reckoner (Jcollier0120/Reckoner) checks your devices after updates in the Auditor's, the Weigher (Jcollier0120/Weigher) measures your internet against your plan in the Aletaster's, and the Shepherd (Jcollier0120/Shepherd) brings in background apps in the Pinder's. Like the Chamberlain, they are built on the kit, and Manor offers them from their releases' `manor-agent.json` (Manor 0.4.51). The Steward rolls the kit out to them, merges their PRs and publishes their releases.
