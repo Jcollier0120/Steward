@@ -404,7 +404,10 @@ p { margin: 8px 0; }
    script marks it .stuck), a line and the theme's shadow under it. */
 .titlebar { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 8px 16px; min-height: 56px; background: var(--bg); border-bottom: 1px solid transparent; transition: border-color .15s, box-shadow .15s; }
 .titlebar.stuck { border-bottom-color: var(--line); box-shadow: var(--shadow); }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
+/* The name and role take the room the bar has, up to their own width: the role is on one line, whole when it fits and
+   cut with an ellipsis only when the window is too narrow for it. From 220px, so a long role doesn't push the tools
+   to a second row. */
+.brand { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: 0; max-width: max-content; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
 .brand:hover { background: var(--hover); }
 .brand-mark { width: 28px; height: 28px; flex: none; }
 /* Back to the manor, first in the title bar: Manor's icon and its name; the icon alone in a narrow window. */
@@ -415,7 +418,7 @@ p { margin: 8px 0; }
 .manor-sep { width: 1px; height: 24px; background: var(--line); flex: none; }
 .brand-text { min-width: 0; }
 .brand h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
-.brand .role { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.35; max-width: 90ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand .role { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tools { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; }
 .status-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
@@ -501,8 +504,9 @@ p { margin: 8px 0; }
 .banner-note > span { flex: 1 1 260px; }
 .banner-note.offduty { background: var(--warn-bg); color: var(--warn); }
 .banner-note button { padding: 3px 12px; }
+/* The panel's content runs the width of the window, its padding aside: no column of its own for text, panels or
+   Settings, which would break lines short and leave the rest of a wide window empty. */
 main.view { flex: 1; min-width: 0; margin: 0 12px 12px; padding: 14px 24px 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
-main.view > * { max-width: 1180px; }
 footer { margin: 0 12px; padding: 0 12px 18px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 footer code { font-size: 11.5px; }
 

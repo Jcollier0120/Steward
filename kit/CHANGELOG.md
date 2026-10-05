@@ -2,6 +2,14 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.16.0
+
+**Every agent's page uses the width of the window.** The page's panel held everything in it (text, cards, tables, Settings) to a 1180px column, so on a wide window the lines broke short and the rest of the panel stood empty; and the title bar cut the agent's role at 90 characters' width even with room to spare (the Wright's and the Bailiff's were never shown whole).
+- **page.ts:** `main.view > * { max-width: 1180px; }` is gone: the panel's content runs its width, inside its own padding (24px a side, 14px in a narrow window).
+- **The role:** `.brand .role` loses `max-width: 90ch`, and `.brand` is `flex: 1 1 220px; max-width: max-content`: the name and role take the room the bar has, up to their own width, so the role is whole when it fits and cut with an ellipsis only when the window is too narrow for it, without pushing the tools to a second row. Still one line (two in a narrow window, as before).
+- **Kept, since they hold a control and not a run of text:** a text box in Settings (`min(100%, 560px)`, and 560px in a list), a number box (130px), the Theme menu (272px), the `max-width: 100%` guards and the narrow-window breakpoints. settings-panel.css had no other cap.
+- **Nothing for an agent to do** but take this version. An agent whose own page CSS sets a column (a `max-width` in `ch` or px on its text or panels) keeps it until its own PR takes it out.
+
 ## 2.15.0
 
 **Offline is waited out, never a failure.** A PC that is offline knows it, so nothing in the manor says so again: a round that fails only because the network isn't there waits for it, and is tried at its usual time. spec/OFFLINE.md is new, and says what waits where.
