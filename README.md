@@ -401,6 +401,19 @@ npm run vectors      # spec\turn-vectors.json and spec\accelerator-vectors.json,
 npm run typecheck
 npm run release      # artifacts\steward\Steward-<version>.zip and its SHA256SUMS.txt; -- --install installs it
 npm run kit-release  # artifacts\kit\kit-<version>.zip and its SHA256SUMS.txt; -- --publish makes kit-v<version>
+npm run ui:inventory # docs\UI-INVENTORY.md and .html: the page's components, their sizes, and markup written out more than once
 ```
+
+### The UI inventory
+
+`npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's apps/mobile script) asks what a page is made of, and flags what could be broken down and reused. It reads the Steward and its kit by default, and any agent's repository or Manor's with `-- --repo <folder>`: every page is moving to React, and the same questions apply in JSX as in template strings.
+
+A **component** is a named function that writes markup (JSX, a tag in a string or template, or an `h('tag', …)` call as in settings-panel.js), and it **renders** the components it calls or puts in its JSX. TypeScript 7's own parser reads the code (`typescript/unstable/sync`, through a project of exactly the files read, made outside the repository), so a tag in a comment or a `<branch>` in usage text isn't counted. Tests, builds, `src\kit\` (the Steward's kit, copied in) and build-time tools (`art\`, `scripts\`, `tools\`) are left out.
+
+- **Repeated markup**, the leading indicator: an element with the same tag and classes (`span.muted`) written out 4 times or more. A bare `<td>` and SVG drawing don't count.
+- **Largest components:** over 60 for a component, 150 for a page, where size is lines, or characters / 100 when that's more (a line here can run to hundreds of characters).
+- **File-local** components, those **never used** (the kit's exports serve every agent: check them before deleting), what each file **writes by hand** per component, the **most reused**, and the **render tree** from each page (a route's, or a React root's `render(<App/>)`) down to the core: the kit's page.ts, or a `components/ui` folder.
+
+Every finding is a question, not a defect. Reports go in the Steward's `docs\` (git-ignored): `UI-INVENTORY.md` and `.html`, or `UI-INVENTORY-<repository>.*` for another, which is never written to. `-- --tree` prints the tree, `-- --check` says whether the report is current, `-- --strict` fails on any finding, and `-- --ci` only on a component past 140 or a page past 320.
 
 The Steward takes its own kit the way a hire does: `kit.json` pins it (the `node` and `web` parts, which bring the core and spec), and `npm run kit` fills `src\kit\` from this checkout's `kit\` (`--from kit`). The dotnet tests restore Jint and xUnit from nuget.org (`kit\test\nuget.config`), whatever this PC's NuGet config lists. The tests make fake employees with git in temporary folders, with gh standing in, and serve tools/kit.ts a kit release from a local server; nothing reaches GitHub but one lookup of a release that isn't there. A checkout runs as the development copy, in `%USERPROFILE%\.steward-dev` on port 29494.
