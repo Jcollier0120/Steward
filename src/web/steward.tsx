@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ago, Badge, Card, Muted, Notes, PostButton, useNow } from '../kit/react/index.ts';
+import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
@@ -13,20 +13,16 @@ const Link = ({ url, children }: { url: string; children: ReactNode }) => (
 );
 
 function KitCell({ r, kit }: { r: StaffRowView; kit: string | null }) {
-  if (!r.usesKit) return <Badge>not using the kit yet</Badge>;
+  if (!r.usesKit) return <Badge label="not using the kit yet" />;
   const m = r.main;
-  if (!m) return <Muted>unknown</Muted>;
+  if (!m) return <Text variant="muted">unknown</Text>;
   if (m.oldKitFiles.length)
     return (
-      <Badge kind="alert" title={`Still tracks ${m.oldKitFiles.length} old kit files at their old paths: ${m.oldKitFiles.join(', ')}`}>
-        old kit
-      </Badge>
+      <Badge tone="danger" title={`Still tracks ${m.oldKitFiles.length} old kit files at their old paths: ${m.oldKitFiles.join(', ')}`} label="old kit" />
     );
-  if (!m.kit) return <Badge kind="warn">no kit.json</Badge>;
+  if (!m.kit) return <Badge tone="caution" label="no kit.json" />;
   return (
-    <Badge kind={m.kit === kit ? 'ok' : 'warn'} title={m.parts ? `parts: ${m.parts.join(', ')}` : undefined}>
-      kit {m.kit}
-    </Badge>
+    <Badge tone={m.kit === kit ? 'success' : 'caution'} title={m.parts ? `parts: ${m.parts.join(', ')}` : undefined} label={<>kit {m.kit}</>} />
   );
 }
 
@@ -38,15 +34,15 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
       {rel ? (
         <>
           <Link url={`https://github.com/${r.repo}/releases/tag/${rel.tag}`}>{rel.tag}</Link>
-          <Muted>{kit}</Muted>
+          <Text variant="muted">{kit}</Text>
         </>
       ) : (
-        <Muted>none</Muted>
+        <Text variant="muted">none</Text>
       )}
       {r.releaseNeeded && r.main?.version && (
         <>
           <br />
-          <Badge kind="warn">{r.main.version} not released</Badge>
+          <Badge tone="caution" label={<>{r.main.version} not released</>} />
         </>
       )}
     </>
@@ -62,23 +58,21 @@ function Pr({ p, branch }: { p: PrView; branch: string }) {
       {team && (
         <>
           {' '}
-          <Badge title={`Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`}>team</Badge>
+          <Badge title={`Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`} label="team" />
         </>
       )}{' '}
-      <Badge kind={p.checks === 'failing' ? 'alert' : p.checks === 'pending' ? 'warn' : 'ok'}>checks {p.checks}</Badge>{' '}
-      <Badge kind={p.mergeable === 'MERGEABLE' ? 'ok' : p.mergeable === 'CONFLICTING' ? 'alert' : 'warn'}>{p.mergeable.toLowerCase()}</Badge>
+      <Badge tone={p.checks === 'failing' ? 'danger' : p.checks === 'pending' ? 'caution' : 'success'} label={<>checks {p.checks}</>} />{' '}
+      <Badge tone={p.mergeable === 'MERGEABLE' ? 'success' : p.mergeable === 'CONFLICTING' ? 'danger' : 'caution'} label={p.mergeable.toLowerCase()} />
       {p.draft && (
         <>
           {' '}
-          <Badge kind="warn">draft</Badge>
+          <Badge tone="caution" label="draft" />
         </>
       )}
       {p.base && p.base !== branch && (
         <>
           {' '}
-          <Badge kind="warn" title={`Merge only takes a PR into ${branch}`}>
-            into {p.base}
-          </Badge>
+          <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
         </>
       )}
       {team && (
@@ -91,21 +85,19 @@ function Pr({ p, branch }: { p: PrView; branch: string }) {
       {p.afterError ? (
         <>
           <br />
-          <Badge kind="alert" title={p.afterError}>
-            steward block
-          </Badge>
+          <Badge tone="danger" title={p.afterError} label="steward block" />
         </>
       ) : p.afterText ? (
         <>
           <br />
-          <Muted>then: {p.afterText}</Muted>
+          <Text variant="muted">then: {p.afterText}</Text>
         </>
       ) : null}
       <br />
-      <Muted>
+      <Text variant="muted">
         {p.head}
         {team ? `, ${p.author}'s` : ''}
-      </Muted>
+      </Text>
     </div>
   );
 }
@@ -121,31 +113,31 @@ function StaffRow({ r, kit }: { r: StaffRowView; kit: string | null }) {
           <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
         </strong>
         <br />
-        <Muted>{r.parts.join(', ') || 'no parts'}</Muted>
+        <Text variant="muted">{r.parts.join(', ') || 'no parts'}</Text>
       </td>
       <td>
         {co.exists ? (
           <>
             <code>{co.path}</code>
             <br />
-            <Muted>
+            <Text variant="muted">
               {co.branch ?? ''}
               {co.changes ? `, ${co.changes} changed` : ''}
-            </Muted>
+            </Text>
           </>
         ) : (
           <>
-            <Muted>no checkout at</Muted> <code>{co.path}</code>
+            <Text variant="muted">no checkout at</Text> <code>{co.path}</code>
           </>
         )}
       </td>
       <td>
         {r.main ? (
           <>
-            {r.branch} {r.main.version ?? '?'} <Muted>{r.main.commit}</Muted>
+            {r.branch} {r.main.version ?? '?'} <Text variant="muted">{r.main.commit}</Text>
           </>
         ) : (
-          <Muted>unknown</Muted>
+          <Text variant="muted">unknown</Text>
         )}
       </td>
       <td>
@@ -162,7 +154,7 @@ function StaffRow({ r, kit }: { r: StaffRowView; kit: string | null }) {
           <>
             <code>{r.prepared.branch}</code>
             <br />
-            <Muted>{r.prepared.ahead} ahead, not pushed?</Muted>
+            <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
           </>
         )}
       </td>
@@ -192,7 +184,41 @@ function StaffTable({ s }: { s: StaffView }) {
   );
 }
 
-const OUTCOME: Record<EmployeeResult['outcome'], 'ok' | '' | 'warn' | 'alert'> = { done: 'ok', skipped: '', refused: 'warn', failed: 'alert' };
+const OUTCOME: Record<EmployeeResult['outcome'], BadgeTone> = { done: 'success', skipped: 'neutral', refused: 'caution', failed: 'danger' };
+
+/** A stage's result for each employee: how it went, in what words, and a link when there is one. */
+function StageResults({ results }: { results: StageResult['results'] }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Result</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {results.map((r, i) => (
+          <tr key={i}>
+            <td>{r.name}</td>
+            <td>
+              <Badge tone={OUTCOME[r.outcome]} label={r.outcome} />
+            </td>
+            <td>
+              {r.message}
+              {r.url && (
+                <>
+                  {' '}
+                  <Link url={r.url}>link</Link>
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 function LastStage({ l, now }: { l: StageResult | null; now: number }) {
   if (!l)
@@ -213,45 +239,16 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
         {asked && (
           <>
             {' '}
-            <Muted>({asked})</Muted>
+            <Text variant="muted">({asked})</Text>
           </>
         )}
       </p>
       {l.error && (
         <p>
-          <Badge kind="alert">stopped</Badge> {l.error}
+          <Badge tone="danger" label="stopped" /> {l.error}
         </p>
       )}
-      {l.results.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Employee</th>
-              <th>Result</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {l.results.map((r, i) => (
-              <tr key={i}>
-                <td>{r.name}</td>
-                <td>
-                  <Badge kind={OUTCOME[r.outcome]}>{r.outcome}</Badge>
-                </td>
-                <td>
-                  {r.message}
-                  {r.url && (
-                    <>
-                      {' '}
-                      <Link url={r.url}>link</Link>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {l.results.length > 0 && <StageResults results={l.results} />}
       <details open={!!l.error || l.results.some((r) => r.outcome === 'failed')}>
         <summary>Log ({l.log.length} lines)</summary>
         <pre className="log">{l.log.join('\n')}</pre>
@@ -273,9 +270,7 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
 /** Run now, in the title bar: a round now, on duty or not, asked first. */
 export function RunNow({ v }: { v: StewardView }) {
   return (
-    <PostButton quiet path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={!!v.running}>
-      Run now
-    </PostButton>
+    <PostButton title="Run now" variant="secondary" path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={!!v.running} />
   );
 }
 
@@ -288,26 +283,19 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
     <div className="alarm" key={x.id}>
       <div className="row alarm-head">
         <strong>{x.url ? <Link url={x.url}>{x.title}</Link> : x.title}</strong>
-        {button && (
-          <PostButton quiet path="/api/alarms/dismiss" body={{ id: x.id }}>
-            Dismiss
-          </PostButton>
-        )}
+        {button && <PostButton title="Dismiss" variant="secondary" path="/api/alarms/dismiss" body={{ id: x.id }} />}
       </div>
       {x.detail.length > 0 && <Notes items={x.detail} />}
-      <Muted>
+      <Text variant="muted">
         Since {ago(x.since, now)}
         {x.dismissedAt ? `, dismissed ${ago(x.dismissedAt, now)}` : ''}
-      </Muted>
+      </Text>
     </div>
   );
   if (!showing.length && !dismissed.length && !a.cleared.length) return null;
-  return (
-    <>
-      <a id="alarms" />
-      {showing.length > 0 && <h2>Needs you</h2>}
-      <Card className={showing.length ? 'alarms' : undefined} tour="alarms">
-        {showing.length ? showing.map((x) => item(x, true)) : <Muted as="p">Nothing needs you.</Muted>}
+  const card = (
+    <Card className={showing.length ? 'alarms' : undefined} tour="alarms">
+        {showing.length ? showing.map((x) => item(x, true)) : <Text variant="muted" as="p">Nothing needs you.</Text>}
         {dismissed.length > 0 && (
           <details>
             <summary className="muted">{dismissed.length} dismissed: back if they clear and return</summary>
@@ -320,13 +308,24 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
             <Notes
               items={a.cleared.slice(0, 10).map((x) => (
                 <>
-                  {x.title} <Muted>(cleared {ago(x.clearedAt, now)})</Muted>
+                  {x.title} <Text variant="muted">(cleared {ago(x.clearedAt, now)})</Text>
                 </>
               ))}
             />
           </details>
         )}
-      </Card>
+    </Card>
+  );
+  return (
+    <>
+      <a id="alarms" />
+      {showing.length > 0 ? (
+        <Section title="Needs you" count={showing.length}>
+          {card}
+        </Section>
+      ) : (
+        card
+      )}
     </>
   );
 }
@@ -347,10 +346,8 @@ function Stages({ v }: { v: StewardView }) {
   const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
   const one = offKit.length === 1;
   const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}, but the team's PRs to ${one ? 'it' : 'them'} can be merged.` : '';
-  const stage = (label: string, path: string, confirm: string, disabled: boolean, title?: string) => (
-    <PostButton path={`/api/stage/${path}`} body={ask} confirm={confirm} disabled={disabled} title={title}>
-      {label}
-    </PostButton>
+  const stage = (label: string, path: string, confirm: string, disabled: boolean, tooltip?: string) => (
+    <PostButton title={label} path={`/api/stage/${path}`} body={ask} confirm={confirm} disabled={disabled} tooltip={tooltip} />
   );
   return (
     <Card tour="stages">
@@ -367,15 +364,13 @@ function Stages({ v }: { v: StewardView }) {
         {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", !!v.running)}
         {stage('4. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
         {stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running || !team.length, team.length ? undefined : 'No team in Settings')}
-        <PostButton quiet path="/api/staff/refresh" disabled={!!v.running || v.refreshing}>
-          {v.refreshing ? 'Refreshing…' : 'Refresh'}
-        </PostButton>
+        <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
-      <Muted as="p">
+      <Text variant="muted" as="p">
         Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).{offKitNote}
-      </Muted>
+      </Text>
       <div className="row round">
-        <Muted>{roundWords(v.round).when}</Muted>
+        <Text variant="muted">{roundWords(v.round).when}</Text>
       </div>
     </Card>
   );
@@ -407,7 +402,7 @@ export function StewardBody({ v }: { v: StewardView }) {
       <style>{STYLE}</style>
       {v.running && (
         <Card className="row">
-          <Badge kind="warn">Working</Badge>{' '}
+          <Badge tone="caution" label="Working" />{' '}
           <span>
             {v.running.stage}, started {ago(v.running.since, now)}. This page keeps itself current until it's done.
           </span>
@@ -422,32 +417,35 @@ export function StewardBody({ v }: { v: StewardView }) {
               {s.released.length > 0 && (
                 <>
                   {' '}
-                  <Muted>(released: {s.released.slice(0, 5).join(', ')})</Muted>
+                  <Text variant="muted">(released: {s.released.slice(0, 5).join(', ')})</Text>
                 </>
               )}
               {s.local && (
                 <>
                   {' '}
-                  <Muted>· this checkout's kit\VERSION: {s.local}</Muted>
+                  <Text variant="muted">· this checkout's kit\VERSION: {s.local}</Text>
                 </>
               )}
             </p>
-            {s.kitNote && <Muted as="p">{s.kitNote}</Muted>}
-            <Muted as="p">
+            {s.kitNote && <Text variant="muted" as="p">{s.kitNote}</Text>}
+            <Text variant="muted" as="p">
               The table is from {ago(s.at, now)}
               {s.checked && s.checked !== s.at ? `; GitHub had nothing new for it ${ago(s.checked, now)}` : ''}.
-            </Muted>
+            </Text>
           </>
         ) : (
-          <Muted as="p">Looking at the staff for the first time…</Muted>
+          <Text variant="muted" as="p">Looking at the staff for the first time…</Text>
         )}
       </Card>
-      <h2>Staff</h2>
-      {s ? <StaffTable s={s} /> : <Card className="empty">Looking at each employee…</Card>}
-      <h2>Roll out the kit</h2>
-      <Stages v={v} />
-      <h2>Last stage</h2>
-      <LastStage l={v.last} now={now} />
+      <Section title="Staff" count={s?.rows.length}>
+        {s ? <StaffTable s={s} /> : <Card className="empty">Looking at each employee…</Card>}
+      </Section>
+      <Section title="Roll out the kit">
+        <Stages v={v} />
+      </Section>
+      <Section title="Last stage">
+        <LastStage l={v.last} now={now} />
+      </Section>
     </>
   );
 }
