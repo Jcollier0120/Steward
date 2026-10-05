@@ -6,6 +6,7 @@ import type { Employee, Settings } from '../settings.ts';
 import { runChecks } from './bump.ts';
 import { checkoutOf, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
+import { recordTested } from '../tested.ts';
 
 /**
  * A team PR that GitHub runs no checks on is tested here before it's merged: the employee's own checks (Settings,
@@ -43,6 +44,8 @@ export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tes
   const kept = readJson<Record<string, Tested>>(prChecksFile(), {});
   kept[keyOf(e, pr)] = tested;
   writeJson(prChecksFile(), Object.fromEntries(Object.entries(kept).slice(-500)));
+  // Passed here before it merges: the Surveyor's GET /api/tested (tested.ts).
+  if (tested.ok) recordTested(e.id, { commit: pr.headOid, stage: 'merge', branch: pr.head, pr: pr.number, at: tested.at });
   return tested;
 }
 

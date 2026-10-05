@@ -75,6 +75,11 @@ export interface Settings {
   stewardCheckout: string;
   /** Before it publishes an employee's release, a passing tasting from the Aletaster of that very commit (tasting.ts). */
   tasteBeforeRelease: boolean;
+  /**
+   * A failed bump or release, and a Reeve alert that is code work, filed as an issue in the Wright's queue, its alarm
+   * held back while the Wright works on it (work.ts).
+   */
+  fileWork: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -228,6 +233,7 @@ export const DEFAULT_SETTINGS: Settings = {
   releaseSelf: true,
   mergeSelf: true,
   stewardCheckout: 'C:\\Projects\\Steward',
+  fileWork: true,
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
@@ -297,7 +303,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'rollout',
     kind: 'switch',
     label: 'Rolls out a new kit by itself',
-    help: "In its rounds, each employee whose branch pins a kit older than the newest kit release is bumped (a worktree of its branch, the new pin and the next patch version, its checks run) and its PR pushed, a few at a time; later rounds merge and release it. Not one with a kit PR already open. A bump whose checks fail is an alarm, and isn't tried again for that kit until a new commit lands on its branch, or you press Bump or Push. It waits while this Steward carries a kit older than the newest release, since its tools/kit.ts is the one handed out. Off: Bump and Push only when asked.",
+    help: "In its rounds, each employee whose branch pins a kit older than the newest kit release is bumped (a worktree of its branch, the new pin and the next patch version, its checks run) and its PR pushed, a few at a time; later rounds merge and release it. Not one with a kit PR already open. A bump whose checks fail is handed to the Wright (or an alarm: Hands failures to the Wright, below), and isn't tried again for that kit until a new commit lands on its branch, or you press Bump or Push. It waits while this Steward carries a kit older than the newest release, since its tools/kit.ts is the one handed out. Off: Bump and Push only when asked.",
   },
   {
     key: 'releaseSelf',
@@ -324,6 +330,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: "Waits for the Aletaster's tasting",
     help: "Before it publishes an employee's release, the Steward asks the Aletaster to taste the very commit it would release (POST /api/taste), and publishes only when the tasting lets it through: a pass, or a warning unless the Aletaster's own settings say warnings hold. Otherwise the release waits, with the tasting's reason, and the next round asks again; one held longer than the alarms' while is an alarm. Never the Aletaster's own release, so a broken Aletaster can always be fixed. Released without a tasting, and said so, when the Aletaster isn't installed, is off duty for Developer options, predates the tasting, or its page doesn't answer.",
+  },
+  {
+    key: 'fileWork',
+    kind: 'switch',
+    label: 'Hands failures to the Wright',
+    help: "An employee's bump or release that fails, and one of Reeve's alerts that is code work in an employee's repository (a security advisory, a failing UI test), is filed as an issue in the Wright's queue (manor:work), with what failed, its output (secrets taken out) and what done means: once each, at most a few a day, and only in a repository the Wright's page (The Wright's page, under Alarms) says it works in. Its alarm then waits: it is raised only when the Wright gets stuck or its PR waits for your review, the Wright has no queue for that repository, or nothing has landed after the alarms' while for a PR (a day). The Steward's own releases stay alarms. Off: each is an alarm at once, as before.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
   {
@@ -457,6 +469,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       mergeSelf: typeof r.mergeSelf === 'boolean' ? r.mergeSelf : d.mergeSelf,
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),
       tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
+      fileWork: typeof r.fileWork === 'boolean' ? r.fileWork : d.fileWork,
     },
     problems,
   };
