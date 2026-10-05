@@ -2,6 +2,17 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.0
+
+**A failed bump or release is work for the Wright, not an alarm for you** (src/work.ts; Settings: "Hands failures to the Wright", `fileWork`, on). An employee's bump to a new kit that fails its checks, and its release that fails at a commit, used to be alarms at once ("Reeve's bump to kit 2.12.1 failed, and the rounds won't try it again until its branch moves"), though someone working in the repository could fix them.
+- **Each is filed as a `manor:work` issue in the employee's repository**: what failed, the end of its output with secrets taken out (src/redact.ts, the Aletaster's rules), the branch or commit, where the fix goes (main: the bump's `steward/kit-<version>` was never pushed, and is made afresh from main once it moves) and what done means. Once each, by a hidden marker per employee, kind and kit version or commit (`<!-- steward:work:bump:porter:2.12.1 -->`); at most three a day (`work-filed.json`).
+- **Only in an employee's repository the Wright's `GET /api/work` lists**, while it takes work, and only when gh is signed in as one of its team, as the Surveyor and the Aletaster file. Never in a repository the Wright works in that isn't the Steward's employee's (a project of the PC's own).
+- **Its alarm waits** a day (`waitingHours`) from when it was filed, and is raised at once, saying why, when the Wright gets stuck on it (`wright:stuck`), its PR for it waits for a person (`wright:needs-you`), the Wright has no queue for that repository, or it couldn't be filed. The Steward's own releases stay alarms.
+- **Reeve's alerts that are code work** go the same way: a new high or critical security advisory (dependency-health) or a failed Maestro flow (maestro-runs) that names an employee. His others (the NPU driver, the test phone, a job that crashed) stay alarms.
+- A failed release's whole output is kept beside its worktree (`work\<id>-release.log`), as a bump's is.
+
+**`GET /api/tested`, for the Surveyor**: each employee's last 20 commits whose checks passed here, newest first, with the stage (`bump`, `catch-up`, `merge` before merging, `release` for the commit a release was built from), when, and the branch, PR and version where there is one (`tested.json`).
+
 ## 0.8.23
 
 **Kit 2.17.0: releases are built, and published in the public Jcollier0120/Manor-releases** (kit/CHANGELOG.md, kit/spec/RELEASES.md).
