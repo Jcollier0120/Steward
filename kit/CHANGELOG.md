@@ -2,6 +2,13 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.13.1
+
+**An update that moves an agent's port ends the old page.** The installer ended the running page only when it answered on this version's port, so the Chamberlain's 0.1.3 (moved from 19898 to 20303) left 0.1.2's page running on 19898, where the Developer Herald's page then couldn't start.
+- **service.ts:** `pageAt()` is new. It gives the port the page answers on: this version's, else the one server.json says the running page took. `shutdown()` stops the page there, and `ping(at)` takes a port.
+- **install.ts:** `InstallDeps.running()` is new and optional (ping when unset). The installer uses it to decide whether there's a page to end, and to wait until it's gone.
+- **Nothing for an agent to do** but take this version. Its next update after a port change ends the old page.
+
 ## 2.13.0
 
 **The NPU first.** The NPU does model work without the processor or a graphics card, so it is used as much as it can be, and the others only when it can't do the work. Before, the auto order put graphics cards with 2 GB or more of their own memory ahead of the NPU, and a request the NPU could do went to a free card whenever the NPU was busy.

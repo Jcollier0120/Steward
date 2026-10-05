@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
-import { ping, shutdown } from './service.ts';
+import { pageAt, ping, shutdown } from './service.ts';
 
 /**
  * Installing from a release, as each of Manor's agents does on its own (Manor's docs/INSTALLING.md):
@@ -61,6 +61,11 @@ export interface InstallDeps {
   schtasks(args: string[]): Promise<Ran>;
   /** Whether the installed copy's page answers its ping. */
   ping(): Promise<boolean>;
+  /**
+   * Whether its page is running at all: on its port, or on the one an older version took (server.json's), so an
+   * update that moves the port ends the old page. Unset: ping.
+   */
+  running?(): Promise<boolean>;
   /** Ends the installed copy's page process (the kit's shutdown). */
   shutdown(): Promise<number>;
   onDuty(): boolean;
@@ -172,9 +177,10 @@ async function waitFor(ok: () => Promise<boolean>, ms: number, d: InstallDeps): 
 
 /** Ends the installed copy's page process, if it's running, and waits until it has gone. `wasUp`: it was running. */
 async function endPage(d: InstallDeps): Promise<{ ended: boolean; wasUp: boolean }> {
-  if (!(await d.ping())) return { ended: true, wasUp: false };
+  const running = () => (d.running ?? d.ping)();
+  if (!(await running())) return { ended: true, wasUp: false };
   await d.shutdown();
-  return { ended: await waitFor(async () => !(await d.ping()), 10_000, d), wasUp: true };
+  return { ended: await waitFor(async () => !(await running()), 10_000, d), wasUp: true };
 }
 
 /**
@@ -418,6 +424,7 @@ export function defaultDeps(): InstallDeps {
     home: os.homedir(),
     schtasks: (args) => run(SCHTASKS, args),
     ping: async () => (await ping()) !== null,
+    running: async () => (await pageAt()) !== null,
     shutdown,
     onDuty: () => duty().onDuty,
     setDuty: (on) => void setDuty(on),

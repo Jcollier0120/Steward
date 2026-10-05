@@ -171,6 +171,25 @@ test('an update ends the running page, replaces app and keeps the duty it had', 
   assert.match(f.lines.join('\n'), /updated from 1\.0\.0[\s\S]*off duty/);
 });
 
+test("an update that moves the port ends the old page on the old port, where this version's ping can't see it", async () => {
+  const p = place();
+  const app = appFolder(p.data);
+  mkdirSync(path.join(app, 'src'), { recursive: true });
+  writeFileSync(path.join(app, 'release.json'), JSON.stringify({ version: '1.0.0' }));
+  const f = fakes({ root: p.release, data: p.data });
+  // The old page answers only on the port server.json says it took: running, though ping (the new port) says no.
+  let old = true;
+  f.deps.running = async () => old || f.state.up;
+  const shutdown = f.deps.shutdown;
+  f.deps.shutdown = async () => {
+    old = false;
+    return shutdown();
+  };
+  assert.equal(await install({}, f.deps), 0, f.lines.join('\n'));
+  assert.equal(f.state.shutdowns, 1, 'the old page was ended, so it no longer holds the old port');
+  assert.equal(old, false);
+});
+
 /** An installed copy to update: its old cli, on duty, its page up. */
 function installed() {
   const p = place();
