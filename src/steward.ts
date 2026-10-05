@@ -4,6 +4,7 @@ import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
+import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
 import { run as realRun, type Runner } from './run.ts';
@@ -66,13 +67,15 @@ export async function tryGlance(run: Runner, settings: Settings, log: (line: str
   }
 }
 
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean } = {}): Promise<Ctx> {
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean } = {}): Promise<Ctx> {
   const settings = o.settings ?? loadSettings();
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
   const glance = o.glance === false ? null : await tryGlance(run, settings, log);
-  const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(run, dataDir, settings.stewardRepo);
+  // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
+  const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
+  const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(kitRun, dataDir, settings.stewardRepo);
   return { settings, run, kit, log, neutralDir: dataDir, glance };
 }
 
@@ -154,6 +157,11 @@ export interface StageOptions {
   self?: { checkout: string };
   /** Stands in for the Aletaster for the release gate (tasting.ts); tests only. */
   tasting?: TastingDeps;
+  /**
+   * Whether this PC is online (the kit's net.ts): a round while it's offline waits, and the alarms leave out what's only
+   * the network's. Under node --test, online unless this is given, so a test never looks at the real network.
+   */
+  online?: () => Promise<boolean>;
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
@@ -163,6 +171,9 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
+
+/** Whether this PC is online: the kit's look, or online under node --test (StageOptions.online). */
+export const onlineNow = (): Promise<boolean> => (process.env.NODE_TEST_CONTEXT ? Promise.resolve(true) : kitOnline());
 
 /** The round's look at the Steward's own versions: from its glance at GitHub, else asked on their own. */
 async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
@@ -188,9 +199,13 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
   return withLock(
     stageLock(),
     async () => {
-      const ctx = await context({ run: o.run, log });
+      // Offline (the kit's net.ts), a round asks nothing of GitHub: it would only fail for every employee, every
+      // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
+      const offline = name === 'round' && !(await (o.online ?? onlineNow)());
+      const ctx = await context({ run: o.run, log, glance: offline ? false : undefined, offline });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
+      if (o.online) ctx.online = o.online;
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
       let held: { employee: Employee; prs: Held[] }[] = [];
@@ -203,7 +218,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
-        if (name === 'merge' || name === 'round') {
+        if (offline) {
+          out.offline = true;
+          log('this PC is offline, so the round waits for the network: nothing is asked of GitHub until it is back');
+        } else if (name === 'merge' || name === 'round') {
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
@@ -299,7 +317,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log }, o.alarms);
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

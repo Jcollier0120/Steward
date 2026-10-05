@@ -7,7 +7,7 @@ import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } fr
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { networkFailure, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -174,7 +174,8 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
         } catch (err) {
           r = selfResult('failed', `${step.tag}: ${(err as Error).message}`, { version: step.version, commit: step.commit.slice(0, 7) });
         }
-        if (r.outcome === 'failed') failed[step.tag] = { commit: step.commit, message: r.message.replace(/^self: /, ''), at: new Date().toISOString() };
+        // One the network cut short (the kit's net.ts) is tried again next round, not left to a person.
+        if (r.outcome === 'failed' && !(await networkFailure(ctx, r.message))) failed[step.tag] = { commit: step.commit, message: r.message.replace(/^self: /, ''), at: new Date().toISOString() };
         else if (r.outcome === 'done') delete failed[step.tag];
         results.push(r);
       }
