@@ -2,6 +2,10 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.5
+
+**The Thatcher, the Reckoner, the Weigher and the Shepherd are employees.** They are the general agents of the developer offices. Each shares its office with the developer agent there, as the Herald shares the Herald's: the Thatcher (Jcollier0120/Thatcher) keeps your apps upgraded in Reeve's office, the Reckoner (Jcollier0120/Reckoner) checks your devices after updates in the Auditor's, the Weigher (Jcollier0120/Weigher) measures your internet against your plan in the Aletaster's, and the Shepherd (Jcollier0120/Shepherd) brings in background apps in the Pinder's. Like the Chamberlain, they are built on the kit, and Manor offers them from their releases' `manor-agent.json` (Manor 0.4.51). The Steward rolls the kit out to them, merges their PRs and publishes their releases.
+
 ## 0.9.4
 
 **An update the Steward rolls back really goes back: the new page is ended, and the old one must answer as itself.**
