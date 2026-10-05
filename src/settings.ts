@@ -160,7 +160,8 @@ export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
  * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, the Lamplighter, the Smith, the Developer
- * Herald (the Herald's developer half since Herald 0.5.0) and the Chamberlain (announced to Manor by its release, not in Manor's staff.json), built on
+ * Herald (the Herald's developer half since Herald 0.5.0) the Chamberlain, and the general agents of the developer offices (the Thatcher, the Reckoner, the Weigher and the
+ * Shepherd: Reeve's, the Auditor's, the Aletaster's and the Pinder's), announced to Manor by their releases, not in Manor's staff.json, built on
  * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
@@ -197,6 +198,10 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   hire('Smith'),
   hire('Developer Herald'),
   hire('Chamberlain'),
+  hire('Thatcher'),
+  hire('Reckoner'),
+  hire('Weigher'),
+  hire('Shepherd'),
 ];
 
 /** The employees when Settings name none: the defaults, and the Wright and the Bailiff where each is installed. */
