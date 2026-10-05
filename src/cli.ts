@@ -4,6 +4,9 @@ import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
+import { claimVersion, loadClaims, releaseClaim } from './claims.ts';
+import { stewardEmployee } from './stages/selfmerge.ts';
+import type { Employee, Settings } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -48,11 +51,25 @@ const USAGE = `${APP.id}: ${APP.role}
                    ${TASK_NAME} that brings its page up, and start it. An update keeps the version
                    before it, and goes back to it when the new one doesn't hold up for its probation;
                    that version is then flagged, and refused until allowed again
+  claim-version <employee or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
+                   before starting work on a repository: the next version no one has (above its branch,
+                   its releases, its open PRs and every live claim), claimed for that work. The same
+                   branch asking again gets the same version
+  release-version <employee or owner/repo> <version>
+                   give a claimed version back (the work was dropped)
+  claims [--json]  the versions claimed and not yet landed
   allow-update <version>
                    allow a version the install rolled back to be installed again
   uninstall [--purge] [--dry-run]
                    end its page, delete the sign-in task and remove the installed copy; --purge also its data
 `;
+
+/** An employee by its id, its name or its repository; the Steward's own repository too. */
+function employeeFor(s: Settings, who: string): Employee | null {
+  const w = who.toLowerCase();
+  const all = [...s.employees, stewardEmployee(s)];
+  return all.find((e) => e.id.toLowerCase() === w || e.name.toLowerCase() === w || e.repo.toLowerCase() === w || e.repo.split('/')[1]?.toLowerCase() === w) ?? null;
+}
 
 /** --name value, or undefined. */
 function opt(args: string[], ...names: string[]): string | undefined {
@@ -180,6 +197,44 @@ switch (cmd) {
   case 'uninstall':
     process.exitCode = await installCli(cmd, rest);
     break;
+  case 'claim-version': {
+    const who = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
+    const bad = rest.slice(1).filter((a, i, all) => a.startsWith('--') && !['--branch', '--for', '--by', '--minor', '--json'].includes(a) && !['--branch', '--for', '--by'].includes(all[i - 1]));
+    if (!who || bad.length) {
+      console.error(`claim-version takes an employee (its id, name or owner/repo), then --branch <b> --for "<what>" --by <who> --minor --json${bad.length ? `; not ${bad.join(' ')}` : ''}`);
+      process.exitCode = 2;
+      break;
+    }
+    const ctx = await context({ glance: false });
+    const e = employeeFor(ctx.settings, who);
+    if (!e) {
+      console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo}).`);
+      process.exitCode = 2;
+      break;
+    }
+    const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor') });
+    if (rest.includes('--json')) console.log(JSON.stringify({ ...claim, again }));
+    else console.log(`${e.name} ${claim.version}${again ? ' (claimed already for this branch)' : ''}: yours. Set it in ${e.versionFiles.join(', ')}.`);
+    break;
+  }
+  case 'release-version': {
+    const ctx = await context({ glance: false });
+    const e = rest[0] ? employeeFor(ctx.settings, rest[0]) : null;
+    if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
+      console.error('release-version takes an employee and a version: release-version porter 0.4.12');
+      process.exitCode = 2;
+      break;
+    }
+    console.log((await releaseClaim(e.repo, rest[1])) ? `${e.name} ${rest[1]} is free again.` : `${e.name} ${rest[1]} wasn't claimed.`);
+    break;
+  }
+  case 'claims': {
+    const all = loadClaims();
+    if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
+    else if (!all.length) console.log('No versions are claimed.');
+    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}`);
+    break;
+  }
   case 'allow-update': {
     const v = rest[0] ?? '';
     if (!/^d+.d+.d+$/.test(v) || rest.length > 1) {

@@ -8,6 +8,7 @@ import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
+import { claimsOn } from '../claims.ts';
 import type { Held } from '../alarms.ts';
 import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
@@ -116,6 +117,9 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   if (!v.head) return { why: `its branch has no version the Steward can read (${e.versionFiles.join(', ')})`, sets: null };
   if (v.head === v.from) return { why: null, sets: null };
   if (released.includes(v.head)) return { why: `it sets v${v.head}, which is already released: raise it`, sets: v.head, raise: true };
+  // Claimed up front by other work (claims.ts): that work keeps it, and this one gets a version of its own.
+  const claimed = claimsOn(e.repo).find((c) => c.version === v.head && c.branch && c.branch !== pr.head);
+  if (claimed) return { why: `it sets v${v.head}, which ${claimed.by} claimed for ${claimed.for} (${claimed.branch}): it needs a version of its own`, sets: v.head, raise: true };
   if (base && compareVersions(v.head, base) <= 0) return { why: `it sets v${v.head}, but ${e.branch} is at v${base} already: raise it above`, sets: v.head, raise: true };
   return { why: null, sets: v.head };
 }
@@ -314,7 +318,9 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   for (const pr of [...o.catchable.values()].sort((a, b) => a.number - b.number)) {
     let c: CaughtUp;
     try {
-      c = await catchUp(ctx, e, pr, { released, taken });
+      // Versions claimed up front by other work are taken too (claims.ts); this PR's own branch's claim is its own.
+      const claimed = claimsOn(e.repo).filter((x) => x.branch !== pr.head).map((x) => x.version);
+      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed] });
     } catch (err) {
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }

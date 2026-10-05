@@ -11,6 +11,7 @@ import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { renderBody } from './view.ts';
 import { allowUpdate } from './safeinstall.ts';
+import { loadClaims } from './claims.ts';
 
 /**
  * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
@@ -125,6 +126,8 @@ export async function serveSteward(o: { run?: Runner } = {}) {
         return { html: page({ token, body, busy: running !== null || refreshing !== null, title: running ? `(${running.stage}) ${APP.name}` : APP.name }) };
       },
       '/api/staff': () => ({ json: loadStaff() }),
+      // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
+      '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
       // What needs the person (alarms.ts): Manor shows the open ones that aren't dismissed.
       '/api/alarms': () => {

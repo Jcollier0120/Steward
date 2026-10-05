@@ -185,6 +185,19 @@ Both take the kit (`usesKit` in Settings), so every stage covers them as it does
 
 **How a logic change reaches Heiward:** the rule changes in the core (and, for a timing, rules.json), with the vectors that show it, released as a kit version; the Steward's bump moves Heiward's pin, its build embeds the new core, and its tests run the new vectors. No C# changes, unless the core asks for a new kind of action.
 
+## Versions claimed up front
+
+Two pieces of work started side by side on one repository each used to take "the next version" when they began, the same one, and found out when the second conflicted on its way in. Now whoever starts work asks the Steward for its version first (`src/claims.ts`):
+
+```powershell
+node %USERPROFILE%\.steward\app\src\cli.ts claim-version porter --branch claude/my-fix --for "the Run now button"
+# Porter 0.4.22: yours. Set it in package.json, package-lock.json, src/app.ts.
+```
+
+It takes an employee's id, name or `owner/repo` (the Steward's own too), and hands out the next version no one has: above its branch's version on GitHub, every release, every open PR's (by the version in its title), and every live claim. `--minor` for the next minor; `--json` for programs; `--by` says who asks (`claude` unless said). Claims go one at a time under a machine-wide lock, so two workers asking at once get two versions; the same branch asking again gets the same one. `claims` lists them (and `GET /api/versions`); `release-version <employee> <version>` gives one back.
+
+A claim lives until its version is on the branch or overtaken by a release (the work landed), until it is given back, or for three days with no open PR that names it (its branch, or its version in a title); each round prunes them. While it lives, the merge stage holds another PR that sets that version ("it sets v0.4.22, which wright claimed for #7 (wright/7-…): it needs a version of its own") and catches it up to a free one. The Wright claims for each job before its worker starts, and gives the version back when no PR comes of it.
+
 ## Install
 
 The Steward installs itself, from a release, as every agent does. In a checkout of this repository:
@@ -324,6 +337,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `self-failed.json` | Each of the Steward's own releases (by tag) that failed in a round, with the commit of main: the rounds don't try it again at that commit. |
 | `tasting-held.json` | Each employee whose release the Aletaster's tasting holds: the commit, the version, since when, the reason and the link. For the alarms; gone once it is released or no longer waits. |
 | `alarms.json` | The alarms: open, dismissed and lately cleared, and each condition watched since it was first seen. |
+| `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when. |
 | `kickbacks.json` | Each conflicting team PR sent back to its author, by its head and its branch's: sent once, and again only when either moves. |
 | `unsafe-updates.json` | Each version of the Steward its install rolled back: what failed, the version it went back to, and where the failed copy is kept. Refused until allowed again. |
 | `app.prev`, `app.unsafe-<version>` | The version before the last update, to go back to; a rolled-back version's copy, for a look. |

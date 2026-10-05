@@ -15,6 +15,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
+import { pruneClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
@@ -295,6 +296,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         log(`${name}: ${out.error}`);
       }
       out.finished = new Date().toISOString();
+      // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
+      if (name === 'round') {
+        try {
+          await pruneClaims(loadStaff()?.rows ?? []);
+        } catch (e) {
+          log(`claims: ${(e as Error).message}`);
+        }
+      }
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
         try {
