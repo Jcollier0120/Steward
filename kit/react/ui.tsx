@@ -22,10 +22,10 @@ export function Muted({ as = 'span', className, children }: { as?: 'span' | 'p';
   return <Tag className={className ? `muted ${className}` : 'muted'}>{children}</Tag>;
 }
 
-/** A card; `className` adds classes: 'empty', 'row', or the agent's own. */
-export function Card({ className, id, children }: { className?: string; id?: string; children: ReactNode }) {
+/** A card; `className` adds classes: 'empty', 'row', or the agent's own. `tour` names it for the page's tour (shell.tsx). */
+export function Card({ className, id, tour, children }: { className?: string; id?: string; tour?: string; children: ReactNode }) {
   return (
-    <div className={className ? `card ${className}` : 'card'} id={id}>
+    <div className={className ? `card ${className}` : 'card'} id={id} data-tour={tour}>
       {children}
     </div>
   );

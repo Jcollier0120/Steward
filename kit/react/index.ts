@@ -11,6 +11,6 @@
  *   mount(<App />);
  */
 export { BUSY_LOOK_MS, initialData, pageToken, post, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
-export { mount, Page, ThemeMenu } from './shell.tsx';
+export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
 export { ago, useNow } from './time.ts';
 export { Badge, Card, Muted, Notes, PostButton, ReloadProvider } from './ui.tsx';

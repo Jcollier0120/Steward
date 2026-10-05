@@ -134,7 +134,7 @@ export function ThemeMenu({ shell }: { shell: PageShell }) {
   const title = m ? `Theme (${m.name}'s)` : 'Theme';
   const manorTheme = m ? (shell.themes.find((t) => t.name === m.theme) ?? shell.themes[0]) : null;
   return (
-    <div className="theme-picker" id="theme-picker">
+    <div className="theme-picker" id="theme-picker" data-tour="theme">
       <button ref={btn} type="button" className="icon-btn" id="theme-btn" title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} aria-controls="theme-menu" onClick={() => setOpen(!open)}>
         <Palette />
       </button>
@@ -183,7 +183,7 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
   }, []);
   const m = shell.manor;
   return (
-    <header ref={bar} className={['titlebar', shell.busy ? 'busy' : '', stuck ? 'stuck' : ''].filter(Boolean).join(' ')} data-agent={shell.app.id}>
+    <header ref={bar} className={['titlebar', shell.busy ? 'busy' : '', stuck ? 'stuck' : ''].filter(Boolean).join(' ')} data-agent={shell.app.id} data-tour="titlebar">
       {m && (
         <>
           <a className="manor-back" href={m.url} title={`Back to ${m.name}`}>
@@ -202,15 +202,19 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
       </a>
       <Markup html={shell.scene} />
       <div className="tools">
-        <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title}>
+        <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title} data-tour="status">
           {shell.pill.text}
         </span>
-        <a className="tool-link" id="settings-link" href="#/settings" title="Settings" aria-current={settings ? 'page' : 'false'}>
+        <a className="tool-link" id="settings-link" href="#/settings" title="Settings" aria-current={settings ? 'page' : 'false'} data-tour="settings">
           <Gear />
           <span>Settings</span>
         </a>
         <ThemeMenu shell={shell} />
-        {action && <span className="titlebar-action">{action}</span>}
+        {action && (
+          <span className="titlebar-action" data-tour="action">
+            {action}
+          </span>
+        )}
       </div>
     </header>
   );
@@ -232,31 +236,42 @@ const SettingsPanel = memo(function SettingsPanel() {
     s.src = '/settings.js';
     document.body.append(s);
   }, []);
-  return <div ref={el} className="card sf-panel" data-settings-panel="" />;
+  return <div ref={el} className="card sf-panel" data-settings-panel="" data-tour="settings-panel" />;
 });
 
-/** The route: the page at #/, Settings at #/settings, as page.ts's script has them. */
-function useSettingsRoute(): boolean {
-  const on = () => /^#\/?settings$/.test(location.hash);
-  const [settings, setSettings] = useState(on);
+export type Route = 'page' | 'settings' | 'tour';
+
+/** The route: the page at #/, Settings at #/settings, a tour of the page at #/tour (over the page itself). */
+export function useRoute(): Route {
+  const read = (): Route => (/^#\/?settings$/.test(location.hash) ? 'settings' : /^#\/?tour$/.test(location.hash) ? 'tour' : 'page');
+  const [route, setRoute] = useState(read);
   useEffect(() => {
     const change = () => {
-      setSettings(on());
-      window.scrollTo(0, 0);
+      const next = read();
+      setRoute(next);
+      if (next !== 'tour') window.scrollTo(0, 0);
     };
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
   useEffect(() => {
-    document.body.classList.toggle('on-settings', settings);
-  }, [settings]);
-  return settings;
+    document.body.classList.toggle('on-settings', route === 'settings');
+    document.body.classList.toggle('on-tour', route === 'tour');
+  }, [route]);
+  return route;
 }
 
-/** The whole page: the agent's own as children, in the kit's frame. */
-export function Page<Body>({ data, reload, action, settings, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; children: ReactNode }) {
+/**
+ * The whole page: the agent's own as children, in the kit's frame.
+ *
+ * `tour` is the page's walkthrough (onboarding: what the role is, its settings, then what its page shows), drawn over
+ * the page at #/tour. It points at the page's parts by their `data-tour` names: the frame's are titlebar, status,
+ * settings, theme, action, settings-panel and work, and an agent names its own sections the same way.
+ */
+export function Page<Body>({ data, reload, action, settings, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
-  const onSettings = useSettingsRoute();
+  const route = useRoute();
+  const onSettings = route === 'settings';
   return (
     <ReloadProvider value={reload}>
       <TitleBar shell={s} settings={onSettings} action={action} />
@@ -281,9 +296,16 @@ export function Page<Body>({ data, reload, action, settings, children }: { data:
           <h2>Settings</h2>
           {settings}
           <SettingsPanel />
-          <Markup html={s.work} />
+          <div data-tour="work" style={{ display: 'contents' }}>
+            <Markup html={s.work} />
+          </div>
         </section>
       </main>
+      {route === 'tour' && tour && (
+        <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
+          {tour}
+        </div>
+      )}
       <footer>
         {s.app.name} {s.app.version} · this PC only · its files are in <code>{s.dataDir}</code>
       </footer>

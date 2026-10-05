@@ -109,22 +109,35 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
     `import { renderToStaticMarkup } from 'react-dom/server';
      import { Page, Card, Muted, Badge, PostButton } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
      export const render = (data) => renderToStaticMarkup(
-       <Page data={data} reload={() => {}} action={<PostButton quiet path="/api/run" confirm="Now?">Run now</PostButton>}>
-         <Card className="empty"><Muted>quiet</Muted> <Badge kind="ok">fine</Badge></Card>
+       <Page data={data} reload={() => {}} action={<PostButton quiet path="/api/run" confirm="Now?">Run now</PostButton>} tour={<p>Step one</p>}>
+         <Card className="empty" tour="mine"><Muted>quiet</Muted> <Badge kind="ok">fine</Badge></Card>
        </Page>);`,
     { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
   );
   const html = render({ shell, body: {} });
-  assert.match(html, /<header class="titlebar busy" data-agent="[a-z-]+">/);
+  assert.match(html, /<header class="titlebar busy" data-agent="[a-z-]+" data-tour="titlebar">/);
   assert.match(html, /<a class="manor-back" href="http:\/\/manor\.localhost:18585\/" title="Back to Weasel Manor">/);
   assert.match(html, /<span class="status-pill busy" title="A round is under way/);
   assert.match(html, /<a class="tool-link" id="settings-link" href="#\/settings"/);
   assert.match(html, /Weasel Manor chooses the theme, for every page in the manor/);
-  assert.match(html, /<span class="titlebar-action"><button type="button" class="quiet" data-post="\/api\/run">Run now<\/button><\/span>/);
+  assert.match(html, /<span class="titlebar-action" data-tour="action"><button type="button" class="quiet" data-post="\/api\/run">Run now<\/button><\/span>/);
   assert.match(html, /<div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since 3 minutes ago/);
-  assert.match(html, /<div class="card empty"><span class="muted">quiet<\/span> <span class="badge ok">fine<\/span><\/div>/);
+  assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge ok">fine<\/span><\/div>/);
   assert.match(html, /<section id="settings-view"><a class="back-link" href="#\/">Back to /);
-  assert.match(html, /<div class="card sf-panel" data-settings-panel="">/);
+  assert.match(html, /<div class="card sf-panel" data-settings-panel="" data-tour="settings-panel">/);
   assert.match(html, /Where its work runs/);
   assert.match(html, /<footer>[^<]+ · this PC only · its files are in <code>/);
+  // Room for the onboarding tour: every part of the frame named, and the tour drawn over the page only at #/tour.
+  for (const name of ['titlebar', 'status', 'settings', 'theme', 'action', 'settings-panel', 'work']) assert.match(html, new RegExp(`data-tour="${name}"`), name);
+  assert.doesNotMatch(html, /tour-layer/);
+  (globalThis as unknown as { location: { hash: string } }).location.hash = '#/tour';
+  assert.match(render({ shell, body: {} }), /<div class="tour-layer" role="dialog" aria-label="A tour of [^"]+(&#x27;|')s page"><p>Step one<\/p><\/div>/);
+});
+
+test("a ping's round state: news when a round starts or ends, not when nothing changed", async () => {
+  const { roundState } = await import('../react/page-data.ts');
+  const idle = roundState({ busy: false, lastRunAt: '2026-10-05T12:00:00Z', runningSince: null });
+  assert.equal(roundState({ busy: false, lastRunAt: '2026-10-05T12:00:00Z' }), idle, 'the same state, said either way');
+  assert.notEqual(roundState({ busy: true, lastRunAt: '2026-10-05T12:00:00Z', runningSince: '2026-10-05T12:10:00Z' }), idle, 'one started');
+  assert.notEqual(roundState({ busy: false, lastRunAt: '2026-10-05T12:10:30Z' }), idle, 'one ended');
 });

@@ -173,7 +173,7 @@ function StaffRow({ r, kit }: { r: StaffRowView; kit: string | null }) {
 
 function StaffTable({ s }: { s: StaffView }) {
   return (
-    <Card>
+    <Card tour="staff">
       <table>
         <thead>
           <tr>
@@ -195,13 +195,18 @@ function StaffTable({ s }: { s: StaffView }) {
 const OUTCOME: Record<EmployeeResult['outcome'], 'ok' | '' | 'warn' | 'alert'> = { done: 'ok', skipped: '', refused: 'warn', failed: 'alert' };
 
 function LastStage({ l, now }: { l: StageResult | null; now: number }) {
-  if (!l) return <Card className="empty">No stage has run yet.</Card>;
+  if (!l)
+    return (
+      <Card className="empty" tour="last-stage">
+        No stage has run yet.
+      </Card>
+    );
   const asked = Object.entries(l.asked)
     .filter(([, v]) => v !== undefined && v !== null && v !== false && !(Array.isArray(v) && !v.length))
     .map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(',') : v}`)
     .join('; ');
   return (
-    <Card>
+    <Card tour="last-stage">
       <p>
         <strong>{l.stage}</strong>
         {l.kit ? ` to kit ${l.kit}` : ''}, {ago(l.finished, now)}
@@ -301,7 +306,7 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
     <>
       <a id="alarms" />
       {showing.length > 0 && <h2>Needs you</h2>}
-      <Card className={showing.length ? 'alarms' : undefined}>
+      <Card className={showing.length ? 'alarms' : undefined} tour="alarms">
         {showing.length ? showing.map((x) => item(x, true)) : <Muted as="p">Nothing needs you.</Muted>}
         {dismissed.length > 0 && (
           <details>
@@ -348,7 +353,7 @@ function Stages({ v }: { v: StewardView }) {
     </PostButton>
   );
   return (
-    <Card>
+    <Card tour="stages">
       <div className="picks">
         {rows.map((r) => (
           <label key={r.id} className="pick" title={r.usesKit ? undefined : "Doesn't take the kit yet: only the team's PRs are merged for it"}>
@@ -409,7 +414,7 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <AlarmsCard a={v.alarms} now={now} />
-      <Card>
+      <Card tour="kit">
         {s ? (
           <>
             <p>
