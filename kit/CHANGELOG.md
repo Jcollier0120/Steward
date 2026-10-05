@@ -2,6 +2,15 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.12.0
+
+**A release announces its agent to every Manor, when the checkout has manor-agent.json.** Manor 0.4.35 finds new agents on GitHub: on each hourly look it asks which of its staff's owners' repositories have `manor-agent.json` on their latest release, checks it against that release's SHA256SUMS.txt (it must be listed there), and offers Hire on the role's card. The file is `{ "agent": { ...its entry as Manor's staff.json has it, with "release": { "repo", "kind": "node" } }, "roles": [ ...optional, as Manor's roles.json has them ] }`. node/release.ts now carries it:
+- **`npm run release`** copies the checkout's `manor-agent.json` (at its root) into `artifacts\<id>\`, beside the zip, and adds its line to SHA256SUMS.txt after the zip's. **`--publish`** uploads it with the zip and SHA256SUMS.txt. A checkout without one releases as before, and an earlier build's copy is removed.
+- **It refuses to build** when the file isn't one Manor would take: its `agent.id` isn't this agent's (release.json's id), its `release.repo` isn't origin's GitHub repository (or origin isn't GitHub), its `release.kind` isn't `node`, its `paths.app` isn't exactly `["%USERPROFILE%\\.<id>\\app"]`, or its `roles` isn't a list of objects. The error says which, and to fix it or remove it.
+- **A change to manor-agent.json makes the release dirty** (`+dev.<commit>`), so an uncommitted one is never published.
+- New exports: `ANNOUNCEMENT`, `checkAnnouncement(json, id, repo)`, `announcementOf(dir, id, repo)` and `sumsText(files)`.
+- **Nothing for an agent to do** but take this version. An agent that wants Manor to offer it adds `manor-agent.json` at its root and releases.
+
 ## 2.11.0
 
 **Keeping the model servers moves into the kit, for the Smith.** Reeve, a developer role, kept the model servers every agent works from: when Developer options were off, its role went vacant and its servers kept running only by special case. The Smith, a new general role, takes the job over; Reeve keeps it only where there is no Smith. Both run the same code, which is Reeve 0.4.x's, moved here unchanged in what it does:
