@@ -65,7 +65,10 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
   const logFile = dataFile('serve.log');
   if (existsSync(logFile) && statSync(logFile).size > 5_000_000) renameSync(logFile, dataFile('serve.old.log'));
   const log = openSync(logFile, 'a');
-  const child = spawn(process.execPath, [cliFile, 'serve'], {
+  // A built release (kit 2.17.0) runs src\cli.js through the src\cli.ts stub: the page is started as cli.ts, as ever,
+  // so its command line says so (Pinder and the Surveyor know the manor's own agents by it).
+  const entry = cliFile.endsWith('.js') && existsSync(`${cliFile.slice(0, -3)}.ts`) ? `${cliFile.slice(0, -3)}.ts` : cliFile;
+  const child = spawn(process.execPath, [entry, 'serve'], {
     detached: true,
     stdio: ['ignore', log, log],
     windowsHide: true,

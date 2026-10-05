@@ -208,7 +208,7 @@ async function build(readable = false): Promise<Built> {
       cpSync(path.join(root, f), path.join(stage, f));
     }
     writeFileSync(path.join(stage, 'release.json'), JSON.stringify(release, null, 2) + '\n');
-    const minified = esbuild ? minifyRelease(stage, esbuild) : null;
+    const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
@@ -226,7 +226,7 @@ async function build(readable = false): Promise<Built> {
     writeFileSync(sums, sumsText(listed));
     console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
-    if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript, ${minified.js} JavaScript and ${minified.css} CSS files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
+    if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     return { release, zip, sums, announcement: announced ? announcement : null };
