@@ -104,3 +104,35 @@ test("a release that fails is tried once at its commit; later rounds leave it to
   assert.deepEqual(alarms.open.map((a: any) => a.id), [`release:fake:${sha.slice(0, 7)}`]);
   assert.ok('manor:down' in alarms.watching && !alarms.open.some((a: any) => a.id === 'manor:down'), 'watched, not yet an hour');
 });
+
+test('a round while this PC is offline asks GitHub nothing, fails nothing and leaves no trace: it waits for the network', async () => {
+  const before = readFileSync(lastStageFile(), 'utf8');
+  const asked = runner();
+  const out = await runStage('round', {}, { run: asked.run, online: async () => false });
+  assert.equal(out.offline, true);
+  assert.deepEqual(out.results, []);
+  assert.equal(out.error, undefined);
+  assert.deepEqual(asked.gh, [], 'not one gh call');
+  assert.ok(out.log.some((l) => /this PC is offline, so the round waits for the network/.test(l)));
+  assert.equal(readFileSync(lastStageFile(), 'utf8'), before, 'not recorded: nothing happened');
+});
+
+test("a release that fails while this PC is offline isn't held against its commit: the next round tries it again", async () => {
+  // A new commit at 0.4.3 (whose release command fails): the PC is online as the round starts, offline as it fails.
+  writeFileSync(path.join(f.checkout, 'note.txt'), 'again');
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  sh(f.checkout, 'add', 'note.txt');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'a note');
+  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'push', '--quiet', 'origin', `${sha}:refs/heads/main`);
+  const tries = () => readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length;
+  const before = tries();
+  let looks = 0;
+  const failed = await runStage('round', {}, { run: r.run, online: async () => looks++ === 0 });
+  assert.match(failed.results.find((x) => x.outcome === 'failed')!.message, /^release: .* failed \(exit 1\)/);
+  assert.notEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'no hold on this commit: it failed offline');
+  assert.equal(tries(), before + 1);
+  await round();
+  assert.equal(tries(), before + 2, 'tried again, online');
+  assert.equal(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'online, a failure is held as before');
+});

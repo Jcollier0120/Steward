@@ -4,7 +4,7 @@ import { compareVersions } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
-import { checkoutOf, freshBranch, glanceOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
 import { push } from './push.ts';
 import { parsePrs, prListArgs, readPin } from './staff.ts';
 
@@ -161,7 +161,8 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
-      failed[r.id] = { kit, head: heads.get(r.id)!, stage: 'bump', message: r.message, at };
+      // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.
+      if (!(await networkFailure(ctx, r.message))) failed[r.id] = { kit, head: heads.get(r.id)!, stage: 'bump', message: r.message, at };
       results.push({ ...r, outcome: 'failed', message: `rollout: bump to kit ${kit}: ${r.message}` });
     }
     for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
@@ -179,7 +180,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
           delete failed[p.id];
           results.push({ ...p, message: `rollout: kit ${kit}: ${b.message}; ${p.message}`, version: b.version ?? p.version });
         } else {
-          failed[p.id] = { kit, head: heads.get(p.id)!, stage: 'push', message: p.message, at };
+          if (!(await networkFailure(ctx, p.message))) failed[p.id] = { kit, head: heads.get(p.id)!, stage: 'push', message: p.message, at };
           results.push({ ...p, outcome: 'failed', message: `rollout: push of kit ${kit}: ${p.message} (the bump is ready: ${b.message})` });
         }
       }
