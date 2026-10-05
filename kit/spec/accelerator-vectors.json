@@ -2834,10 +2834,10 @@
    "noteLabel": "note from The Oryon CPU, unverified"
   },
   {
-   "case": "none: a note from before the accelerators came from the NPU",
+   "case": "none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU",
    "ref": null,
-   "theAccelerator": "the NPU",
-   "noteLabel": "note from the NPU, unverified"
+   "theAccelerator": "a local model",
+   "noteLabel": "note from a local model, unverified"
   }
  ],
  "tokens": [

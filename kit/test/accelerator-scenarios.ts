@@ -275,7 +275,7 @@ export function makeAcceleratorVectors() {
       { case: 'an older config\'s card', ref: { id: 'gpu-graphics-card', name: 'Graphics card' } },
       { case: 'the processor', ref: { id: 'cpu', name: 'Processor' } },
       { case: 'a name that says "the"', ref: { id: 'cpu', name: 'The Oryon CPU' } },
-      { case: 'none: a note from before the accelerators came from the NPU', ref: null },
+      { case: 'none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU', ref: null },
     ].map((m) => ({ ...m, theAccelerator: core.theAccelerator(m.ref), noteLabel: core.noteLabel(m.ref) })),
     tokens: [
       { text: 'x'.repeat(9000), estimate: core.estimateTokens(RULES, 'x'.repeat(9000)) },

@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { acceleratorId, reeveHome, slug } from './accelerators.ts';
+import { acceleratorId, type Hardware, readHardware, reeveHome, slug } from './accelerators.ts';
+import * as core from './core/index.js';
 import { RULES } from './rules.ts';
 
 /**
@@ -208,11 +209,15 @@ export function readAccelerator(v: any): Accelerator | null {
  * config.json's accelerators and their order. With no `accelerators` list, the old single-endpoint
  * fields are read as accelerators (legacyAccelerators), so an old config keeps working unchanged.
  * Entries that aren't usable are left out (validateAccelerators says what's wrong with them).
+ *
+ * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has instead,
+ * the core's rule (notTheNpu): so the keeper, setup and Settings never call a model on a graphics card the NPU, and
+ * the next save writes it as the card's.
  */
-export function readAccelerators(raw: Record<string, any> | null | undefined): AcceleratorConfig {
+export function readAccelerators(raw: Record<string, any> | null | undefined, hw: Hardware | null = readHardware()): AcceleratorConfig {
   const r = raw && typeof raw === 'object' ? raw : {};
   const order: AcceleratorOrder = Array.isArray(r.acceleratorOrder) ? r.acceleratorOrder.filter((x: unknown) => typeof x === 'string') : 'auto';
-  if (!Array.isArray(r.accelerators)) return { accelerators: legacyAccelerators(r), order, legacy: true };
+  if (!Array.isArray(r.accelerators)) return { ...onThisPc(legacyAccelerators(r), order, hw, true), legacy: true };
   const seen = new Set<string>();
   const accelerators: Accelerator[] = [];
   for (const v of r.accelerators) {
@@ -221,7 +226,30 @@ export function readAccelerators(raw: Record<string, any> | null | undefined): A
     seen.add(a.id);
     accelerators.push(a);
   }
-  return { accelerators, order, legacy: false };
+  return { ...onThisPc(accelerators, order, hw, false), legacy: false };
+}
+
+/**
+ * The list on this PC: an entry said to be the NPU, on a PC known to have none, becomes what it has instead (its one
+ * card, the graphics card, or the processor), after the others, merged into a card's own entry of the same id. An
+ * old config's GenieX quirks go with it: GenieX runs only on an NPU.
+ */
+function onThisPc(list: Accelerator[], order: AcceleratorOrder, hw: Hardware | null, legacy: boolean): { accelerators: Accelerator[]; order: AcceleratorOrder } {
+  const other = core.instead(hw);
+  if (!other || !list.some((a) => a.kind === 'npu')) return { accelerators: list, order };
+  const kept = list.filter((a) => a.kind !== 'npu');
+  const renamed = new Map<string, string>();
+  for (const a of list.filter((x) => x.kind === 'npu')) {
+    const name = /^(the\s+)?npu$/i.test(a.name) ? other.name : a.name;
+    const id = acceleratorId(other.kind, name);
+    renamed.set(a.id, id);
+    const memoryGb = a.memoryGb ?? other.memoryGb ?? undefined;
+    const moved: Accelerator = { ...a, id, kind: other.kind, name, ...(memoryGb !== undefined ? { memoryGb } : {}), ...(legacy ? { quirks: [] } : {}) };
+    const same = kept.find((x) => x.id === id);
+    if (same) for (const w of SERVE_KINDS) same[w] ??= moved[w];
+    else kept.push(moved);
+  }
+  return { accelerators: kept, order: order === 'auto' ? order : order.map((id) => renamed.get(id) ?? id) };
 }
 
 /**

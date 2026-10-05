@@ -5,9 +5,9 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { expandEnv } from './accelerators.ts';
+import { expandEnv, rememberHardware } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
-import { type Detection, detect, detectedAccelerators, type GpuCard, noNpu, recommendedCard } from './detect.ts';
+import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 
 /**
  * Accelerator setup (`smith accelerators setup`, Reeve's where there is no Smith, and their Settings pages' Set up): llama.cpp's server for each graphics
@@ -794,6 +794,9 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     return { code: 2 };
   }
   const detection = o.detection ?? (await detect());
+  // What this PC has, for every program that reads Reeve's config: a model is never called the NPU on a PC without one.
+  const hw = o.detection ? null : hardwareOf(detection);
+  if (hw) rememberHardware(hw);
   log("Looking up llama.cpp's newest build and the models...");
   const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases: await (o.releases ?? llamaReleases)(), hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome() });
   for (const l of describePlan(plan)) log(l);
