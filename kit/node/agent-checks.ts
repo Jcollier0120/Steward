@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { APP, appRoot } from '../app.ts';
 import { SETTINGS_SPEC } from '../settings.ts';
 import { checkValues, schemaGaps, type Field } from './settings-kit.ts';
+import { onboardingProblems, type Onboarding } from './onboarding.ts';
 
 /**
  * The kit's checks of the agent it sits in: that the agent gives the kit what it needs (the agent
@@ -31,6 +33,12 @@ test('src/kit holds the kit that kit.json pins', { skip: !existsSync(pinFile) &&
   const pin = JSON.parse(read('kit.json')).kit;
   assert.match(String(pin), /^\d+\.\d+\.\d+$/, 'kit.json pins one exact version: {"kit": "1.0.0"}');
   assert.equal(read(path.join('src', 'kit', 'VERSION')).trim(), pin, 'npm run kit fills src/kit at the pinned version');
+});
+
+const onboardingFile = path.join(appRoot, 'src', 'onboarding.ts');
+test('its onboarding: at most three day-one settings, each in its schema and none advanced, and a tour of named parts', { skip: !existsSync(onboardingFile) && 'no src/onboarding.ts' }, async () => {
+  const { ONBOARDING } = (await import(pathToFileURL(onboardingFile).href)) as { ONBOARDING: Onboarding };
+  assert.deepEqual(onboardingProblems(ONBOARDING, SETTINGS_SPEC.schema as Field[]), []);
 });
 
 test('its icon is art/icon.svg', () => {

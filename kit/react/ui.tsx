@@ -112,12 +112,14 @@ export interface ButtonProps {
   tooltip?: string;
   /** A form's submit button rather than a plain one. */
   submit?: boolean;
+  /** What a screen reader says, when the title alone isn't enough out of context ("Remove folder 2"). */
+  accessibilityLabel?: string;
   /** Attributes a page's script or a test finds it by (data-post, data-tour). */
   data?: Record<`data-${string}`, string>;
 }
 
 /** The button: five weights (danger-quiet among other controls, danger only for the last step), three sizes. */
-export function Button({ title, variant = 'primary', size = 'md', loading = false, disabled, disabledLook = false, icon, leftIcon, onPress, tooltip, submit, data }: ButtonProps) {
+export function Button({ title, variant = 'primary', size = 'md', loading = false, disabled, disabledLook = false, icon, leftIcon, onPress, tooltip, submit, accessibilityLabel, data }: ButtonProps) {
   return (
     <button
       type={submit ? 'submit' : 'button'}
@@ -126,6 +128,7 @@ export function Button({ title, variant = 'primary', size = 'md', loading = fals
       aria-busy={loading || undefined}
       aria-disabled={disabledLook || undefined}
       title={tooltip}
+      aria-label={accessibilityLabel}
       onClick={onPress}
       {...data}
     >
@@ -156,6 +159,15 @@ export function Badge({ label, tone = 'neutral', align = 'start', title }: { lab
     <span className={cx('badge', `tone-${tone}`, align === 'end' && 'ui-end')} title={title}>
       {label}
     </span>
+  );
+}
+
+/** A button that reads as a link: an action in a line of text (Reset to default, Skip the tour). The manor's own. */
+export function LinkButton({ title, onPress, disabled }: { title: string; onPress: () => void; disabled?: boolean }) {
+  return (
+    <button type="button" className="link" disabled={disabled} onClick={onPress}>
+      {title}
+    </button>
   );
 }
 

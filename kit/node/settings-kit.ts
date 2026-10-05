@@ -70,6 +70,17 @@ interface Common {
   optional?: boolean;
   /** Shown, never changed from the page. */
   readOnly?: boolean;
+  /**
+   * Seldom changed: the page folds it under Advanced, after the rest (a top-level key, or a group's field), and onboarding
+   * never shows it. Most of a person's day-one choices are not this; the knobs that have one sane value nearly always are.
+   */
+  advanced?: boolean;
+  /**
+   * Shown only while another top-level setting holds one of these values (as text: a switch is "true" or "false"):
+   * the Herald's `stocks` while its `variant` is general or financial. Hidden, it keeps its value and is still saved, so
+   * switching back restores it; onboarding follows the same rule, and a message about it shows it anyway.
+   */
+  shownWhen?: { key: string; is: string[] };
 }
 
 export type Field =

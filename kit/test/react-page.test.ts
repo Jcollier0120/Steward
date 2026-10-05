@@ -47,6 +47,8 @@ test('the shell: the token, the theme at first paint, the first data, and the bu
   assert.equal(shell.title, '(bump) Fixture');
   assert.ok(shell.themes.some((t) => t.name === 'system' && t.groupLabel));
   assert.match(shell.work, /Where its work runs/);
+  assert.deepEqual(shell.onboarding?.settings, ['folders'], "the agent's src/onboarding.ts, found by itself");
+  assert.equal(pageShell({ onboarding: null }).onboarding, null, 'unless the caller says otherwise');
   const html = reactPage({ token: 'tok', data: { shell, body: { words: '</script>' } } });
   assert.match(html, /<meta name="page-token" content="tok">/);
   assert.match(html, /<title>\(bump\) Fixture<\/title>/);
@@ -124,7 +126,7 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since 3 minutes ago/);
   assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge tone-success">fine<\/span><\/div>/);
   assert.match(html, /<section id="settings-view"><a class="back-link" href="#\/">Back to /);
-  assert.match(html, /<div class="card sf-panel" data-settings-panel="" data-tour="settings-panel">/);
+  assert.match(html, /<div class="card sf-panel" data-tour="settings-panel"><p class="muted">Loading the settings…<\/p><\/div>/, "the kit's React Settings form, loading");
   assert.match(html, /Where its work runs/);
   assert.match(html, /<footer>[^<]+ · this PC only · its files are in <code>/);
   // Room for the onboarding tour: every part of the frame named, and the tour drawn over the page only at #/tour.

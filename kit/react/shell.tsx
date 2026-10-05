@@ -1,7 +1,9 @@
 import { memo, StrictMode, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { PageData, PageShell, ShellTheme } from './page-data.ts';
+import { SettingsForm } from './settings-form.tsx';
 import { UI_CSS } from './styles.ts';
+import { Tour } from './tour.tsx';
 import { PostButton, ReloadProvider } from './ui.tsx';
 
 /**
@@ -221,25 +223,6 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
   );
 }
 
-/**
- * The kit's Settings panel (web/settings-panel.js, which server.ts serves as /settings.js), placed once and left to
- * itself: it builds its own form inside this element and keeps its own state, so React never draws in it again.
- */
-const SettingsPanel = memo(function SettingsPanel() {
-  const el = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!el.current || document.querySelector('script[src="/settings.js"]')) return;
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'Loading the settings…';
-    el.current.replaceChildren(p);
-    const s = document.createElement('script');
-    s.src = '/settings.js';
-    document.body.append(s);
-  }, []);
-  return <div ref={el} className="card sf-panel" data-settings-panel="" data-tour="settings-panel" />;
-});
-
 export type Route = 'page' | 'settings' | 'tour';
 
 /** The route: the page at #/, Settings at #/settings, a tour of the page at #/tour (over the page itself). */
@@ -265,14 +248,19 @@ export function useRoute(): Route {
 /**
  * The whole page: the agent's own as children, in the kit's frame.
  *
- * `tour` is the page's walkthrough (onboarding: what the role is, its settings, then what its page shows), drawn over
- * the page at #/tour. It points at the page's parts by their `data-tour` names: the frame's are titlebar, status,
- * settings, theme, action, settings-panel and work, and an agent names its own sections the same way.
+ * `tour` is the page's walkthrough, drawn over the page at #/tour: by default its onboarding (the shell's, from
+ * pageShell(): tour.tsx draws it), so an agent writes no tour of its own. It points at the page's parts by their
+ * `data-tour` names: the frame's are titlebar, status, settings, theme, action, settings-panel and work, and an agent
+ * names its own sections the same way.
+ *
+ * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves.
  */
 export function Page<Body>({ data, reload, action, settings, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
   const route = useRoute();
   const onSettings = route === 'settings';
+  const [settingsDrawn, setSettingsDrawn] = useState(0);
+  const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} onSettingsSaved={() => setSettingsDrawn((n) => n + 1)} />);
   return (
     <ReloadProvider value={reload}>
       <style>{UI_CSS}</style>
@@ -295,15 +283,15 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
           </a>
           <h2>Settings</h2>
           {settings}
-          <SettingsPanel />
+          <SettingsForm key={settingsDrawn} />
           <div data-tour="work" style={{ display: 'contents' }}>
             <Markup html={s.work} />
           </div>
         </section>
       </main>
-      {route === 'tour' && tour && (
+      {route === 'tour' && walkthrough && (
         <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
-          {tour}
+          {walkthrough}
         </div>
       )}
       <footer>
