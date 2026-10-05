@@ -56,7 +56,7 @@ test('nineteen employees, all on the kit: the eight hires, Reeve and Heiward, th
   assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
   assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [true, 10], 'it merges and releases by itself, a round every 10 minutes on duty');
   assert.deepEqual([normalizeSettings({ roundMinutes: 1 }).settings.roundMinutes, normalizeSettings({ byItself: false }).settings.byItself], [2, false]);
-  assert.deepEqual(DEFAULT_SETTINGS.team, ['Jcollier0120'], 'you, and Claude Code, which opens its PRs with your account');
+  assert.deepEqual(DEFAULT_SETTINGS.team, [], "none named: the account gh is signed in as (team.ts)");
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
 });
 
@@ -89,8 +89,14 @@ test('a good change is saved and read back; release after merge can be switched 
   assert.equal(s.parallel, 4);
   assert.deepEqual(s.team, ['Jcollier0120', 'app/claude']);
   assert.equal(s.employees.length, 19);
-  assert.deepEqual(normalizeSettings({}).settings.team, ['Jcollier0120'], 'no team in the file is the default team');
+  assert.deepEqual(normalizeSettings({}).settings.team, [], 'no team in the file is none named: gh decides (team.ts)');
   assert.deepEqual(normalizeSettings({ team: [] }).settings.team, [], 'an empty one stays empty');
+});
+
+test("an older settings.json that names its team keeps it; only a missing team takes the new default", () => {
+  const old = normalizeSettings({ team: ['Jcollier0120'], parallel: 3, byItself: false }).settings;
+  assert.deepEqual([old.team, old.parallel, old.byItself], [['Jcollier0120'], 3, false]);
+  assert.deepEqual(normalizeSettings({ parallel: 3 }).settings.team, []);
 });
 
 test('an employee without a usable id is left out, and said so; the stages take only known employees', () => {

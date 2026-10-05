@@ -363,11 +363,11 @@ function Stages({ v }: { v: StewardView }) {
         {stage('2. Push', 'push', `Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`, noKit)}
         {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", !!v.running)}
         {stage('4. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
-        {stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running || !team.length, team.length ? undefined : 'No team in Settings')}
+        {stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running || !team.length, v.teamNote ?? (team.length ? undefined : 'No team in Settings'))}
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
-        Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).{offKitNote}
+        Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).{v.teamNote ? ` ${v.teamNote}` : ''}{offKitNote}
       </Text>
       <div className="row round">
         <Text variant="muted">{roundWords(v.round).when}</Text>
