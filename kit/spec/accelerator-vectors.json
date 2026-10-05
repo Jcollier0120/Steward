@@ -303,6 +303,34 @@
    "expect": {
     "accelerators": [
      {
+      "id": "npu",
+      "kind": "npu",
+      "name": "Snapdragon X2 Elite NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
+       "startCommand": [
+        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
+        "serve"
+       ]
+      },
+      "vision": {
+       "baseUrl": "http://127.0.0.1:18181",
+       "model": "Qwen3-VL-4B-Instruct:W4A16",
+       "startCommand": [
+        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
+        "serve"
+       ]
+      }
+     },
+     {
       "id": "gpu-off",
       "kind": "gpu",
       "name": "Off",
@@ -345,34 +373,6 @@
       "embed": {
        "baseUrl": "http://127.0.0.1:18192",
        "model": "qwen3-embedding-0.6b"
-      }
-     },
-     {
-      "id": "npu",
-      "kind": "npu",
-      "name": "Snapdragon X2 Elite NPU",
-      "memoryGb": null,
-      "slots": 1,
-      "maxContextTokens": 2400,
-      "quirks": [
-       "prefix-leak",
-       "image-path"
-      ],
-      "chat": {
-       "baseUrl": "http://127.0.0.1:18181",
-       "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16",
-       "startCommand": [
-        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
-        "serve"
-       ]
-      },
-      "vision": {
-       "baseUrl": "http://127.0.0.1:18181",
-       "model": "Qwen3-VL-4B-Instruct:W4A16",
-       "startCommand": [
-        "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe",
-        "serve"
-       ]
       }
      }
     ],
@@ -420,19 +420,6 @@
    "expect": {
     "accelerators": [
      {
-      "id": "gpu-big",
-      "kind": "gpu",
-      "name": "Graphics card",
-      "memoryGb": 24,
-      "slots": 16,
-      "maxContextTokens": 2400,
-      "quirks": [],
-      "chat": {
-       "baseUrl": "http://x:1",
-       "model": "m"
-      }
-     },
-     {
       "id": "npu",
       "kind": "npu",
       "name": "NPU",
@@ -442,6 +429,19 @@
       "quirks": [],
       "chat": {
        "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-big",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 24,
+      "slots": 16,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
        "model": "m"
       }
      },
@@ -669,6 +669,19 @@
    "expect": {
     "accelerators": [
      {
+      "id": "npu",
+      "kind": "npu",
+      "name": "NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
       "id": "gpu-big",
       "kind": "gpu",
       "name": "Graphics card",
@@ -691,19 +704,6 @@
       "quirks": [],
       "chat": {
        "baseUrl": "http://x:4",
-       "model": "m"
-      }
-     },
-     {
-      "id": "npu",
-      "kind": "npu",
-      "name": "NPU",
-      "memoryGb": null,
-      "slots": 1,
-      "maxContextTokens": 2400,
-      "quirks": [],
-      "chat": {
-       "baseUrl": "http://x:3",
        "model": "m"
       }
      },
@@ -1505,8 +1505,6 @@
    },
    "expect": {
     "list": [
-     "gpu-a",
-     "gpu-b",
      "npu"
     ],
     "skipped": []
@@ -1765,18 +1763,7 @@
     "list": [
      "npu"
     ],
-    "skipped": [
-     {
-      "id": "gpu-a",
-      "why": "failed",
-      "detail": "the Card A failed (refused); it is tried again in 8 min"
-     },
-     {
-      "id": "gpu-b",
-      "why": "game",
-      "detail": "the Card B is in use by game.exe"
-     }
-    ]
+    "skipped": []
    }
   },
   {
@@ -1852,16 +1839,9 @@
    },
    "expect": {
     "list": [
-     "gpu-b",
      "npu"
     ],
-    "skipped": [
-     {
-      "id": "gpu-a",
-      "why": "failed",
-      "detail": "the Card A failed (refused); it is tried again in 8 min"
-     }
-    ]
+    "skipped": []
    }
   },
   {
@@ -1921,10 +1901,7 @@
     ]
    },
    "expect": {
-    "list": [
-     "gpu-a",
-     "gpu-b"
-    ],
+    "list": [],
     "skipped": [
      {
       "id": "npu",
@@ -2005,8 +1982,6 @@
    },
    "expect": {
     "list": [
-     "gpu-a",
-     "gpu-b",
      "npu"
     ],
     "skipped": []
@@ -2095,16 +2070,9 @@
    },
    "expect": {
     "list": [
-     "gpu-a",
      "npu"
     ],
-    "skipped": [
-     {
-      "id": "gpu-b",
-      "why": "game",
-      "detail": "the Card B is in use by game.exe"
-     }
-    ]
+    "skipped": []
    }
   },
   {
@@ -2175,18 +2143,7 @@
     "list": [
      "npu"
     ],
-    "skipped": [
-     {
-      "id": "gpu-a",
-      "why": "failed",
-      "detail": "the Card A failed (refused); it is tried again in 9 min"
-     },
-     {
-      "id": "gpu-b",
-      "why": "failed",
-      "detail": "the Card B failed (refused); it is tried again in 1 min"
-     }
-    ]
+    "skipped": []
    }
   },
   {
@@ -2296,8 +2253,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2311,7 +2268,7 @@
     }
    },
    "expect": {
-    "acc": "gpu-a"
+    "acc": "npu"
    }
   },
   {
@@ -2362,8 +2319,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2428,8 +2385,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2494,8 +2451,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2509,7 +2466,7 @@
     }
    },
    "expect": {
-    "acc": "gpu-a"
+    "acc": "npu"
    }
   },
   {
@@ -2560,8 +2517,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2575,7 +2532,7 @@
     }
    },
    "expect": {
-    "deferred": "every line is full (4 waiting for the Card A, 5 waiting for the NPU)"
+    "deferred": "every line is full (5 waiting for the NPU, 4 waiting for the Card A)"
    }
   },
   {
@@ -2626,8 +2583,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "background",
    "looks": {
@@ -2692,8 +2649,8 @@
     ]
    },
    "candidates": [
-    "gpu-a",
-    "npu"
+    "npu",
+    "gpu-a"
    ],
    "lane": "interactive",
    "looks": {

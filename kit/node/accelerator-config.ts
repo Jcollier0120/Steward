@@ -250,20 +250,21 @@ export function overrideEndpoint(list: Accelerator[], kind: 'chat' | 'embed', ep
 // ------------------------------------------------------------------------------------------------
 // Order
 
-/** Ranks for the auto order: cards with their own memory, the NPU, cards that share the PC's memory, the processor. */
+/** Ranks for the auto order: the NPU, cards with their own memory, cards that share the PC's memory, the processor (the core's autoOrder). */
 function autoRank(a: Accelerator): number {
-  if (a.kind === 'gpu') return (a.memoryGb ?? 0) >= OWN_MEMORY_GB ? 0 : 2;
-  return a.kind === 'npu' ? 1 : 3;
+  if (a.kind === 'gpu') return (a.memoryGb ?? 0) >= OWN_MEMORY_GB ? 1 : 2;
+  return a.kind === 'npu' ? 0 : 3;
 }
 
 /**
- * The auto order: graphics cards with 2 GB or more of their own memory first, by memory (most first);
- * then the NPU; then graphics that share the PC's memory; then the processor. Ties keep the list's order.
+ * The auto order, as the core's: the NPU first, since it does model work without the processor or a graphics
+ * card; then graphics cards with 2 GB or more of their own memory, by memory (most first); then graphics that
+ * share the PC's memory; then the processor. Ties keep the list's order.
  */
 export function autoOrder<T extends Accelerator>(list: T[]): T[] {
   return list
     .map((a, i) => ({ a, i }))
-    .sort((x, y) => autoRank(x.a) - autoRank(y.a) || (autoRank(x.a) === 0 ? (y.a.memoryGb ?? 0) - (x.a.memoryGb ?? 0) : 0) || x.i - y.i)
+    .sort((x, y) => autoRank(x.a) - autoRank(y.a) || (autoRank(x.a) === 1 ? (y.a.memoryGb ?? 0) - (x.a.memoryGb ?? 0) : 0) || x.i - y.i)
     .map((x) => x.a);
 }
 

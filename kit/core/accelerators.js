@@ -228,8 +228,9 @@ function fromLegacy(rules, raw) {
 }
 
 /**
- * Auto: graphics cards with `ownMemoryGb` (2 GB) or more of their own memory first, the most memory
- * first; then the NPU; then graphics that share the PC's memory; then the CPU. Ties keep the given order.
+ * Auto: the NPU first, since it does model work without the processor or a graphics card; then graphics
+ * cards with `ownMemoryGb` (2 GB) or more of their own memory, the most memory first; then graphics that
+ * share the PC's memory; then the CPU. Ties keep the given order.
  * @template {{ kind: AcceleratorKind, memoryGb: number | null }} A
  * @param {Rules} rules
  * @param {A[]} list
@@ -237,10 +238,10 @@ function fromLegacy(rules, raw) {
  */
 export function autoOrder(rules, list) {
   /** @param {A} a */
-  const rank = (a) => (a.kind === 'gpu' && (a.memoryGb ?? 0) >= rules.accelerators.ownMemoryGb ? 0 : a.kind === 'npu' ? 1 : a.kind === 'gpu' ? 2 : 3);
+  const rank = (a) => (a.kind === 'npu' ? 0 : a.kind === 'gpu' && (a.memoryGb ?? 0) >= rules.accelerators.ownMemoryGb ? 1 : a.kind === 'gpu' ? 2 : 3);
   return list
     .map((a, i) => ({ a, i }))
-    .sort((x, y) => rank(x.a) - rank(y.a) || (rank(x.a) === 0 ? (y.a.memoryGb ?? 0) - (x.a.memoryGb ?? 0) : 0) || x.i - y.i)
+    .sort((x, y) => rank(x.a) - rank(y.a) || (rank(x.a) === 1 ? (y.a.memoryGb ?? 0) - (x.a.memoryGb ?? 0) : 0) || x.i - y.i)
     .map((x) => x.a);
 }
 
@@ -556,11 +557,17 @@ export function gameCards(rules, load, accs, opts) {
  * failed in the last failedForMs (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), and the agent isn't leaving them alone after
  * a line that was too long (`deferredMs`).
+ *
+ * **The NPU first:** when the first that would do, in order, is the NPU and it hasn't failed, it is the only
+ * candidate (`npuFirst`). The NPU does model work without the processor or a graphics card, so they take it
+ * only when the NPU can't: it doesn't serve the work, the request is too big for it, or it failed lately.
+ * Busy, resting after a long line, or loading its model, it is waited for, never passed over. An
+ * acceleratorOrder that puts something else first is the person's choice, and kept.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
  * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number }} [state]
- * @returns {{ list: Accelerator[], skipped: Skipped[] }}
+ * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export function candidates(rules, accs, need, state = {}) {
   /** @type {Accelerator[]} */
@@ -573,7 +580,9 @@ export function candidates(rules, accs, need, state = {}) {
   // When every one that would do has failed, they're tried anyway (the last resort, as Reeve does), rather
   // than leaving a PC with only the NPU without model work for ten minutes after one hiccup.
   const lastResort = fitting.length > 0 && fitting.every((acc) => failureOfAcc(acc));
-  for (const acc of fitting) {
+  const head = fitting[0];
+  const npuFirst = !!head && head.kind === 'npu' && (lastResort || !failureOfAcc(head));
+  for (const acc of npuFirst ? [head] : fitting) {
     const failed = lastResort ? null : failureOfAcc(acc);
     if (failed) {
       const min = Math.max(1, Math.ceil((failureUntil(rules, failed) - (state.nowMs ?? 0)) / 60_000));
@@ -592,7 +601,7 @@ export function candidates(rules, accs, need, state = {}) {
     }
     list.push(acc);
   }
-  return { list, skipped };
+  return { list, skipped, npuFirst };
 }
 
 /**
