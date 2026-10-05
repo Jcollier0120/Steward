@@ -303,7 +303,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             // A person's Bump lets the rounds try these again, whatever failed before (stages/rollout.ts).
             clearRolloutHolds(picked.employees.map((e) => e.id));
-            out.results = await bump(ctx, picked.employees, { kit: chosen.version, base: ask.base, kitFrom: ask.kitFrom });
+            out.results = await bump(ctx, picked.employees, { kit: chosen.version, base: ask.base, kitFrom: ask.kitFrom, changelog: await changelogFor(ctx, chosen.version) });
           } else if (name === 'push') {
             clearRolloutHolds(picked.employees.map((e) => e.id));
             out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });

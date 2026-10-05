@@ -22,7 +22,11 @@
  * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
  * README.md and release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill
  * its kit again (and the Steward, installed, has the tools\kit.ts it hands out). So an installed agent
- * needs neither the Steward nor GitHub. The zip is made and opened with Windows' own tar.exe, so there's
+ * needs neither the Steward nor GitHub.
+ *
+ * Its notes are the agent's CHANGELOG.md entry for the version (notes.ts, spec/RELEASE-NOTES.md): what's new, what
+ * changed, and what to do before updating. A version with no entry is published with its commits instead, and the
+ * build warns of it first. The zip is made and opened with Windows' own tar.exe, so there's
  * no dependency. Uncommitted changes in what the zip carries make a release marked dirty, version
  * <version>+dev.<commit>, which installs but doesn't publish.
  */
@@ -35,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
+import { releaseNotes, type Notes } from './notes.ts';
 
 /** The public repository every release of the manor's is published in, with no source: any PC downloads from it, signed in or not. */
 export const RELEASES_REPO = 'Jcollier0120/Manor-releases';
@@ -181,7 +186,12 @@ interface Built {
   sums: string;
   /** manor-agent.json beside the zip, when the checkout announces the agent. */
   announcement: string | null;
+  notes: Notes;
 }
+
+/** The notes' last section: how to install a hire's release by hand (Manor installs and updates it by itself). */
+export const INSTALL_NOTE =
+  'Manor installs and updates it by itself. To install it by hand, unpack the zip anywhere and run `node src\\cli.ts install` (Node 22.18 or later). `SHA256SUMS.txt` lists its SHA-256 (PowerShell: `Get-FileHash`).';
 
 /** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
 async function build(readable = false): Promise<Built> {
@@ -230,7 +240,10 @@ async function build(readable = false): Promise<Built> {
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
-    return { release, zip, sums, announcement: announced ? announcement : null };
+    const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
+    console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
+    for (const w of notes.warnings) console.warn(`  warning: ${w}`);
+    return { release, zip, sums, announcement: announced ? announcement : null, notes };
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
@@ -304,19 +317,26 @@ function publish(b: Built): number {
     return 1;
   }
   const assets = [b.zip, b.sums, ...(b.announcement ? [b.announcement] : [])];
-  const notes = `${APP.name} ${release.version}, built from ${release.commit}, with the Steward's kit ${release.kit}. Unpack the zip anywhere and run: node src\\cli.ts install (Node 22.18 or later).`;
-  // The releases repository holds no source, so its tag points at its own default branch: the commit is in the notes and release.json.
-  const pub = spawnSync(gh, ['release', 'create', tag, ...assets, '--repo', RELEASES_REPO, '--title', `${APP.name} ${release.version}`, '--notes', notes], { stdio: 'inherit', windowsHide: true });
-  if (pub.status !== 0) return pub.status ?? 1;
-  if (own === 'there') {
-    console.log(`${repo} has ${ownTag} already (released before the releases repository): published in ${RELEASES_REPO} alone.`);
-    return 0;
+  // The notes go in a file: a double quote inside an argument can reach gh split on Windows, and an entry has them.
+  const notesDir = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-notes-`));
+  const notesFile = path.join(notesDir, 'notes.md');
+  writeFileSync(notesFile, b.notes.notes);
+  try {
+    // The releases repository holds no source, so its tag points at its own default branch: the commit is in the notes and release.json.
+    const pub = spawnSync(gh, ['release', 'create', tag, ...assets, '--repo', RELEASES_REPO, '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], { stdio: 'inherit', windowsHide: true });
+    if (pub.status !== 0) return pub.status ?? 1;
+    if (own === 'there') {
+      console.log(`${repo} has ${ownTag} already (released before the releases repository): published in ${RELEASES_REPO} alone.`);
+      return 0;
+    }
+    const r = spawnSync(gh, ['release', 'create', ownTag, ...assets, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], {
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+    return r.status ?? 1;
+  } finally {
+    rmSync(notesDir, { recursive: true, force: true });
   }
-  const r = spawnSync(gh, ['release', 'create', ownTag, ...assets, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
-    stdio: 'inherit',
-    windowsHide: true,
-  });
-  return r.status ?? 1;
 }
 
 async function main(args: string[]): Promise<number> {

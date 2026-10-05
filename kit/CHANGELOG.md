@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.19.0
+
+**Every release says what it brings: its notes are the agent's CHANGELOG.md entry for the version.** A release's notes said only which commit it was built from and how to unpack it, so Manor's What's new link showed nothing new. spec/RELEASE-NOTES.md is new, and says how an entry is written: a bold headline, then `### What's new`, `### What changed` and `### Before you update` (always there, "Nothing: it updates itself as usual." when updating needs nothing).
+- **node/notes.ts is new:** `releaseNotes({ root, name, version, commit, kit, install })` gives the notes (the first line Manor reads, "built from <commit>"; the entry; how to install it), where they came from, and warnings. Also `entryOf`, `sectionOf`, `headlineOf`, `entryWarnings`, `commitsSince`, `withEntry`, `changelogHead`, `HEADINGS`, `NOTHING_TO_DO`.
+- **A version with no entry** is published with a "What changed" that says so and lists its commits since the release before (each pull request's title), never with nothing.
+- **release.ts:** the build says where its notes come from, and warns of an entry that's missing or lacks a heading; `--publish` publishes them through a file (`--notes-file`), since an entry's quotes could reach gh split on Windows. New export: `INSTALL_NOTE`.
+- **The Steward's kit bump writes the agent's entry** for the version it raises (starting a CHANGELOG.md when there's none): each kit version's headline, and those kit entries' own "Before you update".
+- **What an agent must do:** nothing but take this version. From then on, whoever raises its version writes its entry in CHANGELOG.md, in the same change.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.18.0
 
 **Non-employee projects: repositories that ride along with the manor.** Each PC's Manor may list, in settings.json's `"projects"` (its Settings page's Non-employee projects), other repositories it looks after without employing them: the agents that clean up and fix repositories (Reeve's rounds, the Surveyor's test runs, the Wright's and the Bailiff's fixes) work on them too, but they take no kit, the Steward never touches them, they hold no role, and the manor never merges or releases them.

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { carriedOldKit, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
+import { carriedOldKit, changelogBetween, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
+import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile, trackedAt } from '../git.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
@@ -21,6 +22,10 @@ import { recordTested } from '../tested.ts';
  * failed step's whole output beside it (<worktree>.log) and the failed tests named in its message. An employee that isn't a Node agent
  * (Heiward, in C#) gets the same, but for npm and tools/kit.ts: its own fill command fills its kit, and its
  * version files may be a .csproj's <VersionPrefix>.
+ *
+ * The new version's entry goes at the top of its CHANGELOG.md (one is started when it has none), so its release's notes
+ * say what it brings (the kit's spec/RELEASE-NOTES.md): each kit version's headline since the one it pinned, and those
+ * kit entries' own "Before you update", else that updating needs nothing.
  */
 
 export interface BumpOptions {
@@ -31,6 +36,43 @@ export interface BumpOptions {
   kitFrom?: string | null;
   /** The tools/kit.ts to hand out (default: the Steward's own). */
   tool?: string;
+  /** The kit's CHANGELOG.md, for the employee's changelog entry; null when it couldn't be read (the entry names the kit alone). */
+  changelog?: string | null;
+}
+
+/**
+ * The employee's changelog entry for a kit bump (`## <version>` and all): the kit it now carries, a "What changed"
+ * line for each kit version after `from` up to `kit` (that entry's headline), and "Before you update" from those kit
+ * entries' own, or that updating needs nothing.
+ */
+export function kitBumpEntry(o: { version: string; from: string; kit: string; changelog: string | null }): string {
+  const back = compareVersions(o.kit, o.from) < 0;
+  const sections = !back && o.changelog ? changelogBetween(o.changelog, o.from, o.kit).split(/^(?=## )/m).filter((s) => s.startsWith('## ')) : [];
+  const changed: string[] = [];
+  const care: string[] = [];
+  for (const s of sections) {
+    const [heading, ...rest] = lf(s).split('\n');
+    const v = headingVersion(heading);
+    const body = rest.join('\n');
+    const headline = headlineOf(body);
+    if (v) changed.push(`- The Steward's kit ${v}${headline ? `: ${headline}` : ''}`);
+    const c = sectionOf(body, HEADINGS.care);
+    if (c && !/^nothing\b/i.test(c)) care.push(c);
+  }
+  if (!changed.length) changed.push(back ? `- A step back to the Steward's kit ${o.kit}, from ${o.from}.` : `- The Steward's kit ${o.kit}, after ${o.from}: see its changelog, kit/CHANGELOG.md in Jcollier0120/Steward.`);
+  return [
+    `## ${o.version}`,
+    '',
+    `**It carries the Steward's kit ${o.kit}${back ? ', a step back' : ''}: the parts every agent of the manor shares.**`,
+    '',
+    `### ${HEADINGS.changed}`,
+    '',
+    ...changed,
+    '',
+    `### ${HEADINGS.care}`,
+    '',
+    care.length ? care.join('\n') : NOTHING_TO_DO,
+  ].join('\n');
 }
 
 /**
@@ -140,6 +182,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
     return result(e, 'failed', (err as Error).message);
   }
   say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
+  // The new version's entry, so its release's notes say what it brings.
+  const logAt = path.join(dir, CHANGELOG);
+  const logText = existsSync(logAt) ? readFileSync(logAt, 'utf8') : null;
+  writeFileSync(logAt, withEntry(logText, kitBumpEntry({ version: next, from: pin.kit, kit: o.kit, changelog: o.changelog ?? null }), e.name));
+  say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : ''}`);
 
   // A failure is tried once more, as a PR's checks are here (prtest.ts): a round bumps several employees at once, and a
   // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
@@ -152,9 +199,9 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   }
   const secondTry = first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
-  await git(run, dir, 'add', '--', 'kit.json', ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
+  await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}.${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
+  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
   const commit = full.slice(0, 7);
   // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit tree.
