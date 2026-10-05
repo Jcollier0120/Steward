@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useId, useRef, useState, type Rea
 import { ErrorNote } from './feedback.tsx';
 import { Switch } from './forms.tsx';
 import { post } from './page-data.ts';
-import { blank, canon, clone, same, SCALAR, shown, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
+import { APPLIES_NOTE, blank, canon, clone, laterNotes, same, SCALAR, shown, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 import { Badge, Button, LinkButton, Text } from './ui.tsx';
 
 /**
@@ -333,7 +333,7 @@ function FieldMeta({ f, value, def, top, onChange }: { f: SettingsField; value: 
     meta.push(<span key="default">Default: {words(f, def)}.</span>);
     meta.push(<LinkButton key="reset" title="Reset to default" disabled={same(f, value, def)} onPress={() => onChange(clone(def))} />);
   }
-  if (top && f.applies === 'restart') meta.push(<Badge key="restart" tone="caution" label="takes effect at the next start" />);
+  if (top && f.applies && f.applies !== 'now') meta.push(<Badge key="applies" tone="caution" label={APPLIES_NOTE[f.applies]} />);
   return meta.length ? <p className="sf-meta">{meta}</p> : null;
 }
 
@@ -475,13 +475,13 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
 }
 
 /** Above the fields: where they're saved and when they're used, what's wrong with the file, and the form's own message. */
-function FormHead({ data, later, general }: { data: SettingsData; later: boolean; general?: Msgs[string] }) {
+function FormHead({ data, later, general }: { data: SettingsData; later: string[]; general?: Msgs[string] }) {
   const usedFrom = data.usedFrom || 'from the next round on';
   return (
     <>
       <p className="sf-intro muted">
         Changes are checked and saved here, into <code>{data.file}</code>
-        {later ? `. They are used ${usedFrom}, except those marked "takes effect at the next start".` : `. They are used ${usedFrom}.`}
+        {later.length ? `. They are used ${usedFrom}, except those marked ${later.map((n) => `"${n}"`).join(' or ')}.` : `. They are used ${usedFrom}.`}
       </p>
       <div className="sf-problems">
         {data.problems.map((p, i) => (
@@ -589,7 +589,7 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
               ))}
             </nav>
           )}
-          <FormHead data={data} later={fields.some((f) => f.applies === 'restart')} general={msgs['']} />
+          <FormHead data={data} later={laterNotes(fields)} general={msgs['']} />
           <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
             {ordinary.map(block)}
             <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
