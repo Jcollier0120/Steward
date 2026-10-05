@@ -84,7 +84,7 @@ test('every text pair reads, 4.5:1 or more, in every theme', () => {
 test("every colour the kit's page and Settings panel use is a theme's token, or the kit's own", () => {
   const page = readFileSync(new URL('../node/page.ts', import.meta.url), 'utf8');
   const panel = readFileSync(new URL('../web/settings-panel.css', import.meta.url), 'utf8');
-  const defined = new Set([...Object.keys(block(':root')), '--card', '--soft', '--role', '--role-soft', '--phase']);
+  const defined = new Set([...Object.keys(block(':root')), '--card', '--soft', '--role', '--role-soft', '--phase', '--titlebar-h']);
   for (const [file, text] of [['page.ts', page], ['settings-panel.css', panel]]) {
     for (const m of text.matchAll(/var\((--[\w-]+)/g)) assert.ok(defined.has(m[1]), `${file} uses ${m[1]}`);
   }
