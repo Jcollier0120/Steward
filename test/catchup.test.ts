@@ -184,11 +184,11 @@ ${JSON.stringify(first.out.held)}`);
   assert.equal(again.gh.filter((a) => a[1] === 'comment').length, 0);
   assert.match(again.out.held[0].why, /back with the Claude Code session/);
 
-  // The Wright's: closed (its branch kept), its issue queued again; it then waits for nothing.
+  // The Wright's: closed and its branch deleted (the redo's branch has its name), its issue queued again; it then waits for nothing.
   rmSync(kickbacksFile(), { force: true });
   sh(checkout, 'push', '--quiet', 'origin', `${pr.headOid}:refs/heads/wright/7-a-feature`);
   const wright = await round(listed({ head: 'wright/7-a-feature', labels: ['wright'], body: 'A feature.\n\nCloses #7' }));
-  assert.ok(wright.gh.some((a) => a[0] === 'pr' && a[1] === 'close' && a[2] === '21' && !a.includes('--delete-branch')), JSON.stringify(wright.gh));
+  assert.ok(wright.gh.some((a) => a[0] === 'pr' && a[1] === 'close' && a[2] === '21' && a.includes('--delete-branch')), JSON.stringify(wright.gh));
   assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'edit' && a[2] === '7' && a.includes('wright:done')));
   assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'comment' && a[2] === '7'));
   assert.equal(wright.out.held.length, 0);
