@@ -23,7 +23,11 @@ const release = (dir: string, version: string) => {
 const versionIn = (dir: string) => JSON.parse(readFileSync(path.join(dir, 'release.json'), 'utf8')).version;
 
 let n = 0;
-/** An installed 0.8.13 and a release of 0.8.14 to install; `page` says what the page answers as, by moment. */
+/**
+ * An installed 0.8.13 and a release of 0.8.14 to install; `page` says what 0.8.14's page answers as, by moment (null:
+ * it doesn't answer, though its process runs on and holds the port). As on Windows, Task Scheduler's /Run starts
+ * nothing while a page is running, and a page that doesn't answer stops only when its process is ended.
+ */
 function setup(o: { installCode?: number; page?: (t: number) => string | null; homeStatus?: number | null; installLeaves?: 'new' | 'old' } = {}) {
   const dir = path.join(home, `case-${++n}`);
   const dataDir = path.join(dir, 'data');
@@ -35,6 +39,7 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
   let running = '0.8.13';
   const said: string[] = [];
   const tasks: string[][] = [];
+  const ended: string[] = [];
   const d: SafeDeps = {
     root,
     dev: false,
@@ -45,13 +50,19 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
     home: dir,
     schtasks: async (args) => {
       tasks.push(args);
-      if (args[0] === '/Run') running = versionIn(app);
+      if (args[0] === '/Run' && !running) running = versionIn(app);
       return { code: 0, out: '' };
     },
-    ping: async () => running !== '',
+    ping: async () => (await d.pingVersion()) !== null,
+    // The kit's shutdown asks the page to stop, so a page that doesn't answer goes on running.
     shutdown: async () => {
-      running = '';
+      if (await d.ping()) running = '';
       return 0;
+    },
+    endPage: async () => {
+      ended.push(running);
+      running = '';
+      return true;
     },
     onDuty: () => true,
     setDuty: () => {},
@@ -68,7 +79,7 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
       }
       return o.installCode ?? 0;
     },
-    pingVersion: async () => (running ? (o.page ? o.page(t) : running) : null),
+    pingVersion: async () => (running === '0.8.14' && o.page ? o.page(t) : running || null),
     homePage: async () => (o.homeStatus === undefined ? 200 : o.homeStatus),
     probationMs: 30_000,
     copy: (from, to) => cpSync(from, to, { recursive: true }),
@@ -76,7 +87,7 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
     record: (u) => writeFileSync(unsafeFile(), JSON.stringify({ ...loadUnsafe(), [u.version]: u })),
     flagged: loadUnsafe,
   };
-  return { d, app, said, tasks, running: () => running };
+  return { d, app, said, tasks, ended, running: () => running };
 }
 
 test('an update that holds up for its probation is done, and the version before it is kept beside it', async () => {
@@ -110,6 +121,38 @@ test("a new version whose page stops answering is rolled back: the one before is
   assert.equal(allowUpdate('0.8.14'), false);
   const allowed = setup();
   assert.equal(await safeInstall({}, allowed.d), 0, allowed.said.join('\n'));
+});
+
+test('a look or two missed on a busy PC is forgiven: the update holds up', async () => {
+  rmSync(unsafeFile(), { force: true });
+  // One ping missed 10 s in, and two in a row 20 s in: never three.
+  const s = setup({ page: (t) => (t === 10_000 || t === 20_000 || t === 25_000 ? null : '0.8.14') });
+  assert.equal(await safeInstall({}, s.d), 0, s.said.join('\n'));
+  assert.equal(versionIn(s.app), '0.8.14');
+  assert.equal(s.running(), '0.8.14');
+  assert.deepEqual(loadUnsafe(), {});
+});
+
+test("a page that stops answering but runs on is ended by the rollback, and the old version is up as itself (0.9.2's case)", async () => {
+  rmSync(unsafeFile(), { force: true });
+  // Silent from 10 s in, then answering again by the time the rollback looks: its process never stopped.
+  const s = setup({ page: (t) => (t >= 10_000 && t < 25_000 ? null : '0.8.14') });
+  assert.equal(await safeInstall({}, s.d), 1);
+  assert.deepEqual(s.ended, ['0.8.14'], 'the new page ended, though it didn\'t answer');
+  assert.equal(versionIn(s.app), '0.8.13');
+  assert.equal(s.running(), '0.8.13', '0.8.13 runs, not 0.8.14 from 0.8.13\'s files');
+  assert.match(loadUnsafe()['0.8.14'].why, /its page stopped answering 10 s into its probation/);
+  assert.ok(s.said.some((l) => /0\.8\.13 is back, and its page is up/.test(l)), s.said.join('\n'));
+});
+
+test("a rollback whose page answers as the wrong version says so, rather than that the old one is up", async () => {
+  rmSync(unsafeFile(), { force: true });
+  const s = setup({ page: (t) => (t >= 10_000 && t < 25_000 ? null : '0.8.14') });
+  s.d.endPage = async () => false; // it wouldn't end
+  assert.equal(await safeInstall({}, s.d), 1);
+  assert.equal(s.running(), '0.8.14');
+  assert.ok(s.said.some((l) => /wouldn't end/.test(l)), s.said.join('\n'));
+  assert.ok(s.said.some((l) => /0\.8\.13 is back in .*, but its page answers as 0\.8\.14: end that one/.test(l)), s.said.join('\n'));
 });
 
 test('the other ways an update fails its probation: the wrong version answers, the home page fails, the install fails once it is in place', async () => {
