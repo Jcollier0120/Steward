@@ -36,6 +36,8 @@ export interface Release {
   built: string;
   /** The Steward's kit it carries in src\kit\ (none in a release from before the kit had a version). */
   kit?: string;
+  /** Built (minified: minify.ts, kit 2.16.0), or readable (--readable, never published); none before kit 2.16.0. */
+  form?: 'minified' | 'readable';
 }
 
 export interface Ran {

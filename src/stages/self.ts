@@ -8,6 +8,7 @@ import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts'
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import { networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { releaseNeedsPackages } from './release.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -120,6 +121,12 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, step.commit);
   ctx.log(`[${APP.id}] releasing ${step.tag} from origin/${STEWARD_BRANCH} (${at}) in ${dir}`);
   try {
+    // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
+    if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
+      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
+      ctx.log(`[${APP.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
+      if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
+    }
     const commands = SELF_COMMANDS[step.what];
     for (const [i, line] of commands.entries()) {
       // The last one publishes: never from a tree with anything uncommitted in it.

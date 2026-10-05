@@ -13,8 +13,8 @@ import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KI
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
  * no GitHub release yet, a worktree at that very commit, and its release command run there. Releases come
  * from the branch, never from a PR's, so a release and its branch never drift apart. A Node agent whose release
- * builds something gets its packages first (`npm ci`): Reeve's release builds its dashboard with them. The kit's own
- * release (a hire's) only packs files with Node, and needs none (releaseNeedsPackages).
+ * builds something gets its packages first (`npm ci`): Reeve's release builds its dashboard with them, and from kit
+ * 2.16.0 every hire's builds its code with esbuild (releaseNeedsPackages).
  */
 
 /** A command in an npm script that needs no packages: the kit's own tools, run with Node. */
@@ -25,9 +25,17 @@ const KIT_ONLY = /^node\s+(tools[\\/]kit\.ts|src[\\/]kit[\\/]release\.ts)(\s|$)/
  * release runs anything but the kit's own tools. A hire's `npm run release -- --publish` runs `node tools/kit.ts &&
  * node src/kit/release.ts` (pre and release scripts), which packs src with Node alone: no. Reeve's builds its
  * dashboard with vite: yes. Anything the Steward can't read is taken to need them, as every release did before.
+ * From kit 2.16.0 the kit's release builds what it carries with esbuild (minify.ts), the agent's devDependency: an
+ * agent with esbuild in its package.json needs its packages, whatever its scripts.
  */
 export function releaseNeedsPackages(dir: string, release: string): boolean {
   if (!needsNpmCi(dir)) return false;
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8').replace(/^﻿/, ''));
+    if (pkg?.devDependencies?.esbuild || pkg?.dependencies?.esbuild) return true;
+  } catch {
+    return true;
+  }
   const words = splitCommand(release);
   const commands = (line: string) => line.split('&&').map((c) => c.trim()).filter(Boolean);
   let lines: string[];

@@ -93,6 +93,11 @@ test("a release needs packages only when it builds: a hire's runs the kit's own 
   assert.equal(releaseNeedsPackages(dir, 'powershell -File release.ps1'), true, 'anything else: as before');
   pkg({ release: 'node src/kit/release.ts' }, false);
   assert.equal(releaseNeedsPackages(dir, 'npm run release'), false, 'no lockfile: no npm ci at all');
+
+  // Kit 2.16.0: the kit's release builds with esbuild, the agent's devDependency.
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', version: '0.1.0', scripts: { release: 'node tools/kit.ts && node src/kit/release.ts' }, devDependencies: { esbuild: '0.28.2' } }));
+  writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  assert.equal(releaseNeedsPackages(dir, 'npm run release -- --publish'), true, "a hire with esbuild: the kit's release builds with it");
 });
 
 test("a hire's release worktree gets no npm ci: its release only packs files with Node", async () => {
