@@ -212,7 +212,8 @@ async function build(readable = false): Promise<Built> {
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
-    const prefix = zipName(APP.name, '');
+    // Every earlier build's zip goes ("Steward-0.8.20.zip"): the name without its version and ".zip".
+    const prefix = zipName(APP.name, '').replace(/\.zip$/, '');
     for (const f of readdirSync(outDir)) if (f.startsWith(prefix) && f.endsWith('.zip')) rmSync(path.join(outDir, f));
     const name = zipName(APP.name, release.version);
     const zip = path.join(outDir, name);

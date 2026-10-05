@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.17.0
+
+**A release is built, never the readable source, and published in the public Jcollier0120/Manor-releases.** The agents' repositories stay private; what a PC installs comes from one public repository that holds releases alone, so any PC downloads them with no sign-in, and the source can't be read from them. spec/RELEASES.md is new.
+- **node/minify.ts is new:** `loadEsbuild(root)` (the agent's devDependency, or `STEWARD_ESBUILD`'s), `minifyRelease(stage, esbuild)`. It builds each `.ts` under `src\` on its own with esbuild: minified, ESM, `keepNames`, imports as written (`verbatimModuleSyntax`), every import left outside it, and a relative `.ts` pointing at its `.js` (by esbuild's parser, never a text search). Each is written as a `.js` beside where it was. `src\cli.ts` stays as a stub, `import './cli.js'`; `.js` is minified with no module format; `.d.ts` goes; CSS and everything else are left as they were. Also `builtSpecifier`, `stubFor`, `ENTRY_STUBS`.
+- **release.ts:**
+  - It builds what it stages (a Steward release went from 864 KB of code to 418 KB), and leaves the README out.
+  - `release.json` says `"form": "minified"`. `--readable` skips the build to look into on this PC, and is never published.
+  - `--publish` publishes as `<id>-v<version>` in `RELEASES_REPO` (Jcollier0120/Manor-releases), and as `v<version>` in the agent's own repository too, for Manors from before.
+  - A version already in the agent's own repository goes to the releases repository alone; one already in the releases repository is refused.
+  - New exports: `RELEASES_REPO`, `releaseTag`.
+- **service.ts:** `open()` starts the page through the `src\cli.ts` stub when it's there, so a built agent's command line still says `cli.ts` (Pinder and the Surveyor know the manor's agents by it).
+- **install.ts:** `Release.form`.
+- **release.ts fix:** an earlier build's zip in `artifacts\<id>\` is removed again. Its prefix had kept ".zip" on the end, so nothing ever matched it.
+- **What an agent must do:** have **esbuild 0.28.2** as an exact devDependency (every hire has it since its "esbuild, to build its releases" PR). Its release now needs its packages, so the Steward runs `npm ci` before it.
+
 ## 2.16.0
 
 **Every agent's page uses the width of the window.** The page's panel held everything in it (text, cards, tables, Settings) to a 1180px column, so on a wide window the lines broke short and the rest of the panel stood empty; and the title bar cut the agent's role at 90 characters' width even with room to spare (the Wright's and the Bailiff's were never shown whole).
