@@ -9,7 +9,8 @@ import type { PrInfo } from './staff.ts';
  * new entry at the top of the changelog) goes back to whoever wrote it, rather than waiting for a person:
  * - **The Wright's** (labelled `wright`, or a wright/… branch): closed, with a comment, and the issue it closes
  *   queued for the Wright again (its `wright:done` label removed), so the Wright does the work afresh from the branch
- *   as it is now. As the Steward does with a kit PR of its own that conflicts. Its branch is the Wright's, and stays.
+ *   as it is now. As the Steward does with a kit PR of its own that conflicts, its branch is deleted: the Wright names
+ *   the redo's branch as it named this one (wright/<issue>-<words>), and couldn't push the redo over the old one.
  * - **A Claude Code session's** (a claude/… branch): a comment on the PR that names the files. The desktop app's
  *   Auto-fix, where it is on for that session, wakes it on the conflict itself.
  * - **Anyone else's**: the same comment, to its author.
@@ -73,7 +74,7 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   const issue = author === 'wright' ? wrightIssueOf(pr) : null;
   if (issue) {
     const body = `Closed by the Steward: ${where.replace(/^it /, 'this ')}, beyond what it resolves by itself. #${issue} is queued for the Wright again, to be done afresh from ${e.branch} as it is now.`;
-    const closeFailed = await ghOk(ctx, ['pr', 'close', String(pr.number), '--repo', e.repo, '--comment', body]);
+    const closeFailed = await ghOk(ctx, ['pr', 'close', String(pr.number), '--repo', e.repo, '--delete-branch', '--comment', body]);
     if (!closeFailed) {
       const relabel = await ghOk(ctx, ['issue', 'edit', String(issue), '--repo', e.repo, '--remove-label', 'wright:done']);
       await ghOk(ctx, ['issue', 'comment', String(issue), '--repo', e.repo, '--body', `#${pr.number} conflicted with ${code(e.branch)} in ${listOf(files)}, so the Steward closed it${relabel ? `; removing ${code('wright:done')} failed (${relabel}), so remove it to queue this again` : ', and this is queued for the Wright again'}.`]);
