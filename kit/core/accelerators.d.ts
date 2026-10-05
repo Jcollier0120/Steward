@@ -198,6 +198,39 @@ export type Written = {
     model: string;
     startCommand?: string[];
 };
+export type Hardware = {
+    npu: boolean;
+    cards: {
+        name: string;
+        memoryGb: number | null;
+    }[];
+};
+/**
+ * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
+ * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
+ * @property {boolean} npu
+ * @property {{ name: string, memoryGb: number | null }[]} cards
+ */
+/**
+ * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
+ * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * Null when the PC has an NPU, or isn't known: then the config's word stands.
+ * @param {Hardware | null | undefined} hw
+ * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
+ */
+export declare function instead(hw: Hardware | null | undefined): {
+    kind: AcceleratorKind;
+    name: string;
+    memoryGb: number | null;
+} | null;
+/**
+ * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
+ * id and, when its name only said "NPU", its name. Null when the PC has an NPU or isn't known, and for any other entry.
+ * @param {Accelerator} a
+ * @param {Hardware | null | undefined} hw
+ * @returns {Accelerator | null}
+ */
+export declare function notTheNpu(a: Accelerator, hw: Hardware | null | undefined): Accelerator | null;
 /**
  * Auto: the NPU first, since it does model work without the processor or a graphics card; then graphics
  * cards with `ownMemoryGb` (2 GB) or more of their own memory, the most memory first; then graphics that
@@ -244,11 +277,14 @@ export declare function withoutGpuBesideNpu<A extends {
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
+ * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has
+ * instead (notTheNpu): a model is never called the NPU, or routed as one, on a PC without one.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null} [hw]
  * @returns {AcceleratorConfig | { error: string }}
  */
-export declare function parseAccelerators(rules: Rules, raw: any): AcceleratorConfig | {
+export declare function parseAccelerators(rules: Rules, raw: any, hw?: Hardware | null): AcceleratorConfig | {
     error: string;
 };
 /**
@@ -257,9 +293,10 @@ export declare function parseAccelerators(rules: Rules, raw: any): AcceleratorCo
  * @param {Rules} rules
  * @param {string} file The file's path, for messages.
  * @param {string | null} text
+ * @param {Hardware | null} [hw] What this PC has (hardware.json), when known.
  * @returns {AcceleratorConfig | { error: string }}
  */
-export declare function readConfig(rules: Rules, file: string, text: string | null): AcceleratorConfig | {
+export declare function readConfig(rules: Rules, file: string, text: string | null, hw?: Hardware | null): AcceleratorConfig | {
     error: string;
 };
 /**

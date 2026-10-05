@@ -18,6 +18,19 @@ An **accelerator** is a device that runs the manor's models, behind a model serv
 
 Names, not DXGI's numbers, identify cards: DXGI's numbers can change from boot to boot. A card's DXGI number and LUID are looked up when a server starts.
 
+## What this PC has
+
+What decides whether a model runs on the NPU is the PC, never the model: any model can run on any accelerator, so no model name or server address is ever read as a sign of one. Detection asks Windows whether it lists a Hexagon NPU driver and which graphics cards DXGI has, and its answer is kept in `hardware.json` (Shared files, below): `{ "at": "<ISO time>", "npu": false, "cards": [{ "name": "NVIDIA GeForce RTX 4080 SUPER", "memoryGb": 16 }] }`. It's written only when both questions were answered (an NPU found, or none for certain, and the cards listed); setup writes it, and the keeper asks again when it's a day old.
+
+On a PC known to have no NPU, an entry said to be the NPU (an `npu` id, an old config's `device: "Npu"`, or an old endpoint that names no device) runs on what the PC has instead:
+- its one graphics card, by that card's name and memory;
+- "Graphics card" when it has several (which one isn't known);
+- the processor when it has none.
+
+It takes that kind and id, keeps a name of its own (one that only said "NPU" takes the card's), and goes after the others: a card's own entry of the same id comes first, and gets the servers it lacked from it. An old config's GenieX quirks go (GenieX runs only on an NPU), and `acceleratorOrder` follows the new id. The config's problems say so. With an NPU, or with no hardware.json, a config is taken at its word.
+
+A note that says nothing of where it was written (one kept from before accelerators) is "from a local model", never "the NPU".
+
 ## Where they're kept
 
 The accelerators are in **`config.json`** in Reeve's data folder (`%USERPROFILE%\.reeve\config.json`), which every agent already reads for its model endpoint. Whoever keeps the model servers owns its accelerators: **the Smith** where it is installed (`%USERPROFILE%\.smith\app`), else Reeve. The keeper detects them, sets up their servers, and offers them on its Settings page; nobody edits the file by hand. The Smith took over the same file in kit 2.10.0 rather than move it, so every agent reads it where it always has. Its keys are shared out: the keeper writes `accelerators`, `acceleratorOrder`, `npuIdleStopMinutes` and `gpuIdleStopMinutes` (the kit's `accelerator-config.ts`, `KEEPER_KEYS`); Reeve writes its own (repositories, jobs, Foundry Local). Each write keeps every other key, and is refused when the file changed since it was read. llama.cpp's builds and the models stay in `%USERPROFILE%\.reeve\servers` and `models`, and the keeper's log in `servers\logs\reaper.log`, whoever keeps them.
@@ -110,6 +123,7 @@ A gaming desktop is for games first. While a game or another full-screen 3D prog
 Every agent reads and writes these the same way, in `%USERPROFILE%\.npu-agent\accelerators\` (beside `locks\`, moved with it: with `NPU_AGENT_NPU_LOCK` set, the folder `accelerators` beside the lock folder's parent; a scratch `REEVE_HOME` gets its own). Each is written whole (a temporary file, then a rename), and anything unreadable counts as absent.
 
 - `<id>.failed.json`: `{ "since": "<ISO time>", "reason": "<one line, at most 300 characters, starting with the kind of request: chat, vision or embed>", "by": "<who>" }`. The ISO time has its zone (`Z`, as every program writes it); a time without one counts as unreadable. The reason is the failure's first line, trimmed ("it failed" when there's none). Written when a request on the accelerator fails as above; the accelerator is skipped until 10 minutes after `since` (a marker exactly 10 minutes old has expired); a success on it deletes the file. A marker is about the accelerator's model server, so only programs that use the servers write or clear them.
+- `hardware.json`: what this PC has (What this PC has, above). Written by setup and the keeper; read with every config.
 - `games.json`: `{ "checkedAt": "<ISO time>", "cards": { "<id>": { "busy": true, "percent": 87, "by": ["game.exe"] } } }`. Whoever finds it older than 15 seconds checks the counters again and rewrites it; everyone else reads it. A card missing from it isn't busy. `percent` is the busiest 3D engine's, rounded; `by` lists the programs (`name.exe`). Not counted: the checking process itself, `dwm.exe`, and the model servers (`llama-server.exe`, `geniex.exe`, and any configured `startCommand` program). A check that fails leaves the file as it was. A card's LUID in the counters is lowercase `0x<high>_0x<low>`.
 
 ## What each part does

@@ -250,6 +250,18 @@ export function noNpu(d: Pick<Detection, 'npu' | 'problems' | 'cpu'>): boolean {
   return !d.npu && pastNpu && !d.problems.some((p) => /^(NPU|PowerShell): |^only Windows/.test(p));
 }
 
+/**
+ * What this PC has, for hardware.json (accelerators.ts' rememberHardware): whether it has an NPU, and its graphics
+ * cards. Null unless both were answered: an NPU found, or none for certain (noNpu), and the cards listed. A model is
+ * then never called the NPU on a PC without one, whatever model it is (the core's notTheNpu).
+ */
+export function hardwareOf(d: Detection): { npu: boolean; cards: { name: string; memoryGb: number | null }[] } | null {
+  const npuKnown = !!d.npu || noNpu(d);
+  const cardsKnown = !d.problems.some((p) => /^(graphics cards|PowerShell): |^only Windows/.test(p));
+  if (!npuKnown || !cardsKnown) return null;
+  return { npu: !!d.npu, cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })) };
+}
+
 /** Asks this PC. */
 export async function detect(run: (script: string) => Promise<string> = runPowerShell): Promise<Detection> {
   if (process.platform !== 'win32') return { cards: [], npu: null, geniex: null, cpu: null, ramBytes: 0, problems: ['only Windows is asked'] };

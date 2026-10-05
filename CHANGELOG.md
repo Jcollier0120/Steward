@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.8
+
+**The kit 2.20.0: on a PC without an NPU, a model is never called the NPU, and pages show a round as it starts and ends.**
+
+### What's new
+
+- What this PC has (whether it has an NPU, and its graphics cards) is kept in `hardware.json`, and decides what a config's "NPU" entry really is: on a desktop with an RTX 4080 SUPER, Reeve's model shows and works as the card's.
+- Every agent's page draws itself again when a round starts or ends, without a reload by hand.
+
+### What changed
+
+- A note that says nothing of where it was written is "from a local model", never "the NPU".
+- Settings' "Where its work runs" speaks of the NPU only on a PC that has one.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.9.6
 
 **A UI inventory: which components are too big, and which markup is written out again and again, in any agent's page.**
