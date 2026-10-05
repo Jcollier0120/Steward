@@ -69,7 +69,8 @@ export function afterRound(seen: Seen, o: { plan: RoundPlan; results: EmployeeRe
   const repos = { ...seen.repos };
   for (const e of o.plan.look) {
     const sig = o.plan.sigs[e.id];
-    const failed = o.results.some((r) => r.id === e.id && r.outcome === 'failed');
+    // A release the tasting holds is asked about again next round, whatever GitHub says.
+    const failed = o.results.some((r) => r.id === e.id && (r.outcome === 'failed' || r.again));
     if (!sig || failed || o.error) delete repos[e.id];
     else repos[e.id] = { sig, held: o.held.find((h) => h.employee.id === e.id)?.prs ?? [] };
   }

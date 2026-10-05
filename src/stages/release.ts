@@ -3,6 +3,7 @@ import path from 'node:path';
 import { git, removeWorktree, showFile } from '../git.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
+import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { needsNpmCi } from './bump.ts';
 import { readPin } from './staff.ts';
@@ -71,7 +72,8 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
 
 /**
  * `unless`, given the commit to release and its version, may say why not (a round leaves a commit whose release
- * failed before to a person).
+ * failed before to a person). Then the Aletaster tastes that commit (tasting.ts): a release it holds waits, with its
+ * reason, and the next round asks again.
  */
 export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null }): Promise<EmployeeResult> {
   const { run } = ctx;
@@ -89,6 +91,13 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const version = (v as { version: string }).version;
   const not = o.unless?.(commit, version);
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
+  const gate = await tasteFirst(e, { commit, version }, ctx.settings, ctx.tasting);
+  if (!gate.go) {
+    ctx.log(`[${e.id}] ${gate.why}`);
+    return result(e, 'skipped', gate.why, { version, commit: commit.slice(0, 7), url: gate.url, again: true });
+  }
+  if (gate.note) ctx.log(`[${e.id}] ${gate.note}`);
+  const noted = gate.note ? `; ${gate.note}` : '';
 
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
@@ -109,7 +118,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})`, { version, commit: commit.slice(0, 7) });
     // Its releases have changed: the glance no longer says how they are.
     forgetGlance(ctx, e);
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

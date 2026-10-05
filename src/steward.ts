@@ -21,6 +21,7 @@ import { clearRolloutHolds, loadRolloutFailures, rollout } from './stages/rollou
 import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
+import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -149,6 +150,8 @@ export interface StageOptions {
    * node --test they're made only when this is given, so a test never touches the real checkout.
    */
   self?: { checkout: string };
+  /** Stands in for the Aletaster for the release gate (tasting.ts); tests only. */
+  tasting?: TastingDeps;
 }
 
 /** The round's look at the Steward's own versions: from its glance at GitHub, else asked on their own. */
@@ -177,6 +180,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
     async () => {
       const ctx = await context({ run: o.run, log });
       if (o.kitInfo) ctx.kit = o.kitInfo;
+      if (o.tasting) ctx.tasting = o.tasting;
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
       let held: { employee: Employee; prs: Held[] }[] = [];
@@ -277,7 +281,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, employees: ctx.settings.employees, log }, o.alarms);
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), employees: ctx.settings.employees, log }, o.alarms);
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

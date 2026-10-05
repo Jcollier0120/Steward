@@ -61,8 +61,11 @@ export function pruneKits(dir: string, pinned: (string | null | undefined)[], o:
 /** A local address only: the Steward tells pages on this PC, never anything further. */
 export const LOCAL_URL = /^http:\/\/(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?\/[A-Za-z0-9/_.-]*$/;
 
+export type HttpAnswer = { status: number; body: string } | { error: string };
+export type HttpRequest = (url: URL, o: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs: number }) => Promise<HttpAnswer>;
+
 /** One HTTP request, with a deadline: its status and body, or the reason it got none. */
-function request(url: URL, o: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string; timeoutMs: number }): Promise<{ status: number; body: string } | { error: string }> {
+export const request: HttpRequest = (url, o) => {
   return new Promise((resolve) => {
     const req = http.request(url, { method: o.method, headers: o.headers, timeout: o.timeoutMs }, (res) => {
       const chunks: Buffer[] = [];
@@ -78,7 +81,22 @@ function request(url: URL, o: { method: 'GET' | 'POST'; headers?: Record<string,
     req.on('error', (e) => resolve({ error: e.message }));
     req.end(o.body);
   });
+};
+
+/**
+ * A page's token, read as its own script would: GET its origin's `/`, and the `<meta name="page-token">` in it (Manor's
+ * page and every kit page carry one). `{ error }` when the page gives no answer at all; `{ status }` alone when it
+ * answers without a token.
+ */
+export async function pageToken(origin: URL, o: { timeoutMs: number; http?: HttpRequest }): Promise<{ token: string } | { status: number } | { error: string }> {
+  const page = await (o.http ?? request)(new URL('/', origin), { method: 'GET', timeoutMs: o.timeoutMs });
+  if ('error' in page) return page;
+  const token = /<meta name="page-token" content="([0-9A-Za-z_-]{16,200})">/.exec(page.body)?.[1];
+  return token ? { token } : { status: page.status };
 }
+
+/** The headers a POST to a manor page carries: its token (as Manor's guard and the kit's read it), and no Origin. */
+export const tokenHeaders = (token: string) => ({ 'content-type': 'application/json', 'x-token': token, 'x-manor-token': token });
 
 /**
  * POSTs a page's action as its own page would: the page at its origin read for its token (`<meta name="page-token">`,
@@ -89,11 +107,10 @@ export async function pokePage(target: string, o: { timeoutMs?: number } = {}): 
   if (!LOCAL_URL.test(target)) return { ok: false, said: 'not a local address' };
   const timeoutMs = o.timeoutMs ?? 5000;
   const url = new URL(target);
-  const page = await request(new URL('/', url), { method: 'GET', timeoutMs });
-  if ('error' in page) return { ok: false, said: page.error };
-  const token = /<meta name="page-token" content="([0-9A-Za-z_-]{16,200})">/.exec(page.body)?.[1];
-  if (!token) return { ok: false, said: `its page (HTTP ${page.status}) carries no token` };
-  const r = await request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token, 'x-manor-token': token }, body: '{}', timeoutMs });
+  const t = await pageToken(url, { timeoutMs });
+  if ('error' in t) return { ok: false, said: t.error };
+  if (!('token' in t)) return { ok: false, said: `its page (HTTP ${t.status}) carries no token` };
+  const r = await request(url, { method: 'POST', headers: tokenHeaders(t.token), body: '{}', timeoutMs });
   if ('error' in r) return { ok: false, said: r.error };
   return { ok: r.status >= 200 && r.status < 300, said: `HTTP ${r.status}` };
 }
