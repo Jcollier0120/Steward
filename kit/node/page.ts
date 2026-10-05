@@ -120,7 +120,9 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
  * The title bar has the agent's icon, name and role, its scene (look.ts: still while idle, moving while a
  * round runs), a status pill, the Settings gear, the Theme menu, and the agent's Run now: the script
  * lifts the body's first button that POSTs /api/run and says "Run now" (or a button marked
- * data-titlebar) into the title bar. Without JavaScript it stays where the agent put it.
+ * data-titlebar) into the title bar. Without JavaScript it stays where the agent put it. The title bar stays at the
+ * top as the page scrolls (sticky, on the page's colour, with a line under it once scrolled), and a jump to a
+ * #section lands below it (scroll-padding-top, from --titlebar-h, which the script keeps to the bar's height).
  *
  * Settings is a page of its own, as on Manor's, Reeve's and Heiward's: the title bar's Settings link (a
  * gear) opens it at #/settings, and its back link returns. The agent's body still carries its Settings
@@ -219,6 +221,19 @@ document.addEventListener('click', (e) => {
   b.disabled = true;
   act(b.dataset.post, data, b.dataset.confirm).finally(() => { b.disabled = false; });
 });
+// The title bar stays at the top (sticky): --titlebar-h follows its height, so a jump to #a-section and the Theme
+// menu's height allow for it, and .stuck draws the line under it once the page has scrolled.
+(function () {
+  const bar = document.querySelector('header.titlebar');
+  if (!bar) return;
+  const root = document.documentElement;
+  const size = () => root.style.setProperty('--titlebar-h', Math.ceil(bar.getBoundingClientRect().height) + 'px');
+  const stuck = () => bar.classList.toggle('stuck', window.scrollY > 0);
+  if (window.ResizeObserver) new ResizeObserver(size).observe(bar);
+  size();
+  stuck();
+  window.addEventListener('scroll', stuck, { passive: true });
+})();
 // Run now, in the title bar: the body's own button, moved there (its data-post works wherever it is).
 (function () {
   const main = document.querySelector('main');
@@ -370,9 +385,11 @@ ${look.motion}
  * and --soft (a quiet fill). --ink and --ink-soft are the agents' icons' own colours, for the scenes' outlines.
  */
 const CSS = `
-:root { --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg)); }
+:root { --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg)); --titlebar-h: 57px; }
 * { box-sizing: border-box; }
-html { background: var(--bg); }
+/* The title bar stays at the top as the page scrolls, so a jump to #a-section lands below it, not under it.
+   --titlebar-h is its height: the script keeps it to the bar's own (it wraps to two rows in a narrow window). */
+html { background: var(--bg); scroll-padding-top: calc(var(--titlebar-h) + 8px); }
 body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
 a { color: var(--accent-text); }
 h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 26px 0 10px; letter-spacing: .01em; }
@@ -383,7 +400,10 @@ h3 { font-size: 15px; font-weight: 600; }
 p { margin: 8px 0; }
 
 /* ---- The title bar: icon, name and role, the scene, the status pill, Settings, Theme, Run now ---- */
-.titlebar { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 8px 16px; min-height: 56px; }
+/* Sticky, on the page's own colour, so what scrolls beneath doesn't show through; once the page has scrolled (the
+   script marks it .stuck), a line and the theme's shadow under it. */
+.titlebar { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 8px 16px; min-height: 56px; background: var(--bg); border-bottom: 1px solid transparent; transition: border-color .15s, box-shadow .15s; }
+.titlebar.stuck { border-bottom-color: var(--line); box-shadow: var(--shadow); }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 8px; margin: -4px -8px; border-radius: 6px; color: inherit; text-decoration: none; }
 .brand:hover { background: var(--hover); }
 .brand-mark { width: 28px; height: 28px; flex: none; }
@@ -419,7 +439,7 @@ p { margin: 8px 0; }
 
 /* The Theme menu, as Heiward's and Manor's */
 .theme-picker { position: relative; }
-.theme-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 272px; max-width: calc(100vw - 24px); max-height: calc(100vh - 72px); overflow-y: auto; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.theme-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 272px; max-width: calc(100vw - 24px); max-height: calc(100vh - var(--titlebar-h) - 16px); overflow-y: auto; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
 .menu-label { font-size: 11px; font-weight: 600; color: var(--muted); padding: 8px 10px 4px; }
 .theme-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--fg); font-weight: 400; text-align: left; cursor: pointer; }
 .theme-item:hover:not(:disabled), .theme-item:focus-visible { background: var(--hover); outline: none; filter: none; }
@@ -473,7 +493,7 @@ p { margin: 8px 0; }
 .scene .sc-flour { fill: #f8f3e6; stroke: var(--ink); stroke-width: 1.1; }
 .scene .sc-grain { fill: var(--role); stroke: var(--ink); stroke-width: .5; }
 .scene .sc-grain, .scene .sc-wave, .scene .sc-lock, .scene .sc-sight { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .scene, .scene *, .status-pill::before { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .scene, .scene *, .status-pill::before { animation: none !important; } .titlebar { transition: none; } }
 
 /* ---- Notices under the title bar, and the page's one panel ---- */
 .banners { margin: 0 12px; }
@@ -536,6 +556,7 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
 .work-runs p { margin: 8px 0; }
 
 @media (max-width: 640px) {
+  :root { --titlebar-h: 97px; }
   .titlebar { padding: 8px 12px; }
   .manor-back span { display: none; }
   .brand { flex: 1 1 0; }

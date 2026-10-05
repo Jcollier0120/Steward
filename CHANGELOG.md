@@ -2,9 +2,13 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.15
+
+**The Steward announces itself to every Manor.** `manor-agent.json` at the root is its staff.json entry and its role, as Manor's main has them; its own release (the kit's release.ts, from 2.12.0) publishes it beside the zip, listed in SHA256SUMS.txt, as every Node agent of the manor's now does. `test/manor-agent.test.ts` checks it with the kit's `checkAnnouncement`. Numbered 0.8.15, after 0.8.14 (kit 2.14.0) on main.
+
 ## 0.8.14
 
-**The Steward announces itself to every Manor.** `manor-agent.json` at the root is its staff.json entry and its role, as Manor's main has them; its own release (the kit's release.ts, from 2.12.0) publishes it beside the zip, listed in SHA256SUMS.txt, as every Node agent of the manor's now does. `test/manor-agent.test.ts` checks it with the kit's `checkAnnouncement`. Numbered 0.8.14, after 0.8.13 (kit 2.13.1) on main.
+**Kit 2.14.0: the title bar stays at the top as the page scrolls.** The Steward hands out kit 2.14.0 (kit/CHANGELOG.md). Every kit agent's title bar (the Steward's own too) stays in place on a long page, with a line under it once scrolled, and a jump to a #section lands below it.
 
 ## 0.8.13
 
