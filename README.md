@@ -253,6 +253,7 @@ After every round, done or not, the Steward lists what needs you: the few things
 | An update Manor couldn't install (`/api/state`'s updates) | two hours |
 | Manor's update checks failing | twelve hours |
 | Manor's page not answering | an hour |
+| A port two agents claim, one kept for the model servers, or one another program answers on so an agent's page can't start (Manor's `/api/summary` `ports`, Manor 0.4.38 and later), one alarm a port | a quarter of an hour |
 | A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it | 6 hours (`problemHours`) |
 | The Surveyor's page not answering | two hours |
 | An issue the Wright got stuck on (`wright:stuck`), its PR that changes what a person reviews (`wright:needs-you`), or Claude Code unusable for it (not found, or not signed in), from its `/api/work` | at once |
