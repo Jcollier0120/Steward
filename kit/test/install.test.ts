@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -353,16 +353,16 @@ test('a mistyped option is refused before anything is done', async () => {
 
 // ---------------------------------------------------------------- the release
 
-test('a release carries src (no tests) with the kit in src/kit, art, package.json, README.md, LICENSE, kit.json and tools/kit.ts, and nothing else', () => {
+test('a release carries src (no tests) with the kit in src/kit, art, package.json, LICENSE, kit.json and tools/kit.ts, and nothing else: no README', () => {
   const picked = pickReleaseFiles([
     'src/cli.ts', 'src\\watch\\index.ts', 'src/ocr.ps1', 'src/thing.test.ts', 'src/kit/npu.ts', 'src/kit/VERSION', 'art/icon.svg', 'package.json', 'README.md', 'LICENSE',
     'test/agent.test.ts', 'tools/kit.ts', 'tools\\convert.ts', 'kit.json', 'tsconfig.json', 'package-lock.json', '.gitignore', 'artifacts/x/X-1.zip', 'node_modules/typescript/package.json', 'docs/x.md',
   ]);
-  assert.deepEqual(picked, ['LICENSE', 'README.md', 'art/icon.svg', 'kit.json', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts', 'tools/kit.ts']);
+  assert.deepEqual(picked, ['LICENSE', 'art/icon.svg', 'kit.json', 'package.json', 'src/cli.ts', 'src/kit/VERSION', 'src/kit/npu.ts', 'src/ocr.ps1', 'src/watch/index.ts', 'tools/kit.ts']);
 
   const own = pickReleaseFiles(repoFiles(appRoot));
-  for (const f of ['src/cli.ts', 'src/app.ts', 'src/kit/install.ts', 'src/kit/release.ts', 'art/icon.svg', 'package.json', 'README.md']) assert.ok(own.includes(f), f);
-  assert.ok(own.every((f) => f.startsWith('src/') || f.startsWith('art/') || ['package.json', 'README.md', 'LICENSE', 'kit.json', 'tools/kit.ts'].includes(f)));
+  for (const f of ['src/cli.ts', 'src/app.ts', 'src/kit/install.ts', 'src/kit/release.ts', 'src/kit/minify.ts', 'art/icon.svg', 'package.json']) assert.ok(own.includes(f), f);
+  assert.ok(own.every((f) => f.startsWith('src/') || f.startsWith('art/') || ['package.json', 'LICENSE', 'kit.json', 'tools/kit.ts'].includes(f)));
 });
 
 test('repoFiles looks into tools\\ for tools/kit.ts, and the release picks only that from it', () => {
@@ -465,13 +465,45 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   git('remote', 'add', 'origin', 'https://github.com/Jcollier0120/Fixture.git');
   git('add', '-A');
   git('commit', '-q', '-m', 'fixture');
-  const release = () => spawnSync(process.execPath, [path.join(repo, 'src', 'kit', 'release.ts')], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  // The fixture's copy has no node_modules: esbuild is the Steward checkout's (STEWARD_ESBUILD).
+  const env = { ...process.env, STEWARD_ESBUILD: path.resolve(appRoot, '..', '..', '..') };
+  const release = (...args: string[]) => spawnSync(process.execPath, [path.join(repo, 'src', 'kit', 'release.ts'), ...args], { cwd: repo, encoding: 'utf8', windowsHide: true, env });
   const out = path.join(repo, 'artifacts', APP.id);
   const sha = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
+  const unpacked = (into: string) => {
+    rmSync(into, { recursive: true, force: true });
+    mkdirSync(into, { recursive: true });
+    execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-x', '-f', path.join(out, zip), '-C', into], { windowsHide: true });
+    const list = (d: string, rel = ''): string[] => readdirSync(path.join(d, rel), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? list(d, `${rel}${e.name}/`) : [`${rel}${e.name}`]));
+    return list(into);
+  };
 
   let r = release();
   assert.equal(r.status, 0, r.stderr);
   const zip = `${APP.name}-${pkg.version}.zip`;
+  // Built: no TypeScript but the entry's stub, no README, release.json says so; and the built copy runs.
+  const built = path.join(tmp, 'built');
+  const files = unpacked(built);
+  assert.deepEqual(files.filter((f) => f.endsWith('.ts') && !f.startsWith('tools/')), ['src/cli.ts']);
+  assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "import './cli.js';\n");
+  assert.ok(files.includes('src/cli.js') && files.includes('src/kit/install.js') && files.includes('src/kit/release.js'));
+  assert.ok(!files.includes('README.md'));
+  assert.equal(JSON.parse(readFileSync(path.join(built, 'release.json'), 'utf8')).form, 'minified');
+  assert.match(r.stdout, /built with esbuild \d+\.\d+\.\d+: \d+ TypeScript/);
+  const ran = spawnSync(process.execPath, [path.join(built, 'src', 'cli.ts'), 'status', '--json'], { encoding: 'utf8', windowsHide: true, env: { ...process.env, FIXTURE_HOME: path.join(tmp, 'built-home') } });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.equal(JSON.parse(ran.stdout).app, APP.id, 'the built copy answers as the agent');
+
+  // Readable: for a look on this PC, never published.
+  r = release('--readable');
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(unpacked(path.join(tmp, 'readable')).includes('src/kit/install.ts'));
+  assert.match(r.stdout, /readable: not built/);
+  r = release('--readable', '--publish');
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /a readable release is never published/);
+  r = release();
+  assert.equal(r.status, 0, r.stderr);
   assert.equal(readFileSync(path.join(out, ANNOUNCEMENT), 'utf8'), readFileSync(path.join(repo, ANNOUNCEMENT), 'utf8'), 'the checkout\'s file, as committed');
   assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n${sha(path.join(out, ANNOUNCEMENT))}  ${ANNOUNCEMENT}\n`);
   assert.match(r.stdout, /manor-agent\.json, announcing/);

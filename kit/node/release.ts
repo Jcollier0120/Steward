@@ -4,7 +4,14 @@
  *
  *   npm run release                  artifacts\<id>\<Name, no spaces>-<version>.zip and artifacts\<id>\SHA256SUMS.txt
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
- *   npm run release -- --publish     builds it, then makes the GitHub release v<version> with both files
+ *   npm run release -- --publish     builds it, then publishes it: <id>-v<version> in the public releases repository
+ *                                    (Jcollier0120/Manor-releases), and v<version> in the agent's own as before
+ *   npm run release -- --readable    builds it without minifying, to look into on this PC; it can't be published
+ *
+ * What a release carries is built, never the readable source (minify.ts, spec/RELEASES.md): each .ts file under
+ * src\ minified to a .js beside it, src\cli.ts a stub that runs its .js, and the .js and .css minified. The
+ * README stays out: it's for the repository. The public repository holds the releases alone, so any PC downloads
+ * them with no sign-in; the agent's own repository keeps them too, while Manors that look there are about.
  *
  * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
  * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
@@ -27,6 +34,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
+import { loadEsbuild, minifyRelease } from './minify.ts';
+
+/** The public repository every release of the manor's is published in, with no source: any PC downloads from it, signed in or not. */
+export const RELEASES_REPO = 'Jcollier0120/Manor-releases';
+/** An agent's release's tag there: its id and version (porter-v0.4.22), since every agent's releases share it. */
+export const releaseTag = (id: string, version: string) => `${id}-v${version}`;
 
 /** The agent's root: this file is its src\kit\release.ts. */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -35,7 +48,7 @@ const TAR = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.
 /** The folders a release carries whole, tests aside (src\ holds the PowerShell scripts an agent runs, too, and src\kit\). */
 export const RELEASE_FOLDERS = ['src', 'art'];
 /** The files a release carries, when the repo has them. */
-export const RELEASE_FILES = ['package.json', 'README.md', 'LICENSE', 'kit.json', 'tools/kit.ts'];
+export const RELEASE_FILES = ['package.json', 'LICENSE', 'kit.json', 'tools/kit.ts'];
 
 /**
  * The kit a release carries: src\kit\VERSION, which must be the version kit.json pins (npm run kit fills
@@ -170,8 +183,8 @@ interface Built {
   announcement: string | null;
 }
 
-/** Stages the release in a temporary folder, zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
-function build(): Built {
+/** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
+async function build(readable = false): Promise<Built> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   if (pkg.version !== APP.version) throw new Error(`package.json says ${pkg.version} but src/app.ts says ${APP.version}; make them agree first.`);
   const kit = kitOf(root);
@@ -183,7 +196,9 @@ function build(): Built {
   // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
   // scratch files) don't count. manor-agent.json, published beside the zip, does.
   const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT) !== '';
-  const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit };
+  const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
+  const esbuild = readable ? null : await loadEsbuild(root);
+  if (esbuild && 'error' in esbuild) throw new Error(esbuild.error);
 
   const stage = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-release-`));
   try {
@@ -193,6 +208,7 @@ function build(): Built {
       cpSync(path.join(root, f), path.join(stage, f));
     }
     writeFileSync(path.join(stage, 'release.json'), JSON.stringify(release, null, 2) + '\n');
+    const minified = esbuild ? minifyRelease(stage, esbuild) : null;
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
@@ -210,6 +226,8 @@ function build(): Built {
     writeFileSync(sums, sumsText(listed));
     console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
+    if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript, ${minified.js} JavaScript and ${minified.css} CSS files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
+    else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     return { release, zip, sums, announcement: announced ? announcement : null };
   } finally {
@@ -234,10 +252,28 @@ function ghExe(): string {
   return 'C:\\tools\\gh\\bin\\gh.exe';
 }
 
-/** Makes the GitHub release v<version> from a clean, pushed HEAD, with the zip and SHA256SUMS.txt (and manor-agent.json, when there is one). */
+/** gh release view: 'there', 'none', or why GitHub couldn't be asked. */
+function released(gh: string, tag: string, repo: string): 'there' | 'none' | { error: string } {
+  const view = spawnSync(gh, ['release', 'view', tag, '--repo', repo], { encoding: 'utf8', windowsHide: true });
+  if (view.status === 0) return 'there';
+  if (/not found/i.test(`${view.stderr}`)) return 'none';
+  return { error: `${view.stderr}`.trim() || view.error?.message || `gh exited ${view.status}` };
+}
+
+/**
+ * Publishes a built release from a clean, pushed HEAD, with the zip and SHA256SUMS.txt (and manor-agent.json, when
+ * there is one): as <id>-v<version> in RELEASES_REPO, where every Manor looks, and as v<version> in the agent's own
+ * repository, where a Manor from before the releases repository looks. Refused when RELEASES_REPO has it already;
+ * one already in the agent's own (a version released before the releases repository) is published there alone.
+ */
 function publish(b: Built): number {
   const { release } = b;
-  const tag = `v${release.version}`;
+  const tag = releaseTag(release.id, release.version);
+  const ownTag = `v${release.version}`;
+  if (release.form !== 'minified') {
+    console.error('Not published: a readable release stays on this PC. Release again without --readable.');
+    return 1;
+  }
   if (release.dirty) {
     console.error('Not published: the tree has uncommitted changes. Commit them, push, and release again.');
     return 1;
@@ -252,33 +288,50 @@ function publish(b: Built): number {
     return 1;
   }
   const gh = ghExe();
-  const view = spawnSync(gh, ['release', 'view', tag, '--repo', repo], { encoding: 'utf8', windowsHide: true });
-  if (view.status === 0) {
-    console.error(`Not published: ${repo} already has ${tag}. Raise the version in package.json and src/app.ts first.`);
+  const there = released(gh, tag, RELEASES_REPO);
+  if (there === 'there') {
+    console.error(`Not published: ${RELEASES_REPO} already has ${tag}. Raise the version in package.json and src/app.ts first.`);
     return 1;
   }
-  if (!/not found/i.test(`${view.stderr}`)) {
-    console.error(`Not published: couldn't ask GitHub about ${tag}: ${`${view.stderr}`.trim() || view.error?.message}`);
+  if (typeof there === 'object') {
+    console.error(`Not published: couldn't ask GitHub about ${tag} in ${RELEASES_REPO}: ${there.error}`);
     return 1;
   }
+  const own = released(gh, ownTag, repo);
+  if (typeof own === 'object') {
+    console.error(`Not published: couldn't ask GitHub about ${ownTag} in ${repo}: ${own.error}`);
+    return 1;
+  }
+  const assets = [b.zip, b.sums, ...(b.announcement ? [b.announcement] : [])];
   const notes = `${APP.name} ${release.version}, built from ${release.commit}, with the Steward's kit ${release.kit}. Unpack the zip anywhere and run: node src\\cli.ts install (Node 22.18 or later).`;
-  const r = spawnSync(gh, ['release', 'create', tag, b.zip, b.sums, ...(b.announcement ? [b.announcement] : []), '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
+  // The releases repository holds no source, so its tag points at its own default branch: the commit is in the notes and release.json.
+  const pub = spawnSync(gh, ['release', 'create', tag, ...assets, '--repo', RELEASES_REPO, '--title', `${APP.name} ${release.version}`, '--notes', notes], { stdio: 'inherit', windowsHide: true });
+  if (pub.status !== 0) return pub.status ?? 1;
+  if (own === 'there') {
+    console.log(`${repo} has ${ownTag} already (released before the releases repository): published in ${RELEASES_REPO} alone.`);
+    return 0;
+  }
+  const r = spawnSync(gh, ['release', 'create', ownTag, ...assets, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
     stdio: 'inherit',
     windowsHide: true,
   });
   return r.status ?? 1;
 }
 
-function main(args: string[]): number {
-  const known = ['--install', '--publish', '--no-start', '--dry-run'];
+async function main(args: string[]): Promise<number> {
+  const known = ['--install', '--publish', '--no-start', '--dry-run', '--readable'];
   const unknown = args.filter((a) => !known.includes(a));
   if (unknown.length) {
-    console.error(`release: unknown ${unknown.join(' ')}\nUsage: npm run release [-- --install [--no-start] [--dry-run]] [-- --publish]`);
+    console.error(`release: unknown ${unknown.join(' ')}\nUsage: npm run release [-- --install [--no-start] [--dry-run]] [-- --publish] [-- --readable]`);
+    return 2;
+  }
+  if (args.includes('--readable') && args.includes('--publish')) {
+    console.error('release: a readable release is never published: give --readable or --publish, not both');
     return 2;
   }
   let built: Built;
   try {
-    built = build();
+    built = await build(args.includes('--readable'));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 1;
@@ -291,4 +344,4 @@ function main(args: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
