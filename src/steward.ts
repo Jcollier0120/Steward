@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { watchAlarms, type Held } from './alarms.ts';
 import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
@@ -14,6 +14,8 @@ import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan }
 import { pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
+import { stewardEmployee } from './stages/selfmerge.ts';
+import { loadUnsafe } from './safeinstall.ts';
 import { push } from './stages/push.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
@@ -162,6 +164,14 @@ export interface StageOptions {
   online?: () => Promise<boolean>;
 }
 
+/** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
+function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
+  if (!ctx.settings.mergeSelf) return null;
+  if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
+  const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
+}
+
 /** Whether this PC is online: the kit's look, or online under node --test (StageOptions.online). */
 export const onlineNow = (): Promise<boolean> => (process.env.NODE_TEST_CONTEXT ? Promise.resolve(true) : kitOnline());
 
@@ -229,6 +239,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           });
           // Those not looked at still have the PRs that waited when they last were: the alarms go on counting their hours.
           if (plan) held.push(...heldBefore(seen!, plan.quiet));
+          // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts); not in a stage asked about some of them.
+          const self = (round || ask.team) && !ask.employees?.length ? selfEmployee(ctx, o) : null;
+          if (self) {
+            const [r] = await merge(ctx, [self], { yes, team: true });
+            const { merged: _m, held: prs, ...line } = r;
+            out.results.push(line);
+            if (prs.length) held.push({ employee: self, prs });
+          }
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
@@ -299,7 +317,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), employees: ctx.settings.employees, log }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

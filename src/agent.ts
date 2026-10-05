@@ -10,6 +10,7 @@ import type { Runner } from './run.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { renderBody } from './view.ts';
+import { allowUpdate } from './safeinstall.ts';
 
 /**
  * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
@@ -146,6 +147,8 @@ export async function serveSteward(o: { run?: Runner } = {}) {
       },
       '/api/alarms/dismiss': ({ body }) => {
         const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
+        // An update the install rolled back: dismissing its alarm is looking at it, and allows that version again.
+        if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
       '/api/staff/refresh': () => {

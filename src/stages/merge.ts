@@ -7,6 +7,7 @@ import { agreedVersion } from '../versions.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
+import { kickBack } from './kickback.ts';
 import type { Held } from '../alarms.ts';
 import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
@@ -318,6 +319,15 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }
     if (c.version) taken.push(c.version);
+    // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
+    if (c.conflicts?.length && pr.whose === 'team') {
+      try {
+        const k = await kickBack(ctx, e, pr, c.conflicts, now);
+        c = { done: false, closed: k.closed, note: k.note };
+      } catch (err) {
+        c = { ...c, note: `${c.note} (couldn't send it back to its author: ${(err as Error).message})` };
+      }
+    }
     const h = o.held.find((x) => x.number === pr.number);
     if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.

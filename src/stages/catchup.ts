@@ -15,7 +15,8 @@ import type { PrInfo } from './staff.ts';
  * and merges it as any team PR.
  *
  * Only what needs no judgement: a conflict is resolved only in a version file, and only where one side changed
- * nothing but versions (diff3's common ancestor says which). Any other conflict is left to a person, untouched.
+ * nothing but versions (diff3's common ancestor says which); or in the changelog, where each side only added an entry
+ * at its top (mergeChangelogs). Any other conflict is left untouched, and goes back to the PR's author (kickback.ts).
  * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
  * (steward/kit-…).
  *
@@ -67,6 +68,62 @@ export function resolveVersionConflicts(text: string): string | null {
   return out.join(eol);
 }
 
+/** Whether a conflicted path is the repository's own changelog (CHANGELOG.md at its root), whose sections are its versions. */
+export const isChangelog = (f: string) => f.replace(/\\/g, '/').toLowerCase() === 'changelog.md';
+
+/** A changelog cut at its `## ` headings: what comes before the first, and each section from its heading on. */
+function sectionsOf(text: string): { head: string; parts: string[] } {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const at = lines.map((l, i) => (l.startsWith('## ') ? i : -1)).filter((i) => i >= 0);
+  if (!at.length) return { head: lines.join('\n'), parts: [] };
+  return { head: lines.slice(0, at[0]).join('\n'), parts: at.map((a, k) => lines.slice(a, at[k + 1] ?? lines.length).join('\n')) };
+}
+
+const sameSection = (a: string, b: string) => a.trimEnd() === b.trimEnd();
+/** A section that ends with a blank line, so the next heading stands apart. */
+const spaced = (s: string) => `${s.trimEnd()}\n`;
+
+/**
+ * The changelog both sides added a new top entry to, as two PRs written side by side do: the branch's new entries
+ * kept, the PR's entry put above them under `to` (its version once caught up), everything older as it was. Null when
+ * it needs judgement: the text above the entries changed on both sides, an older entry changed, or the PR added more
+ * than one entry, or one whose heading names no version.
+ */
+export function mergeChangelogs(base: string, ours: string, theirs: string, to: string): string | null {
+  const eol = theirs.includes('\r\n') ? '\r\n' : '\n';
+  const [b, o, t] = [sectionsOf(base), sectionsOf(ours), sectionsOf(theirs)];
+  if (o.head !== b.head && t.head !== b.head && o.head !== t.head) return null;
+  const head = o.head === b.head ? t.head : o.head;
+  const n = b.parts.length;
+  const keeps = (x: { parts: string[] }) => x.parts.length >= n && x.parts.slice(x.parts.length - n).every((p, i) => sameSection(p, b.parts[i]));
+  if (!keeps(o) || !keeps(t)) return null;
+  const mine = o.parts.slice(0, o.parts.length - n);
+  const theirsNew = t.parts.slice(0, t.parts.length - n);
+  if (mine.length > 1) return null;
+  const renamed = mine.map((p) => {
+    const [heading, ...rest] = p.split('\n');
+    return VERSION_IN.test(heading) ? [heading.replace(VERSION_IN, to), ...rest].join('\n') : null;
+  });
+  if (renamed.includes(null)) return null;
+  const moved = [...(renamed as string[]), ...theirsNew];
+  // Each section is its lines, joined again with the line breaks between them; one moved above another ends with a blank line.
+  const parts = [...moved.map((p, i) => (i < moved.length - 1 || n ? spaced(p) : p)), ...b.parts];
+  const text = (head === '' && parts.length ? parts : [head, ...parts]).join('\n');
+  return eol === '\n' ? text : text.replace(/\n/g, '\r\n');
+}
+
+const VERSION_IN = /\d+\.\d+\.\d+/;
+
+/** The changelog's top section renamed from `from` to `to`, when it is the one that names `from`; null when it isn't. */
+export function renumberChangelog(text: string, from: string, to: string): string | null {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  const i = lines.findIndex((l) => l.startsWith('## '));
+  if (i < 0 || lines[i].match(VERSION_IN)?.[0] !== from) return null;
+  lines[i] = lines[i].replace(VERSION_IN, to);
+  return lines.join(eol);
+}
+
 /** The next version above `from` that is neither released nor another PR's. */
 function nextFree(from: string, taken: Set<string>): string {
   let v = bumpPatch(from);
@@ -98,6 +155,8 @@ export interface CaughtUp {
   closed?: boolean;
   /** What it did ("merged main into it; v0.4.12, since v0.4.11 is already released"), or why it couldn't. */
   note: string;
+  /** The files it conflicts in that need judgement, when that's why it wasn't caught up: they go back to its author (kickback.ts). */
+  conflicts?: string[];
   version?: string;
 }
 
@@ -175,18 +234,24 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       if (m.code !== 0) {
         const conflicted = (await gitMaybe(run, dir, 'diff', '--name-only', '--diff-filter=U'))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
         const versionFiles = new Set(e.versionFiles.map((f) => f.replace(/\\/g, '/').toLowerCase()));
-        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()));
+        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f));
         const why = !conflicted.length
           ? `merging ${e.branch} into it failed: ${(m.err || m.out).trim().split('\n').pop()}`
           : others.length
             ? `it conflicts with ${e.branch} in ${others.join(', ')}: that needs a person`
             : null;
         let unresolved = why;
+        let stuck: string[] = others;
         if (!unresolved) {
           for (const f of conflicted) {
-            const fixed = resolveVersionConflicts(readFileSync(path.join(dir, f), 'utf8'));
+            // The changelog, from its three sides: the PR's new entry above the branch's, under the version it ends up with.
+            const side = async (n: number) => (await gitMaybe(run, dir, 'show', `:${n}:${f}`)) ?? '';
+            const fixed = isChangelog(f)
+              ? mergeChangelogs(await side(1), await side(2), await side(3), choice.version)
+              : resolveVersionConflicts(readFileSync(path.join(dir, f), 'utf8'));
             if (fixed === null) {
-              unresolved = `it conflicts with ${e.branch} in ${f} beyond its version: that needs a person`;
+              unresolved = `it conflicts with ${e.branch} in ${f} beyond ${isChangelog(f) ? 'a new entry at its top' : 'its version'}: that needs a person`;
+              stuck = [f];
               break;
             }
             writeFileSync(path.join(dir, f), fixed);
@@ -195,15 +260,24 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         if (unresolved) {
           await gitMaybe(run, dir, 'merge', '--abort');
           if (kitPr && conflicted.length) return await closeKitPr(ctx, e, pr, repo, unresolved.replace(/: that needs a person$/, ''));
-          return { done: false, note: unresolved };
+          return { done: false, note: unresolved, ...(conflicted.length ? { conflicts: stuck } : {}) };
         }
         settleVersion(dir, e.versionFiles, choice.version);
         await git(run, dir, 'add', '--', ...conflicted, ...e.versionFiles);
         await git(run, dir, 'commit', '--quiet', '--no-edit');
-        did.push(`merged ${e.branch} into it, its version lines resolved`);
+        did.push(`merged ${e.branch} into it, its ${conflicted.some(isChangelog) ? 'version lines and changelog' : 'version lines'} resolved`);
       } else did.push(`merged ${e.branch} into it`);
     }
     const changed = settleVersion(dir, e.versionFiles, choice.version);
+    // A new version of its own: the changelog's entry the PR wrote under its old one says the new one too.
+    const log = path.join(dir, 'CHANGELOG.md');
+    if (choice.version !== headV && existsSync(log)) {
+      const renamed = renumberChangelog(readFileSync(log, 'utf8'), headV, choice.version);
+      if (renamed !== null && headV !== baseV) {
+        writeFileSync(log, renamed);
+        changed.push('CHANGELOG.md');
+      }
+    }
     if (changed.length) {
       await git(run, dir, 'add', '--', ...changed);
       await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}: a version of its own (${choice.why ?? `the branch's, after the merge`})`);

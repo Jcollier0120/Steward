@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
+import { allowUpdate, safeInstallCli } from './safeinstall.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -44,7 +45,11 @@ const USAGE = `${APP.id}: ${APP.role}
   serve            run the page in this window (what start and open run in the background)
   install [--no-start] [--dry-run]
                    install this release: copy it to %USERPROFILE%\\.${APP.id}\\app, register the sign-in task
-                   ${TASK_NAME} that brings its page up, and start it
+                   ${TASK_NAME} that brings its page up, and start it. An update keeps the version
+                   before it, and goes back to it when the new one doesn't hold up for its probation;
+                   that version is then flagged, and refused until allowed again
+  allow-update <version>
+                   allow a version the install rolled back to be installed again
   uninstall [--purge] [--dry-run]
                    end its page, delete the sign-in task and remove the installed copy; --purge also its data
 `;
@@ -170,9 +175,20 @@ switch (cmd) {
     break;
   }
   case 'install':
+    process.exitCode = await safeInstallCli(rest);
+    break;
   case 'uninstall':
     process.exitCode = await installCli(cmd, rest);
     break;
+  case 'allow-update': {
+    const v = rest[0] ?? '';
+    if (!/^d+.d+.d+$/.test(v) || rest.length > 1) {
+      console.error('allow-update takes one version: allow-update 0.8.14');
+      process.exitCode = 2;
+    } else if (allowUpdate(v)) console.log(`${APP.name} ${v} may be installed again: Manor's next update installs it, behind the same fail-safe.`);
+    else console.log(`${APP.name} ${v} isn't flagged: nothing to allow.`);
+    break;
+  }
   default:
     console.log(USAGE);
     process.exitCode = cmd && cmd !== 'help' ? 2 : 0;

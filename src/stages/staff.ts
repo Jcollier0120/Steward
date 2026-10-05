@@ -43,6 +43,8 @@ export interface PrInfo {
   /** Lines added and removed, and the files it changes (gh pr list's, at most 100). */
   changed: number;
   files: string[];
+  /** The issues its description closes ("Closes #12"): the Wright's PR names the issue it was queued as. */
+  closes?: number[];
   /** From a fork (gh's isCrossRepository): never pushed to. */
   fork?: boolean;
   /** For one of the Wright's drafts: why the Steward's look (review.ts) leaves it to the person. Not from gh. */
@@ -131,6 +133,9 @@ export function whosePr(p: any, team: string[]): PrInfo['whose'] | null {
   return author && team.some((t) => t.toLowerCase() === author) ? 'team' : null;
 }
 
+/** The issues a PR's description closes, as GitHub reads it: "Closes #12", "fixes #3", "Resolved #7". */
+export const closedIssues = (body: string): number[] => [...new Set([...body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi)].map((m) => Number(m[1])))];
+
 /** The Steward's PRs and the team's in a `gh pr list --json` answer (prListArgs), by number. */
 export function parsePrs(json: string, team: string[]): PrInfo[] {
   const list = JSON.parse(json || '[]') as any[];
@@ -157,6 +162,7 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
         labels: Array.isArray(p.labels) ? p.labels.map((l: any) => String(l?.name ?? '')).filter(Boolean) : [],
         changed: (Number(p.additions) || 0) + (Number(p.deletions) || 0),
         files: Array.isArray(p.files) ? p.files.map((f: any) => String(f?.path ?? '')).filter(Boolean) : [],
+        closes: closedIssues(String(p.body ?? '')),
       };
     })
     .sort((a, b) => a.number - b.number);
