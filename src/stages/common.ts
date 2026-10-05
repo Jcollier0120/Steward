@@ -2,6 +2,7 @@ import path from 'node:path';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch, gh } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
+import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
 import type { Runner } from '../run.ts';
@@ -20,6 +21,8 @@ export interface EmployeeResult {
   url?: string;
   version?: string;
   commit?: string;
+  /** The next round looks at it again, whatever GitHub says (a release the Aletaster's tasting holds). */
+  again?: boolean;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
@@ -52,6 +55,8 @@ export interface Ctx {
    * or dropped once the Steward changed its repository (a merge), is asked for one by one, as before.
    */
   glance?: Glance | null;
+  /** Stands in for the Aletaster, its install and the clock, for the release gate (tasting.ts); tests only. */
+  tasting?: TastingDeps;
 }
 
 /** An employee's repository from the stage's glance at GitHub, while it still says how things are. */

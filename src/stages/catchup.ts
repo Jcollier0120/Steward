@@ -4,7 +4,8 @@ import { aheadOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } fro
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.ts';
-import { checkoutOf, workRootOf, type Ctx } from './common.ts';
+import { runChecks } from './bump.ts';
+import { bumpDirOf, checkoutOf, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 
 /**
@@ -15,8 +16,17 @@ import type { PrInfo } from './staff.ts';
  *
  * Only what needs no judgement: a conflict is resolved only in a version file, and only where one side changed
  * nothing but versions (diff3's common ancestor says which). Any other conflict is left to a person, untouched.
- * Only the team's PRs from the repository itself (never a fork's, never the Steward's own bumps, never a draft).
+ * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
+ * (steward/kit-…).
+ *
+ * A kit PR of the Steward's is caught up by the same rules, and, since no one else tests it, its checks run (its kit
+ * filled again, then the employee's tests, as its bump ran them) before it is pushed. A kit PR that conflicts beyond
+ * its version files isn't left waiting for a person: the Steward closes it and deletes its branch, and the next round's
+ * rollout bumps the employee again, from its branch's head as it is then.
  */
+
+/** One of the Steward's own kit PRs (a bump's), which it catches up as the team's. */
+export const isKitPr = (pr: PrInfo) => pr.whose === 'steward' && pr.head.startsWith('steward/kit-');
 
 export const catchUpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), `${e.id}-catchup`);
 
@@ -84,6 +94,8 @@ export function catchUpVersion(o: { head: string; from: string | null; base: str
 
 export interface CaughtUp {
   done: boolean;
+  /** A kit PR of the Steward's it closed, since it conflicted beyond its versions: the next round bumps again. */
+  closed?: boolean;
   /** What it did ("merged main into it; v0.4.12, since v0.4.11 is already released"), or why it couldn't. */
   note: string;
   version?: string;
@@ -106,12 +118,32 @@ function settleVersion(dir: string, files: string[], version: string): string[] 
 }
 
 /**
- * One team PR caught up with its branch, as the module's comment says: `released` are the employee's released
+ * A kit PR of the Steward's that conflicts with its branch beyond its versions: closed, with a comment, its branch
+ * deleted (a bump refuses while it is on origin) and the Steward's worktree for it removed. The next round's rollout
+ * sees the employee still behind the kit, with no kit PR open, and bumps it again from its branch's head.
+ */
+async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: string): Promise<CaughtUp> {
+  const note = `${why}, so the Steward closed it: the next round bumps ${e.name} again from ${e.branch}`;
+  const body = `Closed by the Steward: ${why}, which it doesn't resolve. The next round bumps ${e.name} to the kit again, from ${e.branch} as it is then.`;
+  const r = await ctx.run('gh', ['pr', 'close', String(pr.number), '--repo', e.repo, '--delete-branch', '--comment', body], { cwd: ctx.neutralDir, timeoutMs: 120_000 });
+  if (r.code !== 0) return { done: false, note: `${why}, and the Steward couldn't close it: ${(r.err || r.out).trim().split('\n').pop()}` };
+  try {
+    for (const line of await removeWorktree(ctx.run, repo, bumpDirOf(ctx.settings, e), pr.head)) ctx.log(`[${e.id}] ${line}`);
+  } catch (err) {
+    ctx.log(`[${e.id}] couldn't remove the bump's worktree for #${pr.number}: ${(err as Error).message}`);
+  }
+  ctx.log(`[${e.id}] #${pr.number}: ${note}`);
+  return { done: false, closed: true, note };
+}
+
+/**
+ * One team PR (or kit PR of the Steward's) caught up with its branch, as the module's comment says: `released` are the employee's released
  * versions, `taken` the versions other open PRs set (which keep theirs).
  */
 export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[] }): Promise<CaughtUp> {
   const { run } = ctx;
-  if (pr.whose !== 'team' || pr.fork || pr.draft) return { done: false, note: 'only a ready team PR from the repository itself is caught up' };
+  const kitPr = isKitPr(pr);
+  if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
   if (pr.base !== e.branch) return { done: false, note: `it merges into ${pr.base}, not ${e.branch}` };
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return { done: false, note: `there's no checkout at ${repo}` };
@@ -162,6 +194,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         }
         if (unresolved) {
           await gitMaybe(run, dir, 'merge', '--abort');
+          if (kitPr && conflicted.length) return await closeKitPr(ctx, e, pr, repo, unresolved.replace(/: that needs a person$/, ''));
           return { done: false, note: unresolved };
         }
         settleVersion(dir, e.versionFiles, choice.version);
@@ -176,12 +209,18 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}: a version of its own (${choice.why ?? `the branch's, after the merge`})`);
     }
     if (choice.why) did.push(`v${choice.version}, since ${choice.why}`);
+    if (kitPr) {
+      // No one tests the Steward's own PRs on their way in: its bump did, and so does its catch-up, here.
+      const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`) });
+      if (failed) return { done: false, note: `${did.join('; ')}, but then ${failed}, so it wasn't pushed` };
+      did.push('its checks passed');
+    }
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
     const note = did.join('; ');
     ctx.log(`[${e.id}] #${pr.number}: caught up (${note})`);
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
     if (choice.why && pr.title.includes(headV)) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', pr.title.split(headV).join(choice.version)).catch(() => '');
-    await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. It merges once its checks pass at the new head.`).catch(() => '');
+    await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${kitPr ? 'The next round merges it.' : 'It merges once its checks pass at the new head.'}`).catch(() => '');
     return { done: true, note, version: choice.version };
   } finally {
     try {

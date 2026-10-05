@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import type { Employee, Settings } from './settings.ts';
+import { reeveInstalled, type Employee, type Settings } from './settings.ts';
+import type { TastingHold } from './tasting.ts';
 import type { StageResult } from './stages/common.ts';
 
 /**
@@ -22,7 +23,11 @@ import type { StageResult } from './stages/common.ts';
  * - an update Manor couldn't install, for two hours; Manor's update checks failing, for twelve; Manor's page down,
  *   for an hour;
  * - a problem the Surveyor has reported for six hours (Settings: problemHours); the Surveyor's page down, for two;
- * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two.
+ * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two;
+ * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
+ * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
+ *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
+ *   reports as crashed takes that problem's place (withoutReeveDuplicates).
  */
 
 export interface Condition {
@@ -136,6 +141,8 @@ export function roundConditions(o: {
   failedRollouts?: Record<string, FailedRollout>;
   failedSelf?: Record<string, FailedSelf>;
   rolloutWaits?: { kit: string; own: string } | null;
+  /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
+  tastingHolds?: Record<string, TastingHold>;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -200,6 +207,22 @@ export function roundConditions(o: {
         title: `The Steward couldn't release ${tag} at ${f.commit.slice(0, 7)}, and the rounds won't try it again`,
         detail: [f.message, `Release it in the Steward's checkout (npm run ${tag.startsWith('kit-') ? 'kit-release' : 'release'} -- --publish) once it's fixed, or push a new commit to main: the next round tries that.`],
         afterMs: 0,
+      });
+    }
+  }
+  if (o.settings.tasteBeforeRelease) {
+    const h = o.settings.alarms.tastingHours;
+    for (const [id, hold] of Object.entries(o.tastingHolds ?? {})) {
+      const e = o.employees.find((x) => x.id === id);
+      if (!e) continue;
+      out.push({
+        id: `tasting:${id}:${hold.commit.slice(0, 7)}:${hold.version}`,
+        who: id,
+        title: `${e.name} v${hold.version} has waited ${hours(h)} or more for the Aletaster's tasting`,
+        detail: [hold.why, `Fix what the tasting found and push to ${e.branch} (the next round asks again), or switch off "Waits for the Aletaster's tasting" in the Steward's Settings to release without it.`],
+        url: hold.url,
+        since: hold.since,
+        afterMs: h * HOUR,
       });
     }
   }
@@ -277,6 +300,44 @@ export function wrightConditions(work: unknown): Condition[] {
     });
 }
 
+/**
+ * From Reeve's GET /api/alerts: one condition per open alert of his jobs, at once, as he gives it; and the jobs they are
+ * of. An older Reeve without the endpoint (404), or one whose page doesn't answer, is quiet here: no alarm about the
+ * source (the Surveyor's agent.reeve.page problem already says when his page is down), and jobs null.
+ */
+export function reeveConditions(answer: unknown): { conditions: Condition[]; jobs: Set<string> | null } {
+  if (noAnswer(answer) !== null) return { conditions: [], jobs: null };
+  const alerts = (answer as any).alerts;
+  if (!Array.isArray(alerts)) return { conditions: [], jobs: null };
+  const jobs = new Set<string>();
+  const conditions: Condition[] = [];
+  for (const a of alerts) {
+    if (!a || typeof a.id !== 'string' || !a.id || typeof a.title !== 'string') continue;
+    if (typeof a.job === 'string') jobs.add(a.job);
+    conditions.push({
+      id: `reeve:${a.id}`,
+      who: 'reeve',
+      title: a.title,
+      detail: Array.isArray(a.detail) ? a.detail.map(String) : [],
+      url: typeof a.url === 'string' ? a.url : undefined,
+      since: typeof a.since === 'string' && !Number.isNaN(Date.parse(a.since)) ? a.since : undefined,
+      afterMs: 0,
+    });
+  }
+  return { conditions, jobs };
+}
+
+/**
+ * One alarm for one crashed job: the Surveyor reports a Reeve job that exited non-zero as the problem
+ * agent.reeve.job.<job> (an alarm after problemHours), and Reeve lists the same crash as an open alert of that job. While
+ * Reeve's alerts name a job, the Surveyor's condition for it (id survey:agent.reeve.job.<job>) is dropped, and Reeve's
+ * stands. With no answer from Reeve (jobs null), the Surveyor's stays.
+ */
+export function withoutReeveDuplicates(conditions: Condition[], jobs: Set<string> | null): Condition[] {
+  if (!jobs?.size) return conditions;
+  return conditions.filter((c) => !(c.id.startsWith('survey:agent.reeve.job.') && jobs.has(c.id.slice('survey:agent.reeve.job.'.length))));
+}
+
 export type GetJson = (url: string) => Promise<unknown>;
 
 /** GET a local page's JSON; { error } when it doesn't answer. Never under node --test: a test must not read the live manor. */
@@ -331,7 +392,7 @@ export function toastWords(raised: Alarm[]): { title: string; body: string } {
  */
 export async function watchAlarms(
   o: Parameters<typeof roundConditions>[0] & { log: (line: string) => void },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   if (!a.on) return loadAlarms();
@@ -341,7 +402,13 @@ export async function watchAlarms(
   if (manor) conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
   if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
   if (a.wrightUrl) conditions.push(...wrightConditions(await get(new URL('/api/work', a.wrightUrl).href)));
-  const { state, raised } = reconcile(loadAlarms(), conditions, deps.now ?? new Date());
+  let reeveJobs: Set<string> | null = null;
+  if (a.reeveUrl && (deps.reeveInstalled ?? reeveInstalled)()) {
+    const r = reeveConditions(await get(new URL('/api/alerts', a.reeveUrl).href));
+    conditions.push(...r.conditions);
+    reeveJobs = r.jobs;
+  }
+  const { state, raised } = reconcile(loadAlarms(), withoutReeveDuplicates(conditions, reeveJobs), deps.now ?? new Date());
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);
   if (raised.length && a.toast) {

@@ -157,3 +157,65 @@ test("an answer with an error field of its own is still an answer: only getJson'
   assert.deepEqual(wrightConditions({ at: 'x', needsYou: [], error: null }), [], 'nothing needs you, and it answers');
   assert.equal(wrightConditions({ needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }], error: null })[0].id, 'wright:claude:blocked');
 });
+// Reeve's jobs' open alerts (his GET /api/alerts) are alarms at once, with the Steward's toast, since Reeve raises
+// none of his own when Manor and the Steward are installed.
+const REEVE_ALERTS = {
+  app: 'reeve',
+  at: '2026-10-04T20:00:00.000Z',
+  page: 'http://reeve.localhost:18383/',
+  offDuty: null,
+  toast: { reeve: false, why: 'Manor and the Steward are installed' },
+  alerts: [
+    { id: 'npu-health:3f9a1c0b7d2e', job: 'npu-health', title: "Reeve's npu-health job: NPU driver changed", detail: ['was 30.0.140.1000', 'Log: C:\\x.log'], since: '2026-10-04T19:30:12.000Z', checkedAt: '2026-10-04T19:30:12.000Z', url: 'http://reeve.localhost:18383/#job-npu-health' },
+    { id: 'fast-forward:0123456789ab', job: 'fast-forward', title: "Reeve's fast-forward job: exited 1", detail: ['crashed'], since: 'not a time', checkedAt: '2026-10-04T19:30:12.000Z', url: 'http://reeve.localhost:18383/#job-fast-forward' },
+    { job: 'no-id', title: 'left out' },
+  ],
+};
+
+test("Reeve's alerts: one alarm each, at once, as he gives them; an older Reeve or his page down is quiet", () => {
+  const { reeveConditions } = alarmsModule;
+  const r = reeveConditions(REEVE_ALERTS);
+  assert.deepEqual([...r.jobs!].sort(), ['fast-forward', 'npu-health']);
+  assert.deepEqual(r.conditions[0], { id: 'reeve:npu-health:3f9a1c0b7d2e', who: 'reeve', title: "Reeve's npu-health job: NPU driver changed", detail: ['was 30.0.140.1000', 'Log: C:\\x.log'], url: 'http://reeve.localhost:18383/#job-npu-health', since: '2026-10-04T19:30:12.000Z', afterMs: 0 });
+  assert.equal(r.conditions[1].since, undefined, 'a since that is not a time: from when the Steward first saw it');
+  assert.equal(r.conditions.length, 2, 'one without an id is left out');
+  assert.deepEqual(reeveConditions({ error: 'HTTP 404' }), { conditions: [], jobs: null }, 'an older Reeve, without /api/alerts');
+  assert.deepEqual(reeveConditions({ error: 'ECONNREFUSED' }), { conditions: [], jobs: null }, "his page down: the Surveyor's agent.reeve.page says so");
+  assert.deepEqual(reeveConditions({ ...REEVE_ALERTS, alerts: [] }), { conditions: [], jobs: new Set() });
+});
+
+test("one alarm for one crashed job: Reeve's alert stands, the Surveyor's problem for the same job goes", () => {
+  const { withoutReeveDuplicates } = alarmsModule;
+  const survey = surveyorConditions({ findings: [
+    { id: 'agent.reeve.job.fast-forward', subject: 'reeve', severity: 'problem', title: "Reeve's fast-forward job failed (exit 1)", evidence: [] },
+    { id: 'agent.reeve.job.repo-sync', subject: 'reeve', severity: 'problem', title: "Reeve's repo-sync job failed (exit 1)", evidence: [] },
+    { id: 'agent.porter.page', subject: 'porter', severity: 'problem', title: "Porter's page doesn't answer", evidence: [] },
+  ] }, settings);
+  const reeve = alarmsModule.reeveConditions(REEVE_ALERTS);
+  const ids = withoutReeveDuplicates([...survey, ...reeve.conditions], reeve.jobs).map((c) => c.id);
+  assert.deepEqual(ids, ['survey:agent.reeve.job.repo-sync', 'survey:agent.porter.page', 'reeve:npu-health:3f9a1c0b7d2e', 'reeve:fast-forward:0123456789ab']);
+  assert.equal(withoutReeveDuplicates(survey, null).length, 3, "no answer from Reeve: the Surveyor's stay");
+});
+
+test("watching: Reeve's alerts are read only where he is installed, raised at once with the Steward's toast", async () => {
+  writeFileSync(alarmsFile(), JSON.stringify(empty()));
+  const toasts: [string, string][] = [];
+  const asked: string[] = [];
+  const s = structuredClone(settings);
+  s.alarms.manorUrl = '';
+  s.alarms.surveyorUrl = '';
+  s.alarms.wrightUrl = '';
+  const deps = (installed: boolean, answer: unknown = REEVE_ALERTS) => ({ getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18383/api/alerts' ? answer : { error: 'none' }), toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(12), reeveInstalled: () => installed });
+  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
+  let st = await watch(deps(false));
+  assert.deepEqual([asked, st.open, toasts], [[], [], []], 'not installed: not read');
+  st = await watch(deps(true, { error: 'HTTP 404' }));
+  assert.deepEqual([st.open, toasts], [[], []], 'an older Reeve: quiet');
+  st = await watch(deps(true));
+  assert.deepEqual(st.open.map((a) => [a.id, a.who, a.url]), [['reeve:npu-health:3f9a1c0b7d2e', 'reeve', 'http://reeve.localhost:18383/#job-npu-health'], ['reeve:fast-forward:0123456789ab', 'reeve', 'http://reeve.localhost:18383/#job-fast-forward']]);
+  assert.deepEqual(toasts, [['Steward: 2 things need you', "Reeve's npu-health job: NPU driver changed\nReeve's fast-forward job: exited 1"]]);
+  st = await watch(deps(true, { ...REEVE_ALERTS, alerts: [] }));
+  assert.deepEqual([st.open.length, st.cleared.slice(0, 2).map((a) => a.id).sort()], [0, ['reeve:fast-forward:0123456789ab', 'reeve:npu-health:3f9a1c0b7d2e']], 'cleared once Reeve no longer lists them');
+  assert.equal(normalizeSettings({}).settings.alarms.reeveUrl, 'http://127.0.0.1:18383');
+  assert.equal(normalizeSettings({ alarms: { reeveUrl: '' } }).settings.alarms.reeveUrl, '', 'empty: not read');
+});
