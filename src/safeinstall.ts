@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { cpSync, existsSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
@@ -11,7 +12,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * it back. So an update of the installed copy:
  * 1. keeps the version it replaces whole beside it (app.prev), before anything changes;
  * 2. is installed as every agent installs (the kit's install.ts);
- * 3. is on probation for a while: its page must answer as the new version and keep answering, its home page too;
+ * 3. is on probation for a while: its page must answer as the new version and keep answering (a look or two missed on
+ *    a busy PC is forgiven), its home page too;
  * 4. failing any of that (the install itself failing once the new copy was in place included), is rolled back: the
  *    new copy set aside as app.unsafe-<version> for a look, the version before put back and started again, and the
  *    version flagged in unsafe-updates.json.
@@ -51,6 +53,11 @@ export const unsafeAlarmId = (version: string) => `unsafe:${version}`;
 /** How long a new version must keep answering before the update counts as done. */
 export const PROBATION_MS = 90_000;
 const LOOK_EVERY_MS = 5_000;
+/**
+ * How many looks in a row a page may miss before it has stopped answering. One ping can miss on a busy PC (each has
+ * 2 s): 0.9.2 missed one, 83 s in, and was rolled back for it, though its page went on answering for hours.
+ */
+export const MISSES_ALLOWED = 3;
 
 export interface SafeDeps extends InstallDeps {
   /** The kit's install of the release, as every agent's. */
@@ -60,6 +67,11 @@ export interface SafeDeps extends InstallDeps {
   /** The status of the page's home page, or null when it doesn't answer. */
   homePage(): Promise<number | null>;
   probationMs: number;
+  /**
+   * Ends the installed copy's page, whether or not it answers: the kit's shutdown, then its process, by server.json's
+   * pid, when it's still there. True once it has gone. A page that has stopped answering may still hold the port.
+   */
+  endPage(): Promise<boolean>;
   copy(from: string, to: string): void;
   now(): number;
   record(u: Unsafe): void;
@@ -67,6 +79,24 @@ export interface SafeDeps extends InstallDeps {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Whether the process is a Node (tasklist's image name), so a pid Windows has given to another program is left alone. */
+async function isNode(pid: number): Promise<boolean> {
+  const out = await new Promise<string>((resolve) =>
+    execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 10_000 }, (_e, stdout) => resolve(String(stdout ?? ''))),
+  );
+  return /^"node(\.exe)?",/im.test(out.trim());
+}
+
+/** Whether a process is still there (signal 0 only checks), as the kit's service.ts asks. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 async function moveWithRetries(from: string, to: string, d: SafeDeps): Promise<void> {
   const rename = d.rename ?? renameSync;
@@ -88,10 +118,18 @@ async function moveWithRetries(from: string, to: string, d: SafeDeps): Promise<v
 export async function probation(version: string, d: SafeDeps): Promise<string | null> {
   const start = d.now();
   let homeSeen = false;
+  let missedAt: number | null = null;
+  let misses = 0;
   for (;;) {
     const v = await d.pingVersion();
-    const s = Math.round((d.now() - start) / 1000);
-    if (v === null) return `its page stopped answering ${s} s into its probation`;
+    if (v === null) {
+      missedAt ??= d.now();
+      if (++misses >= MISSES_ALLOWED) return `its page stopped answering ${Math.round((missedAt - start) / 1000)} s into its probation`;
+      await d.sleep(LOOK_EVERY_MS);
+      continue;
+    }
+    missedAt = null;
+    misses = 0;
     if (v !== version) return `its page answers as ${v}, not ${version}`;
     if (!homeSeen) {
       const status = await d.homePage();
@@ -103,10 +141,13 @@ export async function probation(version: string, d: SafeDeps): Promise<string | 
   }
 }
 
-/** The version before, put back in app and started: true when its page answers again. */
-async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): Promise<boolean> {
-  if (await d.ping()) await d.shutdown();
-  for (let i = 0; i < 20 && (await d.ping()); i++) await d.sleep(500);
+/**
+ * The version before, put back in app and started: what its page answers as then (null for nothing). The new page is
+ * ended first whether it answers or not: one that has stopped answering may still be running and hold the port, and
+ * the old one, started beside it, would find a page up and leave it be (0.9.2 went on running from 0.9.1's files).
+ */
+async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): Promise<string | null> {
+  if (!(await d.endPage())) d.out("The new version's page wouldn't end: going back all the same.");
   rmSync(kept, { recursive: true, force: true });
   try {
     if (existsSync(app)) await moveWithRetries(app, kept, d);
@@ -116,12 +157,15 @@ async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): P
     replaceContents(prev, app);
   }
   const ran = await d.schtasks(['/Run', '/TN', TASK_NAME]);
-  if (ran.code !== 0) return false;
+  if (ran.code !== 0) return null;
+  const was = readRelease(app)?.version;
+  let v: string | null = null;
   for (let waited = 0; waited < 20_000; waited += 500) {
-    if (await d.ping()) return true;
+    v = await d.pingVersion();
+    if (v !== null && v === was) return v;
     await d.sleep(500);
   }
-  return d.ping();
+  return v;
 }
 
 export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean } = {}, d: SafeDeps = safeDeps()): Promise<number> {
@@ -165,9 +209,16 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean } 
   }
   out(`${APP.name} ${release.version} failed: ${why}. Going back to ${before!.version}.`);
   const kept = `${app}.unsafe-${release.version}`;
-  const up = await rollBack(app, prev, kept, d);
+  const answers = await rollBack(app, prev, kept, d);
   d.record({ version: release.version, from: before!.version, why, at: new Date(d.now()).toISOString(), kept: existsSync(kept) ? kept : null });
-  out(up ? `${APP.name} ${before!.version} is back, and its page is up: ${d.pageUrl}` : `${APP.name} ${before!.version} is back in ${app}, but its page didn't answer: start it with node ${path.win32.join(app, 'src', 'cli.ts')} open`);
+  const start = `start it with node ${path.win32.join(app, 'src', 'cli.ts')} open`;
+  out(
+    answers === before!.version
+      ? `${APP.name} ${before!.version} is back, and its page is up: ${d.pageUrl}`
+      : answers
+        ? `${APP.name} ${before!.version} is back in ${app}, but its page answers as ${answers}: end that one (node ${path.win32.join(app, 'src', 'cli.ts')} shutdown), then ${start}`
+        : `${APP.name} ${before!.version} is back in ${app}, but its page didn't answer: ${start}`,
+  );
   out(`${release.version} is flagged as unsafe, and won't be installed again until you allow it.${existsSync(kept) ? ` Its copy is kept in ${kept} for a look.` : ''}`);
   return 1;
 }
@@ -190,6 +241,20 @@ export function safeDeps(): SafeDeps {
       }
     },
     probationMs: Number(process.env.STEWARD_PROBATION_MS) || PROBATION_MS,
+    endPage: async () => {
+      await d.shutdown();
+      const pid = readJson<{ pid?: number } | null>(dataFile('server.json'), null)?.pid;
+      if (typeof pid !== 'number' || pid === process.pid || !alive(pid)) return true;
+      // server.json's pid may be stale, and Windows reuses pids: only a Node is ended.
+      if (!(await isNode(pid))) return true;
+      try {
+        process.kill(pid);
+      } catch {
+        // Gone meanwhile, or not ours to end: alive() says which.
+      }
+      for (let i = 0; i < 40 && alive(pid); i++) await d.sleep(250);
+      return !alive(pid);
+    },
     copy: (from, to) => cpSync(from, to, { recursive: true }),
     now: () => Date.now(),
     record: (u) => writeJson(unsafeFile(), { ...loadUnsafe(), [u.version]: u }),

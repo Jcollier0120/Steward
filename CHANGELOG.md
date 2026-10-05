@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.9.3
+## 0.9.6
 
 **A UI inventory: which components are too big, and which markup is written out again and again, in any agent's page.**
 
@@ -13,6 +13,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 Nothing: it updates itself as usual.
+
+## 0.9.4
+
+**An update the Steward rolls back really goes back: the new page is ended, and the old one must answer as itself.**
+
+### What changed
+
+- Its update's probation forgives a look or two its page misses on a busy PC (each look allows 2 s): only three in a row, some 15 s with no answer, count as its page having stopped. 0.9.2 missed one, 83 s in, and was rolled back for it, though its page answered for hours after.
+- A rollback ends the new version's page whether it answers or not: asked to stop, then its process ended (server.json's pid, when that is a Node). Before, a page that didn't answer was left running: it kept the port, the old version, started beside it, found a page up and stayed off, and the new version went on running from the old one's files. Manor then saw an update still waiting, and its installs failed.
+- The old version counts as back only when its page answers as that version. Otherwise the rollback says which version answers, and how to end it.
+
+### Before you update
+
+Nothing: it updates itself as usual. If the Steward's page says 0.9.2 while Manor offers 0.9.2 as an update, its files are 0.9.1's: Dismiss the 0.9.2 alarm on its page (or `node src\cli.ts allow-update 0.9.2`), and this version installs over both.
 
 ## 0.9.2
 
