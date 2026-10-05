@@ -115,10 +115,28 @@ test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, 
   // Its colour and motion, and none for someone who asks for less: its Dark colour on every dark theme.
   assert.ok(html.includes(`:root { --role: ${DEFAULT_LOOK.accent.light}; }`));
   assert.ok(html.includes(`:root[data-theme="dark"], :root[data-theme="arcade"], :root[data-theme="onyx"], :root[data-theme="carbon"] { --role: ${DEFAULT_LOOK.accent.dark}; }`));
-  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \}/);
+  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \.titlebar \{ transition: none; \} \}/);
   assert.match(html, /setProperty\('--phase'/);
   // No external fonts or scripts: the page's CSP allows its own origin only.
   assert.doesNotMatch(html, /https?:\/\/(?!www\.w3\.org)/);
+});
+
+test('the title bar stays at the top as the page scrolls, and a jump to a #section lands below it', () => {
+  const html = page({ token: 'tok', body: '' });
+  const rule = (sel: string) => html.match(new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+  const bar = rule('.titlebar');
+  assert.match(bar, /position: sticky; top: 0; z-index: \d+;/);
+  assert.match(bar, /background: var\(--bg\);/, "opaque, on the theme's own colour");
+  assert.match(rule('.titlebar.stuck'), /border-bottom-color: var\(--line\); box-shadow: var\(--shadow\);/);
+  assert.match(rule('html'), /scroll-padding-top: calc\(var\(--titlebar-h\) \+ 8px\);/);
+  assert.match(html, /--titlebar-h: 57px;/);
+  assert.match(html, /:root \{ --titlebar-h: 97px; \}/, 'two rows in a narrow window');
+  assert.match(html, /max-height: calc\(100vh - var\(--titlebar-h\) - 16px\)/, 'the Theme menu fits below it');
+  assert.ok(html.includes(`root.style.setProperty('--titlebar-h'`), 'the script keeps it to the bar');
+  assert.ok(html.includes(`bar.classList.toggle('stuck', window.scrollY > 0)`));
+  // Nothing else of the kit's sticks to the top, where it would meet the bar.
+  assert.equal((html.match(/position: sticky/g) ?? []).length, 1);
+  assert.equal((html.match(/position: fixed/g) ?? []).length, 0);
 });
 
 test('busy: the title bar moves, the pill says what it is doing, the page refreshes', () => {

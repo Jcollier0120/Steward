@@ -2,6 +2,15 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.14.0
+
+**The title bar stays at the top as the page scrolls.** On a long page (the Steward's staff table, the Auditor's findings, Settings) the title bar, with its status pill, Settings, Theme and Run now, scrolled away with the rest.
+- **page.ts:** `.titlebar` is `position: sticky; top: 0; z-index: 40`, on the page's own colour (`--bg`), so nothing shows through it in any theme. Once the page has scrolled, the script marks it `.stuck`: a `--line` border and the theme's `--shadow` under it (none at the top, where the panel's own edge meets it).
+- **A jump to a #section lands below it:** `html` has `scroll-padding-top: calc(var(--titlebar-h) + 8px)`. `--titlebar-h` is 57px (97px in a narrow window, where the bar wraps to two rows), and the script keeps it to the bar's real height with a ResizeObserver.
+- **The Theme menu's height** allows for the bar (`calc(100vh - var(--titlebar-h) - 16px)`), since a menu in a bar that doesn't scroll can't be scrolled into view.
+- The kit has no other sticky bar at the top (the Settings panel's Save bar sticks to the bottom), so nothing else moves. An agent's own sticky element at `top: 0` should use `top: var(--titlebar-h)`.
+- **Nothing for an agent to do** but take this version. The `<header class="titlebar">` markup is unchanged.
+
 ## 2.13.1
 
 **An update that moves an agent's port ends the old page.** The installer ended the running page only when it answered on this version's port, so the Chamberlain's 0.1.3 (moved from 19898 to 20303) left 0.1.2's page running on 19898, where the Developer Herald's page then couldn't start.
