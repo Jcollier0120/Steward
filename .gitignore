@@ -2,3 +2,5 @@ node_modules/
 artifacts/
 src/kit/
 kit/test/fixture/src/kit/
+docs/UI-INVENTORY.md
+docs/UI-INVENTORY.html

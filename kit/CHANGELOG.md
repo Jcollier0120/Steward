@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.20.0
+
+**The page's vocabulary, written once: `badge`, `muted` and `card`.** Every agent wrote these out by hand: `badge` in the Steward's, the Miller's, the Auditor's and the Aletaster's view.ts, `<span class="muted">` some 130 times across the agents and `<div class="card">` some 95. The Steward's new `npm run ui:inventory` counts that kind of repeat; a copy drifts, a class left off, a title not escaped.
+- **node/html.ts is new:** `esc` (moved from page.ts), `badge(cls, text, title?)` (a `.badge` pill, `cls` its colour: ok, warn, alert, npu, or '' for a plain one), `muted(text, tag?)` (escaped text in `.muted`, a span or a `'p'`) and `card(html, cls?)` (a `.card` around markup, `cls` for 'empty' or 'row'). page.ts exports all four, so an agent imports them from `./kit/page.ts` as it does `esc`.
+- **page.ts** uses them (`unverified`'s pill, the Settings panel's "Loading"), and its page script is its own function, `pageScript()`: page() is the page's markup, and the script its behaviour. The page is the same.
+- **work.ts** takes `esc` and `card` from html.ts rather than keeping its own copy of `esc`, and says the Task Manager line once.
+- **web/settings-panel.js:** its Add, Remove and Try again buttons are one `smallButton()`.
+- **What an agent must do:** nothing but take this version. An agent with its own `badge`, or many a `<span class="muted">`, can use the kit's in its own change; `esc` is where it was.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.19.0
 
 **Every release says what it brings: its notes are the agent's CHANGELOG.md entry for the version.** A release's notes said only which commit it was built from and how to unpack it, so Manor's What's new link showed nothing new. spec/RELEASE-NOTES.md is new, and says how an entry is written: a bold headline, then `### What's new`, `### What changed` and `### Before you update` (always there, "Nothing: it updates itself as usual." when updating needs nothing).

@@ -176,7 +176,7 @@ test('off duty: the pill and a notice under the title bar, with its button back'
     const html = page({ token: 'tok', body: '' });
     assert.match(html, /<span class="status-pill off" title="Off duty since just now[^"]*">Off duty<\/span>/);
     assert.match(html, /<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since just now/);
-    assert.match(html, /<button class="quiet" data-post="\/api\/duty" data-body='\{"onDuty":true\}'>Back on duty<\/button>/);
+    assert.match(html, /<button class="quiet" data-post="\/api\/duty" data-body="\{&quot;onDuty&quot;:true\}">Back on duty<\/button>/);
     assert.ok(html.indexOf('class="banners"') < html.indexOf('<main'), 'above the page, so Settings shows it too');
   } finally {
     setDuty(true);

@@ -1,5 +1,6 @@
 import { loadAccelerators, serves, theAccelerator, type Accelerator, type AcceleratorConfig } from './accelerators.ts';
 import { APP } from '../app.ts';
+import { card, esc } from './html.ts';
 
 /**
  * Where an agent's work runs (the processor, a graphics card, the NPU) and when: the "Where its work runs"
@@ -134,8 +135,11 @@ export const WORK: Record<string, AgentWork> = {
   },
 };
 
-const esc = (s: unknown) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** A small, quiet line under the section's table. */
+const note = (text: string) => `<p class="muted small">${esc(text)}</p>`;
+
+/** Where to see the NPU's work, said under either kind of model work. */
+const TASK_MANAGER = note("Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.");
 
 const WORK_NAMES: Record<string, string> = { chat: 'chat', vision: 'vision', embed: 'embeddings' };
 
@@ -161,7 +165,7 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
   const w = WORK[id];
   const rows = (w?.lines ?? []).map((l) => `<tr><td>${esc(l.what)}</td><td>${esc(l.where)}</td><td>${esc(l.when)}</td></tr>`).join('');
   const table = rows ? `<table class="work-table"><tr><th>What</th><th>Where it runs</th><th>When</th></tr>${rows}</table>` : '';
-  const notes = (w?.notes ?? []).map((n) => `<p class="muted small">${esc(n)}</p>`).join('');
+  const notes = (w?.notes ?? []).map(note).join('');
   const cfg = () => o.config ?? loadAccelerators();
   const hasNpu = () => {
     const c = cfg();
@@ -171,14 +175,14 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
     ? `<p>${esc(name)} uses no model.</p>`
     : w?.npuOnly
       ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${hasNpu() ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
-<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
+${TASK_MANAGER}`
       : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. The NPU comes first (by default; Reeve's order can say otherwise): it does model work without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg()))}</p>
-<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`;
+${TASK_MANAGER}`;
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>
-<div class="card">
+${card(`
 <p>What ${esc(name)} does on this PC, where, and when. It works in rounds and does nothing in between, so the processor or a graphics card busy for a moment, then quiet again, is expected.</p>
 ${table}${notes}${model}
-</div>
+`)}
 </section>`;
 }

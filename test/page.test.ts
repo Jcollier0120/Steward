@@ -48,7 +48,7 @@ test('the page shows the kit, the stages and Settings, and carries its token', a
   assert.match(html, /<meta name="page-token" content="[0-9a-f]{48}">/);
   assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
   for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
-  assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team's PRs</);
+  assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team&#39;s PRs</);
   assert.match(html, /data-settings-panel/);
   // By itself (Settings' default): its rounds, and Run now, which the kit lifts into the title bar.
   assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team&#39;s that is ready/);

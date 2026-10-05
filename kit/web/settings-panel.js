@@ -197,8 +197,11 @@
     return { box, node: h('label', { class: 'sf-switch' }, box, h('span', { text: f.nullable })), set: (isNull) => ((box.checked = isNull), (body.hidden = isNull)) };
   }
 
+  /** The panel's small, quiet button: Add, Remove, Try again. */
+  const smallButton = (text, attrs) => h('button', { type: 'button', class: 'quiet small', text, ...attrs });
+
   function removeButton(noun, i, onClick) {
-    const b = h('button', { type: 'button', class: 'quiet small', text: 'Remove', 'aria-label': `Remove ${noun} ${i + 1}` });
+    const b = smallButton('Remove', { 'aria-label': `Remove ${noun} ${i + 1}` });
     b.addEventListener('click', onClick);
     return b;
   }
@@ -206,7 +209,7 @@
   function list(f, v) {
     const noun = f.item.label.toLowerCase();
     const ul = h('ul', { class: 'sf-list' });
-    const add = h('button', { type: 'button', class: 'quiet small', text: `Add ${noun}` });
+    const add = smallButton(`Add ${noun}`);
     const body = h('div', {}, ul, add);
     const auto = f.nullable ? nullBox(f, body) : null;
     const node = h('div', {}, auto?.node, body);
@@ -254,15 +257,55 @@
     return ed;
   }
 
+  /** A table of rows the panel edits: its column headings, and an empty one over each row's Remove. */
+  const sfTable = (headings, tbody) =>
+    h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, headings.map((text) => h('th', { scope: 'col', text })), h('th', {}))), tbody));
+
+  /** The first control in a record's fields, for focus. */
+  const firstControl = (parts) => Object.values(parts).find((p) => p.ed.control)?.ed.control;
+
+  /** A record of plain fields (switches, numbers, text, choices) as a table row, a cell each, and its Remove. */
+  function recordRow(f, rec, i, noun, remove) {
+    const parts = {};
+    const rowMsg = msgEl();
+    const tr = h('tr');
+    for (const g of f.fields) {
+      const ed = scalar(g, rec[g.key], `${g.label}, ${noun} ${i + 1}`);
+      const msg = msgEl();
+      describedBy(ed.control, msg);
+      parts[g.key] = { ed, slot: () => ({ msg, control: ed.control }) };
+      tr.append(h('td', { 'data-label': g.label }, ed.node, msg));
+    }
+    tr.append(h('td', {}, removeButton(noun, i, remove), rowMsg));
+    return { node: tr, parts, rowMsg, first: firstControl(parts) };
+  }
+
+  /** A record with a list or a group in it, folded to its title (which follows its title field as it's typed), and its Remove. */
+  function recordBox(f, rec, i, title, open, noun, remove) {
+    const parts = {};
+    const rowMsg = msgEl();
+    const summary = h('summary', { text: title(rec, i) });
+    const box = h('details', { class: 'sf-record' }, summary);
+    box.open = open;
+    const fields = h('div', { role: 'group', 'aria-label': title(rec, i) });
+    for (const g of f.fields) {
+      const b = block(g, rec[g.key], undefined, {});
+      parts[g.key] = { ed: b.ed, slot: b.slot };
+      fields.append(b.node);
+    }
+    const titleEd = f.title && parts[f.title]?.ed;
+    titleEd?.control?.addEventListener('input', () => (summary.textContent = title({ [f.title]: titleEd.get() }, i)));
+    box.append(fields, h('div', { class: 'row' }, removeButton(noun, i, remove)), rowMsg);
+    return { node: box, summary, parts, rowMsg, first: firstControl(parts) };
+  }
+
   function records(f, v) {
     const noun = (f.noun || 'entry').toLowerCase();
     const flat = f.fields.every((g) => SCALAR.includes(g.kind));
-    const add = h('button', { type: 'button', class: 'quiet small', text: `Add ${noun}` });
+    const add = smallButton(`Add ${noun}`);
     const tbody = h('tbody');
     const stack = h('div');
-    const node = flat
-      ? h('div', {}, h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, f.fields.map((g) => h('th', { scope: 'col', text: g.label })), h('th', {}))), tbody)), add)
-      : h('div', {}, stack, add);
+    const node = flat ? h('div', {}, sfTable(f.fields.map((g) => g.label), tbody), add) : h('div', {}, stack, add);
     let rows = [];
     const values = () => rows.map((r) => Object.fromEntries(f.fields.map((g) => [g.key, r.parts[g.key].ed.get()])));
     const title = (rec, i) => (f.title && rec[f.title] ? String(rec[f.title]) : `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1}`);
@@ -270,7 +313,6 @@
     const opened = () => rows.map((r) => !!r.node.open);
     function draw(vals, open = []) {
       rows = vals.map((rec, i) => {
-        const parts = {};
         const remove = () => {
           const next = values();
           const keep = opened();
@@ -280,32 +322,7 @@
           (rows[i]?.summary || rows[i]?.first || add).focus();
           changed();
         };
-        const rowMsg = msgEl();
-        if (flat) {
-          const tr = h('tr');
-          for (const g of f.fields) {
-            const ed = scalar(g, rec[g.key], `${g.label}, ${noun} ${i + 1}`);
-            const msg = msgEl();
-            describedBy(ed.control, msg);
-            parts[g.key] = { ed, slot: () => ({ msg, control: ed.control }) };
-            tr.append(h('td', { 'data-label': g.label }, ed.node, msg));
-          }
-          tr.append(h('td', {}, removeButton(noun, i, remove), rowMsg));
-          return { node: tr, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
-        }
-        const summary = h('summary', { text: title(rec, i) });
-        const box = h('details', { class: 'sf-record' }, summary);
-        box.open = !!open[i];
-        const fields = h('div', { role: 'group', 'aria-label': title(rec, i) });
-        for (const g of f.fields) {
-          const b = block(g, rec[g.key], undefined, {});
-          parts[g.key] = { ed: b.ed, slot: b.slot };
-          fields.append(b.node);
-        }
-        const titleEd = f.title && parts[f.title]?.ed;
-        titleEd?.control?.addEventListener('input', () => (summary.textContent = title({ [f.title]: titleEd.get() }, i)));
-        box.append(fields, h('div', { class: 'row' }, removeButton(noun, i, remove)), rowMsg);
-        return { node: box, summary, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
+        return flat ? recordRow(f, rec, i, noun, remove) : recordBox(f, rec, i, title, !!open[i], noun, remove);
       });
       (flat ? tbody : stack).replaceChildren(...rows.map((r) => r.node));
     }
@@ -338,9 +355,9 @@
   }
 
   function map(f, v) {
-    const add = h('button', { type: 'button', class: 'quiet small', text: `Add ${f.keyLabel.toLowerCase()}` });
+    const add = smallButton(`Add ${f.keyLabel.toLowerCase()}`);
     const tbody = h('tbody');
-    const node = h('div', {}, h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, h('th', { scope: 'col', text: f.keyLabel }), h('th', { scope: 'col', text: f.valueLabel }), h('th', {}))), tbody)), add);
+    const node = h('div', {}, sfTable([f.keyLabel, f.valueLabel], tbody), add);
     let rows = [];
     const entries = () => rows.map((r) => [r.key.value, r.value.value]);
     function draw(list) {
@@ -554,7 +571,7 @@
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       data = await r.json();
     } catch (e) {
-      const retry = h('button', { type: 'button', class: 'quiet small', text: 'Try again' });
+      const retry = smallButton('Try again');
       retry.addEventListener('click', load);
       root.replaceChildren(h('p', { class: 'sf-msg error', text: `The settings couldn't be loaded: ${e.message}.` }), retry);
       return;

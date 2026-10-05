@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.3
+
+**A UI inventory, and kit 2.20.0: the page's badge, muted text and card, written once** (kit/CHANGELOG.md).
+
+### What's new
+
+- `npm run ui:inventory` (tools/ui-inventory.ts, ported from GamerNexus's): every component of the Steward's page and the kit's, how big each is, which renders which, and the markup written out by hand more than once. It writes docs/UI-INVENTORY.md and docs/UI-INVENTORY.html, a page to open from disk; `--tree` prints the render tree, `--ci` fails on a component past its size ceiling.
+
+### What changed
+
+- The Steward's page uses the kit's new `badge`, `muted` and `card` in place of its own copies. It looks the same.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.9.2
 
 **Kit 2.19.0: every release's notes say what it brings, from the repository's CHANGELOG.md** (kit/CHANGELOG.md, kit/spec/RELEASE-NOTES.md).

@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "private": true,
   "license": "UNLICENSED",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
@@ -29,6 +29,7 @@
     "test:dotnet": "node kit/test/dotnet.ts",
     "test:dotnet-publish": "node kit/test/dotnet.ts --publish",
     "typecheck": "tsc -p .",
+    "ui:inventory": "node tools/ui-inventory.ts",
     "release": "node tools/kit.ts --from kit && node src/kit/release.ts",
     "kit-release": "node tools/kit-release.ts",
     "core-types": "node kit/test/core-types.ts --write",

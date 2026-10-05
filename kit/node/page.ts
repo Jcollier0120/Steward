@@ -6,10 +6,10 @@ import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
 import { roundTimes } from './schedule.ts';
 import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
+import { badge, esc, muted, postButton } from './html.ts';
 
-/** Text made safe for HTML. */
-export const esc = (s: unknown) =>
-  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** The page's vocabulary (html.ts): esc, and the kit's badge, muted text, card and the button the page script POSTs from. */
+export { badge, card, esc, muted, postButton, type PostButton } from './html.ts';
 
 /** "3 minutes ago", for a time the page shows. */
 export function ago(iso: string | null | undefined, now = Date.now()): string {
@@ -42,7 +42,7 @@ export function until(at: number | string | null | undefined, now = Date.now()):
  * accelerators says nothing of where, and came from the NPU.
  */
 export const unverified = (text: string, from?: AcceleratorRef | null) =>
-  `<span class="note"><span class="badge npu" title="Written by a local model on ${esc(theAccelerator(from))}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
+  `<span class="note">${badge('npu', noteLabel(from), `Written by a local model on ${theAccelerator(from)}. Check it against the facts beside it.`)} ${esc(text)}</span>`;
 
 /**
  * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js
@@ -50,7 +50,7 @@ export const unverified = (text: string, from?: AcceleratorRef | null) =>
  * GET /api/settings, with every setting in the agent's schema, and saves it with POST.
  */
 export const settingsPanel = () =>
-  `<div class="card sf-panel" data-settings-panel><p class="muted">Loading the settings…</p><noscript><p>The settings need JavaScript, which this page uses only for its buttons.</p></noscript></div>`;
+  `<div class="card sf-panel" data-settings-panel>${muted('Loading the settings…', 'p')}<noscript><p>The settings need JavaScript, which this page uses only for its buttons.</p></noscript></div>`;
 
 /** The title bar's icons, as Heiward's and Manor's draw them: 16 × 16, in the text's colour. */
 const icon = (paths: string, cls = '') =>
@@ -185,7 +185,20 @@ ${workSection()}
 </main>
 <footer>${esc(APP.name)} ${esc(APP.version)} · this PC only · its files are in <code>${esc(dataDir)}</code></footer>
 <script>
-const TOKEN = ${JSON.stringify(o.token)};
+${pageScript(o.token, refresh, themeKey)}
+</script>
+<script src="/settings.js" defer></script>
+</body>
+</html>`;
+}
+
+/**
+ * The page's script, at the end of its body: the buttons (data-post), the title bar that stays at the top, Run now in
+ * the title bar, the Theme menu, Settings as a page of its own, and the refresh while busy. Its own function, so
+ * page() is the page's markup and this its behaviour.
+ */
+function pageScript(token: string, refresh: number, themeKey: string): string {
+  return `const TOKEN = ${JSON.stringify(token)};
 const REFRESH = ${refresh};
 function fields(form) {
   const out = {};
@@ -331,11 +344,7 @@ document.addEventListener('click', (e) => {
 if (REFRESH) setInterval(() => {
   const busy = document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
   if (!busy) location.reload();
-}, REFRESH * 1000);
-</script>
-<script src="/settings.js" defer></script>
-</body>
-</html>`;
+}, REFRESH * 1000);`;
 }
 
 /**
@@ -361,7 +370,7 @@ export function developerOptionsNote(setBy: ManorLink | null): string {
 function offDuty(d: Duty): string {
   if (d.onDuty) return '';
   return `<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty</strong> since ${esc(ago(d.since))}: its scheduled rounds are paused. Run now still works.</span>
-<button class="quiet" data-post="/api/duty" data-body='{"onDuty":true}'>Back on duty</button></div></div>
+${postButton('Back on duty', '/api/duty', { quiet: true, body: { onDuty: true } })}</div></div>
 `;
 }
 
