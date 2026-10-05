@@ -1,11 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { run as realRun, type Ran, type Runner } from '../src/run.ts';
 import type { Employee, Settings } from '../src/settings.ts';
 import type { Ctx } from '../src/stages/common.ts';
 
 /** Stand-ins for the world outside the Steward: real git, a scripted gh. */
+
+// The Bailiff's install decides whether the Wright's drafts wait for its approval (settings.ts's bailiffInstalled): a test
+// never sees this PC's. One that wants it installed sets BAILIFF_HOME itself.
+process.env.BAILIFF_HOME ??= path.join(os.tmpdir(), 'steward-test-no-bailiff');
 
 export const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
@@ -82,7 +87,7 @@ export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
   const lines: string[] = [];
-  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true };
+  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', bailiffUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true };
   return {
     settings,
     run: o.run,

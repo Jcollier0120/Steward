@@ -24,6 +24,8 @@ import type { StageResult } from './stages/common.ts';
  *   for an hour;
  * - a problem the Surveyor has reported for six hours (Settings: problemHours); the Surveyor's page down, for two;
  * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two;
+ * - the Bailiff unable to review (Claude Code not signed in), or a review of its failing twice, at once; its page down,
+ *   for two (the Wright's drafts wait for it).
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
@@ -300,6 +302,24 @@ export function wrightConditions(work: unknown): Condition[] {
     });
 }
 
+/** From the Bailiff's /api/reviews: reviews it can't do, at once; or no answer at all. */
+export function bailiffConditions(reviews: unknown): Condition[] {
+  const why = noAnswer(reviews);
+  if (why !== null) {
+    return [{ id: 'bailiff:down', who: 'bailiff', title: "The Bailiff's page doesn't answer, so the Wright's drafts wait for its review", detail: [why], afterMs: 2 * HOUR }];
+  }
+  const needs = (reviews as any).needsYou;
+  return (Array.isArray(needs) ? needs : [])
+    .filter((n: any) => n && typeof n.id === 'string' && typeof n.repo === 'string')
+    .map((n: any) => {
+      const url = typeof n.url === 'string' ? n.url : undefined;
+      // Claude Code can't be used on this PC (not there, or not signed in): its title says which.
+      if (n.kind === 'blocked') return { id: `bailiff:${n.id}`, who: 'bailiff', title: `The Bailiff can't review: ${String(n.title)}`, detail: ["The Wright's drafts wait, labelled bailiff:waiting; each round tries again."], url, afterMs: 0 };
+      const where = `${String(n.repo).split('/')[1]} #${n.number}`;
+      return { id: `bailiff:${n.id}`, who: 'bailiff', title: `The Bailiff's review of ${where} failed twice: ${String(n.title)}`, detail: ['Its request log says why. A new commit is reviewed again; or review it yourself, and mark it ready.'], url, afterMs: 0 };
+    });
+}
+
 /**
  * From Reeve's GET /api/alerts: one condition per open alert of his jobs, at once, as he gives it; and the jobs they are
  * of. An older Reeve without the endpoint (404), or one whose page doesn't answer, is quiet here: no alarm about the
@@ -402,6 +422,7 @@ export async function watchAlarms(
   if (manor) conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
   if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
   if (a.wrightUrl) conditions.push(...wrightConditions(await get(new URL('/api/work', a.wrightUrl).href)));
+  if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
   let reeveJobs: Set<string> | null = null;
   if (a.reeveUrl && (deps.reeveInstalled ?? reeveInstalled)()) {
     const r = reeveConditions(await get(new URL('/api/alerts', a.reeveUrl).href));

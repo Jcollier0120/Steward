@@ -10,6 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-settings-'));
 process.env.STEWARD_HOME = home;
 // The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, loadSettings, normalizeSettings } = await import('../src/settings.ts');
@@ -111,4 +112,25 @@ test("the Wright is ours alone: an employee, and its page read for alarms, only 
   assert.equal(normalizeSettings({}).settings.alarms.wrightUrl, WRIGHT_URL);
   assert.equal(normalizeSettings({ alarms: { wrightUrl: '' } }).settings.alarms.wrightUrl, '', 'Settings still decide when they say');
   assert.ok(!normalizeSettings({ employees: [{ id: 'porter' }] }).settings.employees.some((e) => e.id === 'wright'), 'and when they name the employees');
+});
+test("the Bailiff is ours alone too: an employee, and its page read for alarms, only where it is installed", async () => {
+  const { mkdirSync, rmSync: rm } = await import('node:fs');
+  const { defaultEmployees, bailiffInstalled, BAILIFF_URL } = await import('../src/settings.ts');
+  assert.ok(!DEFAULT_SETTINGS.employees.some((e) => e.id === 'bailiff'), "not among anyone else's employees");
+  assert.equal(DEFAULT_SETTINGS.alarms.bailiffUrl, '');
+  assert.equal(bailiffInstalled(), false);
+  assert.ok(!defaultEmployees().some((e) => e.id === 'bailiff'));
+  assert.equal(normalizeSettings({}).settings.alarms.bailiffUrl, '', 'not installed: not read');
+  mkdirSync(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true });
+  try {
+    assert.equal(bailiffInstalled(), true);
+    const b = defaultEmployees().find((e) => e.id === 'bailiff')!;
+    assert.deepEqual([b.repo, b.checkout, b.installed], ['Jcollier0120/Bailiff', 'C:\\Projects\\Bailiff', '%USERPROFILE%\\.bailiff\\app']);
+    assert.equal(normalizeSettings({}).settings.employees.at(-1)!.id, 'bailiff', 'installed: taken on');
+    assert.equal(normalizeSettings({}).settings.alarms.bailiffUrl, BAILIFF_URL);
+    assert.equal(normalizeSettings({ alarms: { bailiffUrl: '' } }).settings.alarms.bailiffUrl, '', 'Settings still decide when they say');
+    assert.ok(!normalizeSettings({ employees: [{ id: 'porter' }] }).settings.employees.some((e) => e.id === 'bailiff'), 'and when they name the employees');
+  } finally {
+    rm(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true, force: true });
+  }
 });
