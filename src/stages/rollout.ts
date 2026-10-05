@@ -158,7 +158,14 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     ctx.log(`rollout: kit ${kit} for ${plan.bump.map((b) => b.employee.name).join(', ')}`);
     const heads = new Map(plan.bump.map((b) => [b.employee.id, b.head]));
     const at = new Date().toISOString();
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit });
+    // The kit's changelog: each bump's entry in the employee's own, and its PR's body.
+    let changelog: string | null = null;
+    try {
+      changelog = await o.changelog(kit);
+    } catch {
+      // The entry names the kit alone, and the PR's body points at the kit's changelog.
+    }
+    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
       // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.
@@ -167,12 +174,6 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     }
     for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
     if (ready.length) {
-      let changelog: string | null = null;
-      try {
-        changelog = await o.changelog(kit);
-      } catch {
-        // The PR's body points at the kit's changelog instead.
-      }
       const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog });
       for (const p of pushed) {
         const b = ready.find((r) => r.id === p.id)!;

@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.2
+
+**Kit 2.19.0: every release's notes say what it brings, from the repository's CHANGELOG.md** (kit/CHANGELOG.md, kit/spec/RELEASE-NOTES.md).
+
+### What's new
+
+- A kit bump writes the employee's changelog entry for the version it raises, at the top of its CHANGELOG.md (starting one when it has none): the kit it now carries, each kit version's headline since the one it pinned, and those kit entries' "Before you update", else that updating needs nothing. So the release a bump leads to has notes that say what changed.
+- The Steward's own releases have the same notes: this file's entry for the version.
+
+### What changed
+
+- A manual Bump reads the kit's changelog too, as the round's rollout does, for that entry.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.8.23
 
 **Kit 2.17.0: releases are built, and published in the public Jcollier0120/Manor-releases** (kit/CHANGELOG.md, kit/spec/RELEASES.md).

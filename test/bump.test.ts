@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { bumpBranch } from '../src/stages/common.ts';
-import { bumpOne, repin } from '../src/stages/bump.ts';
+import { bumpOne, kitBumpEntry, repin } from '../src/stages/bump.ts';
 import { prBody, pushOne } from '../src/stages/push.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
@@ -38,8 +38,13 @@ test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json and t
   assert.equal(res.version, '0.4.1');
   const branch = bumpBranch('1.0.1');
   assert.equal(branch, 'steward/kit-1.0.1');
-  // The commit: exactly kit.json and the three version files.
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['kit.json', 'package-lock.json', 'package.json', 'src/app.ts']);
+  // The commit: exactly kit.json, the three version files and the changelog, started with the new version's entry.
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts']);
+  const log = sh(s.checkout, 'show', `${branch}:CHANGELOG.md`).replace(/\r\n/g, '\n');
+  assert.match(log, /^# Fake's changelog\n/);
+  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
+  assert.match(log, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: see its changelog/);
+  assert.match(log, /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.equal(sh(s.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
   assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.1'/);
   assert.equal(JSON.parse(sh(s.checkout, 'show', `${branch}:package-lock.json`)).packages[''].version, '0.4.1');
@@ -168,7 +173,7 @@ test("Reeve's own files at the old kit's paths don't stop its bump", async () =>
   const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
   assert.equal(res.version, '0.3.1');
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', 'steward/kit-1.0.1').split('\n').sort(), ['kit.json', 'package-lock.json', 'package.json', 'src/mcp.ts']);
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', 'steward/kit-1.0.1').split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/mcp.ts']);
   for (const p of own) assert.equal(sh(s.checkout, 'show', `steward/kit-1.0.1:${p}`), `// Reeve's own ${p}`, `${p} is still there`);
 });
 
@@ -179,7 +184,7 @@ test("tools/kit.ts rides with the pin: an agent's old one is replaced with the S
   assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
   assert.match(res.message, /tools\/kit\.ts updated/);
   const branch = 'steward/kit-1.0.1';
-  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['kit.json', 'package-lock.json', 'package.json', 'src/app.ts', 'tools/kit.ts']);
+  assert.deepEqual(sh(s.checkout, 'diff', '--name-only', 'origin/main', branch).split('\n').sort(), ['CHANGELOG.md', 'kit.json', 'package-lock.json', 'package.json', 'src/app.ts', 'tools/kit.ts']);
   assert.equal(sh(s.checkout, 'show', `${branch}:tools/kit.ts`), kitTool.replace(/\r\n/g, '\n').trimEnd(), "the Steward's own, byte for byte (LF)");
   assert.match(sh(s.checkout, 'log', '-1', '--format=%b', branch), /tools\/kit\.ts is the Steward's\./);
   assert.equal(readFileSync(path.join(s.work, 'src', 'kit', 'VERSION'), 'utf8').trim(), '1.0.1', 'the new tool filled the kit');
@@ -214,4 +219,46 @@ test('kit.json keeps its parts and anything else when its pin moves; the PR body
   const body = prBody({ kit: '1.1.0', from: '1.0.0', version: '0.4.2', changelog: null, files: ['kit.json', 'package.json'], fill: 'node tools/kit.ts' });
   assert.match(body, /`node tools\/kit\.ts` fills it from the kit release kit-v1\.1\.0/);
   assert.match(body, /See the Steward's kit\/CHANGELOG\.md for 1\.1\.0/);
+});
+
+test("a bump's changelog entry: each kit version's headline since the one it pinned, and their Before you update", () => {
+  const kitLog = [
+    '## 1.0.3',
+    '',
+    '**Pages use the whole window.** More.',
+    '',
+    '## 1.0.2',
+    '',
+    '**Offline is waited out.** More.',
+    '',
+    '### Before you update',
+    '',
+    '- Close its page first.',
+    '',
+    '## 1.0.1',
+    '',
+    '**Already had.**',
+    '',
+  ].join('\n');
+  const e = kitBumpEntry({ version: '0.4.7', from: '1.0.1', kit: '1.0.3', changelog: kitLog });
+  assert.equal(
+    e,
+    [
+      '## 0.4.7',
+      '',
+      "**It carries the Steward's kit 1.0.3: the parts every agent of the manor shares.**",
+      '',
+      '### What changed',
+      '',
+      "- The Steward's kit 1.0.3: Pages use the whole window.",
+      "- The Steward's kit 1.0.2: Offline is waited out.",
+      '',
+      '### Before you update',
+      '',
+      '- Close its page first.',
+    ].join('\n'),
+  );
+  // A kit entry whose Before you update is "Nothing" adds nothing to it.
+  assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.2', kit: '1.0.3', changelog: kitLog.replace('**Pages use the whole window.** More.', '**Pages.**\n\n### Before you update\n\nNothing: it updates itself as usual.') }), /### Before you update\n\nNothing: it updates itself as usual\.$/);
+  assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.3', kit: '1.0.1', changelog: kitLog }), /a step back[\s\S]*- A step back to the Steward's kit 1\.0\.1, from 1\.0\.3\./);
 });
