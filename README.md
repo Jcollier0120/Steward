@@ -84,7 +84,7 @@ Its `src\kit\` is git-ignored and filled by `tools/kit.ts`, the one shared file 
 3. `%USERPROFILE%\.steward\kits\<version>`, the cache.
 4. The kit release: `https://github.com/Jcollier0120/Steward/releases/download/kit-v<version>/kit-<version>.zip` and its `SHA256SUMS.txt`, over plain HTTPS with no sign-in (the repository is public), or through `gh release download` if that fails. The zip is checked against SHA256SUMS.txt, unpacked with Windows' own tar.exe, and kept in the cache.
 
-An agent's release (`src/kit/release.ts`, `npm run release`) carries `src\kit\`, with `kit.json` and `tools/kit.ts`, and its release.json says `"kit": "2.0.0"`. It refuses to build when `src\kit\VERSION` isn't the pinned version. So an installed agent needs neither the Steward nor GitHub.
+An agent's release (`src/kit/release.ts`, `npm run release`) carries `src\kit\`, with `kit.json` and `tools/kit.ts`, and its release.json says `"kit": "2.0.0"`. It refuses to build when `src\kit\VERSION` isn't the pinned version. So an installed agent needs neither the Steward nor GitHub. An agent that announces itself to every Manor (Manor's "New agents, announced on GitHub") keeps `manor-agent.json` at its root: the release copies it beside the zip, lists it in SHA256SUMS.txt and publishes it with the zip, and refuses to build when its `agent.id` isn't the agent's, its `release.repo` isn't origin's, or it isn't otherwise one Manor would take (a Node release, installed in `%USERPROFILE%\.<id>\app`).
 
 **A fresh clone of a hire builds** with `npm install`, `npm run kit` and `npm test`. `npm run kit` needs one of the sources above: the kit release on GitHub (no sign-in once this repository is public; `gh`, signed in, while it's private), or a Steward checkout beside the hire.
 

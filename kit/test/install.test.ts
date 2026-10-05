@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -15,7 +17,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
 const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
-const { kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl } = await import('./fixture/src/kit/release.ts');
+const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
 let n = 0;
@@ -372,4 +374,108 @@ test('a release from uncommitted changes is versioned +dev.<commit>; the repo co
   assert.equal(repoFromUrl('https://github.com/Jcollier0120/Porter'), 'Jcollier0120/Porter');
   assert.equal(repoFromUrl('git@github.com:Jcollier0120/Porter.git'), 'Jcollier0120/Porter');
   assert.equal(repoFromUrl('https://example.com/x/y.git'), null);
+});
+
+/** A manor-agent.json Manor would take, for the fixture's agent from Jcollier0120/Fixture. */
+const announcement = (agent: Record<string, unknown> = {}, more: Record<string, unknown> = {}) => ({
+  agent: {
+    id: APP.id, name: APP.name, role: 'Keeps a fixture', fills: ['fixture'],
+    paths: { app: [`%USERPROFILE%\\.${APP.id}\\app`] },
+    release: { repo: 'Jcollier0120/Fixture', kind: 'node' },
+    ...agent,
+  },
+  ...more,
+});
+
+test("a release's manor-agent.json is checked as Manor checks it: this agent, a Node release from origin's repository, installed in .<id>\\app", () => {
+  const repo = 'Jcollier0120/Fixture';
+  assert.equal(checkAnnouncement(announcement(), APP.id, repo), null);
+  assert.equal(checkAnnouncement(announcement({ release: { repo: 'jcollier0120/fixture', kind: 'node' } }), APP.id, repo), null, 'the repository, in any case');
+  assert.equal(checkAnnouncement(announcement({}, { roles: [{ id: 'fixture', name: 'Fixture' }] }), APP.id, repo), null, 'with the roles it brings');
+
+  assert.match(checkAnnouncement(announcement({ release: { repo: 'Jcollier0120/Other', kind: 'node' } }), APP.id, repo)!, /names Jcollier0120\/Other as its "release\.repo", but origin is Jcollier0120\/Fixture/);
+  assert.match(checkAnnouncement(announcement({ release: { kind: 'node' } }), APP.id, repo)!, /names no repository/);
+  assert.match(checkAnnouncement(announcement(), APP.id, null)!, /origin isn't a GitHub repository/);
+  assert.match(checkAnnouncement(announcement({ id: 'someone-else' }), APP.id, repo)!, new RegExp(`agent is "someone-else", but this release is "${APP.id}" \\(release\\.json's id\\)`));
+  assert.match(checkAnnouncement(announcement({ id: undefined }), APP.id, repo)!, /agent is null/);
+  assert.match(checkAnnouncement(announcement({ release: { repo, kind: 'heiward' } }), APP.id, repo)!, /"release\.kind" is "heiward"/);
+  assert.match(checkAnnouncement(announcement({ paths: { app: ['C:\\Elsewhere\\app'] } }), APP.id, repo)!, /"paths\.app" should be/);
+  assert.match(checkAnnouncement(announcement({ paths: {} }), APP.id, repo)!, /"paths\.app" should be/);
+  assert.match(checkAnnouncement(announcement({}, { roles: {} }), APP.id, repo)!, /"roles" should be a list/);
+  assert.match(checkAnnouncement(announcement({}, { roles: ['fixture'] }), APP.id, repo)!, /"roles" should be a list/);
+  assert.match(checkAnnouncement({ agents: [] }, APP.id, repo)!, /should give its "agent"/);
+  assert.match(checkAnnouncement([], APP.id, repo)!, /should be an object/);
+});
+
+test("manor-agent.json at a checkout's root is published with the release; none is nothing; a wrong or broken one stops the build", () => {
+  const dir = path.join(tmp, 'announces');
+  mkdirSync(dir, { recursive: true });
+  assert.equal(announcementOf(dir, APP.id, 'Jcollier0120/Fixture'), null, 'no manor-agent.json: the release is as before');
+
+  writeFileSync(path.join(dir, ANNOUNCEMENT), '\uFEFF' + JSON.stringify(announcement(), null, 2));
+  assert.deepEqual(announcementOf(dir, APP.id, 'Jcollier0120/Fixture'), { file: path.join(dir, 'manor-agent.json') });
+  assert.match((announcementOf(dir, APP.id, 'Jcollier0120/Fork') as { error: string }).error, /but origin is Jcollier0120\/Fork.*Fix it, or remove it, and release again\.$/);
+  assert.match((announcementOf(dir, 'other', 'Jcollier0120/Fixture') as { error: string }).error, /but this release is "other"/);
+
+  writeFileSync(path.join(dir, ANNOUNCEMENT), '{ "agent": ');
+  assert.match((announcementOf(dir, APP.id, 'Jcollier0120/Fixture') as { error: string }).error, /^manor-agent\.json isn't JSON/);
+});
+
+test('SHA256SUMS.txt lists the zip, and manor-agent.json after it, as sha256sum writes them', () => {
+  assert.equal(sumsText([{ name: 'Fixture-1.0.0.zip', hash: 'ab'.repeat(32) }]), `${'ab'.repeat(32)}  Fixture-1.0.0.zip\n`);
+  assert.equal(
+    sumsText([{ name: 'Fixture-1.0.0.zip', hash: 'ab'.repeat(32) }, { name: ANNOUNCEMENT, hash: 'cd'.repeat(32) }]),
+    `${'ab'.repeat(32)}  Fixture-1.0.0.zip\n${'cd'.repeat(32)}  manor-agent.json\n`,
+  );
+});
+
+test('npm run release copies manor-agent.json beside the zip and lists it in SHA256SUMS.txt; a mismatched one builds nothing', { skip: process.platform !== 'win32' && 'needs Windows tar.exe' }, () => {
+  // A copy of the fixture as an agent's own repository, from Jcollier0120/Fixture, committed, its kit filled.
+  const repo = path.join(tmp, 'fixture-repo');
+  cpSync(appRoot, repo, { recursive: true });
+  writeFileSync(path.join(repo, 'kit.json'), JSON.stringify({ kit: readFileSync(path.join(appRoot, 'src', 'kit', 'VERSION'), 'utf8').trim() }) + '\n');
+  writeFileSync(path.join(repo, '.gitignore'), 'artifacts/\nsrc/kit/\n');
+  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement(), null, 2) + '\n');
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  git('init', '-q');
+  git('remote', 'add', 'origin', 'https://github.com/Jcollier0120/Fixture.git');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'fixture');
+  const release = () => spawnSync(process.execPath, [path.join(repo, 'src', 'kit', 'release.ts')], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  const out = path.join(repo, 'artifacts', APP.id);
+  const sha = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
+
+  let r = release();
+  assert.equal(r.status, 0, r.stderr);
+  const zip = `${APP.name}-${pkg.version}.zip`;
+  assert.equal(readFileSync(path.join(out, ANNOUNCEMENT), 'utf8'), readFileSync(path.join(repo, ANNOUNCEMENT), 'utf8'), 'the checkout\'s file, as committed');
+  assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n${sha(path.join(out, ANNOUNCEMENT))}  ${ANNOUNCEMENT}\n`);
+  assert.match(r.stdout, /manor-agent\.json, announcing/);
+  assert.doesNotMatch(r.stdout, /with uncommitted changes/);
+
+  // A change to it makes the release dirty: it is published, so it must be the commit's.
+  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ role: 'Keeps a fixture well' })) + '\n');
+  r = release();
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /with uncommitted changes/);
+
+  // Another repository's, or another agent's: refused, and the last build's files are left as they were.
+  const before = readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8');
+  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ release: { repo: 'Jcollier0120/Other', kind: 'node' } })));
+  r = release();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /names Jcollier0120\/Other as its "release\.repo", but origin is Jcollier0120\/Fixture/);
+  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ id: 'other' })));
+  r = release();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /agent is "other", but this release is/);
+  assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), before);
+
+  // None: the zip alone, and an earlier build's manor-agent.json is gone.
+  rmSync(path.join(repo, ANNOUNCEMENT));
+  git('commit', '-q', '-am', 'no announcement');
+  r = release();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(path.join(out, ANNOUNCEMENT)));
+  assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n`);
 });

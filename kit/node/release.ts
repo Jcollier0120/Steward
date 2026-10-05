@@ -6,6 +6,11 @@
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
  *   npm run release -- --publish     builds it, then makes the GitHub release v<version> with both files
  *
+ * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
+ * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
+ * SHA256SUMS.txt (Manor takes it only when it's listed there), and publishes it with the zip; and refuses to
+ * build when it names another repository than origin's, or another agent than this one.
+ *
  * npm run release fills src\kit\ first (tools\kit.ts), at the version kit.json pins. The zip holds what
  * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
  * README.md and release.json, which names the kit; and kit.json and tools\kit.ts, so the copy can fill
@@ -53,6 +58,58 @@ export function kitOf(dir: string): { kit: string } | { error: string } {
   return { kit: have };
 }
 
+/** The release asset an agent announces itself to every Manor with (Manor's src/announced.ts). */
+export const ANNOUNCEMENT = 'manor-agent.json';
+
+/**
+ * What's wrong with a manor-agent.json, as Manor would refuse it (its src/announced.ts, and install.ts's
+ * announcedHire), or null when Manor can take it: an object with an "agent" whose id is this agent's, a Node release
+ * from `repo` (origin's, owner/name), installed at %USERPROFILE%\.<id>\app; and "roles", when given, a list of objects.
+ */
+export function checkAnnouncement(json: unknown, id: string, repo: string | null): string | null {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return `${ANNOUNCEMENT} should be an object with an "agent".`;
+  const j = json as Record<string, unknown>;
+  const agent = j.agent as Record<string, unknown> | undefined;
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return `${ANNOUNCEMENT} should give its "agent": its entry, as Manor's staff.json has one.`;
+  if (agent.id !== id) return `${ANNOUNCEMENT}'s agent is ${JSON.stringify(agent.id ?? null)}, but this release is ${JSON.stringify(id)} (release.json's id).`;
+  const release = agent.release as Record<string, unknown> | undefined;
+  const named = typeof release?.repo === 'string' ? release.repo : null;
+  if (!repo) return `${ANNOUNCEMENT} can't be checked: origin isn't a GitHub repository, and its "release.repo" must be the one it's published from.`;
+  if (named?.toLowerCase() !== repo.toLowerCase()) return `${ANNOUNCEMENT} names ${named ?? 'no repository'} as its "release.repo", but origin is ${repo}, where it would be published.`;
+  if (release?.kind !== 'node') return `${ANNOUNCEMENT}'s "release.kind" is ${JSON.stringify(release?.kind ?? null)}: Manor takes an announced agent only as a Node release ("node").`;
+  const where = `%USERPROFILE%\\.${id}\\app`;
+  const app = (agent.paths as Record<string, unknown> | undefined)?.app;
+  if (!Array.isArray(app) || app.length !== 1 || String(app[0]).toLowerCase() !== where.toLowerCase()) return `${ANNOUNCEMENT}'s "paths.app" should be ${JSON.stringify([where])}, where its installer puts it.`;
+  const roles = j.roles;
+  if (roles !== undefined && (!Array.isArray(roles) || !roles.every((r) => r && typeof r === 'object' && !Array.isArray(r)))) return `${ANNOUNCEMENT}'s "roles" should be a list of roles, as Manor's roles.json has them.`;
+  return null;
+}
+
+/**
+ * The checkout's manor-agent.json, checked (checkAnnouncement): null when it has none, its path when Manor can take
+ * it, else an error in words.
+ */
+export function announcementOf(dir: string, id: string, repo: string | null): { file: string } | { error: string } | null {
+  const file = path.join(dir, ANNOUNCEMENT);
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text.replace(/^﻿/, ''));
+  } catch (e) {
+    return { error: `${ANNOUNCEMENT} isn't JSON: ${(e as Error).message}. Fix it, or remove it, and release again.` };
+  }
+  const wrong = checkAnnouncement(json, id, repo);
+  return wrong ? { error: `${wrong} Fix it, or remove it, and release again.` } : { file };
+}
+
+/** SHA256SUMS.txt's text: a line per file, "<sha256>  <name>", as sha256sum writes it. */
+export const sumsText = (files: { name: string; hash: string }[]) => files.map((f) => `${f.hash}  ${f.name}\n`).join('');
+
 const isTest = (f: string) => /\.(test|spec)\.[cm]?[jt]s$/.test(f);
 
 /** Picks the release's files from a repo's (paths relative to its root, either slash). */
@@ -86,21 +143,40 @@ export function repoFromUrl(url: string): string | null {
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
 
+/** origin's GitHub repository (owner/name), or null when there's no origin or it isn't GitHub. */
+function originRepo(): string | null {
+  try {
+    return repoFromUrl(git('remote', 'get-url', 'origin'));
+  } catch {
+    return null;
+  }
+}
+
 function sha256(file: string): string {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
-/** Stages the release in a temporary folder, zips it, and writes its SHA256SUMS.txt. */
-function build(): { release: Release; zip: string; sums: string } {
+interface Built {
+  release: Release;
+  zip: string;
+  sums: string;
+  /** manor-agent.json beside the zip, when the checkout announces the agent. */
+  announcement: string | null;
+}
+
+/** Stages the release in a temporary folder, zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
+function build(): Built {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   if (pkg.version !== APP.version) throw new Error(`package.json says ${pkg.version} but src/app.ts says ${APP.version}; make them agree first.`);
   const kit = kitOf(root);
   if ('error' in kit) throw new Error(kit.error);
+  const announced = announcementOf(root, APP.id, originRepo());
+  if (announced && 'error' in announced) throw new Error(announced.error);
   const commit = git('rev-parse', '--short', 'HEAD');
   // Dirty means what goes into the zip isn't the commit's: a change or a new file there (src\kit\ is
   // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
-  // scratch files) don't count.
-  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES) !== '';
+  // scratch files) don't count. manor-agent.json, published beside the zip, does.
+  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit };
 
   const stage = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-release-`));
@@ -118,12 +194,17 @@ function build(): { release: Release; zip: string; sums: string } {
     const name = `${APP.name}-${release.version}.zip`;
     const zip = path.join(outDir, name);
     execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', stage, ...readdirSync(stage).sort()], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'] });
+    const announcement = path.join(outDir, ANNOUNCEMENT);
+    rmSync(announcement, { force: true });
+    if (announced) cpSync(announced.file, announcement);
     const sums = path.join(outDir, 'SHA256SUMS.txt');
     const hash = sha256(zip);
-    writeFileSync(sums, `${hash}  ${name}\n`);
+    const listed = [{ name, hash }, ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
+    writeFileSync(sums, sumsText(listed));
     console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
-    return { release, zip, sums };
+    if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
+    return { release, zip, sums, announcement: announced ? announcement : null };
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
@@ -146,8 +227,8 @@ function ghExe(): string {
   return 'C:\\tools\\gh\\bin\\gh.exe';
 }
 
-/** Makes the GitHub release v<version> from a clean, pushed HEAD, with the zip and SHA256SUMS.txt. */
-function publish(b: { release: Release; zip: string; sums: string }): number {
+/** Makes the GitHub release v<version> from a clean, pushed HEAD, with the zip and SHA256SUMS.txt (and manor-agent.json, when there is one). */
+function publish(b: Built): number {
   const { release } = b;
   const tag = `v${release.version}`;
   if (release.dirty) {
@@ -158,7 +239,7 @@ function publish(b: { release: Release; zip: string; sums: string }): number {
     console.error(`Not published: ${release.commit} isn't on origin yet. Push it first.`);
     return 1;
   }
-  const repo = repoFromUrl(git('remote', 'get-url', 'origin'));
+  const repo = originRepo();
   if (!repo) {
     console.error("Not published: origin isn't a GitHub repository.");
     return 1;
@@ -174,7 +255,7 @@ function publish(b: { release: Release; zip: string; sums: string }): number {
     return 1;
   }
   const notes = `${APP.name} ${release.version}, built from ${release.commit}, with the Steward's kit ${release.kit}. Unpack the zip anywhere and run: node src\\cli.ts install (Node 22.18 or later).`;
-  const r = spawnSync(gh, ['release', 'create', tag, b.zip, b.sums, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
+  const r = spawnSync(gh, ['release', 'create', tag, b.zip, b.sums, ...(b.announcement ? [b.announcement] : []), '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes', notes], {
     stdio: 'inherit',
     windowsHide: true,
   });
@@ -188,7 +269,7 @@ function main(args: string[]): number {
     console.error(`release: unknown ${unknown.join(' ')}\nUsage: npm run release [-- --install [--no-start] [--dry-run]] [-- --publish]`);
     return 2;
   }
-  let built: ReturnType<typeof build>;
+  let built: Built;
   try {
     built = build();
   } catch (e) {
