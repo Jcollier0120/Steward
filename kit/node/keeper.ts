@@ -61,7 +61,7 @@ export const smithHome = (env: NodeJS.ProcessEnv = process.env) => env.SMITH_HOM
 export const smithInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(smithHome(env), 'app'));
 
 /** The Smith's page, and its Settings, where the accelerators are set up and changed. */
-export const SMITH_URL = 'http://smith.localhost:19999/';
+export const SMITH_URL = 'http://smith.localhost:20202/';
 export const SMITH_SETTINGS_URL = `${SMITH_URL}#/settings`;
 
 /** Who keeps the model servers on this PC: the Smith where it is installed, else Reeve. */
