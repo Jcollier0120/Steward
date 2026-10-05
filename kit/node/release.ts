@@ -2,7 +2,7 @@
 /**
  * Builds this agent's release, as every Node agent of Manor's does (Manor's docs/INSTALLING.md, "Releases"):
  *
- *   npm run release                  artifacts\<id>\<Name>-<version>.zip and artifacts\<id>\SHA256SUMS.txt
+ *   npm run release                  artifacts\<id>\<Name, no spaces>-<version>.zip and artifacts\<id>\SHA256SUMS.txt
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
  *   npm run release -- --publish     builds it, then makes the GitHub release v<version> with both files
  *
@@ -107,6 +107,12 @@ export function announcementOf(dir: string, id: string, repo: string | null): { 
   return wrong ? { error: `${wrong} Fix it, or remove it, and release again.` } : { file };
 }
 
+/**
+ * The release zip's name: its name without spaces, then its version (DeveloperHerald-0.5.3.zip). GitHub stores an
+ * asset's space as a dot, so a name with one would no longer match SHA256SUMS.txt, and Manor looks for it this way.
+ */
+export const zipName = (name: string, version: string) => `${name.replaceAll(' ', '')}-${version}.zip`;
+
 /** SHA256SUMS.txt's text: a line per file, "<sha256>  <name>", as sha256sum writes it. */
 export const sumsText = (files: { name: string; hash: string }[]) => files.map((f) => `${f.hash}  ${f.name}\n`).join('');
 
@@ -190,8 +196,9 @@ function build(): Built {
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
-    for (const f of readdirSync(outDir)) if (f.startsWith(`${APP.name}-`) && f.endsWith('.zip')) rmSync(path.join(outDir, f));
-    const name = `${APP.name}-${release.version}.zip`;
+    const prefix = zipName(APP.name, '');
+    for (const f of readdirSync(outDir)) if (f.startsWith(prefix) && f.endsWith('.zip')) rmSync(path.join(outDir, f));
+    const name = zipName(APP.name, release.version);
     const zip = path.join(outDir, name);
     execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', stage, ...readdirSync(stage).sort()], { windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'] });
     const announcement = path.join(outDir, ANNOUNCEMENT);
