@@ -328,16 +328,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 
 ## Manor entry
 
-```json
-{ "id": "steward", "name": "Steward", "role": "Keeps the essentials every agent shares, and brings each update to all of them at once",
-  "description": "Keeps the kit the agents share in one place, and rolls each kit version out to every employee: a bump, its PR, the merge and the release, each one stage, reported per employee.",
-  "fills": ["steward"], "app": "steward",
-  "home": "http://steward.localhost:19494/", "ping": "http://127.0.0.1:19494/api/ping",
-  "icon": "%USERPROFILE%\\.steward\\app\\art\\icon.svg",
-  "paths": { "app": ["%USERPROFILE%\\.steward\\app"], "node": ["C:\\tools\\node-v22.23.3-win-arm64\\node.exe", "%ProgramFiles%\\nodejs\\node.exe"] },
-  "cwd": "{app}",
-  "commands": { "start": ["{node}", "{app}\\src\\cli.ts", "start"], "stop": ["{node}", "{app}\\src\\cli.ts", "stop"], "status": ["{node}", "{app}\\src\\cli.ts", "status", "--json"], "open": ["{node}", "{app}\\src\\cli.ts", "open"] } }
-```
+[manor-agent.json](manor-agent.json) is its entry, as Manor's staff.json has it, and its role, as Manor's roles.json has it. Every release publishes it beside the zip, listed in SHA256SUMS.txt (the kit's release.ts, from kit 2.12.0), so a Manor that finds it on GitHub offers Hire on the Steward's card (Manor's "New agents, announced on GitHub"). The release refuses to build when its `release.repo` isn't this repository or its id isn't `steward`. Keep it the same as Manor's staff.json entry.
 
 It points at the installed copy (see Install). Its role in Manor's roles is `steward`.
 

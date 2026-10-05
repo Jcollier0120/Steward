@@ -1,0 +1,69 @@
+{
+  "agent": {
+    "id": "steward",
+    "name": "Steward",
+    "role": "Keeps the essentials every agent shares, and brings each update to all of them at once",
+    "description": "Holds the kit every hire shares (the NPU and accelerator queue, settings, install, the page) and rolls a change out to all of them in one go: prepares and tests each, opens the PRs, merges the green ones and publishes their releases from main.",
+    "fills": [
+      "steward"
+    ],
+    "developer": true,
+    "app": "steward",
+    "home": "http://steward.localhost:19494/",
+    "ping": "http://127.0.0.1:19494/api/ping",
+    "icon": "%USERPROFILE%\\.steward\\app\\art\\icon.svg",
+    "paths": {
+      "app": [
+        "%USERPROFILE%\\.steward\\app"
+      ],
+      "node": [
+        "%USERPROFILE%\\.manor\\node\\node.exe",
+        "C:\\tools\\node-v22.23.3-win-arm64\\node.exe",
+        "%ProgramFiles%\\nodejs\\node.exe"
+      ]
+    },
+    "cwd": "{app}",
+    "commands": {
+      "start": [
+        "{node}",
+        "{app}\\src\\cli.ts",
+        "start"
+      ],
+      "stop": [
+        "{node}",
+        "{app}\\src\\cli.ts",
+        "stop"
+      ],
+      "status": [
+        "{node}",
+        "{app}\\src\\cli.ts",
+        "status",
+        "--json"
+      ],
+      "open": [
+        "{node}",
+        "{app}\\src\\cli.ts",
+        "open"
+      ]
+    },
+    "release": {
+      "repo": "Jcollier0120/Steward",
+      "kind": "node"
+    },
+    "backup": [
+      "settings.json",
+      "duty.json",
+      "alarms.json",
+      "jobs-approved.json",
+      "round-failed.json"
+    ]
+  },
+  "roles": [
+    {
+      "id": "steward",
+      "title": "Steward",
+      "duty": "Runs the household staff.",
+      "description": "The steward ran the household and its servants: took them on, taught them the ways of the house, and passed the lord's orders down to them. Here the steward keeps the essentials every agent shares (the kit), and brings each update to all of them at once: one change, tested in each agent, then merged and released together."
+    }
+  ]
+}
