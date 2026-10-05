@@ -1,11 +1,12 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { git, removeWorktree, showFile } from '../git.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
-import { needsNpmCi } from './bump.ts';
+import { checksLogOf, needsNpmCi } from './bump.ts';
+import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
 import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
@@ -110,6 +111,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
   if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
@@ -118,14 +120,20 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
+        keepOutput(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
         return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
       }
     }
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-    if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
+    if (r.code !== 0) {
+      keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
+      return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
+    }
     // Its releases have changed: the glance no longer says how they are.
     forgetGlance(ctx, e);
+    // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
+    recordTested(e.id, { commit, stage: 'release', branch: e.branch, version });
     return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
@@ -133,6 +141,18 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     } catch (err) {
       ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
     }
+  }
+}
+
+/**
+ * A failed release's whole output, kept beside its worktree (<worktree>.log, as a bump's checks are) once the worktree
+ * is gone: for a person's look, and for the issue the Steward files for the Wright (work.ts).
+ */
+function keepOutput(dir: string, step: string, code: number, output: string): void {
+  try {
+    writeFileSync(checksLogOf(dir), `${step} (exit ${code})\n\n${output}`);
+  } catch {
+    // Only the round's log has it then.
   }
 }
 

@@ -6,6 +6,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { reeveInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { StageResult } from './stages/common.ts';
+import type { Runner } from './run.ts';
+import { fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -34,6 +36,11 @@ import type { StageResult } from './stages/common.ts';
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
+ *
+ * Work the team can do is handed to the Wright first (work.ts; Settings: fileWork): an employee's failed bump or
+ * release, and Reeve's alerts that are code work in an employee's repository, are filed as manor:work issues, and their
+ * alarms wait a day (waitingHours) from when they were filed, or are raised at once when the Wright gets stuck or its
+ * PR waits for a person, or when they couldn't be filed (holdForWork).
  *
  * While this PC is offline (the kit's net.ts), what is only the network's is no alarm (withoutOffline): the person
  * knows. And a round while offline asks nothing of GitHub (steward.ts).
@@ -491,12 +498,34 @@ export function toastWords(raised: Alarm[]): { title: string; body: string } {
  * new ones. Manor's and the Surveyor's pages are read here; `deps` stands in for them, the toast and the clock.
  */
 export async function watchAlarms(
-  o: Parameters<typeof roundConditions>[0] & { log: (line: string) => void },
+  o: Parameters<typeof roundConditions>[0] & {
+    log: (line: string) => void;
+    /** gh, for filing work for the Wright (work.ts), and where it runs from; without it nothing is filed. */
+    run?: Runner;
+    neutralDir?: string;
+  },
   deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
-  if (!a.on) return loadAlarms();
+  const filing = o.settings.fileWork && !!o.run;
+  if (!a.on && !filing) return loadAlarms();
   const get = deps.getJson ?? getJson;
+  const now = deps.now ?? new Date();
+  // The Wright's work and Reeve's alerts are read for the work filed (work.ts) as well as for the alarms.
+  const wright = a.wrightUrl ? await get(new URL('/api/work', a.wrightUrl).href) : null;
+  const reeve = a.reeveUrl && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', a.reeveUrl).href) : null;
+  // Failed bumps and releases, and Reeve's alerts that are code work, filed for the Wright: their alarms wait.
+  let items: WorkItem[] = [];
+  let states = new Map<string, WorkState>();
+  if (filing) {
+    try {
+      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
+      if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
+    } catch (e) {
+      o.log(`work: ${(e as Error).message}`);
+    }
+  }
+  if (!a.on) return loadAlarms();
   const conditions = roundConditions(o);
   const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
   if (manor) {
@@ -507,16 +536,17 @@ export async function watchAlarms(
     conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
   }
   if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
-  if (a.wrightUrl) conditions.push(...wrightConditions(await get(new URL('/api/work', a.wrightUrl).href)));
+  if (wright !== null) conditions.push(...wrightConditions(wright));
   if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
   let reeveJobs: Set<string> | null = null;
-  if (a.reeveUrl && (deps.reeveInstalled ?? reeveInstalled)()) {
-    const r = reeveConditions(await get(new URL('/api/alerts', a.reeveUrl).href));
+  if (reeve !== null) {
+    const r = reeveConditions(reeve);
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;
   }
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
-  const { state, raised } = reconcile(loadAlarms(), withoutOffline(withoutReeveDuplicates(conditions, reeveJobs), offline), deps.now ?? new Date());
+  const kept = holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours);
+  const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);
   if (raised.length && a.toast) {

@@ -10,6 +10,7 @@ import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
+import { recordTested } from '../tested.ts';
 
 /**
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
@@ -201,8 +202,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
   await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
-  const commit = (await git(run, dir, 'rev-parse', '--short', 'HEAD')).trim();
-  const back = compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
+  const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
+  const commit = full.slice(0, 7);
+  // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit tree.
+  if (!o.kitFrom) recordTested(e.id, { commit: full, stage: 'bump', branch, version: next });
+  const back =compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
   return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
 }
 

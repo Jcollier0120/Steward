@@ -14,8 +14,9 @@ process.env[`${String(pkg.name).toUpperCase().replace(/-/g, '_')}_HOME`] = path.
 process.env.REEVE_HOME = path.join(tmp, 'reeve');
 process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
+process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOUSE_SVG, developerOptions, forgetManorIcon, gpuWithNpu, manorIcon, manorLink, manorSettingsUrl, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, developerOptions, forgetManorIcon, githubRepo, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -180,4 +181,167 @@ test("Manor's icon: as its page serves it, else its app's own, else a house; nev
   assert.equal(safeSvg('<svg><script>x</script></svg>'), false);
   assert.equal(safeSvg('<html><svg/></html>'), false);
   assert.equal(safeSvg('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>'), true);
+});
+
+// Non-employee projects: repositories that ride along with the manor, never staff.
+const NO_OWN = { repos: [], checkouts: [] };
+
+/** A folder that is a clone of `url` (a .git folder with its config), or a worktree of one when `worktreeOf` is given. */
+function cloneAt(name: string, url: string | null, o: { worktreeOf?: string } = {}): string {
+  const dir = path.join(tmp, 'clones', name);
+  mkdirSync(dir, { recursive: true });
+  if (o.worktreeOf) {
+    const gitdir = path.join(o.worktreeOf, '.git', 'worktrees', name);
+    mkdirSync(gitdir, { recursive: true });
+    writeFileSync(path.join(gitdir, 'commondir'), '../..\n');
+    writeFileSync(path.join(dir, '.git'), `gitdir: ${gitdir}\n`);
+  } else {
+    mkdirSync(path.join(dir, '.git'), { recursive: true });
+    const origin = url ? `[remote "origin"]\n\turl = ${url}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n` : '';
+    writeFileSync(path.join(dir, '.git', 'config'), `[core]\n\tbare = false\n${origin}[branch "main"]\n\tremote = origin\n`);
+  }
+  return dir;
+}
+
+test('a project: its name, checkout, repo, branch, test, version files and branch cleaning, with their defaults', () => {
+  const problems: string[] = [];
+  const projects = projectsFrom([
+    { name: ' Side Car ', checkout: 'C:\\Projects\\SideCar' },
+    { name: 'Full', checkout: 'D:\\code\\full\\', repo: 'someone/full.js', branch: 'release/2.x', test: 'npm test', versionFiles: ['package.json', ' package-lock.json ', 'PACKAGE.JSON'], cleanBranches: false, extra: 'kept out' },
+    { name: 'Share', checkout: '\\\\nas\\code\\share', repo: '', branch: '', test: null, versionFiles: [], cleanBranches: null },
+  ], NO_OWN, problems);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(projects, [
+    { name: 'Side Car', checkout: 'C:\\Projects\\SideCar', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true },
+    { name: 'Full', checkout: 'D:\\code\\full\\', repo: 'someone/full.js', branch: 'release/2.x', test: 'npm test', versionFiles: ['package.json', 'package-lock.json'], cleanBranches: false },
+    { name: 'Share', checkout: '\\\\nas\\code\\share', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true },
+  ]);
+  assert.deepEqual(projectsFrom(undefined, NO_OWN), [], 'none listed');
+  assert.deepEqual(projectsFrom(null, NO_OWN), []);
+});
+
+test('a wrong project is left out and said; the rest stand', () => {
+  const cases: [unknown, RegExp][] = [
+    [{ checkout: 'C:\\x' }, /entry 1 should have a "name" of 1 to 60 characters; it's left out\./],
+    [{ name: 'x'.repeat(61), checkout: 'C:\\x' }, /"name"/],
+    [{ name: 'A', checkout: 'relative\\path' }, /entry 1 \("A"\) should have a "checkout": the full path of its clone/],
+    [{ name: 'A', checkout: 'C:\\bad|name' }, /"checkout"/],
+    [{ name: 'A', checkout: 7 }, /"checkout"/],
+    [{ name: 'A', checkout: 'C:\\x', repo: 'no-slash' }, /"repo" as owner\/name/],
+    [{ name: 'A', checkout: 'C:\\x', repo: 'https://github.com/a/b' }, /"repo"/],
+    [{ name: 'A', checkout: 'C:\\x', branch: 'two words' }, /"branch"/],
+    [{ name: 'A', checkout: 'C:\\x', branch: '-x' }, /"branch"/],
+    [{ name: 'A', checkout: 'C:\\x', branch: 'a..b' }, /"branch"/],
+    [{ name: 'A', checkout: 'C:\\x', test: 'line one\nline two' }, /"test"/],
+    [{ name: 'A', checkout: 'C:\\x', test: 'x'.repeat(301) }, /"test"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: 'package.json' }, /"versionFiles" as a list/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: ['..\\outside.json'] }, /"versionFiles"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: ['C:\\abs.json'] }, /"versionFiles"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: ['\\rooted.json'] }, /"versionFiles"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: [7] }, /"versionFiles"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: Array.from({ length: 21 }, (_, i) => `f${i}.json`) }, /up to 20 files/],
+    [{ name: 'A', checkout: 'C:\\x', cleanBranches: 'yes' }, /"cleanBranches" as true or false/],
+    ['a string', /entry 1 should have a "name"/],
+  ];
+  for (const [entry, said] of cases) {
+    const problems: string[] = [];
+    assert.deepEqual(projectsFrom([entry, { name: 'Fine', checkout: 'C:\\fine' }], NO_OWN, problems).map((p) => p.name), ['Fine'], JSON.stringify(entry));
+    assert.equal(problems.length, 1, JSON.stringify(entry));
+    assert.match(problems[0], said);
+  }
+  const problems: string[] = [];
+  assert.deepEqual(projectsFrom({ name: 'A' }, NO_OWN, problems), []);
+  assert.match(problems[0], /"projects" should be a list/);
+  // One name and one clone to a project, whatever their case or a separator at the end; the first stands.
+  problems.length = 0;
+  const twice = projectsFrom([
+    { name: 'One', checkout: 'C:\\Projects\\One' },
+    { name: 'ONE', checkout: 'C:\\Projects\\Other' },
+    { name: 'Two', checkout: 'c:\\projects\\one\\' },
+  ], NO_OWN, problems);
+  assert.deepEqual(twice.map((p) => p.name), ['One']);
+  assert.match(problems[0], /entry 2 \("ONE"\) has the name of one listed before it/);
+  assert.match(problems[1], /entry 3 \("Two"\) has the checkout of one listed before it/);
+  // At most 50.
+  problems.length = 0;
+  assert.equal(projectsFrom(Array.from({ length: 52 }, (_, i) => ({ name: `P${i}`, checkout: `C:\\p\\${i}` })), NO_OWN, problems).length, 50);
+  assert.equal(problems.length, 2);
+  assert.match(problems[0], /entry 51 \("P50"\) is one more than the 50/);
+});
+
+test("a project is never one of the manor's own: its repository, its clone's origin, or a checkout of the Steward's", () => {
+  const own = { repos: ['Jcollier0120/Manor', 'Jcollier0120/Porter'], checkouts: ['C:\\Projects\\Porter', 'C:\\Projects\\Steward'] };
+  const problems: string[] = [];
+  const porterClone = cloneAt('porter-elsewhere', 'https://github.com/Jcollier0120/Porter.git');
+  const sideCar = cloneAt('side-car', 'git@github.com:someone/side-car.git');
+  const projects = projectsFrom([
+    { name: 'By repo', checkout: 'D:\\x', repo: 'jcollier0120/porter' },
+    { name: 'Manor', checkout: 'D:\\manor', repo: 'Jcollier0120/Manor' },
+    { name: 'By origin', checkout: porterClone },
+    { name: 'Its checkout', checkout: 'c:\\projects\\porter\\' },
+    { name: 'Inside one', checkout: 'C:\\Projects\\Steward\\.claude\\worktrees\\x' },
+    { name: 'Holding them', checkout: 'C:\\Projects' },
+    { name: 'Next door', checkout: 'C:\\Projects\\Porterhouse' },
+    { name: 'Side car', checkout: sideCar, repo: 'someone/side-car' },
+  ], own, problems);
+  assert.deepEqual(projects.map((p) => p.name), ['Next door', 'Side car']);
+  assert.match(problems[0], /"By repo"\) is jcollier0120\/porter, one of the manor's own: an employee is looked after as staff, never as a project; it's left out\./);
+  assert.match(problems[1], /"Manor"\) is Jcollier0120\/Manor, one of the manor's own/);
+  assert.match(problems[2], /"By origin"\) is Jcollier0120\/Porter, one of the manor's own/);
+  assert.match(problems[3], /"Its checkout"\) is one of the Steward's employees' checkouts/);
+  assert.match(problems[4], /"Inside one"\) is inside one of the Steward's employees' checkouts/);
+  assert.match(problems[5], /"Holding them"\) is a folder holding one of the Steward's employees' checkouts/);
+  assert.equal(problems.length, 6);
+});
+
+test("a clone's origin: from its git config, a worktree's too; GitHub's alone", () => {
+  const main = cloneAt('origin-main', 'https://github.com/someone/thing.git');
+  assert.equal(originRepo(main), 'someone/thing');
+  assert.equal(originRepo(cloneAt('origin-worktree', null, { worktreeOf: main })), 'someone/thing', "a worktree shares its clone's config");
+  assert.equal(originRepo(cloneAt('origin-none', null)), null, 'no origin');
+  assert.equal(originRepo(cloneAt('origin-elsewhere', 'https://gitlab.com/someone/thing.git')), null);
+  assert.equal(originRepo(path.join(tmp, 'nowhere')), null);
+  assert.equal(githubRepo('git@github.com:a-b/c.d.git'), 'a-b/c.d');
+  assert.equal(githubRepo('https://github.com/a/b/'), 'a/b');
+  assert.equal(githubRepo('ssh://git@github.com/a/b'), 'a/b');
+});
+
+test("the manor's own: Manor's repository, its staff's and announced agents', the Steward's employees and its own checkout", () => {
+  const home = manorAt('own-home', {});
+  writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', release: { repo: 'Jcollier0120/Porter' } }, { id: 'odd' }, null] }));
+  writeFileSync(path.join(home, 'agents.json'), JSON.stringify({ agents: [{ id: 'chamberlain', release: { repo: 'Jcollier0120/Chamberlain' } }] }));
+  const steward = path.join(tmp, 'own-steward');
+  mkdirSync(steward, { recursive: true });
+  // The staff table the Steward keeps, when its settings name no employees.
+  writeFileSync(path.join(steward, 'staff.json'), JSON.stringify({ rows: [{ id: 'miller', repo: 'Jcollier0120/Miller', checkout: { path: 'C:\\Projects\\Miller', exists: true } }] }));
+  assert.deepEqual(manorOwn({ home, stewardHome: steward }), {
+    repos: ['Jcollier0120/Manor', 'Jcollier0120/Porter', 'Jcollier0120/Chamberlain', 'Jcollier0120/Miller'],
+    checkouts: ['C:\\Projects\\Miller', 'C:\\Projects\\Steward'],
+  });
+  // Its settings' employees, and its own checkout, when they say.
+  writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk' }], stewardCheckout: 'E:\\src\\Steward' }));
+  assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: path.join(tmp, 'no-staff.json') }), {
+    repos: ['Jcollier0120/Manor', 'Jcollier0120/Chamberlain', 'me/Clerk'],
+    checkouts: ['E:\\src\\Clerk', 'E:\\src\\Steward'],
+  });
+  // Nothing installed: Manor's repository and the Steward's usual checkout.
+  assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere') }), { repos: ['Jcollier0120/Manor'], checkouts: ['C:\\Projects\\Steward'] });
+});
+
+test("manorProjects: Manor's projects, checked, read afresh; none without an installed Manor", () => {
+  const home = manorAt('projects', { projects: [{ name: 'Side car', checkout: 'D:\\side-car', versionFiles: ['package.json'] }, { name: 'Bad' }] });
+  writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', release: { repo: 'Jcollier0120/Porter' } }] }));
+  assert.deepEqual(manorProjects(home), [{ name: 'Side car', checkout: 'D:\\side-car', repo: null, branch: 'main', test: null, versionFiles: ['package.json'], cleanBranches: true }]);
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ projects: [{ name: 'Porter', checkout: 'D:\\porter', repo: 'Jcollier0120/Porter' }, { name: 'Other', checkout: 'D:\\other', cleanBranches: false }] }));
+  assert.deepEqual(manorProjects(home).map((p) => [p.name, p.cleanBranches]), [['Other', false]], "Manor's staff, from its app's staff.json, is never a project");
+  assert.deepEqual(manorProjects(manorAt('projects-none', {})), []);
+  assert.deepEqual(manorProjects(manorAt('projects-unreadable', '{"projects": [')), []);
+  assert.deepEqual(manorProjects(manorAt('projects-not-installed', { projects: [{ name: 'A', checkout: 'D:\\a' }] }, { installed: false })), []);
+  assert.deepEqual(manorProjects(path.join(tmp, 'nowhere')), []);
+  process.env.MANOR_HOME = home;
+  try {
+    assert.equal(manorProjects().length, 1, 'MANOR_HOME, as Manor reads it');
+  } finally {
+    process.env.MANOR_HOME = path.join(tmp, 'no-manor');
+  }
 });

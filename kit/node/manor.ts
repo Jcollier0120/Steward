@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,6 +93,214 @@ export function developerOptions(own: boolean, home = manorHome()): { on: boolea
 export function gpuWithNpu(own = true, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
   const m = readManor(home);
   return m?.saysGpuWithNpu ? { on: m.link.gpuWithNpu, setBy: m.link } : { on: own, setBy: null };
+}
+
+/**
+ * A non-employee project (settings.json's "projects", the Non-employee projects section of Manor's Settings): another
+ * repository on this PC that rides along with the manor. The agents that clean up and fix repositories look after it
+ * too (Reeve's rounds, the Surveyor's test runs, the Wright's and the Bailiff's fixes), but it is never staff: it takes
+ * no kit, the Steward never touches it, it holds no role, and the manor never merges or releases it. Each PC has its own.
+ */
+export interface ManorProject {
+  /** What the page calls it: 1 to 60 characters, one name to a project. */
+  name: string;
+  /** The clone on this PC: a full path (C:\..., or a share), one project to a clone. */
+  checkout: string;
+  /** Its repository on GitHub, owner/name, or null when it has none (or none was given). */
+  repo: string | null;
+  /** The branch its work goes to: "main" unless it says. */
+  branch: string;
+  /** The command that runs its tests, in its checkout, or null when it has none. */
+  test: string | null;
+  /**
+   * The files the Wright sets the version in (paths inside the checkout, like package.json): its drafts there set the
+   * next free version. Empty, as it is unless settings list some: the manor never changes this project's version.
+   */
+  versionFiles: string[];
+  /** Whether Reeve's rounds delete branches already merged into `branch`, in the clone and on GitHub (true unless it says false). */
+  cleanBranches: boolean;
+}
+
+/** What a project may not be: the manor's own repositories (owner/name) and the checkouts the Steward works from. */
+export interface ManorOwn {
+  repos: string[];
+  checkouts: string[];
+}
+
+/** The most projects settings.json may list, and the most version files one may name. */
+export const MAX_PROJECTS = 50;
+export const MAX_VERSION_FILES = 20;
+/** Manor's own repository: it isn't in its staff.json, which lists the agents. */
+export const MANOR_REPO = 'Jcollier0120/Manor';
+
+const FULL_PATH = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
+const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
+/** A branch git would take: no spaces or control characters, none of ~^:?*[\, no "..", not starting with "-" or ending in "/" or ".lock". */
+const branchOk = (b: string) => b.length <= 100 && !b.startsWith('-') && !/[\s~^:?*[\\\u0000-\u001f\u007f]|\.\.|\/\/|@\{|^\/|\/$|\.lock$|^@$/.test(b);
+/** A file inside the checkout, as a relative path: no drive or leading separator, no "." or ".." part, nothing Windows refuses. */
+const insideFile = (f: string) => f.length <= 200 && !/^[\\/]|^[a-z]:/i.test(f) && !/[\u0000-\u001f<>:"|?*]/.test(f) && f.split(/[\\/]/).every((part) => part && part !== '.' && part !== '..');
+/** A path as Windows compares them: whole, without a separator at the end, in one case. */
+const samePlace = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer.endsWith('\\') ? outer : outer + '\\');
+
+/** owner/name from a GitHub remote's URL (https or ssh), or null for anything else. */
+export function githubRepo(url: string): string | null {
+  const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/*$/i.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * The GitHub repository a clone's origin is (owner/name), read from its git config: a worktree's .git file is followed
+ * to the config it shares. Null when it isn't a clone, has no origin, or its origin isn't on GitHub.
+ */
+export function originRepo(checkout: string): string | null {
+  try {
+    let git = path.join(checkout, '.git');
+    if (statSync(git).isFile()) {
+      const to = /^gitdir:\s*(.+)$/m.exec(readFileSync(git, 'utf8'))?.[1]?.trim();
+      if (!to) return null;
+      git = path.resolve(checkout, to);
+      const common = path.join(git, 'commondir');
+      if (existsSync(common)) git = path.resolve(git, readFileSync(common, 'utf8').trim());
+    }
+    const config = readFileSync(path.join(git, 'config'), 'utf8');
+    const url = /\[remote "origin"\][^[]*?^\s*url\s*=\s*(.+)$/m.exec(config)?.[1];
+    return url ? githubRepo(url) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A JSON file's contents, or null when it's missing or unreadable. */
+function jsonAt(file: string): unknown {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+  } catch {
+    return null;
+  }
+}
+
+const listOf = (v: unknown, key: string): Record<string, unknown>[] => {
+  const list = v && typeof v === 'object' ? (v as Record<string, unknown>)[key] : null;
+  return Array.isArray(list) ? list.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object') : [];
+};
+const textAt = (o: unknown, ...keys: string[]): string | null => {
+  let v: unknown = o;
+  for (const k of keys) v = v && typeof v === 'object' ? (v as Record<string, unknown>)[k] : undefined;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+};
+
+/**
+ * The manor's own, which no project may be: Manor's repository; every agent's in Manor's staff.json (`staffFile`, the
+ * installed Manor's app\staff.json unless said) and in its agents.json, the announced ones among them; and the Steward's
+ * employees, their repositories and checkouts, from its settings.json (or, when that names none, the staff table it
+ * keeps, staff.json), with the Steward's own checkout. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward.
+ */
+export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: string } = {}): ManorOwn {
+  const home = o.home ?? manorHome();
+  const steward = o.stewardHome ?? process.env.STEWARD_HOME ?? path.join(os.homedir(), '.steward');
+  const repos = new Set<string>([MANOR_REPO]);
+  const checkouts = new Set<string>();
+  for (const a of [...listOf(jsonAt(o.staffFile ?? path.join(home, 'app', 'staff.json')), 'agents'), ...listOf(jsonAt(path.join(home, 'agents.json')), 'agents')]) {
+    const repo = textAt(a, 'release', 'repo');
+    if (repo) repos.add(repo);
+  }
+  const settings = jsonAt(path.join(steward, 'settings.json'));
+  const employees = listOf(settings, 'employees');
+  for (const e of employees.length ? employees : listOf(jsonAt(path.join(steward, 'staff.json')), 'rows')) {
+    const repo = textAt(e, 'repo');
+    if (repo) repos.add(repo);
+    const checkout = textAt(e, 'checkout') ?? textAt(e, 'checkout', 'path');
+    if (checkout && FULL_PATH.test(checkout)) checkouts.add(checkout);
+  }
+  const own = textAt(settings, 'stewardCheckout') ?? 'C:\\Projects\\Steward';
+  if (FULL_PATH.test(own)) checkouts.add(own);
+  return { repos: [...repos], checkouts: [...checkouts] };
+}
+
+/**
+ * settings.json's "projects" as the manor uses them: each entry checked, a wrong one left out and said in `problems`
+ * (Manor shows them with its other settings' problems). Manor's own settings and every agent read them with this, so
+ * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?,
+ * "cleanBranches"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
+ * checkout inside one of the Steward's or holding one: an employee is looked after as staff, never as a project.
+ * Whether the checkout is there isn't checked here: a project whose clone has gone stays listed, and the page says so.
+ */
+export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = []): ManorProject[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "branch", "test", "versionFiles", "cleanBranches" }.');
+    return [];
+  }
+  const ownRepos = new Set(own.repos.map((r) => r.toLowerCase()));
+  const ownCheckouts = own.checkouts.map(samePlace);
+  const projects: ManorProject[] = [];
+  const given = (v: unknown) => v !== undefined && v !== null && v !== '';
+  raw.forEach((entry: unknown, i) => {
+    const e = entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : {};
+    const name = typeof e.name === 'string' ? e.name.trim() : '';
+    const which = `"projects" entry ${i + 1}${name ? ` ("${name}")` : ''}`;
+    const wrong = (why: string) => void problems.push(`settings.json: ${which} ${why}; it's left out.`);
+    if (i >= MAX_PROJECTS) return wrong(`is one more than the ${MAX_PROJECTS} the manor looks after`);
+    if (!name || name.length > 60) return wrong('should have a "name" of 1 to 60 characters');
+    const checkout = typeof e.checkout === 'string' ? e.checkout.trim() : '';
+    if (!checkout || checkout.length > 260 || !FULL_PATH.test(checkout) || /[\u0000-\u001f<>"|?*]/.test(checkout.slice(2))) {
+      return wrong('should have a "checkout": the full path of its clone, like C:\\Projects\\Example');
+    }
+    let repo: string | null = null;
+    if (given(e.repo)) {
+      if (typeof e.repo !== 'string' || !REPO.test(e.repo.trim())) return wrong('should give its "repo" as owner/name on GitHub, or none');
+      repo = e.repo.trim();
+    }
+    let branch = 'main';
+    if (given(e.branch)) {
+      if (typeof e.branch !== 'string' || !branchOk(e.branch.trim())) return wrong('should give its "branch" as a branch\'s name, or none for main');
+      branch = e.branch.trim();
+    }
+    let test: string | null = null;
+    if (given(e.test)) {
+      if (typeof e.test !== 'string' || !e.test.trim() || e.test.trim().length > 300 || /[\u0000-\u001f]/.test(e.test)) return wrong('should give its "test" as one command of up to 300 characters, or none');
+      test = e.test.trim();
+    }
+    const versionFiles: string[] = [];
+    if (given(e.versionFiles)) {
+      const files = Array.isArray(e.versionFiles) ? e.versionFiles.map((f) => (typeof f === 'string' ? f.trim() : '')) : null;
+      if (!files || files.length > MAX_VERSION_FILES || !files.every(insideFile)) {
+        return wrong(`should give its "versionFiles" as a list of up to ${MAX_VERSION_FILES} files inside its checkout, like "package.json", or none`);
+      }
+      for (const f of files) if (!versionFiles.some((v) => v.toLowerCase() === f.toLowerCase())) versionFiles.push(f);
+    }
+    let cleanBranches = true;
+    if (e.cleanBranches !== undefined && e.cleanBranches !== null) {
+      if (typeof e.cleanBranches !== 'boolean') return wrong('should give "cleanBranches" as true or false');
+      cleanBranches = e.cleanBranches;
+    }
+    const place = samePlace(checkout);
+    if (projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) return wrong('has the name of one listed before it');
+    if (projects.some((p) => samePlace(p.checkout) === place)) return wrong('has the checkout of one listed before it');
+    const steward = ownCheckouts.find((c) => within(place, c) || within(c, place));
+    if (steward !== undefined) {
+      const how = place === steward ? 'one of' : within(place, steward) ? 'inside one of' : 'a folder holding one of';
+      return wrong(`is ${how} the Steward's employees' checkouts: an employee is looked after as staff, never as a project`);
+    }
+    const theirs = [repo, originRepo(checkout)].find((r) => r && ownRepos.has(r.toLowerCase()));
+    if (theirs) return wrong(`is ${theirs}, one of the manor's own: an employee is looked after as staff, never as a project`);
+    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches });
+  });
+  return projects;
+}
+
+/**
+ * The manor's non-employee projects on this PC (projectsFrom, against manorOwn()), read afresh: none when Manor isn't
+ * installed here, its settings can't be read, or they list none. An agent that cleans up and fixes repositories works on
+ * these as well as on the staff, and never treats one as staff: no kit, no Steward, no merge or release of its own.
+ */
+export function manorProjects(home = manorHome()): ManorProject[] {
+  const file = path.join(home, 'settings.json');
+  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return [];
+  const raw = jsonAt(file);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return projectsFrom((raw as Record<string, unknown>).projects, manorOwn({ home }));
 }
 
 /** A plain house, for when Manor's own icon can't be had. */

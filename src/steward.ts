@@ -326,7 +326,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

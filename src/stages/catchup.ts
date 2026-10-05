@@ -7,6 +7,7 @@ import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.t
 import { runChecks } from './bump.ts';
 import { bumpDirOf, checkoutOf, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
+import { recordTested } from '../tested.ts';
 
 /**
  * Catching a team PR up, so it doesn't wait on its branch moving under it: the Steward merges the branch into it
@@ -290,6 +291,8 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       did.push('its checks passed');
     }
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
+    // A kit PR's new head, whose checks passed here: the Surveyor's GET /api/tested (tested.ts).
+    if (kitPr) recordTested(e.id, { commit: (await git(run, dir, 'rev-parse', 'HEAD')).trim(), stage: 'catch-up', branch: pr.head, pr: pr.number, version: choice.version });
     const note = did.join('; ');
     ctx.log(`[${e.id}] #${pr.number}: caught up (${note})`);
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
