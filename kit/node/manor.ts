@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -46,10 +47,10 @@ export function manorLink(home = manorHome()): ManorLink | null {
 }
 
 /** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
-function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean } | null {
+function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown } | null {
   const file = path.join(home, 'settings.json');
   if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown } = {};
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
@@ -66,7 +67,7 @@ function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean } |
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
   const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
-  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu };
+  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify };
 }
 
 /** Manor's Settings page, where its Developer options switch is (Manor's page at #/settings). */
@@ -93,6 +94,138 @@ export function developerOptions(own: boolean, home = manorHome()): { on: boolea
 export function gpuWithNpu(own = true, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
   const m = readManor(home);
   return m?.saysGpuWithNpu ? { on: m.link.gpuWithNpu, setBy: m.link } : { on: own, setBy: null };
+}
+
+/**
+ * The manor's notification preferences (settings.json's "notify", on Manor's Settings page): whether agents notify
+ * the owner at all, and the quiet hours when none does. Every agent follows them; none has a switch of its own.
+ * Quiet hours are local times, "HH:MM" (24-hour), from `quietFrom` until `quietTo`, and may span midnight; null for
+ * both when there are none (equal times, as Manor says, or none given).
+ */
+export interface NotifyPrefs {
+  on: boolean;
+  quietFrom: string | null;
+  quietTo: string | null;
+}
+
+/** Manor's defaults for "notify", which a value it can't use falls back to, field by field, as Manor's panel does. */
+export const NOTIFY_DEFAULT: NotifyPrefs = { on: true, quietFrom: '22:00', quietTo: '07:00' };
+
+const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const minutesOf = (t: string) => {
+  const m = CLOCK.exec(t)!;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
+/** "notify" as Manor keeps it, checked: each wrong field its default; equal quiet times, no quiet hours. */
+export function notifyFrom(raw: unknown): NotifyPrefs {
+  const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v.trim()) ? v.trim() : def);
+  const quietFrom = clock(o.quietFrom, NOTIFY_DEFAULT.quietFrom);
+  const quietTo = clock(o.quietTo, NOTIFY_DEFAULT.quietTo);
+  const quiet = quietFrom && quietTo && quietFrom !== quietTo;
+  return { on: typeof o.on === 'boolean' ? o.on : NOTIFY_DEFAULT.on, quietFrom: quiet ? quietFrom : null, quietTo: quiet ? quietTo : null };
+}
+
+/**
+ * The manor's notification preferences, read afresh; null without an installed Manor, or one that doesn't say (an
+ * older Manor, with no "notify"): then nothing holds an agent back (mayNotify()).
+ */
+export function notifyPrefs(home = manorHome()): NotifyPrefs | null {
+  const m = readManor(home);
+  return m && m.notify !== undefined ? notifyFrom(m.notify) : null;
+}
+
+/**
+ * Whether an agent may notify the owner now: Manor's "notify me" is on and `now` (local time) is outside its quiet
+ * hours. Always true without Manor's say (notifyPrefs() null). Call it for each notification, so a change in Manor
+ * applies at once; what's held back is the agent's to keep for its page, or drop, never to send later in a burst.
+ */
+export function mayNotify(now = new Date(), home = manorHome()): boolean {
+  return notifyAllowed(notifyPrefs(home), now);
+}
+
+/** mayNotify() for preferences in hand. */
+export function notifyAllowed(p: NotifyPrefs | null, now = new Date()): boolean {
+  if (!p) return true;
+  if (!p.on) return false;
+  if (!p.quietFrom || !p.quietTo) return true;
+  const t = now.getHours() * 60 + now.getMinutes();
+  const from = minutesOf(p.quietFrom);
+  const to = minutesOf(p.quietTo);
+  const quiet = from < to ? t >= from && t < to : t >= from || t < to;
+  return !quiet;
+}
+
+/** How far above the installed copy's port a development checkout serves, for every agent (each app.ts) and Manor. */
+export const DEV_PORT_OFFSET = 10000;
+
+/**
+ * Another agent's page in this manor: its "home" in Manor's agents.json (the agents it announces), else in its
+ * staff.json (`staffFile`, the installed Manor's app\staff.json unless said). With `dev`, its development checkout's,
+ * on its port + DEV_PORT_OFFSET. Null when Manor doesn't know the agent, or says no http(s) address for it. Read
+ * afresh, and never written into settings: the address is Manor's to say.
+ */
+export function agentUrl(id: string, o: { dev?: boolean; home?: string; staffFile?: string } = {}): string | null {
+  const home = o.home ?? manorHome();
+  for (const a of [...listOf(jsonAt(path.join(home, 'agents.json')), 'agents'), ...listOf(jsonAt(o.staffFile ?? path.join(home, 'app', 'staff.json')), 'agents')]) {
+    if (a.id !== id) continue;
+    const at = textAt(a, 'home');
+    if (!at) continue;
+    let url: URL;
+    try {
+      url = new URL(at);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+    if (o.dev) url.port = String(Number(url.port || (url.protocol === 'https:' ? 443 : 80)) + DEV_PORT_OFFSET);
+    return url.href;
+  }
+  return null;
+}
+
+let owner: { login: string | null; at: number } | null = null;
+const OWNER_RETRY_MS = 10 * 60_000;
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+
+/**
+ * The GitHub account gh is signed in as on this PC (its login, the owner of the owner's repositories), for defaults
+ * that would otherwise name someone: settings start empty and mean this. From gh's own config, without the network;
+ * else from GitHub, through gh. Kept once known; when not (no gh, or not signed in), asked again after ten minutes.
+ * Null when there's none. `run` runs gh with its arguments and returns what it printed (for tests).
+ */
+export function githubOwner(o: { run?: (args: string[]) => string; now?: number } = {}): string | null {
+  const now = o.now ?? Date.now();
+  if (owner && (owner.login || now - owner.at < OWNER_RETRY_MS)) return owner.login;
+  const run = o.run ?? ghText;
+  let login: string | null = null;
+  for (const args of [['config', 'get', '-h', 'github.com', 'user'], ['api', 'user', '--jq', '.login']]) {
+    const said = run(args).trim();
+    if (LOGIN.test(said)) {
+      login = said;
+      break;
+    }
+  }
+  owner = { login, at: now };
+  return login;
+}
+
+/** For tests: forget the GitHub owner. */
+export const forgetGithubOwner = () => {
+  owner = null;
+};
+
+/** What gh printed, or nothing when it isn't there or fails: on PATH, else where this PC keeps it. */
+function ghText(args: string[]): string {
+  for (const gh of ['gh', 'C:\\tools\\gh\\bin\\gh.exe']) {
+    try {
+      return execFileSync(gh, args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return '';
+    }
+  }
+  return '';
 }
 
 /**

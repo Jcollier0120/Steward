@@ -5,7 +5,18 @@
  * changed, and what a field says about its default.
  */
 
-export type Applies = 'now' | 'restart';
+/** When a change is used (settings-kit.ts says how each is applied). */
+export type Applies = 'now' | 'restart' | 'reinstall' | 'admin';
+
+/** What the page says beside a setting that isn't used at once, and what a save says when it changes one. */
+export const APPLIES_NOTE: Record<Exclude<Applies, 'now'>, string> = {
+  restart: 'takes effect at the next start',
+  reinstall: 'takes effect at the next install or update',
+  admin: 'takes effect when installed as an administrator',
+};
+
+/** The notes of the settings that aren't used at once, each once, for the form's intro. */
+export const laterNotes = (fields: SettingsField[]): string[] => [...new Set(fields.flatMap((f) => (f.applies && f.applies !== 'now' ? [APPLIES_NOTE[f.applies]] : [])))];
 export interface SettingsOption {
   value: string;
   label: string;

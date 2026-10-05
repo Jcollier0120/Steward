@@ -101,3 +101,17 @@ test("the Tour's three steps: what the role is, its settings, what its page show
   assert.match(walk, /<div class="tour-card tour-dock">.*Step 3 of 3 · 1 of 2.*Its status.*On duty or off\./, 'a card docked at the bottom, the page beside it');
   assert.match(m.tour({ ...o, tour: [] }, 'settings'), /Step 2 of 2.*>Done</, 'no tour steps: the settings are the last step');
 });
+
+test('a setting used only at the next start, install, or install as an administrator: marked so, and the intro says each', () => {
+  const fields = [
+    { key: 'a', kind: 'whole', label: 'A', min: 1, max: 9, applies: 'restart' },
+    { key: 'b', kind: 'whole', label: 'B', min: 1, max: 9, applies: 'reinstall' },
+    { key: 'c', kind: 'switch', label: 'C', applies: 'admin' },
+    { key: 'd', kind: 'switch', label: 'D', applies: 'now' },
+  ];
+  const h = m.form({ schema: fields, values: { a: 1, b: 2, c: true, d: false }, defaults: { a: 1, b: 2, c: true, d: false }, problems: [], warnings: {}, file: 'f' });
+  assert.match(h, /except those marked (&quot;|")takes effect at the next start(&quot;|") or (&quot;|")takes effect at the next install or update(&quot;|") or (&quot;|")takes effect when installed as an administrator(&quot;|")\./);
+  assert.match(h, /data-key="b".*<span class="badge tone-caution">takes effect at the next install or update<\/span>/);
+  assert.match(h, /data-key="c".*<span class="badge tone-caution">takes effect when installed as an administrator<\/span>/);
+  assert.equal(h.match(/badge tone-caution/g)?.length, 3, "'now' isn't marked");
+});

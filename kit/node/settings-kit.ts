@@ -19,8 +19,20 @@ import { readJson, writeJson } from './store.ts';
  * would have to fix is refused rather than fixed quietly.
  */
 
-/** When a change is used: from the agent's next round or at once ('now'), or from its next start. */
-export type Applies = 'now' | 'restart';
+/**
+ * When a change is used: from the agent's next round or at once ('now'), from its next start ('restart'), from its
+ * next install or update ('reinstall': it's written into what the install sets up, like a scheduled task), or only
+ * when an administrator next installs it ('admin': what it sets up needs one). The page marks each but 'now' with its
+ * note (APPLIES_NOTE), and a save says it for each such setting it changed.
+ */
+export type Applies = 'now' | 'restart' | 'reinstall' | 'admin';
+
+/** What the page says beside a setting that isn't used at once, and what a save says when it changes one. */
+export const APPLIES_NOTE: Record<Exclude<Applies, 'now'>, string> = {
+  restart: 'takes effect at the next start',
+  reinstall: 'takes effect at the next install or update',
+  admin: 'takes effect when installed as an administrator',
+};
 
 export interface Option {
   value: string;
@@ -461,8 +473,8 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   const changed = Object.keys(clean).filter((k) => JSON.stringify((saved as any)[k]) !== JSON.stringify((before.settings as any)[k]));
   const notes = changed
     .map((k) => spec.schema.find((f) => f.key === k)!)
-    .filter((f) => f.applies === 'restart')
-    .map((f) => `${f.label}: takes effect at the next start.`);
+    .filter((f) => f.applies && f.applies !== 'now')
+    .map((f) => `${f.label}: ${APPLIES_NOTE[f.applies as Exclude<Applies, 'now'>]}.`);
   try {
     spec.onSaved?.(saved, before.settings);
   } catch (e) {

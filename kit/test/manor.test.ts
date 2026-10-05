@@ -16,7 +16,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOUSE_SVG, developerOptions, forgetManorIcon, githubRepo, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -344,4 +344,62 @@ test("manorProjects: Manor's projects, checked, read afresh; none without an ins
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
+});
+
+test("the manor's notify preferences: Manor's when it says, each wrong field its default; none without Manor's say", () => {
+  assert.deepEqual(notifyPrefs(manorAt('notify', { notify: { on: true, quietFrom: '21:30', quietTo: '06:45' } })), { on: true, quietFrom: '21:30', quietTo: '06:45' });
+  assert.deepEqual(notifyFrom({ on: false, quietFrom: '25:00', quietTo: '7:00' }), { on: false, quietFrom: '22:00', quietTo: '07:00' }, 'a bad time: its default');
+  assert.deepEqual(notifyFrom({ on: 'yes', quietFrom: '08:00', quietTo: '08:00' }), { on: true, quietFrom: null, quietTo: null }, 'equal times: no quiet hours');
+  assert.deepEqual(notifyFrom(null), { on: true, quietFrom: '22:00', quietTo: '07:00' });
+  assert.equal(notifyPrefs(manorAt('notify-unsaid', {})), null, 'an older Manor, which says nothing');
+  assert.equal(notifyPrefs(manorAt('notify-not-installed', { notify: { on: false } }, { installed: false })), null);
+  assert.equal(notifyPrefs(path.join(tmp, 'nowhere')), null);
+});
+
+test('may an agent notify now: on, and outside the quiet hours, which may span midnight; always without Manor', () => {
+  const at = (h: number, m = 0) => new Date(2026, 9, 5, h, m);
+  const night = { on: true, quietFrom: '22:00', quietTo: '07:00' };
+  assert.equal(notifyAllowed(night, at(21, 59)), true);
+  assert.equal(notifyAllowed(night, at(22)), false);
+  assert.equal(notifyAllowed(night, at(3)), false);
+  assert.equal(notifyAllowed(night, at(6, 59)), false);
+  assert.equal(notifyAllowed(night, at(7)), true);
+  const lunch = { on: true, quietFrom: '12:00', quietTo: '13:30' };
+  assert.equal(notifyAllowed(lunch, at(12, 30)), false);
+  assert.equal(notifyAllowed(lunch, at(13, 30)), true);
+  assert.equal(notifyAllowed(lunch, at(23)), true);
+  assert.equal(notifyAllowed({ on: true, quietFrom: null, quietTo: null }, at(3)), true);
+  assert.equal(notifyAllowed({ on: false, quietFrom: null, quietTo: null }, at(12)), false, 'off: never');
+  assert.equal(notifyAllowed(null, at(3)), true, "no say from Manor: nothing holds it back");
+  assert.equal(mayNotify(at(3), manorAt('notify-may', { notify: night })), false);
+  assert.equal(mayNotify(at(3), path.join(tmp, 'nowhere')), true);
+});
+
+test("another agent's page: its home in Manor's agents.json, else its staff.json; a checkout's 10000 above", () => {
+  const home = manorAt('agents', {});
+  writeFileSync(path.join(home, 'agents.json'), JSON.stringify({ agents: [{ id: 'reeve', home: 'http://reeve.localhost:18383/' }, { id: 'odd', home: 'javascript:alert(1)' }, { id: 'none' }] }));
+  writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'reeve', home: 'http://reeve.localhost:1/' }, { id: 'porter', home: 'http://porter.localhost:18686/' }] }));
+  assert.equal(agentUrl('reeve', { home }), 'http://reeve.localhost:18383/', 'announced first');
+  assert.equal(agentUrl('porter', { home }), 'http://porter.localhost:18686/', 'else its staff');
+  assert.equal(agentUrl('reeve', { home, dev: true }), 'http://reeve.localhost:28383/');
+  assert.equal(agentUrl('odd', { home }), null, 'only http(s)');
+  assert.equal(agentUrl('none', { home }), null);
+  assert.equal(agentUrl('smith', { home }), null);
+  assert.equal(agentUrl('reeve', { home: path.join(tmp, 'nowhere') }), null);
+});
+
+test("the GitHub owner: gh's signed-in login, from its config, else GitHub; kept once known, asked again later when not", () => {
+  forgetGithubOwner();
+  const asked: string[][] = [];
+  const gh = (said: Record<string, string>) => (args: string[]) => (asked.push(args), said[args[0]] ?? '');
+  assert.equal(githubOwner({ run: gh({ config: 'Jcollier0120\n' }), now: 0 }), 'Jcollier0120');
+  assert.equal(githubOwner({ run: gh({ config: 'someone-else' }), now: 1 }), 'Jcollier0120', 'kept');
+  assert.equal(asked.length, 1);
+  forgetGithubOwner();
+  assert.equal(githubOwner({ run: gh({ config: '', api: 'octo-cat' }), now: 0 }), 'octo-cat', "gh's config empty: GitHub");
+  forgetGithubOwner();
+  assert.equal(githubOwner({ run: gh({ config: 'not a login!' }), now: 0 }), null);
+  assert.equal(githubOwner({ run: gh({ config: 'late' }), now: 60_000 }), null, 'not known: not asked again at once');
+  assert.equal(githubOwner({ run: gh({ config: 'late' }), now: 10 * 60_000 }), 'late', 'but after ten minutes');
+  forgetGithubOwner();
 });

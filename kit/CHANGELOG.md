@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.24.0
+
+**What every agent asked Manor, its owner or GitHub for by hand, from the kit.** The settings audit (the user's call: fewer settings) found agents asking the person for what the PC already knows: another agent's address, the GitHub owner, and, soon, when to notify. These are the first of its helpers; the round interval, the plain-words notes switch, the model calls per round, the known folders and the on-page list follow in 2.25.0.
+- **node/manor.ts: `agentUrl(id, { dev?, home?, staffFile? })`**, another agent's page, from its `home` in Manor's agents.json, else its staff.json, with a trailing slash; with `dev`, its development checkout's, on its port + `DEV_PORT_OFFSET` (10000, as every app.ts and Manor's settings.ts place one). Null when Manor doesn't know the agent. Read afresh: never keep an agent's address in settings.
+- **node/manor.ts: `githubOwner()`**, the GitHub login gh is signed in as on this PC, from gh's config without the network, else GitHub through gh; kept once known, asked again after ten minutes when not. Null without gh or a sign-in. For defaults that would otherwise name someone: they start empty and mean this.
+- **node/manor.ts: the manor's notification preferences.** Manor's settings.json gains `"notify": { "on": true, "quietFrom": "22:00", "quietTo": "07:00" }` (Manor's Settings page; the user's call: one switch and quiet hours for every agent, none of its own). `notifyPrefs()` reads it afresh (`NotifyPrefs` {on, quietFrom, quietTo}; quiet hours null when there are none), null without an installed Manor or one that doesn't say; `mayNotify(now = new Date())` is whether an agent may notify the owner now (on, and outside the quiet hours, which may span midnight), always true without Manor's say; `notifyAllowed(prefs, now)` is the same for preferences in hand. A wrong field falls back to its default (`NOTIFY_DEFAULT`), and equal times mean no quiet hours, as Manor's panel has it.
+- **node/settings-kit.ts: `applies` gains `'reinstall'` and `'admin'`**, beside `'restart'`, for a setting saved but only used when the agent is next installed or updated (written into a scheduled task, say), or only when installed as an administrator. The Settings form (React, and settings-panel.js) marks each with its note, `APPLIES_NOTE`, and a save says it for each such setting it changed.
+- **What an agent must do:** nothing. Dropping a setting these answer, and marking settings `reinstall` or `admin`, is each agent's own change.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.23.0
 
 **Settings in React, and short; and a new hire's tour of its page.** The kit's React Settings form replaces settings-panel.js on a React page, and a page that is one long column of every setting becomes a short one: the user asked for fewer, shorter settings. Onboarding is new: Manor starts empty, and each employee a person hires walks them through three steps on its own page.

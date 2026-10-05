@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.10.4
+
+**Kit 2.24.0: what agents asked for by hand, from the kit** (kit/CHANGELOG.md): another agent's address from Manor, the GitHub owner from gh, the manor's notification preferences, and settings marked as used only at the next install.
+
+### What changed
+
+- Nothing on the Steward's own page: it hands the new kit to every agent.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.10.2
 
 **Kit 2.23.0: the Steward's Settings are a React form, and shorter to read** (kit/CHANGELOG.md).
