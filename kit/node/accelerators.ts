@@ -18,7 +18,8 @@ import { RULES } from './rules.ts';
  * - Reeve's config.json lists them (`accelerators`, `acceleratorOrder`); an older config with only a
  *   `chatEndpoint` (and `embedEndpoint`) is read as one accelerator per device, `npu` for the NPU;
  * - each request is offered to the candidates that serve its kind, fit its size, haven't failed in the
- *   last 10 minutes, and (for background work) aren't a graphics card a game is using; it goes to the
+ *   last 10 minutes, and (for background work) aren't a graphics card a game is using. The NPU first: when
+ *   it comes first and can do the request, it alone is offered it, busy or not; otherwise it goes to the
  *   first with a free slot and nobody waiting, else to the shortest line;
  * - a server that won't start within 30 s, refuses the connection, answers 5xx or times out marks its
  *   accelerator failed (a file every agent reads), and the request goes once to the next candidate;
@@ -77,8 +78,8 @@ export const slug = (name: string) => core.slug(name);
 export const acceleratorId = (kind: AcceleratorKind, name: string) => core.acceleratorId(kind, name);
 
 /**
- * Auto: graphics cards with 2 GB or more of their own memory first, the most memory first; then the
- * NPU; then graphics that share the PC's memory; then the CPU. Ties keep the config's order.
+ * Auto: the NPU first; then graphics cards with 2 GB or more of their own memory, the most memory first;
+ * then graphics that share the PC's memory; then the CPU. Ties keep the config's order.
  */
 export function autoOrder(list: Accelerator[]): Accelerator[] {
   return core.autoOrder(RULES, list);
@@ -318,7 +319,7 @@ export function candidates(
   accs: Accelerator[],
   need: Need,
   state: { failure?: (id: string) => Failure | null; games?: Games | null; deferredMs?: (id: string) => number; now?: number } = {},
-): { list: Accelerator[]; skipped: Skipped[] } {
+): { list: Accelerator[]; skipped: Skipped[]; npuFirst: boolean } {
   const asked = accs.filter((a) => core.serves(a, need.work));
   return core.candidates(RULES, accs, need, {
     failures: state.failure ? Object.fromEntries(asked.map((a) => [a.id, state.failure!(a.id)])) : undefined,

@@ -199,8 +199,9 @@ export type Written = {
     startCommand?: string[];
 };
 /**
- * Auto: graphics cards with `ownMemoryGb` (2 GB) or more of their own memory first, the most memory
- * first; then the NPU; then graphics that share the PC's memory; then the CPU. Ties keep the given order.
+ * Auto: the NPU first, since it does model work without the processor or a graphics card; then graphics
+ * cards with `ownMemoryGb` (2 GB) or more of their own memory, the most memory first; then graphics that
+ * share the PC's memory; then the CPU. Ties keep the given order.
  * @template {{ kind: AcceleratorKind, memoryGb: number | null }} A
  * @param {Rules} rules
  * @param {A[]} list
@@ -355,11 +356,17 @@ export declare function gameCards(rules: Rules, load: GpuLoad, accs: Accelerator
  * failed in the last failedForMs (unless every one that would do has: then they all may, as a last
  * resort), a game isn't using them (background work only), and the agent isn't leaving them alone after
  * a line that was too long (`deferredMs`).
+ *
+ * **The NPU first:** when the first that would do, in order, is the NPU and it hasn't failed, it is the only
+ * candidate (`npuFirst`). The NPU does model work without the processor or a graphics card, so they take it
+ * only when the NPU can't: it doesn't serve the work, the request is too big for it, or it failed lately.
+ * Busy, resting after a long line, or loading its model, it is waited for, never passed over. An
+ * acceleratorOrder that puts something else first is the person's choice, and kept.
  * @param {Rules} rules
  * @param {Accelerator[]} accs
  * @param {Need} need
  * @param {{ failures?: Record<string, Failure | null>, games?: Games | null, deferredMs?: Record<string, number>, nowMs?: number }} [state]
- * @returns {{ list: Accelerator[], skipped: Skipped[] }}
+ * @returns {{ list: Accelerator[], skipped: Skipped[], npuFirst: boolean }}
  */
 export declare function candidates(rules: Rules, accs: Accelerator[], need: Need, state?: {
     failures?: Record<string, Failure | null>;
@@ -369,6 +376,7 @@ export declare function candidates(rules: Rules, accs: Accelerator[], need: Need
 }): {
     list: Accelerator[];
     skipped: Skipped[];
+    npuFirst: boolean;
 };
 /**
  * The pick: the first candidate with a free slot and nobody waiting; else the one whose line is shortest,

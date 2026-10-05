@@ -138,15 +138,14 @@ test("Reeve's config lists the accelerators; a vision model without an address i
     ],
     acceleratorOrder: 'auto',
   });
-  assert.deepEqual(cfg.accelerators.map((a) => a.id), ['gpu-off', 'gpu-nvidia-geforce-rtx-4090', 'npu'], 'auto: the most memory first');
-  assert.ok(!A.serves(cfg.accelerators[0], 'chat'), 'one turned off is kept in the list, and sent nothing');
-  cfg.accelerators.shift();
-  const card = cfg.accelerators[0];
+  assert.deepEqual(cfg.accelerators.map((a) => a.id), ['npu', 'gpu-off', 'gpu-nvidia-geforce-rtx-4090'], 'auto: the NPU first, then the cards, the most memory first');
+  assert.ok(!A.serves(cfg.accelerators[1], 'chat'), 'one turned off is kept in the list, and sent nothing');
+  const card = cfg.accelerators[2];
   assert.equal(card.chat!.baseUrl, 'http://127.0.0.1:18191');
   assert.deepEqual(card.vision, { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-vl-4b-instruct', startCommand: ['llama-server.exe', '--port', '18191'] });
   assert.equal(card.embed!.model, 'qwen3-embedding-0.6b');
   assert.equal(card.slots, 2);
-  assert.deepEqual(cfg.accelerators[1].quirks, ['prefix-leak', 'image-path']);
+  assert.deepEqual(cfg.accelerators[0].quirks, ['prefix-leak', 'image-path']);
   assert.equal(cfg.problems.length, 2, 'a bad id, and one listed twice');
   assert.equal(cfg.legacy, false);
 });
@@ -244,7 +243,7 @@ test('the model messages are clauses with no full stop of their own, for an agen
   assert.ok(!`No notes: ${new Npu({ error: A.REEVE_NOT_SET_UP }).problem}.`.includes('..'));
 });
 
-test('auto order: cards with 2 GB or more by memory, then the NPU, then shared graphics, then the CPU; a list goes first', () => {
+test('auto order: the NPU, then cards with 2 GB or more by memory, then shared graphics, then the CPU; a list goes first', () => {
   const list = config({
     accelerators: [
       { id: 'cpu', kind: 'cpu', name: 'Oryon', chat: { baseUrl: 'http://x:1', model: 'm' } },
@@ -255,7 +254,7 @@ test('auto order: cards with 2 GB or more by memory, then the NPU, then shared g
       { id: 'gpu-unknown', kind: 'gpu', chat: { baseUrl: 'http://x:6', model: 'm' } },
     ],
   }).accelerators;
-  assert.deepEqual(list.map((a) => a.id), ['gpu-big', 'gpu-small', 'npu', 'gpu-igpu', 'gpu-unknown', 'cpu']);
+  assert.deepEqual(list.map((a) => a.id), ['npu', 'gpu-big', 'gpu-small', 'gpu-igpu', 'gpu-unknown', 'cpu']);
   assert.deepEqual(A.ordered(list, ['cpu', 'npu', 'nope']).map((a) => a.id), ['cpu', 'npu', 'gpu-big', 'gpu-small', 'gpu-igpu', 'gpu-unknown']);
 });
 
@@ -272,7 +271,7 @@ test("a card's id and name are Heiward's: software adapters left out, a second c
 
 // ---------------------------------------------------------------- choosing
 
-test('candidates serve the kind, fit the cap, have not failed, and (for background work) no game is on them', () => {
+test('candidates serve the kind, fit the cap, have not failed, and (for background work) no game is on them; the NPU first, alone', () => {
   const list = config({
     accelerators: [
       gpu('gpu-a', { memoryGb: 24, chat: { baseUrl: 'http://x:1', model: 'm' } } as any),
@@ -283,31 +282,44 @@ test('candidates serve the kind, fit the cap, have not failed, and (for backgrou
   }).accelerators;
   const ids = (r: { list: Accelerator[] }) => r.list.map((a) => a.id);
   const bg = (work: 'chat' | 'vision' | 'embed', tokens: number) => ({ work, tokens, lane: 'background' as const });
-  assert.deepEqual(ids(A.candidates(list, bg('chat', 500))), ['gpu-a', 'gpu-b', 'npu']);
-  assert.deepEqual(ids(A.candidates(list, bg('vision', 500))), ['gpu-b']);
+  assert.deepEqual(list.map((a) => a.id), ['npu', 'gpu-a', 'gpu-b', 'cpu'], 'auto: the NPU first');
+  // The NPU can do it: it alone, background or a person waiting; the cards aren't used beside it.
+  const r0 = A.candidates(list, bg('chat', 500));
+  assert.deepEqual([ids(r0), r0.npuFirst], [['npu'], true]);
+  assert.deepEqual(ids(A.candidates(list, { work: 'chat', tokens: 500, lane: 'interactive' })), ['npu']);
+  // It can't: the others, in order.
+  assert.deepEqual(ids(A.candidates(list, bg('vision', 500))), ['gpu-b'], "the NPU doesn't serve it");
   assert.deepEqual(ids(A.candidates(list, bg('embed', 500))), ['cpu']);
-  assert.deepEqual(ids(A.candidates(list, bg('chat', 3000))), ['gpu-a', 'gpu-b'], "over the NPU's cap");
-  const failure = (id: string) => (id === 'gpu-a' ? { since: new Date().toISOString(), reason: 'refused', by: 'x' } : null);
+  const over = A.candidates(list, bg('chat', 3000));
+  assert.deepEqual([ids(over), over.npuFirst], [['gpu-a', 'gpu-b'], false], "over the NPU's cap");
+  const failure = (id: string) => (id === 'npu' || id === 'gpu-a' ? { since: new Date().toISOString(), reason: 'refused', by: 'x' } : null);
   const games = { checkedAt: new Date().toISOString(), cards: { 'gpu-b': { busy: true, percent: 87, by: ['game.exe'] } } };
   const r = A.candidates(list, bg('chat', 500), { failure, games });
-  assert.deepEqual(ids(r), ['npu']);
-  assert.deepEqual(r.skipped.map((s) => [s.acc.id, s.why]), [['gpu-a', 'failed'], ['gpu-b', 'game']]);
-  assert.match(r.skipped[1].detail, /in use by game\.exe/);
-  assert.deepEqual(ids(A.candidates(list, { work: 'chat', tokens: 500, lane: 'interactive' }, { failure, games })), ['gpu-b', 'npu'], 'a person waiting may use the card');
-  assert.deepEqual(ids(A.candidates(list, bg('chat', 500), { deferredMs: (id) => (id === 'npu' ? 60_000 : 0) })), ['gpu-a', 'gpu-b']);
-  // The last resort: every one that would do has failed, so they're all tried again.
+  assert.deepEqual(ids(r), [], 'the NPU failed lately, the big card too, and a game is on the other');
+  assert.deepEqual(r.skipped.map((s) => [s.acc.id, s.why]), [['npu', 'failed'], ['gpu-a', 'failed'], ['gpu-b', 'game']]);
+  assert.match(r.skipped[2].detail, /in use by game\.exe/);
+  assert.deepEqual(ids(A.candidates(list, { work: 'chat', tokens: 500, lane: 'interactive' }, { failure, games })), ['gpu-b'], 'a person waiting may use the card');
+  // Resting after a long line: waited for, never passed over for the cards.
+  const resting = A.candidates(list, bg('chat', 500), { deferredMs: (id) => (id === 'npu' ? 60_000 : 0) });
+  assert.deepEqual([ids(resting), resting.skipped.map((s) => [s.acc.id, s.why])], [[], [['npu', 'deferred']]]);
+  assert.equal(core.whyNone(resting.skipped, null).busy, true, 'deferred, not a fault');
+  // The last resort: every one that would do has failed, so they're tried again, the NPU first.
   const allFailed = () => ({ since: new Date().toISOString(), reason: 'refused', by: 'x' });
   const last = A.candidates(list, bg('chat', 500), { failure: allFailed });
-  assert.deepEqual(ids(last), ['gpu-a', 'gpu-b', 'npu']);
+  assert.deepEqual(ids(last), ['npu']);
   assert.deepEqual(last.skipped, []);
-  assert.deepEqual(ids(A.candidates(list, bg('chat', 500), { failure: allFailed, games })), ['gpu-a', 'npu'], 'a game still keeps background work off its card');
+  assert.deepEqual(ids(A.candidates(list.filter((a) => a.id !== 'npu'), bg('chat', 500), { failure: allFailed, games })), ['gpu-a'], 'a game still keeps background work off its card');
   const onlyNpu = list.filter((a) => a.id === 'npu');
   assert.deepEqual(ids(A.candidates(onlyNpu, bg('chat', 500), { failure: allFailed })), ['npu'], 'a PC with only the NPU keeps working');
   assert.deepEqual(ids(A.candidates(list, bg('chat', 500), { failure: (id) => (id === 'npu' ? null : allFailed()) })), ['npu'], 'one working is enough: the failed stay skipped');
+  // A list that puts a card first is the person's choice: kept, and the NPU is one of the candidates after it.
+  const cardFirst = A.ordered(list, ['gpu-a']);
+  assert.deepEqual(ids(A.candidates(cardFirst, bg('chat', 500))), ['gpu-a', 'npu', 'gpu-b']);
 });
 
 test('the pick: a free slot with nobody waiting, else the shortest line; background waits at 4 in every line', () => {
-  const list = config({ accelerators: [gpu('gpu-a', { memoryGb: 24, chat: { baseUrl: 'http://x:1', model: 'm' } } as any), { id: 'npu', kind: 'npu', chat: { baseUrl: 'http://x:2', model: 'm' } }] }).accelerators;
+  // A list that puts the card first (with the NPU first, it is the only candidate, and the pick is its line alone).
+  const list = config({ accelerators: [gpu('gpu-a', { memoryGb: 24, chat: { baseUrl: 'http://x:1', model: 'm' } } as any), { id: 'npu', kind: 'npu', chat: { baseUrl: 'http://x:2', model: 'm' } }], acceleratorOrder: ['gpu-a'] }).accelerators;
   const looks = (m: Record<string, { freeSlot: boolean; waiting: number }>) => (a: Accelerator) => m[a.id];
   const id = (r: ReturnType<typeof A.pick>) => ('acc' in r ? r.acc.id : r.deferred);
   assert.equal(id(A.pick(list, 'background', looks({ 'gpu-a': { freeSlot: true, waiting: 0 }, npu: { freeSlot: true, waiting: 0 } }))), 'gpu-a', 'first in order');
@@ -515,23 +527,27 @@ test('every answer says where it ran, and a background request goes around a car
         { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: npu.baseUrl, model: 'm' }, quirks: ['prefix-leak'] },
       ],
     }));
+    // The NPU first, though the card is listed first and has more room: it does the work without the card.
     const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
-    assert.equal(a.text, 'from the card');
-    assert.deepEqual(a.accelerator, { id: 'gpu-nvidia-geforce-rtx-4090', name: 'NVIDIA GeForce RTX 4090' });
-    assert.equal(A.noteLabel(a.accelerator), 'note from the NVIDIA GeForce RTX 4090, unverified');
-    assert.match(unverified('<b>', a.accelerator), /note from the NVIDIA GeForce RTX 4090, unverified<\/span> &lt;b&gt;/);
+    assert.equal(a.text, 'from the NPU');
+    assert.deepEqual(a.accelerator, { id: 'npu', name: 'Snapdragon X2 Elite NPU' });
+    assert.match(npu.seen[0].messages[0].content, /^\[req /, "the NPU's server gets its nonce");
+    assert.equal(model.budget(100), 2300, "chunking: the NPU's cap, so the pieces fit the NPU");
+    // Too big for the NPU: the card takes it, since the NPU can't.
+    const big = [{ role: 'user' as const, content: 'x'.repeat(9000) }];
+    const b = await model.chat(big, { maxTokens: 10 });
+    assert.equal(b.text, 'from the card');
+    assert.deepEqual(b.accelerator, { id: 'gpu-nvidia-geforce-rtx-4090', name: 'NVIDIA GeForce RTX 4090' });
+    assert.ok(!card.seen[0].messages.some((m: any) => /\[req /.test(m.content)), 'the card gets no nonce');
+    assert.equal(A.noteLabel(b.accelerator), 'note from the NVIDIA GeForce RTX 4090, unverified');
+    assert.match(unverified('<b>', b.accelerator), /note from the NVIDIA GeForce RTX 4090, unverified<\/span> &lt;b&gt;/);
     assert.match(unverified('old note'), /note from the NPU, unverified/, 'a note kept from before came from the NPU');
-    // A game on the card: background work goes to the NPU, a person waiting may still use the card.
+    // A game on the card: background work that only the card can take waits; a person waiting may still use it.
     mkdirSync(acceleratorsDir, { recursive: true });
     writeFileSync(A.gamesFile(), JSON.stringify({ checkedAt: new Date().toISOString(), cards: { 'gpu-nvidia-geforce-rtx-4090': { busy: true, percent: 91, by: ['game.exe'] } } }));
-    const b = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
-    assert.equal(b.accelerator.id, 'npu');
-    assert.match(npu.seen[0].messages[0].content, /^\[req /, "the NPU's server gets its nonce");
-    assert.ok(!card.seen[0].messages.some((m: any) => /\[req /.test(m.content)), 'the card does not');
-    assert.equal((await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10, lane: 'interactive' })).accelerator.id, 'gpu-nvidia-geforce-rtx-4090');
-    assert.equal(model.budget(100), 2300, "chunking while the card is held back: the NPU's cap");
-    // Only the card can take a request this big, and a game is on it: background work waits.
-    await assert.rejects(model.chat([{ role: 'user', content: 'x'.repeat(9000) }], { maxTokens: 10 }), (e: Error) => e instanceof NpuBusy && /game\.exe/.test(e.message));
+    assert.equal((await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 })).accelerator.id, 'npu');
+    assert.equal((await model.chat(big, { maxTokens: 10, lane: 'interactive' })).accelerator.id, 'gpu-nvidia-geforce-rtx-4090');
+    await assert.rejects(model.chat(big, { maxTokens: 10 }), (e: Error) => e instanceof NpuBusy && /game\.exe/.test(e.message));
     await assert.rejects(model.chat([{ role: 'user', content: 'x'.repeat(60_000) }], { maxTokens: 10 }), (e: Error) => e instanceof NpuError && !(e instanceof NpuBusy) && /largest cap is 16384/.test(e.message));
   } finally {
     rmSync(A.gamesFile(), { force: true });
@@ -894,7 +910,7 @@ test("gpuWithNpu on, an older Manor without the key, no Manor, or no NPU: the ca
       else noManor();
       const model = new Npu(cfg);
       assert.deepEqual(ids(model.accelerators), ['npu', 'gpu-adreno', 'cpu'], JSON.stringify(settings));
-      assert.equal(model.budget(300), 16384 - 300);
+      assert.equal(model.budget(300), 2400 - 300, "the NPU's cap: it comes first, so the pieces fit it");
       A.markFailed('npu', 'chat: refused', 'tester');
       assert.deepEqual(ids(A.candidates(model.accelerators, need, { failure: A.readFailure }).list), ['gpu-adreno'], 'the card is the fallback');
       A.clearFailure('npu');

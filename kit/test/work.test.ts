@@ -40,7 +40,7 @@ test('this PC: what Reeve lists, in order, and when that is the NPU alone', () =
     ],
   });
   const text = thisPc(both);
-  assert.match(text, /the NVIDIA GeForce RTX 4090 \(chat\), then the Snapdragon X2 Elite NPU \(chat\)\./, 'auto order: the big card first');
+  assert.match(text, /the Snapdragon X2 Elite NPU \(chat\), then the NVIDIA GeForce RTX 4090 \(chat\)\./, 'auto order: the NPU first');
   assert.doesNotMatch(text, /NPU only/);
   assert.equal(thisPc({ error: REEVE_NOT_SET_UP }), `${REEVE_NOT_SET_UP}, so there is no model work here.`);
 });
