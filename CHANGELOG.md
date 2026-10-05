@@ -2,14 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.8.18
+## 0.8.19
 
 **Versions are claimed up front.** Work started side by side on one repository each took "the next version" and clashed on its way in. Now a worker asks the Steward first: `node src\cli.ts claim-version <employee> --branch <b> --for "<what>"` hands out the next version no one has (above the branch, every release, every open PR's title and every live claim), one claim at a time under a machine-wide lock, the same again for the same branch (src/claims.ts).
 - `claims` and `GET /api/versions` list them; `release-version` gives one back. A claim lives until its work lands (on the branch, or overtaken by a release), it is given back, or three days pass with no PR that names it; each round prunes them (`version-claims.json`).
 - The merge stage holds a PR that sets a version other work claimed, and its catch-up gives it a free one.
 - The Wright 0.1.16 claims for each job before its worker starts.
 
-## 0.8.17
+## 0.8.18
 
 **The Steward merges its own PRs, sends a conflict back to whoever wrote it, and rolls back an update of itself that fails.** Today's conflicts on its own PR were two PRs each adding a top entry to CHANGELOG.md under the same next version, and no one but a person merged the Steward's PRs.
 - **A new entry at the top of CHANGELOG.md, on both sides, is resolved** in a catch-up, as version lines are: the branch's entries kept, the PR's above them under the version it ends up with (`mergeChangelogs` in catchup.ts). A PR given a new version without a conflict has its top entry renamed too.
@@ -17,12 +17,16 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Its own PRs are merged in its rounds** (stages/selfmerge.ts), as an employee's team PRs are: tested here first (`npm run kit`, `npm run typecheck`, `npm test`), a version of their own each, caught up or sent back. New setting: Merges its own PRs (`mergeSelf`), on.
 - **An update of itself is on probation** (src/safeinstall.ts): the version before is kept as `app.prev`; the new one must answer as itself for 90 seconds, and render its home page. One that doesn't, or whose install fails once it is in place, is rolled back to `app.prev` and started again, set aside as `app.unsafe-<version>`, and flagged in `unsafe-updates.json`: refused by every install after, so Manor stops trying it, and an alarm at once. Dismissing the alarm, or `node src\cli.ts allow-update <version>`, allows it again.
 
-## 0.8.16
+## 0.8.17
 
 **A bump that fails says which test, keeps its output, and is tried once more.** The rollout of kit 2.12.1 failed for two employees with only "npm test failed (exit 1)": the log keeps the last 25 lines of the output, and the failed test was far above them.
 - A failed check's message names the tests that failed and the first lines of their errors, read from `node --test`'s output (`failedTests` in run.ts), so the alarm says what broke: `npm test failed (exit 1): "its name" (each request came after its warm-up: 5 !== 8)`. The log lists them too, before the tail.
 - The failed step's whole output is kept beside its worktree, as `work\<id>.log`, and the message says where.
 - A bump's checks that fail are run once more, as a PR's tested here are: Reeve's failed in the round, under the load of several bumps at once, and passed three times alone. A pass the second time is committed, and its result and commit message say so; failing twice is the failure, as before.
+
+## 0.8.16
+
+**A port clash is an alarm.** Each round the Steward reads Manor's `/api/summary` (Manor 0.4.38 and later) and its `ports`. It raises one alarm per port that two agents claim, that is kept for the model servers, or that another program answers on, so an agent's page can't start there (the Chamberlain on the Developer Herald's 19898). The alarm comes after a quarter of an hour, so a page restarting through an update isn't one. If the summary doesn't answer in a round, a port alarm stays as it was rather than clearing and coming back with a second toast.
 
 ## 0.8.15
 
