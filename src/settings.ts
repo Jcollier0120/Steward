@@ -147,7 +147,7 @@ export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => exists
 export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor and the Lamplighter, built on
+ * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, the Lamplighter and the Smith, built on
  * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
  * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
@@ -181,6 +181,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   },
   hire('Surveyor'),
   hire('Lamplighter'),
+  hire('Smith'),
 ];
 
 /** The employees when Settings name none: the defaults, and the Wright and the Bailiff where each is installed. */

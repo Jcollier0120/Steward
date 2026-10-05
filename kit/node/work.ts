@@ -123,6 +123,15 @@ export const WORK: Record<string, AgentWork> = {
     ],
     notes: ['The guard is the one part of the manor that runs as an administrator (SYSTEM), and it uses no model: detecting a dark screen and rolling back are code.'],
   },
+  smith: {
+    model: false,
+    lines: [
+      { what: 'A look at every model server: who uses each accelerator, whether each answers, how much memory GenieX holds, whether a game wants a graphics card, and any model server nobody configured', where: 'the processor (one PowerShell process list) and the model servers on this PC', when: 'every minute, a moment' },
+      { what: 'Stopping a server nobody has used for 10 minutes (Settings), one a game needs the card back from, or an orphan; restarting one that stopped answering or holds too much', where: 'the model servers it keeps: GenieX on the NPU, llama-server on a graphics card or the processor', when: 'only when nobody holds or waits for that accelerator' },
+      { what: 'Setting up a graphics card or the processor: llama.cpp and the models, downloaded and checked', where: 'the network and the disk (some 6 GB), and a moment of the graphics card to list its devices', when: 'only when you press Set up' },
+    ],
+    notes: ["The model servers run every other agent's model work, not the Smith's: it uses no model, it keeps them. A server it stops starts again by itself at the next request, in seconds."],
+  },
 };
 
 const esc = (s: unknown) =>

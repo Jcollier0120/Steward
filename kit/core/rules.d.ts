@@ -128,6 +128,49 @@ export type MannersRules = {
      */
     backOffMs: number;
 };
+export type KeeperRules = {
+    /**
+     * How often the keeper looks at every server it can start again.
+     */
+    lookEveryMs: number;
+    /**
+     * config.json's npuIdleStopMinutes when it gives none: the NPU unused this long, its servers stop.
+     */
+    npuIdleStopMinutes: number;
+    /**
+     * config.json's gpuIdleStopMinutes when it gives none: a graphics card (or the processor) unused this long, its servers stop.
+     */
+    gpuIdleStopMinutes: number;
+    /**
+     * A card nobody has used this long has its servers stopped as soon as a game is using it.
+     */
+    gameGraceMs: number;
+    /**
+     * A server that hasn't answered this long, while nobody uses its accelerator, is restarted.
+     */
+    unansweredMs: number;
+    /**
+     * GenieX's working set at which it is restarted while nobody uses the NPU: memory kept from earlier loads.
+     */
+    recycleBytes: number;
+    /**
+     * How long the keeper's turn waits for its first slot.
+     */
+    turnWaitMs: number;
+    /**
+     * The keeper's turn joins a line only with fewer than this many waiting: 1 is "only an empty line" (0 refuses every turn).
+     */
+    turnMaxAhead: number;
+    /**
+     * How long it waits for each of a card's other slots, held as plain locks.
+     */
+    otherSlotsWaitMs: number;
+    /**
+     * A model server on the manor's ports that no configured accelerator names (an orphan: a test's,
+     * a scratch home's, an old config's) is stopped once seen this long, so nothing nobody tracks keeps a card's memory.
+     */
+    orphanGraceMs: number;
+};
 export type TokenRules = {
     /**
      * The pessimistic estimate: one token per this many characters.
@@ -155,6 +198,7 @@ export type Rules = {
     lock: LockRules;
     accelerators: AcceleratorRules;
     manners: MannersRules;
+    keeper: KeeperRules;
     tokens: TokenRules;
 };
 /**
