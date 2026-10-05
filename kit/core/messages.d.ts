@@ -73,6 +73,8 @@ export declare const say: Readonly<{
     noneCould: () => "no accelerator could take the request";
     /** @param {string} id @param {string} work */
     notServing: (id: string, work: string) => string;
+    /** @param {AcceleratorRef} acc */
+    gpuSetAside: (acc: AcceleratorRef) => string;
     noVisionModel: () => "no vision model in Reeve's config.json (an accelerator's \"vision\", or \"visionModel\" in an older config)";
     /** @param {string} work */
     noneServes: (work: string) => string;

@@ -264,6 +264,21 @@ export function ordered(rules, list, order) {
 }
 
 /**
+ * Manor's "Use the graphics card for models when there's an NPU" (settings.json's `gpuWithNpu`) applied: when it's
+ * false and the list has an NPU that serves something, every graphics card is left out, so none is ever a candidate,
+ * not even the fallback when the NPU fails or is busy. The processor stays. With it true, or no NPU serving anything,
+ * the list is unchanged: on a PC without an NPU the switch means nothing.
+ * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A
+ * @param {A[]} list
+ * @param {boolean} gpuWithNpu
+ * @returns {A[]}
+ */
+export function withoutGpuBesideNpu(list, gpuWithNpu) {
+  const npu = list.some((a) => a.kind === 'npu' && a.enabled !== false && WORKS.some((w) => !!a[w]));
+  return gpuWithNpu === false && npu ? list.filter((a) => a.kind !== 'gpu') : list;
+}
+
+/**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
  * @param {Rules} rules

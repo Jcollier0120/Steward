@@ -2,6 +2,16 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.10.0
+
+**Manor can keep the graphics card out of model work on a PC with an NPU.** Manor 0.4.26 has a Settings switch, "Use the graphics card for models when there's an NPU", saved as `"gpuWithNpu": true | false` in its settings.json. It is on by default, and an absent key means on, so nothing changes until someone turns it off. Off, on a PC whose Reeve config has an NPU that serves something, no graphics card is ever chosen for a request: not first, and not as the fallback when the NPU fails, is busy or its line is full. The processor, if configured, stays as before. Without an NPU the switch means nothing.
+- core/accelerators.js: **`withoutGpuBesideNpu(list, gpuWithNpu)`** is the rule. False, with an NPU in the list (not `enabled: false`, and serving chat, vision or embed), leaves out every `gpu` accelerator; otherwise the list is unchanged.
+- core/messages.js: **`say.gpuSetAside(acc)`**, for a request only a set-aside card could serve (one naming the card, or embeddings only the card serves).
+- node/manor.ts: **`ManorLink.gpuWithNpu`** (true unless settings.json says false: an older Manor, without the key, never set the card aside), and **`gpuWithNpu(own = true)`**, `{ on, setBy }` as `developerOptions(own)`: Manor's value while it's installed and says true or false, else the agent's own switch (true for an agent without one). It reads afresh on each call.
+- node/npu.ts: `Npu.accelerators` applies the rule on every read, so every request, `budget()`, `hasVision` and `hasEmbed` follow Manor's switch at once, with no restart.
+- spec/ACCELERATORS.md says so.
+- **Nothing for an agent to do.** Agents that build on `Npu` follow it. Reeve, which routes requests and starts servers itself, follows it in its own PR. Heiward, which runs its own models, is unchanged.
+
 ## 2.9.1
 
 **An NPU turn skips its warm-up while the model is still loaded.** Since 2.6.0 every chat or vision turn on the NPU began with a one-token warm-up request, in case GenieX had to load the model. With Reeve keeping one model loaded for hours (`--keepalive`, one model for chat and vision), that was a second request on every turn. Now a turn skips the warm-up when the server was already up and answered this same model within its keepalive (less 30 s; GenieX's default 300 s when its `startCommand` names none):
