@@ -16,9 +16,9 @@ import path from 'node:path';
 export const KIT_META = ['VERSION', 'CHANGELOG.md', 'LICENSE'];
 
 /** The kit's parts, and where each lands in a Node agent. */
-export const PARTS = ['node', 'web', 'spec'] as const;
+export const PARTS = ['node', 'web', 'spec', 'react'] as const;
 export type Part = (typeof PARTS)[number];
-export const PART_DIRS: Record<Part, string> = { node: 'src/kit', web: 'src/kit/web', spec: 'src/kit/spec' };
+export const PART_DIRS: Record<Part, string> = { node: 'src/kit', web: 'src/kit/web', spec: 'src/kit/spec', react: 'src/kit/react' };
 
 /** Where a Node agent keeps the kit: filled by its tools/kit.ts, git-ignored. */
 export const HIRE_KIT_DIR = 'src/kit';
@@ -36,7 +36,7 @@ export function hirePathOf(kitPath: string): string | null {
 /** The kit-tree path of a file a Node agent has under src/kit (src/kit/web/x.js is web/x.js), or null. */
 export function kitPathOfHire(hirePath: string): string | null {
   const p = hirePath.replace(/\\/g, '/');
-  for (const part of ['spec', 'web', 'node'] as const) {
+  for (const part of ['spec', 'web', 'react', 'node'] as const) {
     const dir = `${PART_DIRS[part]}/`;
     if (p.startsWith(dir)) return `${part}/${p.slice(dir.length)}`;
   }

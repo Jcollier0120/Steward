@@ -5,6 +5,7 @@ import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
+import { pageScript } from './react-page.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
@@ -124,6 +125,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),
     '/settings.js': webFile('/settings.js'),
     '/settings.css': webFile('/settings.css'),
+    // A React page's bundle (react-page.ts): built from src/web/main.tsx in a checkout, as released otherwise.
+    '/page.js': pageScript(),
     ...opts.get,
   };
   const post: Record<string, Handler> = {

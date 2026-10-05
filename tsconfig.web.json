@@ -1,0 +1,18 @@
+{
+  "//": "The Steward's page, drawn in the browser: src/web and the kit's react part (src/kit/react). esbuild bundles it (the kit's react-page.ts); this only type-checks it.",
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/web", "src/kit/react"]
+}

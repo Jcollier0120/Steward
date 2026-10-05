@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.9.8",
+  "version": "0.10.0",
   "private": true,
   "license": "UNLICENSED",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
@@ -28,7 +28,7 @@
     "posttest": "node kit/test/dotnet.ts --if-present",
     "test:dotnet": "node kit/test/dotnet.ts",
     "test:dotnet-publish": "node kit/test/dotnet.ts --publish",
-    "typecheck": "tsc -p .",
+    "typecheck": "tsc -p . && tsc -p tsconfig.web.json",
     "ui:inventory": "node tools/ui-inventory.ts",
     "release": "node tools/kit.ts --from kit && node src/kit/release.ts",
     "kit-release": "node tools/kit-release.ts",
@@ -37,7 +37,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "esbuild": "0.28.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "^7.0.2"
   }
 }
