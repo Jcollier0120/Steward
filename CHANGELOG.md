@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.17
+
+**Offline, the Steward waits, and raises no alarm the PC's being offline caused.** With kit 2.15.0 (kit/CHANGELOG.md, spec/OFFLINE.md):
+- **A round while this PC is offline asks GitHub nothing:** no glance, no PR lists, no release lists. It would only fail for every employee, every few minutes. It records nothing (stages.log, last-stage.json) and says in its log that it waits for the network; the alarms still look at the pages on this PC.
+- **The alarms leave out what is only the network's while offline** (`withoutOffline`): Manor's update look and an update it couldn't download, and any condition whose words are a network failure (an agent's round as the Surveyor saw it, a Reeve job's alert). An open one clears, and its hours start afresh once the PC is back online and it still fails. Everything else (a full disk, a page that doesn't answer, a port clash) is as ever, toast and all.
+- **A release, one of the Steward's own, or a kit rollout that fails offline, or with a network failure's words, is never held against its commit** (round-failed.json, self-failed.json, rollout-failed.json; `networkFailure` in stages/common.ts): the next round tries it again, where before it waited for a person.
+- Under `node --test`, the Steward is online unless a test says otherwise (`StageOptions.online`), so no test looks at the real network.
+
+## 0.8.16
+
+**A port clash is an alarm.** Each round the Steward reads Manor's `/api/summary` (Manor 0.4.38 and later) and its `ports`. It raises one alarm per port that two agents claim, that is kept for the model servers, or that another program answers on, so an agent's page can't start there (the Chamberlain on the Developer Herald's 19898). The alarm comes after a quarter of an hour, so a page restarting through an update isn't one. If the summary doesn't answer in a round, a port alarm stays as it was rather than clearing and coming back with a second toast.
+
 ## 0.8.15
 
 **The Steward announces itself to every Manor.** `manor-agent.json` at the root is its staff.json entry and its role, as Manor's main has them; its own release (the kit's release.ts, from 2.12.0) publishes it beside the zip, listed in SHA256SUMS.txt, as every Node agent of the manor's now does. `test/manor-agent.test.ts` checks it with the kit's `checkAnnouncement`. Numbered 0.8.15, after 0.8.14 (kit 2.14.0) on main.

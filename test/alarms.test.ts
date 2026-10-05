@@ -14,7 +14,7 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
-const { alarmsFile, dismiss, loadAlarms, manorConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
+const { alarmsFile, dismiss, loadAlarms, manorConditions, portConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
 const { alarmsCard } = await import('../src/view.ts');
 
@@ -78,6 +78,41 @@ test("from Manor: an update it couldn't install, its checks failing, its page do
   assert.deepEqual(c.map((x) => [x.id, x.afterMs / HOUR]), [['install:miller', 2], ['manor:updates', 12]]);
   assert.equal(c[0].title, "Manor couldn't update Miller");
   assert.deepEqual(manorConditions({ error: 'ECONNREFUSED' }).map((x) => [x.id, x.detail[0]]), [['manor:down', 'ECONNREFUSED']]);
+});
+
+test("from Manor's summary: one alarm a port that two agents claim, or another program holds, after a quarter of an hour", () => {
+  const summary = { ports: [
+    { port: 18686, agent: 'porter', answeredBy: 'porter', problem: null },
+    { port: 19898, agent: 'chamberlain', answeredBy: 'chamberlain', problem: 'Developer Herald claims it too: only one page can start there.' },
+    { port: 19898, agent: 'developer-herald', answeredBy: 'chamberlain', problem: 'Chamberlain claims it too: only one page can start there.' },
+    { port: 20404, agent: 'miller', answeredBy: 'something', problem: "something answers there, so Miller's page can't start." },
+  ] };
+  const c = portConditions(summary);
+  assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs / 60_000]), [['port:19898', 'chamberlain', 15], ['port:20404', 'miller', 15]]);
+  assert.equal(c[0].title, 'Port 19898 is claimed by chamberlain and developer-herald: only one page can start there');
+  assert.equal(c[0].detail[2], 'chamberlain answers there now.');
+  assert.equal(c[1].title, "Port 20404: something answers there, so Miller's page can't start.");
+  assert.deepEqual(portConditions({ error: 'ECONNREFUSED' }), [], "Manor's page down is manorConditions'");
+  assert.deepEqual(portConditions({ agents: [] }), [], 'an older Manor, without "ports"');
+  assert.deepEqual(portConditions({ ports: [{ port: 1, agent: 'x', problem: null }, 'junk'] }), []);
+});
+
+test('after a round, a port clash in Manor\'s summary is an alarm once it has lasted', async () => {
+  rmSync(alarmsFile(), { force: true });
+  const s = structuredClone(settings);
+  const pages: Record<string, unknown> = {
+    'http://m/api/state': { updates: { items: [] } },
+    'http://m/api/summary': { ports: [{ port: 19898, agent: 'developer-herald', answeredBy: 'chamberlain', problem: "chamberlain answers there, so Developer Herald's page can't start." }] },
+  };
+  const run = (min: number) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async () => {}, now: new Date(at(0).getTime() + min * 60_000), manorUrl: 'http://m' });
+  assert.deepEqual((await run(0)).open, [], 'not at once: a page may be restarting');
+  assert.deepEqual((await run(16)).open.map((a) => a.id), ['port:19898']);
+  delete pages['http://m/api/summary'];
+  const kept = await run(30);
+  assert.deepEqual(kept.open.map((a) => [a.id, a.title]), [['port:19898', "Port 19898: chamberlain answers there, so Developer Herald's page can't start."]], 'the summary not answering keeps it as it was');
+  pages['http://m/api/summary'] = { ports: [{ port: 19898, agent: 'developer-herald', answeredBy: 'developer-herald', problem: null }] };
+  assert.deepEqual((await run(45)).open, [], 'cleared once the summary says the port is fine');
+  rmSync(alarmsFile(), { force: true });
 });
 
 test("from the Surveyor: its problems from when it first saw them, never its warnings; its page down", () => {
