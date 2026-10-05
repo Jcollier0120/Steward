@@ -7,7 +7,7 @@ import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } fr
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { networkFailure, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -129,7 +129,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
       }
       const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000 });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
-      if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released`, { version: step.version, commit: at });
+      if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
     }
     return selfResult('done', `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})`, { version: step.version, commit: at, url: `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}` });
   } finally {
