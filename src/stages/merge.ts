@@ -4,7 +4,7 @@ import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
-import { catchUp, type CaughtUp } from './catchup.ts';
+import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import type { Held } from '../alarms.ts';
@@ -121,9 +121,12 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
 
 const heldOf = (pr: PrInfo, why: string): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft });
 
-/** A ready team PR from the repository itself that waits only on its branch: conflicting with it, or behind it. */
+/**
+ * A ready team PR from the repository itself, or a kit PR of the Steward's, that waits only on its branch: conflicting
+ * with it, or behind it.
+ */
 export const behindItsBranch = (pr: PrInfo, branch: string) =>
-  pr.whose === 'team' && !pr.fork && !pr.draft && !pr.afterError && pr.base === branch && (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY' || pr.mergeState === 'BEHIND');
+  (pr.whose === 'team' || isKitPr(pr)) && !pr.fork && !pr.draft && !pr.afterError && pr.base === branch && (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY' || pr.mergeState === 'BEHIND');
 
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
@@ -308,8 +311,10 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     }
     if (c.version) taken.push(c.version);
     const h = o.held.find((x) => x.number === pr.number);
-    if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : `${h.why} (not caught up: ${c.note})`;
-    lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
+    if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
+    // A closed PR waits for nothing: no alarm counts its hours.
+    if (h && c.closed) o.held.splice(o.held.indexOf(h), 1);
+    lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
   return lines;
 }
