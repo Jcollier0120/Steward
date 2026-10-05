@@ -2,6 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.10
+
+**Kit 2.12.1: a release zip's name has no spaces.** The Steward hands out kit 2.12.1 (kit/CHANGELOG.md). An agent whose name has two words (the Developer Herald) now publishes a zip that GitHub stores under the name SHA256SUMS.txt gives it, and that Manor finds.
+
+## 0.8.9
+
+**The Developer Herald is an employee.** It is the Herald's developer half since Herald 0.5.0, and the Steward now looks after it as it does the Smith: it rolls the kit out to it, merges its PRs and publishes its releases. A name of two words gives the id `developer-herald` and the repository and checkout `DeveloperHerald`.
+
 ## 0.8.8
 
 **Kit 2.12.0: a release publishes manor-agent.json, when the agent's checkout has one.** The Steward hands out kit 2.12.0 (kit/CHANGELOG.md): `npm run release -- --publish` copies the checkout's `manor-agent.json` beside the zip, lists it in SHA256SUMS.txt and uploads it, so Manor 0.4.35 offers the agent for hire; and it refuses to build when the file names another repository than origin's, or another agent. (0.8.7 was kit 2.11.0's, for the Smith.)

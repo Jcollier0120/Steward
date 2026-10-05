@@ -17,7 +17,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
 const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
-const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText } = await import('./fixture/src/kit/release.ts');
+const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
 let n = 0;
@@ -427,6 +427,11 @@ test('SHA256SUMS.txt lists the zip, and manor-agent.json after it, as sha256sum 
     sumsText([{ name: 'Fixture-1.0.0.zip', hash: 'ab'.repeat(32) }, { name: ANNOUNCEMENT, hash: 'cd'.repeat(32) }]),
     `${'ab'.repeat(32)}  Fixture-1.0.0.zip\n${'cd'.repeat(32)}  manor-agent.json\n`,
   );
+});
+
+test("the zip's name has no spaces: GitHub stores one as a dot, which SHA256SUMS.txt and Manor wouldn't match", () => {
+  assert.equal(zipName('Porter', '0.4.17'), 'Porter-0.4.17.zip');
+  assert.equal(zipName('Developer Herald', '0.5.3'), 'DeveloperHerald-0.5.3.zip');
 });
 
 test('npm run release copies manor-agent.json beside the zip and lists it in SHA256SUMS.txt; a mismatched one builds nothing', { skip: process.platform !== 'win32' && 'needs Windows tar.exe' }, () => {
