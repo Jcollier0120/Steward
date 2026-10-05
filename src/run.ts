@@ -124,3 +124,33 @@ export function tail(text: string, lines = 30): string {
   const all = text.replace(/\r\n/g, '\n').trimEnd().split('\n');
   return (all.length > lines ? [`… ${all.length - lines} lines before`, ...all.slice(-lines)] : all).join('\n');
 }
+
+/**
+ * The tests a `node --test` run failed (its TAP output: `not ok <n> - <name>` at the margin, not a TODO or SKIP), each
+ * with the first lines of its error. A test that fails mid-output is long gone from a tail of the last lines.
+ */
+export function failedTests(text: string): { name: string; error: string | null }[] {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const out: { name: string; error: string | null }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^not ok \d+ - (.*)$/.exec(lines[i]);
+    if (!m || /#\s*(TODO|SKIP)\b/i.test(m[1])) continue;
+    let error: string | null = null;
+    for (let j = i + 1; j < lines.length && !/^\s*\.\.\.\s*$/.test(lines[j]) && !/^(not )?ok \d+/.test(lines[j]); j++) {
+      const em = /^(\s*)error: (.*)$/.exec(lines[j]);
+      if (!em) continue;
+      // `error: 'one line'`, or `error: |-` and a block indented further: its first two lines that say something.
+      const said: string[] = [];
+      if (!/^[|>][-+]?$/.test(em[2])) said.push(em[2].replace(/^'(.*)'$/, '$1'));
+      else
+        for (let k = j + 1; k < lines.length && said.length < 2; k++) {
+          if (lines[k].trim() && lines[k].length - lines[k].trimStart().length <= em[1].length) break;
+          if (lines[k].trim()) said.push(lines[k].trim());
+        }
+      error = said.reduce((all, l) => (all ? `${all}${all.endsWith(':') ? ' ' : ': '}${l}` : l), '') || null;
+      break;
+    }
+    out.push({ name: m[1], error });
+  }
+  return out;
+}

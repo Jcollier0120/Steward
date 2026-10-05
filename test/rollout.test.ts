@@ -206,7 +206,7 @@ test("a bump whose checks fail is an alarm, and isn't tried again for that kit u
   const failed = await round();
   const r = failed.results.find((x) => x.message.startsWith('rollout: '))!;
   assert.equal(r.outcome, 'failed');
-  assert.match(r.message, /^rollout: bump to kit 1\.0\.2: node -e .* failed \(exit 1\); the worktree is left at /);
+  assert.match(r.message, /^rollout: bump to kit 1\.0\.2: node -e .* failed \(exit 1\), twice; the worktree is left at /);
   assert.deepEqual(Object.keys(loadRolloutFailures()), ['fake']);
   assert.deepEqual(openAlarms(), ['rollout:fake:1.0.2']);
 

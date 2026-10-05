@@ -3,7 +3,7 @@ import path from 'node:path';
 import { carriedOldKit, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
 import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile, trackedAt } from '../git.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
-import { runLine, tail } from '../run.ts';
+import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
@@ -16,7 +16,8 @@ import { readPin } from './staff.ts';
  * folder. There kit.json's pin goes to the new kit, tools/kit.ts becomes the Steward's (for an agent that
  * fills its kit with it), and the employee's patch version goes up in every version file; then its kit is
  * filled, with the new tools/kit.ts, its checks run, and, when every one passes, the changes are
- * committed. A failure leaves the worktree as it was, for a look. An employee that isn't a Node agent
+ * committed. Checks that fail are run once more; failing again leaves the worktree as it was, for a look, with the
+ * failed step's whole output beside it (<worktree>.log) and the failed tests named in its message. An employee that isn't a Node agent
  * (Heiward, in C#) gets the same, but for npm and tools/kit.ts: its own fill command fills its kit, and its
  * version files may be a .csproj's <VersionPrefix>.
  */
@@ -54,11 +55,31 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
-      for (const line of tail(`${r.out}\n${r.err}`, 25).split('\n')) o.say(`  ${line}`);
-      return `${step} failed (exit ${r.code})`;
+      const output = `${r.out}\n${r.err}`;
+      const tests = failedTests(output);
+      for (const t of tests) o.say(`  failed: ${t.name}${t.error ? ` (${t.error})` : ''}`);
+      for (const line of tail(output, 25).split('\n')) o.say(`  ${line}`);
+      try {
+        writeFileSync(checksLogOf(dir), `${step} (exit ${r.code})\n\n${output}`);
+        o.say(`  its whole output: ${checksLogOf(dir)}`);
+      } catch (err) {
+        o.say(`  couldn't keep its output: ${(err as Error).message}`);
+      }
+      return `${step} failed (exit ${r.code})${testsLine(tests)}`;
     }
   }
   return null;
+}
+
+/** Where runChecks keeps the whole output of the step that failed in a worktree: beside it, as <worktree>.log. */
+export const checksLogOf = (dir: string) => `${dir}.log`;
+
+/** `: "name" (its error)`, for the tests that failed, so a failure's message (and its alarm) says which. */
+export function testsLine(tests: { name: string; error: string | null }[]): string {
+  if (!tests.length) return '';
+  const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+  const named = tests.slice(0, 2).map((t) => `"${cut(t.name, 100)}"${t.error ? ` (${cut(t.error, 100)})` : ''}`);
+  return `: ${named.join('; ')}${tests.length > 2 ? ` and ${tests.length - 2} more` : ''}`;
 }
 
 /** kit.json's text with its pin moved to `kit`, everything else as it was. */
@@ -96,6 +117,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const dir = bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
   if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, dir, base);
   say(`worktree ${dir} on ${branch}, from ${base} (${baseCommit.slice(0, 7)})`);
 
@@ -118,15 +140,23 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   }
   say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
 
-  const failed = await runChecks(ctx, e, dir, { env: o.kitFrom ? { STEWARD_KIT: path.resolve(o.kitFrom) } : {}, say });
-  if (failed) return result(e, 'failed', `${failed}; the worktree is left at ${dir}`, { version: next });
+  // A failure is tried once more, as a PR's checks are here (prtest.ts): a round bumps several employees at once, and a
+  // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
+  const env: Record<string, string> = o.kitFrom ?{ STEWARD_KIT: path.resolve(o.kitFrom) } : {};
+  const first = await runChecks(ctx, e, dir, { env, say });
+  if (first) {
+    say(`its checks once more (${first})`);
+    const again = await runChecks(ctx, e, dir, { env, say });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; the worktree is left at ${dir}, the failed step's whole output in ${checksLogOf(dir)}`, { version: next });
+  }
+  const secondTry = first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
   await git(run, dir, 'add', '--', 'kit.json', ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}.${toolLine} Made by steward bump.`);
+  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}.${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const commit = (await git(run, dir, 'rev-parse', '--short', 'HEAD')).trim();
   const back = compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
-  return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
+  return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
 }
 
 export async function bump(ctx: Ctx, employees: Employee[], o: BumpOptions): Promise<EmployeeResult[]> {

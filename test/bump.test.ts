@@ -94,9 +94,51 @@ test('failing checks leave the worktree for a look, and commit nothing', async (
   const s = setup({}, { test: ['node -e process.exit(3)'] });
   const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(res.outcome, 'failed');
-  assert.match(res.message, /exit 3/);
+  assert.match(res.message, /exit 3\), twice; the worktree is left at .*, the failed step's whole output in .*fake\.log$/);
   assert.equal(sh(s.checkout, 'rev-list', '--count', 'origin/main..steward/kit-1.0.1'), '0');
   assert.ok(existsSync(path.join(s.work, 'kit.json')));
+  assert.match(readFileSync(`${s.work}.log`, 'utf8'), /^node -e process\.exit\(3\) \(exit 3\)/);
+});
+
+// A test runner's TAP: the failed test is far above the last lines a log keeps.
+const tap = [
+  'TAP version 13',
+  '# Subtest: the first',
+  'ok 1 - the first',
+  '# Subtest: each request came after its warm-up',
+  'not ok 2 - each request came after its warm-up',
+  '  ---',
+  "  failureType: 'testCodeFailure'",
+  '  error: |-',
+  '    each request came after its warm-up',
+  '    ',
+  '    5 !== 8',
+  '    ',
+  "  code: 'ERR_ASSERTION'",
+  '  ...',
+  ...Array.from({ length: 40 }, (_, i) => `ok ${i + 3} - later ${i}`),
+  '# fail 1',
+].join('\n');
+
+test("a failure's message names the failed tests and their errors; a test that fails once and then passes doesn't stop the bump", async () => {
+  const failing = setup({ files: { 'tap.mjs': `console.log(${JSON.stringify(tap)}); process.exit(1);\n` } }, { test: ['node tap.mjs'] });
+  const res = await bumpOne(failing.ctx, failing.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'failed');
+  assert.match(res.message, /^node tap\.mjs failed \(exit 1\): "each request came after its warm-up" \(each request came after its warm-up: 5 !== 8\), twice;/);
+  assert.ok(failing.ctx.lines.some((l) => l.endsWith('failed: each request came after its warm-up (each request came after its warm-up: 5 !== 8)')));
+
+  // Fails the first time it's run in this worktree, then passes.
+  const flaky = `import { existsSync, writeFileSync } from 'node:fs';\nif (!existsSync('.ran')) { writeFileSync('.ran', ''); console.log(${JSON.stringify(tap)}); process.exit(1); }\n`;
+  const s = setup({ files: { 'flaky.mjs': flaky } }, { test: ['node flaky.mjs'] });
+  const ok2 = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(ok2.outcome, 'done', ok2.message);
+  assert.match(ok2.message, /checks passed on a second try \(the first: node flaky\.mjs failed \(exit 1\): "each request came after its warm-up"/);
+  assert.match(sh(s.checkout, 'log', '-1', '--format=%b', 'steward/kit-1.0.1'), /Its checks passed on a second try; the first failed: node flaky\.mjs/);
+  assert.ok(existsSync(`${s.work}.log`), "the first try's output stays");
+  // Bumped again from scratch: the old output goes with the old worktree.
+  const s2 = await bumpOne(s.ctx, { ...s.e, test: ['node -e 0'] }, { kit: '1.0.1', kitFrom });
+  assert.equal(s2.outcome, 'done', s2.message);
+  assert.ok(!existsSync(`${s.work}.log`));
 });
 
 test('already on the kit: skipped; not taking the kit: skipped; still carrying the old kit: refused', async () => {
