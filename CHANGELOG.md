@@ -11,6 +11,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The page looks as it did, and keeps itself current without reloading: every few seconds while a stage or round runs, and at once after a button. A ticked employee, an open log or where you'd scrolled to stays as it is.
 - Run now is in the title bar from the start.
 
+## 0.9.8
+
+**The kit 2.20.0: on a PC without an NPU, a model is never called the NPU, and pages show a round as it starts and ends.**
+
+### What's new
+
+- What this PC has (whether it has an NPU, and its graphics cards) is kept in `hardware.json`, and decides what a config's "NPU" entry really is: on a desktop with an RTX 4080 SUPER, Reeve's model shows and works as the card's.
+- Every agent's page draws itself again when a round starts or ends, without a reload by hand.
+
+### What changed
+
+- A note that says nothing of where it was written is "from a local model", never "the NPU".
+- Settings' "Where its work runs" speaks of the NPU only on a PC that has one.
+
 ### Before you update
 
 Nothing: it updates itself as usual.

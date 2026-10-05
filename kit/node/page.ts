@@ -38,11 +38,11 @@ export function until(at: number | string | null | undefined, now = Date.now()):
 
 /**
  * The label every model answer carries: a 4B model's words, for a person to check, and where they were
- * written ("note from the NVIDIA GeForce RTX 4090, unverified"). A note kept from before the
- * accelerators says nothing of where, and came from the NPU.
+ * written ("note from the NVIDIA GeForce RTX 4090, unverified"). A note that says nothing of where (one kept from
+ * before the accelerators) is "from a local model": it is never guessed to be the NPU's.
  */
 export const unverified = (text: string, from?: AcceleratorRef | null) =>
-  `<span class="note"><span class="badge npu" title="Written by a local model on ${esc(theAccelerator(from))}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
+  `<span class="note"><span class="badge npu" title="Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
 
 /**
  * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js
@@ -334,10 +334,31 @@ document.addEventListener('click', (e) => {
   route();
   link.hidden = false;
 })();
+// Someone at the page: typing, ticking, in Settings or the theme menu. A reload then waits for them.
+const engaged = () => !!document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
 if (REFRESH) setInterval(() => {
-  const busy = document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
-  if (!busy) location.reload();
+  if (!engaged()) location.reload();
 }, REFRESH * 1000);
+// A round that starts or ends after the page was drawn, by the schedule, Run now or another program: the ping
+// says so (busy, its last and current run), and the page is drawn again with what it found. Without this, a page
+// drawn between rounds never showed the next one's work until someone reloaded it.
+(() => {
+  let seen = null;
+  let due = false;
+  const look = async () => {
+    try {
+      const r = await fetch('/api/ping', { cache: 'no-store' });
+      if (!r.ok) return;
+      const p = await r.json();
+      const now = JSON.stringify([!!p.busy, p.lastRunAt ?? null, p.runningSince ?? null]);
+      if (seen === null) seen = now;
+      else if (now !== seen) due = true;
+      if (due && !engaged()) location.reload();
+    } catch (e) { /* the page's server is stopping or restarting: the next look tries again */ }
+  };
+  look();
+  setInterval(look, 5000);
+})();
 </script>
 <script src="/settings.js" defer></script>
 </body>

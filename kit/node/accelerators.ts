@@ -105,12 +105,12 @@ export const REEVE_NOT_SET_UP = core.REEVE_NOT_SET_UP;
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
  */
-export function parseAccelerators(raw: any): AcceleratorConfig | { error: string } {
-  return core.parseAccelerators(RULES, raw);
+export function parseAccelerators(raw: any, hw: Hardware | null = readHardware()): AcceleratorConfig | { error: string } {
+  return core.parseAccelerators(RULES, raw, hw);
 }
 
 /** Reeve's config.json (REEVE_HOME, else %USERPROFILE%\.reeve), or why its accelerators can't be used. */
-export function loadAccelerators(file = path.join(reeveHome, 'config.json')): AcceleratorConfig | { error: string } {
+export function loadAccelerators(file = path.join(reeveHome, 'config.json'), hw: Hardware | null = readHardware()): AcceleratorConfig | { error: string } {
   let text: string | null;
   try {
     text = readFileSync(file, 'utf8');
@@ -118,7 +118,40 @@ export function loadAccelerators(file = path.join(reeveHome, 'config.json')): Ac
     if (e?.code !== 'ENOENT') return { error: core.say.configUnreadable(file, (e as Error).message) };
     text = null;
   }
-  return core.readConfig(RULES, file, text);
+  return core.readConfig(RULES, file, text, hw);
+}
+
+// ---------------------------------------------------------------- what this PC has
+
+/** Whether this PC has an NPU, and its graphics cards: what detection found, never guessed from a model. */
+export interface Hardware {
+  npu: boolean;
+  cards: { name: string; memoryGb: number | null }[];
+}
+
+/** hardware.json, beside the failure markers in the accelerators folder every program shares. */
+export const hardwareFile = () => path.join(acceleratorsDir, 'hardware.json');
+
+/**
+ * What detection last found here (setup writes it, and Reeve's keeper once a day), or null when it never ran or
+ * couldn't tell: then a config's word stands, as it always has.
+ */
+export function readHardware(file = hardwareFile()): Hardware | null {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    if (typeof j?.npu !== 'boolean' || !Array.isArray(j.cards)) return null;
+    const cards = j.cards
+      .filter((c: any) => c && typeof c.name === 'string' && c.name)
+      .map((c: any) => ({ name: c.name as string, memoryGb: typeof c.memoryGb === 'number' ? c.memoryGb : null }));
+    return { npu: j.npu, cards };
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps what detection found (detect.ts' hardwareOf), with when, for every program that reads Reeve's config. */
+export function rememberHardware(hw: Hardware, file = hardwareFile()): void {
+  writeWhole(file, { at: new Date().toISOString(), npu: hw.npu, cards: hw.cards });
 }
 
 // ---------------------------------------------------------------- shared files

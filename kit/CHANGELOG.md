@@ -13,6 +13,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **tools/kit.ts** knows the react part.
 - **What an agent must do:** nothing but take this version. One moving to React takes the part, adds react, react-dom, @types/react and @types/react-dom as devDependencies, writes its page in src/web/main.tsx, serves `{ shell: pageShell(…), body }` as /api/page and `reactPage(…)` as /, and type-checks src/web and src/kit/react with a tsconfig of their own (DOM and JSX): the Steward's tsconfig.web.json.
 
+## 2.20.0
+
+**A model on a graphics card is never called the NPU, and pages show a round as it starts and ends.** On a desktop with no NPU and an RTX 4080 SUPER, pages said "the NPU" was the accelerator, requests went to an NPU that wasn't there, and a page drawn between rounds never showed the next round's work.
+- **What the PC has decides, never the model.** spec/ACCELERATORS.md's "What this PC has" is new. Detection's answer (whether the PC has an NPU, and its graphics cards) is kept in `hardware.json` in the shared accelerators folder. On a PC known to have no NPU, a config entry said to be the NPU (or an old config's endpoint that says no device) is read as what the PC has instead: its one card by name, "the graphics card" when it has several, the processor when it has none. It's never routed as an NPU. A card's own entry comes first and the two are one card. An old config's GenieX quirks go, and the order follows the new id. No model name or server address is looked at, so any model works.
+  - core: `parseAccelerators(rules, raw, hw?)` and `readConfig(rules, file, text, hw?)` take it; new `instead(hw)`, `notTheNpu(a, hw)`, the `Hardware` type, and `say.notTheNpu`, which a config's problems carry.
+  - node: `readHardware()`, `rememberHardware(hw)`, `hardwareFile()` and `Hardware` (accelerators.ts); `hardwareOf(detection)` (detect.ts), which is null unless both the NPU's and the cards' questions were answered; `refreshHardware()` (keeper.ts). `loadAccelerators`, `parseAccelerators` and accelerator-config's `readAccelerators`/`configuredAccelerators` read hardware.json by default, so setup's next save writes the entry as the card's.
+  - Who writes it: setup, from its detection, and the keeper's look once a day (Reeve's page, or the Smith's rounds).
+- **A note that says nothing of where it was written** is "from a local model", not "the NPU": `theAccelerator(null)` is `UNKNOWN_ACCELERATOR`, and page.ts' `unverified` says "Written by a local model" with no place. The accelerator vectors say so.
+- **Settings' "Where its work runs"** speaks of the NPU only when Reeve lists one. Otherwise it gives the graphics cards' and the processor's order, and Task Manager's GPU graph.
+- **Every kit page watches its own `/api/ping`** every 5 seconds, and draws itself again when a round starts or ends (busy, `lastRunAt`, `runningSince`), whoever started it. It still never reloads under someone typing, ticking a box, in Settings or the theme menu; it waits for them.
+- **What an agent must do:** nothing but take this version. Agents that pass their own accelerator to a note keep doing so; one that labels a note "NPU" by default (Clerk's `{ id: 'npu', name: 'NPU' }`) should pass nothing instead.
+
 ### Before you update
 
 Nothing: it updates itself as usual.

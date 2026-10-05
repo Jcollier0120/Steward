@@ -2,7 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type Accelerator, type AcceleratorKind, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, rememberHardware, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
 import * as core from './core/index.js';
@@ -528,8 +529,32 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
   return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000 }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
 }
 
+/** How old hardware.json may get before the keeper asks this PC again: a card or an NPU driver can come and go. */
+const HARDWARE_DAYS = 1;
+
+/**
+ * hardware.json afresh when there's none or it's a day old: what this PC has, asked with detection (a few seconds of
+ * PowerShell, once a day), so every program knows whether it has an NPU, and a model on a graphics card is never
+ * called the NPU. A detection that couldn't tell writes nothing; the next look tries again.
+ */
+export async function refreshHardware(o: { file?: string; detect?: () => Promise<Detection>; nowMs?: number } = {}): Promise<boolean> {
+  const file = o.file ?? hardwareFile();
+  let age = Infinity;
+  try {
+    age = (o.nowMs ?? Date.now()) - statSync(file).mtimeMs;
+  } catch {
+    // none yet
+  }
+  if (age < HARDWARE_DAYS * 86_400_000) return false;
+  const hw = hardwareOf(await (o.detect ?? detect)());
+  if (!hw) return false;
+  rememberHardware(hw, file);
+  return true;
+}
+
 /** One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the next look. */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
+  if (!o.config) await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
   const looked = await reaper.look(servers);
   const orphans = await reaper.orphans(servers);

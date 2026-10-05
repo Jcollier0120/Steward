@@ -161,6 +161,44 @@ function withServers(a, eps) {
 }
 
 /**
+ * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
+ * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
+ * @property {boolean} npu
+ * @property {{ name: string, memoryGb: number | null }[]} cards
+ */
+
+/**
+ * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
+ * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * Null when the PC has an NPU, or isn't known: then the config's word stands.
+ * @param {Hardware | null | undefined} hw
+ * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
+ */
+export function instead(hw) {
+  if (!hw || hw.npu) return null;
+  if (!hw.cards.length) return { kind: 'cpu', name: LEGACY_NAMES.cpu, memoryGb: null };
+  const card = hw.cards.length === 1 ? hw.cards[0] : null;
+  return { kind: 'gpu', name: card?.name ?? LEGACY_NAMES.gpu, memoryGb: card?.memoryGb ?? null };
+}
+
+/** "NPU", "The NPU": a name given only for being the NPU. */
+const NPU_NAME = /^(the\s+)?npu$/i;
+
+/**
+ * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
+ * id and, when its name only said "NPU", its name. Null when the PC has an NPU or isn't known, and for any other entry.
+ * @param {Accelerator} a
+ * @param {Hardware | null | undefined} hw
+ * @returns {Accelerator | null}
+ */
+export function notTheNpu(a, hw) {
+  const other = a.kind === 'npu' ? instead(hw) : null;
+  if (!other) return null;
+  const name = NPU_NAME.test(a.name) ? other.name : a.name;
+  return { ...a, kind: other.kind, id: acceleratorId(other.kind, name), name, memoryGb: a.memoryGb ?? other.memoryGb };
+}
+
+/**
  * One entry of `accelerators`, as Reeve reads it: its kind from its id, one slot, the NPU's cap, known quirks only.
  * @param {Rules} rules
  * @param {any} v
@@ -282,31 +320,61 @@ export function withoutGpuBesideNpu(list, gpuWithNpu) {
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
+ * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has
+ * instead (notTheNpu): a model is never called the NPU, or routed as one, on a PC without one.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null} [hw]
  * @returns {AcceleratorConfig | { error: string }}
  */
-export function parseAccelerators(rules, raw) {
+export function parseAccelerators(rules, raw, hw = null) {
   /** @type {string[]} */
   const problems = [];
   /** @type {Accelerator[]} */
   const list = [];
   const legacy = !Array.isArray(raw?.accelerators);
+  /** @type {Map<string, string>} */
+  const renamed = new Map();
+  /** @param {Accelerator} a @returns {Accelerator} */
+  const onThisPc = (a) => {
+    const other = notTheNpu(a, hw);
+    if (!other) return a;
+    renamed.set(a.id, other.id);
+    problems.push(say.notTheNpu(a.id, other.name));
+    // An old config's chat was GenieX's, with its quirks; GenieX runs only on an NPU, so this server isn't it.
+    return legacy ? { ...other, quirks: [] } : other;
+  };
+  /** @type {Accelerator[]} */
+  const moved = [];
   if (!legacy) {
     raw.accelerators.forEach((/** @type {unknown} */ v, /** @type {number} */ i) => {
-      const r = readOne(rules, v);
-      if ('error' in r) problems.push(`accelerators[${i}] ${r.error}`);
-      else if (list.some((x) => x.id === r.id)) problems.push(`accelerators[${i}]: ${say.listedTwice(r.id)}`);
-      else list.push(r);
+      const read = readOne(rules, v);
+      if ('error' in read) problems.push(`accelerators[${i}] ${read.error}`);
+      else if (list.some((x) => x.id === read.id)) problems.push(`accelerators[${i}]: ${say.listedTwice(read.id)}`);
+      else list.push(read);
     });
   } else {
     list.push(...fromLegacy(rules, raw));
+  }
+  // An entry said to be the NPU on a PC without one goes after the others: a card's own entry (setup's) comes first.
+  for (const a of list.splice(0)) {
+    const r = onThisPc(a);
+    if (r === a) list.push(a);
+    else moved.push(r);
+  }
+  for (const a of moved) {
+    const same = list.find((x) => x.id === a.id);
+    // The same card listed twice (its own entry and the one called the NPU): one card, its own entry's servers first.
+    if (same) for (const w of WORKS) same[w] ??= a[w];
+    else list.push(a);
   }
   if (!list.some((a) => WORKS.some((w) => serves(a, w)))) {
     return { error: problems.length ? say.nothingUsable(problems) : REEVE_NOT_SET_UP };
   }
   /** @type {'auto' | string[]} */
-  const order = Array.isArray(raw?.acceleratorOrder) ? raw.acceleratorOrder.filter((/** @type {unknown} */ x) => typeof x === 'string') : 'auto';
+  const order = Array.isArray(raw?.acceleratorOrder)
+    ? raw.acceleratorOrder.filter((/** @type {unknown} */ x) => typeof x === 'string').map((/** @type {string} */ id) => renamed.get(id) ?? id)
+    : 'auto';
   return {
     accelerators: ordered(rules, list, order),
     order,
@@ -322,9 +390,10 @@ export function parseAccelerators(rules, raw) {
  * @param {Rules} rules
  * @param {string} file The file's path, for messages.
  * @param {string | null} text
+ * @param {Hardware | null} [hw] What this PC has (hardware.json), when known.
  * @returns {AcceleratorConfig | { error: string }}
  */
-export function readConfig(rules, file, text) {
+export function readConfig(rules, file, text, hw = null) {
   if (text === null) return { error: REEVE_NOT_SET_UP };
   let raw;
   try {
@@ -332,7 +401,7 @@ export function readConfig(rules, file, text) {
   } catch (e) {
     return { error: say.configUnreadable(file, /** @type {Error} */ (e).message) };
   }
-  const cfg = parseAccelerators(rules, raw);
+  const cfg = parseAccelerators(rules, raw, hw);
   if ('error' in cfg) return { error: cfg.error === REEVE_NOT_SET_UP ? cfg.error : say.configError(file, cfg.error) };
   return cfg;
 }

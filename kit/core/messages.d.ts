@@ -1,9 +1,12 @@
 // Made by kit/test/core-types.ts from messages.js's JSDoc: don't edit it, run npm run core-types.
 import type { AcceleratorRef } from './ids.js';
 /** @import { AcceleratorRef } from './ids.js' */
+/** What an accelerator nobody recorded is called: never "the NPU", which a PC may not have. */
+export declare const UNKNOWN_ACCELERATOR = "a local model";
 /**
  * "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. A name that
- * starts with "the" is left as it is; none is the NPU (a note kept from before accelerators).
+ * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
+ * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
@@ -55,6 +58,8 @@ export declare const say: Readonly<{
     badId: (id: string) => string;
     /** @param {string} id */
     listedTwice: (id: string) => string;
+    /** @param {string} id @param {string} instead */
+    notTheNpu: (id: string, instead: string) => string;
     /** @param {AcceleratorRef} acc @param {string} reason @param {number} min */
     skippedFailed: (acc: AcceleratorRef, reason: string, min: number) => string;
     /** @param {AcceleratorRef} acc @param {string[]} by */

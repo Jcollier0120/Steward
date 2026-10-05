@@ -2,19 +2,24 @@
 // agent puts it into its own sentence ("No notes: …." or "Busy: notes deferred to a later round (…)")
 // and ends that as it needs.
 
-import { LEGACY_NAMES, LEGACY_NPU } from './ids.js';
+import { LEGACY_NAMES } from './ids.js';
 
 /** @import { AcceleratorRef } from './ids.js' */
 
+/** What an accelerator nobody recorded is called: never "the NPU", which a PC may not have. */
+export const UNKNOWN_ACCELERATOR = 'a local model';
+
 /**
  * "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. A name that
- * starts with "the" is left as it is; none is the NPU (a note kept from before accelerators).
+ * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
+ * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
 export function theAccelerator(a) {
-  const name = (a ?? LEGACY_NPU).name;
-  if (/^the\s/i.test(name)) return name;
+  if (!a || !a.name) return UNKNOWN_ACCELERATOR;
+  const name = a.name;
+  if (/^(the|a|an)\s/i.test(name)) return name;
   return `the ${name === LEGACY_NAMES.gpu || name === LEGACY_NAMES.cpu ? name.toLowerCase() : name}`;
 }
 
@@ -71,6 +76,8 @@ export const say = Object.freeze({
   badId: (id) => `${id}: an id is npu, cpu, or gpu- and the card's name in lowercase with dashes`,
   /** @param {string} id */
   listedTwice: (id) => `${id} is listed twice; the first is used`,
+  /** @param {string} id @param {string} instead */
+  notTheNpu: (id, instead) => `${id} is listed as the NPU, but this PC has none: its model runs on ${theAccelerator({ name: instead })}`,
 
   // ------------------------------------------------------------ choosing
   /** @param {AcceleratorRef} acc @param {string} reason @param {number} min */
