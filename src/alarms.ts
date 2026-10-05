@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
+import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { reeveInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
@@ -33,6 +34,9 @@ import type { StageResult } from './stages/common.ts';
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
+ *
+ * While this PC is offline (the kit's net.ts), what is only the network's is no alarm (withoutOffline): the person
+ * knows. And a round while offline asks nothing of GitHub (steward.ts).
  */
 
 export interface Condition {
@@ -276,6 +280,20 @@ export function manorConditions(state: unknown): Condition[] {
   return out;
 }
 
+/** Conditions that are the network's by nature: Manor's update look, and an update it couldn't download. */
+const NETWORK_IDS = /^(?:manor:updates|install:)/;
+
+/**
+ * While this PC is offline (the kit's net.ts), the conditions that are only the network's are left out: Manor's
+ * update look and its updates, and anything whose words are a network failure (a Surveyor finding of an agent's
+ * round, a job's alert, a failed release). The person knows the PC is offline. Left out, an open one clears, and
+ * its hours start afresh once the PC is back online and it still fails; everything else is as ever.
+ */
+export function withoutOffline(conditions: Condition[], offline: boolean): Condition[] {
+  if (!offline) return conditions;
+  return conditions.filter((c) => !NETWORK_IDS.test(c.id) && !isNetworkError([c.title, ...c.detail].join('\n')));
+}
+
 /**
  * From Manor's /api/summary "ports" (Manor 0.4.38 and later): a port two agents claim, one kept for the model
  * servers, or one another program answers on, so an agent's page can't start there (the Chamberlain on the
@@ -474,7 +492,7 @@ export function toastWords(raised: Alarm[]): { title: string; body: string } {
  */
 export async function watchAlarms(
   o: Parameters<typeof roundConditions>[0] & { log: (line: string) => void },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   if (!a.on) return loadAlarms();
@@ -497,7 +515,8 @@ export async function watchAlarms(
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;
   }
-  const { state, raised } = reconcile(loadAlarms(), withoutReeveDuplicates(conditions, reeveJobs), deps.now ?? new Date());
+  const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
+  const { state, raised } = reconcile(loadAlarms(), withoutOffline(withoutReeveDuplicates(conditions, reeveJobs), offline), deps.now ?? new Date());
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);
   if (raised.length && a.toast) {
