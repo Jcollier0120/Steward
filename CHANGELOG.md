@@ -2,6 +2,10 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.9.1
+
+**Kit 2.18.0: non-employee projects** (kit/CHANGELOG.md). The kit's `manorProjects()` gives the repositories a PC's Manor looks after without employing them (settings.json's `"projects"`), with the rules Manor's own settings use; a project is never an employee, and the Steward never touches one. The Aletaster's hand-over row says its new limit, 20 minutes.
+
 ## 0.8.23
 
 **Kit 2.17.0: releases are built, and published in the public Jcollier0120/Manor-releases** (kit/CHANGELOG.md, kit/spec/RELEASES.md).
