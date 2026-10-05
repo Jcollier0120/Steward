@@ -6,7 +6,7 @@ import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 
@@ -65,7 +65,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
       } catch (err) {
         o.say(`  couldn't keep its output: ${(err as Error).message}`);
       }
-      return `${step} failed (exit ${r.code})${testsLine(tests)}`;
+      return `${step} failed (exit ${r.code})${testsLine(tests)}${networkNote(output)}`;
     }
   }
   return null;

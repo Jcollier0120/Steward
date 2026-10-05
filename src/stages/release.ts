@@ -7,7 +7,7 @@ import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { needsNpmCi } from './bump.ts';
 import { readPin } from './staff.ts';
-import { checkoutOf, forgetGlance, freshBranch, mapLimit, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -118,12 +118,12 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-        return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built`, { version, commit: commit.slice(0, 7) });
+        return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
       }
     }
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-    if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})`, { version, commit: commit.slice(0, 7) });
+    if (r.code !== 0) return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
     // Its releases have changed: the glance no longer says how they are.
     forgetGlance(ctx, e);
     return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });

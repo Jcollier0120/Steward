@@ -71,10 +71,32 @@ export interface Ctx {
  * failed (exit 1)"), so being offline right now counts too.
  */
 export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string): Promise<boolean> {
-  if (isNetworkError(message)) return true;
+  if (isNetworkError(message) || MORE_NET_WORDS.test(message)) return true;
   const look = ctx.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : online);
   return !(await look().catch(() => true));
 }
+
+/** Network failures the kit's words miss: Go's (gh's) TLS and HTTP client timeouts, and Windows' connect failure. */
+const MORE_NET_WORDS = /tls handshake timeout|net\/http: (?:request canceled|timeout)|client\.timeout exceeded|connection attempt failed|could not establish (?:a )?connection/i;
+
+/**
+ * The line of a command's output that says the network failed, if one does: a command's failure message carries it
+ * ("npm run release -- --publish failed (exit 1): the network: ... TLS handshake timeout"), so networkFailure sees
+ * what a bare exit code hides. The Developer Herald's 0.5.6 was held at a commit for a TLS handshake timeout.
+ */
+export function networkLine(output: string): string | null {
+  for (const raw of output.split(/\r?\n/).reverse()) {
+    const line = raw.trim();
+    if (line && (isNetworkError(line) || MORE_NET_WORDS.test(line))) return line.slice(0, 200);
+  }
+  return null;
+}
+
+/** ", the network: <its line>" for a failure message, when the output says the network failed; else nothing. */
+export const networkNote = (output: string) => {
+  const line = networkLine(output);
+  return line ? `; the network: ${line}` : '';
+};
 
 /** An employee's repository from the stage's glance at GitHub, while it still says how things are. */
 export const glanceOf = (ctx: Ctx, e: Employee): RepoGlance | null => ctx.glance?.repos[e.id] ?? null;
