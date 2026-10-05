@@ -18,9 +18,13 @@ const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
 const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values })) as { status?: number; json: any };
 
-test('thirteen employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor, the Lamplighter and the Smith, each with the parts and commands of its own', () => {
+test('fourteen employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor, the Lamplighter, the Smith and the Developer Herald, each with the parts and commands of its own', () => {
   const e = DEFAULT_SETTINGS.employees;
-  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor', 'lamplighter', 'smith']);
+  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor', 'lamplighter', 'smith', 'developer-herald']);
+  // A name of two words: its id has a dash, its repository and checkout no space.
+  const dh = e.find((x) => x.id === 'developer-herald')!;
+  assert.deepEqual([dh.name, dh.repo, dh.checkout, dh.installed], ['Developer Herald', 'Jcollier0120/DeveloperHerald', 'C:\\Projects\\DeveloperHerald', '%USERPROFILE%\\.developer-herald\\app']);
+  assert.deepEqual([dh.branch, dh.parts, dh.versionFiles, dh.install], ['main', ['node', 'web', 'spec'], ['package.json', 'package-lock.json', 'src/app.ts'], 'node src/cli.ts install']);
   for (const h of e.slice(0, 8)) {
     assert.equal(h.usesKit, true);
     assert.equal(h.repo, `Jcollier0120/${h.name}`);
@@ -84,7 +88,7 @@ test('a good change is saved and read back; release after merge can be switched 
   assert.equal(s.releaseAfterMerge, true);
   assert.equal(s.parallel, 4);
   assert.deepEqual(s.team, ['Jcollier0120', 'app/claude']);
-  assert.equal(s.employees.length, 13);
+  assert.equal(s.employees.length, 14);
   assert.deepEqual(normalizeSettings({}).settings.team, ['Jcollier0120'], 'no team in the file is the default team');
   assert.deepEqual(normalizeSettings({ team: [] }).settings.team, [], 'an empty one stays empty');
 });
