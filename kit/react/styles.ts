@@ -92,6 +92,11 @@ button.ui-choice:hover:not(:disabled) { background: var(--hover); filter: none; 
 .ui-error-note { border-color: var(--alert); background: var(--alert-bg); }
 .ui-error-note p { color: var(--alert); margin: 0 0 8px; }
 .ui-empty-note { text-align: center; padding: 24px 0; }
+/* OnPageList (lists.tsx): a row per entry, its Remove at the end. */
+.ui-onpage-list ul { list-style: none; margin: 0; padding: 0; }
+.ui-onpage-list li { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.ui-onpage-list li + li { border-top: 1px solid var(--line); }
+.ui-onpage-what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 .ui-toast { position: fixed; left: 0; right: 0; bottom: 28px; z-index: 60; display: flex; justify-content: center; pointer-events: none; }
 .ui-toast > span { padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); box-shadow: var(--shadow); }

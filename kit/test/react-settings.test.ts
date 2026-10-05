@@ -10,11 +10,12 @@ const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..',
 process.env.STEWARD_ESBUILD = STEWARD;
 const { bundleForNode, importPath } = await import('./react-render.ts');
 
-const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string) => string }>(
+const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string, from?: string | null) => string; tourFrom: (hash: string) => string | null; onPage: (parts: unknown[], doc?: unknown) => { tour: string }[] }>(
   `import { renderToStaticMarkup as r } from 'react-dom/server';
-   import { SettingsForm, Tour } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+   import { onPage, SettingsForm, Tour, tourFrom } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
    export const form = (data, keys) => r(<SettingsForm initial={data} keys={keys} />);
-   export const tour = (o, start) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} />);`,
+   export const tour = (o, start, from = null) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} from={from} />);
+   export { onPage, tourFrom };`,
   { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
 );
 
@@ -114,4 +115,41 @@ test('a setting used only at the next start, install, or install as an administr
   assert.match(h, /data-key="b".*<span class="badge tone-caution">takes effect at the next install or update<\/span>/);
   assert.match(h, /data-key="c".*<span class="badge tone-caution">takes effect when installed as an administrator<\/span>/);
   assert.equal(h.match(/badge tone-caution/g)?.length, 3, "'now' isn't marked");
+});
+
+test('opened from Manor (#/tour?from=): its last step offers Back to Manor, and only to an address on this PC', () => {
+  const o = { intro: { title: 'Meet the fixture', text: 'It carries the kit.' }, settings: [], tour: [{ tour: 'status', text: 'On duty or off.' }] };
+  const manor = 'http://manor.localhost:8888/#/roles/fixture';
+  assert.match(m.tour(o, 'tour', manor), />Done<.*>Back to Manor</, 'the last step: Done, and Back to Manor');
+  assert.doesNotMatch(m.tour(o, 'intro', manor), /Back to Manor/, 'not before the last step');
+  assert.doesNotMatch(m.tour(o, 'tour'), /Back to Manor/, 'not without a from');
+  assert.match(m.tour({ ...o, tour: [] }, 'settings', manor), /Back to Manor/, 'the settings step, when it is the last');
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent(manor)), manor);
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://127.0.0.1:8888/')), 'http://127.0.0.1:8888/');
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://[::1]:8888/')), 'http://[::1]:8888/');
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://localhost:8888/x')), 'http://localhost:8888/x');
+  assert.equal(m.tourFrom('#/tour'), null);
+  assert.equal(m.tourFrom('#/tour?from='), null);
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('https://example.com/')), null, 'off the PC: ignored');
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://localhost.example.com/')), null);
+  assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('javascript:alert(1)')), null);
+  assert.equal(m.tourFrom('#/tour?from=not a url'), null);
+});
+
+test("only the parts on the page are walked: a page that differs by variant keeps one onboarding", () => {
+  const o = { intro: { title: 'Meet the fixture', text: 'x' }, settings: [], tour: [{ tour: 'games', text: 'Games.' }, { tour: 'weather', text: 'Weather.' }, { tour: 'drivers', text: 'Drivers.' }] };
+  const doc = (names: string[]) => ({ querySelector: (sel: string) => (names.some((n) => sel === `[data-tour="${n}"]`) ? {} : null) });
+  globalThis.CSS ??= { escape: (s: string) => s } as typeof CSS;
+  assert.deepEqual(m.onPage(o.tour, doc(['games', 'drivers'])).map((p) => p.tour), ['games', 'drivers']);
+  assert.deepEqual(m.onPage(o.tour, {}).map((p) => p.tour), ['games', 'weather', 'drivers'], 'no page to look in: all of them');
+  const d = globalThis.document as unknown as Record<string, unknown>;
+  d.querySelector = doc(['games', 'drivers']).querySelector;
+  try {
+    assert.match(m.tour(o, 'intro'), /Step 1 of 3/);
+    assert.match(m.tour(o, 'tour'), /Step 3 of 3 · 1 of 2.*Games./, 'two of the three: Weather is not on the page');
+    d.querySelector = doc([]).querySelector;
+    assert.match(m.tour(o, 'settings'), /Step 2 of 2.*>Done</, 'none on the page: the settings are the last step');
+  } finally {
+    delete d.querySelector;
+  }
 });

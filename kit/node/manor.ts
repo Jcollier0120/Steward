@@ -120,7 +120,7 @@ const minutesOf = (t: string) => {
 /** "notify" as Manor keeps it, checked: each wrong field its default; equal quiet times, no quiet hours. */
 export function notifyFrom(raw: unknown): NotifyPrefs {
   const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v.trim()) ? v.trim() : def);
+  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v) ? v : def);
   const quietFrom = clock(o.quietFrom, NOTIFY_DEFAULT.quietFrom);
   const quietTo = clock(o.quietTo, NOTIFY_DEFAULT.quietTo);
   const quiet = quietFrom && quietTo && quietFrom !== quietTo;

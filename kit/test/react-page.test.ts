@@ -19,7 +19,7 @@ const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..',
 process.env.STEWARD_ESBUILD = STEWARD;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { pageShell, pageScript, reactPage, releasePage, scriptJson, PAGE_BUNDLE, PAGE_ENTRY } = await import('./fixture/src/kit/react-page.ts');
+const { hasTour, pageShell, pageScript, reactPage, releasePage, scriptJson, PAGE_BUNDLE, PAGE_ENTRY } = await import('./fixture/src/kit/react-page.ts');
 const { loadEsbuild } = await import('./fixture/src/kit/minify.ts');
 const { ago: serverAgo } = await import('./fixture/src/kit/page.ts');
 const { ago: browserAgo } = await import('../react/time.ts');
@@ -142,4 +142,12 @@ test("a ping's round state: news when a round starts or ends, not when nothing c
   assert.equal(roundState({ busy: false, lastRunAt: '2026-10-05T12:00:00Z' }), idle, 'the same state, said either way');
   assert.notEqual(roundState({ busy: true, lastRunAt: '2026-10-05T12:00:00Z', runningSince: '2026-10-05T12:10:00Z' }), idle, 'one started');
   assert.notEqual(roundState({ busy: false, lastRunAt: '2026-10-05T12:10:30Z' }), idle, 'one ended');
+});
+
+test("/api/ping's tour: a React page with an onboarding, in a checkout or a release; nothing else", () => {
+  const o = { intro: { title: 't', text: 'x' }, settings: [], tour: [] };
+  assert.equal(hasTour(agentRoot({ [PAGE_ENTRY]: '' }), o), true, 'a checkout');
+  assert.equal(hasTour(agentRoot({ [PAGE_BUNDLE]: '' }), o), true, 'a release');
+  assert.equal(hasTour(agentRoot({ [PAGE_ENTRY]: '' }), null), false, 'no onboarding');
+  assert.equal(hasTour(agentRoot({ 'src/app.ts': '' }), o), false, 'a page built in strings: no #/tour');
 });
