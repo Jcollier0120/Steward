@@ -22,6 +22,8 @@ import type { StageResult } from './stages/common.ts';
  * - a round that couldn't run at all (gh signed out, say) for an hour;
  * - an update Manor couldn't install, for two hours; Manor's update checks failing, for twelve; Manor's page down,
  *   for an hour;
+ * - a port two agents claim, or one another program answers on so an agent's page can't start (Manor's summary
+ *   "ports"), for a quarter of an hour;
  * - a problem the Surveyor has reported for six hours (Settings: problemHours); the Surveyor's page down, for two;
  * - an issue the Wright got stuck on, or its PR that changes what a person reviews, at once; its page down, for two;
  * - the Bailiff unable to review (Claude Code not signed in), or a review of its failing twice, at once; its page down,
@@ -274,6 +276,50 @@ export function manorConditions(state: unknown): Condition[] {
   return out;
 }
 
+/**
+ * From Manor's /api/summary "ports" (Manor 0.4.38 and later): a port two agents claim, one kept for the model
+ * servers, or one another program answers on, so an agent's page can't start there (the Chamberlain on the
+ * Developer Herald's 19898). One alarm a port, after a quarter of an hour, so a page restarting through an
+ * update isn't one. No answer, or an older Manor without "ports": nothing (Manor's page down is manorConditions').
+ */
+export function portConditions(summary: unknown): Condition[] {
+  if (noAnswer(summary) !== null) return [];
+  const rows = (summary as any).ports;
+  if (!Array.isArray(rows)) return [];
+  const byPort = new Map<number, { agent: string; answeredBy: string | null; problem: string }[]>();
+  for (const r of rows) {
+    if (!r || typeof r.port !== 'number' || typeof r.agent !== 'string' || typeof r.problem !== 'string' || !r.problem) continue;
+    const list = byPort.get(r.port) ?? [];
+    list.push({ agent: r.agent, answeredBy: typeof r.answeredBy === 'string' ? r.answeredBy : null, problem: r.problem });
+    byPort.set(r.port, list);
+  }
+  return [...byPort].map(([port, list]) => {
+    const agents = [...new Set(list.map((r) => r.agent))];
+    const by = list.find((r) => r.answeredBy)?.answeredBy ?? null;
+    return {
+      id: `port:${port}`,
+      who: agents[0],
+      title: agents.length > 1 ? `Port ${port} is claimed by ${agents.join(' and ')}: only one page can start there` : `Port ${port}: ${list[0].problem}`,
+      detail: [
+        ...new Set(list.map((r) => r.problem)),
+        by ? `${by} answers there now.` : 'Nothing answers there now.',
+        "Move one to a free port with a release of its own (each agent's port is in its src/app.ts and Manor entry), or stop the program on it. Manor's GET /api/summary lists every port.",
+      ],
+      afterMs: 15 * 60_000,
+    };
+  });
+}
+
+/** The port clashes being watched, or open, as the last round saw them: for a round whose summary didn't answer. */
+export function portsAsTheyWere(state: AlarmState): Condition[] {
+  return Object.entries(state.watching)
+    .filter(([id]) => id.startsWith('port:'))
+    .map(([id, since]) => {
+      const open = state.open.find((a) => a.id === id);
+      return { id, who: open?.who ?? 'manor', title: open?.title ?? `Port ${id.slice(5)} is taken`, detail: open?.detail ?? [], since, afterMs: 15 * 60_000 };
+    });
+}
+
 /** From the Surveyor's /api/survey: its problems, from when it first saw each; or no answer at all. */
 export function surveyorConditions(survey: unknown, settings: Settings): Condition[] {
   const why = noAnswer(survey);
@@ -435,7 +481,13 @@ export async function watchAlarms(
   const get = deps.getJson ?? getJson;
   const conditions = roundConditions(o);
   const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
-  if (manor) conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
+  if (manor) {
+    conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
+    const summary = await get(new URL('/api/summary', manor).href);
+    // The summary asks every agent, so it may not answer one round: a port clash it said is kept as it was until it
+    // answers again, rather than cleared and raised a second time.
+    conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
+  }
   if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
   if (a.wrightUrl) conditions.push(...wrightConditions(await get(new URL('/api/work', a.wrightUrl).href)));
   if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
