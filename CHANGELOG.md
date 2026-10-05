@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.10.1
+
+**Kit 2.22.0: the page's components are GamerNexus's UI kit, in the manor's look** (kit/CHANGELOG.md).
+
+### What changed
+
+- The Steward's page is built on them: its sections have headings with a count (Staff · 21), Refresh has its icon, and a button spins while what it started is under way.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.10.0
 
 **The Steward's page is drawn in the browser, with React: the first of the manor's pages to move.** With kit 2.21.0 (kit/CHANGELOG.md), whose new react part draws the title bar, Settings and the rest of the frame.

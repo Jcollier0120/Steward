@@ -1,6 +1,7 @@
 import { memo, StrictMode, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { PageData, PageShell, ShellTheme } from './page-data.ts';
+import { UI_CSS } from './styles.ts';
 import { PostButton, ReloadProvider } from './ui.tsx';
 
 /**
@@ -274,6 +275,7 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
   const onSettings = route === 'settings';
   return (
     <ReloadProvider value={reload}>
+      <style>{UI_CSS}</style>
       <TitleBar shell={s} settings={onSettings} action={action} />
       {s.offDutySince && (
         <div className="banners">
@@ -281,9 +283,7 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
             <span>
               <strong>Off duty</strong> since {s.offDutySince}: its scheduled rounds are paused. Run now still works.
             </span>
-            <PostButton quiet path="/api/duty" body={{ onDuty: true }}>
-              Back on duty
-            </PostButton>
+            <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
           </div>
         </div>
       )}

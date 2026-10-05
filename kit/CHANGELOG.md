@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.22.0
+
+**The react part's components are GamerNexus's UI kit, in the manor's look.** The user's call: the kit's React components keep GamerNexus's mobile UI kit API (apps/mobile/components/ui: names, props, variants, behaviour) rather than a design of their own, drawn with the manor's themes and page.ts's classes. GamerNexus's are React Native, so these are written for a page; where its prop names have a web meaning they are kept (`onPress`, `onChangeText`, `onValueChange`, `icon` by Ionicons name).
+- **react/ui.tsx:** `Text` (title, heading, body, muted, label), `Card` (a button with `onPress`), `CardFooter`, `Section` (title, icon or `leading`, `count`, `right`, `gap` md or lg), `DetailRow`, `Button` (primary, secondary, ghost, danger, danger-quiet × sm, md, lg; `loading`, `disabledLook`, `icon`, `leftIcon`; `tooltip` is the web's title, since GamerNexus's `title` is the label), `IconButton`, `Badge` (GamerNexus's nine tones: neutral, info, success, premium, caution, danger, night, subscription, host, on the manor's colours), and the manor's own `Notes` and `PostButton`, now a `Button` (`title`, `variant`). **Changed:** `Badge` takes `label` and `tone` (it took children and `kind`), `PostButton` takes `title` and `variant` (children and `quiet`), and `Muted` is gone: `<Text variant="muted">`.
+- **react/forms.tsx is new:** `Input` (label, error, `clearable`, `busy`), `Select` (the browser's own list; GamerNexus opens a sheet on a phone), `Switch`, `ChoiceGroup` (row, wrap, stack), `Segmented`, `SaveStatus`: what the schema-driven Settings form and onboarding's settings step are built from.
+- **react/feedback.tsx is new:** `Loading`, `ErrorNote` (with Try again), `EmptyNote`, `QueryView` (data first, else the error, else offline, else loading, else empty), `Toast`, `ModalCard`.
+- **react/icons.tsx is new:** `Icon` (the glyphs the components use, by their Ionicons names) and `Spinner`. **react/styles.ts is new:** `UI_CSS`, which `Page` puts in the page once, every colour a theme variable.
+- **What an agent must do:** nothing, unless it has a React page: then `Badge`, `PostButton` and `Muted` as above. The Steward's is done.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.21.0
 
 **A page drawn in the browser, with React: the kit's react part.** The first step of the manor's move to React and TypeScript. An agent's page can be React components in the browser rather than HTML written in strings on the server; the Steward's page is the first. Nothing changes for an agent that doesn't take the part.

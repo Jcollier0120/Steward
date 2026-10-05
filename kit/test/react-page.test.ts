@@ -107,10 +107,10 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   const shell = { ...pageShell({ busy: true }), offDutySince: '3 minutes ago', manor: { name: 'Weasel Manor', url: 'http://manor.localhost:18585/', theme: 'system', settingsUrl: 'http://manor.localhost:18585/#/settings' } };
   const { render } = await bundleForNode<{ render: (d: unknown) => string }>(
     `import { renderToStaticMarkup } from 'react-dom/server';
-     import { Page, Card, Muted, Badge, PostButton } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+     import { Page, Card, Text, Badge, PostButton } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
      export const render = (data) => renderToStaticMarkup(
-       <Page data={data} reload={() => {}} action={<PostButton quiet path="/api/run" confirm="Now?">Run now</PostButton>} tour={<p>Step one</p>}>
-         <Card className="empty" tour="mine"><Muted>quiet</Muted> <Badge kind="ok">fine</Badge></Card>
+       <Page data={data} reload={() => {}} action={<PostButton title="Run now" variant="secondary" path="/api/run" confirm="Now?" />} tour={<p>Step one</p>}>
+         <Card className="empty" tour="mine"><Text variant="muted">quiet</Text> <Badge label="fine" tone="success" /></Card>
        </Page>);`,
     { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
   );
@@ -122,7 +122,7 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /Weasel Manor chooses the theme, for every page in the manor/);
   assert.match(html, /<span class="titlebar-action" data-tour="action"><button type="button" class="quiet" data-post="\/api\/run">Run now<\/button><\/span>/);
   assert.match(html, /<div class="banner-note offduty" role="status"><span><strong>Off duty<\/strong> since 3 minutes ago/);
-  assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge ok">fine<\/span><\/div>/);
+  assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge tone-success">fine<\/span><\/div>/);
   assert.match(html, /<section id="settings-view"><a class="back-link" href="#\/">Back to /);
   assert.match(html, /<div class="card sf-panel" data-settings-panel="" data-tour="settings-panel">/);
   assert.match(html, /Where its work runs/);
