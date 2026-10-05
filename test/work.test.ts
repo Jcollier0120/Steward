@@ -145,6 +145,19 @@ test('filed once where the Wright works, by its team, with the label and a marke
   assert.deepEqual([...s4.values()].map((s) => s.state), ['filed', 'filed', 'filed']);
 });
 
+test("a kit's failed bumps count as one of the day's few: a kit that breaks six agents' checks has all six filed that day", async () => {
+  const bumps = ['porter', 'reeve', 'gamernexus', 'herald', 'miller', 'pinder'].map((e) => ({ id: `bump:${e}:2.21.0`, condition: `rollout:${e}:2.21.0`, repo: 'Jcollier0120/Porter', title: e, body: e }));
+  const others = ['a', 'b', 'c'].map((k) => ({ id: `release:porter:${k}`, condition: `release:porter:${k}`, repo: 'Jcollier0120/Porter', title: k, body: k }));
+  const g = gh();
+  const s = await fileWork({ items: [...bumps, ...others], work: WORK(), employees, run: g.run, cwd: home, now: at(0), log: () => {} });
+  // The kit's six are one; two releases make three; the third release waits for tomorrow.
+  assert.deepEqual([...s.values()].map((x) => x.state), [...bumps.map(() => 'filed'), 'filed', 'filed', 'not-filed']);
+  assert.equal(g.creates().length, 8);
+  // Another kit's bumps are another one, and today's few are filed.
+  const next = await fileWork({ items: [{ ...bumps[0], id: 'bump:porter:2.22.0' }], work: WORK(), employees, run: gh().run, cwd: home, now: at(1), log: () => {} });
+  assert.equal([...next.values()][0].state, 'not-filed');
+});
+
 test('no queue, no team, or an issue already open with its marker: not filed again', async () => {
   const item = { id: 'release:porter:abc1234', condition: 'release:porter:abc1234', repo: 'Jcollier0120/Porter', title: 't', body: 'b' };
   const why = async (work: unknown, g = gh()) => {
