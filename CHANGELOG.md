@@ -2,6 +2,10 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.14
+
+**Kit 2.14.0: the title bar stays at the top as the page scrolls.** The Steward hands out kit 2.14.0 (kit/CHANGELOG.md). Every kit agent's title bar (the Steward's own too) stays in place on a long page, with a line under it once scrolled, and a jump to a #section lands below it.
+
 ## 0.8.13
 
 **Kit 2.13.1: an update that moves an agent's port ends the old page.** The Steward hands out kit 2.13.1 (kit/CHANGELOG.md). An agent's installer now finds its running page on the port server.json recorded, as well as its own, and stops it there.
