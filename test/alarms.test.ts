@@ -10,6 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-alarms-'));
 process.env.STEWARD_HOME = home;
 // The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
@@ -156,4 +157,29 @@ test("an answer with an error field of its own is still an answer: only getJson'
   assert.equal(noAnswer({ at: 'x', needsYou: [], error: "Couldn't read the queue" }), null, 'up, though it could not read something');
   assert.deepEqual(wrightConditions({ at: 'x', needsYou: [], error: null }), [], 'nothing needs you, and it answers');
   assert.equal(wrightConditions({ needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }], error: null })[0].id, 'wright:claude:blocked');
+});
+test("from the Bailiff: Claude Code unusable, or a review failing twice, at once; its page down, after two hours; read only where Settings name it", async () => {
+  const { bailiffConditions } = alarmsModule;
+  const c = bailiffConditions({ needsYou: [
+    { id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: "Claude Code isn't signed in", url: 'http://bailiff.localhost:19999/' },
+    { id: 'failing:Jcollier0120/Porter#31', kind: 'failing', repo: 'Jcollier0120/Porter', number: 31, title: 'Porter 0.4.11: x', url: 'https://github.com/Jcollier0120/Porter/pull/31' },
+    { not: 'one' },
+  ], error: null });
+  assert.deepEqual(c.map((x) => [x.id, x.who, x.afterMs]), [['bailiff:claude:blocked', 'bailiff', 0], ['bailiff:failing:Jcollier0120/Porter#31', 'bailiff', 0]]);
+  assert.equal(c[0].title, "The Bailiff can't review: Claude Code isn't signed in");
+  assert.equal(c[1].title, "The Bailiff's review of Porter #31 failed twice: Porter 0.4.11: x");
+  assert.deepEqual(bailiffConditions({ error: 'ECONNREFUSED' }).map((x) => [x.id, x.afterMs / HOUR]), [['bailiff:down', 2]]);
+  assert.deepEqual(bailiffConditions({ at: 'x', needsYou: [], error: null }), []);
+  // watchAlarms reads /api/reviews only where Settings name the Bailiff's page (by default, only where it is installed).
+  rmSync(alarmsFile(), { force: true });
+  const asked: string[] = [];
+  const s = structuredClone(settings);
+  const watch = () => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => (asked.push(u), u.endsWith('/api/reviews') ? { needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }] } : { error: 'none' }), toast: async () => {}, now: at(0), manorUrl: null });
+  assert.equal(s.alarms.bailiffUrl, '', 'not installed here: not read');
+  await watch();
+  assert.ok(!asked.some((u) => u.includes('19999')));
+  s.alarms.bailiffUrl = 'http://127.0.0.1:19999';
+  const st = await watch();
+  assert.ok(asked.includes('http://127.0.0.1:19999/api/reviews'));
+  assert.ok(st.open.some((a) => a.id === 'bailiff:claude:blocked'));
 });

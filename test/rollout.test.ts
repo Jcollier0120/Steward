@@ -10,6 +10,7 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-rollout-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');

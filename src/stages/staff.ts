@@ -47,6 +47,8 @@ export interface PrInfo {
   fork?: boolean;
   /** For one of the Wright's drafts: why the Steward's look (review.ts) leaves it to the person. Not from gh. */
   reviewHold?: string;
+  /** For one of the Wright's drafts that passed the look: why it waits for the Bailiff's approval of its head (review.ts). Not from gh. */
+  bailiffHold?: string;
 }
 
 export interface ReleaseInfo {

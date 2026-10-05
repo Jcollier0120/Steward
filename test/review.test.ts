@@ -8,6 +8,8 @@ import { after, test } from 'node:test';
 // stays a draft for the person, and says why.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-review-'));
 process.env.STEWARD_HOME = home;
+// Whether the Bailiff is installed on this PC decides nothing here: each test says.
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { dependenciesOf, dependencyHold, isWrightDraft, reviewHold, sensitiveFiles } = await import('../src/review.ts');
@@ -81,4 +83,60 @@ test("a draft that changes package.json's dependencies stays for you; one that o
   assert.equal(await dependencyHold(ctx, e, pr({ number: 20, headOid: bumped, files: ['package.json'] })), null);
   assert.equal(await dependencyHold(ctx, e, pr({ number: 21, headOid: added, files: ['package.json'] })), 'it changes the dependencies in package.json');
   assert.equal(await dependencyHold(ctx, e, pr({ number: 22, files: ['README.md'] })), null, 'no package.json, nothing to compare');
+});
+
+test("the Bailiff's verdict: its last marked comment by the team; a stranger's marker or a broken one counts for nothing", async () => {
+  const { bailiffVerdict } = await import('../src/review.ts');
+  const H = 'a'.repeat(40);
+  const mark = (head: string, verdict: string) => `**The Bailiff's review**\n\n<!-- bailiff-review {"head":"${head}","verdict":"${verdict}"} -->`;
+  const by = (login: string, body: string) => ({ author: { login }, body });
+  assert.deepEqual(bailiffVerdict([by('Jcollier0120', mark('b'.repeat(40), 'changes')), by('Jcollier0120', mark(H, 'approved'))], ['jcollier0120']), { head: H, verdict: 'approved' });
+  assert.deepEqual(bailiffVerdict([by('Jcollier0120', mark(H, 'changes')), by('stranger', mark(H, 'approved'))], ['Jcollier0120']), { head: H, verdict: 'changes' }, "a stranger's marker is no approval");
+  assert.equal(bailiffVerdict([by('Jcollier0120', `${mark(H, 'approved')}\n\nand then more words`)], ['Jcollier0120']), null, 'the marker must end the comment');
+  assert.equal(bailiffVerdict([by('Jcollier0120', '<!-- bailiff-review {not json} -->')], ['Jcollier0120']), null);
+  assert.equal(bailiffVerdict('nonsense', ['Jcollier0120']), null);
+});
+
+test("with the Bailiff installed, a Wright draft that passes the look is marked ready only once the Bailiff approved its head commit", async () => {
+  const H = 'c'.repeat(40);
+  const OLD = 'd'.repeat(40);
+  const marked = (head: string, verdict: string) => ({ author: { login: 'Jcollier0120' }, body: `review\n\n<!-- bailiff-review {"head":"${head}","verdict":"${verdict}"} -->` });
+  const views: Record<string, unknown> = {
+    '30': { headRefOid: H, comments: [marked(H, 'approved')] },
+    '31': { headRefOid: H, comments: [marked(OLD, 'approved')] },
+    '32': { headRefOid: 'e'.repeat(40), comments: [marked(H, 'approved')] },
+    '33': { headRefOid: H, comments: [marked(H, 'changes')] },
+  };
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'view' ? ok(views[args[2]]) : args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
+  const e = employee(path.join(home, 'nowhere'), { repo: 'Jcollier0120/Fake' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
+  const approved = pr({ number: 30, headOid: H, labels: ['wright', 'bailiff:approved'] });
+  const stale = pr({ number: 31, headOid: H, labels: ['wright', 'bailiff:approved'] });
+  const moved = pr({ number: 32, headOid: H, labels: ['wright', 'bailiff:approved'] });
+  const contradicted = pr({ number: 33, headOid: H, labels: ['wright', 'bailiff:approved'] });
+  const unreviewed = pr({ number: 34, headOid: H });
+  const changes = pr({ number: 35, headOid: H, labels: ['wright', 'bailiff:changes'] });
+  const waiting = pr({ number: 36, headOid: H, labels: ['wright', 'bailiff:waiting'] });
+  const risky = pr({ number: 37, headOid: H, labels: ['wright', 'bailiff:approved'], files: ['jobs/fast-forward.ps1'] });
+  const all = [approved, stale, moved, contradicted, unreviewed, changes, waiting, risky];
+  await lookAtWrightDrafts(ctx, e, all, true);
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '30', '--repo', 'Jcollier0120/Fake']], 'only the one approved at its head');
+  assert.ok(r.gh.find((a) => a[1] === 'comment')!.at(-1)!.includes(`the Bailiff approved its head commit, ${H.slice(0, 7)}`));
+  assert.deepEqual(all.map((p) => p.draft), [false, true, true, true, true, true, true, true]);
+  assert.equal(holdReason(approved, 'main'), null);
+  assert.equal(stale.bailiffHold, `the Bailiff approved ${OLD.slice(0, 7)}, not its head ${H.slice(0, 7)}: waiting for its review of the new commit`);
+  assert.equal(moved.bailiffHold, 'its head moved since the round listed it: the next round looks again');
+  assert.equal(contradicted.bailiffHold, "labelled bailiff:approved, but the Bailiff's last review doesn't approve it");
+  assert.equal(holdReason(unreviewed, 'main'), "a draft from the Wright, with the Bailiff: waiting for the Bailiff's review");
+  assert.equal(changes.bailiffHold, 'the Bailiff asked for changes (its comment says which)');
+  assert.equal(waiting.bailiffHold, "the Bailiff couldn't review it yet (its comment says why)");
+  assert.ok(risky.reviewHold && !risky.bailiffHold, "the Steward's own look comes first: an approval never overrides it");
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'view').map((a) => a[2]), ['30', '31', '32', '33'], 'GitHub is asked only for the ones labelled approved that passed the look');
+
+  // Without the Bailiff, nothing changes: the look alone marks it ready.
+  const r2 = runner((args) => (args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
+  const plain = pr({ number: 40, headOid: H });
+  await lookAtWrightDrafts(ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r2.run, neutralDir: home }), e, [plain]);
+  assert.deepEqual(r2.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '40', '--repo', 'Jcollier0120/Fake']]);
+  assert.ok(!r2.gh.find((a) => a[1] === 'comment')!.at(-1)!.includes('Bailiff'));
 });

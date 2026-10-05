@@ -99,6 +99,8 @@ export interface AlarmSettings {
   surveyorUrl: string;
   /** The Wright's page, read for the issues it got stuck on and its PRs a person reviews; empty: not read. */
   wrightUrl: string;
+  /** The Bailiff's page, read for reviews it can't do (Claude Code unusable, a review failing); empty: not read. */
+  bailiffUrl: string;
 }
 
 const hire = (name: string): Employee => ({
@@ -125,6 +127,14 @@ const hire = (name: string): Employee => ({
  */
 export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
 export const WRIGHT_URL = 'http://127.0.0.1:19797';
+
+/**
+ * The Bailiff is ours alone too (Manor marks it internal), and reviews the Wright's drafts. Where it is installed
+ * (%USERPROFILE%\.bailiff\app, or BAILIFF_HOME's app) the Steward takes it on as it does the Wright, reads its page for
+ * alarms, and marks a draft of the Wright's ready only once the Bailiff has approved its head commit (review.ts).
+ */
+export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
+export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
  * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor and the Lamplighter, built on
@@ -163,8 +173,12 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   hire('Lamplighter'),
 ];
 
-/** The employees when Settings name none: the defaults, and the Wright where it is installed. */
-export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee[] => (wrightInstalled(env) ? [...DEFAULT_EMPLOYEES, hire('Wright')] : DEFAULT_EMPLOYEES);
+/** The employees when Settings name none: the defaults, and the Wright and the Bailiff where each is installed. */
+export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee[] => [
+  ...DEFAULT_EMPLOYEES,
+  ...(wrightInstalled(env) ? [hire('Wright')] : []),
+  ...(bailiffInstalled(env) ? [hire('Bailiff')] : []),
+];
 
 /**
  * Told after a release: Manor's update check (so it installs the release within minutes, not at its next look hours
@@ -184,7 +198,7 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '' },
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '' },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
@@ -298,13 +312,14 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
       { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
       { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797' },
+      { key: 'bailiffUrl', kind: 'text', label: "The Bailiff's page", help: "Read for the reviews it can't do: Claude Code not signed in, or a review that keeps failing.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19999' },
     ],
   },
   {
     key: 'wrightReview',
     kind: 'group',
     label: "The Wright's drafts",
-    help: "The Wright opens every pull request as a draft. In its rounds the Steward looks at each, in code: not labelled wright:needs-you, no changed file a person reviews, no dependency changes, not too large. One that passes is marked ready, then tested here and merged as any team PR; one that doesn't stays a draft for you, and says why.",
+    help: "The Wright opens every pull request as a draft. In its rounds the Steward looks at each, in code: not labelled wright:needs-you, no changed file a person reviews, no dependency changes, not too large; and where the Bailiff is installed, its approval of the draft's head commit. One that passes is marked ready, then tested here and merged as any team PR; one that doesn't stays a draft, and says why.",
     fields: [
       { key: 'on', kind: 'switch', label: 'Look at the Wright\'s drafts, and merge the ones that pass' },
       { key: 'maxLines', kind: 'whole', min: 10, max: 5000, unit: 'lines', label: 'At most', help: 'Lines added and removed; a larger draft waits for you.' },
@@ -356,6 +371,8 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
     // Not named in settings.json: the Wright's page where it is installed, else none (it is ours alone).
     wrightUrl: a.wrightUrl === undefined ? (wrightInstalled() ? WRIGHT_URL : '') : url(a.wrightUrl, d.wrightUrl),
+    // The same for the Bailiff's.
+    bailiffUrl: a.bailiffUrl === undefined ? (bailiffInstalled() ? BAILIFF_URL : '') : url(a.bailiffUrl, d.bailiffUrl),
   };
 }
 

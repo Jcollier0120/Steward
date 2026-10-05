@@ -2,13 +2,13 @@ import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
 import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
-import type { Employee } from '../settings.ts';
+import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { catchUp, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import type { Held } from '../alarms.ts';
-import { dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
+import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -36,7 +36,7 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
-  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : 'a draft';
+  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `a draft from the Wright, with the Bailiff: ${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return 'GitHub is still working out whether it merges: try again in a minute';
@@ -131,9 +131,10 @@ const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 /**
  * Each of the Wright's drafts, looked at (review.ts): one that passes is marked ready on GitHub, with a comment saying
  * what was looked at, and goes on as any ready team PR (tested here at its head, then merged); one that doesn't keeps
- * the reason, which its hold then says.
+ * the reason, which its hold then says. Where the Bailiff is installed (`bailiff`), one that passes is marked ready
+ * only once the Bailiff has approved its current head commit; until then it waits for the Bailiff, and says so.
  */
-export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<void> {
+export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], bailiff = bailiffInstalled()): Promise<void> {
   const s = ctx.settings.wrightReview;
   for (const pr of prs.filter(isWrightDraft)) {
     let why = reviewHold(pr, s);
@@ -148,12 +149,19 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[]): 
       pr.reviewHold = why;
       continue;
     }
+    if (bailiff) {
+      const waits = await bailiffHold(ctx, e, pr);
+      if (waits) {
+        pr.bailiffHold = waits;
+        continue;
+      }
+    }
     const ready = await ctx.run('gh', ['pr', 'ready', String(pr.number), '--repo', e.repo], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
     if (ready.code !== 0) {
       pr.reviewHold = `the Steward couldn't mark it ready: ${(ready.err || ready.out).trim().split('\n').pop()}`;
       continue;
     }
-    await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', reviewedComment(pr, s)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', reviewedComment(pr, s, bailiff)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
     pr.draft = false;
     ctx.log(`[${e.id}] the Wright's #${pr.number}: looked at, and marked ready (${pr.files.length} files, ${pr.changed} lines)`);
   }

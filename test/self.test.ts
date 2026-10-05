@@ -10,6 +10,7 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-self-'));
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
+process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { planSelf, releaseSelf, loadSelfFailures, SELF_COMMANDS } = await import('../src/stages/self.ts');
