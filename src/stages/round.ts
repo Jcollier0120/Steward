@@ -2,6 +2,7 @@ import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { mapLimit, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
+import { clearTastingHold } from '../tasting.ts';
 
 /**
  * The Steward's round (`steward round`, and on duty every few minutes when Settings say it merges and releases
@@ -36,6 +37,8 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
   for (const r of out) {
     if (r.outcome === 'failed' && r.commit) failed[r.id] = r.commit;
     else if (r.outcome === 'done') delete failed[r.id];
+    // Looked at, and not held by the tasting (released, or nothing to release): no hold to count hours for.
+    if (!r.again) clearTastingHold(r.id);
   }
   writeJson(roundFailuresFile(), failed);
   return out;

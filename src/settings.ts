@@ -71,6 +71,8 @@ export interface Settings {
   releaseSelf: boolean;
   /** The Steward's own checkout, which those releases are made from (a worktree of it at origin/main). */
   stewardCheckout: string;
+  /** Before it publishes an employee's release, a passing tasting from the Aletaster of that very commit (tasting.ts). */
+  tasteBeforeRelease: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -101,6 +103,10 @@ export interface AlarmSettings {
   wrightUrl: string;
   /** The Bailiff's page, read for reviews it can't do (Claude Code unusable, a review failing); empty: not read. */
   bailiffUrl: string;
+  /** Reeve's page, read for his jobs' open alerts (GET /api/alerts) where Reeve is installed; empty: not read. */
+  reeveUrl: string;
+  /** A release the Aletaster's tasting has held this long is an alarm. */
+  tastingHours: number;
 }
 
 const hire = (name: string): Employee => ({
@@ -127,6 +133,10 @@ const hire = (name: string): Employee => ({
  */
 export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
 export const WRIGHT_URL = 'http://127.0.0.1:19797';
+
+/** Reeve is installed here when his home (%USERPROFILE%\.reeve, or REEVE_HOME) has an app folder: only then are his alerts read. */
+export const reeveInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.REEVE_HOME ?? path.join(os.homedir(), '.reeve'), 'app'));
+export const REEVE_URL = 'http://127.0.0.1:18383';
 
 /**
  * The Bailiff is ours alone too (Manor marks it internal), and reviews the Wright's drafts. Where it is installed
@@ -198,9 +208,10 @@ export const DEFAULT_SETTINGS: Settings = {
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '' },
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '', reeveUrl: REEVE_URL, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
+  tasteBeforeRelease: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
   releaseSelf: true,
@@ -290,6 +301,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     maxLength: 260,
     path: { is: 'folder', missing: 'warn', missingNote: "Without it, the Steward's own versions are left to you.", env: true },
   },
+  {
+    key: 'tasteBeforeRelease',
+    kind: 'switch',
+    label: "Waits for the Aletaster's tasting",
+    help: "Before it publishes an employee's release, the Steward asks the Aletaster to taste the very commit it would release (POST /api/taste), and publishes only when the tasting lets it through: a pass, or a warning unless the Aletaster's own settings say warnings hold. Otherwise the release waits, with the tasting's reason, and the next round asks again; one held longer than the alarms' while is an alarm. Never the Aletaster's own release, so a broken Aletaster can always be fixed. Released without a tasting, and said so, when the Aletaster isn't installed, is off duty for Developer options, predates the tasting, or its page doesn't answer.",
+  },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
   {
     key: 'afterRelease',
@@ -311,6 +328,8 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
       { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
+      { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for", help: 'With the reason the tasting gave, and a link to it.' },
+      { key: 'reeveUrl', kind: 'text', label: "Reeve's page", help: "Read for his jobs' open alerts (GET /api/alerts), where Reeve is installed: each is an alarm at once. An older Reeve without them is passed over quietly.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18383' },
       { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797' },
       { key: 'bailiffUrl', kind: 'text', label: "The Bailiff's page", help: "Read for the reviews it can't do: Claude Code not signed in, or a review that keeps failing.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19999' },
     ],
@@ -373,6 +392,8 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     wrightUrl: a.wrightUrl === undefined ? (wrightInstalled() ? WRIGHT_URL : '') : url(a.wrightUrl, d.wrightUrl),
     // The same for the Bailiff's.
     bailiffUrl: a.bailiffUrl === undefined ? (bailiffInstalled() ? BAILIFF_URL : '') : url(a.bailiffUrl, d.bailiffUrl),
+    reeveUrl: url(a.reeveUrl, d.reeveUrl),
+    tastingHours: whole(a.tastingHours, 1, 168, d.tastingHours),
   };
 }
 
@@ -416,6 +437,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
       releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),
+      tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
     },
     problems,
   };

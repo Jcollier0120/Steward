@@ -88,6 +88,8 @@ export const say = Object.freeze({
   noneCould: () => 'no accelerator could take the request',
   /** @param {string} id @param {string} work */
   notServing: (id, work) => `${id} isn't in Reeve's config, or doesn't serve ${work}`,
+  /** @param {AcceleratorRef} acc */
+  gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Manor's Settings: "Use the graphics card for models when there's an NPU" is off)`,
   noVisionModel: () => 'no vision model in Reeve\'s config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
   /** @param {string} work */
   noneServes: (work) => `no accelerator in Reeve's config.json serves ${work}`,

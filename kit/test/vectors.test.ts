@@ -12,6 +12,8 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'kit-vectors-'));
 process.env.FIXTURE_HOME = path.join(home, 'agent');
 process.env.REEVE_HOME = path.join(home, 'reeve');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'npu-agent', 'locks', 'npu');
+// Manor's settings (gpuWithNpu) from a scratch folder: none, until a test writes one.
+process.env.MANOR_HOME = path.join(home, 'manor');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const core = await import('../core/index.js');

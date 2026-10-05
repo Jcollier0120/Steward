@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -128,4 +128,85 @@ test("the round: a conflicting team PR is caught up after the merges, and its ho
   const ctxOff = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: off.run, neutralDir: dir });
   const r2 = await mergeOne(ctxOff, e, { yes: true, team: true });
   assert.equal(r2.held[0].why, 'conflicts with its branch');
+});
+
+// The Steward's own kit PRs are caught up by the same rules, with their checks run here before the push; one that
+// conflicts beyond its versions is closed, and the next round's rollout bumps again from the branch's head.
+/** moved()'s PR, as a kit PR of the Steward's (Reeve#39's case: a team PR took its version on main). */
+function kitPr(name: string, prFiles?: Record<string, string>) {
+  const m = moved(name, prFiles);
+  sh(m.checkout, 'push', '--quiet', 'origin', `${m.pr.headOid}:refs/heads/steward/kit-1.0.1`);
+  const pr: PrInfo = { ...m.pr, number: 39, title: "Fake 0.4.1: the Steward's kit 1.0.1", head: 'steward/kit-1.0.1', whose: 'steward', author: 'Jcollier0120', after: null };
+  return { ...m, pr };
+}
+
+/** gh scripted; npm stands in (its packages "installed"); everything else, git and the checks, runs for real. */
+function kitRunner() {
+  const r = runner(() => ok(''));
+  const ran: string[] = [];
+  const run: import('../src/run.ts').Runner = async (cmd, args, opts) => {
+    if (cmd === 'npm') {
+      mkdirSync(path.join(opts!.cwd!, 'node_modules'), { recursive: true });
+      return ok('');
+    }
+    if (cmd !== 'gh' && cmd !== 'git') ran.push([cmd, ...args].join(' '));
+    return r.run(cmd, args, opts);
+  };
+  return { run, gh: r.gh, ran };
+}
+
+test("a kit PR of the Steward's whose version lines conflict is caught up, its checks run before the push", async () => {
+  const { dir, checkout, pr } = kitPr('kit-versions');
+  const { run, gh, ran } = kitRunner();
+  const e = employee(checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, `${c.note}\n${ctx.lines.join('\n')}`);
+  assert.equal(c.version, '0.4.2');
+  assert.match(c.note, /merged main into it, its version lines resolved; v0\.4\.2, since v0\.4\.1 is already released; its checks passed$/);
+  assert.ok(ran.includes('node -e process.exit(0)'), 'its checks ran');
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(JSON.parse(sh(checkout, 'show', 'origin/steward/kit-1.0.1:package.json')).version, '0.4.2');
+  assert.deepEqual(gh.find((a) => a[1] === 'edit')?.slice(-2), ['--title', "Fake 0.4.2: the Steward's kit 1.0.1"]);
+  assert.match(gh.find((a) => a[1] === 'comment')!.at(-1)!, /The next round merges it\.$/);
+});
+
+test("a kit PR whose checks fail after catching up isn't pushed", async () => {
+  const { dir, checkout, pr } = kitPr('kit-failing');
+  const { run, gh } = kitRunner();
+  const e = employee(checkout, { fill: '', test: ['node -e process.exit(3)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, false);
+  assert.match(c.note, /but then node -e process\.exit\(3\) failed \(exit 3\), so it wasn't pushed$/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'rev-parse', 'origin/steward/kit-1.0.1'), pr.headOid);
+  assert.equal(gh.length, 0);
+});
+
+test('a kit PR that conflicts beyond its versions is closed, its branch deleted, for the next round to bump again', async () => {
+  const { dir, checkout, pr } = kitPr('kit-conflict', { LICENSE: 'MIT\n' });
+  const { run, gh, ran } = kitRunner();
+  const e = employee(checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.deepEqual([c.done, c.closed], [false, true]);
+  assert.equal(c.note, 'it conflicts with main in LICENSE, so the Steward closed it: the next round bumps Fake again from main');
+  const close = gh.find((a) => a[1] === 'close')!;
+  assert.deepEqual(close.slice(0, 5), ['pr', 'close', '39', '--repo', 'Jcollier0120/Fake']);
+  assert.ok(close.includes('--delete-branch'), "its branch goes, or the next bump would refuse it");
+  assert.match(close.at(-1)!, /^Closed by the Steward: it conflicts with main in LICENSE/);
+  assert.deepEqual(ran, [], 'no checks for a PR it closes');
+  // A team PR with the same conflict still waits for a person.
+  const team = await catchUp(ctx, e, { ...pr, whose: 'team', head: 'claude/feature' }, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.deepEqual([team.done, team.closed, team.note], [false, undefined, 'it conflicts with main in LICENSE: that needs a person']);
+});
+
+test("the round: a conflicting kit PR of the Steward's is one a catch-up may clear; any other of its own isn't", async () => {
+  const { behindItsBranch } = await import('../src/stages/merge.ts');
+  const { isKitPr } = await import('../src/stages/catchup.ts');
+  const base = { number: 39, title: 't', url: 'u', head: 'steward/kit-2.9.1', base: 'main', author: 'Jcollier0120', whose: 'steward', headOid: 'x', after: null, afterError: null, mergeable: 'CONFLICTING', mergeState: 'DIRTY', draft: false, checks: 'none', labels: [], changed: 1, files: [], fork: false } as unknown as PrInfo;
+  assert.ok(isKitPr(base) && behindItsBranch(base, 'main'));
+  assert.ok(!behindItsBranch({ ...base, head: 'steward/other' }, 'main'));
+  assert.ok(!behindItsBranch({ ...base, mergeable: 'MERGEABLE', mergeState: 'CLEAN' }, 'main'));
 });

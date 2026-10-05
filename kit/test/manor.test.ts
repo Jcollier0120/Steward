@@ -15,7 +15,7 @@ process.env.REEVE_HOME = path.join(tmp, 'reeve');
 process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 
-const { HOUSE_SVG, developerOptions, forgetManorIcon, manorIcon, manorLink, manorSettingsUrl, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, developerOptions, forgetManorIcon, gpuWithNpu, manorIcon, manorLink, manorSettingsUrl, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -29,9 +29,9 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
 }
 
 test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
-  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx', developerOptions: true });
-  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null }, 'Manor\'s own defaults');
-  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null });
+  assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
+  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults');
+  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
   assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Manor');
   assert.equal(manorLink(manorAt('not-an-object', 'null'))!.theme, 'system');
   assert.equal(manorLink(manorAt('bom', '﻿{"theme": "quest"}'))!.theme, 'quest');
@@ -119,6 +119,35 @@ test("an agent's developer features: Manor's Developer options when it's install
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
   assert.deepEqual(developerOptions(true), { on: true, setBy: null }, 'no Manor here');
+});
+
+test("the graphics card beside the NPU: Manor's gpuWithNpu when it says; else the agent's own switch, true without one", () => {
+  // ManorLink: false only when Manor says false; an older Manor (no key), or anything else, is true.
+  assert.equal(manorLink(manorAt('gpu-off', { gpuWithNpu: false }))!.gpuWithNpu, false);
+  assert.equal(manorLink(manorAt('gpu-on', { gpuWithNpu: true }))!.gpuWithNpu, true);
+  assert.equal(manorLink(manorAt('gpu-old', { name: 'Weasel Manor', developerOptions: true }))!.gpuWithNpu, true, 'an older Manor never set it aside');
+  for (const [i, value] of ['false', 0, null, {}].entries()) assert.equal(manorLink(manorAt(`gpu-odd-${i}`, { gpuWithNpu: value }))!.gpuWithNpu, true, JSON.stringify(value));
+  // gpuWithNpu(): Manor's value wins when it says, and it's Manor that set it.
+  const off = manorAt('gpu-says-off', { name: 'Weasel Manor', port: 18600, gpuWithNpu: false });
+  const on = manorAt('gpu-says-on', { gpuWithNpu: true });
+  for (const own of [true, false]) {
+    const r = gpuWithNpu(own, off);
+    assert.equal(r.on, false, `own ${own}, Manor off`);
+    assert.equal(r.setBy!.url, 'http://manor.localhost:18600/');
+    assert.equal(gpuWithNpu(own, on).on, true, `own ${own}, Manor on`);
+    // An older Manor without the key, one that says something else, or none: the agent's own switch.
+    for (const home of [manorAt('gpu-says-nothing', { name: 'Weasel Manor' }), manorAt('gpu-says-no', { gpuWithNpu: 'no' }), manorAt('gpu-not-installed', { gpuWithNpu: false }, { installed: false }), path.join(tmp, 'nowhere')]) {
+      assert.deepEqual(gpuWithNpu(own, home), { on: own, setBy: null }, `${home}, own ${own}`);
+    }
+  }
+  // An agent without a switch of its own: true, unless Manor says false.
+  assert.deepEqual(gpuWithNpu(undefined, manorAt('gpu-old-2', {})), { on: true, setBy: null });
+  assert.deepEqual(gpuWithNpu(), { on: true, setBy: null }, 'no Manor here');
+  // Read afresh.
+  const later = manorAt('gpu-changes', { gpuWithNpu: true });
+  assert.equal(gpuWithNpu(true, later).on, true);
+  writeFileSync(path.join(later, 'settings.json'), JSON.stringify({ gpuWithNpu: false }));
+  assert.equal(gpuWithNpu(true, later).on, false);
 });
 
 test('in place of the agent\'s own switch: "<manor>\'s Developer options set this", and "Change it in <manor>", to its Settings', () => {

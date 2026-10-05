@@ -29,15 +29,27 @@ export interface ManorLink {
    * below). Null when Manor hasn't said: no key, or not true or false.
    */
   developerOptions: boolean | null;
+  /**
+   * The manor's "Use the graphics card for models when there's an NPU" (settings.json's "gpuWithNpu", the switch on
+   * Manor's Settings page). False: on a PC with an NPU, no graphics card runs models, not even as a fallback
+   * (gpuWithNpu(), below, and the core's withoutGpuBesideNpu). True when Manor hasn't said (no key, or not true or
+   * false): an older Manor never set the graphics card aside.
+   */
+  gpuWithNpu: boolean;
 }
 
 const DEFAULT_PORT = 18585;
 
-/** Manor's name, page, theme and Developer options, read afresh; null when Manor isn't installed here (no settings.json, or no app beside it). */
+/** Manor's name, page, theme, Developer options and gpuWithNpu, read afresh; null when Manor isn't installed here (no settings.json, or no app beside it). */
 export function manorLink(home = manorHome()): ManorLink | null {
+  return readManor(home)?.link ?? null;
+}
+
+/** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
+function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean } | null {
   const file = path.join(home, 'settings.json');
   if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown } = {};
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
@@ -53,7 +65,8 @@ export function manorLink(home = manorHome()): ManorLink | null {
     // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to Manor still works.
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
-  return { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions };
+  const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
+  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu };
 }
 
 /** Manor's Settings page, where its Developer options switch is (Manor's page at #/settings). */
@@ -68,6 +81,18 @@ export const manorSettingsUrl = (m: ManorLink) => `${m.url}#/settings`;
 export function developerOptions(own: boolean, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
   const m = manorLink(home);
   return m && m.developerOptions !== null ? { on: m.developerOptions, setBy: m } : { on: own, setBy: null };
+}
+
+/**
+ * Whether a graphics card may run models beside an NPU (the core's withoutGpuBesideNpu takes `on`). With Manor
+ * installed and saying (settings.json's "gpuWithNpu" true or false), Manor's value wins, and `setBy` is Manor: an
+ * agent with a switch of its own shows gpuWithNpuNote() (page.ts) in its place. Otherwise it's the agent's own switch,
+ * `own`, true for an agent without one: an older Manor, or none, never set the graphics card aside. Read afresh: call
+ * it for each request, so a change in Manor applies at once.
+ */
+export function gpuWithNpu(own = true, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
+  const m = readManor(home);
+  return m?.saysGpuWithNpu ? { on: m.link.gpuWithNpu, setBy: m.link } : { on: own, setBy: null };
 }
 
 /** A plain house, for when Manor's own icon can't be had. */
