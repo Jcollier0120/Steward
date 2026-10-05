@@ -2,6 +2,10 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.8.12
+
+**The Chamberlain is an employee.** The manor's new hire for its private papers (Jcollier0120/Chamberlain) is built on the kit as the other hires are, and the Steward now rolls the kit out to it, merges its PRs and publishes its releases. Manor offers it from its release's `manor-agent.json` (Manor 0.4.35), not from its own staff.json.
+
 ## 0.8.11
 
 **Kit 2.13.0: the NPU first.** The Steward hands out kit 2.13.0 (kit/CHANGELOG.md): model work goes to the NPU whenever it can do it, busy or not, and to a graphics card or the processor only when it can't.
