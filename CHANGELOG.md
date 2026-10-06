@@ -14,6 +14,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 Nothing: it updates itself as usual.
 
+## 0.10.5
+
+**The team is whoever gh is signed in as, unless you name one.**
+
+### What changed
+
+- Team in Settings starts empty, and empty means the GitHub account gh is signed in as on this PC: yours, which covers the PRs Claude Code opens with it. Nobody else's account is built in any more.
+- When Team is empty and gh isn't signed in, there is no team: Merge the team's PRs merges only the Steward's own, and the page, the stage's results and its log say so and how to fix it (`gh auth login`). Nothing stops working.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A team you already named in Settings is kept as it is. This release brings kit 2.24.0 (0.10.4) too, if that wasn't released on its own.
+
 ## 0.10.4
 
 **Kit 2.24.0: what agents asked for by hand, from the kit** (kit/CHANGELOG.md): another agent's address from Manor, the GitHub owner from gh, the manor's notification preferences, and settings marked as used only at the next install.

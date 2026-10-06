@@ -8,6 +8,7 @@ import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { afterWords } from './after.ts';
 import type { Runner } from './run.ts';
+import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff } from './stages/staff.ts';
 import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
@@ -47,8 +48,8 @@ export function askOf(body: any): StageAsk {
 export const staffView = (s: Staff | null): StaffView | null =>
   s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
-/** `run` stands in for git, gh and the employees' commands in a test. */
-export async function serveSteward(o: { run?: Runner } = {}) {
+/** `run` stands in for git, gh and the employees' commands in a test; `owner`, for the account gh is signed in as (team.ts). */
+export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
   let running: { stage: string; since: string } | null = null;
   let refreshing: Promise<unknown> | null = null;
 
@@ -56,7 +57,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     if (refreshing) return refreshing;
     refreshing = (async () => {
       try {
-        await refreshStaff(await context({ run: o.run }));
+        await refreshStaff(await context({ run: o.run, owner: o.owner }));
       } catch (e) {
         console.error(`${new Date().toISOString()} refreshing the staff: ${(e as Error).message}`);
       } finally {
@@ -69,7 +70,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
   const start = (stage: 'bump' | 'push' | 'merge' | 'release', ask: StageAsk) => {
     if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
     running = { stage, since: new Date().toISOString() };
-    void runStage(stage, ask, { run: o.run, log: (line) => console.log(`${stage}: ${line}`) })
+    void runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) })
       .catch((e) => console.error(`${new Date().toISOString()} ${stage}: ${(e as Error).message}`))
       .finally(() => (running = null));
     return { json: { started: true } };
@@ -99,7 +100,7 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     running = { stage: 'round', since: new Date().toISOString() };
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone.
-      await runStage('round', full ? { full } : {}, { run: o.run, log: (line) => console.log(`round: ${line}`) });
+      await runStage('round', full ? { full } : {}, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
@@ -124,7 +125,9 @@ export async function serveSteward(o: { run?: Runner } = {}) {
     const s = loadSettings();
     const busy = running !== null || refreshing !== null;
     const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf };
-    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: s.team, round, alarms: s.alarms.on ? loadAlarms() : undefined };
+    // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
+    const team = teamOf(s.team, o.owner);
+    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 

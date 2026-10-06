@@ -48,7 +48,7 @@ export interface Employee {
 
 export interface Settings {
   employees: Employee[];
-  /** The GitHub accounts whose PRs to the employees `merge --team` merges, as well as the Steward's own. */
+  /** The GitHub accounts whose PRs to the employees `merge --team` merges, as well as the Steward's own. Empty: gh's signed-in account (team.ts). */
   team: string[];
   workRoot: string;
   releaseAfterMerge: boolean;
@@ -217,8 +217,11 @@ export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee
  */
 export const DEFAULT_AFTER_RELEASE = ['http://127.0.0.1:18585/api/updates/check', 'http://127.0.0.1:19191/api/run'];
 
-/** The team: you, and Claude Code, which opens its PRs with your account. */
-export const DEFAULT_TEAM = ['Jcollier0120'];
+/**
+ * The team: none named, which means the GitHub account gh is signed in as on this PC (team.ts): you, and Claude Code,
+ * which opens its PRs with your account. Settings that name accounts are used as they are.
+ */
+export const DEFAULT_TEAM: string[] = [];
 
 export const DEFAULT_SETTINGS: Settings = {
   employees: DEFAULT_EMPLOYEES,
@@ -277,7 +280,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'team',
     kind: 'list',
     label: 'Team',
-    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Claude Code opens its PRs with your account, so yours covers them. A team PR that isn't a draft is ready to merge: open one that needs review as a draft. One with no checks on GitHub is tested here first, and the version it sets must be new. Their branches are left as they are.",
+    help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Empty: the account gh is signed in as on this PC, which is yours; Claude Code opens its PRs with it, so it covers them. Accounts named here are the whole team instead, so name yours among them. A team PR that isn't a draft is ready to merge: open one that needs review as a draft. One with no checks on GitHub is tested here first, and the version it sets must be new. Their branches are left as they are.",
     item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like Jcollier0120, or app/<name> for a GitHub App' },
     maxItems: 20,
   },

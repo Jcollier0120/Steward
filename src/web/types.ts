@@ -28,7 +28,10 @@ export interface StewardView {
   last: StageResult | null;
   running: { stage: string; since: string } | null;
   refreshing: boolean;
+  /** The team the stages use: Settings' own, or the account gh is signed in as when they name none (ghuser.ts). */
   team: string[];
+  /** Where an empty Team in Settings leaves it: whose account it is, or why there is none. Null: Settings name it. */
+  teamNote?: string | null;
   round: RoundView;
   /** Undefined when Settings turn the alarms off. */
   alarms?: AlarmState;
