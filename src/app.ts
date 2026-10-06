@@ -9,7 +9,7 @@ export const APP = {
   name: 'Steward',
   /** One line: what it does. Manor shows it under the name. */
   role: 'Keeps the essentials every agent shares, and brings each update to all of them at once',
-  version: '0.11.5',
+  version: '0.11.6',
 };
 
 /** The folder above src/: the installed copy's app folder, or a checkout. */
