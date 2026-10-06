@@ -5,7 +5,7 @@ import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { originRepo } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
-import { migrateSettings } from './migrate.ts';
+import { fillMigrationGaps, migrateSettings } from './migrate.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
 /** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
@@ -465,5 +465,7 @@ export const SETTINGS_SPEC: SettingsSpec<Settings> = {
 export function loadSettings(): Settings {
   // Once, for an install that ran on the old built-in employees: they are written out from its staff table (migrate.ts).
   migrateSettings({ settingsFile: settingsFile(), staffFile: dataFile('staff.json') });
+  // And until Settings are saved, what it couldn't fill in is looked for again, every few minutes.
+  fillMigrationGaps({ settingsFile: settingsFile() });
   return normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
 }

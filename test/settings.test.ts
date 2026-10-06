@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -16,7 +17,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, loadSettings, normalizeSettings, settingsFile } = await import('../src/settings.ts');
 const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
-const { migrationFile, pendingMigration } = await import('../src/migrate.ts');
+const { fillMigrationGaps, migrateSettings, migrationFile, pendingMigration } = await import('../src/migrate.ts');
 const { employeeFor } = await import('../src/claims.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { STAFF } = await import('./fixtures/staff.ts');
@@ -204,6 +205,84 @@ test("Manor's internal staff are released here: built and installed from the clo
     if (before === undefined) delete process.env.MANOR_HOME;
     else process.env.MANOR_HOME = before;
     clean();
+  }
+});
+
+// A real clone: main carries what the stages need, while the folder may be checked out on anything.
+const gitIn = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+const cloneOf = (name: string, files: Record<string, string>) => {
+  const dir = path.join(clones, name);
+  for (const [rel, text] of Object.entries(files)) put(`${name}/${rel}`, text);
+  gitIn(clones, 'init', '-q', '-b', 'main', name);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'one');
+  gitIn(dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  return dir;
+};
+const commitTo = (dir: string, files: Record<string, string>) => {
+  for (const [rel, text] of Object.entries(files)) put(`${path.basename(dir)}/${rel}`, text);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'more');
+};
+const nodeAgent = (name: string) => ({
+  'package.json': JSON.stringify({ name, version: '0.6.5', scripts: { test: 'node --test', release: 'node tools/release.ts' } }),
+  'tsconfig.json': '{}',
+  'src/cli.ts': '',
+});
+
+test("an employee's clone is read at its branch's tip, not whatever it has checked out: one on an old branch still gets its kit script", () => {
+  const dir = cloneOf('Mano', { ...nodeAgent('mano'), 'tools/kit.ts': '' });
+  // The folder sits on a branch from before the kit script.
+  gitIn(dir, 'checkout', '-q', '-b', 'old');
+  gitIn(dir, 'rm', '-q', 'tools/kit.ts');
+  gitIn(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'old');
+  writeFileSync(staffFile, JSON.stringify({ rows: [row('mano', 'Mano')] }));
+  try {
+    const [mano] = loadSettings().employees;
+    assert.equal(mano.fill, 'node tools/kit.ts', "main's kit script, though the folder hasn't it");
+    assert.equal(pendingMigration(settingsFile()), null, 'nothing missing: no alarm');
+  } finally {
+    clean();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("what the migration couldn't fill in is looked for again until Settings are saved: found on the branch, it's written in and the alarm clears", () => {
+  const dir = cloneOf('Lato', nodeAgent('lato'));
+  writeFileSync(staffFile, JSON.stringify({ rows: [row('lato', 'Lato'), row('gone', 'Gone')] }));
+  try {
+    const at = new Date('2026-10-06T13:35:00Z');
+    migrateSettings({ settingsFile: settingsFile(), staffFile, now: at });
+    const m = pendingMigration(settingsFile())!;
+    assert.deepEqual(m.gaps, { lato: { name: 'Lato', missing: ['Fill its kit'], offKit: false } });
+    assert.match(m.notes.join(' '), /Lato: couldn't tell Fill its kit \(no tools\/kit\.ts or tools\/kit\.ps1\) from its clone's main\. The Steward looks again/);
+    assert.equal(fillMigrationGaps({ settingsFile: settingsFile(), now: new Date(at.getTime() + 60_000) }), null, 'not again within a few minutes');
+    assert.equal(fillMigrationGaps({ settingsFile: settingsFile(), now: new Date(at.getTime() + 10 * 60_000) }), null, 'still not there: nothing changes');
+    assert.ok(pendingMigration(settingsFile()), 'and the alarm stays');
+    commitTo(dir, { 'tools/kit.ts': '' });
+    gitIn(dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const later = fillMigrationGaps({ settingsFile: settingsFile(), now: new Date(at.getTime() + 20 * 60_000) })!;
+    assert.deepEqual(later.gaps, {});
+    assert.equal(JSON.parse(readFileSync(settingsFile(), 'utf8')).employees[0].fill, 'node tools/kit.ts', 'written into settings.json');
+    assert.deepEqual(pendingMigration(settingsFile())!.notes.map((n) => n.slice(0, 22)), ['Gone was left out: its'], "only what it can't find itself is left");
+  } finally {
+    clean();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a migration from before it kept its gaps (0.11.7 to 0.11.9) has them read from its notes and Settings, and filled in the same way', () => {
+  const dir = cloneOf('Mano', { ...nodeAgent('mano'), 'tools/kit.ts': '' });
+  const employee = { id: 'mano', name: 'Mano', repo: 'octocat/Mano', checkout: dir, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['npm test'], versionFiles: ['package.json'], release: 'npm run release -- --publish', install: '', approve: '', installed: '' };
+  writeFileSync(settingsFile(), JSON.stringify({ employees: [employee] }));
+  const mtimeMs = statSync(settingsFile()).mtimeMs;
+  writeFileSync(migrationFile(), JSON.stringify({ at: '2026-10-06T13:35:12.219Z', mtimeMs, employees: ['mano'], notes: ["Mano: couldn't tell Fill its kit from its clone until you fill it in."] }));
+  try {
+    assert.equal(loadSettings().employees[0].fill, 'node tools/kit.ts');
+    assert.equal(pendingMigration(settingsFile()), null, 'the alarm clears by itself');
+  } finally {
+    clean();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
