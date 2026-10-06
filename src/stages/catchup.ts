@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { aheadOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
-import { compareVersions } from '../kitfiles.ts';
+import { compareVersions, KIT_VERSION, pinText } from '../kitfiles.ts';
+import { readPin } from './staff.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.ts';
 import { runChecks } from './bump.ts';
@@ -16,15 +17,18 @@ import { recordTested } from '../tested.ts';
  * and merges it as any team PR.
  *
  * Only what needs no judgement: a conflict is resolved only in a version file, and only where one side changed
- * nothing but versions (diff3's common ancestor says which); or in the changelog, where each side only added an entry
- * at its top (mergeChangelogs). Any other conflict is left untouched, and goes back to the PR's author (kickback.ts).
+ * nothing but versions (diff3's common ancestor says which); in the changelog, where each side only added an entry
+ * at its top (mergeChangelogs); or in kit.json, where the newer kit of the two is pinned with every part either takes,
+ * and nothing else in it changed on both sides (mergeKitPins). Any other conflict is left untouched, and goes back to
+ * the PR's author (kickback.ts).
  * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
  * (steward/kit-…).
  *
  * A kit PR of the Steward's is caught up by the same rules, and, since no one else tests it, its checks run (its kit
  * filled again, then the employee's tests, as its bump ran them) before it is pushed. A kit PR that conflicts beyond
  * its version files isn't left waiting for a person: the Steward closes it and deletes its branch, and the next round's
- * rollout bumps the employee again, from its branch's head as it is then.
+ * rollout bumps the employee again, from its branch's head as it is then. So does one whose branch already pins its
+ * kit or a newer one: another PR got there first, and it has nothing left to do.
  */
 
 /** One of the Steward's own kit PRs (a bump's), which it catches up as the team's. */
@@ -67,6 +71,38 @@ export function resolveVersionConflicts(text: string): string | null {
     i = j;
   }
   return out.join(eol);
+}
+
+/** Whether a conflicted path is the employee's kit pin (kit.json at its root). */
+export const isKitPin = (f: string) => f.replace(/\\/g, '/').toLowerCase() === 'kit.json';
+
+/**
+ * kit.json from its three sides (ancestor, the PR's, the branch's): the newer kit of the two, and every part either
+ * side takes (the PR's order, then the branch's others), since an agent's code needs each part it was written with.
+ * Null when anything else in it changed on both sides, or a side can't be read: that needs a person. Pure.
+ */
+export function mergeKitPins(base: string, ours: string, theirs: string): string | null {
+  const parse = (t: string) => {
+    try {
+      const j = JSON.parse(t.replace(/^﻿/, ''));
+      return j && typeof j === 'object' && !Array.isArray(j) && typeof j.kit === 'string' && KIT_VERSION.test(j.kit) ? (j as Record<string, unknown> & { kit: string }) : null;
+    } catch {
+      return null;
+    }
+  };
+  const [b, o, t] = [parse(base) ?? {}, parse(ours), parse(theirs)];
+  if (!o || !t) return null;
+  const rest = (j: Record<string, unknown>) => Object.fromEntries(Object.entries(j).filter(([k]) => k !== 'kit' && k !== 'parts'));
+  const [rb, ro, rt] = [rest(b), rest(o), rest(t)];
+  for (const k of new Set([...Object.keys(ro), ...Object.keys(rt)])) {
+    const [vb, vo, vt] = [JSON.stringify(rb[k]), JSON.stringify(ro[k]), JSON.stringify(rt[k])];
+    if (vo !== vt && vo !== vb && vt !== vb) return null;
+  }
+  const merged: Record<string, unknown> = { ...ro };
+  for (const k of Object.keys(rt)) if (JSON.stringify(rt[k]) !== JSON.stringify(rb[k])) merged[k] = rt[k];
+  for (const k of Object.keys(rb)) if (!(k in ro) || !(k in rt)) delete merged[k];
+  const parts = [...new Set([...(Array.isArray(o.parts) ? o.parts : []), ...(Array.isArray(t.parts) ? t.parts : [])].map(String))];
+  return pinText({ ...merged, kit: compareVersions(o.kit, t.kit) >= 0 ? o.kit : t.kit, ...(parts.length ? { parts } : {}) });
 }
 
 /** Whether a conflicted path is the repository's own changelog (CHANGELOG.md at its root), whose sections are its versions. */
@@ -182,9 +218,11 @@ function settleVersion(dir: string, files: string[], version: string): string[] 
  * deleted (a bump refuses while it is on origin) and the Steward's worktree for it removed. The next round's rollout
  * sees the employee still behind the kit, with no kit PR open, and bumps it again from its branch's head.
  */
-async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: string): Promise<CaughtUp> {
+async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: string, o: { redundant?: boolean } = {}): Promise<CaughtUp> {
   const note = `${why}, so the Steward closed it: the next round bumps ${e.name} again from ${e.branch}`;
-  const body = `Closed by the Steward: ${why}, which it doesn't resolve. The next round bumps ${e.name} to the kit again, from ${e.branch} as it is then.`;
+  const body = o.redundant
+    ? `Closed by the Steward: ${why}, so this bump has nothing left to do. The next round bumps ${e.name} to the newest kit from ${e.branch} as it is then.`
+    : `Closed by the Steward: ${why}, which it doesn't resolve. The next round bumps ${e.name} to the kit again, from ${e.branch} as it is then.`;
   const r = await ctx.run('gh', ['pr', 'close', String(pr.number), '--repo', e.repo, '--delete-branch', '--comment', body], { cwd: ctx.neutralDir, timeoutMs: 120_000 });
   if (r.code !== 0) return { done: false, note: `${why}, and the Steward couldn't close it: ${(r.err || r.out).trim().split('\n').pop()}` };
   try {
@@ -217,6 +255,13 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, ref, f)] as [string, string | null])));
     return 'version' in v ? v.version : null;
   };
+  // A kit PR whose branch already pins that kit or a newer one (another PR took it there first) has nothing left to do.
+  // Its kit is its branch's name's (steward/kit-<version>).
+  const brings = kitPr ? /^steward\/kit-(\d+\.\d+\.\d+)$/.exec(pr.head)?.[1] : undefined;
+  if (brings) {
+    const theirs = readPin(await showFile(run, repo, branch, 'kit.json'));
+    if (theirs && KIT_VERSION.test(theirs.kit) && compareVersions(theirs.kit, brings) >= 0) return await closeKitPr(ctx, e, pr, repo, `${e.branch} already carries kit ${theirs.kit}`, { redundant: true });
+  }
   const start = (await gitMaybe(run, repo, 'merge-base', branch, head))?.trim();
   const [headV, fromV, baseV] = [await read(head), start ? await read(start) : null, await read(branch)];
   if (!headV || !baseV) return { done: false, note: `its version can't be read (${e.versionFiles.join(', ')})` };
@@ -235,7 +280,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       if (m.code !== 0) {
         const conflicted = (await gitMaybe(run, dir, 'diff', '--name-only', '--diff-filter=U'))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
         const versionFiles = new Set(e.versionFiles.map((f) => f.replace(/\\/g, '/').toLowerCase()));
-        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f));
+        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f) && !isKitPin(f));
         const why = !conflicted.length
           ? `merging ${e.branch} into it failed: ${(m.err || m.out).trim().split('\n').pop()}`
           : others.length
@@ -247,11 +292,14 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
           for (const f of conflicted) {
             // The changelog, from its three sides: the PR's new entry above the branch's, under the version it ends up with.
             const side = async (n: number) => (await gitMaybe(run, dir, 'show', `:${n}:${f}`)) ?? '';
+            // kit.json: the newer kit, and every part either side takes.
             const fixed = isChangelog(f)
               ? mergeChangelogs(await side(1), await side(2), await side(3), choice.version)
-              : resolveVersionConflicts(readFileSync(path.join(dir, f), 'utf8'));
+              : isKitPin(f)
+                ? mergeKitPins(await side(1), await side(2), await side(3))
+                : resolveVersionConflicts(readFileSync(path.join(dir, f), 'utf8'));
             if (fixed === null) {
-              unresolved = `it conflicts with ${e.branch} in ${f} beyond ${isChangelog(f) ? 'a new entry at its top' : 'its version'}: that needs a person`;
+              unresolved = `it conflicts with ${e.branch} in ${f} beyond ${isChangelog(f) ? 'a new entry at its top' : isKitPin(f) ? 'its kit and parts' : 'its version'}: that needs a person`;
               stuck = [f];
               break;
             }
@@ -266,7 +314,8 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         settleVersion(dir, e.versionFiles, choice.version);
         await git(run, dir, 'add', '--', ...conflicted, ...e.versionFiles);
         await git(run, dir, 'commit', '--quiet', '--no-edit');
-        did.push(`merged ${e.branch} into it, its ${conflicted.some(isChangelog) ? 'version lines and changelog' : 'version lines'} resolved`);
+        const what = ['version lines', ...(conflicted.some(isKitPin) ? ['kit pin'] : []), ...(conflicted.some(isChangelog) ? ['changelog'] : [])];
+        did.push(`merged ${e.branch} into it, its ${what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]} resolved`);
       } else did.push(`merged ${e.branch} into it`);
     }
     const changed = settleVersion(dir, e.versionFiles, choice.version);
