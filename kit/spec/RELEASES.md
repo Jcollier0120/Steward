@@ -1,6 +1,6 @@
 # Releases: built, and public
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/RELEASES.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). Since kit 2.17.0.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/RELEASES.md` in the Steward's repository, and `src/kit/spec/RELEASES.md` in every agent that takes the part. Since kit 2.17.0.
 
 The agents' source stays in their private repositories. What a PC installs is a **built** release, published in one **public** repository, [Jcollier0120/Manor-releases](https://github.com/Jcollier0120/Manor-releases), so any PC downloads it without signing in to GitHub, and nobody reads the source from it.
 

@@ -1,6 +1,6 @@
 # round.json: each round's outcome
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/ROUND.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). A change to the file's shape is a kit change: made here, released as a kit version, and taken by every agent from that release. Since kit 2.8.0.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/ROUND.md` in the Steward's repository, and `src/kit/spec/ROUND.md` in every agent that takes the part. A change to the file's shape is a kit change: made here, released as a kit version, and taken by every agent from that release. Since kit 2.8.0.
 
 Every agent that runs its rounds with the kit's scheduler leaves each round's outcome in one file, the same way, so a reader outside the agent (the Surveyor, which checks every agent's health and changes nothing) reads one file per agent instead of each agent's own report.json, status.json or state.json.
 
