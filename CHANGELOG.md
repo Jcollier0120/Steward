@@ -4,16 +4,15 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.11.8
 
-**A PR that asks for an install no longer waits forever on an employee the Steward doesn't install.**
+**A PR that asks for an install or a job approval no longer waits forever on an employee the Steward doesn't do that for.**
 
 ### What changed
 
-- A PR's steward block can ask for an install after the merge. When Settings give that employee no install command, because it is installed another way (Heiward installs from its own installer, and Manor's updates bring its new releases), the PR used to wait in every round with "it asks for install, but Settings give … no install command". Now it merges, the release it asks for still happens, and the install line says it was skipped and why.
-- A PR that asks for approve-jobs with no approve command in Settings still waits, since its jobs would otherwise stay unapproved.
+- A PR's steward block can ask for an install, or for its jobs to be approved, after the merge. When Settings give that employee no install command (it is installed another way: Heiward installs from its own installer, and Manor's updates bring its new releases), or no approve command, the PR used to wait in every round with "it asks for install, but Settings give … no install command". Now it merges, the release it asks for still happens, and the install or approval line says it was skipped and why.
 
 ### Before you update
 
-- Nothing: it updates itself as usual. A PR held only for this merges at the next round.
+- Nothing: it updates itself as usual. A PR held only for this merges at the next round. A job a merged PR names isn't approved by the Steward when that employee has no approve command, so approve it in the agent itself if it needs one.
 
 ## 0.11.7
 

@@ -14,7 +14,7 @@ process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { afterWords, readAfter } = await import('../src/after.ts');
-const { afterMerge, installOne, listedSum } = await import('../src/stages/aftermerge.ts');
+const { afterMerge, approveJobs, installOne, listedSum } = await import('../src/stages/aftermerge.ts');
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { releaseDecision } = await import('../src/stages/release.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
@@ -98,13 +98,15 @@ test("parsePrs keeps a PR's steward block, or why it can't be read; merge holds 
   assert.match(look.message, /#7 \(.*; then release, install, approve-jobs \(aletaster-orders\)\) waits: it asks for a release, but v0\.4\.0, its version once merged, is already released: raise the version in the PR/);
   assert.match(look.message, /#8 .* waits: its steward block asks for "deploy"/);
 
-  // Install with no install command in Settings doesn't hold it (the employee is installed another way, and the step
-  // is skipped after the merge): #7 waits only for its version. Approve-jobs with no approve command waits.
-  const none = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, install: '' }, { yes: false, team: true });
-  assert.doesNotMatch(none.message, /install command/);
-  assert.match(none.message, /#7 .* waits: it asks for a release, but v0\.4\.0, its version once merged, is already released/);
-  const noApprove = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, approve: '' }, { yes: false, team: true });
-  assert.match(noApprove.message, /#7 .* waits: it asks for approve-jobs, but Settings give Fake no approve command/);
+  // Install or approve-jobs with no command for it in Settings doesn't hold it (the employee is installed, or its jobs
+  // approved, another way, and the step is skipped after the merge): #7 waits only for its version.
+  for (const missing of [{ install: '' }, { approve: '' }]) {
+    const none = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, ...missing }, { yes: false, team: true });
+    assert.doesNotMatch(none.message, /install command|approve command/);
+    assert.match(none.message, /#7 .* waits: it asks for a release, but v0\.4\.0, its version once merged, is already released/);
+  }
+  const noApprove = await approveJobs(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, approve: '' }, parsePrs(JSON.stringify([listed({ headRefOid: same.sha })]), ['Jcollier0120']));
+  assert.deepEqual([noApprove.outcome, noApprove.message], ['skipped', 'Settings give Fake no approve command, so the Steward leaves aletaster-orders to be approved another way']);
 });
 
 /** A release zip as an agent's release.ts makes it (flat, release.json at the top), with its SHA256SUMS.txt. */
