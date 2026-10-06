@@ -3,6 +3,7 @@ import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import { BAILIFF_WAIT } from './review.ts';
 import { reeveInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
@@ -426,6 +427,22 @@ export function bailiffConditions(reviews: unknown): Condition[] {
 }
 
 /**
+ * While the Bailiff can't review at all (its page doesn't answer, or Claude Code can't be used), the Wright's drafts
+ * that wait only for its review are named in that one alarm, not each raised again after a day: one cause, one alarm.
+ * A draft held for anything else (the Steward's look, the Bailiff's asking for changes) keeps its own. Pure.
+ */
+export function foldBailiffWaits(conditions: Condition[]): Condition[] {
+  const cant = conditions.find((c) => c.id === 'bailiff:down') ?? conditions.find((c) => c.id.startsWith('bailiff:') && c.title.startsWith("The Bailiff can't review:"));
+  if (!cant) return conditions;
+  const waits = conditions.filter((c) => c.id.startsWith('waiting:') && c.title.includes(`: ${BAILIFF_WAIT}`) && !/asked for changes/.test(c.title));
+  if (!waits.length) return conditions;
+  const named = waits.map((w) => w.url ?? w.id.slice('waiting:'.length));
+  return conditions
+    .filter((c) => !waits.includes(c))
+    .map((c) => (c === cant ? { ...c, detail: [...c.detail, `The Wright's drafts waiting on it: ${named.join(', ')}.`] } : c));
+}
+
+/**
  * From Reeve's GET /api/alerts: one condition per open alert of his jobs, at once, as he gives it; and the jobs they are
  * of. An older Reeve without the endpoint (404), or one whose page doesn't answer, is quiet here: no alarm about the
  * source (the Surveyor's agent.reeve.page problem already says when his page is down), and jobs null.
@@ -565,7 +582,7 @@ export async function watchAlarms(
     reeveJobs = r.jobs;
   }
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
-  const kept = holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours);
+  const kept = holdForWork(foldBailiffWaits(withoutReeveDuplicates(conditions, reeveJobs)), items, states, a.waitingHours);
   const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);

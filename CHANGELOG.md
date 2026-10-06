@@ -22,6 +22,30 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Agents on duty whose pages are down are opened again within a round of updating. If you'd rather keep an agent's page down, stop it in Manor (off duty), or switch off **Keeps the staff's pages up** in the Steward's Settings.
 
+## 0.11.13
+
+**A release that "failed" but is out anyway stops being reported as failed.**
+
+### What changed
+
+- When releasing an agent failed in a round, the Steward stopped trying that commit and raised an alarm until someone released it. If the version was in fact published (a retry, or another run that got there first: on 2026-10-06 Reeve 0.6.5 was published, then the round's own attempt found it there and failed), the alarm and the hold stayed, because only a release made by the round cleared them. Now a round that finds the version already released clears its failure too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Reeve's "release failed at f2e18a8" clears at the first round after the update.
+
+## 0.11.12
+
+**One alarm while the Bailiff can't review, not one more for each Wright PR waiting on it.**
+
+### What changed
+
+- While the Bailiff's page doesn't answer, or the Bailiff can't use Claude Code, the Wright's drafts that wait only for its review used to each raise their own "has waited 24 hours" alarm on top of the Bailiff's. Now the Bailiff's alarm lists them ("The Wright's drafts waiting on it: …") and they raise nothing of their own. A draft held for another reason (the Steward's own look, or the Bailiff asking for changes) still has its own alarm. Once the Bailiff reviews again, everything is as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.11.11
 
 **Without the Wright and the Bailiff, the manor keeps itself running but takes on no new work.**

@@ -25,6 +25,8 @@ export interface EmployeeResult {
   commit?: string;
   /** The next round looks at it again, whatever GitHub says (a release the Aletaster's tasting holds). */
   again?: boolean;
+  /** Its branch's version is released already (by this stage or another way): no failed release of it stands. */
+  released?: boolean;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
