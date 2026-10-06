@@ -2,6 +2,29 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.0
+
+**A new kit is tried on every agent before it's released, and some files always wait for you, whatever Settings say.**
+
+### What's new
+
+- **A kit is tried before it's released.** When a pull request to the Steward raises the kit's version, the round first bumps every agent to the new kit, as the rollout would, and runs its checks. Nothing is committed or pushed. If every agent passes, the PR merges as before. If any fail, the PR waits, and a comment on it names each agent and the tests that failed. Whoever wrote it can fix the kit before any agent sees it. If the agents have to change with the kit, label the PR `kit:breaks-agents`: it then merges, and each failed bump goes to the Wright. Each commit is tried once. This would have caught the kit change that failed nine agents' bumps on 2026-10-05.
+
+### What changed
+
+- **The Wright's drafts:** some files now always wait for your review, even if they aren't in Settings' "For a person to review" list:
+  - Claude Code's settings and instructions: `.claude/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json`
+  - `.npmrc`
+  - secrets: `.env` files and keys
+  - the code that guards the merge: the Steward's look at drafts and its merge rules, the Wright's worker and settings, and the Bailiff's review
+
+  A draft that loosened one of these could otherwise pass the very look it changed.
+- A draft that changes the scripts npm runs when it installs (`preinstall`, `install`, `postinstall`, `prepare`) or package.json's `overrides` waits for you, as a dependency change already did.
+
+### Before you update
+
+Nothing: it updates itself as usual. A round that merges a PR raising the kit takes longer, because it runs every agent's checks first.
+
 ## 0.10.5
 
 **The team is whoever gh is signed in as, unless you name one.**
