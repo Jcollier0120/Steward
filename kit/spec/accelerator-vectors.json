@@ -1041,7 +1041,7 @@
      {
       "id": "npu",
       "kind": "npu",
-      "name": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU",
+      "name": "Qualcomm Hexagon",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -1093,7 +1093,7 @@
      {
       "id": "cpu",
       "kind": "cpu",
-      "name": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU",
+      "name": "Qualcomm Oryon",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -1129,7 +1129,7 @@
      {
       "id": "npu",
       "kind": "npu",
-      "name": "Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU",
+      "name": "Qualcomm Hexagon",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,

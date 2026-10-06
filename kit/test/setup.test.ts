@@ -52,7 +52,7 @@ test('detection: DXGI with Heiward\'s naming (software and Microsoft adapters le
   assert.deepEqual(laptop.cpu, { name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU', arch: 'arm64', cores: 18 });
   assert.equal(laptop.geniex, 'C:\\geniex.exe');
   assert.deepEqual(detectedAccelerators(laptop).map((a) => a.id), ['npu', 'gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'cpu'], 'the recommended order');
-  assert.deepEqual(detectedAccelerators(laptop).map((a) => a.name), ['Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU', 'Qualcomm Adreno X2-90 GPU', 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU'], 'shown without (R) and (TM); the card keeps the id of its DXGI name');
+  assert.deepEqual(detectedAccelerators(laptop).map((a) => a.name), ['Qualcomm Hexagon', 'Qualcomm Adreno X2-90', 'Qualcomm Oryon'], 'shown by its model, as Manor shows it (deviceName); the card keeps the id of its DXGI name');
 
   const desk = parseDetection(DESKTOP);
   assert.deepEqual(desk.cards.map((c) => [c.index, c.name, c.id, c.vendor, c.memoryGb]), [
@@ -67,7 +67,7 @@ test('detection: DXGI with Heiward\'s naming (software and Microsoft adapters le
   assert.equal(recommendedCard(desk.cards)?.name, 'NVIDIA GeForce RTX 4090', 'the most memory of its own, the first on a tie');
   assert.deepEqual(detectedAccelerators(desk).map((a) => a.id), ['gpu-nvidia-geforce-rtx-4090', 'gpu-nvidia-geforce-rtx-4090-2', 'gpu-intel-r-uhd-graphics-770', 'gpu-graphics-card-5', 'cpu']);
   assert.equal(npuName('Qualcomm(R) Hexagon(TM) NPU'), 'Qualcomm Hexagon NPU');
-  assert.equal(npuName('  Snapdragon(R)  X2 Elite - X2E88100 -  Qualcomm(R) Hexagon(TM)  NPU '), 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', 'in full, as Manor shows it: (R) and (TM) out, spaces collapsed');
+  assert.equal(npuName('  Snapdragon(R)  X2 Elite - X2E88100 -  Qualcomm(R) Hexagon(TM)  NPU '), 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', 'kept in full in hardware.json: (R) and (TM) out, spaces collapsed');
   assert.equal(npuName(''), 'NPU');
   // hardware.json: the NPU's and the processor's names beside the cards, so every program names them as this PC does.
   assert.deepEqual(hardwareOf(laptop), {
@@ -313,11 +313,11 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
   assert.equal(r.raw.acceleratorOrder, 'auto');
   assert.deepEqual(validateAccelerators(r.raw), []);
   assert.ok(r.raw.accelerators.every((a: any) => !('name' in a)), 'no name is written: it comes from the PC');
-  assert.equal(r.entries[0].name, 'Qualcomm Adreno X2-90 GPU', 'the entries setup hands back are named as Manor shows the card');
+  assert.equal(r.entries[0].name, 'Qualcomm Adreno X2-90', 'the entries setup hands back are named as Manor shows the card');
   const read = readAccelerators(r.raw, hardwareOf(parseDetection(LAPTOP))).accelerators;
   assert.deepEqual(read.map((a) => [a.id, a.name]), [
-    ['npu', 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU'],
-    ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'Qualcomm Adreno X2-90 GPU'],
+    ['npu', 'Qualcomm Hexagon'],
+    ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'Qualcomm Adreno X2-90'],
   ]);
   assert.deepEqual(readAccelerators(r.raw, null).accelerators.map((a) => a.name), ['NPU', 'Graphics card'], "without hardware.json, each kind's name");
   assert.deepEqual(read[0].chat, { baseUrl: 'http://127.0.0.1:18181', model: LIVE.chatEndpoint.model, startCommand: LIVE.chatEndpoint.startCommand });

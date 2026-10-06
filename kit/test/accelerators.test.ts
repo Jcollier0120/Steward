@@ -532,7 +532,7 @@ test('every answer says where it ran, and a background request goes around a car
     // The NPU first, though the card is listed first and has more room: it does the work without the card.
     const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
     assert.equal(a.text, 'from the NPU');
-    assert.deepEqual(a.accelerator, { id: 'npu', name: 'Snapdragon X2 Elite NPU' });
+    assert.deepEqual(a.accelerator, { id: 'npu', name: 'Snapdragon X2 Elite' }, 'shown without NPU, as its badge says it');
     assert.match(npu.seen[0].messages[0].content, /^\[req /, "the NPU's server gets its nonce");
     assert.equal(model.budget(100), 2300, "chunking: the NPU's cap, so the pieces fit the NPU");
     // Too big for the NPU: the card takes it, since the NPU can't.
@@ -735,7 +735,7 @@ test('embeddings go to an accelerator that serves them, and a server can be left
     const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: server.baseUrl, model: 'e' } }] }, { npu: false, cards: [], cpuName: 'Oryon CPU' }));
     const r = await model.embed(['one', 'two']);
     assert.deepEqual(r.vectors, [[0, 1], [1, 1]]);
-    assert.deepEqual(r.accelerator, { id: 'cpu', name: 'Oryon CPU' });
+    assert.deepEqual(r.accelerator, { id: 'cpu', name: 'Oryon' }, 'shown by its model, without CPU');
     const off = `http://127.0.0.1:${await closedPort()}`;
     const down = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', embed: { baseUrl: off, model: 'e' } }] }));
     await assert.rejects(down.embed(['x'], { start: false }), /the NPU's server isn't running/);

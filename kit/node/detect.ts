@@ -192,12 +192,13 @@ export function recommendedCard(cards: GpuCard[]): GpuCard | undefined {
 const tm = (s: string) => s.replace(/\((R|TM|C)\)/gi, '').replace(/\s+/g, ' ').trim();
 
 /**
- * The NPU's name: its device name as Windows lists it, in full, with (R) and (TM) taken out and its spaces
- * collapsed, as Manor shows it: "Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU" is
- * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU". "NPU" when Windows gives none.
+ * The NPU's name as hardware.json keeps it: its device name as Windows lists it, in full, with (R) and (TM) taken
+ * out and its spaces collapsed: "Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU" is
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU". "NPU" when Windows gives none. It is shown
+ * shorter, by its model (the core's deviceName): "Qualcomm Hexagon".
  */
 export function npuName(device: string): string {
-  return core.deviceName(device) || 'NPU';
+  return tm(device) || 'NPU';
 }
 
 /** Everything DETECT_PS printed. */
@@ -277,10 +278,10 @@ export async function detect(run: (script: string) => Promise<string> = runPower
 
 /** What was detected, as accelerators (no endpoints yet), in the auto order: what `setup` and the Settings page start from. */
 export function detectedAccelerators(d: Detection): Accelerator[] {
-  // A card is shown as Manor shows it, (R) and (TM) out; its id stays the one its DXGI name gives.
+  // Each is shown as Manor shows it (the core's deviceName); a card's id stays the one its DXGI name gives.
   const list: Accelerator[] = d.cards.map((c) => ({ id: c.id, kind: 'gpu' as const, name: core.deviceName(c.name), memoryGb: c.memoryGb, slots: 1, maxContextTokens: 4096, quirks: [] }));
-  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: d.npu.name, slots: 1, maxContextTokens: 2400, quirks: [] });
-  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: d.cpu.name, slots: 1, maxContextTokens: 4096, quirks: [] });
+  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: core.deviceName(d.npu.name), slots: 1, maxContextTokens: 2400, quirks: [] });
+  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: core.deviceName(d.cpu.name), slots: 1, maxContextTokens: 4096, quirks: [] });
   return autoOrder(list);
 }
 
