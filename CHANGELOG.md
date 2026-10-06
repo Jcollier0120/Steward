@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.10
+
+**When the Steward copies your employees into Settings and can't find something, it keeps looking and fills it in itself.**
+
+### What changed
+
+- When the Steward first copied its employees into Settings, it read what each needs (the command that fills its kit, its tests, its version files, how it's released) from that employee's folder on this PC, as the folder happened to be checked out. A folder left on an old branch looked like it was missing things, so you got an alarm such as "Manor: couldn't tell Fill its kit from its clone" that didn't say what to fill in and only cleared once you saved Settings. Now the Steward reads each employee's main branch (the branch the Steward works from), whatever the folder is checked out on.
+- Until you save Settings, the Steward looks again every few minutes and fills in whatever it now finds. The alarm drops each item it fills, clears once nothing is left, and puts an employee that was left off the kit's stages back on once it has a test command and a release command.
+- The alarm now says what it looked for (for the kit, `tools/kit.ts` or `tools/kit.ps1`), on which branch, and that you don't need to do anything if the Steward can find it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you have this alarm open, it clears by itself within a few minutes of updating, provided the item is on the employee's main branch. You can still fill it in under Settings, Employees, and save.
+
 ## 0.11.8
 
 **A PR that asks for an install or a job approval no longer waits forever on an employee the Steward doesn't do that for.**

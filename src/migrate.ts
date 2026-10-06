@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { manorHome, originRepo } from './kit/manor.ts';
@@ -10,10 +11,13 @@ import { RELEASE_HERE, type Employee } from './settings.ts';
  * `employees`, and would lose them on update. So the first time the settings are read without `employees`, while the
  * staff table (staff.json) the Steward kept from its last look lists employees whose clones are on this PC, those are
  * written to settings.json once: each row's repository, clone, branch and kit parts, and the rest read from its clone
- * (its package.json scripts, its version files, its kit script). What can't be read is said, and raised as an alarm
- * (migratedCondition) until Settings are saved; an employee missing a test or release command is left off the kit's
- * stages (usesKit off) until then. The Steward's own repository and clone are found the same way, when settings.json
- * names neither: a clone beside the employees' whose package.json is the Steward's, and its origin.
+ * at the tip of its branch (origin/<branch>, as the stages work from it, not whatever the clone has checked out): its
+ * package.json scripts, its version files, its kit script. What can't be read is said, and raised as an alarm
+ * (migratedCondition); an employee missing a test or release command is left off the kit's stages (usesKit off). Until
+ * Settings are saved, the Steward looks again every few minutes (fillMigrationGaps) and writes in what it now finds,
+ * so a gap that was only the clone being on an old branch closes by itself. The Steward's own repository and clone are
+ * found the same way, when settings.json names neither: a clone beside the employees' whose package.json is the
+ * Steward's, and its origin.
  */
 
 /** A staff table row, as much as the migration reads of it. */
@@ -30,10 +34,80 @@ export interface StaffRowLike {
 /** What the migration did: kept in settings-migrated.json for its alarm. */
 export interface Migration {
   at: string;
-  /** settings.json's mtime right after the migration wrote it: a later save of Settings clears the alarm. */
+  /** settings.json's mtime right after the migration (or a later fill) wrote it: a later save of Settings clears the alarm. */
   mtimeMs: number;
   employees: string[];
   notes: string[];
+  /** Each employee's gaps (Settings' labels), and whether they took it off the kit's stages. */
+  gaps?: Record<string, { name: string; missing: string[]; offKit: boolean }>;
+  /** When the clones were last looked at for the gaps. */
+  checkedAt?: string;
+}
+
+/** Each gap: Settings' label, the employee's field, and what was looked for. */
+const GAPS: Record<string, { field: 'fill' | 'test' | 'versionFiles' | 'release'; looked: string }> = {
+  'Fill its kit': { field: 'fill', looked: 'tools/kit.ts or tools/kit.ps1' },
+  'Test it': { field: 'test', looked: 'an npm test script or a .NET test project' },
+  'Version files': { field: 'versionFiles', looked: "a package.json or a .csproj with <VersionPrefix>" },
+  'Release it': { field: 'release', looked: 'a release script or release.ps1' },
+};
+
+/** A gap's note: what wasn't found, where, and what happens next. */
+const gapNote = (name: string, branch: string, missing: string[], offKit: boolean) =>
+  `${name}: couldn't tell ${missing.map((m) => `${m} (no ${GAPS[m]?.looked ?? '?'})`).join(', ')} from its clone's ${branch}${offKit ? ", so it is off the kit's stages" : ''}. The Steward looks again every few minutes and fills ${missing.length > 1 ? 'them' : 'it'} in once ${missing.length > 1 ? "they're" : "it's"} there.`;
+
+/** How often the clones are looked at again for the gaps. */
+const RECHECK_MS = 5 * 60_000;
+
+/** A clone's files, read at a commit or from its folder. */
+export interface Tree {
+  has(rel: string): boolean;
+  read(rel: string): string | null;
+  /** The names in a folder (files and folders), or [] when there's none. */
+  list(rel: string): string[];
+  isDir(rel: string): boolean;
+}
+
+/** The files in a folder on disk. */
+export function folderTree(root: string): Tree {
+  const at = (rel: string) => path.join(root, rel);
+  return { has: (rel) => existsSync(at(rel)), read: (rel) => readText(at(rel)), list: (rel) => list(at(rel)), isDir: (rel) => isDir(at(rel)) };
+}
+
+const gitOut = (cwd: string, args: string[]): string | null => {
+  try {
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A clone's files at the tip of a branch: origin/<branch>, or the local branch when it has no origin copy. The clone
+ * itself may be checked out on anything (an old branch without the kit script, say): the stages work from the branch.
+ * Null when the folder isn't a git clone or has no such branch.
+ */
+export function branchTree(checkout: string, branch: string): Tree | null {
+  // Its own clone (or worktree), not a folder inside someone else's.
+  if (!existsSync(path.join(checkout, '.git'))) return null;
+  const ref = [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`].find((r) => gitOut(checkout, ['rev-parse', '--verify', '--quiet', `${r}^{commit}`])?.trim());
+  if (!ref) return null;
+  const files = (gitOut(checkout, ['ls-tree', '-r', '--name-only', ref]) ?? '').split('\n').filter(Boolean);
+  if (!files.length) return null;
+  const dirs = new Map<string, Set<string>>();
+  const add = (dir: string, name: string) => (dirs.get(dir) ?? dirs.set(dir, new Set()).get(dir)!).add(name);
+  for (const f of files) {
+    const parts = f.split('/');
+    for (let i = 0; i < parts.length; i++) add(parts.slice(0, i).join('/'), parts[i]);
+  }
+  const fileSet = new Set(files);
+  const norm = (rel: string) => rel.replace(/\\/g, '/').replace(/^\.?\/+|\/+$/g, '');
+  return {
+    has: (rel) => fileSet.has(norm(rel)) || dirs.has(norm(rel)),
+    read: (rel) => (fileSet.has(norm(rel)) ? (gitOut(checkout, ['show', `${ref}:${norm(rel)}`])?.replace(/^﻿/, '') ?? null) : null),
+    list: (rel) => [...(dirs.get(norm(rel)) ?? [])],
+    isDir: (rel) => dirs.has(norm(rel)),
+  };
 }
 
 export const migrationFile = () => dataFile('settings-migrated.json');
@@ -84,11 +158,12 @@ const SLOW_TESTS = /^(integration|integrationtests|gui|ui|headless|headlesstests
  * project the others build on most (App.Core.Tests for an App.Core that every other project references), its name
  * less ".Tests" naming the project it tests. Integration, GUI and benchmark tests are left out. None: [].
  */
-export function dotnetTests(checkout: string): string[] {
+export function dotnetTests(checkout: string | Tree): string[] {
+  const t = typeof checkout === 'string' ? folderTree(checkout) : checkout;
   const projects = new Map<string, string>();
-  for (const d of list(checkout).filter((d) => isDir(path.join(checkout, d)))) {
-    const f = list(path.join(checkout, d)).find((x) => x.endsWith('.csproj'));
-    if (f) projects.set(d, readText(path.join(checkout, d, f)) ?? '');
+  for (const d of t.list('').filter((d) => t.isDir(d))) {
+    const f = t.list(d).find((x) => x.endsWith('.csproj'));
+    if (f) projects.set(d, t.read(`${d}/${f}`) ?? '');
   }
   const refsOf = (text: string) => [...text.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map((m) => path.win32.basename(path.win32.dirname(m[1])));
   const usedBy = (dir: string) => [...projects.values()].filter((t) => refsOf(t).includes(dir)).length;
@@ -109,11 +184,14 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
   const checkout = typeof row.checkout?.path === 'string' ? row.checkout.path : '';
   if (!id || !checkout || !isDir(checkout)) return null;
   const name = typeof row.name === 'string' && row.name.trim() ? row.name.trim() : id;
-  const has = (rel: string) => existsSync(path.join(checkout, rel));
+  const branch = typeof row.branch === 'string' && row.branch ? row.branch : 'main';
+  // Its branch's tip, as the stages see it; a folder that isn't a clone (or has no such branch) as it is.
+  const t = branchTree(checkout, branch) ?? folderTree(checkout);
+  const has = (rel: string) => t.has(rel);
   const missing: string[] = [];
   let pkg: { version?: string; scripts?: Record<string, string> } | null = null;
   try {
-    pkg = JSON.parse(readText(path.join(checkout, 'package.json')) ?? 'null');
+    pkg = JSON.parse(t.read('package.json') ?? 'null');
   } catch {
     pkg = null;
   }
@@ -127,7 +205,7 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     if (has('tsconfig.json')) test.push('npx tsc -p . --noEmit');
     if (scripts.test) test.push('npm test');
   }
-  if (!pkg) test.push(...dotnetTests(checkout));
+  if (!pkg) test.push(...dotnetTests(t));
   if (!test.length) missing.push('Test it');
 
   const versionFiles: string[] = [];
@@ -136,15 +214,15 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     if (has('package-lock.json')) versionFiles.push('package-lock.json');
     // The .ts that carries the version as version: 'x.y.z' (src/app.ts, or Reeve's src/mcp.ts).
     if (pkg.version) {
-      const ts = list(path.join(checkout, 'src')).filter((f) => f.endsWith('.ts')).sort((a, b) => (a === 'app.ts' ? -1 : b === 'app.ts' ? 1 : a.localeCompare(b)));
-      const at = ts.find((f) => new RegExp(`version:\\s*'${pkg!.version!.replaceAll('.', '\\.')}'`).test(readText(path.join(checkout, 'src', f)) ?? ''));
+      const ts = t.list('src').filter((f) => f.endsWith('.ts')).sort((a, b) => (a === 'app.ts' ? -1 : b === 'app.ts' ? 1 : a.localeCompare(b)));
+      const at = ts.find((f) => new RegExp(`version:\\s*'${pkg!.version!.replaceAll('.', '\\.')}'`).test(t.read(`src/${f}`) ?? ''));
       if (at) versionFiles.push(`src/${at}`);
     }
   } else {
     // A .NET employee: the .csproj that sets <VersionPrefix>, a folder down.
-    for (const d of list(checkout).filter((d) => isDir(path.join(checkout, d)))) {
-      for (const f of list(path.join(checkout, d)).filter((f) => f.endsWith('.csproj'))) {
-        if (/<VersionPrefix>/.test(readText(path.join(checkout, d, f)) ?? '')) versionFiles.push(`${d}/${f}`);
+    for (const d of t.list('').filter((d) => t.isDir(d))) {
+      for (const f of t.list(d).filter((f) => f.endsWith('.csproj'))) {
+        if (/<VersionPrefix>/.test(t.read(`${d}/${f}`) ?? '')) versionFiles.push(`${d}/${f}`);
       }
     }
   }
@@ -155,7 +233,8 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
   let release = '';
   if (scripts.release) release = internal ? RELEASE_HERE : 'npm run release -- --publish';
   else {
-    const ps = has('release.ps1') ? 'release.ps1' : list(checkout).map((d) => `${d}\\release.ps1`).find((f) => existsSync(path.join(checkout, f)));
+    const under = t.list('').find((d) => t.has(`${d}/release.ps1`));
+    const ps = has('release.ps1') ? 'release.ps1' : under ? `${under}\\release.ps1` : '';
     if (ps) release = `powershell -NoProfile -File ${ps} -Publish`;
   }
   if (!release) missing.push('Release it');
@@ -166,7 +245,7 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     name,
     repo: typeof row.repo === 'string' ? row.repo : '',
     checkout,
-    branch: typeof row.branch === 'string' && row.branch ? row.branch : 'main',
+    branch,
     // Untested or unreleasable, it waits off the kit's stages until Settings say how.
     usesKit: row.usesKit !== false && !missing.includes('Test it') && !missing.includes('Release it'),
     parts: Array.isArray(row.parts) ? row.parts.filter((p): p is string => typeof p === 'string') : [],
@@ -225,6 +304,7 @@ export function migrateSettings(o: { settingsFile: string; staffFile: string; no
     if (!rows.length) return null;
     const notes: string[] = [];
     const employees: Employee[] = [];
+    const gaps: NonNullable<Migration['gaps']> = {};
     const internal = internalStaff();
     for (const row of rows) {
       const name = typeof row.name === 'string' ? row.name : String(row.id);
@@ -234,7 +314,11 @@ export function migrateSettings(o: { settingsFile: string; staffFile: string; no
         continue;
       }
       employees.push(got.employee);
-      if (got.missing.length) notes.push(`${name}: couldn't tell ${got.missing.join(', ')} from its clone${got.employee.usesKit ? '' : ', so it is off the kit\'s stages'} until you fill ${got.missing.length > 1 ? 'them' : 'it'} in.`);
+      if (got.missing.length) {
+        const offKit = row.usesKit !== false && !got.employee.usesKit;
+        gaps[got.employee.id] = { name: got.employee.name, missing: got.missing, offKit };
+        notes.push(gapNote(got.employee.name, got.employee.branch, got.missing, offKit));
+      }
     }
     if (!employees.length) return null;
     const out: Record<string, unknown> = { ...raw, employees };
@@ -243,9 +327,84 @@ export function migrateSettings(o: { settingsFile: string; staffFile: string; no
       if (self) Object.assign(out, { stewardRepo: self.repo, stewardCheckout: self.checkout });
     }
     writeJson(o.settingsFile, out);
-    const m: Migration = { at: (o.now ?? new Date()).toISOString(), mtimeMs: statSync(o.settingsFile).mtimeMs, employees: employees.map((e) => e.id), notes };
+    const at = (o.now ?? new Date()).toISOString();
+    const m: Migration = { at, mtimeMs: statSync(o.settingsFile).mtimeMs, employees: employees.map((e) => e.id), notes, gaps, checkedAt: at };
     writeJson(migrationFile(), m);
     return m;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The migration's gaps, from a migration written before it kept them (Steward 0.11.7 to 0.11.9): each employee a note
+ * names as "couldn't tell", with the fields Settings still have empty.
+ */
+function gapsOf(m: Migration, employees: Record<string, unknown>[]): NonNullable<Migration['gaps']> {
+  if (m.gaps) return m.gaps;
+  const gaps: NonNullable<Migration['gaps']> = {};
+  for (const e of employees) {
+    const id = String(e.id);
+    const name = typeof e.name === 'string' ? e.name : id;
+    const note = m.notes.find((n) => n.startsWith(`${name}: couldn't tell `));
+    if (!note || !m.employees.includes(id)) continue;
+    const missing = Object.entries(GAPS).filter(([, g]) => { const v = e[g.field]; return !v || (Array.isArray(v) && !v.length); }).map(([label]) => label);
+    if (missing.length) gaps[id] = { name, missing, offKit: note.includes("off the kit's stages") };
+  }
+  return gaps;
+}
+
+/**
+ * While Settings haven't been saved since the migration, its gaps are looked for again in each clone (at most every few
+ * minutes): what's found now is written into settings.json, an employee it took off the kit's stages goes back on once
+ * it has a test and a release command, and the alarm keeps only what's still missing (none: it clears). A clone that
+ * was on an old branch when the migration read it, or a script added since, closes its gap by itself. Never throws.
+ */
+export function fillMigrationGaps(o: { settingsFile: string; now?: Date }): Migration | null {
+  try {
+    const m = pendingMigration(o.settingsFile);
+    if (!m) return null;
+    const now = o.now ?? new Date();
+    if (m.checkedAt && now.getTime() - Date.parse(m.checkedAt) < RECHECK_MS) return null;
+    const raw = JSON.parse(readText(o.settingsFile) ?? '{}');
+    const employees: Record<string, unknown>[] = Array.isArray(raw?.employees) ? raw.employees : [];
+    const gaps = gapsOf(m, employees);
+    const before = JSON.stringify(gaps);
+    const internal = internalStaff();
+    let changed = false;
+    for (const [id, gap] of Object.entries(gaps)) {
+      const e = employees.find((x) => x && x.id === id);
+      if (!e) {
+        delete gaps[id];
+        continue;
+      }
+      const got = employeeFromClone({ ...e, checkout: { path: e.checkout } }, internal.has(id));
+      if (!got) continue;
+      for (const label of [...gap.missing]) {
+        const field = GAPS[label]?.field;
+        if (!field || got.missing.includes(label)) continue;
+        e[field] = got.employee[field];
+        gap.missing = gap.missing.filter((x) => x !== label);
+        changed = true;
+      }
+      if (gap.offKit && !gap.missing.includes('Test it') && !gap.missing.includes('Release it') && e.usesKit === false) {
+        e.usesKit = true;
+        changed = true;
+      }
+      if (!gap.missing.length) delete gaps[id];
+    }
+    if (changed) writeJson(o.settingsFile, raw);
+    const branchOf = (id: string) => String(employees.find((x) => x && x.id === id)?.branch ?? 'main');
+    const leftOut = m.notes.filter((n) => !/^.+: couldn't tell /.test(n));
+    const next: Migration = {
+      ...m,
+      mtimeMs: changed ? statSync(o.settingsFile).mtimeMs : m.mtimeMs,
+      gaps,
+      notes: [...leftOut, ...Object.entries(gaps).map(([id, g]) => gapNote(g.name, branchOf(id), g.missing, g.offKit))],
+      checkedAt: now.toISOString(),
+    };
+    writeJson(migrationFile(), next);
+    return changed || JSON.stringify(gaps) !== before ? next : null;
   } catch {
     return null;
   }

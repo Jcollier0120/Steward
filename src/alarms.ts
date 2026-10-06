@@ -162,7 +162,7 @@ export function roundConditions(o: {
   tastingHolds?: Record<string, TastingHold>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
-  /** What the settings migration couldn't fill in (migrate.ts), until Settings are saved. */
+  /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
   migrated?: Migration | null;
   employees: Employee[];
   settings: Settings;
@@ -265,7 +265,7 @@ export function roundConditions(o: {
       id: `settings:migrated:${o.migrated.at}`,
       who: 'steward',
       title: "The Steward's employees were written into its Settings from its staff table, and some need you",
-      detail: [...o.migrated.notes, 'Look at them in Settings, under Employees, and save: that clears this.'],
+      detail: [...o.migrated.notes, 'Or fill them in yourself in Settings, under Employees, and save: that clears this too.'],
       since: o.migrated.at,
       afterMs: 0,
     });
