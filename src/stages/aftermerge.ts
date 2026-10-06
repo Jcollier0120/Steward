@@ -34,7 +34,8 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   const { run } = ctx;
   // Released on this PC (an internal employee): its release built it from its clone and installed it already.
   if (releasedHere(e)) return result(e, 'done', `installed by its release, built here from its clone (${e.release})`);
-  if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command`);
+  // No install command: it is installed another way (Heiward, by Manor, from its own installer), not by the Steward.
+  if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command, so it is installed another way (Manor's updates), not by the Steward`);
   const latest = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
   const dir = installDirOf(ctx.settings, e);
@@ -78,7 +79,8 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
 export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<EmployeeResult> {
   const asking = prs.filter((p) => p.after?.steps.includes('approve-jobs'));
   const jobs = [...new Set(asking.flatMap((p) => p.after!.jobs))];
-  if (!e.approve) return result(e, 'refused', `Settings give ${e.name} no approve command, so ${jobs.join(', ')} ${jobs.length === 1 ? 'waits' : 'wait'} for you`);
+  // No approve command: its jobs are approved another way, not by the Steward.
+  if (!e.approve) return result(e, 'skipped', `Settings give ${e.name} no approve command, so the Steward leaves ${jobs.join(', ')} to be approved another way`);
   const unnamed: string[] = [];
   for (const p of asking) {
     try {
