@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_EMPLOYEES } from '../src/settings.ts';
+import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
 import {
   carriedOldKit,
   changelogBetween,

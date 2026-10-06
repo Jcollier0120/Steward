@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { DEFAULT_EMPLOYEES, type Employee } from '../src/settings.ts';
+import type { Employee } from '../src/settings.ts';
+import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
 import { bumpOne, needsNpmCi } from '../src/stages/bump.ts';
 import { mergeOne } from '../src/stages/merge.ts';
 import { pushOne } from '../src/stages/push.ts';

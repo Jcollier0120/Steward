@@ -15,7 +15,8 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { closeResolved, fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
 const { alarmsFile, watchAlarms } = await import('../src/alarms.ts');
-const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { checksLogOf } = await import('../src/stages/bump.ts');
 const { bumpDirOf, releaseDirOf } = await import('../src/stages/common.ts');
 const { KEEP_TESTED, recordTested, testedFile, testedView } = await import('../src/tested.ts');

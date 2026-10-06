@@ -15,7 +15,8 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
 const { alarmsFile, dismiss, loadAlarms, manorConditions, portConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
-const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { bundleForNode, importPath } = await import('../kit/test/react-render.ts');
 
 const HOUR = 3_600_000;

@@ -115,6 +115,7 @@ writeFileSync(
     team: ['Jcollier0120'],
     workRoot: path.join(home, 'work'),
     afterRelease: [],
+    stewardRepo: 'octocat/steward',
     alarms: { manorUrl: '', surveyorUrl: '', toast: false },
   }),
 );
@@ -141,7 +142,7 @@ const run = async (cmd: string, args: string[], opts?: any) => {
   gh.push(args);
   if (args[0] === 'api' && args[1] === 'graphql') return glanceFails ? { code: 1, out: '', err: 'gh: a moment of no network' } : ok(graph());
   if (args[0] === 'release' && args[1] === 'list') {
-    if (args.includes('Jcollier0120/Steward')) return ok(kits.map((k) => ({ tagName: `kit-v${k}`, isDraft: false })));
+    if (args.includes('octocat/steward')) return ok(kits.map((k) => ({ tagName: `kit-v${k}`, isDraft: false })));
     return ok(released().map((v) => ({ tagName: `v${v}`, isDraft: false })));
   }
   if (args[0] === 'pr' && args[1] === 'list') {

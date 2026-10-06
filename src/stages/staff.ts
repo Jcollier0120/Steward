@@ -1,11 +1,13 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { expandEnv } from '../kit/settings-kit.ts';
 import { readAfter, type After } from '../after.ts';
 import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
 import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
-import type { Employee } from '../settings.ts';
+import { releasedHere, type Employee } from '../settings.ts';
 import { bumpBranch, checkoutOf, glanceOf, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 
 /**
@@ -211,6 +213,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   };
   if (!e.usesKit) notes.push(NOT_ON_KIT);
   const remote = `origin/${e.branch}`;
+  const here = releasedHereRow(e, row);
   // GitHub's side, from the glance when there is one (glance.ts): its PRs, its releases, the commit each release tags.
   const g = glanceOf(ctx, e);
 
@@ -282,7 +285,21 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
     if (row.main?.version) row.releaseNeeded = !list.some((r) => r.version === row.main!.version);
   }
+  // Released here (releasedHere): what counts is the installed copy, which no GitHub release lists.
+  if (here) row.releaseNeeded = !!row.main?.version && here.version !== row.main.version;
   return row;
+}
+
+/** The installed copy of an employee released here: its release.json's version. Null for one released on GitHub. */
+function releasedHereRow(e: Employee, row: StaffRow): { version: string | null } | null {
+  if (!releasedHere(e)) return null;
+  try {
+    const r = JSON.parse(readFileSync(path.join(expandEnv(e.installed), 'release.json'), 'utf8')) as { version?: unknown };
+    return { version: typeof r.version === 'string' ? r.version : null };
+  } catch {
+    row.notes.push(`released on this PC, and not installed yet (${e.installed || 'no install folder set'})`);
+    return { version: null };
+  }
 }
 
 /** Every employee's row, a few at a time; with what GitHub said of each (glance.ts's repoSig), so a round can tell when the table is out of date. */

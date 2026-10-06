@@ -5,6 +5,7 @@ import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { reeveInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
+import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
@@ -161,6 +162,8 @@ export function roundConditions(o: {
   tastingHolds?: Record<string, TastingHold>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
+  /** What the settings migration couldn't fill in (migrate.ts), until Settings are saved. */
+  migrated?: Migration | null;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -254,6 +257,16 @@ export function roundConditions(o: {
         `${u.kept ? `Its copy is kept in ${u.kept} for a look. ` : ''}A newer version installs as usual. Dismiss this once you've looked: that allows ${u.version} again (or node src\cli.ts allow-update ${u.version}), and Manor's next update installs it, behind the same fail-safe.`,
       ],
       since: u.at,
+      afterMs: 0,
+    });
+  }
+  if (o.migrated?.notes.length) {
+    out.push({
+      id: `settings:migrated:${o.migrated.at}`,
+      who: 'steward',
+      title: "The Steward's employees were written into its Settings from its staff table, and some need you",
+      detail: [...o.migrated.notes, 'Look at them in Settings, under Employees, and save: that clears this.'],
+      since: o.migrated.at,
       afterMs: 0,
     });
   }

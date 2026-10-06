@@ -4,8 +4,7 @@ import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
-import { claimVersion, loadClaims, releaseClaim } from './claims.ts';
-import { stewardEmployee } from './stages/selfmerge.ts';
+import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
 import type { Employee, Settings } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
@@ -63,13 +62,6 @@ const USAGE = `${APP.id}: ${APP.role}
   uninstall [--purge] [--dry-run]
                    end its page, delete the sign-in task and remove the installed copy; --purge also its data
 `;
-
-/** An employee by its id, its name or its repository; the Steward's own repository too. */
-function employeeFor(s: Settings, who: string): Employee | null {
-  const w = who.toLowerCase();
-  const all = [...s.employees, stewardEmployee(s)];
-  return all.find((e) => e.id.toLowerCase() === w || e.name.toLowerCase() === w || e.repo.toLowerCase() === w || e.repo.split('/')[1]?.toLowerCase() === w) ?? null;
-}
 
 /** --name value, or undefined. */
 function opt(args: string[], ...names: string[]): string | undefined {
@@ -208,7 +200,7 @@ switch (cmd) {
     const ctx = await context({ glance: false, team: false });
     const e = employeeFor(ctx.settings, who);
     if (!e) {
-      console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo}).`);
+      console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
       process.exitCode = 2;
       break;
     }
