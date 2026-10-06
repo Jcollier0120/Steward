@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.26.0
+
+**The kit names no one's GitHub account, private repository or folder.** It runs on every PC that hires an agent, and the manor is for that PC's owner: their repositories are the ones it looks after, and nothing in it may hand out the maker's (the user's rule). The public releases repository, where every PC downloads from, stays; so do the developer tools.
+- **node/manor.ts: `MANOR_REPO` is gone.** `manorOwn()` no longer counts a built-in repository as the manor's own, nor a built-in folder as the Steward's checkout: only what this PC's Manor and Steward name (staff.json, agents.json, the Steward's settings and staff table). A project's example path in its message is a neutral one.
+- **node/release.ts: manor-agent.json names no repository.** `release.repo` is optional and best left out: Manor finds every release in the public releases repository by its id (`<id>-v<version>`), and the name would be published there. One still given must be origin's, as before, until it's taken out; the message says to leave it out.
+- **spec:** each page's home is said without a link into a private repository, and the accelerator page no longer cites a private issue.
+- **What an agent must do:** take `release.repo` out of its manor-agent.json once Manor finds releases by id alone. Nothing else.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.25.0
 
 **The rest of the settings audit's shared helpers, and a tour that fits the page it's on.** One round interval, one plain-words notes switch and one model-call limit with the same key and words in every agent; the folders Windows keeps, wherever OneDrive moved them; a list kept with buttons on the page; and a tour that can take a new hire back to Manor and walks only the parts of the page that are there.

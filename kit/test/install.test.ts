@@ -395,26 +395,27 @@ test('a release from uncommitted changes is versioned +dev.<commit>; the repo co
   assert.equal(repoFromUrl('https://example.com/x/y.git'), null);
 });
 
-/** A manor-agent.json Manor would take, for the fixture's agent from Jcollier0120/Fixture. */
+/** A manor-agent.json Manor would take, for the fixture's agent: it names no repository. */
 const announcement = (agent: Record<string, unknown> = {}, more: Record<string, unknown> = {}) => ({
   agent: {
     id: APP.id, name: APP.name, role: 'Keeps a fixture', fills: ['fixture'],
     paths: { app: [`%USERPROFILE%\\.${APP.id}\\app`] },
-    release: { repo: 'Jcollier0120/Fixture', kind: 'node' },
+    release: { kind: 'node' },
     ...agent,
   },
   ...more,
 });
 
-test("a release's manor-agent.json is checked as Manor checks it: this agent, a Node release from origin's repository, installed in .<id>\\app", () => {
-  const repo = 'Jcollier0120/Fixture';
+test("a release's manor-agent.json is checked as Manor checks it: this agent, a Node release, installed in .<id>\\app, naming no repository", () => {
+  const repo = 'someone/Fixture';
   assert.equal(checkAnnouncement(announcement(), APP.id, repo), null);
-  assert.equal(checkAnnouncement(announcement({ release: { repo: 'jcollier0120/fixture', kind: 'node' } }), APP.id, repo), null, 'the repository, in any case');
+  assert.equal(checkAnnouncement(announcement(), APP.id, null), null, "no repository named: origin needn't be on GitHub");
+  assert.equal(checkAnnouncement(announcement({ release: { repo: 'SOMEONE/fixture', kind: 'node' } }), APP.id, repo), null, "one still named: origin's, in any case");
   assert.equal(checkAnnouncement(announcement({}, { roles: [{ id: 'fixture', name: 'Fixture' }] }), APP.id, repo), null, 'with the roles it brings');
 
-  assert.match(checkAnnouncement(announcement({ release: { repo: 'Jcollier0120/Other', kind: 'node' } }), APP.id, repo)!, /names Jcollier0120\/Other as its "release\.repo", but origin is Jcollier0120\/Fixture/);
-  assert.match(checkAnnouncement(announcement({ release: { kind: 'node' } }), APP.id, repo)!, /names no repository/);
-  assert.match(checkAnnouncement(announcement(), APP.id, null)!, /origin isn't a GitHub repository/);
+  assert.match(checkAnnouncement(announcement({ release: { repo: 'someone/Other', kind: 'node' } }), APP.id, repo)!, /names someone\/Other as its "release\.repo", but origin is someone\/Fixture\. Leave "release\.repo" out/);
+  assert.match(checkAnnouncement(announcement({ release: { repo: null, kind: 'node' } }), APP.id, repo)!, /names no repository/);
+  assert.match(checkAnnouncement(announcement({ release: { repo: 'someone/Fixture', kind: 'node' } }), APP.id, null)!, /origin is not on GitHub/);
   assert.match(checkAnnouncement(announcement({ id: 'someone-else' }), APP.id, repo)!, new RegExp(`agent is "someone-else", but this release is "${APP.id}" \\(release\\.json's id\\)`));
   assert.match(checkAnnouncement(announcement({ id: undefined }), APP.id, repo)!, /agent is null/);
   assert.match(checkAnnouncement(announcement({ release: { repo, kind: 'heiward' } }), APP.id, repo)!, /"release\.kind" is "heiward"/);
@@ -429,15 +430,16 @@ test("a release's manor-agent.json is checked as Manor checks it: this agent, a 
 test("manor-agent.json at a checkout's root is published with the release; none is nothing; a wrong or broken one stops the build", () => {
   const dir = path.join(tmp, 'announces');
   mkdirSync(dir, { recursive: true });
-  assert.equal(announcementOf(dir, APP.id, 'Jcollier0120/Fixture'), null, 'no manor-agent.json: the release is as before');
+  assert.equal(announcementOf(dir, APP.id, 'someone/Fixture'), null, 'no manor-agent.json: the release is as before');
 
   writeFileSync(path.join(dir, ANNOUNCEMENT), '\uFEFF' + JSON.stringify(announcement(), null, 2));
-  assert.deepEqual(announcementOf(dir, APP.id, 'Jcollier0120/Fixture'), { file: path.join(dir, 'manor-agent.json') });
-  assert.match((announcementOf(dir, APP.id, 'Jcollier0120/Fork') as { error: string }).error, /but origin is Jcollier0120\/Fork.*Fix it, or remove it, and release again\.$/);
-  assert.match((announcementOf(dir, 'other', 'Jcollier0120/Fixture') as { error: string }).error, /but this release is "other"/);
+  assert.deepEqual(announcementOf(dir, APP.id, 'someone/Fixture'), { file: path.join(dir, 'manor-agent.json') });
+  writeFileSync(path.join(dir, ANNOUNCEMENT), JSON.stringify(announcement({ release: { repo: 'someone/Fixture', kind: 'node' } })));
+  assert.match((announcementOf(dir, APP.id, 'someone/Fork') as { error: string }).error, /but origin is someone\/Fork.*Fix it, or remove it, and release again\.$/);
+  assert.match((announcementOf(dir, 'other', 'someone/Fixture') as { error: string }).error, /but this release is "other"/);
 
   writeFileSync(path.join(dir, ANNOUNCEMENT), '{ "agent": ');
-  assert.match((announcementOf(dir, APP.id, 'Jcollier0120/Fixture') as { error: string }).error, /^manor-agent\.json isn't JSON/);
+  assert.match((announcementOf(dir, APP.id, 'someone/Fixture') as { error: string }).error, /^manor-agent\.json isn't JSON/);
 });
 
 test('SHA256SUMS.txt lists the zip, and manor-agent.json after it, as sha256sum writes them', () => {

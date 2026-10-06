@@ -1,6 +1,6 @@
 # Release notes: each repository's changelog
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/RELEASE-NOTES.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). Since kit 2.19.0.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/RELEASE-NOTES.md` in the Steward's repository, and `src/kit/spec/RELEASE-NOTES.md` in every agent that takes the part. Since kit 2.19.0.
 
 Every release says what it brings. A release's notes come from its repository's **`CHANGELOG.md`**, at the repository's root, and are what Manor's **What's new** link opens. Each version has an entry there, newest first. Whoever raises the version writes it, in the same change: a person, a Claude Code session, the Wright's worker, or the Steward's kit bump.
 

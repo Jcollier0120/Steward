@@ -16,7 +16,9 @@
  * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
  * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
  * SHA256SUMS.txt (Manor takes it only when it's listed there), and publishes it with the zip; and refuses to
- * build when it names another repository than origin's, or another agent than this one.
+ * build when it names another agent than this one. It names no repository: Manor finds every release in the public
+ * releases repository by its id (<id>-v<version>), and a "release.repo" would publish the private repository's name
+ * there. One still given must be origin's, until it's taken out.
  *
  * npm run release fills src\kit\ first (tools\kit.ts), at the version kit.json pins. The zip holds what
  * the agent runs from, at its top level: src\ (no tests) with src\kit\ in it, art\, package.json,
@@ -83,7 +85,8 @@ export const ANNOUNCEMENT = 'manor-agent.json';
 /**
  * What's wrong with a manor-agent.json, as Manor would refuse it (its src/announced.ts, and install.ts's
  * announcedHire), or null when Manor can take it: an object with an "agent" whose id is this agent's, a Node release
- * from `repo` (origin's, owner/name), installed at %USERPROFILE%\.<id>\app; and "roles", when given, a list of objects.
+ * installed at %USERPROFILE%\.<id>\app; and "roles", when given, a list of objects. "release.repo" is best left out (it
+ * would be published); one given must be `repo`, origin's (owner/name).
  */
 export function checkAnnouncement(json: unknown, id: string, repo: string | null): string | null {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return `${ANNOUNCEMENT} should be an object with an "agent".`;
@@ -92,9 +95,11 @@ export function checkAnnouncement(json: unknown, id: string, repo: string | null
   if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return `${ANNOUNCEMENT} should give its "agent": its entry, as Manor's staff.json has one.`;
   if (agent.id !== id) return `${ANNOUNCEMENT}'s agent is ${JSON.stringify(agent.id ?? null)}, but this release is ${JSON.stringify(id)} (release.json's id).`;
   const release = agent.release as Record<string, unknown> | undefined;
-  const named = typeof release?.repo === 'string' ? release.repo : null;
-  if (!repo) return `${ANNOUNCEMENT} can't be checked: origin isn't a GitHub repository, and its "release.repo" must be the one it's published from.`;
-  if (named?.toLowerCase() !== repo.toLowerCase()) return `${ANNOUNCEMENT} names ${named ?? 'no repository'} as its "release.repo", but origin is ${repo}, where it would be published.`;
+  if (release?.repo !== undefined) {
+    const named = typeof release.repo === 'string' ? release.repo : null;
+    if (!repo || named?.toLowerCase() !== repo.toLowerCase())
+      return `${ANNOUNCEMENT} names ${named ?? 'no repository'} as its "release.repo", but origin is ${repo ?? 'not on GitHub'}. Leave "release.repo" out: Manor finds the release in the releases repository by its id, and the name would be published there.`;
+  }
   if (release?.kind !== 'node') return `${ANNOUNCEMENT}'s "release.kind" is ${JSON.stringify(release?.kind ?? null)}: Manor takes an announced agent only as a Node release ("node").`;
   const where = `%USERPROFILE%\\.${id}\\app`;
   const app = (agent.paths as Record<string, unknown> | undefined)?.app;
