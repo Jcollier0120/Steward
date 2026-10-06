@@ -39,8 +39,9 @@ async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promis
   }
 }
 
-const config = (raw: unknown): AcceleratorConfig => {
-  const cfg = A.parseAccelerators(raw);
+/** A config as an agent reads it; `hw`, what this PC has (hardware.json), names its accelerators. */
+const config = (raw: unknown, hw: import('./fixture/src/kit/accelerators.ts').Hardware | null = null): AcceleratorConfig => {
+  const cfg = A.parseAccelerators(raw, hw);
   if ('error' in cfg) throw new Error(cfg.error);
   return cfg;
 };
@@ -523,10 +524,11 @@ test('every answer says where it ran, and a background request goes around a car
   try {
     const model = new Npu(config({
       accelerators: [
-        gpu('gpu-nvidia-geforce-rtx-4090', { name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, chat: { baseUrl: card.baseUrl, model: 'm' } } as any),
-        { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: npu.baseUrl, model: 'm' }, quirks: ['prefix-leak'] },
+        gpu('gpu-nvidia-geforce-rtx-4090', { name: 'Not its name', memoryGb: 24, chat: { baseUrl: card.baseUrl, model: 'm' } } as any),
+        { id: 'npu', kind: 'npu', name: 'Nor this', chat: { baseUrl: npu.baseUrl, model: 'm' }, quirks: ['prefix-leak'] },
       ],
-    }));
+    }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] }));
+    // Each is named as this PC names it (hardware.json), never by the config's name.
     // The NPU first, though the card is listed first and has more room: it does the work without the card.
     const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
     assert.equal(a.text, 'from the NPU');
@@ -730,7 +732,7 @@ test('embeddings go to an accelerator that serves them, and a server can be left
     await assert.rejects(new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: slow.baseUrl, model: 'e' } }] })).embed(['x'], { lane: 'interactive', timeoutMs: 300 }), /timed out/);
     assert.ok(Date.now() - t0 < 1400, 'its own timeout, not the config\'s');
     fresh();
-    const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', name: 'Oryon CPU', embed: { baseUrl: server.baseUrl, model: 'e' } }] }));
+    const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: server.baseUrl, model: 'e' } }] }, { npu: false, cards: [], cpuName: 'Oryon CPU' }));
     const r = await model.embed(['one', 'two']);
     assert.deepEqual(r.vectors, [[0, 1], [1, 1]]);
     assert.deepEqual(r.accelerator, { id: 'cpu', name: 'Oryon CPU' });
@@ -893,7 +895,7 @@ test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even
     // With only the card serving embeddings, they're refused, and say why.
     const cardEmbedOnly = new Npu(config({ accelerators: cfg.accelerators.filter((a) => a.kind !== 'cpu') }));
     assert.equal(cardEmbedOnly.hasEmbed, false);
-    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the gpu-adreno isn't used for models beside the NPU/.test(e.message));
+    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the graphics card isn't used for models beside the NPU/.test(e.message));
   } finally {
     noManor();
     fresh();

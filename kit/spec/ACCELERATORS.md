@@ -12,22 +12,24 @@ An **accelerator** is a device that runs the manor's models, behind a model serv
 
 | Kind | Id | Name |
 |---|---|---|
-| The NPU | `npu` | The NPU's own name, e.g. "Snapdragon X2 Elite NPU" |
-| A graphics card | `gpu-` + its name in lowercase, each run of other characters a dash, none at either end, e.g. `gpu-nvidia-geforce-rtx-4090` | DXGI's description, as Heiward lists it: Windows' software adapters (Basic Render, Remote Display, Hyper-V) left out, and a second card of the same name `… #2` (id `…-2`) |
-| The processor | `cpu` | The processor's name |
+| The NPU | `npu` | Its device name as Windows lists it, in full, (R) and (TM) taken out and spaces collapsed, e.g. "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU" (Manor shows the same) |
+| A graphics card | `gpu-` + its name in lowercase, each run of other characters a dash, none at either end, e.g. `gpu-nvidia-geforce-rtx-4090` | DXGI's description, as Heiward lists it: Windows' software adapters (Basic Render, Remote Display, Hyper-V) left out, and a second card of the same name `… #2` (id `…-2`). Shown with (R) and (TM) taken out and spaces collapsed, as Manor shows it ("Qualcomm Adreno X2-90 GPU"); the id is made from the name as DXGI gives it (`gpu-qualcomm-r-adreno-tm-x2-90-gpu`) |
+| The processor | `cpu` | The processor's name as Windows gives it, (R), (TM) and (C) taken out |
 
 Names, not DXGI's numbers, identify cards: DXGI's numbers can change from boot to boot. A card's DXGI number and LUID are looked up when a server starts.
 
+**A name is what the PC calls the device, never a setting** (kit 2.27.0). It comes from `hardware.json` (What this PC has, below): the NPU's from its `npuName`, a card's from the card in `cards` whose name gives the entry's id, the processor's from its `cpuName`. Without one (no hardware.json yet, a card it doesn't list, an NPU on a PC without one) it is the kind's: "NPU", "Graphics card", "Processor". `config.json` keeps no name: one an older file's entry carries is ignored, and dropped when the file is next written; setup writes none, and no Settings page offers one to edit. Each is shown with (R) and (TM) taken out and its spaces collapsed (the core's `deviceName`); an id never changes with it. The core's `acceleratorName(kind, id, hw)` is the rule.
+
 ## What this PC has
 
-What decides whether a model runs on the NPU is the PC, never the model: any model can run on any accelerator, so no model name or server address is ever read as a sign of one. Detection asks Windows whether it lists a Hexagon NPU driver and which graphics cards DXGI has, and its answer is kept in `hardware.json` (Shared files, below): `{ "at": "<ISO time>", "npu": false, "cards": [{ "name": "NVIDIA GeForce RTX 4080 SUPER", "memoryGb": 16 }] }`. It's written only when both questions were answered (an NPU found, or none for certain, and the cards listed); setup writes it, and the keeper asks again when it's a day old.
+What decides whether a model runs on the NPU is the PC, never the model: any model can run on any accelerator, so no model name or server address is ever read as a sign of one. Detection asks Windows whether it lists a Hexagon NPU driver and which graphics cards DXGI has, and its answer is kept in `hardware.json` (Shared files, below): `{ "at": "<ISO time>", "npu": false, "cards": [{ "name": "NVIDIA GeForce RTX 4080 SUPER", "memoryGb": 16 }], "cpuName": "AMD Ryzen 9 7950X 16-Core Processor" }`, with `"npuName"` beside `"npu": true` on a PC with one (`"Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU"`). These names are every accelerator's (Accelerators and their ids, above). It's written only when both questions were answered (an NPU found, or none for certain, and the cards listed); setup writes it, and the keeper asks again when it's a day old, at once when it says there's an NPU but not its name (a file from before kit 2.27.0), and after an hour when it lacks the processor's.
 
 On a PC known to have no NPU, an entry said to be the NPU (an `npu` id, an old config's `device: "Npu"`, or an old endpoint that names no device) runs on what the PC has instead:
 - its one graphics card, by that card's name and memory;
 - "Graphics card" when it has several (which one isn't known);
 - the processor when it has none.
 
-It takes that kind and id, keeps a name of its own (one that only said "NPU" takes the card's), and goes after the others: a card's own entry of the same id comes first, and gets the servers it lacked from it. An old config's GenieX quirks go (GenieX runs only on an NPU), and `acceleratorOrder` follows the new id. The config's problems say so. With an NPU, or with no hardware.json, a config is taken at its word.
+It takes that kind, that name and the id it gives, whatever the entry carried, and goes after the others: a card's own entry of the same id comes first, and gets the servers it lacked from it. An old config's GenieX quirks go (GenieX runs only on an NPU), and `acceleratorOrder` follows the new id. The config's problems say so. With an NPU, or with no hardware.json, a config is taken at its word.
 
 A note that says nothing of where it was written (one kept from before accelerators) is "from a local model", never "the NPU".
 
@@ -39,7 +41,7 @@ The accelerators are in **`config.json`** in Reeve's data folder (`%USERPROFILE%
 {
   "accelerators": [
     {
-      "id": "gpu-nvidia-geforce-rtx-4090", "kind": "gpu", "name": "NVIDIA GeForce RTX 4090", "memoryGb": 24,
+      "id": "gpu-nvidia-geforce-rtx-4090", "kind": "gpu", "memoryGb": 24,
       "slots": 2, "maxContextTokens": 16384,
       "chat":   { "baseUrl": "http://127.0.0.1:18191", "model": "qwen3-4b-instruct-2507",
                   "startCommand": ["%USERPROFILE%\\.reeve\\servers\\llama.cpp\\b11349-cuda-12.4-x64\\llama-server.exe", "--port", "18191", "--device", "CUDA0", "..."] },
@@ -48,7 +50,7 @@ The accelerators are in **`config.json`** in Reeve's data folder (`%USERPROFILE%
       "quirks": []
     },
     {
-      "id": "npu", "kind": "npu", "name": "Snapdragon X2 Elite NPU", "slots": 1, "maxContextTokens": 2400,
+      "id": "npu", "kind": "npu", "slots": 1, "maxContextTokens": 2400,
       "chat":   { "baseUrl": "http://127.0.0.1:18181", "model": "qualcomm/Qwen3-4B-Instruct-2507:W4A16", "startCommand": ["%LOCALAPPDATA%\\GenieX CLI\\geniex.exe", "serve", "--skip-update"] },
       "vision": { "model": "Qwen3-VL-4B-Instruct:W4A16" },
       "quirks": ["prefix-leak", "image-path"]
@@ -64,7 +66,7 @@ The accelerators are in **`config.json`** in Reeve's data folder (`%USERPROFILE%
 - `quirks`, per server: `prefix-leak` (GenieX v0.7.0: each request starts with a nonce), `image-path` (the server reads a local image path; otherwise images are sent as `data:` URLs).
 - `acceleratorOrder`: `"auto"`, or a list of ids, first preferred. Auto puts the NPU first, since it does model work without the processor or a graphics card; then graphics cards with 2 GB or more of their own memory, by memory; then graphics that share the PC's memory; then the CPU.
 - An old config with only `chatEndpoint` (and `visionModel`, `embedEndpoint`, `npuMaxContextTokens`) still works: it is read as one accelerator per device it names, `npu`, `gpu-graphics-card` or `cpu`.
-- The kind comes from the id. The NPU always has one slot; the others at most 16.
+- The kind comes from the id, and the name from the PC (Accelerators and their ids, above): an entry has no `name`, and one it has is ignored. The NPU always has one slot; the others at most 16.
 - `enabled: false` keeps an entry but sends it nothing. `%VAR%` in a `startCommand` is expanded.
 
 ## Model servers

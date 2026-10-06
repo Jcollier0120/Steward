@@ -1,5 +1,5 @@
 {
- "about": "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; accelerators are given as a config's raw entries, read by parseAccelerators first. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
+ "about": "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
  "nowMs": 1790000000000,
  "ids": [
   {
@@ -305,7 +305,7 @@
      {
       "id": "npu",
       "kind": "npu",
-      "name": "Snapdragon X2 Elite NPU",
+      "name": "NPU",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -333,7 +333,7 @@
      {
       "id": "gpu-off",
       "kind": "gpu",
-      "name": "Off",
+      "name": "Graphics card",
       "memoryGb": 48,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -347,7 +347,7 @@
      {
       "id": "gpu-nvidia-geforce-rtx-4090",
       "kind": "gpu",
-      "name": "NVIDIA GeForce RTX 4090",
+      "name": "Graphics card",
       "memoryGb": 24,
       "slots": 2,
       "maxContextTokens": 16384,
@@ -386,7 +386,7 @@
    }
   },
   {
-   "case": "a card has at most 16 slots, the NPU always 1; a name left out is the kind's; no cap is 2400",
+   "case": "a card has at most 16 slots, the NPU always 1; without hardware.json each is its kind's name, whatever the entry says; no cap is 2400",
    "raw": {
     "accelerators": [
      {
@@ -528,7 +528,7 @@
      {
       "id": "cpu",
       "kind": "cpu",
-      "name": "Oryon",
+      "name": "Processor",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -736,7 +736,7 @@
      {
       "id": "cpu",
       "kind": "cpu",
-      "name": "Oryon",
+      "name": "Processor",
       "memoryGb": null,
       "slots": 1,
       "maxContextTokens": 2400,
@@ -967,6 +967,278 @@
    },
    "expect": {
     "error": "lists no accelerator that can be used (accelerators[0] has no id; accelerators[1] tpu-1: an id is npu, cpu, or gpu- and the card's name in lowercase with dashes)"
+   }
+  },
+  {
+   "case": "names come from this PC (hardware.json), never from the config: the NPU's as Windows lists it, a card's as DXGI does, found by its id (made from DXGI's name), shown without (R) and (TM); the processor's; a card it doesn't list is the kind's",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "name": "My NPU",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090-2",
+      "name": "The second one",
+      "memoryGb": 24,
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-gone",
+      "name": "A card taken out",
+      "memoryGb": 8,
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-intel-r-uhd-graphics-770",
+      "memoryGb": 0.1,
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "name": "Mine",
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     }
+    ]
+   },
+   "hw": {
+    "npu": true,
+    "cards": [
+     {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryGb": 24
+     },
+     {
+      "name": "NVIDIA GeForce RTX 4090 #2",
+      "memoryGb": 24
+     },
+     {
+      "name": "Intel(R)  UHD Graphics 770",
+      "memoryGb": 0.1
+     }
+    ],
+    "npuName": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU",
+    "cpuName": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU"
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-nvidia-geforce-rtx-4090-2",
+      "kind": "gpu",
+      "name": "NVIDIA GeForce RTX 4090 #2",
+      "memoryGb": 24,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:2",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-gone",
+      "kind": "gpu",
+      "name": "Graphics card",
+      "memoryGb": 8,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:3",
+       "model": "m"
+      }
+     },
+     {
+      "id": "gpu-intel-r-uhd-graphics-770",
+      "kind": "gpu",
+      "name": "Intel UHD Graphics 770",
+      "memoryGb": 0.1,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:5",
+       "model": "m"
+      }
+     },
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:4",
+       "model": "m"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": []
+   }
+  },
+  {
+   "case": "an older config's NPU is named from this PC too",
+   "raw": {
+    "chatEndpoint": {
+     "baseUrl": "http://x:1",
+     "model": "m",
+     "device": "Npu"
+    }
+   },
+   "hw": {
+    "npu": true,
+    "cards": [],
+    "npuName": "Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU"
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "kind": "npu",
+      "name": "Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [
+       "prefix-leak",
+       "image-path"
+      ],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": true,
+    "problems": []
+   }
+  },
+  {
+   "case": "on a PC with no NPU, an entry listed as the NPU runs on its one card, by the card's name and id, whatever name the entry carries",
+   "raw": {
+    "accelerators": [
+     {
+      "id": "npu",
+      "name": "Snapdragon X2 Elite NPU",
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "acceleratorOrder": [
+     "npu"
+    ]
+   },
+   "hw": {
+    "npu": false,
+    "cards": [
+     {
+      "name": "NVIDIA(R) GeForce RTX 4080 SUPER",
+      "memoryGb": 16
+     }
+    ],
+    "npuName": "left from before",
+    "cpuName": "AMD Ryzen 9 7950X 16-Core Processor"
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "gpu-nvidia-r-geforce-rtx-4080-super",
+      "kind": "gpu",
+      "name": "NVIDIA GeForce RTX 4080 SUPER",
+      "memoryGb": 16,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "order": [
+     "gpu-nvidia-r-geforce-rtx-4080-super"
+    ],
+    "requestTimeoutMs": 180000,
+    "legacy": false,
+    "problems": [
+     "npu is listed as the NPU, but this PC has none: its model runs on the NVIDIA GeForce RTX 4080 SUPER"
+    ]
+   }
+  },
+  {
+   "case": "on a PC with no NPU and no card, an older config's NPU runs on the processor, by its name",
+   "raw": {
+    "chatEndpoint": {
+     "baseUrl": "http://x:1",
+     "model": "m",
+     "device": "Npu"
+    }
+   },
+   "hw": {
+    "npu": false,
+    "cards": [],
+    "cpuName": "AMD Ryzen 9 7950X 16-Core Processor"
+   },
+   "expect": {
+    "accelerators": [
+     {
+      "id": "cpu",
+      "kind": "cpu",
+      "name": "AMD Ryzen 9 7950X 16-Core Processor",
+      "memoryGb": null,
+      "slots": 1,
+      "maxContextTokens": 2400,
+      "quirks": [],
+      "chat": {
+       "baseUrl": "http://x:1",
+       "model": "m"
+      }
+     }
+    ],
+    "order": "auto",
+    "requestTimeoutMs": 180000,
+    "legacy": true,
+    "problems": [
+     "npu is listed as the NPU, but this PC has none: its model runs on the AMD Ryzen 9 7950X 16-Core Processor"
+    ]
    }
   }
  ],
@@ -2532,7 +2804,7 @@
     }
    },
    "expect": {
-    "deferred": "every line is full (5 waiting for the NPU, 4 waiting for the Card A)"
+    "deferred": "every line is full (5 waiting for the NPU, 4 waiting for the graphics card)"
    }
   },
   {

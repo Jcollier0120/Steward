@@ -22,6 +22,20 @@ export const LEGACY_NAMES = Object.freeze({ npu: 'NPU', gpu: 'Graphics card', cp
 export const LEGACY_NPU = Object.freeze({ id: 'npu', name: 'NPU' });
 
 /**
+ * A device's name as it is shown: Windows' (or DXGI's) own, (R) and (TM) taken out and its spaces collapsed, as
+ * Manor shows it: "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". Only for showing: a card's id
+ * is made from its name as DXGI gives it (acceleratorId), so lock folders and configs keep theirs.
+ * @param {string} name
+ * @returns {string}
+ */
+export function deviceName(name) {
+  return String(name ?? '')
+    .replace(/\((R|TM)\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * A card's id part: its name in lowercase, each run of other characters one dash, none at either end
  * ("NVIDIA GeForce RTX 4090 #2" is "nvidia-geforce-rtx-4090-2").
  * @param {string} name

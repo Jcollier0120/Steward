@@ -123,10 +123,19 @@ export function loadAccelerators(file = path.join(reeveHome, 'config.json'), hw:
 
 // ---------------------------------------------------------------- what this PC has
 
-/** Whether this PC has an NPU, and its graphics cards: what detection found, never guessed from a model. */
+/**
+ * Whether this PC has an NPU, and its graphics cards: what detection found, never guessed from a model. With the
+ * NPU's and the processor's names as Windows gives them, every accelerator's name comes from here (the core's
+ * acceleratorName), never from config.json.
+ */
 export interface Hardware {
   npu: boolean;
+  /** Each named as DXGI describes it, " #2" on a second card of a name. */
   cards: { name: string; memoryGb: number | null }[];
+  /** The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one. */
+  npuName?: string;
+  /** The processor's name, (R), (TM) and (C) taken out. */
+  cpuName?: string;
 }
 
 /** hardware.json, beside the failure markers in the accelerators folder every program shares. */
@@ -143,7 +152,10 @@ export function readHardware(file = hardwareFile()): Hardware | null {
     const cards = j.cards
       .filter((c: any) => c && typeof c.name === 'string' && c.name)
       .map((c: any) => ({ name: c.name as string, memoryGb: typeof c.memoryGb === 'number' ? c.memoryGb : null }));
-    return { npu: j.npu, cards };
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    const npuName = j.npu ? text(j.npuName) : undefined;
+    const cpuName = text(j.cpuName);
+    return { npu: j.npu, cards, ...(npuName ? { npuName } : {}), ...(cpuName ? { cpuName } : {}) };
   } catch {
     return null;
   }
@@ -151,7 +163,13 @@ export function readHardware(file = hardwareFile()): Hardware | null {
 
 /** Keeps what detection found (detect.ts' hardwareOf), with when, for every program that reads Reeve's config. */
 export function rememberHardware(hw: Hardware, file = hardwareFile()): void {
-  writeWhole(file, { at: new Date().toISOString(), npu: hw.npu, cards: hw.cards });
+  writeWhole(file, {
+    at: new Date().toISOString(),
+    npu: hw.npu,
+    cards: hw.cards,
+    ...(hw.npu && hw.npuName ? { npuName: hw.npuName } : {}),
+    ...(hw.cpuName ? { cpuName: hw.cpuName } : {}),
+  });
 }
 
 // ---------------------------------------------------------------- shared files

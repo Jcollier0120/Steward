@@ -6,8 +6,9 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { expandEnv, rememberHardware } from './accelerators.ts';
-import { type Accelerator, acceleratorConfigFile, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
+import * as core from './core/index.js';
 
 /**
  * Accelerator setup (`smith accelerators setup`, Reeve's where there is no Smith, and their Settings pages' Set up): llama.cpp's server for each graphics
@@ -279,7 +280,6 @@ export function portablePath(p: string, home = homedir()): string {
 export interface EntryInput {
   id: string;
   kind: 'gpu' | 'cpu';
-  name: string;
   memoryGb?: number;
   /** --device's name (none for the processor). */
   device: string | null;
@@ -290,9 +290,12 @@ export interface EntryInput {
   maxContextTokens: number;
 }
 
-/** The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device. */
-export function acceleratorEntry(e: EntryInput): Accelerator {
-  const a: Accelerator = { id: e.id, kind: e.kind, name: e.name, slots: e.slots, maxContextTokens: e.maxContextTokens, quirks: [] };
+/**
+ * The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device. No name: an
+ * accelerator's name comes from the PC (the core's acceleratorName), never from config.json.
+ */
+export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
+  const a: AcceleratorEntry = { id: e.id, kind: e.kind, slots: e.slots, maxContextTokens: e.maxContextTokens, quirks: [] };
   if (e.memoryGb !== undefined) a.memoryGb = e.memoryGb;
   const server = portablePath(e.server);
   const pin = e.device ? ['--device', e.device, '-ngl', '99'] : ['-ngl', '0'];
@@ -334,14 +337,14 @@ export function usedPorts(list: Accelerator[]): Set<number> {
 /**
  * config.json with the set-up entries in its list: each replaces the one with its id or joins the
  * end. An old config's accelerators (the NPU's GenieX) are put in the list unchanged; nothing else
- * in the file changes, and acceleratorOrder is "auto" unless it says otherwise.
+ * in the file changes, and acceleratorOrder is "auto" unless it says otherwise. No entry keeps a name (it comes
+ * from the PC): an older list's names are dropped.
  */
-export function mergeEntries(raw: Record<string, any>, entries: Accelerator[], npuName?: string): Record<string, any> {
-  const read = readAccelerators(raw);
+export function mergeEntries(raw: Record<string, any>, entries: (Accelerator | AcceleratorEntry)[]): Record<string, any> {
   const list: any[] = Array.isArray(raw.accelerators)
-    ? [...raw.accelerators]
-    : read.accelerators.map((a) => (a.kind === 'npu' && npuName && a.name === 'NPU' ? { ...a, name: npuName } : a));
-  for (const e of entries) {
+    ? raw.accelerators.map((x: any) => (x && typeof x === 'object' && !Array.isArray(x) ? entryOf(x) : x))
+    : readAccelerators(raw).accelerators.map(entryOf);
+  for (const e of entries.map(entryOf)) {
     const i = list.findIndex((x) => x?.id === e.id);
     if (i >= 0) list[i] = e;
     else list.push(e);
@@ -636,7 +639,7 @@ export interface SetupIo {
  * Downloads what the plan lacks, finds each card's llama.cpp device, and returns config.json's new
  * content (mergeEntries) with an entry per accelerator it set up. The caller writes it.
  */
-export async function runSetup(plan: SetupPlan, raw: Record<string, any>, npuName: string | undefined, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[] }> {
+export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[] }> {
   const problems: string[] = [];
   for (const d of plan.downloads.filter((d) => !d.have)) {
     io.log(`downloading ${d.what} (${mb(d.size)})`);
@@ -672,10 +675,11 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, npuNam
       const p = modelPath(k, 'model');
       if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(k, 'mmproj') : undefined };
     }
-    entries.push(acceleratorEntry({ id: t.id, kind: t.kind, name: t.name, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens }));
+    // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
+    entries.push({ ...acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens }), name: core.deviceName(t.name) });
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
-  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries, npuName), entries, problems };
+  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -816,7 +820,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       return { code: 1, plan };
     }
   }
-  const r = await runSetup(plan, file.raw, detection.npu?.name, { log, ...o.io });
+  const r = await runSetup(plan, file.raw, { log, ...o.io });
   for (const p of r.problems) log(`problem: ${p}`);
   if (!r.entries.length && !plan.dropNpu) return { code: 1, plan };
   const saved = writeConfigFile(configFile, r.raw, o.validate ?? validateKeeperConfig);

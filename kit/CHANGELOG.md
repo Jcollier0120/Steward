@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.27.0
+
+**An accelerator's name is what the PC calls it, never a setting.** The user's call: "Just keep it what it's called, there's no reason for custom names." config.json's accelerators keep no `name`; every program names each one from what this PC is, the same way.
+- **core/accelerators.js: `acceleratorName(kind, id, hw)`**, the rule: the NPU's name as Windows lists it, a card's as DXGI describes it (" #2" on a second card of a name), found by its id, and the processor's, all from hardware.json, each shown as Manor shows it, (R) and (TM) taken out and spaces collapsed (core/ids.js' new `deviceName`): "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". A card's id doesn't change: it is still made from its DXGI name as given (`gpu-qualcomm-r-adreno-tm-x2-90-gpu`), so lock folders and configs keep theirs, and hardware.json's cards keep that name. Without one, the kind's (`LEGACY_NAMES`: "NPU", "Graphics card", "Processor"). `parseAccelerators` and `readConfig` name every entry, an older config's too, by it, and ignore a `name` in the file.
+- **hardware.json gains `npuName` and `cpuName`.** `npuName` (with `"npu": true`) is the NPU's device name in full, (R) and (TM) taken out and its spaces collapsed, as Manor shows it: "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", where detection used to shorten it to "Snapdragon X2 Elite Extreme NPU" (node/detect.ts' `npuName`, `hardwareOf`). `cpuName` is the processor's. node/accelerators.ts' `Hardware`, `readHardware` and `rememberHardware` carry both. The keeper's `refreshHardware` asks again at once when hardware.json says there's an NPU but not its name, and after an hour when it lacks the processor's, so a PC doesn't wait a day for its names.
+- **The no-NPU rule:** an entry listed as the NPU on a PC known to have none takes the id and name of what runs it (its one card, "Graphics card" when there are several, the processor), whatever the entry carried (`notTheNpu`).
+- **node/accelerator-config.ts:** `readAccelerator(v, hw?)` and `legacyAccelerators(raw, hw?)` name from `hw` (the kind's name without it); `readAccelerators` passes its hardware.json down. `validateAccelerators` no longer asks for a name. `AcceleratorEntry` (an accelerator as config.json keeps it, without its name), `entryOf(a)` and `withoutNames(raw)` are new; `writeConfigFile` and `saveConfig` write no name, so an older file's go at its next save.
+- **node/setup.ts:** `acceleratorEntry` writes no name (`EntryInput` has none) and returns an `AcceleratorEntry`; `mergeEntries(raw, entries)` drops the names an older list has and takes no `npuName`; `runSetup(plan, raw, io)` takes no `npuName` either. The entries setup hands back are still named, as acceleratorName shows them; so are node/detect.ts' `detectedAccelerators`.
+- **spec/ACCELERATORS.md** says so; accelerator-vectors.json's configs may carry `hw` (hardware.json's content), with cases for names from the PC and for the no-NPU rule.
+- **What an agent must do:** nothing, unless it lets a person edit an accelerator's name: then it stops (the Smith's Settings page does in its own change). An agent with its own copy of the naming rule should take the kit's `acceleratorName` instead. One that calls `mergeEntries`, `runSetup` or `acceleratorEntry` itself drops the name and npuName it passed.
+
+### Before you update
+
+Nothing: it updates itself as usual. A name written in config.json is ignored from now on, and taken out the next time the file is saved. The NPU's name becomes Windows' full name for it at the keeper's next look.
+
 ## 2.26.0
 
 **The kit names no one's GitHub account, private repository or folder.** It runs on every PC that hires an agent, and the manor is for that PC's owner: their repositories are the ones it looks after, and nothing in it may hand out the maker's (the user's rule). The public releases repository, where every PC downloads from, stays; so do the developer tools.
