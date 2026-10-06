@@ -30,6 +30,8 @@ export interface PageShell {
   dataDir: string;
   /** Its onboarding, drawn as the page's tour at #/tour (tour.tsx); null for none. */
   onboarding: Onboarding | null;
+  /** Its required settings not filled in yet (the node part's required.ts): it does nothing until they are. Null when none. */
+  needs?: { keys: string[][]; text: string } | null;
 }
 
 /** An agent's onboarding, as the node part's onboarding.ts has it: three steps, intro, settings and a tour. */
@@ -37,6 +39,8 @@ export interface Onboarding {
   intro: { title: string; text: string };
   settings: string[];
   tour: { tour: string; title?: string; text: string }[];
+  /** The settings it can't work without: a key, or keys of which one is enough. */
+  required?: (string | string[])[];
 }
 
 export interface PageData<Body> {

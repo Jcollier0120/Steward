@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.3
+
+**It hands out kit 2.28.0: an agent that needs a setting from you waits for it, and its tour asks for it.**
+
+### What's new
+
+- Kit 2.28.0: each agent can name the settings it can't work without (the Chamberlain needs a mail account). Until you fill them in, its rounds wait, its page says **Waiting for its settings** with a **Fill them in** button, its status says **Needs settings**, and the first-hire tour won't move past its settings step until they're saved.
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
 ## 0.12.2
 
 **A tour of the Steward's page when you hire it.**

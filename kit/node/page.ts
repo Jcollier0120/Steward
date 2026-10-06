@@ -105,8 +105,10 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
 }
 
 /** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
-export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
+  // Its required settings not filled in yet (required.ts): nothing runs until they are.
+  if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
   if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
   const next = until(o.nextAt, o.now);
   return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Manor's Stop pauses them." };

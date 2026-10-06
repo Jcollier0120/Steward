@@ -1,4 +1,5 @@
 import { duty } from './duty.ts';
+import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
@@ -147,7 +148,8 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
   const tick = async (asked = false) => {
     clearTimeout(timer);
     if (running) return;
-    if (!asked && !duty().onDuty) {
+    // Off duty, only the rounds asked for run; waiting for its required settings (required.ts), none do: it can't work yet.
+    if ((!asked && !duty().onDuty) || needsSettings()) {
       if (!stopped) wait();
       return;
     }
@@ -195,15 +197,15 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     lastRunOffline: lastOffline,
     lastError,
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
-    nextRunAt: stopped || running || !duty().onDuty ? null : iso(dueAt),
+    nextRunAt: stopped || running || !duty().onDuty || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
   });
   schedules.add(state);
 
   return {
-    /** Starts a run now; false when one is already under way. */
+    /** Starts a run now; false when one is already under way, or its required settings are still to be filled in (required.ts). */
     runNow(): boolean {
-      if (running) return false;
+      if (running || needsSettings()) return false;
       void tick(true);
       return true;
     },

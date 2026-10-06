@@ -406,6 +406,11 @@ function readRaw(file: string): { raw: Record<string, unknown> | null; broken: b
   return isObject(raw) ? { raw, broken: false } : { raw: null, broken: true };
 }
 
+/** The settings the agent uses now, as its normalize() reads the file (the defaults where it has none). */
+export function readSettings<S extends object>(spec: SettingsSpec<S>): S {
+  return spec.normalize(readRaw(spec.file()).raw ?? {}).settings;
+}
+
 const brokenNote = (file: string) => `${file} isn't a JSON object, so the defaults are in use. Saving here replaces it; the old file is kept as settings.json.broken.`;
 
 /** GET /api/settings: the schema, the values in use, the defaults, and anything worth a word. */

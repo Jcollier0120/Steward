@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { APP, appRoot, dataDir } from '../app.ts';
 import { duty } from './duty.ts';
 import { lookFor, sceneSvg } from './look.ts';
@@ -8,6 +7,7 @@ import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
 import { ago, CSS, esc, lookCss, pillOf } from './page.ts';
+import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.ts';
 import { roundTimes } from './schedule.ts';
 import type { Handler } from './server.ts';
 import { groupLabel, themes, themesCss } from './themes.ts';
@@ -63,27 +63,25 @@ export interface PageShell {
   dataDir: string;
   /** Its onboarding (onboarding.ts), drawn as the page's tour at #/tour; null for none. */
   onboarding: Onboarding | null;
+  /** The required settings not filled in yet (required.ts): its rounds wait for them, and the page says so. */
+  needs: NeedsSettings | null;
 }
 
-/**
- * The agent's onboarding (onboarding.ts), from its src/onboarding.ts's ONBOARDING when it has one, read once as it
- * starts: src/onboarding.js in a release, which is built. An agent adds the file and nothing else; agent-checks.ts checks
- * it, and pageShell() puts it in the shell, unless a caller passes its own.
- */
-const ONBOARDING_FILE = ['ts', 'js'].map((x) => path.join(appRoot, 'src', `onboarding.${x}`)).find((f) => existsSync(f));
-const AGENT_ONBOARDING: Onboarding | null = ONBOARDING_FILE ? ((await import(pathToFileURL(ONBOARDING_FILE).href)) as { ONBOARDING?: Onboarding }).ONBOARDING ?? null : null;
+// The agent's onboarding is read once as it starts (required.ts's AGENT_ONBOARDING), unless a caller passes its own.
 
 /** The frame's data now. `nextAt` as page()'s: left out, the kit's own schedule's. */
 export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: number; nextAt?: number | string | null; onboarding?: Onboarding | null } = {}): PageShell {
   const look = lookFor(APP.id);
   const d = duty();
   const m = manorLink();
+  const onboarding = o.onboarding === undefined ? AGENT_ONBOARDING : o.onboarding;
+  const needs = needsSettings(onboarding);
   return {
     app: { id: APP.id, name: APP.name, role: APP.role, version: APP.version },
     title: o.title ?? APP.name,
     busy: !!o.busy,
     refreshSec: o.refreshSec ?? 0,
-    pill: pillOf({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt }),
+    pill: pillOf({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, needs: needs?.text }),
     scene: sceneSvg(look),
     offDutySince: d.onDuty ? null : ago(d.since),
     manor: m ? { name: m.name, url: m.url, theme: m.theme, settingsUrl: manorSettingsUrl(m) } : null,
@@ -91,7 +89,8 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     themeKey: `${APP.id}:theme`,
     work: workSection(),
     dataDir,
-    onboarding: o.onboarding === undefined ? AGENT_ONBOARDING : o.onboarding,
+    onboarding,
+    needs,
   };
 }
 

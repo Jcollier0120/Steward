@@ -27,6 +27,6 @@ export { EmptyNote, ErrorNote, Loading, ModalCard, QueryView, Toast, type QueryL
 export { UI_CSS } from './styles.ts';
 export { SettingsForm } from './settings-form.tsx';
 export { blank, canon, same, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
-export { onPage, Tour, tourFrom } from './tour.tsx';
+export { onPage, Tour, tourFrom, tourStart } from './tour.tsx';
 export { OnPageList, type OnPageItem } from './lists.tsx';
 export type { Onboarding } from './page-data.ts';

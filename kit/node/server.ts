@@ -6,6 +6,7 @@ import { duty, setDuty } from './duty.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
 import { hasTour, pageScript } from './react-page.ts';
+import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
@@ -105,6 +106,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   const token = randomBytes(24).toString('hex');
   const hosts = allowedHosts(opts.port);
   const tour = hasTour();
+  // Its required settings (its onboarding's) are read from these: until they're filled in, its rounds wait (required.ts).
+  watchRequired(opts.settings);
 
   const stop: Handler = () => {
     setTimeout(async () => {
@@ -120,8 +123,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract); off duty, since when
     // (`stoppedSince`) and a line saying so (`summary`), as its status command says them, so Manor needn't run that.
     // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way. `tour`:
-    // whether its page has a tour at #/tour (react-page.ts's hasTour()), so Manor's hire flow offers it only where it works.
-    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, ...opts.ping?.() } }),
+    // whether its page has a tour at #/tour (react-page.ts's hasTour()), so Manor's hire flow offers it only where it works. `needsSettings`:
+    // the required settings not filled in yet (required.ts), so Manor can say the new hire waits for them; null when none.
+    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
     '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),

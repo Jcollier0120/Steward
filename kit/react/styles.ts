@@ -125,5 +125,6 @@ details.sf-advanced[open] > summary { margin-bottom: 4px; }
 .tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .tour-actions .sf-spacer { flex: 1; }
 .tour-card .sf-panel { margin: 4px 0 0; }
+.tour-needs { margin: 0; padding: 8px 12px; border-radius: 6px; background: var(--warn-bg); color: var(--warn); }
 .tour-target { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 8px; position: relative; z-index: 79; }
 `;
