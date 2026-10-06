@@ -99,7 +99,10 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
   const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
   const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
-  if (!decision.release) return result(e, 'skipped', 'error' in v ? v.error : decision.why);
+  if (!decision.release) {
+    const out = 'version' in v && released.includes(v.version);
+    return result(e, 'skipped', 'error' in v ? v.error : decision.why, out ? { released: true, version: v.version } : {});
+  }
   const version = (v as { version: string }).version;
   const not = o.unless?.(commit, version);
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
