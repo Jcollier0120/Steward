@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.6
+
+**A kit-bump issue closes by itself once that agent is past the kit, so the Wright isn't sent to fix nothing.**
+
+### What changed
+
+- When an agent's bump to a kit failed, the Steward filed an issue for the Wright. If a later bump then passed, the issue stayed open: the Wright took it up, found nothing to fix, and got stuck, and each one became an alarm. On 2026-10-06 that was six alarms for Reeve, Herald, Clerk and Auditor, all already on the newest kit. Now each round closes a bump issue as soon as that agent's main carries that kit or a newer one, saying why.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.11.5
 
 **A Reeve update's jobs are approved as soon as it's installed, not up to a round later.**

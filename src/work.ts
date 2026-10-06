@@ -8,7 +8,10 @@ import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 import { checksLogOf } from './stages/bump.ts';
-import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { showFile } from './git.ts';
+import { compareVersions } from './kitfiles.ts';
+import { readPin } from './stages/staff.ts';
 
 /**
  * Work for the Wright: what fails in a round that someone working in the employee's repository can fix, filed as an
@@ -34,6 +37,9 @@ import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/
  *   when the Wright gets stuck on the issue (wright:stuck), its PR for it waits for a person (wright:needs-you), the
  *   Wright no longer works in that repository, or it couldn't be filed (the Wright's page not set, no queue for that
  *   repository, today's issues all filed, gh refusing): then it is an alarm as before, saying why.
+ *
+ * A bump issue whose failure is gone (the employee's branch pins that kit or a newer one now) is closed by itself
+ * (closeResolved), rather than left for the Wright to find nothing to fix and get stuck on.
  *
  * Kept in work-filed.json: each issue filed, by its id, with when; the Settings switch is fileWork.
  */
@@ -406,6 +412,37 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   for (const [id, f] of Object.entries(filed)) if (!current.has(id) && o.now.getTime() - Date.parse(f.at) > 30 * 24 * 3_600_000) delete filed[id];
   if (JSON.stringify(filed) !== before) writeJson(workFiledFile(), filed);
   return states;
+}
+
+/**
+ * Each bump issue filed whose failure is gone, closed: the employee's branch on origin now pins that kit or a newer one
+ * (a later bump passed, or a fix landed and its bump merged), so there is nothing left to do. Left open, it waits in the
+ * Wright's queue for the Wright to find nothing to fix, make no commit, and get stuck: an alarm for nothing. Not one
+ * this round's failures still name (`items`), and only bump issues: a release's failure ends with a new commit, which
+ * says nothing of the old one. Forgotten in work-filed.json once closed, or found closed already.
+ */
+export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }): Promise<void> {
+  const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
+  const current = new Set(o.items.map((i) => i.id));
+  let changed = false;
+  for (const [id, f] of Object.entries(filed)) {
+    const m = /^bump:([^:]+):(\d+\.\d+\.\d+)$/.exec(id);
+    if (!m || current.has(id)) continue;
+    const e = o.employees.find((x) => x.id === m[1]);
+    if (!e || !existsSync(checkoutOf(e))) continue;
+    const pin = readPin(await showFile(o.run, checkoutOf(e), `origin/${e.branch}`, 'kit.json'));
+    if (!pin || compareVersions(pin.kit, m[2]) < 0) continue;
+    const r = await o.run('gh', ['issue', 'close', String(f.number), '--repo', f.repo, '--reason', 'completed', '--comment', `Nothing left to do: ${e.branch} now carries kit ${pin.kit}, so ${e.name}'s bump to kit ${m[2]} has passed. Closed by the ${APP.name}.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
+    if (!gone) {
+      o.log(`work: couldn't close ${f.url}, whose failure is gone: ${redact(lastLine(r))}`);
+      continue;
+    }
+    delete filed[id];
+    changed = true;
+    if (r.code === 0) o.log(`work: closed ${f.url}: ${e.name} carries kit ${pin.kit} now`);
+  }
+  if (changed) writeJson(workFiledFile(), filed);
 }
 
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;
