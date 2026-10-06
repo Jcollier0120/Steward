@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
@@ -134,6 +135,17 @@ export function pick(all: Employee[], only?: string[] | null): { employees: Empl
 }
 
 export const checkoutOf = (e: Employee) => path.resolve(expandEnv(e.checkout));
+
+/**
+ * Why an employee isn't hired on this PC, or null when it is (or Settings name no install folder): its install folder
+ * is gone, so it was removed (Manor's Fire, or by hand). The Steward still looks after its code, but never installs it
+ * again by itself, by a release built here or an install: only Manor's Hire brings it back.
+ */
+export function notHiredHere(e: Pick<Employee, 'installed' | 'name'>): string | null {
+  if (!e.installed) return null;
+  const app = path.resolve(expandEnv(e.installed));
+  return existsSync(app) ? null : `${e.name} isn't installed on this PC (no ${e.installed}), and the Steward doesn't install it again by itself: hire it in Manor to have it back`;
+}
 export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
 /** The Steward's worktree for an employee's bump, and the one for its release. */
 export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), e.id);

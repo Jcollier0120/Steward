@@ -18,7 +18,7 @@ import type { PrInfo } from './stages/staff.ts';
  * Where the Bailiff is installed (settings.ts's bailiffInstalled), one more: the Bailiff, which reads each draft with
  * Claude Code, has approved its current head commit. It labels the PR bailiff:approved and ends its review comment
  * with a marker naming the commit it reviewed; both must agree with the head the Steward is about to mark ready.
- * Without the Bailiff, nothing changes.
+ * Without the Bailiff, none is marked ready (stages/merge.ts's NO_BAILIFF): a person reviews it and marks it ready.
  */
 
 export const WRIGHT_LABEL = 'wright';

@@ -114,6 +114,9 @@ test("the Wright's and the Bailiff's pages are read for alarms where each is ins
     rmSync(process.env.WRIGHT_HOME!, { recursive: true, force: true });
     rmSync(process.env.BAILIFF_HOME!, { recursive: true, force: true });
   }
+  // Removed: a page Settings still name isn't read, so it can't be "down" for ever.
+  const named = normalizeSettings({ alarms: { wrightUrl: 'http://127.0.0.1:19797', bailiffUrl: 'http://127.0.0.1:19999' } }).settings.alarms;
+  assert.deepEqual([named.wrightUrl, named.bailiffUrl], ['', '']);
 });
 
 // The migration: an install that ran on the old built-in employees keeps them, read from its staff table and its clones.

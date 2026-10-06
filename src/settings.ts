@@ -163,7 +163,8 @@ export const REEVE_URL = 'http://127.0.0.1:18383';
 /**
  * The Bailiff is ours alone too (Manor marks it internal), and reviews the Wright's drafts. Where it is installed
  * (%USERPROFILE%\.bailiff\app, or BAILIFF_HOME's app) the Steward takes it on as it does the Wright, reads its page for
- * alarms, and marks a draft of the Wright's ready only once the Bailiff has approved its head commit (review.ts).
+ * alarms, and marks a draft of the Wright's ready only once the Bailiff has approved its head commit (review.ts). Where
+ * it isn't, the Wright's drafts wait for a person: the manor takes on no new work without both.
  */
 export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
 export const BAILIFF_URL = 'http://127.0.0.1:19999';
@@ -392,9 +393,10 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     manorUrl: url(a.manorUrl, d.manorUrl),
     surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
     // Not named in settings.json: the Wright's page where it is installed, else none (it is ours alone).
-    wrightUrl: a.wrightUrl === undefined ? (wrightInstalled() ? WRIGHT_URL : '') : url(a.wrightUrl, d.wrightUrl),
+    // Read only where it is installed: a page Settings still name after it's removed would be "down" for ever.
+    wrightUrl: !wrightInstalled() ? '' : a.wrightUrl === undefined ? WRIGHT_URL : url(a.wrightUrl, d.wrightUrl),
     // The same for the Bailiff's.
-    bailiffUrl: a.bailiffUrl === undefined ? (bailiffInstalled() ? BAILIFF_URL : '') : url(a.bailiffUrl, d.bailiffUrl),
+    bailiffUrl: !bailiffInstalled() ? '' : a.bailiffUrl === undefined ? BAILIFF_URL : url(a.bailiffUrl, d.bailiffUrl),
     reeveUrl: url(a.reeveUrl, d.reeveUrl),
     tastingHours: whole(a.tastingHours, 1, 168, d.tastingHours),
   };

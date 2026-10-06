@@ -239,9 +239,12 @@ export function workItems(o: { failedReleases: Record<string, string>; failedRol
   return out;
 }
 
+/** Why nothing goes to the Wright when its page isn't read: it isn't on this PC (or Settings name no page for it). */
+export const NO_WRIGHT = "the Wright isn't on this PC, so it waits for a person (hire the Wright in Manor to hand such work to it)";
+
 /** The Wright's queue as its GET /api/work says, or why work can't go to it. */
 export function readQueue(work: unknown): { label: string; repos: string[]; team: string[] } | { why: string } {
-  if (work === null || work === undefined) return { why: "the Wright's page isn't set (The Wright's page, under Alarms in Settings)" };
+  if (work === null || work === undefined) return { why: NO_WRIGHT };
   const w = work as any;
   if (typeof w !== 'object' || Array.isArray(w)) return { why: "the Wright's page doesn't answer" };
   if (Object.keys(w).length === 1 && 'error' in w) return { why: `the Wright's page doesn't answer (${String(w.error)})` };
@@ -352,8 +355,9 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   for (const item of o.items) {
     const f = filed[item.id];
     if (f) {
-      // A Wright that no longer works there leaves it to a person; one that doesn't answer is the Wright's own alarm.
-      if (takes && !takes.has(f.repo.toLowerCase())) states.set(item.id, { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` });
+      // A Wright that no longer works there, or is gone from this PC, leaves it to a person; one that doesn't answer is the Wright's own alarm.
+      if (o.work === null || o.work === undefined) states.set(item.id, { state: 'not-filed', why: `${NO_WRIGHT}; ${f.url} was filed` });
+      else if (takes && !takes.has(f.repo.toLowerCase())) states.set(item.id, { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` });
       else {
         const says = wrightSays(o.work, f);
         states.set(item.id, says ? { ...says, url: f.url, at: f.at } : { state: 'filed', url: f.url, at: f.at });

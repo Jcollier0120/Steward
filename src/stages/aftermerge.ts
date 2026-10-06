@@ -5,7 +5,7 @@ import type { AfterStep } from '../after.ts';
 import { gh } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import { releasedHere, type Employee, type Settings } from '../settings.ts';
-import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { notHiredHere, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
@@ -36,6 +36,8 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   if (releasedHere(e)) return result(e, 'done', `installed by its release, built here from its clone (${e.release})`);
   // No install command: it is installed another way (Heiward, by Manor, from its own installer), not by the Steward.
   if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command, so it is installed another way (Manor's updates), not by the Steward`);
+  const away = notHiredHere(e);
+  if (away) return result(e, 'skipped', away);
   const latest = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
   const dir = installDirOf(ctx.settings, e);
