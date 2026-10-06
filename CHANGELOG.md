@@ -26,6 +26,19 @@ Nothing: it updates itself as usual.
 
 Nothing: it updates itself as usual.
 
+## 0.10.3
+
+**A kit that breaks many agents at once goes to the Wright all at once, and the Wright can redo a PR the Steward closed.**
+
+### What changed
+
+- When a new kit fails several agents' checks, every failed bump goes to the Wright the same day. A kit's failed bumps now count as one of the Wright's three issues a day, since they're one change with usually one cause. Before, three were filed and the rest stayed alarms, saying "this one waits for tomorrow", for days.
+- When the Steward closes a Wright PR that conflicts and queues its issue again, it now deletes the PR's branch too. The Wright's redo uses the same branch name, so it couldn't push and got stuck ("the branch couldn't be pushed").
+
+### Before you update
+
+Nothing: it updates itself as usual. Bumps that are waiting for tomorrow are filed for the Wright at the next round, and their alarms wait while it works on them.
+
 ## 0.10.2
 
 **Kit 2.23.0: the Steward's Settings are a React form, and shorter to read** (kit/CHANGELOG.md).

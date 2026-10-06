@@ -26,7 +26,8 @@ import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/
  *   and only when gh here is signed in as one of its `team` (it takes no one else's issues), as the Surveyor and the
  *   Aletaster file.
  * - **How much:** each once, by a hidden marker in its body (<!-- steward:work:<id> -->, the id per employee, kind and
- *   kit version or commit), so an issue already open is never filed twice; at most PER_DAY a day.
+ *   kit version or commit), so an issue already open is never filed twice; at most PER_DAY a day, a kit's failed bumps
+ *   counting as one (slotOf).
  * - **The alarm:** held back for the alarms' while for a PR (waitingHours, a day) from when it was filed: by then the
  *   Wright's draft has been reviewed, merged and released, or bumped again, and the failure is gone. Raised at once
  *   when the Wright gets stuck on the issue (wright:stuck), its PR for it waits for a person (wright:needs-you), the
@@ -37,6 +38,16 @@ import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/
  */
 
 export const PER_DAY = 3;
+
+/**
+ * What an issue counts as against the day's few: each its own, but a kit's failed bumps one between them. They are one
+ * change's (the kit's), usually with one cause, so the bumps a kit breaks are all filed the day it breaks them, rather
+ * than three a day while the rest are alarms.
+ */
+export function slotOf(id: string): string {
+  const kit = /^bump:[^:]+:(.+)$/.exec(id)?.[1];
+  return kit ? `bump:${kit}` : id;
+}
 export const workFiledFile = () => dataFile('work-filed.json');
 
 export interface WorkItem {
@@ -273,7 +284,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   const takes = 'why' in q ? null : new Set(q.repos.map((r) => r.toLowerCase()));
   const perDay = o.perDay ?? PER_DAY;
   const at = o.now.toISOString();
-  let today = Object.values(filed).filter((f) => !f.adopted && localDay(Date.parse(f.at)) === localDay(o.now.getTime())).length;
+  const today = new Set(Object.entries(filed).filter(([, f]) => !f.adopted && localDay(Date.parse(f.at)) === localDay(o.now.getTime())).map(([id]) => slotOf(id)));
   let login: string | null | undefined;
   const open = new Map<string, { number: number; url: string; body: string }[] | null>();
 
@@ -301,7 +312,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       states.set(item.id, { state: 'not-filed', why: `the Wright doesn't work in ${item.repo}` });
       continue;
     }
-    if (today >= perDay) {
+    if (!today.has(slotOf(item.id)) && today.size >= perDay) {
       states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
       continue;
     }
@@ -344,7 +355,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       continue;
     }
     filed[item.id] = { url: url[0], number: Number(url[1]), repo: item.repo, at, condition: item.condition };
-    today++;
+    today.add(slotOf(item.id));
     o.log(`work: filed ${url[0]} for the Wright: ${item.title}`);
     states.set(item.id, { state: 'filed', url: url[0], at });
   }
