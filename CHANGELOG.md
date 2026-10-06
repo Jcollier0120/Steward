@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.12
+
+**One alarm while the Bailiff can't review, not one more for each Wright PR waiting on it.**
+
+### What changed
+
+- While the Bailiff's page doesn't answer, or the Bailiff can't use Claude Code, the Wright's drafts that wait only for its review used to each raise their own "has waited 24 hours" alarm on top of the Bailiff's. Now the Bailiff's alarm lists them ("The Wright's drafts waiting on it: …") and they raise nothing of their own. A draft held for another reason (the Steward's own look, or the Bailiff asking for changes) still has its own alarm. Once the Bailiff reviews again, everything is as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.11.11
 
 **Without the Wright and the Bailiff, the manor keeps itself running but takes on no new work.**

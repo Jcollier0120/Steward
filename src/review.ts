@@ -22,6 +22,8 @@ import type { PrInfo } from './stages/staff.ts';
  */
 
 export const WRIGHT_LABEL = 'wright';
+/** How a draft of the Wright's held only for the Bailiff's review starts its hold (stages/merge.ts's holdReason). */
+export const BAILIFF_WAIT = 'a draft from the Wright, with the Bailiff: ';
 export const NEEDS_YOU_LABEL = 'wright:needs-you';
 export const BAILIFF_LABELS = { approved: 'bailiff:approved', changes: 'bailiff:changes', waiting: 'bailiff:waiting' } as const;
 

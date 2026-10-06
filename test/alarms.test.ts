@@ -224,6 +224,20 @@ test("from the Bailiff: Claude Code unusable, or a review failing twice, at once
   assert.ok(asked.includes('http://127.0.0.1:19999/api/reviews'));
   assert.ok(st.open.some((a) => a.id === 'bailiff:claude:blocked'));
 });
+test("while the Bailiff can't review at all, the Wright's drafts waiting only for it are named in its one alarm, not each raised after a day", () => {
+  const { foldBailiffWaits } = alarmsModule;
+  const wait = (n: number, why: string) => ({ id: `waiting:Jcollier0120/Porter#${n}`, who: 'porter', title: `Porter #${n} has waited 24 hours or more: ${why}`, detail: [], url: `https://github.com/Jcollier0120/Porter/pull/${n}`, afterMs: 24 * HOUR });
+  const forReview = wait(40, "a draft from the Wright, with the Bailiff: waiting for the Bailiff's review");
+  const changes = wait(41, 'a draft from the Wright, with the Bailiff: the Bailiff asked for changes (its comment says which)');
+  const forYou = wait(42, 'a draft from the Wright, waiting for you: it changes what a person reviews');
+  const down = { id: 'bailiff:down', who: 'bailiff', title: "The Bailiff's page doesn't answer, so the Wright's drafts wait for its review", detail: ['ECONNREFUSED'], afterMs: 2 * HOUR };
+  assert.deepEqual(foldBailiffWaits([forReview, changes, forYou]), [forReview, changes, forYou], 'the Bailiff up: each keeps its own');
+  const folded = foldBailiffWaits([forReview, changes, forYou, down]);
+  assert.deepEqual(folded.map((c) => c.id), [changes.id, forYou.id, 'bailiff:down'], 'asked for changes, or held by the Steward: still their own');
+  assert.deepEqual(folded.at(-1)!.detail, ['ECONNREFUSED', "The Wright's drafts waiting on it: https://github.com/Jcollier0120/Porter/pull/40."]);
+  const blocked = { id: 'bailiff:claude:blocked', who: 'bailiff', title: "The Bailiff can't review: Claude Code isn't signed in", detail: [], afterMs: 0 };
+  assert.deepEqual(foldBailiffWaits([forReview, blocked]).map((c) => c.id), ['bailiff:claude:blocked']);
+});
 
 // Reeve's jobs' open alerts (his GET /api/alerts) are alarms at once, with the Steward's toast, since Reeve raises
 // none of his own when Manor and the Steward are installed.

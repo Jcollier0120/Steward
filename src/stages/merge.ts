@@ -12,7 +12,7 @@ import { kickBack } from './kickback.ts';
 import { kitTrialHold } from './trial.ts';
 import { claimsOn } from '../claims.ts';
 import type { Held } from '../alarms.ts';
-import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
+import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -44,7 +44,7 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
-  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `a draft from the Wright, with the Bailiff: ${pr.bailiffHold}` : 'a draft';
+  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `${BAILIFF_WAIT}${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return 'GitHub is still working out whether it merges: try again in a minute';
