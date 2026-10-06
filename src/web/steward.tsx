@@ -164,6 +164,13 @@ function StaffRow({ r, kit }: { r: StaffRowView; kit: string | null }) {
 }
 
 function StaffTable({ s }: { s: StaffView }) {
+  if (!s.rows.length)
+    return (
+      <Card className="empty" tour="staff">
+        No employees yet. Add one in Settings, under Employees, for each repository of yours the Steward should look after:
+        its GitHub repository (owner/name), your clone of it, and how to test and release it.
+      </Card>
+    );
   return (
     <Card tour="staff">
       <table>

@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.3
+
+**No one's repositories are built in: the Steward looks after the ones you add.**
+
+### What changed
+
+- Employees in Settings start empty. Add one for each repository of yours the Steward should look after: its GitHub repository (owner/name), your clone of it, and how to test and release it. The page says how when there are none.
+- The Steward's repository and the Steward's checkout in Settings start empty too. Empty, the Steward doesn't release itself or merge its own PRs, and a kit rollout needs a kit you name. With only a clone named, its origin is used as the repository.
+- `claim-version steward` finds the Steward's own repository from Settings, or from the Steward clone it is run in.
+- The examples in Settings no longer name anyone's account or repository.
+
+### Before you update
+
+- Nothing to do: an install that has been running keeps what it looks after. The first time the new version reads its settings, if settings.json doesn't list employees yet, the employees from its last look are written into settings.json once, each read from its clone on this PC. One whose clone isn't on this PC is left out. If something can't be read from a clone (for example a test command for a project that isn't a Node one), an alarm says what, and that employee waits off the kit's stages until you fill it in under Settings, Employees, and save.
+- Settings you already saved are kept as they are.
+- This release brings 0.10.6 (kit 2.25.0) too, if that wasn't released on its own.
+
 ## 0.10.6
 
 **Kit 2.25.0: shared settings for every agent, and a tour that fits the page** (kit/CHANGELOG.md): one round interval, a plain-words notes switch and a model-call limit with the same name in every agent, the folders Windows keeps wherever OneDrive moved them, and a new hire's tour that can take you back to Manor.

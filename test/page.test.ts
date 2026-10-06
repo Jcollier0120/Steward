@@ -10,7 +10,7 @@ import { after, before, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-page-'));
 process.env.STEWARD_HOME = home;
 process.env.STEWARD_PORT = String(41000 + Math.floor(Math.random() * 8000));
-writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [] }));
+writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], stewardRepo: 'octocat/steward' }));
 
 const { APP, port } = await import('../src/app.ts');
 const { serveSteward, askOf } = await import('../src/agent.ts');
@@ -73,6 +73,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const { body } = await (await fetch(`${base()}/api/page`)).json();
   const html = (await renderStewardBody())(body);
   assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
+  assert.match(html, /No employees yet\. Add one in Settings, under Employees/, 'no employees: how to add one');
   for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
   assert.match(html, />Merge the team(&#x27;|')s PRs</);
   // By itself (Settings' default): its rounds; and Run now, in the title bar.

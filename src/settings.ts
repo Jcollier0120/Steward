@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
+import { originRepo } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
+import { migrateSettings } from './migrate.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
 /** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
@@ -117,14 +119,14 @@ export interface AlarmSettings {
 }
 
 /**
- * A Node agent on the kit, by its name. A name of two words (the Developer Herald) is its id with a dash
- * (developer-herald, its data folder too), and its repository and checkout without the space (DeveloperHerald).
+ * An employee of the usual shape, a Node agent on the kit, by its id and name: what a record in settings.json gets for
+ * a field it leaves out. No repository or clone: those are yours, and Settings name them.
  */
-const hire = (name: string): Employee => ({
-  id: idOf(name),
+export const blankEmployee = (id: string, name: string): Employee => ({
+  id,
   name,
-  repo: `Jcollier0120/${name.replaceAll(' ', '')}`,
-  checkout: `C:\\Projects\\${name.replaceAll(' ', '')}`,
+  repo: '',
+  checkout: '',
   branch: 'main',
   usesKit: true,
   parts: ['node', 'web', 'spec'],
@@ -134,14 +136,12 @@ const hire = (name: string): Employee => ({
   release: 'npm run release -- --publish',
   install: 'node src/cli.ts install',
   approve: '',
-  installed: `%USERPROFILE%\\.${idOf(name)}\\app`,
+  installed: `%USERPROFILE%\\.${id}\\app`,
 });
-const idOf = (name: string) => name.toLowerCase().replaceAll(' ', '-');
 
 /**
- * The Wright is ours alone (Manor marks it internal): it isn't among the employees anyone else's Steward has. Where
- * it is installed (%USERPROFILE%\.wright\app, or WRIGHT_HOME's app), and Settings name no employees of their own,
- * the Steward takes it on, and reads its page for alarms.
+ * The Wright, where it is installed (%USERPROFILE%\.wright\app, or WRIGHT_HOME's app): the Steward reads its page for
+ * alarms. It looks after the Wright's own code only when Settings name it as an employee, as any other.
  */
 export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
 export const WRIGHT_URL = 'http://127.0.0.1:19797';
@@ -159,57 +159,11 @@ export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => exists
 export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
- * The eight hires, then Reeve and Heiward (the README's "Reeve and Heiward"), then the Surveyor, the Lamplighter, the Smith, the Developer
- * Herald (the Herald's developer half since Herald 0.5.0) the Chamberlain, and the general agents of the developer offices (the Thatcher, the Reckoner, the Weigher and the
- * Shepherd: Reeve's, the Auditor's, the Aletaster's and the Pinder's), announced to Manor by their releases, not in Manor's staff.json, built on
- * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
- * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
- * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
+ * None: the Steward looks after the repositories you give it, each an employee in Settings (its GitHub repository, your
+ * clone of it, and how to test and release it). Nobody's list is built in. An install that ran on the defaults, before
+ * this, has its staff table's employees written to settings.json once instead (migrate.ts).
  */
-export const DEFAULT_EMPLOYEES: Employee[] = [
-  ...['Porter', 'Auditor', 'Clerk', 'Herald', 'Warrener', 'Aletaster', 'Miller', 'Pinder'].map(hire),
-  {
-    ...hire('Reeve'),
-    parts: ['node', 'spec'],
-    versionFiles: ['package.json', 'package-lock.json', 'src/mcp.ts'],
-    // Reeve's jobs run only while their script's sha256 is the approved one: `reeve jobs approve <name>`, and with
-    // --sha256 (Reeve 0.4.3 and later) only the script the Steward checked, or none.
-    approve: 'node %USERPROFILE%\\.reeve\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}',
-  },
-  {
-    id: 'heiward',
-    name: 'Heiward',
-    repo: 'Jcollier0120/Heiward',
-    checkout: 'C:\\Projects\\Heiward',
-    branch: 'master',
-    usesKit: true,
-    parts: ['spec'],
-    fill: 'powershell -NoProfile -File tools\\kit.ps1',
-    test: ['dotnet test HEI.Core.Tests'],
-    versionFiles: ['HEI.Agent/HEI.Agent.csproj'],
-    release: 'powershell -NoProfile -File HEI.Agent\\release.ps1 -Publish',
-    // Heiward installs as a Windows app (Settings > Apps), not from a zip with src\cli.ts: the Steward doesn't install it.
-    install: '',
-    approve: '',
-    installed: '',
-  },
-  hire('Surveyor'),
-  hire('Lamplighter'),
-  hire('Smith'),
-  hire('Developer Herald'),
-  hire('Chamberlain'),
-  hire('Thatcher'),
-  hire('Reckoner'),
-  hire('Weigher'),
-  hire('Shepherd'),
-];
-
-/** The employees when Settings name none: the defaults, and the Wright and the Bailiff where each is installed. */
-export const defaultEmployees = (env: NodeJS.ProcessEnv = process.env): Employee[] => [
-  ...DEFAULT_EMPLOYEES,
-  ...(wrightInstalled(env) ? [hire('Wright')] : []),
-  ...(bailiffInstalled(env) ? [hire('Bailiff')] : []),
-];
+export const DEFAULT_EMPLOYEES: Employee[] = [];
 
 /**
  * Told after a release: Manor's update check (so it installs the release within minutes, not at its next look hours
@@ -228,7 +182,7 @@ export const DEFAULT_SETTINGS: Settings = {
   team: DEFAULT_TEAM,
   workRoot: path.join(dataDir, 'work'),
   releaseAfterMerge: false,
-  stewardRepo: 'Jcollier0120/Steward',
+  stewardRepo: '',
   parallel: 2,
   byItself: true,
   roundMinutes: 10,
@@ -240,11 +194,11 @@ export const DEFAULT_SETTINGS: Settings = {
   rollout: true,
   releaseSelf: true,
   mergeSelf: true,
-  stewardCheckout: 'C:\\Projects\\Steward',
+  stewardCheckout: '',
   fileWork: true,
 };
 
-const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like Jcollier0120/Porter' };
+const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like octocat/hello-world' };
 const command = { maxLength: 500 };
 
 /** Each setting as the page's Settings panel shows it, and as the kit's settings-kit.ts checks it. */
@@ -256,7 +210,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     title: 'name',
     unique: 'id',
     label: 'Employees',
-    help: 'Every agent the Steward looks after: where its code is, which kit parts it takes, and how to fill its kit, test it, bump its version and release it.',
+    help: 'Every repository of yours the Steward looks after: its GitHub repository (owner/name), your clone of it, which kit parts it takes, and how to fill its kit, test it, bump its version and release it. None to begin with: add one for each repository you want looked after.',
     maxItems: 50,
     blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '', installed: '' },
     fields: [
@@ -281,7 +235,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'list',
     label: 'Team',
     help: "The GitHub accounts whose PRs to the employees the Steward merges as well as its own, when asked: merge --team, or Merge the team's PRs. Empty: the account gh is signed in as on this PC, which is yours; Claude Code opens its PRs with it, so it covers them. Accounts named here are the whole team instead, so name yours among them. A team PR that isn't a draft is ready to merge: open one that needs review as a draft. One with no checks on GitHub is tested here first, and the version it sets must be new. Their branches are left as they are.",
-    item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like Jcollier0120, or app/<name> for a GitHub App' },
+    item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like octocat, or app/<name> for a GitHub App' },
     maxItems: 20,
   },
   {
@@ -293,7 +247,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     path: { is: 'folder', missing: 'warn', missingNote: 'The Steward makes it.', env: true },
   },
   { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', help: 'Off: Release is a stage of its own.' },
-  { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: 'Where the kit releases (kit-v<version>) are.', maxLength: 140, ...REPO },
+  { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: "The Steward's own GitHub repository, if you keep one: where its kit releases (kit-v<version>) are, and where it releases itself.", empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO },
   { key: 'parallel', kind: 'whole', min: 1, max: 10, unit: 'employees', label: 'Checked at once', help: 'How many employees a bump tests at the same time.' },
   {
     key: 'byItself',
@@ -329,7 +283,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'stewardCheckout',
     kind: 'text',
     label: "The Steward's checkout",
-    help: 'Your clone of the Steward, which its own releases are made from: a worktree of it at origin/main, in the work folder. Your working tree is never touched.',
+    help: 'Your clone of the Steward, if you keep one, which its own releases are made from: a worktree of it at origin/main, in the work folder. Your working tree is never touched.',
+    empty: "None: it doesn't release itself or merge its own PRs",
     maxLength: 260,
     path: { is: 'folder', missing: 'warn', missingNote: "Without it, the Steward's own versions are left to you.", env: true },
   },
@@ -390,7 +345,7 @@ const strings = (v: unknown, fallback: string[]) => (Array.isArray(v) ? v.filter
 
 function normalizeEmployee(e: any): Employee | null {
   if (!e || typeof e !== 'object' || typeof e.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(e.id)) return null;
-  const known = DEFAULT_EMPLOYEES.find((d) => d.id === e.id) ?? hire(e.id.charAt(0).toUpperCase() + e.id.slice(1));
+  const known = blankEmployee(e.id, e.id.charAt(0).toUpperCase() + e.id.slice(1));
   return {
     id: e.id,
     name: str(e.name, known.name),
@@ -451,7 +406,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
   const problems: string[] = [];
-  let employees = defaultEmployees();
+  let employees: Employee[] = [];
   if (Array.isArray(r.employees)) {
     employees = r.employees.map(normalizeEmployee).filter((e): e is Employee => e !== null);
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);
@@ -485,6 +440,9 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
 
 export const settingsFile = () => dataFile('settings.json');
 
+/** The Steward's own repository: Settings' when they name it, else the origin of the clone they name, else none. */
+export const selfRepoOf = (s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): string => s.stewardRepo || (s.stewardCheckout ? (originRepo(s.stewardCheckout) ?? '') : '');
+
 /** The Steward's settings, for the kit's Settings panel and its API. */
 export const SETTINGS_SPEC: SettingsSpec<Settings> = {
   schema: SETTINGS_SCHEMA,
@@ -495,5 +453,7 @@ export const SETTINGS_SPEC: SettingsSpec<Settings> = {
 };
 
 export function loadSettings(): Settings {
+  // Once, for an install that ran on the old built-in employees: they are written out from its staff table (migrate.ts).
+  migrateSettings({ settingsFile: settingsFile(), staffFile: dataFile('staff.json') });
   return normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
 }

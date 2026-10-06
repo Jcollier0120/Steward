@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { Runner } from '../src/run.ts';
-import { DEFAULT_EMPLOYEES, type Employee } from '../src/settings.ts';
+import type { Employee } from '../src/settings.ts';
+import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
 import { releaseNeedsPackages, releaseOne } from '../src/stages/release.ts';
 import { ctxFor, ok, runner, sh } from './helpers.ts';
 

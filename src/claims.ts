@@ -2,7 +2,10 @@ import { showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import type { Employee } from './settings.ts';
+import { originRepo } from './kit/manor.ts';
+import { stewardCloneAt } from './migrate.ts';
+import type { Employee, Settings } from './settings.ts';
+import { stewardEmployee } from './stages/selfmerge.ts';
 import { checkoutOf, freshBranch, releasedOf, type Ctx } from './stages/common.ts';
 import { gh } from './git.ts';
 import { agreedVersion, bumpPatch } from './versions.ts';
@@ -135,4 +138,22 @@ export async function pruneClaims(rows: { repo: string; name: string; main: { ve
     });
     if (kept.length !== all.length) writeJson(claimsFile(), kept);
   });
+}
+
+/**
+ * The Steward's own, for a claim: its repository and clone from Settings; else the Steward clone this runs in (a
+ * session's worktree of it), and that clone's origin. Null when there's neither.
+ */
+export function selfFor(s: Settings, cwd = process.cwd()): Employee | null {
+  const checkout = s.stewardCheckout || stewardCloneAt(cwd) || '';
+  const repo = s.stewardRepo || (checkout ? (originRepo(checkout) ?? '') : '');
+  return repo && checkout ? stewardEmployee({ ...s, stewardRepo: repo }, checkout) : null;
+}
+
+/** An employee by its id, its name or its repository; the Steward's own repository too. */
+export function employeeFor(s: Settings, who: string, cwd = process.cwd()): Employee | null {
+  const w = who.toLowerCase();
+  const self = selfFor(s, cwd);
+  const all = [...s.employees, ...(self ? [self] : [])];
+  return all.find((e) => e.id.toLowerCase() === w || e.name.toLowerCase() === w || e.repo.toLowerCase() === w || e.repo.split('/')[1]?.toLowerCase() === w) ?? null;
 }

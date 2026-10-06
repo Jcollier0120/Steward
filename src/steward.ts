@@ -9,7 +9,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
 import { run as realRun, type Runner } from './run.ts';
-import { loadSettings, type Employee, type Settings } from './settings.ts';
+import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
+import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
@@ -89,7 +90,9 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
   const given = o.settings ?? loadSettings();
-  const settings = o.team === false ? given : withTeam(given, log, o.owner);
+  // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
+  const own = { ...given, stewardRepo: selfRepoOf(given) };
+  const settings = o.team === false ? own : withTeam(own, log, o.owner);
   const glance = o.glance === false ? null : await tryGlance(run, settings, log);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
@@ -101,6 +104,7 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
 async function changelogFor(ctx: Ctx, kit: string): Promise<string | null> {
   const local = localChangelog(ctx.kit);
   if (local) return local;
+  if (!ctx.settings.stewardRepo) return null;
   try {
     const body = JSON.parse(await gh(ctx.run, ctx.neutralDir, 'release', 'view', `kit-v${kit}`, '--repo', ctx.settings.stewardRepo, '--json', 'body')).body as string;
     return body.startsWith('## ') ? body : `## ${kit}\n\n${body}`;
@@ -189,6 +193,7 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   if (!ctx.settings.mergeSelf) return null;
   if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  if (!ctx.settings.stewardRepo || !checkout) return null;
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
 
@@ -200,6 +205,8 @@ async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
   if (!ctx.settings.releaseSelf) return [];
   if (process.env.NODE_TEST_CONTEXT && !o.self) return [];
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  // No repository or clone of its own in Settings: it doesn't release itself.
+  if (!ctx.settings.stewardRepo || !checkout) return [];
   try {
     const facts = ctx.glance ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
     return await releaseSelf(ctx, { checkout, ...facts });
@@ -345,7 +352,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
