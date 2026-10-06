@@ -74,12 +74,20 @@ test('the page is drawn in the browser: its shell carries the token, its first d
 test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const { body } = await (await fetch(`${base()}/api/page`)).json();
   const html = (await renderStewardBody())(body);
-  assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
+  // No repositories here: the kit is the one it keeps to run on, its rounds keep the staff's pages up, and no stages.
+  assert.equal(body.round.repos, false);
+  assert.match(html, /The kit the Steward manages: <strong>1\.0\.0<\/strong>/);
   assert.match(html, /No employees yet\. Add one in Settings, under Employees/, 'no employees: how to add one');
-  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
-  assert.match(html, />Merge the team(&#x27;|')s PRs</);
+  assert.match(html, /No repositories to look after on this PC, so a round every 10 minutes while on duty opens again, through Manor, the page of any agent/);
+  assert.doesNotMatch(html, /data-post="\/api\/stage\//, 'no stages, with no one to run them for');
+  // With an employee: the kit it hands out, the stages and the whole round (the same data, drawn as if it had one).
+  const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: ['node'], usesKit: true, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
+  const withOne = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true } });
+  assert.match(withOne, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
+  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
+  assert.match(withOne, />Merge the team(&#x27;|')s PRs</);
   // By itself (Settings' default): its rounds; and Run now, in the title bar.
-  assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
+  assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
@@ -127,7 +135,11 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   const now = await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve'] });
   assert.deepEqual(await now.json(), { started: true });
   await served.idle();
-  // During a round: queued, and approved once it ends, nothing left running after.
+  // During a round: queued, and approved once it ends, nothing left running after. The round has a repository to look
+  // at (a clone here), so it asks GitHub, and waits while the commands are held.
+  const settingsFile = path.join(home, 'settings.json');
+  const was = readFileSync(settingsFile, 'utf8');
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
   let letGo = () => {};
   hold = new Promise((done) => (letGo = done));
   const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
@@ -138,6 +150,7 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   letGo();
   hold = Promise.resolve();
   await served.idle();
+  writeFileSync(settingsFile, was);
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.equal(ping.busy, false);
 });

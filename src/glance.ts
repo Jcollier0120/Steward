@@ -169,6 +169,8 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
 export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>): Promise<Glance> {
   const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
   const all = settings.employees;
+  // Nothing to ask about: no employee, and no repository of its own.
+  if (!all.length && !settings.stewardRepo) return glance;
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {
     const chunk = all.slice(i, i + PER_QUERY);
     const stewardRepo = i === 0 ? settings.stewardRepo : null;

@@ -11,7 +11,8 @@ import type { Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff } from './stages/staff.ts';
-import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
+import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
+import { loadTending } from './tend.ts';
 import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
@@ -23,9 +24,11 @@ import { testedView } from './tested.ts';
  * refreshes itself while it runs.
  *
  * Its duty (start and stop, from Manor) works as every agent's does. Its round (stages/round.ts) comes every
- * few minutes while it's on duty and Settings say it merges and releases by itself, through the kit's every()
- * in schedule.ts: every ready PR of its own and the team's merged, with what each asks for after, and every
- * version not yet released released. Run now does one round, on duty or not.
+ * few minutes while it's on duty, through the kit's every() in schedule.ts: while Settings say it merges and releases
+ * by itself, every ready PR of its own and the team's merged, with what each asks for after, and every version not yet
+ * released released; and while they say it keeps the staff's pages up, every agent on duty whose page doesn't answer
+ * opened again through Manor (tend.ts). With no repositories here, that is the whole round. Run now does one round,
+ * on duty or not.
  */
 
 const ICON = readFileSync(new URL('../art/icon.svg', import.meta.url), 'utf8');
@@ -111,10 +114,14 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
     return !s || Date.now() - Date.parse(s.checked ?? s.at) > STALE_MS;
   };
   if (staleTable()) void refresh();
-  /** Whether the rounds are keeping the table current: scheduled, on duty, and the last one not long ago. */
+  /**
+   * Whether the rounds are keeping the table current: scheduled, merging and releasing by itself with repositories to
+   * look at (a round that only keeps the staff's pages up asks GitHub nothing), on duty, and the last one not long ago.
+   */
   const roundsKeepIt = () => {
     const last = rounds?.state?.lastRunAt;
-    return !!rounds && duty().onDuty && !!last && Date.now() - Date.parse(last) < 2 * loadSettings().roundMinutes * 60_000 + STALE_MS;
+    const s = loadSettings();
+    return !!rounds && s.byItself && duty().onDuty && !!last && Date.now() - Date.parse(last) < 2 * s.roundMinutes * 60_000 + STALE_MS && reposHere(s);
   };
 
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
@@ -123,8 +130,10 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
     if (running) return;
     running = { stage: 'round', since: new Date().toISOString() };
     try {
-      // A scheduled round looks only at what's new on GitHub; Run now looks at everyone.
-      await runStage('round', full ? { full } : {}, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
+      // doesn't merge and release by itself (it keeps the staff's pages up), it asks GitHub nothing.
+      const ask: StageAsk = full ? { full } : loadSettings().byItself ? {} : { tendOnly: true };
+      await runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
@@ -132,13 +141,14 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
       afterRunning();
     }
   };
-  // On duty, every few minutes while Settings say it merges and releases by itself; the kit's every() pauses off
-  // duty. Saving Settings starts, stops or re-times it.
+  // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
+  // kit's every() pauses off duty. Saving Settings starts, stops or re-times it.
   let rounds: ReturnType<typeof every> | null = null;
   const arrange = () => {
     const s = loadSettings();
-    if (s.byItself && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round' });
-    else if (!s.byItself && rounds) {
+    const scheduled = s.byItself || s.tend;
+    if (scheduled && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round' });
+    else if (!scheduled && rounds) {
       rounds.stop();
       rounds = null;
     } else rounds?.reschedule();
@@ -149,10 +159,10 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
   const pageData = () => {
     const s = loadSettings();
     const busy = running !== null || refreshing !== null;
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s) };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
-    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined };
+    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 
