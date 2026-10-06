@@ -216,6 +216,29 @@ async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
   }
 }
 
+/**
+ * The employees' jobs approved now, as a round approves them at its end (stages/jobs.ts: only a script that is exactly
+ * the merged one), for Manor to ask right after it installs an update (POST /api/jobs/approve), so a job whose script
+ * the update changed doesn't wait up to a round to run. `ids`: only these employees, all that approve jobs when empty.
+ * Under the stages' lock; nothing is asked of GitHub but each one's branch, fetched. One line for each it approved.
+ */
+export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: Owner; log?: (line: string) => void } = {}): Promise<EmployeeResult[]> {
+  const log = o.log ?? (() => {});
+  return withLock(stageLock(), async () => {
+    const ctx = await context({ run: o.run, log, glance: false, owner: o.owner });
+    const out: EmployeeResult[] = [];
+    for (const e of ctx.settings.employees.filter((x) => x.approve && (!ids.length || ids.includes(x.id)))) {
+      try {
+        const r = await approveMerged(ctx, e);
+        if (r) out.push({ ...r, message: `jobs: ${r.message}` });
+      } catch (err) {
+        log(`[${e.id}] jobs: ${(err as Error).message}`);
+      }
+    }
+    return out;
+  });
+}
+
 /** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
 export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: StageOptions = {}): Promise<StageResult> {
   const lines: string[] = [];

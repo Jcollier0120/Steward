@@ -8,7 +8,7 @@ import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
-import { fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
+import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -534,6 +534,8 @@ export async function watchAlarms(
     try {
       items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
+      // And the bump issues whose failure is gone, closed, so the Wright isn't sent to find nothing to do.
+      await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);
     }

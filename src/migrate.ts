@@ -61,12 +61,17 @@ const list = (dir: string) => {
 };
 
 /**
- * Manor's internal staff (its staff.json's "internal": true): private agents, never offered or published. The Steward
- * builds and installs them from their clones here (RELEASE_HERE). None without Manor.
+ * Manor's internal staff ("internal": true): private agents, never offered or published. The Steward builds and
+ * installs them from their clones here (RELEASE_HERE). This PC's own are in Manor's staff.local.json (Manor 0.6.4 and
+ * later), which Manor never ships; an older Manor marked them in its own staff.json. None without Manor.
  */
 export function internalStaff(home = manorHome()): Set<string> {
-  const agents = readJson<{ agents?: { id?: unknown; internal?: unknown }[] } | null>(path.join(home, 'app', 'staff.json'), null)?.agents;
-  return new Set((Array.isArray(agents) ? agents : []).filter((a) => a && a.internal === true && typeof a.id === 'string').map((a) => a.id as string));
+  const ids = new Set<string>();
+  for (const file of [path.join(home, 'staff.local.json'), path.join(home, 'app', 'staff.json')]) {
+    const agents = readJson<{ agents?: { id?: unknown; internal?: unknown }[] } | null>(file, null)?.agents;
+    for (const a of Array.isArray(agents) ? agents : []) if (a && a.internal === true && typeof a.id === 'string') ids.add(a.id);
+  }
+  return ids;
 }
 
 /** An employee rebuilt from its staff row and its clone, and what couldn't be filled in. An internal one is released here. */
@@ -113,6 +118,8 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
       }
     }
   }
+  // Manor's one version is package.json's (its src/app.ts reads it there; its lockfile's needn't agree).
+  if (id === 'manor' && versionFiles.includes('package.json')) versionFiles.splice(0, versionFiles.length, 'package.json');
   if (!versionFiles.length) missing.push('Version files');
 
   let release = '';
@@ -138,7 +145,8 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     versionFiles,
     release,
     // Released here, it's installed by its release; else its newest release is downloaded and installed.
-    install: node && !(internal && scripts.release) ? 'node src/cli.ts install' : '',
+    // Manor installs its own releases (Update automatically), told at once by afterRelease's update check.
+    install: node && id !== 'manor' && !(internal && scripts.release) ? 'node src/cli.ts install' : '',
     approve: node && has('jobs/jobs.json') ? `node %USERPROFILE%\\.${id}\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}` : '',
     installed: node ? `%USERPROFILE%\\.${id}\\app` : '',
   };

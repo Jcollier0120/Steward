@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.11.3
+## 0.11.7
 
 **No one's repositories are built in: the Steward looks after the ones you add.**
 
@@ -12,13 +12,91 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's repository and the Steward's checkout in Settings start empty too. Empty, the Steward doesn't release itself or merge its own PRs, and a kit rollout needs a kit you name. With only a clone named, its origin is used as the repository.
 - `claim-version steward` finds the Steward's own repository from Settings, or from the Steward clone it is run in.
 - The examples in Settings no longer name anyone's account or repository.
-- **Private employees are released on this PC.** Manor's internal staff (the Wright and the Bailiff) are built and installed from their clones here, with `npm run release -- --install`, and never published. Their row in the staff table compares the installed copy's version with their branch's, not a GitHub release, and the install after a merge is their release itself.
+- **Private employees are released on this PC.** Manor's internal staff (the agents listed in Manor's `staff.local.json`, or marked internal in its staff.json) are built and installed from their clones here, with `npm run release -- --install`, and never published. Their row in the staff table compares the installed copy's version with their branch's, not a GitHub release, and the install after a merge is their release itself.
 
 ### Before you update
 
 - Nothing to do: an install that has been running keeps what it looks after. The first time the new version reads its settings, if settings.json doesn't list employees yet, the employees from its last look are written into settings.json once, each read from its clone on this PC. One whose clone isn't on this PC is left out. If something can't be read from a clone (for example a test command for a project that isn't a Node one), an alarm says what, and that employee waits off the kit's stages until you fill it in under Settings, Employees, and save.
 - Settings you already saved are kept as they are.
-- This release brings 0.10.6 (kit 2.25.0) too, if that wasn't released on its own.
+
+## 0.11.6
+
+**A kit-bump issue closes by itself once that agent is past the kit, so the Wright isn't sent to fix nothing.**
+
+### What changed
+
+- When an agent's bump to a kit failed, the Steward filed an issue for the Wright. If a later bump then passed, the issue stayed open: the Wright took it up, found nothing to fix, and got stuck, and each one became an alarm. On 2026-10-06 that was six alarms for Reeve, Herald, Clerk and Auditor, all already on the newest kit. Now each round closes a bump issue as soon as that agent's main carries that kit or a newer one, saying why.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
+## 0.11.5
+
+**A Reeve update's jobs are approved as soon as it's installed, not up to a round later.**
+
+### What changed
+
+- When Manor installs an update that changes one of Reeve's job scripts, the job showed "Needs approval" until the Steward's next round approved it, up to ten minutes later. Manor now asks the Steward right after it installs, and the Steward approves at once. If a round is running, it approves as soon as that round ends. As before, it approves only a script that is exactly the one merged on Reeve's main; anything else stays yours to look at.
+
+### Before you update
+
+Nothing: it updates itself as usual. Manor asks only once it has the matching update too; until then, the rounds approve as before.
+
+## 0.11.4
+
+**Manor keeps itself up to date like every other agent, more merge conflicts clear themselves, and the Wright gets one issue per agent for a failing kit, not one per kit.**
+
+### What's new
+
+- **Manor is one of the Steward's employees.** Its PRs are tested and merged by the rounds, its new versions released (setup included), and new kits rolled out to it, as for every other agent. Manor installs its own releases as before, through its "Update automatically" switch.
+
+### What changed
+
+- **A `kit.json` conflict no longer needs a person.** When a PR and its branch both move the kit pin, the catch-up pins the newer kit of the two, with every part either side takes, and the PR merges once its tests pass. Before, every PR in that spot went back to whoever opened it.
+- **A Steward kit PR whose agent already carries that kit, or a newer one, is closed by itself.** It has nothing left to do, and the next round bumps the agent from its branch as it is then.
+- **One Wright issue per agent for a failing kit.** When a newer kit's bump fails for an agent that still has an older kit's bump issue open, that issue is rewritten for the newer kit and any other older ones are closed as superseded. Before, a new issue was filed for every kit version, so the Wright would have fixed the same thing two or three times.
+
+### Before you update
+
+- Manor's PRs merge on their own from now on. Its open PRs merge in version order, each caught up with a new version where it needs one.
+- Manor's first release this way needs its lockfile: Manor's PR "a package-lock.json, as every kit agent has" merges first, on its own.
+- This release doesn't bring 0.11.3, which is still a draft of its own.
+
+## 0.11.2
+
+**A new kit is tried on every agent before it's released, and some files always wait for you, whatever Settings say.**
+
+### What's new
+
+- **A kit is tried before it's released.** When a pull request to the Steward raises the kit's version, the round first bumps every agent to the new kit, as the rollout would, and runs its checks. Nothing is committed or pushed. If every agent passes, the PR merges as before. If any fail, the PR waits, and a comment on it names each agent and the tests that failed. Whoever wrote it can fix the kit before any agent sees it. If the agents have to change with the kit, label the PR `kit:breaks-agents`: it then merges, and each failed bump goes to the Wright. Each commit is tried once. This would have caught the kit change that failed nine agents' bumps on 2026-10-05.
+
+### What changed
+
+- **The Wright's drafts:** some files now always wait for your review, even if they aren't in Settings' "For a person to review" list:
+  - Claude Code's settings and instructions: `.claude/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json`
+  - `.npmrc`
+  - secrets: `.env` files and keys
+  - the code that guards the merge: the Steward's look at drafts and its merge rules, the Wright's worker and settings, and the Bailiff's review
+
+  A draft that loosened one of these could otherwise pass the very look it changed.
+- A draft that changes the scripts npm runs when it installs (`preinstall`, `install`, `postinstall`, `prepare`) or package.json's `overrides` waits for you, as a dependency change already did.
+
+### Before you update
+
+Nothing: it updates itself as usual. A round that merges a PR raising the kit takes longer, because it runs every agent's checks first.
+
+## 0.11.1
+
+**Kit 2.26.0: the kit names no one's GitHub account, private repository or folder** (kit/CHANGELOG.md). What runs on your PC knows only what your PC says.
+
+### What changed
+
+- Nothing on the Steward's own page: it hands the new kit to every agent.
+
+### Before you update
+
+Nothing: it updates itself as usual.
 
 ## 0.10.6
 

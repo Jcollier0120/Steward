@@ -13,14 +13,14 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
+const { closeResolved, fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
 const { alarmsFile, watchAlarms } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { checksLogOf } = await import('../src/stages/bump.ts');
 const { bumpDirOf, releaseDirOf } = await import('../src/stages/common.ts');
 const { KEEP_TESTED, recordTested, testedFile, testedView } = await import('../src/tested.ts');
-const { ok, runner } = await import('./helpers.ts');
+const { employee, fakeEmployee, ok, runner } = await import('./helpers.ts');
 
 const HOUR = 3_600_000;
 const T0 = Date.parse('2026-10-05T08:00:00Z');
@@ -146,6 +146,43 @@ test('filed once where the Wright works, by its team, with the label and a marke
   assert.deepEqual([...s4.values()].map((s) => s.state), ['filed', 'filed', 'filed']);
 });
 
+test("a newer kit's failed bump takes over the employee's open bump issue, and closes the older ones, rather than filing another", async () => {
+  const issue = (n: number, id: string) => ({ number: n, url: `https://github.com/Jcollier0120/Porter/issues/${n}`, body: `x\n${marker(id)}` });
+  // Porter's three, one a kit; and the Developer Herald's, which is no Herald's.
+  const open = [issue(45, 'bump:porter:2.21.0'), issue(46, 'bump:porter:2.23.0'), issue(48, 'bump:porter:2.24.0'), issue(17, 'bump:developer-herald:2.24.0'), issue(50, 'release:porter:abc1234')];
+  const r = runner((args) => {
+    if (args[0] === 'api' && args[1] === 'user') return ok('Jcollier0120\n');
+    if (args[0] === 'issue' && args[1] === 'list') return ok(open);
+    if (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close')) return ok('');
+    return undefined;
+  });
+  const item = { id: 'bump:porter:2.26.0', condition: 'rollout:porter:2.26.0', repo: 'Jcollier0120/Porter', title: "Porter's bump to kit 2.26.0 fails its checks", body: `b\n${marker('bump:porter:2.26.0')}` };
+  const lines: string[] = [];
+  // Even with the day's few all filed: taking one over files nothing new.
+  const s = await fileWork({ items: [item], work: WORK(), employees, run: r.run, cwd: home, now: at(0), log: (l) => lines.push(l), perDay: 0 });
+  assert.deepEqual(s.get(item.id), { state: 'filed', url: 'https://github.com/Jcollier0120/Porter/issues/48', at: at(0).toISOString() });
+  const edit = r.gh.find((a) => a[1] === 'edit')!;
+  assert.deepEqual(edit.slice(0, 6), ['issue', 'edit', '48', '--repo', 'Jcollier0120/Porter', '--title']);
+  assert.equal(edit[6], item.title);
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'close').map((a) => a[2]), ['46', '45']);
+  assert.match(r.gh.find((a) => a[1] === 'close')!.at(-1)!, /Superseded by #48, now the bump to kit 2\.26\.0/);
+  assert.ok(!r.gh.some((a) => a[1] === 'create'));
+  assert.match(lines.join('\n'), /issues\/48 is now the bump to kit 2\.26\.0; #46, #45 closed as superseded/);
+  // Kept under its new id; the next round asks GitHub nothing.
+  const kept = JSON.parse(readFileSync(workFiledFile(), 'utf8'));
+  assert.equal(kept['bump:porter:2.26.0'].number, 48);
+  const again = gh();
+  await fileWork({ items: [item], work: WORK(), employees, run: again.run, cwd: home, now: at(1), log: () => {} });
+  assert.deepEqual(again.gh, []);
+
+  // The Herald's bump never takes the Developer Herald's issue; with none of its own open, it is filed anew.
+  const herald = { ...item, id: 'bump:herald:2.26.0', condition: 'rollout:herald:2.26.0' };
+  const h = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok(open) : args[1] === 'create' ? ok('https://github.com/Jcollier0120/Porter/issues/60\n') : undefined));
+  await fileWork({ items: [herald], work: WORK(), employees, run: h.run, cwd: home, now: at(2), log: () => {} });
+  assert.ok(!h.gh.some((a) => a[1] === 'edit' || a[1] === 'close'));
+  assert.equal(h.gh.filter((a) => a[1] === 'create').length, 1);
+});
+
 test("a kit's failed bumps count as one of the day's few: a kit that breaks six agents' checks has all six filed that day", async () => {
   const bumps = ['porter', 'reeve', 'gamernexus', 'herald', 'miller', 'pinder'].map((e) => ({ id: `bump:${e}:2.21.0`, condition: `rollout:${e}:2.21.0`, repo: 'Jcollier0120/Porter', title: e, body: e }));
   const others = ['a', 'b', 'c'].map((k) => ({ id: `release:porter:${k}`, condition: `release:porter:${k}`, repo: 'Jcollier0120/Porter', title: k, body: k }));
@@ -240,4 +277,31 @@ test('tested: the newest first, a commit and stage once, the last few of each em
   assert.deepEqual(v.employees.porter.tested.slice(0, 2).map((t) => [t.commit, t.at]), [['c24', at(30).toISOString()], ['c23', at(23).toISOString()]]);
   assert.deepEqual(v.employees.steward, { repo: 'Jcollier0120/Steward', tested: [{ commit: 'd1', stage: 'release', branch: 'main', version: '0.9.0', at: at(1).toISOString() }] });
   assert.ok(existsSync(testedFile()));
+});
+
+test("a bump issue whose failure is gone is closed: the employee's branch pins that kit or a newer one now; one still failing, or still behind, stays", async () => {
+  // Two employees on fake git: one bumped past the kit since, one still behind it.
+  const past = employee(fakeEmployee(path.join(home, 'resolved-past'), { kit: '2.26.0' }).checkout, { id: 'past', name: 'Past', repo: 'Jcollier0120/Past' });
+  const behind = employee(fakeEmployee(path.join(home, 'resolved-behind'), { kit: '2.19.0' }).checkout, { id: 'behind', name: 'Behind', repo: 'Jcollier0120/Behind' });
+  const entry = (repo: string, n: number) => ({ url: `https://github.com/${repo}/issues/${n}`, number: n, repo, at: at(0).toISOString(), condition: 'x' });
+  writeFileSync(workFiledFile(), JSON.stringify({
+    'bump:past:2.23.0': entry('Jcollier0120/Past', 42),
+    'bump:past:2.26.0': entry('Jcollier0120/Past', 46),
+    'bump:behind:2.23.0': entry('Jcollier0120/Behind', 7),
+    'release:past:abc1234': entry('Jcollier0120/Past', 9),
+  }));
+  const r = runner((args) => (args[0] === 'issue' && args[1] === 'close' ? (args[2] === '46' ? { code: 1, out: '', err: 'issue #46 is already closed' } : ok('')) : undefined));
+  const lines: string[] = [];
+  await closeResolved({ items: [], employees: [past, behind], run: r.run, cwd: home, log: (l) => lines.push(l) });
+  // Past's two: closed, or found closed already; Behind's waits; a release's is never this one's to close.
+  assert.deepEqual(r.gh.map((a) => [a[2], a[4]]), [['42', 'Jcollier0120/Past'], ['46', 'Jcollier0120/Past']]);
+  assert.match(r.gh[0].at(-1)!, /Nothing left to do: main now carries kit 2\.26\.0, so Past's bump to kit 2\.23\.0 has passed/);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(workFiledFile(), 'utf8'))).sort(), ['bump:behind:2.23.0', 'release:past:abc1234']);
+  assert.deepEqual(lines, ['work: closed https://github.com/Jcollier0120/Past/issues/42: Past carries kit 2.26.0 now']);
+
+  // One this round's failures still name is left alone, whatever its branch says.
+  writeFileSync(workFiledFile(), JSON.stringify({ 'bump:past:2.23.0': entry('Jcollier0120/Past', 42) }));
+  const quiet = runner(() => ok(''));
+  await closeResolved({ items: [{ id: 'bump:past:2.23.0', condition: 'x', repo: 'Jcollier0120/Past', title: 't', body: 'b' }], employees: [past], run: quiet.run, cwd: home, log: () => {} });
+  assert.deepEqual(quiet.gh, []);
 });

@@ -9,6 +9,7 @@ import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
+import { kitTrialHold } from './trial.ts';
 import { claimsOn } from '../claims.ts';
 import type { Held } from '../alarms.ts';
 import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
@@ -29,7 +30,9 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
  *
  * A team PR is held to more, since no one asked for it here: the version it sets must be new (not released, above
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
- * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump.
+ * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
+ * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
+ * (stages/trial.ts), or is labelled to say the agents change with it.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -146,7 +149,7 @@ const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], bailiff = bailiffInstalled()): Promise<void> {
   const s = ctx.settings.wrightReview;
   for (const pr of prs.filter(isWrightDraft)) {
-    let why = reviewHold(pr, s);
+    let why = reviewHold(pr, s, e.id);
     if (!why) {
       try {
         why = await dependencyHold(ctx, e, pr);
@@ -272,6 +275,18 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
       notes.set(pr.number, t.note);
+    }
+    // A PR to the Steward that raises the kit: the new kit tried on every agent first (stages/trial.ts).
+    let trial: string | null;
+    try {
+      trial = await kitTrialHold(ctx, e, pr);
+    } catch (err) {
+      trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
+    }
+    if (trial) {
+      waits.push(`${describe(pr)} waits: ${trial}`);
+      held.push(heldOf(pr, trial));
+      continue;
     }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';

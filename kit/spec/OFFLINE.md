@@ -1,6 +1,6 @@
 # Offline: waited out, never an alarm
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/OFFLINE.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). Since kit 2.15.0.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/OFFLINE.md` in the Steward's repository, and `src/kit/spec/OFFLINE.md` in every agent that takes the part. Since kit 2.15.0.
 
 A PC that is offline knows it: Windows says so in the taskbar, and the person sees it. So nothing in the manor tells them again. A round, an update look, a feed or a release that fails only because the network isn't there is **waited out**: it isn't a failure, an alarm, a notification or a red badge, and it is tried again at its usual time. Once the PC is back online, everything goes on as before, and what still fails then is reported as ever, its hours counted from then.
 

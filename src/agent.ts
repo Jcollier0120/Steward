@@ -11,7 +11,7 @@ import type { Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff } from './stages/staff.ts';
-import { context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
+import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
@@ -52,6 +52,27 @@ export const staffView = (s: Staff | null): StaffView | null =>
 export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
   let running: { stage: string; since: string } | null = null;
   let refreshing: Promise<unknown> | null = null;
+  /** Jobs to approve once what's running ends (POST /api/jobs/approve while it ran): employee ids, none for all. */
+  let approveAfter: string[] | null = null;
+
+  /** The employees' jobs approved now (steward.ts's approveJobsNow), as the stage "jobs". */
+  const approveNow = (ids: string[]) => {
+    running = { stage: 'jobs', since: new Date().toISOString() };
+    void approveJobsNow(ids, { run: o.run, owner: o.owner, log: (line) => console.log(`jobs: ${line}`) })
+      .then((done) => done.forEach((r) => console.log(`jobs: [${r.id}] ${r.message}`)))
+      .catch((e) => console.error(`${new Date().toISOString()} jobs: ${(e as Error).message}`))
+      .finally(() => {
+        running = null;
+        afterRunning();
+      });
+  };
+  /** What waited for the stage that just ended: jobs to approve. */
+  const afterRunning = () => {
+    if (running || !approveAfter) return;
+    const ids = approveAfter;
+    approveAfter = null;
+    approveNow(ids);
+  };
 
   const refresh = () => {
     if (refreshing) return refreshing;
@@ -72,7 +93,10 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
     running = { stage, since: new Date().toISOString() };
     void runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) })
       .catch((e) => console.error(`${new Date().toISOString()} ${stage}: ${(e as Error).message}`))
-      .finally(() => (running = null));
+      .finally(() => {
+        running = null;
+        afterRunning();
+      });
     return { json: { started: true } };
   };
 
@@ -105,6 +129,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
       running = null;
+      afterRunning();
     }
   };
   // On duty, every few minutes while Settings say it merges and releases by itself; the kit's every() pauses off
@@ -166,6 +191,17 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
       '/api/run': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
         void roundJob(true).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+        return { json: { started: true } };
+      },
+      // Manor, right after it installs an update: the jobs whose scripts it changed, approved now when they are exactly
+      // what was merged (stages/jobs.ts), not at the next round's end. While a stage runs, once it ends.
+      '/api/jobs/approve': ({ body }) => {
+        const ids: string[] = Array.isArray(body?.ids) ? body.ids.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 100) : [];
+        if (running) {
+          approveAfter = approveAfter === null ? ids : !ids.length || !approveAfter.length ? [] : [...new Set([...approveAfter, ...ids])];
+          return { json: { started: false, queued: true, message: `${running.stage} is running; the jobs are approved once it ends.` } };
+        }
+        approveNow(ids);
         return { json: { started: true } };
       },
       '/api/alarms/dismiss': ({ body }) => {

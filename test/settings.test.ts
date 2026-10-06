@@ -181,11 +181,15 @@ test("with no settings.json at all, the staff table and its clones are written t
 test("Manor's internal staff are released here: built and installed from the clone, never published; a GitHub release is none of theirs", async () => {
   const manor = path.join(home, 'manor');
   mkdirSync(path.join(manor, 'app'), { recursive: true });
-  writeFileSync(path.join(manor, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', internal: true }, { id: 'dotty' }] }));
+  // This PC's own (Manor 0.6.4 and later): staff.local.json, which Manor never ships; an older Manor's own staff.json too.
+  writeFileSync(path.join(manor, 'staff.local.json'), JSON.stringify({ agents: [{ id: 'porter', internal: true }] }));
+  writeFileSync(path.join(manor, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'dotty' }, { id: 'old', internal: true }] }));
   const before = process.env.MANOR_HOME;
   process.env.MANOR_HOME = manor;
   writeFileSync(staffFile, JSON.stringify(staff));
   try {
+    const { internalStaff } = await import('../src/migrate.ts');
+    assert.deepEqual([...internalStaff(manor)], ['porter', 'old']);
     const { RELEASE_HERE, releasedHere } = await import('../src/settings.ts');
     const [porter, dotty] = loadSettings().employees;
     assert.deepEqual([porter.release, porter.install], [RELEASE_HERE, ''], 'internal: its release builds and installs it here');
