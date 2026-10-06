@@ -9,6 +9,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - On a phone, an agent's title bar no longer runs off the side: its action button (Run now, Check the fingerprints now) moves under the status instead. A wide table scrolls by itself instead of dragging the whole page sideways. This covers the Steward's own page too.
+- **Last stage** lists what the stage did (merged, released, refused, failed) first, and folds the employees it skipped, with nothing to do, under their count. After a round, most of the 60-odd lines were "skipped".
 
 ### Before you update
 
