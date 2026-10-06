@@ -7,6 +7,7 @@ import { withLock } from './kit/lock.ts';
 import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
+import { NO_TEAM, teamOf, type Owner } from './team.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { loadSettings, type Employee, type Settings } from './settings.ts';
 import { bump } from './stages/bump.ts';
@@ -68,11 +69,27 @@ export async function tryGlance(run: Runner, settings: Settings, log: (line: str
   }
 }
 
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean } = {}): Promise<Ctx> {
-  const settings = o.settings ?? loadSettings();
+/**
+ * Settings with the team as the stages use it (team.ts): Settings' own, or when they name none the account gh is signed
+ * in as. With neither, the log says so and the team is nobody: only the Steward's own PRs are merged.
+ */
+export function withTeam(settings: Settings, log: (line: string) => void, owner?: Owner): Settings {
+  if (settings.team.length) return settings;
+  const t = teamOf(settings.team, owner);
+  if (t.from === 'none') log(`${NO_TEAM}.`);
+  return { ...settings, team: t.team };
+}
+
+/**
+ * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
+ * `owner` stands in for the account gh is signed in as (tests).
+ */
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner } = {}): Promise<Ctx> {
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
+  const given = o.settings ?? loadSettings();
+  const settings = o.team === false ? given : withTeam(given, log, o.owner);
   const glance = o.glance === false ? null : await tryGlance(run, settings, log);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
@@ -145,6 +162,8 @@ function pruneKitsNow(s: Staff, kit: KitInfo): void {
 export interface StageOptions {
   run?: Runner;
   log?: (line: string) => void;
+  /** Stands in for the account gh is signed in as, the team when Settings name none (team.ts); tests only. */
+  owner?: Owner;
   kitInfo?: KitInfo;
   alarms?: Parameters<typeof watchAlarms>[1];
   tell?: Poke;
@@ -203,7 +222,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Offline (the kit's net.ts), a round asks nothing of GitHub: it would only fail for every employee, every
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
       const offline = name === 'round' && !(await (o.online ?? onlineNow)());
-      const ctx = await context({ run: o.run, log, glance: offline ? false : undefined, offline });
+      const ctx = await context({ run: o.run, log, glance: offline ? false : undefined, offline, owner: o.owner });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
 import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
@@ -182,7 +183,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
   const g = glanceOf(ctx, e);
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
-  if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [], held: [] };
+  const none = !o.team ? 'no open Steward PRs' : ctx.settings.team.length ? "no open PRs of the Steward's or the team's" : `no open Steward PRs (${NO_TEAM})`;
+  if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);

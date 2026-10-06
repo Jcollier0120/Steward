@@ -205,7 +205,7 @@ switch (cmd) {
       process.exitCode = 2;
       break;
     }
-    const ctx = await context({ glance: false });
+    const ctx = await context({ glance: false, team: false });
     const e = employeeFor(ctx.settings, who);
     if (!e) {
       console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo}).`);
@@ -218,7 +218,7 @@ switch (cmd) {
     break;
   }
   case 'release-version': {
-    const ctx = await context({ glance: false });
+    const ctx = await context({ glance: false, team: false });
     const e = rest[0] ? employeeFor(ctx.settings, rest[0]) : null;
     if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
       console.error('release-version takes an employee and a version: release-version porter 0.4.12');
