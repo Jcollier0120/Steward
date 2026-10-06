@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type Accelerator, type AcceleratorKind, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, rememberHardware, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, rememberHardware, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
@@ -531,11 +531,15 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
 
 /** How old hardware.json may get before the keeper asks this PC again: a card or an NPU driver can come and go. */
 const HARDWARE_DAYS = 1;
+/** How old a hardware.json without the processor's name may get before it's asked again (detection may not have had it). */
+const HARDWARE_UNNAMED_MS = 3_600_000;
 
 /**
  * hardware.json afresh when there's none or it's a day old: what this PC has, asked with detection (a few seconds of
  * PowerShell, once a day), so every program knows whether it has an NPU, and a model on a graphics card is never
- * called the NPU. A detection that couldn't tell writes nothing; the next look tries again.
+ * called the NPU. A detection that couldn't tell writes nothing; the next look tries again. One written before the
+ * accelerators' names were kept in it (kit 2.27.0) is asked again at once when it says there's an NPU but not its
+ * name, and after an hour when it lacks the processor's: every program names the accelerators from it.
  */
 export async function refreshHardware(o: { file?: string; detect?: () => Promise<Detection>; nowMs?: number } = {}): Promise<boolean> {
   const file = o.file ?? hardwareFile();
@@ -545,7 +549,9 @@ export async function refreshHardware(o: { file?: string; detect?: () => Promise
   } catch {
     // none yet
   }
-  if (age < HARDWARE_DAYS * 86_400_000) return false;
+  const had = Number.isFinite(age) ? readHardware(file) : null;
+  const unnamed = !!had && ((had.npu && !had.npuName) || (!had.cpuName && age >= HARDWARE_UNNAMED_MS));
+  if (age < HARDWARE_DAYS * 86_400_000 && !unnamed) return false;
   const hw = hardwareOf(await (o.detect ?? detect)());
   if (!hw) return false;
   rememberHardware(hw, file);

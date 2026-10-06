@@ -183,7 +183,7 @@ public sealed class VectorTests {
 	[Fact]
 	public void ReevesConfig() {
 		foreach (JsonNode c in Each(Accel, "configs"))
-			Same(c["expect"], Json(Core.CallWithRules("parseAccelerators", c["raw"]!.DeepClone())), c["case"]!.GetValue<string>());
+			Same(c["expect"], Json(Core.CallWithRules("parseAccelerators", c["raw"]!.DeepClone(), c["hw"]?.DeepClone())), c["case"]!.GetValue<string>());
 		foreach (JsonNode f in Each(Accel, "files")) {
 			string file = f["file"]!.GetValue<string>();
 			JsonNode? got = Json(Core.CallWithRules("readConfig", file, f["text"]?.DeepClone()));

@@ -54,7 +54,12 @@ export interface Accelerator {
   /** `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId). */
   id: string;
   kind: AcceleratorKind;
-  /** The NPU's or processor's own name; a card's name as DXGI describes it (`… #2` for a second card of the same name). */
+  /**
+   * What this PC calls it (hardware.json, the core's acceleratorName): the NPU's name as Windows lists it, a card's
+   * as DXGI describes it (`… #2` for a second card of the same name), the processor's own. Never read from
+   * config.json nor written to it: a `name` an older file carries is ignored, and dropped when the file is next
+   * written (withoutNames).
+   */
   name: string;
   /** A graphics card's own memory; one under 2 GB shares the PC's. */
   memoryGb?: number;
@@ -68,6 +73,24 @@ export interface Accelerator {
   quirks: Quirk[];
   /** false keeps it in the list but sends it nothing. */
   enabled?: boolean;
+}
+
+/** An accelerator as config.json keeps it: everything but its name, which comes from the PC. */
+export type AcceleratorEntry = Omit<Accelerator, 'name'>;
+
+/** An accelerator as config.json keeps it: without its name. */
+export function entryOf(a: Accelerator | AcceleratorEntry): AcceleratorEntry {
+  const { name: _name, ...entry } = a as Accelerator;
+  return entry;
+}
+
+/**
+ * config.json's content with no `name` in any of its accelerators: a name isn't kept there (it comes from the PC), so
+ * an older file's are dropped when it's next written. Everything else is as it was.
+ */
+export function withoutNames(raw: Record<string, any>): Record<string, any> {
+  if (!Array.isArray(raw?.accelerators) || !raw.accelerators.some((v: any) => v && typeof v === 'object' && 'name' in v)) return raw;
+  return { ...raw, accelerators: raw.accelerators.map((v: any) => (v && typeof v === 'object' && !Array.isArray(v) && 'name' in v ? entryOf(v) : v)) };
 }
 
 export type AcceleratorOrder = 'auto' | string[];
@@ -124,7 +147,7 @@ interface LegacyEndpoint {
   start?: string[] | false;
 }
 
-const LEGACY_NAMES: Record<AcceleratorKind, string> = { npu: 'NPU', gpu: 'Graphics card', cpu: 'Processor' };
+const LEGACY_NAMES: Readonly<Record<AcceleratorKind, string>> = core.LEGACY_NAMES;
 
 function deviceKind(device: unknown): AcceleratorKind {
   const d = String(device ?? 'Npu').toLowerCase();
@@ -134,16 +157,18 @@ function deviceKind(device: unknown): AcceleratorKind {
 /**
  * An old config (chatEndpoint, visionModel, embedEndpoint, npuMaxContextTokens) as accelerators: one
  * per device, `npu` when the device is the NPU. Every request keeps the cap and both GenieX quirks it
- * had, so nothing changes for it. An embed endpoint on another device is an accelerator of its own.
+ * had, so nothing changes for it. An embed endpoint on another device is an accelerator of its own. Each is named
+ * from this PC (`hw`, hardware.json), as a listed one is: the kind's name without it.
  */
-export function legacyAccelerators(raw: Record<string, any>): Accelerator[] {
+export function legacyAccelerators(raw: Record<string, any>, hw: Hardware | null = null): Accelerator[] {
   const cap = positiveInt(raw?.npuMaxContextTokens) ?? DEFAULT_NPU_CAP;
   const out: Accelerator[] = [];
   const forDevice = (device: unknown): Accelerator => {
     const kind = deviceKind(device);
     let a = out.find((x) => x.kind === kind);
     if (!a) {
-      a = { id: acceleratorId(kind, LEGACY_NAMES[kind]), kind, name: LEGACY_NAMES[kind], slots: 1, maxContextTokens: cap, quirks: [] };
+      const id = acceleratorId(kind, LEGACY_NAMES[kind]);
+      a = { id, kind, name: core.acceleratorName(kind, id, hw), slots: 1, maxContextTokens: cap, quirks: [] };
       out.push(a);
     }
     return a;
@@ -183,15 +208,19 @@ function readEndpoint(v: any): Endpoint | undefined {
   return ep;
 }
 
-/** One entry of `accelerators`, with defaults: one slot, the NPU's cap, no quirks. Unusable entries give null (validateAccelerators says why). */
-export function readAccelerator(v: any): Accelerator | null {
+/**
+ * One entry of `accelerators`, with defaults: one slot, the NPU's cap, no quirks. Its name is what this PC calls it
+ * (`hw`, hardware.json; the kind's name without it), never the entry's own `name`, which is ignored. Unusable entries
+ * give null (validateAccelerators says why).
+ */
+export function readAccelerator(v: any, hw: Hardware | null = null): Accelerator | null {
   if (!v || typeof v !== 'object' || typeof v.id !== 'string') return null;
   const kind = kindOfId(v.id);
   if (!kind) return null;
   const a: Accelerator = {
     id: v.id,
     kind,
-    name: typeof v.name === 'string' && v.name.trim() ? v.name.trim() : LEGACY_NAMES[kind],
+    name: core.acceleratorName(kind, v.id, hw),
     slots: kind === 'npu' ? 1 : Math.min(16, positiveInt(v.slots) ?? 1),
     maxContextTokens: positiveInt(v.maxContextTokens) ?? DEFAULT_NPU_CAP,
     quirks: Array.isArray(v.quirks) ? v.quirks.filter((q: unknown): q is Quirk => (QUIRKS as readonly unknown[]).includes(q)) : [],
@@ -212,16 +241,16 @@ export function readAccelerator(v: any): Accelerator | null {
  *
  * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has instead,
  * the core's rule (notTheNpu): so the keeper, setup and Settings never call a model on a graphics card the NPU, and
- * the next save writes it as the card's.
+ * the next save writes it as the card's. Every accelerator is named from `hw` too (readAccelerator).
  */
 export function readAccelerators(raw: Record<string, any> | null | undefined, hw: Hardware | null = readHardware()): AcceleratorConfig {
   const r = raw && typeof raw === 'object' ? raw : {};
   const order: AcceleratorOrder = Array.isArray(r.acceleratorOrder) ? r.acceleratorOrder.filter((x: unknown) => typeof x === 'string') : 'auto';
-  if (!Array.isArray(r.accelerators)) return { ...onThisPc(legacyAccelerators(r), order, hw, true), legacy: true };
+  if (!Array.isArray(r.accelerators)) return { ...onThisPc(legacyAccelerators(r, hw), order, hw, true), legacy: true };
   const seen = new Set<string>();
   const accelerators: Accelerator[] = [];
   for (const v of r.accelerators) {
-    const a = readAccelerator(v);
+    const a = readAccelerator(v, hw);
     if (!a || seen.has(a.id)) continue;
     seen.add(a.id);
     accelerators.push(a);
@@ -231,8 +260,8 @@ export function readAccelerators(raw: Record<string, any> | null | undefined, hw
 
 /**
  * The list on this PC: an entry said to be the NPU, on a PC known to have none, becomes what it has instead (its one
- * card, the graphics card, or the processor), after the others, merged into a card's own entry of the same id. An
- * old config's GenieX quirks go with it: GenieX runs only on an NPU.
+ * card, the graphics card, or the processor), by its name and id, after the others, merged into a card's own entry of
+ * the same id. An old config's GenieX quirks go with it: GenieX runs only on an NPU.
  */
 function onThisPc(list: Accelerator[], order: AcceleratorOrder, hw: Hardware | null, legacy: boolean): { accelerators: Accelerator[]; order: AcceleratorOrder } {
   const other = core.instead(hw);
@@ -240,8 +269,8 @@ function onThisPc(list: Accelerator[], order: AcceleratorOrder, hw: Hardware | n
   const kept = list.filter((a) => a.kind !== 'npu');
   const renamed = new Map<string, string>();
   for (const a of list.filter((x) => x.kind === 'npu')) {
-    const name = /^(the\s+)?npu$/i.test(a.name) ? other.name : a.name;
-    const id = acceleratorId(other.kind, name);
+    const id = acceleratorId(other.kind, other.name);
+    const name = core.acceleratorName(other.kind, id, hw);
     renamed.set(a.id, id);
     const memoryGb = a.memoryGb ?? other.memoryGb ?? undefined;
     const moved: Accelerator = { ...a, id, kind: other.kind, name, ...(memoryGb !== undefined ? { memoryGb } : {}), ...(legacy ? { quirks: [] } : {}) };
@@ -334,7 +363,6 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
       else if (ids.includes(v.id)) problems.push(`${at}: id ${v.id} is listed twice`);
       else ids.push(v.id);
       if (v.kind !== undefined && kind && v.kind !== kind) problems.push(`${at}: kind must be ${kind} for id ${v.id}`);
-      if (typeof v.name !== 'string' || !v.name.trim()) problems.push(`${at}: name is missing`);
       if (v.slots !== undefined && !(Number.isInteger(v.slots) && v.slots >= 1 && v.slots <= 16)) problems.push(`${at}: slots must be a whole number from 1 to 16`);
       if (kind === 'npu' && v.slots !== undefined && v.slots !== 1) problems.push(`${at}: the NPU serves one request at a time (slots 1)`);
       if (v.maxContextTokens !== undefined && !(Number.isInteger(v.maxContextTokens) && v.maxContextTokens >= 512 && v.maxContextTokens <= 1_048_576))
@@ -501,11 +529,14 @@ export function writeJsonWhole(file: string, value: unknown): void {
   }
 }
 
-/** Writes config.json whole when `validate` finds nothing wrong; says what's wrong otherwise and writes nothing. */
+/**
+ * Writes config.json whole when `validate` finds nothing wrong; says what's wrong otherwise and writes nothing. No
+ * accelerator's `name` is written (withoutNames): an older file's go at its next write.
+ */
 export function writeConfigFile(file: string, raw: Record<string, any>, validate: (raw: unknown) => string[] = validateKeeperConfig): { problems: string[] } {
   const problems = validate(raw);
   if (problems.length) return { problems };
-  writeJsonWhole(file, raw);
+  writeJsonWhole(file, withoutNames(raw));
   return { problems: [] };
 }
 
@@ -526,7 +557,7 @@ export function saveConfig(file: string, change: ConfigChange, o: { validate?: (
   if (change.etag !== undefined && change.etag !== now) return { ok: false, status: 409, problems: ['config.json changed since this page read it: reload the page and make the change again'] };
   const read = readConfigFile(file);
   if (read.error) return { ok: false, status: 409, problems: [`${read.error}; it isn't overwritten. Fix it or move it aside, then reload.`] };
-  const next = applyChange(read.raw, change, o.merged);
+  const next = withoutNames(applyChange(read.raw, change, o.merged));
   const { problems } = writeConfigFile(file, next, o.validate ?? validateKeeperConfig);
   if (problems.length) return { ok: false, status: 400, problems };
   return { ok: true, etag: etagOf(file), config: next };

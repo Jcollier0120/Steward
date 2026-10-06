@@ -2,7 +2,7 @@
 // failure markers, the game check, the candidates for a request and the pick among them, and the size
 // of a request. Pure: a driver reads the files and asks the counters, and hands their contents in.
 
-import { acceleratorId, keyedCards, kindOfId, LEGACY_NAMES } from './ids.js';
+import { acceleratorId, deviceName, keyedCards, kindOfId, LEGACY_NAMES } from './ids.js';
 import { REEVE_NOT_SET_UP, say } from './messages.js';
 import { slotNames } from './queue.js';
 
@@ -25,7 +25,8 @@ import { slotNames } from './queue.js';
  * @typedef {object} Accelerator
  * @property {string} id `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId).
  * @property {AcceleratorKind} kind
- * @property {string} name The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+ * @property {string} name The device's own name, from what this PC is (acceleratorName), never from the config:
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
  * @property {number | null} memoryGb A graphics card's own memory, in GB; null when unknown. Under 2 GB, it shares the PC's.
  * @property {number} slots How many requests it serves at once (llama-server's --parallel). The NPU has 1.
  * @property {number} maxContextTokens The most a request may be, prompt and answer, by the kit's pessimistic estimate.
@@ -164,29 +165,49 @@ function withServers(a, eps) {
  * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
  * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
  * @property {boolean} npu
- * @property {{ name: string, memoryGb: number | null }[]} cards
+ * @property {{ name: string, memoryGb: number | null }[]} cards Each named as DXGI describes it, " #2" on a second card
+ * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+ * @property {string} [npuName] The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+ * @property {string} [cpuName] The processor's name as Windows gives it, (R), (TM) and (C) taken out.
  */
+
+/**
+ * An accelerator's name: what this PC calls the device, never what a config says (a config's `name` is ignored).
+ * The NPU's is Windows' name for it, a card's DXGI's description (" #2" on a second card of a name), found by its
+ * id, and the processor's its own, all from hardware.json, each with (R) and (TM) taken out and its spaces collapsed
+ * (deviceName), as Manor shows them: "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". Without one
+ * (no hardware.json, a card it doesn't list, an NPU on a PC without one) it is the kind's: "NPU", "Graphics card",
+ * "Processor" (LEGACY_NAMES). A card's id stays the one its DXGI name gives.
+ * @param {AcceleratorKind} kind
+ * @param {string} id
+ * @param {Hardware | null | undefined} hw
+ * @returns {string}
+ */
+export function acceleratorName(kind, id, hw) {
+  const known = kind === 'npu' ? (hw?.npu ? hw.npuName : undefined) : kind === 'cpu' ? hw?.cpuName : hw?.cards.find((c) => acceleratorId('gpu', c.name) === id)?.name;
+  const name = typeof known === 'string' ? deviceName(known) : '';
+  return name || LEGACY_NAMES[kind];
+}
 
 /**
  * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
  * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * A card's name is as hardware.json keeps it, the one its id is made from (notTheNpu shows it by acceleratorName).
  * Null when the PC has an NPU, or isn't known: then the config's word stands.
  * @param {Hardware | null | undefined} hw
  * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
  */
 export function instead(hw) {
   if (!hw || hw.npu) return null;
-  if (!hw.cards.length) return { kind: 'cpu', name: LEGACY_NAMES.cpu, memoryGb: null };
+  if (!hw.cards.length) return { kind: 'cpu', name: acceleratorName('cpu', 'cpu', hw), memoryGb: null };
   const card = hw.cards.length === 1 ? hw.cards[0] : null;
   return { kind: 'gpu', name: card?.name ?? LEGACY_NAMES.gpu, memoryGb: card?.memoryGb ?? null };
 }
 
-/** "NPU", "The NPU": a name given only for being the NPU. */
-const NPU_NAME = /^(the\s+)?npu$/i;
-
 /**
  * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
- * id and, when its name only said "NPU", its name. Null when the PC has an NPU or isn't known, and for any other entry.
+ * id (the processor's is `cpu`) and its name (acceleratorName), whatever the entry carried. Null when the PC has an
+ * NPU or isn't known, and for any other entry.
  * @param {Accelerator} a
  * @param {Hardware | null | undefined} hw
  * @returns {Accelerator | null}
@@ -194,17 +215,19 @@ const NPU_NAME = /^(the\s+)?npu$/i;
 export function notTheNpu(a, hw) {
   const other = a.kind === 'npu' ? instead(hw) : null;
   if (!other) return null;
-  const name = NPU_NAME.test(a.name) ? other.name : a.name;
-  return { ...a, kind: other.kind, id: acceleratorId(other.kind, name), name, memoryGb: a.memoryGb ?? other.memoryGb };
+  const id = acceleratorId(other.kind, other.name);
+  return { ...a, kind: other.kind, id, name: acceleratorName(other.kind, id, hw), memoryGb: a.memoryGb ?? other.memoryGb };
 }
 
 /**
- * One entry of `accelerators`, as Reeve reads it: its kind from its id, one slot, the NPU's cap, known quirks only.
+ * One entry of `accelerators`, as Reeve reads it: its kind from its id, its name from this PC (a `name` written in
+ * the entry is ignored), one slot, the NPU's cap, known quirks only.
  * @param {Rules} rules
  * @param {any} v
+ * @param {Hardware | null | undefined} hw
  * @returns {Accelerator | { error: string }}
  */
-function readOne(rules, v) {
+function readOne(rules, v, hw) {
   if (!v || typeof v !== 'object' || typeof v.id !== 'string') return { error: say.noId() };
   const kind = kindOfId(v.id);
   if (!kind) return { error: say.badId(v.id) };
@@ -212,7 +235,7 @@ function readOne(rules, v) {
     {
       id: v.id,
       kind,
-      name: typeof v.name === 'string' && v.name.trim() ? v.name.trim() : LEGACY_NAMES[kind],
+      name: acceleratorName(kind, v.id, hw),
       memoryGb: typeof v.memoryGb === 'number' && v.memoryGb >= 0 ? v.memoryGb : null,
       slots: kind === 'npu' ? 1 : Math.min(rules.accelerators.maxSlots, positiveInt(v.slots) ?? 1),
       maxContextTokens: positiveInt(v.maxContextTokens) ?? rules.accelerators.defaultMaxContextTokens,
@@ -226,12 +249,14 @@ function readOne(rules, v) {
 /**
  * An older config (chatEndpoint, visionModel, embedEndpoint, npuMaxContextTokens) as accelerators, as
  * Reeve reads it: one per device, `npu` when the device is the NPU. The chat endpoint keeps the cap and
- * both GenieX quirks it always had; an embed endpoint on another device is an accelerator of its own.
+ * both GenieX quirks it always had; an embed endpoint on another device is an accelerator of its own. Each is named
+ * from this PC, as a listed one is.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null | undefined} hw
  * @returns {Accelerator[]}
  */
-function fromLegacy(rules, raw) {
+function fromLegacy(rules, raw, hw) {
   const cap = positiveInt(raw?.npuMaxContextTokens) ?? rules.accelerators.defaultMaxContextTokens;
   /** @type {{ a: Omit<Accelerator, Work>, eps: Partial<Record<Work, Written | undefined>> }[]} */
   const found = [];
@@ -242,7 +267,8 @@ function fromLegacy(rules, raw) {
     const kind = d === 'gpu' ? 'gpu' : d === 'cpu' ? 'cpu' : 'npu';
     let f = found.find((x) => x.a.kind === kind);
     if (!f) {
-      f = { a: { id: acceleratorId(kind, LEGACY_NAMES[kind]), kind, name: LEGACY_NAMES[kind], memoryGb: null, slots: 1, maxContextTokens: cap, quirks: [] }, eps: {} };
+      const id = acceleratorId(kind, LEGACY_NAMES[kind]);
+      f = { a: { id, kind, name: acceleratorName(kind, id, hw), memoryGb: null, slots: 1, maxContextTokens: cap, quirks: [] }, eps: {} };
       found.push(f);
     }
     return f;
@@ -348,13 +374,13 @@ export function parseAccelerators(rules, raw, hw = null) {
   const moved = [];
   if (!legacy) {
     raw.accelerators.forEach((/** @type {unknown} */ v, /** @type {number} */ i) => {
-      const read = readOne(rules, v);
+      const read = readOne(rules, v, hw);
       if ('error' in read) problems.push(`accelerators[${i}] ${read.error}`);
       else if (list.some((x) => x.id === read.id)) problems.push(`accelerators[${i}]: ${say.listedTwice(read.id)}`);
       else list.push(read);
     });
   } else {
-    list.push(...fromLegacy(rules, raw));
+    list.push(...fromLegacy(rules, raw, hw));
   }
   // An entry said to be the NPU on a PC without one goes after the others: a card's own entry (setup's) comes first.
   for (const a of list.splice(0)) {

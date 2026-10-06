@@ -21,6 +21,17 @@ export declare const LEGACY_NAMES: Readonly<Record<AcceleratorKind, string>>;
  */
 export declare const LEGACY_NPU: Readonly<AcceleratorRef>;
 /**
+ * A device's name as it is shown, from Windows' (or DXGI's) own, as Manor shows it: (R), (TM) and (C) taken out and its
+ * spaces collapsed; a "<chip> - <part number> - <model>" name (Snapdragon's NPU and processor) only its model; and no
+ * last "NPU", "CPU" or "GPU", which what it is beside it says. "Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R)
+ * Hexagon(TM) NPU" is "Qualcomm Hexagon"; "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90". Never empty
+ * for a name that isn't. Only for showing: hardware.json keeps the name in full, and a card's id is made from its name
+ * as DXGI gives it (acceleratorId), so lock folders and configs keep theirs.
+ * @param {string} name
+ * @returns {string}
+ */
+export declare function deviceName(name: string): string;
+/**
  * A card's id part: its name in lowercase, each run of other characters one dash, none at either end
  * ("NVIDIA GeForce RTX 4090 #2" is "nvidia-geforce-rtx-4090-2").
  * @param {string} name

@@ -17,7 +17,8 @@ export type Accelerator = {
     id: string;
     kind: AcceleratorKind;
     /**
-     * The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+     * The device's own name, from what this PC is (acceleratorName), never from the config:
+     * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
      */
     name: string;
     /**
@@ -113,7 +114,8 @@ export type Look = {
  * @typedef {object} Accelerator
  * @property {string} id `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId).
  * @property {AcceleratorKind} kind
- * @property {string} name The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+ * @property {string} name The device's own name, from what this PC is (acceleratorName), never from the config:
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
  * @property {number | null} memoryGb A graphics card's own memory, in GB; null when unknown. Under 2 GB, it shares the PC's.
  * @property {number} slots How many requests it serves at once (llama-server's --parallel). The NPU has 1.
  * @property {number} maxContextTokens The most a request may be, prompt and answer, by the kit's pessimistic estimate.
@@ -200,20 +202,49 @@ export type Written = {
 };
 export type Hardware = {
     npu: boolean;
+    /**
+     * Each named as DXGI describes it, " #2" on a second card
+     * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+     */
     cards: {
         name: string;
         memoryGb: number | null;
     }[];
+    /**
+     * The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+     */
+    npuName?: string;
+    /**
+     * The processor's name as Windows gives it, (R), (TM) and (C) taken out.
+     */
+    cpuName?: string;
 };
 /**
  * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
  * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
  * @property {boolean} npu
- * @property {{ name: string, memoryGb: number | null }[]} cards
+ * @property {{ name: string, memoryGb: number | null }[]} cards Each named as DXGI describes it, " #2" on a second card
+ * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+ * @property {string} [npuName] The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+ * @property {string} [cpuName] The processor's name as Windows gives it, (R), (TM) and (C) taken out.
  */
+/**
+ * An accelerator's name: what this PC calls the device, never what a config says (a config's `name` is ignored).
+ * The NPU's is Windows' name for it, a card's DXGI's description (" #2" on a second card of a name), found by its
+ * id, and the processor's its own, all from hardware.json, each with (R) and (TM) taken out and its spaces collapsed
+ * (deviceName), as Manor shows them: "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". Without one
+ * (no hardware.json, a card it doesn't list, an NPU on a PC without one) it is the kind's: "NPU", "Graphics card",
+ * "Processor" (LEGACY_NAMES). A card's id stays the one its DXGI name gives.
+ * @param {AcceleratorKind} kind
+ * @param {string} id
+ * @param {Hardware | null | undefined} hw
+ * @returns {string}
+ */
+export declare function acceleratorName(kind: AcceleratorKind, id: string, hw: Hardware | null | undefined): string;
 /**
  * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
  * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * A card's name is as hardware.json keeps it, the one its id is made from (notTheNpu shows it by acceleratorName).
  * Null when the PC has an NPU, or isn't known: then the config's word stands.
  * @param {Hardware | null | undefined} hw
  * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
@@ -225,7 +256,8 @@ export declare function instead(hw: Hardware | null | undefined): {
 } | null;
 /**
  * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
- * id and, when its name only said "NPU", its name. Null when the PC has an NPU or isn't known, and for any other entry.
+ * id (the processor's is `cpu`) and its name (acceleratorName), whatever the entry carried. Null when the PC has an
+ * NPU or isn't known, and for any other entry.
  * @param {Accelerator} a
  * @param {Hardware | null | undefined} hw
  * @returns {Accelerator | null}

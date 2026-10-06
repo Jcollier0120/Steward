@@ -22,7 +22,7 @@ const { unverified } = await import('./fixture/src/kit/page.ts');
 type Detection = import('./fixture/src/kit/detect.ts').Detection;
 
 const RULES = (await import('./fixture/src/kit/rules.ts')).RULES;
-const DESKTOP = { npu: false, cards: [{ name: 'NVIDIA GeForce RTX 4080 SUPER', memoryGb: 16 }] };
+const DESKTOP = { npu: false, cards: [{ name: 'NVIDIA GeForce RTX 4080 SUPER', memoryGb: 16 }], cpuName: 'Ryzen' };
 const TWO_CARDS = { npu: false, cards: [{ name: 'NVIDIA GeForce RTX 4080 SUPER', memoryGb: 16 }, { name: 'Intel(R) UHD Graphics 770', memoryGb: 0.1 }] };
 const NO_CARD = { npu: false, cards: [] };
 const LAPTOP = { npu: true, cards: [{ name: 'Qualcomm(R) Adreno(TM) X2-90 GPU', memoryGb: 0 }] };
@@ -66,14 +66,20 @@ test("a list's NPU entry on a PC without one: its card's own entry first, the tw
   assert.deepEqual(cfg.order, ['gpu-nvidia-geforce-rtx-4080-super', 'gpu-nvidia-geforce-rtx-4080-super']);
 });
 
-test('several cards: "the graphics card", which one unknown; none: the processor. A name of its own stays', () => {
+test(`several cards: "the graphics card", which one unknown; none: the processor, by its name. The entry's own name never stays`, () => {
   const raw = { accelerators: [{ id: 'npu', name: 'NPU', chat: LLAMA }] };
   const two = core.parseAccelerators(RULES, raw, TWO_CARDS);
   assert.equal(!('error' in two) && two.accelerators[0].name, 'Graphics card');
   const none = core.parseAccelerators(RULES, raw, NO_CARD);
   assert.equal(!('error' in none) && none.accelerators[0].kind, 'cpu');
+  assert.equal(!('error' in none) && none.accelerators[0].name, 'Processor', "the processor's name unknown: the kind's");
+  const ryzen = core.parseAccelerators(RULES, raw, { ...NO_CARD, cpuName: 'AMD Ryzen 9 7950X' });
+  assert.equal(!('error' in ryzen) && ryzen.accelerators[0].name, 'AMD Ryzen 9 7950X');
   const named = core.parseAccelerators(RULES, { accelerators: [{ id: 'npu', name: 'My big card', chat: LLAMA }] }, DESKTOP);
-  assert.equal(!('error' in named) && named.accelerators[0].name, 'My big card');
+  assert.deepEqual(!('error' in named) && [named.accelerators[0].id, named.accelerators[0].name], ['gpu-nvidia-geforce-rtx-4080-super', 'NVIDIA GeForce RTX 4080 SUPER'], "the card's, whatever the entry said");
+  // A name an older hardware.json left for an NPU that's gone isn't taken.
+  const gone = core.parseAccelerators(RULES, raw, { ...DESKTOP, npuName: 'Snapdragon X2 Elite NPU' });
+  assert.equal(!('error' in gone) && gone.accelerators[0].name, 'NVIDIA GeForce RTX 4080 SUPER');
 });
 
 test('a note that says nothing of where is "from a local model", never "the NPU"', () => {
@@ -116,6 +122,21 @@ test('the keeper asks this PC again when hardware.json is a day old, and not bef
   assert.equal(await refreshHardware({ file, detect, nowMs: Date.now() }), true);
   assert.equal(asked, 2);
   assert.ok(statSync(file).size > 0);
+});
+
+test('the keeper asks again at once when hardware.json has an NPU but not its name, and after an hour without the processor\'s', async () => {
+  const file = path.join(home, 'hw-unnamed.json');
+  let asked = 0;
+  const npu = { name: 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', device: 'Snapdragon(R) X2 Elite - X2E88100 - Qualcomm(R) Hexagon(TM) NPU', driver: '1', driverDate: '2026-01-01' };
+  const detect = async (): Promise<Detection> => (asked++, { cards: [], npu, geniex: null, cpu: { name: 'Oryon', arch: 'arm64', cores: 12 }, ramBytes: 1, problems: [] });
+  writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), npu: true, cards: [] }));
+  assert.equal(await refreshHardware({ file, detect }), true, 'from before names were kept: asked at once');
+  assert.deepEqual(kit.readHardware(file), { npu: true, cards: [], npuName: npu.name, cpuName: 'Oryon' });
+  assert.equal(await refreshHardware({ file, detect }), false, 'named now: not asked again');
+  writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), npu: false, cards: [] }));
+  assert.equal(await refreshHardware({ file, detect }), false, "no processor's name, but not an hour old");
+  assert.equal(await refreshHardware({ file, detect, nowMs: Date.now() + 3_600_000 }), true, 'an hour old');
+  assert.equal(asked, 2);
 });
 
 test('Settings\' "Where its work runs" on a PC without an NPU names no NPU', () => {

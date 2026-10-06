@@ -185,8 +185,8 @@ test('accelerator vectors: ids, and the names behind them', () => {
 
 for (const c of accel.configs) {
   test(`accelerator vectors, Reeve's config: ${c.case}`, () => {
-    assert.deepEqual(core.parseAccelerators(RULES, c.raw), c.expect);
-    assert.deepEqual(A.parseAccelerators(c.raw), c.expect);
+    assert.deepEqual(core.parseAccelerators(RULES, c.raw, c.hw ?? null), c.expect);
+    assert.deepEqual(A.parseAccelerators(c.raw, c.hw ?? null), c.expect);
   });
 }
 

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.1
+
+**Kit 2.27.0: an accelerator's name is what your PC calls it, never a setting** (kit/CHANGELOG.md).
+
+### What changed
+
+- Every agent names the NPU, each graphics card and the processor from what Windows calls them, as Manor shows them: by the model alone, without (R), (TM) or a last "NPU", "CPU" or "GPU": "Qualcomm Hexagon", "Qualcomm Oryon", "Qualcomm Adreno X2-90". A name written in Reeve's config.json is no longer used, and is taken out the next time the file is saved.
+- Nothing else on the Steward's own page: it hands the new kit to every agent.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.12.0
 
 **The Steward now keeps the rest of the staff up and answering, with or without repositories to look after.**

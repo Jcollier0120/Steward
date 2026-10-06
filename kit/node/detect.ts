@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type Accelerator, acceleratorId, autoOrder, OWN_MEMORY_GB } from './accelerator-config.ts';
+import type { Hardware } from './accelerators.ts';
+import * as core from './core/index.js';
 
 /**
  * What this PC has to run models on (`smith accelerators`, `reeve accelerators`): its graphics cards as DXGI lists them,
@@ -190,12 +192,12 @@ export function recommendedCard(cards: GpuCard[]): GpuCard | undefined {
 const tm = (s: string) => s.replace(/\((R|TM|C)\)/gi, '').replace(/\s+/g, ' ').trim();
 
 /**
- * The NPU's own name from its driver's device name: "Snapdragon(R) X2 Elite Extreme - X2E94100 -
- * Qualcomm(R) Hexagon(TM) NPU" is "Snapdragon X2 Elite Extreme NPU".
+ * The NPU's name as hardware.json keeps it: its device name as Windows lists it, in full, with (R) and (TM) taken
+ * out and its spaces collapsed: "Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU" is
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU". "NPU" when Windows gives none. It is shown
+ * shorter, by its model (the core's deviceName): "Qualcomm Hexagon".
  */
 export function npuName(device: string): string {
-  const parts = device.split(/\s+-\s+/);
-  if (parts.length > 1 && /snapdragon/i.test(parts[0])) return `${tm(parts[0])} NPU`;
   return tm(device) || 'NPU';
 }
 
@@ -252,14 +254,20 @@ export function noNpu(d: Pick<Detection, 'npu' | 'problems' | 'cpu'>): boolean {
 
 /**
  * What this PC has, for hardware.json (accelerators.ts' rememberHardware): whether it has an NPU, and its graphics
- * cards. Null unless both were answered: an NPU found, or none for certain (noNpu), and the cards listed. A model is
- * then never called the NPU on a PC without one, whatever model it is (the core's notTheNpu).
+ * cards, with the NPU's and the processor's names. Null unless both were answered: an NPU found, or none for certain
+ * (noNpu), and the cards listed. A model is then never called the NPU on a PC without one, whatever model it is (the
+ * core's notTheNpu), and every accelerator is named as this PC names it (the core's acceleratorName).
  */
-export function hardwareOf(d: Detection): { npu: boolean; cards: { name: string; memoryGb: number | null }[] } | null {
+export function hardwareOf(d: Detection): Hardware | null {
   const npuKnown = !!d.npu || noNpu(d);
   const cardsKnown = !d.problems.some((p) => /^(graphics cards|PowerShell): |^only Windows/.test(p));
   if (!npuKnown || !cardsKnown) return null;
-  return { npu: !!d.npu, cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })) };
+  return {
+    npu: !!d.npu,
+    cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })),
+    ...(d.npu ? { npuName: d.npu.name } : {}),
+    ...(d.cpu ? { cpuName: d.cpu.name } : {}),
+  };
 }
 
 /** Asks this PC. */
@@ -270,9 +278,10 @@ export async function detect(run: (script: string) => Promise<string> = runPower
 
 /** What was detected, as accelerators (no endpoints yet), in the auto order: what `setup` and the Settings page start from. */
 export function detectedAccelerators(d: Detection): Accelerator[] {
-  const list: Accelerator[] = d.cards.map((c) => ({ id: c.id, kind: 'gpu' as const, name: c.name, memoryGb: c.memoryGb, slots: 1, maxContextTokens: 4096, quirks: [] }));
-  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: d.npu.name, slots: 1, maxContextTokens: 2400, quirks: [] });
-  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: d.cpu.name, slots: 1, maxContextTokens: 4096, quirks: [] });
+  // Each is shown as Manor shows it (the core's deviceName); a card's id stays the one its DXGI name gives.
+  const list: Accelerator[] = d.cards.map((c) => ({ id: c.id, kind: 'gpu' as const, name: core.deviceName(c.name), memoryGb: c.memoryGb, slots: 1, maxContextTokens: 4096, quirks: [] }));
+  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: core.deviceName(d.npu.name), slots: 1, maxContextTokens: 2400, quirks: [] });
+  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: core.deviceName(d.cpu.name), slots: 1, maxContextTokens: 4096, quirks: [] });
   return autoOrder(list);
 }
 

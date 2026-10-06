@@ -35,12 +35,12 @@ test('this PC: what Reeve lists, in order, and when that is the NPU alone', () =
   assert.match(npu, /NPU only, never on the processor or a graphics card/);
   const both = parseAccelerators({
     accelerators: [
-      { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', maxContextTokens: 2400, chat: { baseUrl: 'http://127.0.0.1:18181', model: 'q' } },
-      { id: 'gpu-rtx', kind: 'gpu', name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, slots: 2, maxContextTokens: 8192, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } },
+      { id: 'npu', kind: 'npu', maxContextTokens: 2400, chat: { baseUrl: 'http://127.0.0.1:18181', model: 'q' } },
+      { id: 'gpu-nvidia-geforce-rtx-4090', kind: 'gpu', memoryGb: 24, slots: 2, maxContextTokens: 8192, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } },
     ],
-  });
+  }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] });
   const text = thisPc(both);
-  assert.match(text, /the Snapdragon X2 Elite NPU \(chat\), then the NVIDIA GeForce RTX 4090 \(chat\)\./, 'auto order: the NPU first');
+  assert.match(text, /the Snapdragon X2 Elite \(chat\), then the NVIDIA GeForce RTX 4090 \(chat\)\./, 'auto order: the NPU first');
   assert.doesNotMatch(text, /NPU only/);
   assert.equal(thisPc({ error: REEVE_NOT_SET_UP }), `${REEVE_NOT_SET_UP}, so there is no model work here.`);
 });
