@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { originRepo } from './kit/manor.ts';
+import { manorHome, originRepo } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import type { Employee } from './settings.ts';
+import { RELEASE_HERE, type Employee } from './settings.ts';
 
 /**
  * The Steward used to come with a list of employees, a repository and a clone of its own built in. It no longer does:
@@ -60,8 +60,17 @@ const list = (dir: string) => {
   }
 };
 
-/** An employee rebuilt from its staff row and its clone, and what couldn't be filled in. */
-export function employeeFromClone(row: StaffRowLike): { employee: Employee; missing: string[] } | null {
+/**
+ * Manor's internal staff (its staff.json's "internal": true): private agents, never offered or published. The Steward
+ * builds and installs them from their clones here (RELEASE_HERE). None without Manor.
+ */
+export function internalStaff(home = manorHome()): Set<string> {
+  const agents = readJson<{ agents?: { id?: unknown; internal?: unknown }[] } | null>(path.join(home, 'app', 'staff.json'), null)?.agents;
+  return new Set((Array.isArray(agents) ? agents : []).filter((a) => a && a.internal === true && typeof a.id === 'string').map((a) => a.id as string));
+}
+
+/** An employee rebuilt from its staff row and its clone, and what couldn't be filled in. An internal one is released here. */
+export function employeeFromClone(row: StaffRowLike, internal = false): { employee: Employee; missing: string[] } | null {
   const id = typeof row.id === 'string' && /^[a-z][a-z0-9-]*$/.test(row.id) ? row.id : null;
   const checkout = typeof row.checkout?.path === 'string' ? row.checkout.path : '';
   if (!id || !checkout || !isDir(checkout)) return null;
@@ -107,7 +116,7 @@ export function employeeFromClone(row: StaffRowLike): { employee: Employee; miss
   if (!versionFiles.length) missing.push('Version files');
 
   let release = '';
-  if (scripts.release) release = 'npm run release -- --publish';
+  if (scripts.release) release = internal ? RELEASE_HERE : 'npm run release -- --publish';
   else {
     const ps = has('release.ps1') ? 'release.ps1' : list(checkout).map((d) => `${d}\\release.ps1`).find((f) => existsSync(path.join(checkout, f)));
     if (ps) release = `powershell -NoProfile -File ${ps} -Publish`;
@@ -128,7 +137,8 @@ export function employeeFromClone(row: StaffRowLike): { employee: Employee; miss
     test,
     versionFiles,
     release,
-    install: node ? 'node src/cli.ts install' : '',
+    // Released here, it's installed by its release; else its newest release is downloaded and installed.
+    install: node && !(internal && scripts.release) ? 'node src/cli.ts install' : '',
     approve: node && has('jobs/jobs.json') ? `node %USERPROFILE%\\.${id}\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}` : '',
     installed: node ? `%USERPROFILE%\\.${id}\\app` : '',
   };
@@ -177,9 +187,10 @@ export function migrateSettings(o: { settingsFile: string; staffFile: string; no
     if (!rows.length) return null;
     const notes: string[] = [];
     const employees: Employee[] = [];
+    const internal = internalStaff();
     for (const row of rows) {
       const name = typeof row.name === 'string' ? row.name : String(row.id);
-      const got = employeeFromClone(row);
+      const got = employeeFromClone(row, typeof row.id === 'string' && internal.has(row.id));
       if (!got) {
         notes.push(`${name} was left out: its clone isn't on this PC. Add it in Settings if you still want it looked after.`);
         continue;

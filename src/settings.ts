@@ -16,6 +16,16 @@ export const PART_NAMES = ['node', 'web', 'spec', 'core', 'dotnet'];
  * and the commands that fill its kit, test it and release it. Commands run in the employee's folder;
  * `npm` and `npx` run with the Node that runs the Steward.
  */
+/**
+ * An employee released only on this PC: its release command builds and installs it from its clone (--install), and
+ * never publishes (no --publish or -Publish). Manor's internal staff are, so their releases never reach the public
+ * releases repository; a staff table compares their version with the installed copy's, not a GitHub release.
+ */
+export const releasedHere = (e: Pick<Employee, 'release'>) => /(^|\s)--install\b/.test(e.release ?? '') && !/(^|\s)(--publish|-Publish)\b/.test(e.release ?? '');
+
+/** The local build-and-install a private employee releases with (releasedHere). */
+export const RELEASE_HERE = 'npm run release -- --install';
+
 export interface Employee {
   id: string;
   name: string;

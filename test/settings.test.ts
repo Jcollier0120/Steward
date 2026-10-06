@@ -178,6 +178,31 @@ test("with no settings.json at all, the staff table and its clones are written t
   }
 });
 
+test("Manor's internal staff are released here: built and installed from the clone, never published; a GitHub release is none of theirs", async () => {
+  const manor = path.join(home, 'manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  writeFileSync(path.join(manor, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', internal: true }, { id: 'dotty' }] }));
+  const before = process.env.MANOR_HOME;
+  process.env.MANOR_HOME = manor;
+  writeFileSync(staffFile, JSON.stringify(staff));
+  try {
+    const { RELEASE_HERE, releasedHere } = await import('../src/settings.ts');
+    const [porter, dotty] = loadSettings().employees;
+    assert.deepEqual([porter.release, porter.install], [RELEASE_HERE, ''], 'internal: its release builds and installs it here');
+    assert.equal(releasedHere(porter), true);
+    assert.equal(releasedHere(dotty), false, 'published with -Publish');
+    assert.equal(releasedHere({ release: 'npm run release -- --publish' }), false);
+    const { installOne } = await import('../src/stages/aftermerge.ts');
+    const r = await installOne({ run: async () => { throw new Error('no GitHub look for one released here'); } } as any, porter);
+    assert.equal(r.outcome, 'done');
+    assert.match(r.message, /installed by its release, built here from its clone/);
+  } finally {
+    if (before === undefined) delete process.env.MANOR_HOME;
+    else process.env.MANOR_HOME = before;
+    clean();
+  }
+});
+
 test('a settings.json with other keys but no employees keeps its keys, and gets the employees from the staff table', () => {
   writeFileSync(staffFile, JSON.stringify(staff));
   writeFileSync(settingsFile(), JSON.stringify({ parallel: 3, stewardRepo: 'octocat/my-steward' }));

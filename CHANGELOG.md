@@ -12,6 +12,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's repository and the Steward's checkout in Settings start empty too. Empty, the Steward doesn't release itself or merge its own PRs, and a kit rollout needs a kit you name. With only a clone named, its origin is used as the repository.
 - `claim-version steward` finds the Steward's own repository from Settings, or from the Steward clone it is run in.
 - The examples in Settings no longer name anyone's account or repository.
+- **Private employees are released on this PC.** Manor's internal staff (the Wright and the Bailiff) are built and installed from their clones here, with `npm run release -- --install`, and never published. Their row in the staff table compares the installed copy's version with their branch's, not a GitHub release, and the install after a merge is their release itself.
 
 ### Before you update
 

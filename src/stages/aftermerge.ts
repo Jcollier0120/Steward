@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { AfterStep } from '../after.ts';
 import { gh } from '../git.ts';
 import { runLine, tail } from '../run.ts';
-import type { Employee, Settings } from '../settings.ts';
+import { releasedHere, type Employee, type Settings } from '../settings.ts';
 import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
@@ -32,6 +32,8 @@ export function listedSum(sums: string, file: string): string | null {
 /** An employee's newest release, installed on this PC from its zip on GitHub, with its install command. */
 export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult> {
   const { run } = ctx;
+  // Released on this PC (an internal employee): its release built it from its clone and installed it already.
+  if (releasedHere(e)) return result(e, 'done', `installed by its release, built here from its clone (${e.release})`);
   if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command`);
   const latest = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
