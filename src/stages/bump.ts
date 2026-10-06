@@ -38,7 +38,16 @@ export interface BumpOptions {
   tool?: string;
   /** The kit's CHANGELOG.md, for the employee's changelog entry; null when it couldn't be read (the entry names the kit alone). */
   changelog?: string | null;
+  /**
+   * A trial of a kit not released yet, before its PR merges (stages/trial.ts): a worktree and local branch of their
+   * own (never a bump's, which may be left for a look), nothing committed; trial.ts removes them after.
+   */
+  trial?: boolean;
 }
+
+/** Where a trial bumps an employee, and on which local branch. */
+export const trialDirOf = (s: Ctx['settings'], e: Employee) => path.join(workRootOf(s), `${e.id}-trial`);
+export const trialBranch = (kit: string) => `steward/trial-kit-${kit}`;
 
 /**
  * The employee's changelog entry for a kit bump (`## <version>` and all): the kit it now carries, a "What changed"
@@ -154,10 +163,10 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  const branch = bumpBranch(o.kit);
-  if (await onOrigin(run, repo, branch)) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
+  const branch = o.trial ? trialBranch(o.kit) : bumpBranch(o.kit);
+  if (!o.trial && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
   // A bump made here before and not pushed is made again, from scratch.
-  const dir = bumpDirOf(ctx.settings, e);
+  const dir = o.trial ? trialDirOf(ctx.settings, e) : bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
   if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
   rmSync(checksLogOf(dir), { force: true });
@@ -195,8 +204,9 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say });
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; the worktree is left at ${dir}, the failed step's whole output in ${checksLogOf(dir)}`, { version: next });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next });
   }
+  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${first ? ` on a second try (the first: ${first})` : ''}`, { version: next });
   const secondTry = first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));

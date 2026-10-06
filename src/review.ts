@@ -10,9 +10,10 @@ import type { PrInfo } from './stages/staff.ts';
  * check stays a draft for the person, and says why (after a day, the Steward's alarm says so too).
  *
  * The checks: not labelled wright:needs-you (the Wright's own word that a person reviews it); no changed file a person
- * reviews (Settings: the same patterns as the Wright's, checked here again rather than trusted); no change to its
- * dependencies (package.json's dependencies, devDependencies, optionalDependencies, peerDependencies); and not
- * larger than Settings allow. Its tests come after, as for every team PR.
+ * reviews (Settings: the same patterns as the Wright's, checked here again rather than trusted; and, whatever Settings
+ * say, ALWAYS_REVIEWED and the employee's own GUARDS); no change to its dependencies (package.json's dependencies,
+ * devDependencies, optionalDependencies, peerDependencies, overrides) or to the scripts npm runs as it installs; and
+ * not larger than Settings allow. Its tests come after, as for every team PR.
  *
  * Where the Bailiff is installed (settings.ts's bailiffInstalled), one more: the Bailiff, which reads each draft with
  * Claude Code, has approved its current head commit. It labels the PR bailiff:approved and ends its review comment
@@ -47,31 +48,54 @@ export const sensitiveFiles = (files: string[], patterns: string[]) => {
   return files.filter((f) => res.some((r) => r.test(f.replace(/\\/g, '/'))));
 };
 
-/** Why the Steward won't mark it ready on its own, from what gh lists: null when nothing does. Pure. */
-export function reviewHold(pr: PrInfo, s: Settings['wrightReview']): string | null {
+/**
+ * What a person always reviews, whatever Settings say, so no list there can leave it out: what Claude Code may do in
+ * a repository and what it is told (.claude\, CLAUDE.md, AGENTS.md, .mcp.json), where npm fetches from (.npmrc), and
+ * secrets (.env files, keys).
+ */
+export const ALWAYS_REVIEWED = ['.claude/**', '**/CLAUDE.md', '**/AGENTS.md', '**/.mcp.json', '**/.npmrc', '**/.env', '**/.env.*', '**/*.pem', '**/*.key'];
+
+/**
+ * And in these employees' own repositories, the code that is the guard itself: the Steward's look at a draft and what
+ * it merges, the Wright's worker and what it may do, the Bailiff's review. A draft that loosened one of these would
+ * otherwise pass the very look it changed. By employee id.
+ */
+export const GUARDS: Record<string, string[]> = {
+  steward: ['src/review.ts', 'src/settings.ts', 'src/stages/merge.ts', 'src/stages/trial.ts', 'src/safeinstall.ts'],
+  wright: ['src/worker.ts', 'src/workers.ts', 'src/settings.ts'],
+  bailiff: ['src/review.ts', 'src/worker.ts', 'src/settings.ts'],
+};
+
+/** Every pattern a person reviews in an employee's repository: Settings', ALWAYS_REVIEWED, and its GUARDS. */
+export const reviewedPatterns = (s: Settings['wrightReview'], who?: string) => [...s.sensitive, ...ALWAYS_REVIEWED, ...((who && GUARDS[who]) || [])];
+
+/** Why the Steward won't mark it ready on its own, from what gh lists: null when nothing does. `who`: the employee's id. Pure. */
+export function reviewHold(pr: PrInfo, s: Settings['wrightReview'], who?: string): string | null {
   if (pr.labels.includes(NEEDS_YOU_LABEL)) return `the Wright labelled it ${NEEDS_YOU_LABEL}`;
   if (!pr.files.length) return "gh listed no files it changes, so the Steward can't look";
   if (pr.files.length >= 100) return 'it changes 100 files or more';
-  const sensitive = sensitiveFiles(pr.files, s.sensitive);
+  const sensitive = sensitiveFiles(pr.files, reviewedPatterns(s, who));
   if (sensitive.length) return `it changes what a person reviews: ${sensitive.slice(0, 5).join(', ')}${sensitive.length > 5 ? ', …' : ''}`;
   if (pr.changed > s.maxLines) return `it changes ${pr.changed} lines, over the ${s.maxLines} the Steward takes on its own`;
   return null;
 }
 
-const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides'];
+/** The scripts npm runs by itself as it installs: code that runs wherever the agent's packages are installed. */
+const INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
 
-/** package.json's dependency fields, as one comparable string; null when there's no such file or it isn't JSON. */
+/** package.json's dependency fields and install scripts, as one comparable string; null when there's no such file or it isn't JSON. */
 export function dependenciesOf(text: string | null): string | null {
   if (text === null) return null;
   try {
     const j = JSON.parse(text.replace(/^﻿/, ''));
-    return JSON.stringify(DEPENDENCY_FIELDS.map((k) => [k, Object.entries(j?.[k] ?? {}).sort(([a], [b]) => a.localeCompare(b))]));
+    return JSON.stringify([...DEPENDENCY_FIELDS.map((k) => [k, Object.entries(j?.[k] ?? {}).sort(([a], [b]) => a.localeCompare(b))]), INSTALL_SCRIPTS.map((k) => j?.scripts?.[k] ?? null)]);
   } catch {
     return null;
   }
 }
 
-/** Why its dependencies stop the Steward: package.json's dependencies differ between its head and where it started. */
+/** Why its dependencies stop the Steward: package.json's dependencies or install scripts differ between its head and where it started. */
 export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!pr.files.some((f) => /(^|\/)package\.json$/i.test(f))) return null;
   const repo = checkoutOf(e);
@@ -80,7 +104,7 @@ export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise
   const start = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, head))?.trim();
   if (!start) return "the Steward couldn't find where it started, to compare its dependencies";
   for (const f of pr.files.filter((x) => /(^|\/)package\.json$/i.test(x))) {
-    if (dependenciesOf(await showFile(ctx.run, repo, head, f)) !== dependenciesOf(await showFile(ctx.run, repo, start, f))) return `it changes the dependencies in ${f}`;
+    if (dependenciesOf(await showFile(ctx.run, repo, head, f)) !== dependenciesOf(await showFile(ctx.run, repo, start, f))) return `it changes the dependencies or install scripts in ${f}`;
   }
   return null;
 }

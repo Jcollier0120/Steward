@@ -380,7 +380,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     fields: [
       { key: 'on', kind: 'switch', label: 'Look at the Wright\'s drafts, and merge the ones that pass' },
       { key: 'maxLines', kind: 'whole', min: 10, max: 5000, unit: 'lines', label: 'At most', help: 'Lines added and removed; a larger draft waits for you.' },
-      { key: 'sensitive', kind: 'list', label: 'For a person to review', help: 'A draft changing a file that matches one of these waits for you. * is any part of a name, ** any folders.', item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
+      { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file that matches one of these waits for you. * is any part of a name, ** any folders. Whatever this list says, Claude Code's settings and instructions (.claude, CLAUDE.md, AGENTS.md, .mcp.json), .npmrc, secrets (.env, keys), and the Steward's, the Wright's and the Bailiff's own guards always wait for you too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
   },
 ];
