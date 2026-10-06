@@ -98,9 +98,11 @@ test("parsePrs keeps a PR's steward block, or why it can't be read; merge holds 
   assert.match(look.message, /#7 \(.*; then release, install, approve-jobs \(aletaster-orders\)\) waits: it asks for a release, but v0\.4\.0, its version once merged, is already released: raise the version in the PR/);
   assert.match(look.message, /#8 .* waits: its steward block asks for "deploy"/);
 
-  // Install or approve-jobs with no command for it in Settings waits too.
+  // Install with no install command in Settings doesn't hold it (the employee is installed another way, and the step
+  // is skipped after the merge): #7 waits only for its version. Approve-jobs with no approve command waits.
   const none = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, install: '' }, { yes: false, team: true });
-  assert.match(none.message, /#7 .* waits: it asks for install, but Settings give Fake no install command/);
+  assert.doesNotMatch(none.message, /install command/);
+  assert.match(none.message, /#7 .* waits: it asks for a release, but v0\.4\.0, its version once merged, is already released/);
   const noApprove = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp }), { ...e, approve: '' }, { yes: false, team: true });
   assert.match(noApprove.message, /#7 .* waits: it asks for approve-jobs, but Settings give Fake no approve command/);
 });
@@ -184,6 +186,9 @@ test("install refuses a zip that doesn't match its SHA256SUMS.txt, or a release.
   assert.match((await installOne(ctx(''), e)).message, /has no SHA256SUMS\.txt naming Fake-0\.4\.1\.zip/);
   assert.equal((await installOne(ctx(made.sums, 'v0.4.2'), e)).message, "Fake-0.4.1.zip's release.json says 0.4.1, not 0.4.2");
   assert.ok(!existsSync(marker), 'nothing installed');
+  // No install command in Settings: installed another way, so the step is skipped, and nothing is downloaded.
+  const elsewhere = await installOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-refuse'), neutralDir: tmp, run: runner(() => { throw new Error('nothing asked of gh'); }).run }), { ...e, install: '' });
+  assert.deepEqual([elsewhere.outcome, elsewhere.message], ['skipped', "Settings give Fake no install command, so it is installed another way (Manor's updates), not by the Steward"]);
   assert.equal(listedSum('abc  x.zip\n' + 'f'.repeat(64) + ' *Fake.zip\n', 'Fake.zip'), 'f'.repeat(64));
 
   // A release asked for, and refused (its version is out already): no install after it.

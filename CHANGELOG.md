@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.8
+
+**A PR that asks for an install no longer waits forever on an employee the Steward doesn't install.**
+
+### What changed
+
+- A PR's steward block can ask for an install after the merge. When Settings give that employee no install command, because it is installed another way (Heiward installs from its own installer, and Manor's updates bring its new releases), the PR used to wait in every round with "it asks for install, but Settings give … no install command". Now it merges, the release it asks for still happens, and the install line says it was skipped and why.
+- A PR that asks for approve-jobs with no approve command in Settings still waits, since its jobs would otherwise stay unapproved.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PR held only for this merges at the next round.
+
 ## 0.11.7
 
 **No one's repositories are built in: the Steward looks after the ones you add.**

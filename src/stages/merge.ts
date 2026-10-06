@@ -25,8 +25,10 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
  *
  * A PR can ask for steps after it is merged, in a steward block in its description (src/after.ts): release,
  * install, approve-jobs. One whose block can't be read waits, and so does one whose steps couldn't happen: an
- * install with no install command in Settings, or a release of a version that is already released. With
- * --yes, the steps run after the merge (stages/aftermerge.ts).
+ * approval with no approve command in Settings, or a release of a version that is already released. An install with
+ * no install command in Settings doesn't hold it: that employee is installed another way (Heiward, by Manor, from its
+ * own installer), so the step is skipped after the merge, and its line says so. With --yes, the steps run after the
+ * merge (stages/aftermerge.ts).
  *
  * A team PR is held to more, since no one asked for it here: the version it sets must be new (not released, above
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
@@ -89,13 +91,13 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
 export const RAISE = 'raise the version in the PR';
 
 /**
- * Why the steps a mergeable PR asks for couldn't happen, or null: an install or approval with no command for it in
- * Settings, or a release whose version once merged (the PR's when it sets one, else its branch's) is already released.
+ * Why the steps a mergeable PR asks for couldn't happen, or null: an approval with no approve command in Settings, or
+ * a release whose version once merged (the PR's when it sets one, else its branch's) is already released. An install
+ * with no install command isn't one: it is skipped after the merge (stages/aftermerge.ts).
  */
 export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<string | null> {
   const a = pr.after;
   if (!a) return null;
-  if (a.steps.includes('install') && !e.install) return `it asks for install, but Settings give ${e.name} no install command`;
   if (a.steps.includes('approve-jobs') && !e.approve) return `it asks for approve-jobs, but Settings give ${e.name} no approve command`;
   if (!a.steps.includes('release')) return null;
   const repo = checkoutOf(e);
