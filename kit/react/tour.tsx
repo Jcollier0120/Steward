@@ -14,6 +14,10 @@ import { Button, LinkButton, Text } from './ui.tsx';
  * Manor's hire flow opens a new employee's page at #/tour. Done, or Skip, goes back to the page; the browser remembers
  * that this agent's tour was seen (`<id>:toured`).
  *
+ * Its required settings (onboarding's `required`, the node part's required.ts) are marked in step 2, which holds until
+ * they're filled in and saved: the agent does nothing without them. Skip still leaves; the page then says what it's
+ * waiting for, with a link back to this step (#/tour?step=settings).
+ *
  * Opened as #/tour?from=<url> (the URL encoded), its last step also offers "Back to Manor": to that URL, which must be
  * this PC's (tourFrom()), so the hire flow that opened it gets its new employee back.
  */
@@ -96,7 +100,14 @@ function TourCard({ docked, place, title, children, back, next, last, appId, wid
   );
 }
 
-export function Tour({ onboarding, app, onSettingsSaved, start = 'intro', from = tourFrom(location.hash) }: { onboarding: Onboarding; app: PageShell['app']; onSettingsSaved?: () => void; start?: Step; from?: string | null }) {
+/** The step #/tour?step=<name> opens at: the page's "Fill them in" opens the settings. */
+export function tourStart(hash: string): Step {
+  const q = hash.indexOf('?');
+  const step = q < 0 ? null : new URLSearchParams(hash.slice(q + 1)).get('step');
+  return step === 'settings' || step === 'tour' ? step : 'intro';
+}
+
+export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = tourStart(location.hash), from = tourFrom(location.hash) }: { onboarding: Onboarding; app: PageShell['app']; needs?: PageShell['needs']; onSettingsSaved?: () => void; start?: Step; from?: string | null }) {
   // The parts walked in step 3: those on the page as it starts, kept while it runs (null before then: those on it now).
   const [walked, setWalked] = useState<Onboarding['tour'] | null>(null);
   const parts = walked ?? onPage(onboarding.tour);
@@ -130,10 +141,15 @@ export function Tour({ onboarding, app, onSettingsSaved, start = 'intro', from =
   if (step === 'settings')
     return (
       <div className="tour-backdrop">
-        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : go(1))} last={steps.length === 2} appId={app.id} from={from}>
+        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : needs ? window.alert(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from}>
           <Text variant="muted" as="p">
             {onboarding.settings.length ? `Only what ${app.name} can't choose for you. Everything else has a default that works, and is in Settings.` : `${app.name} needs nothing from you to start.`}
           </Text>
+          {needs && (
+            <p className="tour-needs" role="status">
+              <strong>Needed before it can start:</strong> {needs.text}.
+            </p>
+          )}
           <SettingsForm keys={onboarding.settings} onDirty={setDirty} onSaved={onSettingsSaved} />
         </TourCard>
       </div>

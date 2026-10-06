@@ -10,12 +10,12 @@ const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..',
 process.env.STEWARD_ESBUILD = STEWARD;
 const { bundleForNode, importPath } = await import('./react-render.ts');
 
-const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string, from?: string | null) => string; tourFrom: (hash: string) => string | null; onPage: (parts: unknown[], doc?: unknown) => { tour: string }[] }>(
+const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string, from?: string | null, needs?: unknown) => string; tourFrom: (hash: string) => string | null; tourStart: (hash: string) => string; onPage: (parts: unknown[], doc?: unknown) => { tour: string }[] }>(
   `import { renderToStaticMarkup as r } from 'react-dom/server';
-   import { onPage, SettingsForm, Tour, tourFrom } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+   import { onPage, SettingsForm, Tour, tourFrom, tourStart } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
    export const form = (data, keys) => r(<SettingsForm initial={data} keys={keys} />);
-   export const tour = (o, start, from = null) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} from={from} />);
-   export { onPage, tourFrom };`,
+   export const tour = (o, start, from = null, needs = null) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} from={from} needs={needs} />);
+   export { onPage, tourFrom, tourStart };`,
   { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
 );
 
@@ -101,6 +101,15 @@ test("the Tour's three steps: what the role is, its settings, what its page show
   const walk = m.tour(o, 'tour');
   assert.match(walk, /<div class="tour-card tour-dock">.*Step 3 of 3 · 1 of 2.*Its status.*On duty or off\./, 'a card docked at the bottom, the page beside it');
   assert.match(m.tour({ ...o, tour: [] }, 'settings'), /Step 2 of 2.*>Done</, 'no tour steps: the settings are the last step');
+});
+
+test("its required settings: the settings step says what it can't start without; the page's Fill them in opens that step", () => {
+  const o = { intro: { title: 'Meet the fixture', text: 'It carries the kit.' }, settings: ['folders'], tour: [], required: ['folders'] };
+  assert.match(m.tour(o, 'settings', null, { keys: [['folders']], text: 'Folders' }), /<p class="tour-needs" role="status"><strong>Needed before it can start:<\/strong> Folders\.<\/p>/);
+  assert.doesNotMatch(m.tour(o, 'settings'), /tour-needs/, 'filled in: nothing said');
+  assert.equal(m.tourStart('#/tour?step=settings'), 'settings');
+  assert.equal(m.tourStart('#/tour'), 'intro');
+  assert.equal(m.tourStart('#/tour?step=nonsense'), 'intro');
 });
 
 test('a setting used only at the next start, install, or install as an administrator: marked so, and the intro says each', () => {

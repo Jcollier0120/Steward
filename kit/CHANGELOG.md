@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.28.0
+
+**Required settings: an agent that can't work without something from you waits for it, and onboarding asks for it.** The user's call: "each agent has designated which of its settings fields are required for the agent to operate... get the user to fill those out during onboarding... before the agent can begin", as the Chamberlain can do nothing until a mail account is set up.
+- **node/onboarding.ts: `Onboarding.required`**, the settings among `settings` the agent can't work without: each entry a key that must be filled in, or a list of keys of which one is enough (`[['thunderbird', 'imapAccounts']]`: Thunderbird, or a mail account). New: `Required`, `requiredGroups`, `filled(v)` (a switch on, a number other than 0, text not blank, a list with something filled in it, a group by its `on`/`enabled` switch, else anything filled in it), `unmetRequired(o, values)` and `requiredText(keys, schema)` ("Thunderbird or Mail accounts"). `onboardingProblems` (agent-checks.ts) now says when a required key isn't one onboarding asks for, an entry names none, or a key is required twice.
+- **node/required.ts is new.** It reads the agent's onboarding once as it starts (`AGENT_ONBOARDING`, moved here from react-page.ts, which imports it) and, with the settings serve() is given (`watchRequired`), says what is still missing: `needsSettings()`, `{ keys, text }` or null, read from settings.json each time, so a save lets the agent go at once.
+- **node/schedule.ts:** while its required settings aren't filled in, `every()`'s rounds don't run, scheduled or asked for: `runNow()` returns false, and `nextRunAt` is null.
+- **node/server.ts:** `/api/ping` says `needsSettings` (null when none), so Manor can show that a new hire waits for its settings.
+- **node/page.ts and react-page.ts:** the status pill says **Needs settings** (its title what for) before Off duty; `PageShell.needs` carries it. **node/settings-kit.ts: `readSettings(spec)`**, the settings in use, as GET /api/settings reads them.
+- **react/shell.tsx:** while it needs settings, a banner says **Waiting for its settings**, with **Fill them in**, which opens the tour at its settings step (`#/tour?step=settings`). After onboarding saves, the page's data is read again.
+- **react/tour.tsx:** step 2 says what it can't start without ("Needed before it can start: …"), and its Next waits until it's filled in and saved; Skip still leaves, and the page's banner brings it back. `tourStart(hash)`: `#/tour?step=settings` (or `tour`) opens at that step.
+- **What an agent must do:** nothing, unless it can't work without a setting: then name it in its src/onboarding.ts's `required` (it must be among `settings`). An agent with none behaves as before.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.27.0
 
 **An accelerator's name is what the PC calls it, never a setting.** The user's call: "Just keep it what it's called, there's no reason for custom names." config.json's accelerators keep no `name`; every program names each one from what this PC is, the same way.

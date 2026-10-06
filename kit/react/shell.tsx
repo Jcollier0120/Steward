@@ -4,7 +4,7 @@ import type { PageData, PageShell, ShellTheme } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
 import { UI_CSS } from './styles.ts';
 import { Tour } from './tour.tsx';
-import { PostButton, ReloadProvider } from './ui.tsx';
+import { Button, PostButton, ReloadProvider } from './ui.tsx';
 
 /**
  * The kit's frame of every React page, as page.ts draws it for a string-built one, element for element and class for
@@ -260,11 +260,22 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
   const route = useRoute();
   const onSettings = route === 'settings';
   const [settingsDrawn, setSettingsDrawn] = useState(0);
-  const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} onSettingsSaved={() => setSettingsDrawn((n) => n + 1)} />);
+  // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
+  const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} needs={s.needs ?? null} onSettingsSaved={() => { setSettingsDrawn((n) => n + 1); void reload(); }} />);
   return (
     <ReloadProvider value={reload}>
       <style>{UI_CSS}</style>
       <TitleBar shell={s} settings={onSettings} action={action} />
+      {s.needs && route !== 'tour' && (
+        <div className="banners">
+          <div className="banner-note offduty" role="status">
+            <span>
+              <strong>Waiting for its settings</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
+            </span>
+            <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
+          </div>
+        </div>
+      )}
       {s.offDutySince && (
         <div className="banners">
           <div className="banner-note offduty" role="status">
