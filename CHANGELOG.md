@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.5
+
+**A Reeve update's jobs are approved as soon as it's installed, not up to a round later.**
+
+### What changed
+
+- When Manor installs an update that changes one of Reeve's job scripts, the job showed "Needs approval" until the Steward's next round approved it, up to ten minutes later. Manor now asks the Steward right after it installs, and the Steward approves at once. If a round is running, it approves as soon as that round ends. As before, it approves only a script that is exactly the one merged on Reeve's main; anything else stays yours to look at.
+
+### Before you update
+
+Nothing: it updates itself as usual. Manor asks only once it has the matching update too; until then, the rounds approve as before.
+
 ## 0.11.4
 
 **Manor keeps itself up to date like every other agent, more merge conflicts clear themselves, and the Wright gets one issue per agent for a failing kit, not one per kit.**

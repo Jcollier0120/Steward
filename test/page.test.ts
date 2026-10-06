@@ -19,8 +19,10 @@ const { bundleForNode, importPath } = await import('../kit/test/react-render.ts'
 
 const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? { code: 0, out: JSON.stringify([{ tagName: 'kit-v1.0.0', isDraft: false }]), err: '' } : undefined));
 let served: Awaited<ReturnType<typeof serveSteward>>;
+/** While a test holds it, every command waits: a stage stays running until it lets go. */
+let hold: Promise<void> = Promise.resolve();
 before(async () => {
-  served = await serveSteward({ run: r.run });
+  served = await serveSteward({ run: async (cmd, args, opts) => (await hold, r.run(cmd, args, opts)) });
   await served.idle();
 });
 after(async () => {
@@ -113,6 +115,30 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   assert.deepEqual(await round.json(), { started: true });
   await served.idle();
   assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'merge', 'a round with nothing done is not recorded');
+});
+
+test("Manor's ask after an install: the jobs approved now, with the token as the CLI sends it; while a round runs, once it ends", async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  assert.equal((await post('/api/jobs/approve', {}, { ids: ['reeve'] })).status, 403);
+  // No Origin: Manor posts as the Steward's own CLI does, with the token from its server.json.
+  const now = await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve'] });
+  assert.deepEqual(await now.json(), { started: true });
+  await served.idle();
+  // During a round: queued, and approved once it ends, nothing left running after.
+  let letGo = () => {};
+  hold = new Promise((done) => (letGo = done));
+  const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  assert.deepEqual(await round.json(), { started: true });
+  const queued = await (await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve', '../x', 7] })).json();
+  assert.equal(queued.queued, true);
+  assert.match(queued.message, /round is running; the jobs are approved once it ends/);
+  letGo();
+  hold = Promise.resolve();
+  await served.idle();
+  const ping = await (await fetch(`${base()}/api/ping`)).json();
+  assert.equal(ping.busy, false);
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {
