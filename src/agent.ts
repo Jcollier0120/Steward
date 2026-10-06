@@ -3,7 +3,7 @@ import { dismiss, loadAlarms } from './alarms.ts';
 import { APP, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
-import { pageShell, reactPage } from './kit/react-page.ts';
+import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { afterWords } from './after.ts';
@@ -169,7 +169,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
   const served = await serve({
     port,
     icon: ICON,
-    ping: () => ({ busy: running !== null, stage: running?.stage ?? null }),
+    ping: () => ({ busy: running !== null, stage: running?.stage ?? null, tour: hasTour() }),
     get: {
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
       // /api/page again every few seconds while a stage runs, and after each button.

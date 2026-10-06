@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.2
+
+**A tour of the Steward's page when you hire it.**
+
+### What's new
+
+- When you hire the Steward from Manor, **Take the tour** walks you through it in three steps: what it does, the three settings only you can choose (whose pull requests it merges, whether it merges and releases by itself, and whether it reopens an agent's page that stopped answering), and its page, part by part. You can take it again any time from its page at `#/tour`.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.12.1
 
 **Kit 2.27.0: an accelerator's name is what your PC calls it, never a setting** (kit/CHANGELOG.md).
