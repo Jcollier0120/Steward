@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.0
+
+**The Steward now keeps the rest of the staff up and answering, with or without repositories to look after.**
+
+### What's new
+
+- **The staff's pages are kept up.** No one did this before. In every round, whether or not the Steward has repositories to look after, an agent that is on duty but whose page has stopped answering (it crashed, or an update left it down, so its rounds aren't running) has its page opened again through Manor, as Manor's own Open button would. It gets three tries, five minutes apart, then one an hour. If it still doesn't come back, or Manor can't open it, an alarm says so until it answers. An agent you stopped stays stopped: the Steward never changes anyone's duty, and leaves alone the agents Manor keeps off duty for Developer options.
+- The page has a new section, **The staff's pages**, listing any agent that's down and the ones lately opened again.
+- A new setting, **Keeps the staff's pages up**, is on by default. It needs only Manor's page (Settings, Alarms).
+
+### What changed
+
+- **No repositories, no GitHub.** On a PC where none of the Steward's employees has a clone, and it has no checkout of its own, a round no longer asks GitHub anything. Before, it sent an empty query every round and logged that it had no team. Now keeping the staff's pages up and raising the alarms is the whole round. The page says that's what it is doing and leaves out the kit's stage buttons until you add an employee. Its kit card reads **The kit the Steward manages**, since there's no one to hand the kit to: the Steward keeps it only to run on.
+- With **Merges and releases by itself** off, rounds still come on duty to keep the staff's pages up, but they do nothing on GitHub. **Run now** still does a whole round.
+- If there are no repositories and **Keeps the staff's pages up** is off, the page says the Steward has nothing to do, and what to add.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents on duty whose pages are down are opened again within a round of updating. If you'd rather keep an agent's page down, stop it in Manor (off duty), or switch off **Keeps the staff's pages up** in the Steward's Settings.
+
 ## 0.11.13
 
 **A release that "failed" but is out anyway stops being reported as failed.**

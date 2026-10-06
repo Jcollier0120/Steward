@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { watchAlarms, type Held } from './alarms.ts';
+import { getJson, watchAlarms, type GetJson, type Held } from './alarms.ts';
 import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
@@ -13,7 +13,7 @@ import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } 
 import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
-import { pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
+import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -28,6 +28,7 @@ import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts'
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
+import { loadTending, tend, type OpenAgent } from './tend.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -48,6 +49,11 @@ export interface StageAsk {
   team?: boolean;
   /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
   full?: boolean;
+  /**
+   * round: only the staff's pages kept up (tend.ts) and the alarms, nothing asked of GitHub: a scheduled round while
+   * Settings say it doesn't merge and release by itself. A round on a PC with no repositories to look after is this too.
+   */
+  tendOnly?: boolean;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
@@ -186,6 +192,33 @@ export interface StageOptions {
    * the network's. Under node --test, online unless this is given, so a test never looks at the real network.
    */
   online?: () => Promise<boolean>;
+  /**
+   * Stands in for Manor in the round's look at the staff's pages (tend.ts): its page, its /api/state and its Open. Under
+   * node --test the staff are looked at only when this is given, so a test never opens a real agent.
+   */
+  tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+}
+
+/**
+ * Whether this PC has a repository for the Steward to look after: an employee's clone, or its own checkout while Settings
+ * say it merges or releases itself. Without one, a round asks GitHub nothing: it keeps the staff's pages up (tend.ts),
+ * and raises the alarms.
+ */
+export function reposHere(settings: Settings, o: Pick<StageOptions, 'self'> = {}): boolean {
+  if (settings.employees.some((e) => e.checkout && existsSync(checkoutOf(e)))) return true;
+  if (!settings.mergeSelf && !settings.releaseSelf) return false;
+  if (process.env.NODE_TEST_CONTEXT && !o.self) return false;
+  const checkout = o.self?.checkout ?? settings.stewardCheckout;
+  return !!checkout && existsSync(checkout);
+}
+
+/** The round's look at the staff's pages (tend.ts), through Settings' Manor page; nothing when Settings switch it off. */
+async function tendRound(settings: Settings, o: StageOptions, log: (line: string) => void): Promise<EmployeeResult[]> {
+  if (!settings.tend) return [];
+  if (process.env.NODE_TEST_CONTEXT && !o.tend) return [];
+  const manorUrl = o.tend?.manorUrl ?? settings.alarms.manorUrl;
+  if (!manorUrl) return [];
+  return tend({ manorUrl, getJson: o.tend?.getJson ?? getJson, open: o.tend?.open, now: o.now, log });
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
@@ -249,10 +282,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
   return withLock(
     stageLock(),
     async () => {
+      // With no repositories to look after here, or Settings saying it doesn't merge and release by itself, a round
+      // asks GitHub nothing (no glance, no team): it keeps the staff's pages up, and the alarms look.
+      const given = loadSettings();
+      const tendOnly = name === 'round' && (!!ask.tendOnly || !reposHere(given, o));
       // Offline (the kit's net.ts), a round asks nothing of GitHub: it would only fail for every employee, every
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
-      const offline = name === 'round' && !(await (o.online ?? onlineNow)());
-      const ctx = await context({ run: o.run, log, glance: offline ? false : undefined, offline, owner: o.owner });
+      const offline = name === 'round' && !tendOnly && !(await (o.online ?? onlineNow)());
+      const quiet = offline || tendOnly;
+      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
@@ -268,7 +306,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
-        if (offline) {
+        if (tendOnly) {
+          out.tendOnly = true;
+          log(
+            ask.tendOnly
+              ? "Settings say it doesn't merge and release by itself: the round keeps the staff's pages up, and asks GitHub nothing"
+              : "no repositories to look after on this PC (no employee's clone here, and no checkout of its own): the round keeps the staff's pages up, and asks GitHub nothing",
+          );
+        } else if (offline) {
           out.offline = true;
           log('this PC is offline, so the round waits for the network: nothing is asked of GitHub until it is back');
         } else if (name === 'merge' || name === 'round') {
@@ -362,6 +407,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         out.error = (e as Error).message;
         log(`${name}: ${out.error}`);
       }
+      // Every round, offline or not, with repositories or none: the agents on duty whose pages don't answer, opened again.
+      if (name === 'round') {
+        try {
+          out.results.push(...(await tendRound(ctx.settings, o, log)));
+        } catch (e) {
+          log(`tend: ${(e as Error).message}`);
+        }
+      }
       out.finished = new Date().toISOString();
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
       if (name === 'round') {
@@ -375,7 +428,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
@@ -404,6 +457,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       }
       writeJson(lastStageFile(), out);
       appendRotating(dataFile('stages.log'), `${JSON.stringify({ ...out, log: undefined })}\n`);
+      // A round that only kept the staff's pages up changed nothing on GitHub: the table stands.
+      if (tendOnly) return out;
       try {
         // The stage changed things on GitHub: a fresh glance for the table.
         await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings) });

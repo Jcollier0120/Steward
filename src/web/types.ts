@@ -1,4 +1,5 @@
 import type { AlarmState } from '../alarms.ts';
+import type { TendState } from '../tend.ts';
 import type { StageResult } from '../stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from '../stages/staff.ts';
 
@@ -16,6 +17,10 @@ export interface RoundView {
   /** Settings' rollout and releaseSelf. */
   rollout?: boolean;
   releaseSelf?: boolean;
+  /** Settings' tend, with Manor's page named: the rounds keep the staff's pages up (tend.ts). */
+  tend?: boolean;
+  /** This PC has a repository to look after (steward.ts's reposHere): without one, a round only keeps the staff's pages up. */
+  repos?: boolean;
 }
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */
@@ -35,4 +40,6 @@ export interface StewardView {
   round: RoundView;
   /** Undefined when Settings turn the alarms off. */
   alarms?: AlarmState;
+  /** The staff's pages as the last round left them (tending.json); undefined when Settings switch it off. */
+  tending?: TendState;
 }

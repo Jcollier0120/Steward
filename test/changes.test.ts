@@ -154,3 +154,18 @@ test('which employees a round looks at, and what it keeps for the next', () => {
   const failed = afterRound(none, { plan, results: [], held: [], error: 'gh: not signed in', now });
   assert.deepEqual([failed.ok, failed.full, Object.keys(failed.repos)], [false, null, []], 'a round that failed keeps nothing: the next looks at everyone');
 });
+
+test("with repositories, a round does their work and keeps the staff's pages up too", async () => {
+  calls = [];
+  const opened: string[] = [];
+  const state = { roles: [{ id: 'porter', holder: { id: 'porter', name: 'Porter', state: 'stopped', since: null, page: { up: false }, can: { open: true }, busy: null }, behind: [] }], offDuty: [] };
+  const out = await runStage('round', { full: true }, {
+    run,
+    tell,
+    tend: { manorUrl: 'http://127.0.0.1:18585', getJson: async () => state, open: async (id) => (opened.push(id), { ok: true, said: 'HTTP 200' }) },
+  });
+  assert.equal(out.tendOnly, undefined, 'a whole round, not only tending');
+  assert.deepEqual(gh().map((c) => c.slice(1, 3))[0], ['api', 'graphql'], 'GitHub asked about the employee');
+  assert.deepEqual(opened, ['porter']);
+  assert.ok(out.results.some((r) => r.id === 'porter' && r.outcome === 'done' && r.message.startsWith('tend: ')));
+});
