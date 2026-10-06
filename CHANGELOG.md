@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.13
+
+**A release that "failed" but is out anyway stops being reported as failed.**
+
+### What changed
+
+- When releasing an agent failed in a round, the Steward stopped trying that commit and raised an alarm until someone released it. If the version was in fact published (a retry, or another run that got there first: on 2026-10-06 Reeve 0.6.5 was published, then the round's own attempt found it there and failed), the alarm and the hold stayed, because only a release made by the round cleared them. Now a round that finds the version already released clears its failure too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Reeve's "release failed at f2e18a8" clears at the first round after the update.
+
 ## 0.11.12
 
 **One alarm while the Bailiff can't review, not one more for each Wright PR waiting on it.**
