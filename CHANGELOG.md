@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.11
+
+**Without the Wright and the Bailiff, the manor keeps itself running but takes on no new work.**
+
+### What changed
+
+- **New work needs both.** The Wright's pull requests are marked ready and merged only after the Bailiff approves them. Before, with no Bailiff on this PC, the Steward's own quick look was enough for a Wright PR to merge. Now it stays a draft and says so: review it yourself and mark it ready, or hire the Bailiff.
+- **A removed agent stays removed.** If an employee's install folder is gone (it was fired in Manor, or uninstalled), the Steward still looks after its code and kit, but no longer installs it again: not after a merge, and not through a release built on this PC (which installs it). Before, the next kit rollout quietly put the Wright or the Bailiff back. Hire it in Manor to bring it back.
+- **No Wright on this PC: work waits for you, and the alarm says so.** A failed bump or release is no longer described as "the Wright's page isn't set". The alarm now says the Wright isn't on this PC. Work already filed for a Wright that's since been removed no longer holds its alarm back for a day, since nobody is working on it.
+- **No stale "down" alarms.** The Wright's and the Bailiff's pages are read only while they're installed, even if Settings still name them, so a removed one can't show as down forever.
+- Everything else carries on without them as before: rounds, merging the team's and the Steward's own PRs, releases, kit rollouts, installs and alarms.
+
+### Before you update
+
+- Nothing: it updates itself as usual. With both the Wright and the Bailiff installed, nothing changes. Without the Bailiff, any open Wright drafts wait for you.
+
 ## 0.11.10
 
 **When the Steward copies your employees into Settings and can't find something, it keeps looking and fills it in itself.**

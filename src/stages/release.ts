@@ -2,13 +2,13 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { git, removeWorktree, showFile } from '../git.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
-import type { Employee } from '../settings.ts';
+import { releasedHere, type Employee } from '../settings.ts';
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
-import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -87,6 +87,9 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
 export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null }): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
+  // Released here, its release installs it: not for one that was removed from this PC.
+  const away = releasedHere(e) ? notHiredHere(e) : null;
+  if (away) return result(e, 'skipped', away);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
   const remote = `origin/${e.branch}`;

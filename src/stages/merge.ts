@@ -141,12 +141,17 @@ export const behindItsBranch = (pr: PrInfo, branch: string) =>
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
+/** Why a draft of the Wright's waits where the Bailiff isn't installed. */
+export const NO_BAILIFF = "the Bailiff isn't on this PC to review it: review it yourself and mark it ready, or hire the Bailiff";
+
 /**
  * Each of the Wright's drafts, looked at (review.ts): one that passes is marked ready on GitHub, with a comment saying
  * what was looked at, and goes on as any ready team PR (tested here at its head, then merged); one that doesn't keeps
- * the reason, which its hold then says. Where the Bailiff is installed (`bailiff`), one that passes is marked ready
- * only once the Bailiff has approved its current head commit; until then it waits for the Bailiff, and says so.
+ * the reason, which its hold then says. One that passes is marked ready only once the Bailiff has approved its current
+ * head commit; until then it waits for the Bailiff, and says so. Where the Bailiff isn't installed (`bailiff` false),
+ * none is marked ready: the Wright's work waits for a person, as the manor takes on no new work without both.
  */
+
 export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], bailiff = bailiffInstalled()): Promise<void> {
   const s = ctx.settings.wrightReview;
   for (const pr of prs.filter(isWrightDraft)) {
@@ -162,12 +167,15 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], b
       pr.reviewHold = why;
       continue;
     }
-    if (bailiff) {
-      const waits = await bailiffHold(ctx, e, pr);
-      if (waits) {
-        pr.bailiffHold = waits;
-        continue;
-      }
+    // New work needs both: without the Bailiff, a draft of the Wright's waits for a person to review it and mark it ready.
+    if (!bailiff) {
+      pr.reviewHold = NO_BAILIFF;
+      continue;
+    }
+    const waits = await bailiffHold(ctx, e, pr);
+    if (waits) {
+      pr.bailiffHold = waits;
+      continue;
     }
     const ready = await ctx.run('gh', ['pr', 'ready', String(pr.number), '--repo', e.repo], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
     if (ready.code !== 0) {

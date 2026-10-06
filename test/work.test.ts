@@ -246,7 +246,7 @@ test('no queue, no team, or an issue already open with its marker: not filed aga
     const s = (await fileWork({ items: [item], work, employees, run: g.run, cwd: home, now: at(0), log: () => {} })).get(item.id)!;
     return 'why' in s ? s.why : s.state;
   };
-  assert.match(await why(null), /the Wright's page isn't set/);
+  assert.match(await why(null), /the Wright isn't on this PC, so it waits for a person/);
   assert.match(await why({ error: 'ECONNREFUSED' }), /doesn't answer \(ECONNREFUSED\)/);
   assert.match(await why(WORK({ takesWork: false })), /takes no work now/);
   assert.match(await why({ at: 'x', needsYou: [] }), /a Wright before 0\.1\.5/);
@@ -255,6 +255,8 @@ test('no queue, no team, or an issue already open with its marker: not filed aga
   assert.equal(await why(WORK(), g), 'filed');
   assert.deepEqual(g.creates(), [], 'found open: not filed twice');
   assert.equal(JSON.parse(readFileSync(workFiledFile(), 'utf8'))[item.id].url, 'https://github.com/Jcollier0120/Porter/issues/7');
+  // Filed, and then the Wright is gone from this PC: nobody works on it, so its alarm isn't held back.
+  assert.match(await why(null), /the Wright isn't on this PC, so it waits for a person .*; https:\/\/github\.com\/Jcollier0120\/Porter\/issues\/7 was filed/);
 });
 
 test("the alarm waits a day from when it was filed; at once when the Wright is stuck, its PR waits for you, or it couldn't be filed", async () => {

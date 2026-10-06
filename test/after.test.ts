@@ -16,7 +16,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { afterWords, readAfter } = await import('../src/after.ts');
 const { afterMerge, approveJobs, installOne, listedSum } = await import('../src/stages/aftermerge.ts');
 const { mergeOne } = await import('../src/stages/merge.ts');
-const { releaseDecision } = await import('../src/stages/release.ts');
+const { releaseDecision, releaseOne } = await import('../src/stages/release.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
@@ -191,6 +191,14 @@ test("install refuses a zip that doesn't match its SHA256SUMS.txt, or a release.
   // No install command in Settings: installed another way, so the step is skipped, and nothing is downloaded.
   const elsewhere = await installOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-refuse'), neutralDir: tmp, run: runner(() => { throw new Error('nothing asked of gh'); }).run }), { ...e, install: '' });
   assert.deepEqual([elsewhere.outcome, elsewhere.message], ['skipped', "Settings give Fake no install command, so it is installed another way (Manor's updates), not by the Steward"]);
+  // Removed from this PC (its install folder is gone): the Steward never puts it back, by an install or by a release built
+  // here (which installs it). Only Manor's Hire does.
+  const gone = { ...e, installed: path.join(tmp, 'fired', 'app') };
+  const quiet = ctxFor({ employees: [gone], workRoot: path.join(tmp, 'work-fired'), neutralDir: tmp, run: runner(() => { throw new Error('nothing asked of git or gh'); }).run });
+  for (const r of [await installOne(quiet, gone), await releaseOne(quiet, { ...gone, release: 'npm run release -- --install' }, { kit: null })]) {
+    assert.equal(r.outcome, 'skipped');
+    assert.match(r.message, /^Fake isn't installed on this PC \(no .*fired.app\), and the Steward doesn't install it again by itself: hire it in Manor to have it back$/);
+  }
   assert.equal(listedSum('abc  x.zip\n' + 'f'.repeat(64) + ' *Fake.zip\n', 'Fake.zip'), 'f'.repeat(64));
 
   // A release asked for, and refused (its version is out already): no install after it.
