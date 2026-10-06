@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.4
+
+**It hands out kit 2.29.0: every agent's page fits a phone.**
+
+### What changed
+
+- On a phone, an agent's title bar no longer runs off the side: its action button (Run now, Check the fingerprints now) moves under the status instead. A wide table scrolls by itself instead of dragging the whole page sideways. This covers the Steward's own page too.
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
 ## 0.12.3
 
 **It hands out kit 2.28.0: an agent that needs a setting from you waits for it, and its tour asks for it.**

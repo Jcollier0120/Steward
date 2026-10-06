@@ -2,6 +2,16 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.29.0
+
+**Every agent's page fits a phone: the title bar's action and wide tables no longer push the page sideways.**
+- **node/page.ts, at 640px and narrower:** the title bar's tools wrap, so its action (Run now, Check the fingerprints now) goes under the status pill instead of off the side, and a long pill is cut with an ellipsis (its title says it all). A table in the page (`main.view table`) scrolls inside itself instead of the page: it is laid out as a block that holds the table, as GitHub shows tables. On seven agents' pages the title bar ran off the side, and on seven a table did.
+- **What an agent must do:** nothing. One that wrapped its tables in its own scrolling box keeps working; a table narrower than a phone no longer stretches to its full width there.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.28.0
 
 **Required settings: an agent that can't work without something from you waits for it, and onboarding asks for it.** The user's call: "each agent has designated which of its settings fields are required for the agent to operate... get the user to fill those out during onboarding... before the agent can begin", as the Chamberlain can do nothing until a mail account is set up.
