@@ -164,7 +164,8 @@ export const BAILIFF_URL = 'http://127.0.0.1:19999';
  * Shepherd: Reeve's, the Auditor's, the Aletaster's and the Pinder's), announced to Manor by their releases, not in Manor's staff.json, built on
  * the kit from the start as a hire is (they never carried a copy, so they aren't among the old kit's hires). Reeve takes the node and spec parts and
  * fills them with tools/kit.ts, as a hire does. Heiward, in C# on its master branch, takes the spec part and fills
- * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts.
+ * kit\ with a PowerShell script of its own; its version is a .csproj's, and it has no npm and no tools/kit.ts. Last,
+ * Manor itself, which installs its own releases.
  */
 export const DEFAULT_EMPLOYEES: Employee[] = [
   ...['Porter', 'Auditor', 'Clerk', 'Herald', 'Warrener', 'Aletaster', 'Miller', 'Pinder'].map(hire),
@@ -202,6 +203,15 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
   hire('Reckoner'),
   hire('Weigher'),
   hire('Shepherd'),
+  {
+    // Manor itself, so the manor keeps itself: its team PRs tested here and merged, its new versions released (with its
+    // setup's exes: the .NET 10 SDK), its kit rolled out. Its one version is package.json's (src/app.ts reads it there):
+    // its lockfile's needn't agree, so a PR from before Manor had one still has a version the Steward can read.
+    ...hire('Manor'),
+    versionFiles: ['package.json'],
+    // Manor installs its own releases (Update automatically, for Manor), told at once by afterRelease's update check.
+    install: '',
+  },
 ];
 
 /** The employees when Settings name none: the defaults, and the Wright and the Bailiff where each is installed. */

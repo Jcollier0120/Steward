@@ -27,7 +27,8 @@ import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/
  *   Aletaster file.
  * - **How much:** each once, by a hidden marker in its body (<!-- steward:work:<id> -->, the id per employee, kind and
  *   kit version or commit), so an issue already open is never filed twice; at most PER_DAY a day, a kit's failed bumps
- *   counting as one (slotOf).
+ *   counting as one (slotOf). A newer kit's failed bump takes over the employee's open bump issue for an older kit,
+ *   closing any others, rather than filing one more (supersede).
  * - **The alarm:** held back for the alarms' while for a PR (waitingHours, a day) from when it was filed: by then the
  *   Wright's draft has been reviewed, merged and released, or bumped again, and the failure is gone. Raised at once
  *   when the Wright gets stuck on the issue (wright:stuck), its PR for it waits for a person (wright:needs-you), the
@@ -272,9 +273,45 @@ async function withBody(run: Runner, cwd: string, args: string[], body: string) 
   }
 }
 
+/** `bump:<employee>:`, the start of every bump item's id for that employee, or null for any other item. */
+export const bumpPrefixOf = (id: string) => /^(bump:[^:]+:)/.exec(id)?.[1] ?? null;
+
+/**
+ * A newer kit's failed bump, where an older kit's bump issue for the same employee is still open: the same agent
+ * failing its checks, which one fix on its branch makes pass for both. The newest such issue becomes this one (its
+ * title and body this kit's, its marker too), and any others close as superseded, rather than an issue for each kit
+ * while the Wright hasn't got to the first. Its URL when it was taken over; null when there's none, or gh refused (a new
+ * issue is filed then, as before). Not a new issue, so it counts for no day.
+ */
+async function supersede(o: { run: Runner; cwd: string; log: (line: string) => void }, item: WorkItem, list: { number: number; url: string; body: string }[], filed: Record<string, FiledWork>, at: string): Promise<string | null> {
+  const prefix = bumpPrefixOf(item.id);
+  if (!prefix) return null;
+  const older = list.filter((i) => String(i.body ?? '').includes(`<!-- steward:work:${prefix}`)).sort((a, b) => b.number - a.number);
+  if (!older.length) return null;
+  const [keep, ...rest] = older;
+  const kit = item.id.slice(prefix.length);
+  const r = await withBody(o.run, o.cwd, ['issue', 'edit', String(keep.number), '--repo', item.repo, '--title', item.title], item.body);
+  if (r.code !== 0) {
+    o.log(`work: couldn't make ${keep.url} the bump to kit ${kit}: ${redact(lastLine(r))}`);
+    return null;
+  }
+  const closed: number[] = [];
+  for (const x of rest) {
+    const c = await o.run('gh', ['issue', 'close', String(x.number), '--repo', item.repo, '--reason', 'not planned', '--comment', `Superseded by #${keep.number}, now the bump to kit ${kit}: one fix on the branch makes both pass.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    if (c.code === 0) closed.push(x.number);
+    else o.log(`work: couldn't close ${x.url} as superseded: ${redact(lastLine(c))}`);
+  }
+  const numbers = new Set([keep.number, ...closed]);
+  for (const [id, f] of Object.entries(filed)) if (id.startsWith(prefix) && f.repo.toLowerCase() === item.repo.toLowerCase() && numbers.has(f.number)) delete filed[id];
+  filed[item.id] = { url: keep.url, number: keep.number, repo: item.repo, at, condition: item.condition, adopted: true };
+  o.log(`work: ${keep.url} is now the bump to kit ${kit}${closed.length ? `; ${closed.map((n) => `#${n}`).join(', ')} closed as superseded` : ''}`);
+  return keep.url;
+}
+
 /**
  * One round's filing: each item already filed looked up in the Wright's work, each new one filed where the Wright works,
- * as the module's comment says. What each item's state is comes back by its id; work-filed.json is kept.
+ * as the module's comment says, or an older kit's open bump issue taken over (supersede). What each item's state is
+ * comes back by its id; work-filed.json is kept.
  */
 export async function fileWork(o: { items: WorkItem[]; work: unknown; employees: Employee[]; run: Runner; cwd: string; now: Date; log: (line: string) => void; perDay?: number }): Promise<Map<string, WorkState>> {
   const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
@@ -312,10 +349,6 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       states.set(item.id, { state: 'not-filed', why: `the Wright doesn't work in ${item.repo}` });
       continue;
     }
-    if (!today.has(slotOf(item.id)) && today.size >= perDay) {
-      states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
-      continue;
-    }
     if (login === undefined) {
       const r = await o.run('gh', ['api', 'user', '--jq', '.login'], { cwd: o.cwd, timeoutMs: 60_000 });
       login = r.code === 0 ? r.out.trim() || null : null;
@@ -345,6 +378,15 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
     if (already) {
       filed[item.id] = { url: already.url, number: already.number, repo: item.repo, at, condition: item.condition, adopted: true };
       states.set(item.id, { state: 'filed', url: already.url, at });
+      continue;
+    }
+    const taken = await supersede(o, item, list, filed, at);
+    if (taken) {
+      states.set(item.id, { state: 'filed', url: taken, at });
+      continue;
+    }
+    if (!today.has(slotOf(item.id)) && today.size >= perDay) {
+      states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
       continue;
     }
     const r = await withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);

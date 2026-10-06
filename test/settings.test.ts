@@ -18,9 +18,12 @@ const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
 const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values })) as { status?: number; json: any };
 
-test('nineteen employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor, the Lamplighter, the Smith, the Developer Herald, the Chamberlain, the Thatcher, the Reckoner, the Weigher and the Shepherd, each with the parts and commands of its own', () => {
+test('twenty employees, all on the kit: the eight hires, Reeve and Heiward, then the Surveyor, the Lamplighter, the Smith, the Developer Herald, the Chamberlain, the Thatcher, the Reckoner, the Weigher, the Shepherd and Manor itself, each with the parts and commands of its own', () => {
   const e = DEFAULT_SETTINGS.employees;
-  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor', 'lamplighter', 'smith', 'developer-herald', 'chamberlain', 'thatcher', 'reckoner', 'weigher', 'shepherd']);
+  assert.deepEqual(e.map((x) => x.id), ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'reeve', 'heiward', 'surveyor', 'lamplighter', 'smith', 'developer-herald', 'chamberlain', 'thatcher', 'reckoner', 'weigher', 'shepherd', 'manor']);
+  // Manor itself: merged and released as any hire, its version package.json's alone, and installed by Manor (Update automatically), not the Steward.
+  const manor = e.find((x) => x.id === 'manor')!;
+  assert.deepEqual([manor.name, manor.repo, manor.checkout, manor.release, manor.install, manor.versionFiles, manor.parts], ['Manor', 'Jcollier0120/Manor', 'C:\\Projects\\Manor','npm run release -- --publish', '', ['package.json'], ['node', 'web', 'spec']]);
   // A name of two words: its id has a dash, its repository and checkout no space.
   const dh = e.find((x) => x.id === 'developer-herald')!;
   assert.deepEqual([dh.name, dh.repo, dh.checkout, dh.installed], ['Developer Herald', 'Jcollier0120/DeveloperHerald', 'C:\\Projects\\DeveloperHerald', '%USERPROFILE%\\.developer-herald\\app']);
@@ -88,7 +91,7 @@ test('a good change is saved and read back; release after merge can be switched 
   assert.equal(s.releaseAfterMerge, true);
   assert.equal(s.parallel, 4);
   assert.deepEqual(s.team, ['Jcollier0120', 'app/claude']);
-  assert.equal(s.employees.length, 19);
+  assert.equal(s.employees.length, 20);
   assert.deepEqual(normalizeSettings({}).settings.team, [], 'no team in the file is none named: gh decides (team.ts)');
   assert.deepEqual(normalizeSettings({ team: [] }).settings.team, [], 'an empty one stays empty');
 });
