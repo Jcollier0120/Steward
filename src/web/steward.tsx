@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
+import type { TendState } from '../tend.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 
@@ -168,7 +169,8 @@ function StaffTable({ s }: { s: StaffView }) {
     return (
       <Card className="empty" tour="staff">
         No employees yet. Add one in Settings, under Employees, for each repository of yours the Steward should look after:
-        its GitHub repository (owner/name), your clone of it, and how to test and release it.
+        its GitHub repository (owner/name), your clone of it, and how to test and release it. Until then its rounds keep the
+        staff's pages up, and raise the alarms.
       </Card>
     );
   return (
@@ -264,14 +266,88 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
   );
 }
 
-/** What a round does, and when it comes, in words: the round line, and the question Run now asks. */
+/**
+ * What a round does, and when it comes, in words: the round line, and the question Run now asks. With no repositories
+ * here (steward.ts's reposHere) a round only keeps the staff's pages up (tend.ts), or, with that off, has nothing to do.
+ */
 export function roundWords(r: RoundView, now = Date.now()): { what: string; when: string } {
   const more = [r.releaseSelf ? 'releases its own new versions' : '', r.rollout ? 'rolls a new kit out to each employee behind it' : ''].filter(Boolean);
-  const what = `merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the merged ones`;
-  const when = !r.on
-    ? 'It merges and releases only when asked: "Merges and releases by itself" is off in Settings. Run now does one round.'
-    : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${r.onDuty ? '' : ' Off duty, the rounds wait.'}${r.lastRunAt ? ` The last ended ${ago(r.lastRunAt, now)}.` : ''}`;
+  const repoWork = `merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the merged ones`;
+  const tend = "opens again, through Manor, the page of any agent that is on duty but doesn't answer";
+  const noRepos = r.repos === false;
+  const what = noRepos
+    ? r.tend
+      ? `${tend}, and raises the alarms (there are no repositories to look after on this PC)`
+      : 'raises the alarms: there are no repositories to look after on this PC'
+    : r.tend
+      ? `${repoWork}, and ${tend}`
+      : repoWork;
+  const after = `${r.onDuty ? '' : ' Off duty, the rounds wait.'}${r.lastRunAt ? ` The last ended ${ago(r.lastRunAt, now)}.` : ''}`;
+  const when = noRepos
+    ? r.tend
+      ? `No repositories to look after on this PC, so a round every ${r.minutes} minutes while on duty ${tend}, and raises the alarms. Add an employee in Settings for the Steward to look after its repository too.${after}`
+      : "Nothing to do: there are no repositories to look after on this PC, and \"Keeps the staff's pages up\" is off in Settings (or Manor's page isn't named under Alarms). Add an employee in Settings, or switch it on."
+    : !r.on
+      ? r.tend
+        ? `It merges and releases only when asked: "Merges and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
+        : 'It merges and releases only when asked: "Merges and releases by itself" is off in Settings. Run now does one round.'
+      : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
   return { what, when };
+}
+
+/**
+ * The staff's pages as the last round's look left them (tend.ts): the agents on duty whose pages don't answer, and the
+ * ones lately opened again. Shown while there is something to say, and always with no repositories (it is the work then).
+ */
+function TendingCard({ t, r, now }: { t: TendState | undefined; r: RoundView; now: number }) {
+  if (!t) return null;
+  const down = Object.entries(t.down);
+  if (!down.length && !t.revived.length && r.repos !== false) return null;
+  const times = (n: number) => `${n} time${n === 1 ? '' : 's'}`;
+  return (
+    <Section title="The staff's pages" count={down.length || undefined}>
+      <Card>
+        {!t.at ? (
+          <Text variant="muted" as="p">
+            Not looked at yet: the next round looks.
+          </Text>
+        ) : !t.manor ? (
+          <Text variant="muted" as="p">
+            Manor's page didn't answer the last look ({ago(t.at, now)}), so the staff's pages couldn't be seen.
+          </Text>
+        ) : (
+          !down.length && (
+            <Text variant="muted" as="p">
+              Every agent on duty answered, {ago(t.at, now)}.
+            </Text>
+          )
+        )}
+        {down.length > 0 && (
+          <Notes
+            items={down.map(([id, d]) => (
+              <span key={id}>
+                <strong>{d.name}</strong> is on duty, but its page hasn't answered since {ago(d.since, now)}
+                {d.tries ? `: opened again ${times(d.tries)}` : ''}
+                {d.said ? <Text variant="muted"> ({d.said})</Text> : null}
+              </span>
+            ))}
+          />
+        )}
+        {t.revived.length > 0 && (
+          <details>
+            <summary className="muted">Opened again lately</summary>
+            <Notes
+              items={t.revived.slice(0, 10).map((x) => (
+                <>
+                  {x.name} <Text variant="muted">({ago(x.at, now)})</Text>
+                </>
+              ))}
+            />
+          </details>
+        )}
+      </Card>
+    </Section>
+  );
 }
 
 /** Run now, in the title bar: a round now, on duty or not, asked first. */
@@ -400,6 +476,54 @@ pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Co
 td a { color: var(--accent); }
 `;
 
+/**
+ * The kit the Steward hands out, and how old the staff's table is. With no one to hand it to (`handsOut` false: no
+ * employees, no repositories here), the kit it manages: kept current so the Steward itself runs, and handed to no one.
+ */
+function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; handsOut: boolean }) {
+  if (s && !handsOut)
+    return (
+      <Card tour="kit">
+        <p>
+          The kit the Steward manages: <strong>{s.kit ?? s.local ?? 'none'}</strong>
+        </p>
+        <Text variant="muted" as="p">
+          With no repositories to look after here, it hands the kit to no one: it keeps it only to run on itself.
+        </Text>
+      </Card>
+    );
+  return (
+    <Card tour="kit">
+      {s ? (
+        <>
+          <p>
+            The kit the Steward hands out: <strong>{s.kit ?? 'none'}</strong>
+            {s.released.length > 0 && (
+              <>
+                {' '}
+                <Text variant="muted">(released: {s.released.slice(0, 5).join(', ')})</Text>
+              </>
+            )}
+            {s.local && (
+              <>
+                {' '}
+                <Text variant="muted">· this checkout's kit\VERSION: {s.local}</Text>
+              </>
+            )}
+          </p>
+          {s.kitNote && <Text variant="muted" as="p">{s.kitNote}</Text>}
+          <Text variant="muted" as="p">
+            The table is from {ago(s.at, now)}
+            {s.checked && s.checked !== s.at ? `; GitHub had nothing new for it ${ago(s.checked, now)}` : ''}.
+          </Text>
+        </>
+      ) : (
+        <Text variant="muted" as="p">Looking at the staff for the first time…</Text>
+      )}
+    </Card>
+  );
+}
+
 /** The page's body: everything above Settings. */
 export function StewardBody({ v }: { v: StewardView }) {
   const now = useNow();
@@ -416,40 +540,24 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <AlarmsCard a={v.alarms} now={now} />
-      <Card tour="kit">
-        {s ? (
-          <>
-            <p>
-              The kit the Steward hands out: <strong>{s.kit ?? 'none'}</strong>
-              {s.released.length > 0 && (
-                <>
-                  {' '}
-                  <Text variant="muted">(released: {s.released.slice(0, 5).join(', ')})</Text>
-                </>
-              )}
-              {s.local && (
-                <>
-                  {' '}
-                  <Text variant="muted">· this checkout's kit\VERSION: {s.local}</Text>
-                </>
-              )}
-            </p>
-            {s.kitNote && <Text variant="muted" as="p">{s.kitNote}</Text>}
-            <Text variant="muted" as="p">
-              The table is from {ago(s.at, now)}
-              {s.checked && s.checked !== s.at ? `; GitHub had nothing new for it ${ago(s.checked, now)}` : ''}.
-            </Text>
-          </>
-        ) : (
-          <Text variant="muted" as="p">Looking at the staff for the first time…</Text>
-        )}
-      </Card>
+      {v.round.repos === false && (
+        <Card>
+          <Text variant="muted" as="p">
+            {roundWords(v.round, now).when}
+          </Text>
+        </Card>
+      )}
+      <TendingCard t={v.tending} r={v.round} now={now} />
+      {/* With no employees and no repositories here it hands the kit to no one: it keeps it to run on. */}
+      <KitCard s={s} now={now} handsOut={!(v.round.repos === false && !s?.rows.length)} />
       <Section title="Staff" count={s?.rows.length}>
         {s ? <StaffTable s={s} /> : <Card className="empty">Looking at each employee…</Card>}
       </Section>
-      <Section title="Roll out the kit">
-        <Stages v={v} />
-      </Section>
+      {(s?.rows.length ?? 0) > 0 && (
+        <Section title="Roll out the kit">
+          <Stages v={v} />
+        </Section>
+      )}
       <Section title="Last stage">
         <LastStage l={v.last} now={now} />
       </Section>

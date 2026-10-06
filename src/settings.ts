@@ -92,6 +92,11 @@ export interface Settings {
    * held back while the Wright works on it (work.ts).
    */
   fileWork: boolean;
+  /**
+   * In its rounds, each agent Manor employs that is on duty but whose page doesn't answer is opened again through Manor
+   * (tend.ts). With no repositories to look after here, this is the whole round.
+   */
+  tend: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -207,6 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mergeSelf: true,
   stewardCheckout: '',
   fileWork: true,
+  tend: true,
 };
 
 const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like octocat/hello-world' };
@@ -311,6 +317,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Hands failures to the Wright',
     help: "An employee's bump or release that fails, and one of Reeve's alerts that is code work in an employee's repository (a security advisory, a failing UI test), is filed as an issue in the Wright's queue (manor:work), with what failed, its output (secrets taken out) and what done means: once each, at most a few a day, and only in a repository the Wright's page (The Wright's page, under Alarms) says it works in. Its alarm then waits: it is raised only when the Wright gets stuck or its PR waits for your review, the Wright has no queue for that repository, or nothing has landed after the alarms' while for a PR (a day). The Steward's own releases stay alarms. Off: each is an alarm at once, as before.",
   },
+  {
+    key: 'tend',
+    kind: 'switch',
+    label: "Keeps the staff's pages up",
+    help: "In its rounds, every agent Manor employs that is on duty but whose page doesn't answer (so its rounds aren't running) has its page opened again, through Manor's own Open: at most three tries while it stays down, then one an hour, and an alarm. Its duty is never changed: an agent you stopped stays stopped. It needs only Manor's page (under Alarms), so it works with no repositories to look after, and then it is all a round does.",
+  },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
   {
     key: 'afterRelease',
@@ -330,7 +342,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
-      { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
+      { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install, and for the staff's pages to keep up (Keeps the staff's pages up).", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
       { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for", help: 'With the reason the tasting gave, and a link to it.' },
       { key: 'reeveUrl', kind: 'text', label: "Reeve's page", help: "Read for his jobs' open alerts (GET /api/alerts), where Reeve is installed: each is an alarm at once. An older Reeve without them is passed over quietly.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18383' },
@@ -445,6 +457,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),
       tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
       fileWork: typeof r.fileWork === 'boolean' ? r.fileWork : d.fileWork,
+      tend: typeof r.tend === 'boolean' ? r.tend : d.tend,
     },
     problems,
   };

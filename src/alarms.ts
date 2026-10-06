@@ -8,6 +8,7 @@ import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
+import { tendConditions, type TendState } from './tend.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
@@ -34,6 +35,7 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  *   for two (the Wright's drafts wait for it).
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
  * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
+ * - an agent on duty whose page doesn't answer, which the round couldn't open again through Manor (tend.ts), at once;
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
@@ -164,10 +166,13 @@ export function roundConditions(o: {
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
   /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
   migrated?: Migration | null;
+  /** The staff's pages as the round's look left them (tend.ts's tending.json); null while Settings switch it off. */
+  tending?: TendState | null;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
   const out: Condition[] = [];
+  if (o.tending) out.push(...tendConditions(o.tending));
   const wait = o.settings.alarms.waitingHours;
   for (const { employee: e, prs } of o.held) {
     for (const pr of prs) {
