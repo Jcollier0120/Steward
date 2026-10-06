@@ -1,6 +1,6 @@
 # The NPU queue
 
-> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/NPU-QUEUE.md` in [Jcollier0120/Steward](https://github.com/Jcollier0120/Steward). It was Reeve's `docs/NPU-QUEUE.md`. A change to the protocol is a kit change: made here, with the vectors beside it, released as a kit version, and taken by every agent from that release. Since kit 2.0.0 the original implementation is the kit's core (`core/queue.js` for the rules, `core/turn.js` for a turn step by step), which the kit's node and dotnet parts carry out; Reeve's `src/npu-queue.ts` is a copy of kit 1.0.0's until Reeve takes the kit.
+> **This page's home is the Steward's kit**, its `spec` part: `kit/spec/NPU-QUEUE.md` in the Steward's repository, and `src/kit/spec/NPU-QUEUE.md` in every agent that takes the part. It was Reeve's `docs/NPU-QUEUE.md`. A change to the protocol is a kit change: made here, with the vectors beside it, released as a kit version, and taken by every agent from that release. Since kit 2.0.0 the original implementation is the kit's core (`core/queue.js` for the rules, `core/turn.js` for a turn step by step), which the kit's node and dotnet parts carry out; Reeve's `src/npu-queue.ts` is a copy of kit 1.0.0's until Reeve takes the kit.
 
 Every program on this PC that runs work on the Hexagon NPU takes turns through one machine-wide lock. The NPU queue makes those turns first come, first served, and hands the NPU straight to the next in line when the holder lets go. The implementations that follow this page must agree to the letter:
 

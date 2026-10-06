@@ -2,6 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.26.0
+
+**The kit names no one's GitHub account, private repository or folder.** It runs on every PC that hires an agent, and the manor is for that PC's owner: their repositories are the ones it looks after, and nothing in it may hand out the maker's (the user's rule). The public releases repository, where every PC downloads from, stays; so do the developer tools.
+- **node/manor.ts: `MANOR_REPO` is gone.** `manorOwn()` no longer counts a built-in repository as the manor's own, nor a built-in folder as the Steward's checkout: only what this PC's Manor and Steward name (staff.json, agents.json, the Steward's settings and staff table). A project's example path in its message is a neutral one.
+- **node/release.ts: manor-agent.json names no repository.** `release.repo` is optional and best left out: Manor finds every release in the public releases repository by its id (`<id>-v<version>`), and the name would be published there. One still given must be origin's, as before, until it's taken out; the message says to leave it out.
+- **spec:** each page's home is said without a link into a private repository, and the accelerator page no longer cites a private issue.
+- **What an agent must do:** take `release.repo` out of its manor-agent.json once Manor finds releases by id alone. Nothing else.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
+## 2.25.0
+
+**The rest of the settings audit's shared helpers, and a tour that fits the page it's on.** One round interval, one plain-words notes switch and one model-call limit with the same key and words in every agent; the folders Windows keeps, wherever OneDrive moved them; a list kept with buttons on the page; and a tour that can take a new hire back to Manor and walks only the parts of the page that are there.
+- **node/shared-settings.ts is new: the settings agents share.** `roundEveryField({ min, max, default })` is `roundEvery`, minutes between rounds, always under Advanced, with the agent's bounds; `readRoundEvery(raw, bounds, { was?, problems? })` reads it in the normalizer, taking it over from the agent's older key (`was: { key: 'everyHours', minutes: 60 }` for one in hours); `roundEveryMs(() => settings, bounds)` hands it to every(), read at each wait. `plainNotesField()` is `plainNotes`, the plain-words notes switch, on the page, and `readPlainNotes(raw, fallback, { was? })` reads it. `modelCallsField({ max, default }, { unit? })` is `modelCallsPerRound`, under Advanced, 0 allowed, and `readModelCalls(raw, bounds, { was?, problems? })` reads it. Token sizes are no setting: a piece is the client's `budget(answerTokens)` (npu.ts), from the accelerators that would serve it.
+- **node/folders.ts is new: `knownFolders()`**, this PC's Desktop, Documents, Downloads, Pictures, Music, Videos and Screenshots, from the registry's User Shell Folders (where OneDrive's folder backup moves them), the usual places in the home folder for the rest, and the OneDrive folder; read once. `foldersFrom(regOutput)`, `parseShellFolders` and `uniqueFolders` are its parts, for tests and for agents that list candidates. It is the Clerk's resolver, widened.
+- **react/lists.tsx is new: `OnPageList`**, a list a person keeps with buttons on the page (what they trusted, ignored or put off), each entry with a Remove that posts `{ id }` (or `field`) to the agent's `remove` path and reloads the page; the count in its heading, an empty note when there's nothing. For lists a button maintains, which no longer belong in Settings.
+- **react/tour.tsx: `#/tour?from=<url>`.** Opened from Manor's hire flow with the role's card as `from` (encoded), the last step offers Back to Manor beside Done. Only an address on this PC is followed (localhost, 127.0.0.1, [::1], a *.localhost name; `tourFrom(hash)`). Without one, Done closes the tour as before.
+- **react/tour.tsx: only the parts on the page are walked.** Step 3 works out its steps from the `data-tour` parts on the page as it starts (`onPage()`), after step 2's save, so a page that differs by its settings (the Herald's sections by variant) keeps one static ONBOARDING; "Step n of m" counts only those, and with none, the settings are the last step.
+- **/api/ping: `tour`**, whether the agent's page has a tour at #/tour (a React page and an onboarding; react-page.ts's `hasTour()`), so Manor's hire flow offers Take the tour only where it works.
+- **node/manor.ts: notify times are read exactly as Manor reads them.** A time with spaces around it (" 07:00") is no longer trimmed: like "7:00", it falls back to its default, so an agent and Manor never disagree about the quiet hours.
+- **node/work.ts:** the Herald's "Where its work runs" describes today's Herald (its sources by variant, at most 6 summaries a round); the developer Herald has its own entry, `developer-herald`, with the old lines, and its own look (node/look.ts): the Herald's trumpet in violet, "Reading release notes" while busy.
+- **What an agent must do:** nothing. Moving an agent's interval, notes switch and model-call limit onto the shared keys (its normalizer taking the old key over), and its folder defaults onto `knownFolders()`, is each agent's own change.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.24.0
 
 **What every agent asked Manor, its owner or GitHub for by hand, from the kit.** The settings audit (the user's call: fewer settings) found agents asking the person for what the PC already knows: another agent's address, the GitHub owner, and, soon, when to notify. These are the first of its helpers; the round interval, the plain-words notes switch, the model calls per round, the known folders and the on-page list follow in 2.25.0.

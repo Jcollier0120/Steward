@@ -197,6 +197,14 @@ function newest(dirs: string[]): number {
 }
 
 /**
+ * Whether the page has a tour at #/tour: a React page (its built bundle, or its entry in a checkout) and an onboarding.
+ * /api/ping says it as `tour`, so Manor offers "Take the tour" only where it works.
+ */
+export function hasTour(root = appRoot, onboarding: Onboarding | null = AGENT_ONBOARDING): boolean {
+  return !!onboarding && (existsSync(path.join(root, PAGE_BUNDLE)) || existsSync(path.join(root, PAGE_ENTRY)));
+}
+
+/**
  * GET /page.js: a release's built bundle as it is; in a checkout, src/web/main.tsx built now (again after a change to
  * src/web or src/kit/react), so an edit shows on the next reload. 404 for an agent with no React page.
  */

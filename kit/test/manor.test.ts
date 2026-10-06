@@ -306,7 +306,7 @@ test("a clone's origin: from its git config, a worktree's too; GitHub's alone", 
   assert.equal(githubRepo('ssh://git@github.com/a/b'), 'a/b');
 });
 
-test("the manor's own: Manor's repository, its staff's and announced agents', the Steward's employees and its own checkout", () => {
+test("the manor's own: its staff's and announced agents' repositories, the Steward's employees and its own checkout; no one's by name", () => {
   const home = manorAt('own-home', {});
   writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', release: { repo: 'Jcollier0120/Porter' } }, { id: 'odd' }, null] }));
   writeFileSync(path.join(home, 'agents.json'), JSON.stringify({ agents: [{ id: 'chamberlain', release: { repo: 'Jcollier0120/Chamberlain' } }] }));
@@ -315,17 +315,17 @@ test("the manor's own: Manor's repository, its staff's and announced agents', th
   // The staff table the Steward keeps, when its settings name no employees.
   writeFileSync(path.join(steward, 'staff.json'), JSON.stringify({ rows: [{ id: 'miller', repo: 'Jcollier0120/Miller', checkout: { path: 'C:\\Projects\\Miller', exists: true } }] }));
   assert.deepEqual(manorOwn({ home, stewardHome: steward }), {
-    repos: ['Jcollier0120/Manor', 'Jcollier0120/Porter', 'Jcollier0120/Chamberlain', 'Jcollier0120/Miller'],
-    checkouts: ['C:\\Projects\\Miller', 'C:\\Projects\\Steward'],
+    repos: ['Jcollier0120/Porter', 'Jcollier0120/Chamberlain', 'Jcollier0120/Miller'],
+    checkouts: ['C:\\Projects\\Miller'],
   });
   // Its settings' employees, and its own checkout, when they say.
   writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk' }], stewardCheckout: 'E:\\src\\Steward' }));
   assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: path.join(tmp, 'no-staff.json') }), {
-    repos: ['Jcollier0120/Manor', 'Jcollier0120/Chamberlain', 'me/Clerk'],
+    repos: ['Jcollier0120/Chamberlain', 'me/Clerk'],
     checkouts: ['E:\\src\\Clerk', 'E:\\src\\Steward'],
   });
-  // Nothing installed: Manor's repository and the Steward's usual checkout.
-  assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere') }), { repos: ['Jcollier0120/Manor'], checkouts: ['C:\\Projects\\Steward'] });
+  // Nothing installed: nothing, never a name or folder of the kit's own.
+  assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere'), stewardHome: path.join(tmp, 'nowhere') }), { repos: [], checkouts: [] });
 });
 
 test("manorProjects: Manor's projects, checked, read afresh; none without an installed Manor", () => {
@@ -351,6 +351,7 @@ test("the manor's notify preferences: Manor's when it says, each wrong field its
   assert.deepEqual(notifyFrom({ on: false, quietFrom: '25:00', quietTo: '7:00' }), { on: false, quietFrom: '22:00', quietTo: '07:00' }, 'a bad time: its default');
   assert.deepEqual(notifyFrom({ on: 'yes', quietFrom: '08:00', quietTo: '08:00' }), { on: true, quietFrom: null, quietTo: null }, 'equal times: no quiet hours');
   assert.deepEqual(notifyFrom(null), { on: true, quietFrom: '22:00', quietTo: '07:00' });
+  assert.deepEqual(notifyFrom({ quietFrom: ' 23:00', quietTo: '06:00 ' }), { on: true, quietFrom: '22:00', quietTo: '07:00' }, 'spaces are not trimmed: as Manor reads it');
   assert.equal(notifyPrefs(manorAt('notify-unsaid', {})), null, 'an older Manor, which says nothing');
   assert.equal(notifyPrefs(manorAt('notify-not-installed', { notify: { on: false } }, { installed: false })), null);
   assert.equal(notifyPrefs(path.join(tmp, 'nowhere')), null);

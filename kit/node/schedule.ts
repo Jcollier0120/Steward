@@ -106,6 +106,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * `everyMs` may be a function, read each time a wait is set: then an interval changed on the Settings
  * panel takes effect at once, with reschedule() setting the wait under way to the new interval.
+ * The shared round interval (shared-settings.ts) comes as one: every(roundEveryMs(() => settings, ROUND), round).
  * `lastEndedAt` is when the last run ended before this process started (from the agent's report), so
  * that reschedule() counts from it until a run has ended here. `name` tells an agent's schedules apart
  * in /api/ping's `rounds` ("round" unless said).

@@ -60,6 +60,13 @@ export const WORK: Record<string, AgentWork> = {
   herald: {
     model: true,
     lines: [
+      { what: "Reading your sources: your games and drivers, news, the weather and markets, or your PC's updates and security flaws, as its variant says", where: 'the network, and a little of the processor (it reads what is installed with PowerShell)', when: 'every hour for General purpose and the Financial guru, every 6 hours for Gamer and PC caretaker; a few seconds when nothing is new' },
+      { what: 'A short summary of each new set of long notes', where: MODEL, when: 'in the same round, at most 6 a round' },
+    ],
+  },
+  'developer-herald': {
+    model: true,
+    lines: [
       { what: 'Checking the upstream projects for new releases and issue changes', where: 'the network, and a little of the processor', when: 'every 6 hours; about 5 seconds when nothing is new' },
       { what: 'A short summary of each new release', where: MODEL, when: 'in the same round, once per release' },
     ],

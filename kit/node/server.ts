@@ -5,7 +5,7 @@ import { APP, HOST_NAME } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
-import { pageScript } from './react-page.ts';
+import { hasTour, pageScript } from './react-page.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
@@ -104,6 +104,7 @@ const HEADERS = {
 export async function serve(opts: ServeOptions): Promise<{ server: http.Server; token: string; close: () => Promise<void> }> {
   const token = randomBytes(24).toString('hex');
   const hosts = allowedHosts(opts.port);
+  const tour = hasTour();
 
   const stop: Handler = () => {
     setTimeout(async () => {
@@ -118,8 +119,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   const get: Record<string, Handler> = {
     // `running` is whether it's on duty, as Manor reads it (Manor's README: the agent contract); off duty, since when
     // (`stoppedSince`) and a line saying so (`summary`), as its status command says them, so Manor needn't run that.
-    // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way.
-    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), ...opts.ping?.() } }),
+    // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way. `tour`:
+    // whether its page has a tour at #/tour (react-page.ts's hasTour()), so Manor's hire flow offers it only where it works.
+    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
     '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),

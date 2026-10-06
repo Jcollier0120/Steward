@@ -120,7 +120,7 @@ const minutesOf = (t: string) => {
 /** "notify" as Manor keeps it, checked: each wrong field its default; equal quiet times, no quiet hours. */
 export function notifyFrom(raw: unknown): NotifyPrefs {
   const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v.trim()) ? v.trim() : def);
+  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v) ? v : def);
   const quietFrom = clock(o.quietFrom, NOTIFY_DEFAULT.quietFrom);
   const quietTo = clock(o.quietTo, NOTIFY_DEFAULT.quietTo);
   const quiet = quietFrom && quietTo && quietFrom !== quietTo;
@@ -263,8 +263,6 @@ export interface ManorOwn {
 /** The most projects settings.json may list, and the most version files one may name. */
 export const MAX_PROJECTS = 50;
 export const MAX_VERSION_FILES = 20;
-/** Manor's own repository: it isn't in its staff.json, which lists the agents. */
-export const MANOR_REPO = 'Jcollier0120/Manor';
 
 const FULL_PATH = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
@@ -324,15 +322,17 @@ const textAt = (o: unknown, ...keys: string[]): string | null => {
 };
 
 /**
- * The manor's own, which no project may be: Manor's repository; every agent's in Manor's staff.json (`staffFile`, the
- * installed Manor's app\staff.json unless said) and in its agents.json, the announced ones among them; and the Steward's
- * employees, their repositories and checkouts, from its settings.json (or, when that names none, the staff table it
- * keeps, staff.json), with the Steward's own checkout. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward.
+ * The manor's own, which no project may be: every agent's repository that Manor's staff.json (`staffFile`, the installed
+ * Manor's app\staff.json unless said) or its agents.json still names (newer ones name none: releases are found in the
+ * public releases repository by id); and the Steward's employees, their repositories and checkouts, from its
+ * settings.json (or, when that names none, the staff table it keeps, staff.json), with the Steward's own checkout when
+ * its settings name one. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward. Nothing here names anyone's
+ * account or folder: what runs on someone else's PC knows only what that PC says.
  */
 export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: string } = {}): ManorOwn {
   const home = o.home ?? manorHome();
   const steward = o.stewardHome ?? process.env.STEWARD_HOME ?? path.join(os.homedir(), '.steward');
-  const repos = new Set<string>([MANOR_REPO]);
+  const repos = new Set<string>();
   const checkouts = new Set<string>();
   for (const a of [...listOf(jsonAt(o.staffFile ?? path.join(home, 'app', 'staff.json')), 'agents'), ...listOf(jsonAt(path.join(home, 'agents.json')), 'agents')]) {
     const repo = textAt(a, 'release', 'repo');
@@ -346,8 +346,8 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
     const checkout = textAt(e, 'checkout') ?? textAt(e, 'checkout', 'path');
     if (checkout && FULL_PATH.test(checkout)) checkouts.add(checkout);
   }
-  const own = textAt(settings, 'stewardCheckout') ?? 'C:\\Projects\\Steward';
-  if (FULL_PATH.test(own)) checkouts.add(own);
+  const own = textAt(settings, 'stewardCheckout');
+  if (own && FULL_PATH.test(own)) checkouts.add(own);
   return { repos: [...repos], checkouts: [...checkouts] };
 }
 
@@ -378,7 +378,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     if (!name || name.length > 60) return wrong('should have a "name" of 1 to 60 characters');
     const checkout = typeof e.checkout === 'string' ? e.checkout.trim() : '';
     if (!checkout || checkout.length > 260 || !FULL_PATH.test(checkout) || /[\u0000-\u001f<>"|?*]/.test(checkout.slice(2))) {
-      return wrong('should have a "checkout": the full path of its clone, like C:\\Projects\\Example');
+      return wrong('should have a "checkout": the full path of its clone, like D:\\Code\\Example');
     }
     let repo: string | null = null;
     if (given(e.repo)) {

@@ -9,12 +9,22 @@ import { Button, LinkButton, Text } from './ui.tsx';
  *   2. Its few day-one settings, in the Settings form (at most three, never an advanced one), saved there and then; or,
  *      with none, that the defaults just work.
  *   3. What its page shows, part by part: each part (by its data-tour name) brought into view and outlined, with a card
- *      saying what it is.
+ *      saying what it is. Only the parts on the page when step 3 starts are walked (onPage()): a page that differs by
+ *      its settings (the Herald's sections by variant) keeps one onboarding, and a variant just chosen in step 2 counts.
  * Manor's hire flow opens a new employee's page at #/tour. Done, or Skip, goes back to the page; the browser remembers
  * that this agent's tour was seen (`<id>:toured`).
+ *
+ * Opened as #/tour?from=<url> (the URL encoded), its last step also offers "Back to Manor": to that URL, which must be
+ * this PC's (tourFrom()), so the hire flow that opened it gets its new employee back.
  */
 
 type Step = 'intro' | 'settings' | 'tour';
+
+/** The parts of a tour whose data-tour element is on the page (all of them where there's no page to look in). */
+export function onPage(parts: Onboarding['tour'], doc: Pick<Document, 'querySelector'> | undefined = globalThis.document): Onboarding['tour'] {
+  if (typeof doc?.querySelector !== 'function') return parts;
+  return parts.filter((p) => doc.querySelector(`[data-tour="${CSS.escape(p.tour)}"]`));
+}
 
 /** The part of the page a tour step is about, brought into view and outlined while the step shows. */
 function useSpotlight(name: string | null) {
@@ -28,18 +38,38 @@ function useSpotlight(name: string | null) {
   }, [name]);
 }
 
-/** Back to the page, the tour remembered as seen. */
-function finish(appId: string) {
+/**
+ * Where the tour was opened from, out of #/tour?from=<url>: an http(s) address on this PC (localhost, 127.0.0.1, [::1]
+ * or a *.localhost name), or null. Nothing else is followed, so the link can't send anyone off the PC.
+ */
+export function tourFrom(hash: string): string | null {
+  const q = hash.indexOf('?');
+  if (q < 0) return null;
+  const raw = new URLSearchParams(hash.slice(q + 1)).get('from');
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost');
+    return (url.protocol === 'http:' || url.protocol === 'https:') && local ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The tour remembered as seen; then back to the page, or to `to` (where it was opened from). */
+function finish(appId: string, to?: string | null) {
   try {
     localStorage.setItem(`${appId}:toured`, '1');
   } catch {
     // Storage blocked: it's offered again next time.
   }
-  location.hash = '#/';
+  if (to) location.assign(to);
+  else location.hash = '#/';
 }
 
-/** A step's card: where it is in the walkthrough, its words, and Back, Next or Done. */
-function TourCard({ docked, place, title, children, back, next, last, appId, wide }: { docked?: boolean; place: string; title: string; children: ReactNode; back?: () => void; next: () => void; last?: boolean; appId: string; wide?: boolean }) {
+/** A step's card: where it is in the walkthrough, its words, and Back, Next or Done (and Back to Manor, when it came from there). */
+function TourCard({ docked, place, title, children, back, next, last, appId, wide, from }: { docked?: boolean; place: string; title: string; children: ReactNode; back?: () => void; next: () => void; last?: boolean; appId: string; wide?: boolean; from?: string | null }) {
   return (
     <div className={['tour-card', docked ? 'tour-dock' : 'tour-center', wide && 'tour-wide'].filter(Boolean).join(' ')}>
       <Text variant="label" as="p">
@@ -53,21 +83,41 @@ function TourCard({ docked, place, title, children, back, next, last, appId, wid
         <LinkButton title="Skip the tour" onPress={() => finish(appId)} />
         <span className="sf-spacer" />
         {back && <Button title="Back" variant="secondary" onPress={back} />}
-        <Button title={last ? 'Done' : 'Next'} onPress={next} />
+        {last && from ? (
+          <>
+            <Button title="Done" variant="secondary" onPress={next} />
+            <Button title="Back to Manor" onPress={() => finish(appId, from)} />
+          </>
+        ) : (
+          <Button title={last ? 'Done' : 'Next'} onPress={next} />
+        )}
       </div>
     </div>
   );
 }
 
-export function Tour({ onboarding, app, onSettingsSaved, start = 'intro' }: { onboarding: Onboarding; app: PageShell['app']; onSettingsSaved?: () => void; start?: Step }) {
-  const steps: Step[] = ['intro', 'settings', ...(onboarding.tour.length ? (['tour'] as const) : [])];
+export function Tour({ onboarding, app, onSettingsSaved, start = 'intro', from = tourFrom(location.hash) }: { onboarding: Onboarding; app: PageShell['app']; onSettingsSaved?: () => void; start?: Step; from?: string | null }) {
+  // The parts walked in step 3: those on the page as it starts, kept while it runs (null before then: those on it now).
+  const [walked, setWalked] = useState<Onboarding['tour'] | null>(null);
+  const parts = walked ?? onPage(onboarding.tour);
+  const steps: Step[] = ['intro', 'settings', ...(parts.length ? (['tour'] as const) : [])];
   const [step, setStep] = useState<Step>(start);
   const [at, setAt] = useState(0);
   const [dirty, setDirty] = useState(false);
   const n = steps.indexOf(step);
   const place = `Step ${n + 1} of ${steps.length}`;
-  const go = (d: 1 | -1) => (n + d >= steps.length ? finish(app.id) : setStep(steps[Math.max(0, n + d)]));
-  const part = step === 'tour' ? onboarding.tour[at] : null;
+  const go = (d: 1 | -1) => {
+    if (n + d >= steps.length) return finish(app.id);
+    const next = steps[Math.max(0, n + d)];
+    if (next === 'tour') {
+      const now = onPage(onboarding.tour);
+      if (!now.length) return finish(app.id);
+      setWalked(now);
+      setAt(0);
+    } else setWalked(null);
+    setStep(next);
+  };
+  const part = step === 'tour' ? parts[at] : null;
   useSpotlight(part?.tour ?? null);
   if (step === 'intro')
     return (
@@ -80,7 +130,7 @@ export function Tour({ onboarding, app, onSettingsSaved, start = 'intro' }: { on
   if (step === 'settings')
     return (
       <div className="tour-backdrop">
-        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : go(1))} last={steps.length === 2} appId={app.id}>
+        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : go(1))} last={steps.length === 2} appId={app.id} from={from}>
           <Text variant="muted" as="p">
             {onboarding.settings.length ? `Only what ${app.name} can't choose for you. Everything else has a default that works, and is in Settings.` : `${app.name} needs nothing from you to start.`}
           </Text>
@@ -88,9 +138,9 @@ export function Tour({ onboarding, app, onSettingsSaved, start = 'intro' }: { on
         </TourCard>
       </div>
     );
-  const last = at === onboarding.tour.length - 1;
+  const last = at >= parts.length - 1;
   return (
-    <TourCard docked place={`${place} · ${at + 1} of ${onboarding.tour.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id}>
+    <TourCard docked place={`${place} · ${at + 1} of ${parts.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id} from={from}>
       <Text as="p">{part?.text}</Text>
     </TourCard>
   );

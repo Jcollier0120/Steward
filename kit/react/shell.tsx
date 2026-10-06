@@ -225,9 +225,9 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
 
 export type Route = 'page' | 'settings' | 'tour';
 
-/** The route: the page at #/, Settings at #/settings, a tour of the page at #/tour (over the page itself). */
+/** The route: the page at #/, Settings at #/settings, a tour of the page at #/tour (over the page itself; `?from=` too). */
 export function useRoute(): Route {
-  const read = (): Route => (/^#\/?settings$/.test(location.hash) ? 'settings' : /^#\/?tour$/.test(location.hash) ? 'tour' : 'page');
+  const read = (): Route => (/^#\/?settings$/.test(location.hash) ? 'settings' : /^#\/?tour(\?.*)?$/.test(location.hash) ? 'tour' : 'page');
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const change = () => {

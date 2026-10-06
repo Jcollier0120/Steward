@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.11.0
+## 0.11.2
 
 **A new kit is tried on every agent before it's released, and some files always wait for you, whatever Settings say.**
 
@@ -24,6 +24,30 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 Nothing: it updates itself as usual. A round that merges a PR raising the kit takes longer, because it runs every agent's checks first.
+
+## 0.11.1
+
+**Kit 2.26.0: the kit names no one's GitHub account, private repository or folder** (kit/CHANGELOG.md). What runs on your PC knows only what your PC says.
+
+### What changed
+
+- Nothing on the Steward's own page: it hands the new kit to every agent.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
+## 0.10.6
+
+**Kit 2.25.0: shared settings for every agent, and a tour that fits the page** (kit/CHANGELOG.md): one round interval, a plain-words notes switch and a model-call limit with the same name in every agent, the folders Windows keeps wherever OneDrive moved them, and a new hire's tour that can take you back to Manor.
+
+### What changed
+
+- Nothing on the Steward's own page: it hands the new kit to every agent.
+
+### Before you update
+
+Nothing: it updates itself as usual.
 
 ## 0.10.5
 
