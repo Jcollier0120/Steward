@@ -279,6 +279,24 @@ async function withBody(run: Runner, cwd: string, args: string[], body: string) 
   }
 }
 
+/** Whether gh refused to file an issue because the repository has no such label: "could not add label: 'manor:work' not found". */
+const labelMissing = (r: { out: string; err: string }, label: string) => {
+  const text = `${r.err}\n${r.out}`;
+  return /could not add label/i.test(text) && text.includes(`'${label}' not found`);
+};
+
+/** The Wright's queue label made in a repository that hasn't it, as the others have it; one there already is as good. */
+async function createLabel(o: { run: Runner; cwd: string; log: (line: string) => void }, repo: string, label: string): Promise<boolean> {
+  const r = await o.run('gh', ['label', 'create', label, '--repo', repo, '--color', '1d76db', '--description', 'Queued for the Wright'], { cwd: o.cwd, timeoutMs: 60_000 });
+  if (r.code === 0) {
+    o.log(`work: created the ${label} label in ${repo}, which hadn't it`);
+    return true;
+  }
+  if (/already exists/i.test(`${r.err}\n${r.out}`)) return true;
+  o.log(`work: couldn't create the ${label} label in ${repo}: ${redact(lastLine(r))}`);
+  return false;
+}
+
 /** `bump:<employee>:`, the start of every bump item's id for that employee, or null for any other item. */
 export const bumpPrefixOf = (id: string) => /^(bump:[^:]+:)/.exec(id)?.[1] ?? null;
 
@@ -395,7 +413,10 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
       continue;
     }
-    const r = await withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);
+    const create = () => withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);
+    let r = await create();
+    // A repository new to the Wright's queue (an employee just taken on) hasn't its label yet, and gh won't file without it.
+    if (r.code !== 0 && labelMissing(r, q.label) && (await createLabel(o, item.repo, q.label))) r = await create();
     const url = /https:\/\/github\.com\/\S+\/issues\/(\d+)/.exec(r.out);
     if (r.code !== 0 || !url) {
       o.log(`work: couldn't file "${item.title}" in ${item.repo}: ${redact(lastLine(r))}`);

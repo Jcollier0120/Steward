@@ -36,13 +36,20 @@ const roundResult = (more = {}) => ({ stage: 'round' as const, started: at(0).to
 const WORK = (more = {}) => ({ at: 'x', takesWork: true, label: 'manor:work', repos: ['Jcollier0120/Porter', 'Jcollier0120/Reeve', 'Jcollier0120/GamerNexus'], team: ['Jcollier0120'], needsYou: [], recent: [], error: null, ...more });
 
 /** gh as GitHub answers it: signed in as the team, no open work, and each issue created given the next number. */
-function gh(o: { login?: string; open?: { number: number; url: string; body: string }[] } = {}) {
+function gh(o: { login?: string; open?: { number: number; url: string; body: string }[]; noLabel?: boolean } = {}) {
   let next = 40;
+  let labelled = !o.noLabel;
   const bodies: string[] = [];
   const r = runner((args) => {
     if (args[0] === 'api' && args[1] === 'user') return ok(`${o.login ?? 'Jcollier0120'}\n`);
     if (args[0] === 'issue' && args[1] === 'list') return ok(o.open ?? []);
+    if (args[0] === 'label' && args[1] === 'create') {
+      if (labelled) return { code: 1, out: '', err: `label with name "${args[2]}" already exists; use \`--force\` to update its color and description` };
+      labelled = true;
+      return ok('');
+    }
     if (args[0] === 'issue' && args[1] === 'create') {
+      if (!labelled) return { code: 1, out: '', err: `could not add label: '${args[args.indexOf('--label') + 1]}' not found` };
       bodies.push(readFileSync(args[args.indexOf('--body-file') + 1], 'utf8'));
       const repo = args[args.indexOf('--repo') + 1];
       return ok(`https://github.com/${repo}/issues/${next++}\n`);
@@ -194,6 +201,43 @@ test("a kit's failed bumps count as one of the day's few: a kit that breaks six 
   // Another kit's bumps are another one, and today's few are filed.
   const next = await fileWork({ items: [{ ...bumps[0], id: 'bump:porter:2.22.0' }], work: WORK(), employees, run: gh().run, cwd: home, now: at(1), log: () => {} });
   assert.equal([...next.values()][0].state, 'not-filed');
+});
+
+test("a repository without the Wright's label yet has it made, as the others have it, and the issue filed", async () => {
+  const item = { id: 'release:porter:abc1234', condition: 'release:porter:abc1234', repo: 'Jcollier0120/Porter', title: 't', body: 'b' };
+  const g = gh({ noLabel: true });
+  const lines: string[] = [];
+  const s = await fileWork({ items: [item], work: WORK(), employees, run: g.run, cwd: home, now: at(0), log: (l) => lines.push(l) });
+  assert.deepEqual(s.get(item.id), { state: 'filed', url: 'https://github.com/Jcollier0120/Porter/issues/40', at: at(0).toISOString() });
+  assert.deepEqual(g.gh.filter((a) => a[0] === 'label'), [['label', 'create', 'manor:work', '--repo', 'Jcollier0120/Porter', '--color', '1d76db', '--description', 'Queued for the Wright']]);
+  assert.equal(g.creates().length, 2, 'tried again once');
+  assert.ok(lines.includes("work: created the manor:work label in Jcollier0120/Porter, which hadn't it"));
+
+  // Made meanwhile by someone else: "already exists" is as good, and the issue is filed.
+  rmSync(workFiledFile(), { force: true });
+  const raced = runner((args) => {
+    if (args[1] === 'user') return ok('Jcollier0120\n');
+    if (args[1] === 'list') return ok([]);
+    if (args[0] === 'label') return { code: 1, out: '', err: 'label with name "manor:work" already exists; use `--force` to update its color and description' };
+    return raced.gh.filter((a) => a[1] === 'create').length < 2 ? { code: 1, out: '', err: "could not add label: 'manor:work' not found" } : ok('https://github.com/Jcollier0120/Porter/issues/41\n');
+  });
+  const s2 = await fileWork({ items: [item], work: WORK(), employees, run: raced.run, cwd: home, now: at(0), log: () => {} });
+  assert.equal(s2.get(item.id)!.state, 'filed');
+
+  // gh can't make it either: not filed, and said why, with no third try.
+  rmSync(workFiledFile(), { force: true });
+  const refused = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok([]) : args[0] === 'label' ? { code: 1, out: '', err: 'HTTP 403: Resource not accessible' } : { code: 1, out: '', err: "could not add label: 'manor:work' not found" }));
+  const quiet: string[] = [];
+  const s3 = await fileWork({ items: [item], work: WORK(), employees, run: refused.run, cwd: home, now: at(0), log: (l) => quiet.push(l) });
+  assert.deepEqual(s3.get(item.id), { state: 'not-filed', why: "gh couldn't file it in Jcollier0120/Porter" });
+  assert.equal(refused.gh.filter((a) => a[1] === 'create' && a[0] === 'issue').length, 1);
+  assert.ok(quiet.some((l) => l.startsWith("work: couldn't create the manor:work label in Jcollier0120/Porter: HTTP 403")));
+
+  // Another failure isn't a missing label: no label made.
+  rmSync(workFiledFile(), { force: true });
+  const other = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok([]) : { code: 1, out: '', err: 'HTTP 502' }));
+  await fileWork({ items: [item], work: WORK(), employees, run: other.run, cwd: home, now: at(0), log: () => {} });
+  assert.ok(!other.gh.some((a) => a[0] === 'label'));
 });
 
 test('no queue, no team, or an issue already open with its marker: not filed again', async () => {

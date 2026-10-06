@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.11.9
+
+**Work for the Wright is filed in a repository that doesn't have the Wright's label yet.**
+
+### What changed
+
+- The Steward files work for the Wright as issues carrying the Wright's queue label (`manor:work`). In a repository that had never had work filed before, such as an agent just added as an employee, GitHub refused the issue because the label didn't exist yet. The alarm then said the work wasn't handed to the Wright, and someone had to create the label by hand. Now the Steward creates the label itself, with the same color and description the other repositories have, and files the issue again. Its log says when it did.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.11.7
 
 **No one's repositories are built in: the Steward looks after the ones you add.**
