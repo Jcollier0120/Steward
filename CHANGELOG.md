@@ -16,7 +16,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing to do: an install that has been running keeps what it looks after. The first time the new version reads its settings, if settings.json doesn't list employees yet, the employees from its last look are written into settings.json once, each read from its clone on this PC. One whose clone isn't on this PC is left out. If something can't be read from a clone (for example a test command for a project that isn't a Node one), an alarm says what, and that employee waits off the kit's stages until you fill it in under Settings, Employees, and save.
+- Nothing to do: an install that has been running keeps what it looks after. The first time the new version reads its settings, if settings.json doesn't list employees yet, the employees from its last look are written into settings.json once, each read from its clone on this PC. One whose clone isn't on this PC is left out. A .NET project's test command is found too: `dotnet test` on the unit tests of the project the others build on (never integration, GUI or benchmark tests). If something can't be read from a clone, an alarm says what, and that employee waits off the kit's stages until you fill it in under Settings, Employees, and save.
 - Settings you already saved are kept as they are.
 
 ## 0.11.6

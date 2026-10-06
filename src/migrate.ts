@@ -74,6 +74,35 @@ export function internalStaff(home = manorHome()): Set<string> {
   return ids;
 }
 
+/** A test project: one that takes a .NET test framework. */
+const TEST_SDK = /Microsoft\.NET\.Test\.Sdk|"xunit|"NUnit|"MSTest/i;
+/** Slow or needing a desktop: integration, GUI, headless, end-to-end and benchmark tests aren't a round's checks. */
+const SLOW_TESTS = /^(integration|integrationtests|gui|ui|headless|headlesstests|e2e|benchmarks?|perf|performance|load|smoke)$/i;
+
+/**
+ * A .NET clone's checks: `dotnet test` on its unit tests, a folder down. With several test projects, the one for the
+ * project the others build on most (App.Core.Tests for an App.Core that every other project references), its name
+ * less ".Tests" naming the project it tests. Integration, GUI and benchmark tests are left out. None: [].
+ */
+export function dotnetTests(checkout: string): string[] {
+  const projects = new Map<string, string>();
+  for (const d of list(checkout).filter((d) => isDir(path.join(checkout, d)))) {
+    const f = list(path.join(checkout, d)).find((x) => x.endsWith('.csproj'));
+    if (f) projects.set(d, readText(path.join(checkout, d, f)) ?? '');
+  }
+  const refsOf = (text: string) => [...text.matchAll(/<ProjectReference\s+Include="([^"]+)"/g)].map((m) => path.win32.basename(path.win32.dirname(m[1])));
+  const usedBy = (dir: string) => [...projects.values()].filter((t) => refsOf(t).includes(dir)).length;
+  const tests = [...projects].filter(([d, t]) => TEST_SDK.test(t) && !d.split('.').some((part) => SLOW_TESTS.test(part)));
+  if (!tests.length) return [];
+  const scored = tests.map(([d, t]) => {
+    const subject = d.replace(/\.Tests?$/i, '');
+    const refs = refsOf(t);
+    return { d, score: refs.includes(subject) ? usedBy(subject) : Math.max(0, ...refs.map(usedBy)) };
+  });
+  scored.sort((a, b) => b.score - a.score || a.d.localeCompare(b.d));
+  return [`dotnet test ${scored[0].d}`];
+}
+
 /** An employee rebuilt from its staff row and its clone, and what couldn't be filled in. An internal one is released here. */
 export function employeeFromClone(row: StaffRowLike, internal = false): { employee: Employee; missing: string[] } | null {
   const id = typeof row.id === 'string' && /^[a-z][a-z0-9-]*$/.test(row.id) ? row.id : null;
@@ -98,6 +127,7 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     if (has('tsconfig.json')) test.push('npx tsc -p . --noEmit');
     if (scripts.test) test.push('npm test');
   }
+  if (!pkg) test.push(...dotnetTests(checkout));
   if (!test.length) missing.push('Test it');
 
   const versionFiles: string[] = [];

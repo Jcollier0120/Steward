@@ -207,6 +207,31 @@ test("Manor's internal staff are released here: built and installed from the clo
   }
 });
 
+test("a .NET clone's test command is found: the unit tests of the project the others build on, never the slow ones", async () => {
+  const { dotnetTests } = await import('../src/migrate.ts');
+  const shop = mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'));
+  const proj = (dir: string, refs: string[], test = false) => {
+    mkdirSync(path.join(shop, dir), { recursive: true });
+    const items = refs.map((r) => `<ProjectReference Include="..\\${r}\\${r}.csproj" />`).join('');
+    const sdk = test ? '<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.0.0" /><PackageReference Include="xunit" Version="2.9.0" />' : '';
+    writeFileSync(path.join(shop, dir, `${dir}.csproj`), `<Project><ItemGroup>${items}${sdk}</ItemGroup></Project>`);
+  };
+  try {
+    assert.deepEqual(dotnetTests(shop), [], 'none in an empty folder');
+    proj('Shop.Core', []);
+    proj('Shop.Web', ['Shop.Core']);
+    proj('Shop.Agent', ['Shop.Core']);
+    proj('Shop.Web.Tests', ['Shop.Web', 'Shop.Core'], true);
+    assert.deepEqual(dotnetTests(shop), ['dotnet test Shop.Web.Tests'], 'the only unit tests');
+    proj('Shop.Core.Tests', ['Shop.Core'], true);
+    proj('Shop.IntegrationTests', ['Shop.Core', 'Shop.Web'], true);
+    proj('Shop.GUI.Tests', ['Shop.Core'], true);
+    assert.deepEqual(dotnetTests(shop), ['dotnet test Shop.Core.Tests'], "the tests of Shop.Core, which every other project builds on; never integration or GUI tests");
+  } finally {
+    rmSync(shop, { recursive: true, force: true });
+  }
+});
+
 test('a settings.json with other keys but no employees keeps its keys, and gets the employees from the staff table', () => {
   writeFileSync(staffFile, JSON.stringify(staff));
   writeFileSync(settingsFile(), JSON.stringify({ parallel: 3, stewardRepo: 'octocat/my-steward' }));
