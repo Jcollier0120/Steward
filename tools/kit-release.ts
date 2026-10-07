@@ -23,7 +23,7 @@ const kitDir = path.join(root, 'kit');
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
 
 /**
- * The kit's parts: the three a Node agent places (src/kitfiles.ts's PARTS), and, from kit 2.0.0, the core,
+ * The kit's parts: the four a Node agent places (src/kitfiles.ts's PARTS: react since 2.21.0), and, from kit 2.0.0, the core,
  * which the node and dotnet parts run, and dotnet, the C# driver (Heiward's). tools/kit.ts fills any of them.
  */
 export const KIT_PARTS = [...PARTS, 'core', 'dotnet'];

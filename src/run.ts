@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -47,22 +47,16 @@ export function splitCommand(line: string): string[] {
 const nodeDir = path.dirname(process.execPath);
 const npmCli = (name: 'npm' | 'npx') => path.join(nodeDir, 'node_modules', 'npm', 'bin', `${name}-cli.js`);
 
-let ghPath: string | null = null;
-/** gh on PATH, or where Manor's PCs keep it. */
-function gh(): string {
-  if (ghPath) return ghPath;
-  ghPath = spawnSync('gh', ['--version'], { windowsHide: true }).status === 0 ? 'gh' : 'C:\\tools\\gh\\bin\\gh.exe';
-  return ghPath;
-}
+/** Said when a command needs gh and this PC has none on PATH. */
+export const NO_GH = "gh isn't installed: install GitHub CLI (https://cli.github.com), then run gh auth login";
 
 /**
  * The program to start for a command's first word: `node` is the Node running the Steward, and `npm` and
- * `npx` its own npm (no shell, so no cmd.exe quoting); `gh` is found on PATH or in C:\tools\gh.
+ * `npx` its own npm (no shell, so no cmd.exe quoting). Everything else, gh too, is found on PATH.
  */
 export function resolveCommand(cmd: string, args: string[]): [string, string[]] {
   if (cmd === 'node') return [process.execPath, args];
   if ((cmd === 'npm' || cmd === 'npx') && existsSync(npmCli(cmd))) return [process.execPath, [npmCli(cmd), ...args]];
-  if (cmd === 'gh') return [gh(), args];
   return [cmd, args];
 }
 
@@ -76,16 +70,25 @@ const hasSdk = (dir: string) => {
 };
 
 /**
- * A .NET with an SDK, for a .NET employee's tests and release (Heiward's `dotnet test`, its release.ps1):
- * DOTNET_ROOT, then where Manor's PCs keep the SDK, then Program Files'. Started by Task Scheduler, the
- * Steward's PATH has Program Files' dotnet first, which on Manor's PCs is a runtime with no SDK.
+ * A .NET with an SDK, for a .NET employee's tests and release (`dotnet test`, a release.ps1): Settings' .NET SDK
+ * (useDotnet), then DOTNET_ROOT, then
+ * Program Files'. A runtime alone can't build or test, so a folder without an SDK is passed over: set DOTNET_ROOT to
+ * one that has an SDK.
  */
-export function dotnetWithSdk(candidates: (string | undefined)[] = [process.env.DOTNET_ROOT, 'C:\\tools\\dotnet10', path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'dotnet')]): string | null {
+export function dotnetWithSdk(candidates: (string | undefined)[] = [dotnetSetting || undefined, process.env.DOTNET_ROOT, path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'dotnet')]): string | null {
   for (const dir of candidates) if (dir && hasSdk(dir)) return dir;
   return null;
 }
 
 let dotnetDir: string | null | undefined;
+
+/** Settings' .NET SDK folder (dotnetRoot, %NAME% expanded), tried first; empty for none. */
+let dotnetSetting = '';
+export function useDotnet(dir: string): void {
+  if (dir === dotnetSetting) return;
+  dotnetSetting = dir;
+  dotnetDir = undefined;
+}
 
 /**
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
@@ -104,6 +107,8 @@ export const run: Runner = (cmd, args, opts = {}) => {
       argv,
       { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
       (e: any, stdout, stderr) => {
+        // gh not on PATH: one plain line on what to do, not a spawn error.
+        if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
         const err = [String(stderr ?? ''), e && typeof e.code !== 'number' ? String(e.message) : ''].filter(Boolean).join('\n');
         resolve({ code, out: String(stdout ?? ''), err });

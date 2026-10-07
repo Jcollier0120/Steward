@@ -2,7 +2,7 @@
 // failure markers, the game check, the candidates for a request and the pick among them, and the size
 // of a request. Pure: a driver reads the files and asks the counters, and hands their contents in.
 
-import { acceleratorId, keyedCards, kindOfId, LEGACY_NAMES } from './ids.js';
+import { acceleratorId, deviceName, keyedCards, kindOfId, LEGACY_NAMES } from './ids.js';
 import { REEVE_NOT_SET_UP, say } from './messages.js';
 import { slotNames } from './queue.js';
 
@@ -19,13 +19,26 @@ import { slotNames } from './queue.js';
  * @property {string} baseUrl
  * @property {string} model
  * @property {string[]} [startCommand]
+ * @property {Record<string, string>} [env] What its server's environment needs besides this one's (OpenVINO Model Server's
+ * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+ * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
+ * vision model may take less than its chat model): capFor.
+ */
+
+/**
+ * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
+ * server that loads its model slowly). Each left out is the rule's.
+ * @property {number} [requestBaseMs]
+ * @property {number} [requestPerTokenMs]
+ * @property {number} [coldLoadMs]
  */
 
 /**
  * @typedef {object} Accelerator
  * @property {string} id `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId).
  * @property {AcceleratorKind} kind
- * @property {string} name The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+ * @property {string} name The device's own name, from what this PC is (acceleratorName), never from the config:
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
  * @property {number | null} memoryGb A graphics card's own memory, in GB; null when unknown. Under 2 GB, it shares the PC's.
  * @property {number} slots How many requests it serves at once (llama-server's --parallel). The NPU has 1.
  * @property {number} maxContextTokens The most a request may be, prompt and answer, by the kit's pessimistic estimate.
@@ -34,6 +47,7 @@ import { slotNames } from './queue.js';
  * @property {Endpoint} [embed]
  * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
+ * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
 
 /**
@@ -126,7 +140,20 @@ const baseUrlOf = (u) => String(u).replace(/\/(v1\/?)?$/, '');
 /** @param {unknown} v */
 const positiveInt = (v) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
 
-/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[] }} Written */
+/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number }} Written */
+
+/**
+ * A server's own environment as written: names to strings, anything else left out.
+ * @param {any} v
+ * @returns {Record<string, string> | undefined}
+ */
+function readEnv(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const [k, x] of Object.entries(v)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof x === 'string') out[k] = x;
+  return Object.keys(out).length ? out : undefined;
+}
 
 /**
  * One served kind as written; a vision endpoint may leave out its server (it's the chat endpoint's).
@@ -139,7 +166,36 @@ function readEndpoint(v) {
     model: v.model,
     ...(typeof v.baseUrl === 'string' && v.baseUrl ? { baseUrl: baseUrlOf(v.baseUrl) } : {}),
     ...(Array.isArray(v.startCommand) ? { startCommand: v.startCommand.map(String) } : {}),
+    ...(readEnv(v.env) ? { env: readEnv(v.env) } : {}),
+    ...(positiveInt(v.maxContextTokens) ? { maxContextTokens: v.maxContextTokens } : {}),
   };
+}
+
+/**
+ * An accelerator's own timings as written: each a whole number of ms, the others left to the rules.
+ * @param {any} v
+ * @returns {Timeouts | undefined}
+ */
+function readTimeouts(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const k of ['requestBaseMs', 'requestPerTokenMs', 'coldLoadMs']) {
+    const n = v[k];
+    if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[k] = n;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
+ * when it has one, else the accelerator's.
+ * @param {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {number}
+ */
+export function capFor(a, work) {
+  return a[work]?.maxContextTokens ?? a.maxContextTokens;
 }
 
 /**
@@ -154,19 +210,81 @@ function withServers(a, eps) {
   for (const w of WORKS) {
     const ep = eps[w];
     if (!ep) continue;
-    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}) };
-    else if (w === 'vision' && eps.chat?.baseUrl) out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}) };
+    const cap = ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {};
+    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...cap };
+    else if (w === 'vision' && eps.chat?.baseUrl)
+      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...cap };
   }
   return out;
 }
 
 /**
- * One entry of `accelerators`, as Reeve reads it: its kind from its id, one slot, the NPU's cap, known quirks only.
+ * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
+ * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
+ * @property {boolean} npu
+ * @property {{ name: string, memoryGb: number | null }[]} cards Each named as DXGI describes it, " #2" on a second card
+ * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+ * @property {string} [npuName] The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+ * @property {string} [cpuName] The processor's name as Windows gives it, (R), (TM) and (C) taken out.
+ */
+
+/**
+ * An accelerator's name: what this PC calls the device, never what a config says (a config's `name` is ignored).
+ * The NPU's is Windows' name for it, a card's DXGI's description (" #2" on a second card of a name), found by its
+ * id, and the processor's its own, all from hardware.json, each with (R) and (TM) taken out and its spaces collapsed
+ * (deviceName), as Manor shows them: "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". Without one
+ * (no hardware.json, a card it doesn't list, an NPU on a PC without one) it is the kind's: "NPU", "Graphics card",
+ * "Processor" (LEGACY_NAMES). A card's id stays the one its DXGI name gives.
+ * @param {AcceleratorKind} kind
+ * @param {string} id
+ * @param {Hardware | null | undefined} hw
+ * @returns {string}
+ */
+export function acceleratorName(kind, id, hw) {
+  const known = kind === 'npu' ? (hw?.npu ? hw.npuName : undefined) : kind === 'cpu' ? hw?.cpuName : hw?.cards.find((c) => acceleratorId('gpu', c.name) === id)?.name;
+  const name = typeof known === 'string' ? deviceName(known) : '';
+  return name || LEGACY_NAMES[kind];
+}
+
+/**
+ * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
+ * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * A card's name is as hardware.json keeps it, the one its id is made from (notTheNpu shows it by acceleratorName).
+ * Null when the PC has an NPU, or isn't known: then the config's word stands.
+ * @param {Hardware | null | undefined} hw
+ * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
+ */
+export function instead(hw) {
+  if (!hw || hw.npu) return null;
+  if (!hw.cards.length) return { kind: 'cpu', name: acceleratorName('cpu', 'cpu', hw), memoryGb: null };
+  const card = hw.cards.length === 1 ? hw.cards[0] : null;
+  return { kind: 'gpu', name: card?.name ?? LEGACY_NAMES.gpu, memoryGb: card?.memoryGb ?? null };
+}
+
+/**
+ * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
+ * id (the processor's is `cpu`) and its name (acceleratorName), whatever the entry carried. Null when the PC has an
+ * NPU or isn't known, and for any other entry.
+ * @param {Accelerator} a
+ * @param {Hardware | null | undefined} hw
+ * @returns {Accelerator | null}
+ */
+export function notTheNpu(a, hw) {
+  const other = a.kind === 'npu' ? instead(hw) : null;
+  if (!other) return null;
+  const id = acceleratorId(other.kind, other.name);
+  return { ...a, kind: other.kind, id, name: acceleratorName(other.kind, id, hw), memoryGb: a.memoryGb ?? other.memoryGb };
+}
+
+/**
+ * One entry of `accelerators`, as Reeve reads it: its kind from its id, its name from this PC (a `name` written in
+ * the entry is ignored), one slot, the NPU's cap, known quirks only.
  * @param {Rules} rules
  * @param {any} v
+ * @param {Hardware | null | undefined} hw
  * @returns {Accelerator | { error: string }}
  */
-function readOne(rules, v) {
+function readOne(rules, v, hw) {
   if (!v || typeof v !== 'object' || typeof v.id !== 'string') return { error: say.noId() };
   const kind = kindOfId(v.id);
   if (!kind) return { error: say.badId(v.id) };
@@ -174,12 +292,13 @@ function readOne(rules, v) {
     {
       id: v.id,
       kind,
-      name: typeof v.name === 'string' && v.name.trim() ? v.name.trim() : LEGACY_NAMES[kind],
+      name: acceleratorName(kind, v.id, hw),
       memoryGb: typeof v.memoryGb === 'number' && v.memoryGb >= 0 ? v.memoryGb : null,
       slots: kind === 'npu' ? 1 : Math.min(rules.accelerators.maxSlots, positiveInt(v.slots) ?? 1),
       maxContextTokens: positiveInt(v.maxContextTokens) ?? rules.accelerators.defaultMaxContextTokens,
       quirks: Array.isArray(v.quirks) ? v.quirks.filter((/** @type {unknown} */ q) => typeof q === 'string' && QUIRKS.includes(q)) : [],
       ...(v.enabled === false ? { enabled: false } : {}),
+      ...(readTimeouts(v.timeouts) ? { timeouts: readTimeouts(v.timeouts) } : {}),
     },
     { chat: readEndpoint(v.chat), vision: readEndpoint(v.vision), embed: readEndpoint(v.embed) },
   );
@@ -188,12 +307,14 @@ function readOne(rules, v) {
 /**
  * An older config (chatEndpoint, visionModel, embedEndpoint, npuMaxContextTokens) as accelerators, as
  * Reeve reads it: one per device, `npu` when the device is the NPU. The chat endpoint keeps the cap and
- * both GenieX quirks it always had; an embed endpoint on another device is an accelerator of its own.
+ * both GenieX quirks it always had; an embed endpoint on another device is an accelerator of its own. Each is named
+ * from this PC, as a listed one is.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null | undefined} hw
  * @returns {Accelerator[]}
  */
-function fromLegacy(rules, raw) {
+function fromLegacy(rules, raw, hw) {
   const cap = positiveInt(raw?.npuMaxContextTokens) ?? rules.accelerators.defaultMaxContextTokens;
   /** @type {{ a: Omit<Accelerator, Work>, eps: Partial<Record<Work, Written | undefined>> }[]} */
   const found = [];
@@ -204,7 +325,8 @@ function fromLegacy(rules, raw) {
     const kind = d === 'gpu' ? 'gpu' : d === 'cpu' ? 'cpu' : 'npu';
     let f = found.find((x) => x.a.kind === kind);
     if (!f) {
-      f = { a: { id: acceleratorId(kind, LEGACY_NAMES[kind]), kind, name: LEGACY_NAMES[kind], memoryGb: null, slots: 1, maxContextTokens: cap, quirks: [] }, eps: {} };
+      const id = acceleratorId(kind, LEGACY_NAMES[kind]);
+      f = { a: { id, kind, name: acceleratorName(kind, id, hw), memoryGb: null, slots: 1, maxContextTokens: cap, quirks: [] }, eps: {} };
       found.push(f);
     }
     return f;
@@ -282,31 +404,61 @@ export function withoutGpuBesideNpu(list, gpuWithNpu) {
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
+ * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has
+ * instead (notTheNpu): a model is never called the NPU, or routed as one, on a PC without one.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null} [hw]
  * @returns {AcceleratorConfig | { error: string }}
  */
-export function parseAccelerators(rules, raw) {
+export function parseAccelerators(rules, raw, hw = null) {
   /** @type {string[]} */
   const problems = [];
   /** @type {Accelerator[]} */
   const list = [];
   const legacy = !Array.isArray(raw?.accelerators);
+  /** @type {Map<string, string>} */
+  const renamed = new Map();
+  /** @param {Accelerator} a @returns {Accelerator} */
+  const onThisPc = (a) => {
+    const other = notTheNpu(a, hw);
+    if (!other) return a;
+    renamed.set(a.id, other.id);
+    problems.push(say.notTheNpu(a.id, other.name));
+    // An old config's chat was GenieX's, with its quirks; GenieX runs only on an NPU, so this server isn't it.
+    return legacy ? { ...other, quirks: [] } : other;
+  };
+  /** @type {Accelerator[]} */
+  const moved = [];
   if (!legacy) {
     raw.accelerators.forEach((/** @type {unknown} */ v, /** @type {number} */ i) => {
-      const r = readOne(rules, v);
-      if ('error' in r) problems.push(`accelerators[${i}] ${r.error}`);
-      else if (list.some((x) => x.id === r.id)) problems.push(`accelerators[${i}]: ${say.listedTwice(r.id)}`);
-      else list.push(r);
+      const read = readOne(rules, v, hw);
+      if ('error' in read) problems.push(`accelerators[${i}] ${read.error}`);
+      else if (list.some((x) => x.id === read.id)) problems.push(`accelerators[${i}]: ${say.listedTwice(read.id)}`);
+      else list.push(read);
     });
   } else {
-    list.push(...fromLegacy(rules, raw));
+    list.push(...fromLegacy(rules, raw, hw));
+  }
+  // An entry said to be the NPU on a PC without one goes after the others: a card's own entry (setup's) comes first.
+  for (const a of list.splice(0)) {
+    const r = onThisPc(a);
+    if (r === a) list.push(a);
+    else moved.push(r);
+  }
+  for (const a of moved) {
+    const same = list.find((x) => x.id === a.id);
+    // The same card listed twice (its own entry and the one called the NPU): one card, its own entry's servers first.
+    if (same) for (const w of WORKS) same[w] ??= a[w];
+    else list.push(a);
   }
   if (!list.some((a) => WORKS.some((w) => serves(a, w)))) {
     return { error: problems.length ? say.nothingUsable(problems) : REEVE_NOT_SET_UP };
   }
   /** @type {'auto' | string[]} */
-  const order = Array.isArray(raw?.acceleratorOrder) ? raw.acceleratorOrder.filter((/** @type {unknown} */ x) => typeof x === 'string') : 'auto';
+  const order = Array.isArray(raw?.acceleratorOrder)
+    ? raw.acceleratorOrder.filter((/** @type {unknown} */ x) => typeof x === 'string').map((/** @type {string} */ id) => renamed.get(id) ?? id)
+    : 'auto';
   return {
     accelerators: ordered(rules, list, order),
     order,
@@ -322,9 +474,10 @@ export function parseAccelerators(rules, raw) {
  * @param {Rules} rules
  * @param {string} file The file's path, for messages.
  * @param {string | null} text
+ * @param {Hardware | null} [hw] What this PC has (hardware.json), when known.
  * @returns {AcceleratorConfig | { error: string }}
  */
-export function readConfig(rules, file, text) {
+export function readConfig(rules, file, text, hw = null) {
   if (text === null) return { error: REEVE_NOT_SET_UP };
   let raw;
   try {
@@ -332,7 +485,7 @@ export function readConfig(rules, file, text) {
   } catch (e) {
     return { error: say.configUnreadable(file, /** @type {Error} */ (e).message) };
   }
-  const cfg = parseAccelerators(rules, raw);
+  const cfg = parseAccelerators(rules, raw, hw);
   if ('error' in cfg) return { error: cfg.error === REEVE_NOT_SET_UP ? cfg.error : say.configError(file, cfg.error) };
   return cfg;
 }
@@ -574,7 +727,7 @@ export function candidates(rules, accs, need, state = {}) {
   const list = [];
   /** @type {Skipped[]} */
   const skipped = [];
-  const fitting = accs.filter((acc) => serves(acc, need.work) && need.tokens <= acc.maxContextTokens);
+  const fitting = accs.filter((acc) => serves(acc, need.work) && need.tokens <= capFor(acc, need.work));
   /** @param {Accelerator} acc */
   const failureOfAcc = (acc) => state.failures?.[acc.id] ?? null;
   // When every one that would do has failed, they're tried anyway (the last resort, as Reeve does), rather
@@ -676,15 +829,18 @@ export function visionTokens(rules, question) {
 }
 
 /**
- * Why a request is refused before anything is sent: over every candidate's cap (null when one fits).
- * @param {{ maxContextTokens: number }[]} serving
+ * Why a request is refused before anything is sent: over every candidate's cap (null when one fits). With `work`,
+ * each one's cap for that kind (capFor).
+ * @param {(Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[]} serving
  * @param {number} promptTokens
  * @param {number} maxTokens
+ * @param {Work} [work]
  * @returns {string | null}
  */
-export function tooBig(serving, promptTokens, maxTokens) {
-  if (!serving.length || serving.some((a) => promptTokens + maxTokens <= a.maxContextTokens)) return null;
-  const cap = Math.max(...serving.map((a) => a.maxContextTokens));
+export function tooBig(serving, promptTokens, maxTokens, work) {
+  const capOf = (/** @type {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} */ a) => (work ? capFor(a, work) : a.maxContextTokens);
+  if (!serving.length || serving.some((a) => promptTokens + maxTokens <= capOf(a))) return null;
+  const cap = Math.max(...serving.map(capOf));
   return say.tooBig(promptTokens, maxTokens, cap, serving.length > 1);
 }
 
@@ -696,13 +852,14 @@ export function tooBig(serving, promptTokens, maxTokens) {
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
+ * the rules' place, each one it gives.
  * @param {Rules} rules
- * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}
  */
 export function requestTimeoutMs(rules, r) {
-  const a = rules.accelerators;
+  const a = { ...rules.accelerators, ...(r.timeouts ?? {}) };
   const own = r.lane === 'background' && r.work !== 'embed' ? Math.min(r.ceilingMs, a.requestBaseMs + a.requestPerTokenMs * Math.max(0, r.maxTokens)) : r.ceilingMs;
   return own + (r.coldLoad ? a.coldLoadMs : 0);
 }

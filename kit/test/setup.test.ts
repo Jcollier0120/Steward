@@ -9,7 +9,7 @@ process.env.REEVE_HOME = mkdtempSync(path.join(tmpdir(), 'kit-setup-'));
 delete process.env.REEVE_CONFIG;
 after(() => rmSync(process.env.REEVE_HOME!, { recursive: true, force: true }));
 const { autoOrder, readAccelerators, validateAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
-const { detectedAccelerators, keyCards, noNpu, npuName, parseAdapters, parseDetection, recommendedCard } = await import('./fixture/src/kit/detect.ts');
+const { detectedAccelerators, hardwareOf, keyCards, noNpu, npuName, parseAdapters, parseDetection, recommendedCard } = await import('./fixture/src/kit/detect.ts');
 const { acceleratorEntry, cardNeedGb, DESKTOP_GB, describePlan, findModels, matchDevice, mergeEntries, parseHfFiles, parseListDevices, parseReleases, pickRelease, planSetup, portablePath, runSetup, sizing, variantFor, withoutNpu } = await import('./fixture/src/kit/setup.ts');
 const { genieXConfig, isInstallDefaultNpu } = await import('./fixture/src/kit/setup.ts');
 const { setupCommand } = await import('./fixture/src/kit/setup.ts');
@@ -48,10 +48,23 @@ test('detection: DXGI with Heiward\'s naming (software and Microsoft adapters le
       memoryGb: 0.1,
     },
   ]);
-  assert.deepEqual(laptop.npu, { name: 'Snapdragon X2 Elite Extreme NPU', device: 'Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU', driver: '30.0.228.10000', driverDate: '2026-07-20' });
+  assert.deepEqual(laptop.npu, {
+    name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU',
+    device: 'Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU',
+    driver: '30.0.228.10000',
+    driverDate: '2026-07-20',
+    manufacturer: '',
+    deviceId: '',
+    vendor: 'qualcomm',
+    generation: 'snapdragon-x2',
+    label: 'Snapdragon X2 Elite / X2 Plus (Hexagon v81)',
+    supported: true,
+    verified: true,
+  }, 'an older npu| line (a Hexagon driver) still reads, its maker and generation from its name');
   assert.deepEqual(laptop.cpu, { name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU', arch: 'arm64', cores: 18 });
   assert.equal(laptop.geniex, 'C:\\geniex.exe');
   assert.deepEqual(detectedAccelerators(laptop).map((a) => a.id), ['npu', 'gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'cpu'], 'the recommended order');
+  assert.deepEqual(detectedAccelerators(laptop).map((a) => a.name), ['Qualcomm Hexagon', 'Qualcomm Adreno X2-90', 'Qualcomm Oryon'], 'shown by its model, as Manor shows it (deviceName); the card keeps the id of its DXGI name');
 
   const desk = parseDetection(DESKTOP);
   assert.deepEqual(desk.cards.map((c) => [c.index, c.name, c.id, c.vendor, c.memoryGb]), [
@@ -66,6 +79,20 @@ test('detection: DXGI with Heiward\'s naming (software and Microsoft adapters le
   assert.equal(recommendedCard(desk.cards)?.name, 'NVIDIA GeForce RTX 4090', 'the most memory of its own, the first on a tie');
   assert.deepEqual(detectedAccelerators(desk).map((a) => a.id), ['gpu-nvidia-geforce-rtx-4090', 'gpu-nvidia-geforce-rtx-4090-2', 'gpu-intel-r-uhd-graphics-770', 'gpu-graphics-card-5', 'cpu']);
   assert.equal(npuName('Qualcomm(R) Hexagon(TM) NPU'), 'Qualcomm Hexagon NPU');
+  assert.equal(npuName('  Snapdragon(R)  X2 Elite - X2E88100 -  Qualcomm(R) Hexagon(TM)  NPU '), 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', 'kept in full in hardware.json: (R) and (TM) out, spaces collapsed');
+  assert.equal(npuName(''), 'NPU');
+  // hardware.json: the NPU's and the processor's names beside the cards, so every program names them as this PC does.
+  assert.deepEqual(hardwareOf(laptop), {
+    npu: true,
+    cards: [{ name: 'Qualcomm(R) Adreno(TM) X2-90 GPU', memoryGb: 0.1 }],
+    npuName: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU',
+    cpuName: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU',
+  });
+  assert.deepEqual(hardwareOf(parseDetection(DESKTOP.replace('problem|NPU: Invalid class\n', ''))), {
+    npu: false,
+    cards: desk.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })),
+    cpuName: '13th Gen Intel Core i9-13900K',
+  });
   // Names compare without case, as Heiward's do.
   assert.deepEqual(keyCards(parseAdapters('adapter|0|4318|1|1|0x0_0x1|0|RTX\nadapter|1|4318|1|1|0x0_0x2|0|rtx')).map((c) => c.name), ['RTX', 'rtx #2']);
 });
@@ -258,7 +285,7 @@ test('the plan for this laptop: the Adreno\'s OpenCL build; the NPU is left alon
   };
   const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'npu', 'gpu-nope'], raw, releases: RELEASES, hfFiles: hf, home });
   assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant, t.ports]), [['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'opencl-adreno-arm64', { chat: 18192, vision: 18193, embed: 18300 }]]);
-  assert.ok(plan.problems.some((p) => /^npu: the NPU runs GenieX/.test(p)));
+  assert.equal(plan.npu?.route.server, 'GenieX', 'asked for by name, the NPU is set up again on its route');
   assert.ok(plan.problems.some((p) => /^gpu-nope: no such graphics card/.test(p)));
 });
 
@@ -268,7 +295,7 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
   const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: [], raw: LIVE, releases: RELEASES, hfFiles: hf, home });
   const unpacked: string[] = [];
   const got: string[] = [];
-  const r = await runSetup(plan, LIVE, 'Snapdragon X2 Elite Extreme NPU', {
+  const r = await runSetup(plan, LIVE, {
     log: () => {},
     download: async (d) => {
       got.push(d.what);
@@ -297,20 +324,23 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
   assert.deepEqual(r.raw.chatEndpoint, LIVE.chatEndpoint);
   assert.equal(r.raw.acceleratorOrder, 'auto');
   assert.deepEqual(validateAccelerators(r.raw), []);
-  const read = readAccelerators(r.raw).accelerators;
+  assert.ok(r.raw.accelerators.every((a: any) => !('name' in a)), 'no name is written: it comes from the PC');
+  assert.equal(r.entries[0].name, 'Qualcomm Adreno X2-90', 'the entries setup hands back are named as Manor shows the card');
+  const read = readAccelerators(r.raw, hardwareOf(parseDetection(LAPTOP))).accelerators;
   assert.deepEqual(read.map((a) => [a.id, a.name]), [
-    ['npu', 'Snapdragon X2 Elite Extreme NPU'],
-    ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'Qualcomm(R) Adreno(TM) X2-90 GPU'],
+    ['npu', 'Qualcomm Hexagon'],
+    ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'Qualcomm Adreno X2-90'],
   ]);
+  assert.deepEqual(readAccelerators(r.raw, null).accelerators.map((a) => a.name), ['NPU', 'Graphics card'], "without hardware.json, each kind's name");
   assert.deepEqual(read[0].chat, { baseUrl: 'http://127.0.0.1:18181', model: LIVE.chatEndpoint.model, startCommand: LIVE.chatEndpoint.startCommand });
   assert.deepEqual(read[0].quirks, ['prefix-leak', 'image-path']);
   assert.deepEqual(autoOrder(read).map((a) => a.id), ['npu', 'gpu-qualcomm-r-adreno-tm-x2-90-gpu'], 'the NPU first: the Adreno shares the PC\'s memory');
-  // Run again: the entry is replaced, not added twice; an NPU already in the list is left exactly as it is.
-  const twice = mergeEntries({ ...r.raw, accelerators: [{ ...r.raw.accelerators[0], name: 'My NPU' }, ...r.raw.accelerators.slice(1)] }, r.entries, 'Other name');
+  // Run again: the entry is replaced, not added twice; an NPU already in the list is left as it is, but for an older file's name.
+  const twice = mergeEntries({ ...r.raw, accelerators: [{ ...r.raw.accelerators[0], name: 'My NPU' }, ...r.raw.accelerators.slice(1)] }, r.entries);
   assert.equal(twice.accelerators.length, 2);
-  assert.equal(twice.accelerators[0].name, 'My NPU');
+  assert.deepEqual(twice.accelerators[0], r.raw.accelerators[0], "an older file's name is dropped");
   // A card llama.cpp doesn't list is reported, not written.
-  const none = await runSetup(plan, LIVE, undefined, { log: () => {}, download: async () => {}, unpack: () => {}, listDevices: async () => 'Available devices:\n  (none)\n' });
+  const none = await runSetup(plan, LIVE, { log: () => {}, download: async () => {}, unpack: () => {}, listDevices: async () => 'Available devices:\n  (none)\n' });
   assert.equal(none.entries.length, 0);
   assert.match(none.problems[0], /names no device for Qualcomm\(R\) Adreno\(TM\) X2-90 GPU/);
 });
@@ -339,7 +369,7 @@ test('on a PC with no NPU, setup drops the npu install wrote by default, says so
   const plan = await planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
   assert.equal(plan.dropNpu, true);
   assert.match(describePlan(plan)[0], /^NPU \(npu\): removed from config\.json\. It's the GenieX server install wrote by default, and this PC has no NPU/);
-  const r = await runSetup(plan, raw, undefined, fakeIo);
+  const r = await runSetup(plan, raw, fakeIo);
   assert.deepEqual(r.problems, []);
   assert.equal(r.raw.chatEndpoint, undefined, "install's chatEndpoint is gone, so nothing reads it back as the NPU");
   assert.deepEqual([r.raw.jobs, r.raw.mine, r.raw.acceleratorOrder], [{ toast: false }, 1, 'auto'], 'the rest of the file as it was');
@@ -379,7 +409,7 @@ test("setup never drops an npu configured by hand, nor one on a PC that has an N
     assert.equal(isInstallDefaultNpu(raw, LOCAL), false, what);
     const plan = await planSetup({ detection: parseDetection(DESKTOP_NO_NPU), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
     assert.equal(plan.dropNpu, false, what);
-    const r = await runSetup(plan, raw, undefined, fakeIo);
+    const r = await runSetup(plan, raw, fakeIo);
     assert.ok(readAccelerators(r.raw).accelerators.some((a) => a.id === 'npu'), `${what}: kept`);
   }
   for (const [pc, text] of [['an NPU', LAPTOP], ["couldn't ask", DESKTOP]]) {
@@ -413,7 +443,7 @@ test("setup with nothing else to do still drops the default npu and writes confi
 });
 
 test('a processor entry: the CPU build, no device, no offload', () => {
-  const e = acceleratorEntry({ id: 'cpu', kind: 'cpu', name: 'CPU', device: null, server: 'C:\\s\\llama-server.exe', models: { chat: { path: 'C:\\m\\q.gguf' } }, ports: { chat: 18199 }, slots: 1, maxContextTokens: 4096 });
+  const e = acceleratorEntry({ id: 'cpu', kind: 'cpu', device: null, server: 'C:\\s\\llama-server.exe', models: { chat: { path: 'C:\\m\\q.gguf' } }, ports: { chat: 18199 }, slots: 1, maxContextTokens: 4096 });
   assert.deepEqual(e.chat!.startCommand, ['C:\\s\\llama-server.exe', '--host', '127.0.0.1', '--port', '18199', '-ngl', '0', '-m', 'C:\\m\\q.gguf', '-c', '4096', '--parallel', '1', '--jinja', '--alias', 'qwen3-4b-instruct-2507']);
   assert.equal(e.vision, undefined);
 });

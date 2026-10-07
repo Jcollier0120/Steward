@@ -60,6 +60,13 @@ export const WORK: Record<string, AgentWork> = {
   herald: {
     model: true,
     lines: [
+      { what: "Reading your sources: your games and drivers, news, the weather and markets, or your PC's updates and security flaws, as its variant says", where: 'the network, and a little of the processor (it reads what is installed with PowerShell)', when: 'every hour for General purpose and the Financial guru, every 6 hours for Gamer and PC caretaker; a few seconds when nothing is new' },
+      { what: 'A short summary of each new set of long notes', where: MODEL, when: 'in the same round, at most 6 a round' },
+    ],
+  },
+  'developer-herald': {
+    model: true,
+    lines: [
       { what: 'Checking the upstream projects for new releases and issue changes', where: 'the network, and a little of the processor', when: 'every 6 hours; about 5 seconds when nothing is new' },
       { what: 'A short summary of each new release', where: MODEL, when: 'in the same round, once per release' },
     ],
@@ -76,7 +83,7 @@ export const WORK: Record<string, AgentWork> = {
     model: true,
     lines: [
       { what: "Comparing each project's versions, tags, changelog and release files, and the checksums of its local build", where: 'the network, and the processor and disk for the checksums', when: 'every 6 hours, or Run now' },
-      { what: 'Asking Manor and the Steward who works at the manor, so each agent is tasted too', where: "Manor's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all' },
+      { what: 'Asking Castellan and the Steward who works at the manor, so each agent is tasted too', where: "Castellan's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all' },
       { what: "Cloning a project that isn't on this PC (gh repo clone), and fetching each clone (git fetch), fast-forwarding its default branch when it's checked out and clean", where: 'the network and the disk', when: 'in the same round, just before each project is tasted; a first clone takes longer' },
       { what: 'A changelog line for each merged change that has none', where: MODEL, when: 'at most 12 a round, about 25 seconds on the NPU' },
       { what: "Handing a project's work orders to a worker, when Settings → Work orders names one (it's off by default), in a git worktree of its own", where: "Claude Code (claude -p), which runs on Anthropic's servers, with its tool calls on this PC's processor; or a command of yours, on this PC", when: 'at the end of the round, at most 2 projects, one at a time, each for at most 20 minutes (Time for each)' },
@@ -108,7 +115,7 @@ export const WORK: Record<string, AgentWork> = {
   surveyor: {
     model: true,
     lines: [
-      { what: "Its checks: Manor, every agent's page and logs, the PC (one PowerShell script) and the code checkouts", where: 'the processor and the disk', when: 'every 60 minutes (Settings), a few seconds to a minute' },
+      { what: "Its checks: Castellan, every agent's page and logs, the PC (one PowerShell script) and the code checkouts", where: 'the processor and the disk', when: 'every 60 minutes (Settings), a few seconds to a minute' },
       { what: 'Explanations, the daily report, suggestions and what is new', where: MODEL, when: 'only when no other agent holds or waits for an accelerator; at most 8 a round' },
     ],
   },
@@ -202,8 +209,11 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
     : w?.npuOnly
       ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${hasNpu() ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
 <p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
-      : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. The NPU comes first (by default; Reeve's order can say otherwise): it does model work without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg()))}</p>
-<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`;
+      : hasNpu()
+        ? `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. The NPU comes first (by default; Reeve's order can say otherwise): it does model work without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg()))}</p>
+<p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
+        : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: as many at once as a server has slots. Graphics cards with 2 GB or more of their own memory come first, the most memory first, then graphics that share the PC's memory, then the processor (by default; Reeve's order can say otherwise). The next one takes a request only when the one before can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg()))}</p>
+<p class="muted small">Task Manager shows the model's work as the graphics card's (Performance, then GPU) or the processor's.</p>`;
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>
 <div class="card">

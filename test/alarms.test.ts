@@ -15,8 +15,9 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
 const { alarmsFile, dismiss, loadAlarms, manorConditions, portConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
-const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
-const { alarmsCard } = await import('../src/view.ts');
+const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
+const { bundleForNode, importPath } = await import('../kit/test/react-render.ts');
 
 const HOUR = 3_600_000;
 const T0 = Date.parse('2026-10-04T08:00:00Z');
@@ -157,15 +158,20 @@ test("the alarms' settings: on with a toast by default, and what they refuse", (
   assert.deepEqual([a.on, a.toast, a.waitingHours, a.problemHours, a.manorUrl, a.surveyorUrl], [false, true, 168, 6, 'http://127.0.0.1:18585', '']);
 });
 
-test('the page: what needs you at the top, each with Dismiss; the dismissed and the cleared folded away', () => {
+test('the page: what needs you at the top, each with Dismiss; the dismissed and the cleared folded away', async () => {
   const st = reconcile(empty(), [cond('waiting:x#1', 0, { title: 'Porter #1 <waits>', url: 'https://github.com/x/pull/1' }), cond('quiet', 0)], at(0)).state;
   st.open[1].dismissedAt = at(0).toISOString();
-  const html = alarmsCard(st);
+  const { render } = await bundleForNode<{ render: (a: unknown) => string }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { AlarmsCard } from '${importPath('src/web/steward.tsx')}';
+     export const render = (a) => renderToStaticMarkup(<AlarmsCard a={a} now={Date.now()} />);`,
+  );
+  const html = render(st);
   assert.match(html, /<h2>Needs you<\/h2>/);
   assert.match(html, /Porter #1 &lt;waits&gt;/);
   assert.match(html, /data-post="\/api\/alarms\/dismiss"/);
   assert.match(html, /1 dismissed/);
-  assert.equal(alarmsCard({ ...empty() }), '', 'nothing to say');
+  assert.equal(render({ ...empty() }), '', 'nothing to say');
 });
 
 test("from the Wright: an issue it got stuck on and a PR a person reviews, at once; its page down, after two hours", () => {
@@ -217,6 +223,20 @@ test("from the Bailiff: Claude Code unusable, or a review failing twice, at once
   const st = await watch();
   assert.ok(asked.includes('http://127.0.0.1:19999/api/reviews'));
   assert.ok(st.open.some((a) => a.id === 'bailiff:claude:blocked'));
+});
+test("while the Bailiff can't review at all, the Wright's drafts waiting only for it are named in its one alarm, not each raised after a day", () => {
+  const { foldBailiffWaits } = alarmsModule;
+  const wait = (n: number, why: string) => ({ id: `waiting:Jcollier0120/Porter#${n}`, who: 'porter', title: `Porter #${n} has waited 24 hours or more: ${why}`, detail: [], url: `https://github.com/Jcollier0120/Porter/pull/${n}`, afterMs: 24 * HOUR });
+  const forReview = wait(40, "a draft from the Wright, with the Bailiff: waiting for the Bailiff's review");
+  const changes = wait(41, 'a draft from the Wright, with the Bailiff: the Bailiff asked for changes (its comment says which)');
+  const forYou = wait(42, 'a draft from the Wright, waiting for you: it changes what a person reviews');
+  const down = { id: 'bailiff:down', who: 'bailiff', title: "The Bailiff's page doesn't answer, so the Wright's drafts wait for its review", detail: ['ECONNREFUSED'], afterMs: 2 * HOUR };
+  assert.deepEqual(foldBailiffWaits([forReview, changes, forYou]), [forReview, changes, forYou], 'the Bailiff up: each keeps its own');
+  const folded = foldBailiffWaits([forReview, changes, forYou, down]);
+  assert.deepEqual(folded.map((c) => c.id), [changes.id, forYou.id, 'bailiff:down'], 'asked for changes, or held by the Steward: still their own');
+  assert.deepEqual(folded.at(-1)!.detail, ['ECONNREFUSED', "The Wright's drafts waiting on it: https://github.com/Jcollier0120/Porter/pull/40."]);
+  const blocked = { id: 'bailiff:claude:blocked', who: 'bailiff', title: "The Bailiff can't review: Claude Code isn't signed in", detail: [], afterMs: 0 };
+  assert.deepEqual(foldBailiffWaits([forReview, blocked]).map((c) => c.id), ['bailiff:claude:blocked']);
 });
 
 // Reeve's jobs' open alerts (his GET /api/alerts) are alarms at once, with the Steward's toast, since Reeve raises

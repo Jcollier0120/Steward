@@ -11,6 +11,13 @@ import type { Ctx } from '../src/stages/common.ts';
 // The Bailiff's install decides whether the Wright's drafts wait for its approval (settings.ts's bailiffInstalled): a test
 // never sees this PC's. One that wants it installed sets BAILIFF_HOME itself.
 process.env.BAILIFF_HOME ??= path.join(os.tmpdir(), 'steward-test-no-bailiff');
+// The same for the Wright's and the Surveyor's installs (settings.ts's wrightInstalled, surveyorInstalled): the tests see
+// the owner's PC as it is, with both installed, unless one says otherwise before it imports this.
+for (const [name, home] of [['WRIGHT_HOME', 'steward-test-wright'], ['SURVEYOR_HOME', 'steward-test-surveyor']] as const) {
+  if (process.env[name] !== undefined) continue;
+  process.env[name] = path.join(os.tmpdir(), home);
+  mkdirSync(path.join(process.env[name]!, 'app'), { recursive: true });
+}
 
 export const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
@@ -55,6 +62,7 @@ export function employee(checkout: string, more: Partial<Employee> = {}): Employ
     repo: 'Jcollier0120/Fake',
     checkout,
     branch: 'main',
+    merges: true,
     usesKit: true,
     parts: ['node'],
     fill: 'node tools/kit.ts',
@@ -87,7 +95,7 @@ export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
   const lines: string[] = [];
-  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', bailiffUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true };
+  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', bailiffUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', wrightHere: true };
   return {
     settings,
     run: o.run,

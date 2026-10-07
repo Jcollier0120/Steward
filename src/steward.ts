@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { watchAlarms, type Held } from './alarms.ts';
+import { getJson, watchAlarms, type GetJson, type Held } from './alarms.ts';
 import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
@@ -7,11 +7,14 @@ import { withLock } from './kit/lock.ts';
 import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
-import { run as realRun, type Runner } from './run.ts';
-import { loadSettings, type Employee, type Settings } from './settings.ts';
+import { NO_TEAM, teamOf, type Owner } from './team.ts';
+import { run as realRun, useDotnet, type Runner } from './run.ts';
+import { expandEnv } from './kit/settings-kit.ts';
+import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
+import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
-import { pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
+import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -26,6 +29,7 @@ import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts'
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
+import { loadTending, tend, type OpenAgent } from './tend.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -46,6 +50,11 @@ export interface StageAsk {
   team?: boolean;
   /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
   full?: boolean;
+  /**
+   * round: only the staff's pages kept up (tend.ts) and the alarms, nothing asked of GitHub: a scheduled round while
+   * Settings say it doesn't merge and release by itself. A round on a PC with no repositories to look after is this too.
+   */
+  tendOnly?: boolean;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
@@ -68,11 +77,31 @@ export async function tryGlance(run: Runner, settings: Settings, log: (line: str
   }
 }
 
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean } = {}): Promise<Ctx> {
-  const settings = o.settings ?? loadSettings();
+/**
+ * Settings with the team as the stages use it (team.ts): Settings' own, or when they name none the account gh is signed
+ * in as. With neither, the log says so and the team is nobody: only the Steward's own PRs are merged.
+ */
+export function withTeam(settings: Settings, log: (line: string) => void, owner?: Owner): Settings {
+  if (settings.team.length) return settings;
+  const t = teamOf(settings.team, owner);
+  if (t.from === 'none') log(`${NO_TEAM}.`);
+  return { ...settings, team: t.team };
+}
+
+/**
+ * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
+ * `owner` stands in for the account gh is signed in as (tests).
+ */
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner } = {}): Promise<Ctx> {
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
+  const given = o.settings ?? loadSettings();
+  // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
+  const own = { ...given, stewardRepo: selfRepoOf(given) };
+  const settings = o.team === false ? own : withTeam(own, log, o.owner);
+  // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
+  useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
   const glance = o.glance === false ? null : await tryGlance(run, settings, log);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
@@ -84,6 +113,7 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
 async function changelogFor(ctx: Ctx, kit: string): Promise<string | null> {
   const local = localChangelog(ctx.kit);
   if (local) return local;
+  if (!ctx.settings.stewardRepo) return null;
   try {
     const body = JSON.parse(await gh(ctx.run, ctx.neutralDir, 'release', 'view', `kit-v${kit}`, '--repo', ctx.settings.stewardRepo, '--json', 'body')).body as string;
     return body.startsWith('## ') ? body : `## ${kit}\n\n${body}`;
@@ -145,6 +175,8 @@ function pruneKitsNow(s: Staff, kit: KitInfo): void {
 export interface StageOptions {
   run?: Runner;
   log?: (line: string) => void;
+  /** Stands in for the account gh is signed in as, the team when Settings name none (team.ts); tests only. */
+  owner?: Owner;
   kitInfo?: KitInfo;
   alarms?: Parameters<typeof watchAlarms>[1];
   tell?: Poke;
@@ -163,6 +195,33 @@ export interface StageOptions {
    * the network's. Under node --test, online unless this is given, so a test never looks at the real network.
    */
   online?: () => Promise<boolean>;
+  /**
+   * Stands in for Manor in the round's look at the staff's pages (tend.ts): its page, its /api/state and its Open. Under
+   * node --test the staff are looked at only when this is given, so a test never opens a real agent.
+   */
+  tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+}
+
+/**
+ * Whether this PC has a repository for the Steward to look after: an employee's clone, or its own checkout while Settings
+ * say it merges or releases itself. Without one, a round asks GitHub nothing: it keeps the staff's pages up (tend.ts),
+ * and raises the alarms.
+ */
+export function reposHere(settings: Settings, o: Pick<StageOptions, 'self'> = {}): boolean {
+  if (settings.employees.some((e) => e.checkout && existsSync(checkoutOf(e)))) return true;
+  if (!settings.mergeSelf && !settings.releaseSelf) return false;
+  if (process.env.NODE_TEST_CONTEXT && !o.self) return false;
+  const checkout = o.self?.checkout ?? settings.stewardCheckout;
+  return !!checkout && existsSync(checkout);
+}
+
+/** The round's look at the staff's pages (tend.ts), through Settings' Manor page; nothing when Settings switch it off. */
+async function tendRound(settings: Settings, o: StageOptions, log: (line: string) => void): Promise<EmployeeResult[]> {
+  if (!settings.tend) return [];
+  if (process.env.NODE_TEST_CONTEXT && !o.tend) return [];
+  const manorUrl = o.tend?.manorUrl ?? settings.alarms.manorUrl;
+  if (!manorUrl) return [];
+  return tend({ manorUrl, getJson: o.tend?.getJson ?? getJson, open: o.tend?.open, now: o.now, log });
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
@@ -170,6 +229,7 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   if (!ctx.settings.mergeSelf) return null;
   if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  if (!ctx.settings.stewardRepo || !checkout) return null;
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
 
@@ -181,6 +241,8 @@ async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
   if (!ctx.settings.releaseSelf) return [];
   if (process.env.NODE_TEST_CONTEXT && !o.self) return [];
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  // No repository or clone of its own in Settings: it doesn't release itself.
+  if (!ctx.settings.stewardRepo || !checkout) return [];
   try {
     const facts = ctx.glance ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
     return await releaseSelf(ctx, { checkout, ...facts });
@@ -188,6 +250,29 @@ async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
     ctx.log(`[steward] its own releases: ${(e as Error).message}`);
     return [];
   }
+}
+
+/**
+ * The employees' jobs approved now, as a round approves them at its end (stages/jobs.ts: only a script that is exactly
+ * the merged one), for Manor to ask right after it installs an update (POST /api/jobs/approve), so a job whose script
+ * the update changed doesn't wait up to a round to run. `ids`: only these employees, all that approve jobs when empty.
+ * Under the stages' lock; nothing is asked of GitHub but each one's branch, fetched. One line for each it approved.
+ */
+export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: Owner; log?: (line: string) => void } = {}): Promise<EmployeeResult[]> {
+  const log = o.log ?? (() => {});
+  return withLock(stageLock(), async () => {
+    const ctx = await context({ run: o.run, log, glance: false, owner: o.owner });
+    const out: EmployeeResult[] = [];
+    for (const e of ctx.settings.employees.filter((x) => x.approve && (!ids.length || ids.includes(x.id)))) {
+      try {
+        const r = await approveMerged(ctx, e);
+        if (r) out.push({ ...r, message: `jobs: ${r.message}` });
+      } catch (err) {
+        log(`[${e.id}] jobs: ${(err as Error).message}`);
+      }
+    }
+    return out;
+  });
 }
 
 /** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
@@ -200,10 +285,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
   return withLock(
     stageLock(),
     async () => {
+      // With no repositories to look after here, or Settings saying it doesn't merge and release by itself, a round
+      // asks GitHub nothing (no glance, no team): it keeps the staff's pages up, and the alarms look.
+      const given = loadSettings();
+      const tendOnly = name === 'round' && (!!ask.tendOnly || !reposHere(given, o));
       // Offline (the kit's net.ts), a round asks nothing of GitHub: it would only fail for every employee, every
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
-      const offline = name === 'round' && !(await (o.online ?? onlineNow)());
-      const ctx = await context({ run: o.run, log, glance: offline ? false : undefined, offline });
+      const offline = name === 'round' && !tendOnly && !(await (o.online ?? onlineNow)());
+      const quiet = offline || tendOnly;
+      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
@@ -219,7 +309,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
-        if (offline) {
+        if (tendOnly) {
+          out.tendOnly = true;
+          log(
+            ask.tendOnly
+              ? "Settings say it doesn't merge and release by itself: the round keeps the staff's pages up, and asks GitHub nothing"
+              : "no repositories to look after on this PC (no employee's clone here, and no checkout of its own): the round keeps the staff's pages up, and asks GitHub nothing",
+          );
+        } else if (offline) {
           out.offline = true;
           log('this PC is offline, so the round waits for the network: nothing is asked of GitHub until it is back');
         } else if (name === 'merge' || name === 'round') {
@@ -252,7 +349,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
             let releaseKit: string | null = null;
-            if (ctx.settings.releaseAfterMerge) {
+            const releaseAny = ctx.settings.releaseAfterMerge && !ctx.settings.releasesCastellan;
+            if (releaseAny) log(`release after merge (Settings): ${done.join(', ')}`);
+            else if (ctx.settings.releaseAfterMerge) {
               const chosen = chooseKit(ctx.kit, ask.kit);
               if ('error' in chosen) log(`release after merge: ${chosen.error}`);
               else {
@@ -261,7 +360,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                 releaseKit = chosen.version;
               }
             }
-            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit })));
+            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit, releaseAny })));
           }
           if (round) {
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
@@ -292,6 +391,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', 'nothing new on GitHub since the last round')));
           }
+        } else if (!ctx.settings.releasesCastellan) {
+          // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
+          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
+          out.results = await release(ctx, picked.employees, { kit: null });
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
           if ('error' in chosen) throw new Error(chosen.error);
@@ -313,6 +416,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         out.error = (e as Error).message;
         log(`${name}: ${out.error}`);
       }
+      // Every round, offline or not, with repositories or none: the agents on duty whose pages don't answer, opened again.
+      if (name === 'round') {
+        try {
+          out.results.push(...(await tendRound(ctx.settings, o, log)));
+        } catch (e) {
+          log(`tend: ${(e as Error).message}`);
+        }
+      }
       out.finished = new Date().toISOString();
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
       if (name === 'round') {
@@ -326,7 +437,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), unsafe: loadUnsafe(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
@@ -355,6 +466,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       }
       writeJson(lastStageFile(), out);
       appendRotating(dataFile('stages.log'), `${JSON.stringify({ ...out, log: undefined })}\n`);
+      // A round that only kept the staff's pages up changed nothing on GitHub: the table stands.
+      if (tendOnly) return out;
       try {
         // The stage changed things on GitHub: a fresh glance for the table.
         await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings) });

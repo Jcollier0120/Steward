@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { NOT_PUBLISHED } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch, gh } from '../git.ts';
@@ -24,6 +26,8 @@ export interface EmployeeResult {
   commit?: string;
   /** The next round looks at it again, whatever GitHub says (a release the Aletaster's tasting holds). */
   again?: boolean;
+  /** Its branch's version is released already (by this stage or another way): no failed release of it stands. */
+  released?: boolean;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
@@ -40,6 +44,8 @@ export interface StageResult {
   error?: string;
   /** A round while this PC was offline (the kit's net.ts): nothing was asked of GitHub, and it waited for the network. */
   offline?: boolean;
+  /** A round that asked GitHub nothing and only kept the staff's pages up (tend.ts): no repositories here, or Settings said so. */
+  tendOnly?: boolean;
   results: EmployeeResult[];
   log: string[];
 }
@@ -87,6 +93,8 @@ const MORE_NET_WORDS = /tls handshake timeout|net\/http: (?:request canceled|tim
 export function networkLine(output: string): string | null {
   for (const raw of output.split(/\r?\n/).reverse()) {
     const line = raw.trim();
+    // The Exchequer's line is never why a release failed (exchequer.ts): it runs after GitHub's, and fails nothing.
+    if (line.startsWith(NOT_PUBLISHED)) continue;
     if (line && (isNetworkError(line) || MORE_NET_WORDS.test(line))) return line.slice(0, 200);
   }
   return null;
@@ -97,6 +105,20 @@ export const networkNote = (output: string) => {
   const line = networkLine(output);
   return line ? `; the network: ${line}` : '';
 };
+
+/**
+ * "; Not published to the Exchequer: …" for a release's message, when the kit's release (kit 2.30.0, exchequer.ts)
+ * says it reached GitHub but not the Exchequer: no publisher key, or the Exchequer failed. Never a failure, nor an
+ * alarm: the release on GitHub stands, and `npm run release -- --exchequer` in the agent's checkout finishes it.
+ */
+export function exchequerNote(output: string): string {
+  const line = output
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .reverse()
+    .find((l) => l.startsWith(NOT_PUBLISHED));
+  return line ? `; ${line.slice(0, 300)}` : '';
+}
 
 /** An employee's repository from the stage's glance at GitHub, while it still says how things are. */
 export const glanceOf = (ctx: Ctx, e: Employee): RepoGlance | null => ctx.glance?.repos[e.id] ?? null;
@@ -134,6 +156,17 @@ export function pick(all: Employee[], only?: string[] | null): { employees: Empl
 }
 
 export const checkoutOf = (e: Employee) => path.resolve(expandEnv(e.checkout));
+
+/**
+ * Why an employee isn't hired on this PC, or null when it is (or Settings name no install folder): its install folder
+ * is gone, so it was removed (Manor's Fire, or by hand). The Steward still looks after its code, but never installs it
+ * again by itself, by a release built here or an install: only Manor's Hire brings it back.
+ */
+export function notHiredHere(e: Pick<Employee, 'installed' | 'name'>): string | null {
+  if (!e.installed) return null;
+  const app = path.resolve(expandEnv(e.installed));
+  return existsSync(app) ? null : `${e.name} isn't installed on this PC (no ${e.installed}), and the Steward doesn't install it again by itself: hire it in Manor to have it back`;
+}
 export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
 /** The Steward's worktree for an employee's bump, and the one for its release. */
 export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), e.id);

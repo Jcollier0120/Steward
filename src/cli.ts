@@ -4,9 +4,10 @@ import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
-import { claimVersion, loadClaims, releaseClaim } from './claims.ts';
-import { stewardEmployee } from './stages/selfmerge.ts';
-import type { Employee, Settings } from './settings.ts';
+import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
+import { anyRepo } from './found.ts';
+import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
+import { loadSettings, settingsFile, type Employee, type Settings } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -15,7 +16,9 @@ import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
-  The kit's rollout, a stage at a time (each reports for every employee):
+  Each stage reports for every repository it looks after (Settings). bump and push are Castellan's kit
+  rollout, only on the PC that releases Castellan itself; elsewhere release takes each repository's
+  own version, and merge merges only where Settings say yes (Merges your ready PRs).
   bump [--kit <version>] [--employees a,b]
                    for each employee: a worktree of its branch on origin, on steward/kit-<version>, with
                    kit.json pinned to the kit and its patch version up; its kit filled, its checks run,
@@ -40,6 +43,13 @@ const USAGE = `${APP.id}: ${APP.role}
                    kit in it, the open PRs of the Steward and the team (--hires is the same as --employees,
                    everywhere)
 
+  employ <its clone> [--branch <b>] [--dry-run]
+                   take on a new agent: add it to Settings' employees from its clone (its id and name
+                   from manor-agent.json or src/app.ts, its repository from origin, its kit parts, how
+                   to fill, test, version and release it), so the page lists it and the rounds test,
+                   merge and release it. One that announces itself is published; Manor's internal staff,
+                   and one that doesn't announce itself, are built and installed here. --dry-run: only show it
+
   start            on duty, and its page up at ${pageUrl}
   stop             off duty: its rounds wait until it is back on duty (the page stays up)
   open             make sure its page is up, without changing duty
@@ -51,10 +61,11 @@ const USAGE = `${APP.id}: ${APP.role}
                    ${TASK_NAME} that brings its page up, and start it. An update keeps the version
                    before it, and goes back to it when the new one doesn't hold up for its probation;
                    that version is then flagged, and refused until allowed again
-  claim-version <employee or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
+  claim-version <repository: id, name or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
                    before starting work on a repository: the next version no one has (above its branch,
                    its releases, its open PRs and every live claim), claimed for that work. The same
-                   branch asking again gets the same version
+                   branch asking again gets the same version. Any repository works: one in Settings, one
+                   Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
   claims [--json]  the versions claimed and not yet landed
@@ -63,13 +74,6 @@ const USAGE = `${APP.id}: ${APP.role}
   uninstall [--purge] [--dry-run]
                    end its page, delete the sign-in task and remove the installed copy; --purge also its data
 `;
-
-/** An employee by its id, its name or its repository; the Steward's own repository too. */
-function employeeFor(s: Settings, who: string): Employee | null {
-  const w = who.toLowerCase();
-  const all = [...s.employees, stewardEmployee(s)];
-  return all.find((e) => e.id.toLowerCase() === w || e.name.toLowerCase() === w || e.repo.toLowerCase() === w || e.repo.split('/')[1]?.toLowerCase() === w) ?? null;
-}
 
 /** --name value, or undefined. */
 function opt(args: string[], ...names: string[]): string | undefined {
@@ -111,7 +115,7 @@ function printStage(r: StageResult): number {
 function printStaff(s: Staff): void {
   console.log(`The kit the Steward hands out: ${s.kit ?? 'none'}${s.kitNote ? ` (${s.kitNote})` : ''}`);
   for (const r of s.rows) {
-    const main = r.main ? `${r.branch} ${r.main.version ?? '?'} (${r.main.commit}), ${r.main.oldKitFiles.length ? `old kit (${r.main.oldKitFiles.length} files)` : r.main.kit ? `kit ${r.main.kit}` : 'no kit.json'}` : `${r.branch} unknown`;
+    const main = r.main ? `${r.branch} ${r.main.version ?? '?'} (${r.main.commit}), ${r.main.kit ? `kit ${r.main.kit}` : r.usesKit ? 'no kit.json' : 'no kit'}` : `${r.branch} unknown`;
     const rel = r.release ? `${r.release.tag}${r.release.kit === 'unknown' ? '' : r.release.kit ? ` with kit ${r.release.kit}` : ' with no kit'}` : 'no release';
     const prs = r.prs.length ? `; PRs ${r.prs.map((p) => `#${p.number} ${p.checks}/${p.mergeable.toLowerCase()}${p.whose === 'team' ? ` (${p.author}'s)` : ''}`).join(', ')}` : '';
     console.log(`\n${r.name} (${r.repo})`);
@@ -197,6 +201,33 @@ switch (cmd) {
   case 'uninstall':
     process.exitCode = await installCli(cmd, rest);
     break;
+  case 'employ': {
+    const where = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
+    const bad = rest.slice(1).filter((a) => a.startsWith('--') && !['--branch', '--dry-run'].includes(a));
+    if (!where || bad.length) {
+      console.error(`employ takes the agent's clone, then --branch <b> --dry-run${bad.length ? `; not ${bad.join(' ')}` : ''}: employ C:\\Code\\Assayer`);
+      process.exitCode = 2;
+      break;
+    }
+    const got = employeeFromCheckout(where, loadSettings().employees, { branch: opt(rest, '--branch') });
+    if ('error' in got) {
+      console.error(got.error);
+      process.exitCode = 1;
+      break;
+    }
+    const e = got.employee;
+    const dry = rest.includes('--dry-run');
+    console.log(`${dry ? 'Would take on' : 'Took on'} ${e.name} (${e.id}): ${e.repo}, its clone ${e.checkout} on ${e.branch}.`);
+    console.log(`  kit parts ${e.parts.join(', ') || 'none'}; fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
+    console.log(`  version in ${e.versionFiles.join(', ') || '-'}; release ${e.release || '-'}; install ${e.install || '-'}`);
+    for (const n of got.notes) console.log(`  ${n}`);
+    if (got.missing.length) console.log(`  Not found, so fill it in on the Settings page: ${got.missing.join(', ')}.`);
+    if (!dry) {
+      addEmployee(settingsFile(), e);
+      console.log(`Its next round looks after it; it is on the page at ${pageUrl}.`);
+    }
+    break;
+  }
   case 'claim-version': {
     const who = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
     const bad = rest.slice(1).filter((a, i, all) => a.startsWith('--') && !['--branch', '--for', '--by', '--minor', '--json'].includes(a) && !['--branch', '--for', '--by'].includes(all[i - 1]));
@@ -205,10 +236,10 @@ switch (cmd) {
       process.exitCode = 2;
       break;
     }
-    const ctx = await context({ glance: false });
-    const e = employeeFor(ctx.settings, who);
+    const ctx = await context({ glance: false, team: false });
+    const e = employeeFor(ctx.settings, who) ?? anyRepo(who);
     if (!e) {
-      console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo}).`);
+      console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, the clone this runs in, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
       process.exitCode = 2;
       break;
     }
@@ -218,8 +249,8 @@ switch (cmd) {
     break;
   }
   case 'release-version': {
-    const ctx = await context({ glance: false });
-    const e = rest[0] ? employeeFor(ctx.settings, rest[0]) : null;
+    const ctx = await context({ glance: false, team: false });
+    const e = rest[0] ? (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0])) : null;
     if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
       console.error('release-version takes an employee and a version: release-version porter 0.4.12');
       process.exitCode = 2;
@@ -237,7 +268,7 @@ switch (cmd) {
   }
   case 'allow-update': {
     const v = rest[0] ?? '';
-    if (!/^d+.d+.d+$/.test(v) || rest.length > 1) {
+    if (!/^\d+\.\d+\.\d+$/.test(v) || rest.length > 1) {
       console.error('allow-update takes one version: allow-update 0.8.14');
       process.exitCode = 2;
     } else if (allowUpdate(v)) console.log(`${APP.name} ${v} may be installed again: Manor's next update installs it, behind the same fail-safe.`);

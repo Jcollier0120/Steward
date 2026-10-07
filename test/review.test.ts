@@ -13,7 +13,7 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { dependenciesOf, dependencyHold, isWrightDraft, reviewHold, sensitiveFiles } = await import('../src/review.ts');
-const { holdReason, lookAtWrightDrafts } = await import('../src/stages/merge.ts');
+const { holdReason, lookAtWrightDrafts, NO_BAILIFF } = await import('../src/stages/merge.ts');
 const { DEFAULT_SETTINGS } = await import('../src/settings.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
@@ -38,14 +38,36 @@ test('the look: wright:needs-you, a file a person reviews, too large, or no file
   assert.deepEqual(sensitiveFiles(['tools/kit.ts', 'kit.json', '.github/workflows/ci.yml', 'src/view.ts'], s.sensitive), ['tools/kit.ts', 'kit.json', '.github/workflows/ci.yml']);
 });
 
+test("what a person always reviews, whatever Settings say: Claude Code's permissions and instructions, secrets, and an employee's own guard", () => {
+  const none = { ...s, sensitive: [] };
+  for (const f of ['.claude/settings.json', 'CLAUDE.md', 'docs/AGENTS.md', '.mcp.json', '.npmrc', '.env', '.env.local', 'certs/dev.pem']) {
+    assert.match(reviewHold(pr({ files: ['src/app.ts', f] }), none)!, /a person reviews/, f);
+  }
+  assert.equal(reviewHold(pr({ files: ['src/claude-notes.ts', 'src/environment.ts'] }), none), null, 'names that only look alike pass');
+  // The guard in its own repository: the Steward's look, the Wright's worker, the Bailiff's review. Elsewhere, the same path is ordinary code.
+  assert.match(reviewHold(pr({ files: ['src/review.ts'] }), s, 'steward')!, /src\/review\.ts/);
+  assert.match(reviewHold(pr({ files: ['src/stages/merge.ts'] }), s, 'steward')!, /merge\.ts/);
+  assert.match(reviewHold(pr({ files: ['src/worker.ts'] }), s, 'wright')!, /worker\.ts/);
+  assert.match(reviewHold(pr({ files: ['src/review.ts'] }), s, 'bailiff')!, /review\.ts/);
+  assert.equal(reviewHold(pr({ files: ['src/review.ts', 'src/worker.ts'] }), s, 'porter'), null);
+  assert.equal(reviewHold(pr(), s, 'surveyor'), null, "another agent's src/settings.ts is its own code");
+  assert.match(reviewHold(pr(), s, 'wright')!, /src\/settings\.ts/, "the Wright's settings say where it works and what it may do");
+});
+
 test('dependencies: the fields compared, in any order; a new one, or a version moved, is a change', () => {
   const a = '{ "name": "x", "version": "1.0.0", "devDependencies": { "typescript": "^7.0.2", "@types/node": "^22.20.4" } }';
   assert.equal(dependenciesOf(a), dependenciesOf('{ "version": "1.0.1", "devDependencies": { "@types/node": "^22.20.4", "typescript": "^7.0.2" } }'), 'a version raised is no dependency change');
   assert.notEqual(dependenciesOf(a), dependenciesOf('{ "devDependencies": { "typescript": "^7.0.2", "@types/node": "^22.20.4", "left-pad": "1.0.0" } }'));
   assert.equal(dependenciesOf('not json'), null);
+  // The scripts npm runs as it installs are code that runs on install; the rest are the agent's own commands.
+  const s1 = '{ "scripts": { "test": "node --test", "postinstall": "node setup.js" } }';
+  assert.notEqual(dependenciesOf(s1), dependenciesOf('{ "scripts": { "test": "node --test", "postinstall": "node other.js" } }'));
+  assert.notEqual(dependenciesOf('{}'), dependenciesOf('{ "scripts": { "prepare": "x" } }'));
+  assert.equal(dependenciesOf(s1), dependenciesOf('{ "scripts": { "test": "node --test --watch", "postinstall": "node setup.js" } }'));
+  assert.notEqual(dependenciesOf('{}'), dependenciesOf('{ "overrides": { "semver": "7.6.0" } }'));
 });
 
-test("a draft that passes is marked ready with a comment saying what was looked at; one that doesn't says why in its hold", async () => {
+test("without the Bailiff, no draft of the Wright's is marked ready: one that passes the look waits for you, one that doesn't says why", async () => {
   const r = runner((args) => (args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
   const e = employee(path.join(home, 'nowhere'), { repo: 'Jcollier0120/Fake' });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r.run, neutralDir: home });
@@ -53,13 +75,11 @@ test("a draft that passes is marked ready with a comment saying what was looked 
   const risky = pr({ number: 15, files: ['jobs/fast-forward.ps1'] });
   const mine = pr({ number: 16, labels: [] });
   await lookAtWrightDrafts(ctx, e, [good, risky, mine]);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '14', '--repo', 'Jcollier0120/Fake']]);
-  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /The Steward looked at this draft from the Wright and marked it ready[\s\S]*3 files[\s\S]*24 lines changed/);
-  assert.deepEqual([good.draft, risky.draft, mine.draft], [false, true, true]);
-  assert.equal(holdReason(good, 'main'), null, 'it goes on as any ready team PR');
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'ready' || a[1] === 'comment'), [], 'the manor takes on no new work without the Bailiff');
+  assert.deepEqual([good.draft, risky.draft, mine.draft], [true, true, true]);
+  assert.equal(holdReason(good, 'main'), `a draft from the Wright, waiting for you: ${NO_BAILIFF}`);
   assert.match(holdReason(risky, 'main')!, /^a draft from the Wright, waiting for you: it changes what a person reviews/);
   assert.equal(holdReason(mine, 'main'), 'a draft', "a draft of your own isn't the Steward's to look at");
-  assert.match(ctx.lines.join('\n'), /the Wright's #14: looked at, and marked ready/);
 });
 
 test("a draft that changes package.json's dependencies stays for you; one that only raises the version passes (real git)", async () => {
@@ -81,7 +101,7 @@ test("a draft that changes package.json's dependencies stays for you; one that o
   const bumped = push(20, (p) => (p.version = '0.4.1'));
   const added = push(21, (p) => (p.dependencies = { 'left-pad': '1.3.0' }));
   assert.equal(await dependencyHold(ctx, e, pr({ number: 20, headOid: bumped, files: ['package.json'] })), null);
-  assert.equal(await dependencyHold(ctx, e, pr({ number: 21, headOid: added, files: ['package.json'] })), 'it changes the dependencies in package.json');
+  assert.equal(await dependencyHold(ctx, e, pr({ number: 21, headOid: added, files: ['package.json'] })), 'it changes the dependencies or install scripts in package.json');
   assert.equal(await dependencyHold(ctx, e, pr({ number: 22, files: ['README.md'] })), null, 'no package.json, nothing to compare');
 });
 
@@ -122,6 +142,8 @@ test("with the Bailiff installed, a Wright draft that passes the look is marked 
   await lookAtWrightDrafts(ctx, e, all, true);
   assert.deepEqual(r.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '30', '--repo', 'Jcollier0120/Fake']], 'only the one approved at its head');
   assert.ok(r.gh.find((a) => a[1] === 'comment')!.at(-1)!.includes(`the Bailiff approved its head commit, ${H.slice(0, 7)}`));
+  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /The Steward looked at this draft from the Wright and marked it ready[\s\S]*3 files[\s\S]*24 lines changed/);
+  assert.match(ctx.lines.join('\n'), /the Wright's #30: looked at, and marked ready/);
   assert.deepEqual(all.map((p) => p.draft), [false, true, true, true, true, true, true, true]);
   assert.equal(holdReason(approved, 'main'), null);
   assert.equal(stale.bailiffHold, `the Bailiff approved ${OLD.slice(0, 7)}, not its head ${H.slice(0, 7)}: waiting for its review of the new commit`);
@@ -133,10 +155,10 @@ test("with the Bailiff installed, a Wright draft that passes the look is marked 
   assert.ok(risky.reviewHold && !risky.bailiffHold, "the Steward's own look comes first: an approval never overrides it");
   assert.deepEqual(r.gh.filter((a) => a[1] === 'view').map((a) => a[2]), ['30', '31', '32', '33'], 'GitHub is asked only for the ones labelled approved that passed the look');
 
-  // Without the Bailiff, nothing changes: the look alone marks it ready.
+  // Without the Bailiff, not even one labelled approved is marked ready: the Steward's look alone is never enough.
   const r2 = runner((args) => (args[0] === 'pr' && (args[1] === 'ready' || args[1] === 'comment') ? ok('') : undefined));
-  const plain = pr({ number: 40, headOid: H });
-  await lookAtWrightDrafts(ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r2.run, neutralDir: home }), e, [plain]);
-  assert.deepEqual(r2.gh.filter((a) => a[1] === 'ready'), [['pr', 'ready', '40', '--repo', 'Jcollier0120/Fake']]);
-  assert.ok(!r2.gh.find((a) => a[1] === 'comment')!.at(-1)!.includes('Bailiff'));
+  const plain = pr({ number: 40, headOid: H, labels: ['wright', 'bailiff:approved'] });
+  await lookAtWrightDrafts(ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: r2.run, neutralDir: home }), e, [plain], false);
+  assert.deepEqual(r2.gh, [], 'nothing asked of GitHub');
+  assert.equal(plain.reviewHold, NO_BAILIFF);
 });

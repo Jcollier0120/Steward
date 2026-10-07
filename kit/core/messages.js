@@ -2,19 +2,24 @@
 // agent puts it into its own sentence ("No notes: …." or "Busy: notes deferred to a later round (…)")
 // and ends that as it needs.
 
-import { LEGACY_NAMES, LEGACY_NPU } from './ids.js';
+import { LEGACY_NAMES } from './ids.js';
 
 /** @import { AcceleratorRef } from './ids.js' */
 
+/** What an accelerator nobody recorded is called: never "the NPU", which a PC may not have. */
+export const UNKNOWN_ACCELERATOR = 'a local model';
+
 /**
  * "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. A name that
- * starts with "the" is left as it is; none is the NPU (a note kept from before accelerators).
+ * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
+ * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
 export function theAccelerator(a) {
-  const name = (a ?? LEGACY_NPU).name;
-  if (/^the\s/i.test(name)) return name;
+  if (!a || !a.name) return UNKNOWN_ACCELERATOR;
+  const name = a.name;
+  if (/^(the|a|an)\s/i.test(name)) return name;
   return `the ${name === LEGACY_NAMES.gpu || name === LEGACY_NAMES.cpu ? name.toLowerCase() : name}`;
 }
 
@@ -28,11 +33,13 @@ export function noteLabel(a) {
 }
 
 /**
- * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a
- * PC without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
- * serves anything. The same words in each case.
+ * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
+ * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since
+ * kit 2.31.0 it points to the app's own setup (Set up local AI), which every PC has, not to Reeve, which a household
+ * may never hire; since 2.32.1 it names the app as the person bought it, Castellan. The old name stays for the agents that import it.
  */
-export const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)";
+export const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI";
+export const REEVE_NOT_SET_UP = NOT_SET_UP;
 
 /**
  * What the lock's folder is called in a message: "the NPU" for the NPU's, else its name.
@@ -71,6 +78,8 @@ export const say = Object.freeze({
   badId: (id) => `${id}: an id is npu, cpu, or gpu- and the card's name in lowercase with dashes`,
   /** @param {string} id */
   listedTwice: (id) => `${id} is listed twice; the first is used`,
+  /** @param {string} id @param {string} instead */
+  notTheNpu: (id, instead) => `${id} is listed as the NPU, but this PC has none: its model runs on ${theAccelerator({ name: instead })}`,
 
   // ------------------------------------------------------------ choosing
   /** @param {AcceleratorRef} acc @param {string} reason @param {number} min */
@@ -87,12 +96,12 @@ export const say = Object.freeze({
   failedNoOther: (first, reason, why) => `${theAccelerator(first)} failed (${reason}), and no other accelerator could take the request${why ? `: ${why}` : ''}`,
   noneCould: () => 'no accelerator could take the request',
   /** @param {string} id @param {string} work */
-  notServing: (id, work) => `${id} isn't in Reeve's config, or doesn't serve ${work}`,
+  notServing: (id, work) => `${id} isn't in the accelerators' config, or doesn't serve ${work}`,
   /** @param {AcceleratorRef} acc */
-  gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Manor's Settings: "Use the graphics card for models when there's an NPU" is off)`,
-  noVisionModel: () => 'no vision model in Reeve\'s config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
+  gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Castellan's Settings: "Use the graphics card for models when there's an NPU" is off)`,
+  noVisionModel: () => 'no vision model in the accelerators\' config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
   /** @param {string} work */
-  noneServes: (work) => `no accelerator in Reeve's config.json serves ${work}`,
+  noneServes: (work) => `no accelerator in the accelerators' config.json serves ${work}`,
   /** @param {number} promptTokens @param {number} maxTokens @param {number} cap @param {boolean} several */
   tooBig: (promptTokens, maxTokens, cap, several) => `refusing a request of ~${promptTokens}+${maxTokens} tokens (${several ? 'the largest cap is' : 'cap'} ${cap}); split the input`,
   /** @param {AcceleratorRef[]} accs @param {string} also */
@@ -120,7 +129,7 @@ export const say = Object.freeze({
   /** @param {string} baseUrl */
   serverNotRunning: (baseUrl) => `${baseUrl} isn't running`,
   /** @param {string} baseUrl */
-  noStartCommand: (baseUrl) => `its server ${baseUrl} isn't running, and Reeve's config has no startCommand for it`,
+  noStartCommand: (baseUrl) => `its server ${baseUrl} isn't running, and the accelerators' config has no startCommand for it`,
   /** @param {string} command @param {string} why */
   couldNotStart: (command, why) => `couldn't start "${command}": ${why}`,
   /** @param {string} program @param {string} baseUrl @param {number} seconds */

@@ -153,6 +153,9 @@ ${B} .sc-horn { transform-origin: 5px 11.4px; ${run('sc-blow', 3, 0, 'ease-in-ou
 ${B} .sc-wave { ${run('sc-sound', 1.5)} } ${B} .sc-v2 { animation-delay: calc(var(--phase, 0s) - 1.25s); } ${B} .sc-v3 { animation-delay: calc(var(--phase, 0s) - 1s); }`,
 };
 
+/* ---- The developer Herald: the Herald's trumpet and banner, in its own colour, for the upstream projects' releases. */
+const developerHerald: Look = { ...herald, accent: { light: '#6a3fa0', dark: '#c5a3f5' }, busy: 'Reading release notes' };
+
 /* ---- The Warrener: two rabbits hop across the grass and into the burrow. */
 const rabbit = `<ellipse class="sc-role" cx="0" cy="-3.6" rx="4.4" ry="3.4"/><circle class="sc-role" cx="4" cy="-6.6" r="2.3"/>
 <ellipse class="sc-role" cx="3.1" cy="-10.4" rx=".9" ry="2.6" transform="rotate(-12 3.1 -10.4)"/><ellipse class="sc-role" cx="4.9" cy="-10.2" rx=".9" ry="2.6" transform="rotate(14 4.9 -10.2)"/>
@@ -376,7 +379,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);

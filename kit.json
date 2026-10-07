@@ -1,4 +1,4 @@
 {
-  "kit": "2.19.0",
-  "parts": ["node", "web"]
+  "kit": "2.33.0",
+  "parts": ["node", "web", "react"]
 }

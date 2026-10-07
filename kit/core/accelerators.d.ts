@@ -9,6 +9,21 @@ export type Endpoint = {
     baseUrl: string;
     model: string;
     startCommand?: string[];
+    /**
+     * What its server's environment needs besides this one's (OpenVINO Model Server's
+     * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+     */
+    env?: Record<string, string>;
+    /**
+     * This kind's own request cap, when it differs from its accelerator's (an NPU's
+     * vision model may take less than its chat model): capFor.
+     */
+    maxContextTokens?: number;
+};
+export type Timeouts = {
+    requestBaseMs?: number;
+    requestPerTokenMs?: number;
+    coldLoadMs?: number;
 };
 export type Accelerator = {
     /**
@@ -17,7 +32,8 @@ export type Accelerator = {
     id: string;
     kind: AcceleratorKind;
     /**
-     * The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+     * The device's own name, from what this PC is (acceleratorName), never from the config:
+     * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
      */
     name: string;
     /**
@@ -46,6 +62,10 @@ export type Accelerator = {
      * false: kept in the list, sent nothing.
      */
     enabled?: boolean;
+    /**
+     * Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
+     */
+    timeouts?: Timeouts;
 };
 export type AcceleratorConfig = {
     /**
@@ -108,12 +128,24 @@ export type Look = {
  * @property {string} baseUrl
  * @property {string} model
  * @property {string[]} [startCommand]
+ * @property {Record<string, string>} [env] What its server's environment needs besides this one's (OpenVINO Model Server's
+ * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+ * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
+ * vision model may take less than its chat model): capFor.
+ */
+/**
+ * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
+ * server that loads its model slowly). Each left out is the rule's.
+ * @property {number} [requestBaseMs]
+ * @property {number} [requestPerTokenMs]
+ * @property {number} [coldLoadMs]
  */
 /**
  * @typedef {object} Accelerator
  * @property {string} id `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId).
  * @property {AcceleratorKind} kind
- * @property {string} name The device's own name: "Snapdragon X2 Elite NPU", "NVIDIA GeForce RTX 4090".
+ * @property {string} name The device's own name, from what this PC is (acceleratorName), never from the config:
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU", "NVIDIA GeForce RTX 4090".
  * @property {number | null} memoryGb A graphics card's own memory, in GB; null when unknown. Under 2 GB, it shares the PC's.
  * @property {number} slots How many requests it serves at once (llama-server's --parallel). The NPU has 1.
  * @property {number} maxContextTokens The most a request may be, prompt and answer, by the kit's pessimistic estimate.
@@ -122,6 +154,7 @@ export type Look = {
  * @property {Endpoint} [embed]
  * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
+ * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
 /**
  * @typedef {object} AcceleratorConfig
@@ -197,7 +230,80 @@ export type Written = {
     baseUrl?: string;
     model: string;
     startCommand?: string[];
+    env?: Record<string, string>;
+    maxContextTokens?: number;
 };
+/**
+ * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
+ * when it has one, else the accelerator's.
+ * @param {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {number}
+ */
+export declare function capFor(a: Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>, work: Work): number;
+export type Hardware = {
+    npu: boolean;
+    /**
+     * Each named as DXGI describes it, " #2" on a second card
+     * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+     */
+    cards: {
+        name: string;
+        memoryGb: number | null;
+    }[];
+    /**
+     * The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+     */
+    npuName?: string;
+    /**
+     * The processor's name as Windows gives it, (R), (TM) and (C) taken out.
+     */
+    cpuName?: string;
+};
+/**
+ * @typedef {object} Hardware What this PC has, as detection found it (hardware.json): whether it has an NPU at all,
+ * and its graphics cards. Never inferred from a model or a server: any model can run on any of them.
+ * @property {boolean} npu
+ * @property {{ name: string, memoryGb: number | null }[]} cards Each named as DXGI describes it, " #2" on a second card
+ * of a name: the name its id is made from (acceleratorId), (R) and (TM) left in.
+ * @property {string} [npuName] The NPU's name as Windows lists it, (R) and (TM) taken out, when it has one.
+ * @property {string} [cpuName] The processor's name as Windows gives it, (R), (TM) and (C) taken out.
+ */
+/**
+ * An accelerator's name: what this PC calls the device, never what a config says (a config's `name` is ignored).
+ * The NPU's is Windows' name for it, a card's DXGI's description (" #2" on a second card of a name), found by its
+ * id, and the processor's its own, all from hardware.json, each with (R) and (TM) taken out and its spaces collapsed
+ * (deviceName), as Manor shows them: "Qualcomm(R) Adreno(TM) X2-90 GPU" is "Qualcomm Adreno X2-90 GPU". Without one
+ * (no hardware.json, a card it doesn't list, an NPU on a PC without one) it is the kind's: "NPU", "Graphics card",
+ * "Processor" (LEGACY_NAMES). A card's id stays the one its DXGI name gives.
+ * @param {AcceleratorKind} kind
+ * @param {string} id
+ * @param {Hardware | null | undefined} hw
+ * @returns {string}
+ */
+export declare function acceleratorName(kind: AcceleratorKind, id: string, hw: Hardware | null | undefined): string;
+/**
+ * The device a model runs on when a config says the NPU, or says nothing, on a PC known to have none: its one
+ * graphics card, the graphics card when it has several (which one isn't known), or the processor when it has none.
+ * A card's name is as hardware.json keeps it, the one its id is made from (notTheNpu shows it by acceleratorName).
+ * Null when the PC has an NPU, or isn't known: then the config's word stands.
+ * @param {Hardware | null | undefined} hw
+ * @returns {{ kind: AcceleratorKind, name: string, memoryGb: number | null } | null}
+ */
+export declare function instead(hw: Hardware | null | undefined): {
+    kind: AcceleratorKind;
+    name: string;
+    memoryGb: number | null;
+} | null;
+/**
+ * An entry listed as the NPU on a PC known to have none runs on what the PC has instead (instead()): its kind, its
+ * id (the processor's is `cpu`) and its name (acceleratorName), whatever the entry carried. Null when the PC has an
+ * NPU or isn't known, and for any other entry.
+ * @param {Accelerator} a
+ * @param {Hardware | null | undefined} hw
+ * @returns {Accelerator | null}
+ */
+export declare function notTheNpu(a: Accelerator, hw: Hardware | null | undefined): Accelerator | null;
 /**
  * Auto: the NPU first, since it does model work without the processor or a graphics card; then graphics
  * cards with `ownMemoryGb` (2 GB) or more of their own memory, the most memory first; then graphics that
@@ -244,11 +350,14 @@ export declare function withoutGpuBesideNpu<A extends {
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
+ * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has
+ * instead (notTheNpu): a model is never called the NPU, or routed as one, on a PC without one.
  * @param {Rules} rules
  * @param {any} raw
+ * @param {Hardware | null} [hw]
  * @returns {AcceleratorConfig | { error: string }}
  */
-export declare function parseAccelerators(rules: Rules, raw: any): AcceleratorConfig | {
+export declare function parseAccelerators(rules: Rules, raw: any, hw?: Hardware | null): AcceleratorConfig | {
     error: string;
 };
 /**
@@ -257,9 +366,10 @@ export declare function parseAccelerators(rules: Rules, raw: any): AcceleratorCo
  * @param {Rules} rules
  * @param {string} file The file's path, for messages.
  * @param {string | null} text
+ * @param {Hardware | null} [hw] What this PC has (hardware.json), when known.
  * @returns {AcceleratorConfig | { error: string }}
  */
-export declare function readConfig(rules: Rules, file: string, text: string | null): AcceleratorConfig | {
+export declare function readConfig(rules: Rules, file: string, text: string | null, hw?: Hardware | null): AcceleratorConfig | {
     error: string;
 };
 /**
@@ -433,24 +543,25 @@ export declare function chatTokens(rules: Rules, messages: {
  */
 export declare function visionTokens(rules: Rules, question: string): number;
 /**
- * Why a request is refused before anything is sent: over every candidate's cap (null when one fits).
- * @param {{ maxContextTokens: number }[]} serving
+ * Why a request is refused before anything is sent: over every candidate's cap (null when one fits). With `work`,
+ * each one's cap for that kind (capFor).
+ * @param {(Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[]} serving
  * @param {number} promptTokens
  * @param {number} maxTokens
+ * @param {Work} [work]
  * @returns {string | null}
  */
-export declare function tooBig(serving: {
-    maxContextTokens: number;
-}[], promptTokens: number, maxTokens: number): string | null;
+export declare function tooBig(serving: (Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[], promptTokens: number, maxTokens: number, work?: Work): string | null;
 /**
  * How long one request may take, in ms. A background chat or vision request gets requestBaseMs plus
  * requestPerTokenMs for each token it may answer (GenieX on the NPU writes about 34 a second, so that is
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
+ * the rules' place, each one it gives.
  * @param {Rules} rules
- * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}
  */
 export declare function requestTimeoutMs(rules: Rules, r: {
@@ -459,6 +570,7 @@ export declare function requestTimeoutMs(rules: Rules, r: {
     maxTokens: number;
     ceilingMs: number;
     coldLoad?: boolean;
+    timeouts?: Timeouts;
 }): number;
 /**
  * Splits text into pieces whose estimated size fits `budgetTokens`, at line breaks where it can, so a long

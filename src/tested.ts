@@ -44,7 +44,7 @@ export function recordTested(id: string, t: Omit<TestedCommit, 'at'> & { at?: st
 /** GET /api/tested: each employee's tested commits, with its repository. One no longer in Settings is still listed. */
 export function testedView(settings: Pick<Settings, 'employees' | 'stewardRepo'>, now = new Date()) {
   const all = loadTested();
-  const repoOf = (id: string) => settings.employees.find((e) => e.id === id)?.repo ?? (id === 'steward' ? settings.stewardRepo : null);
+  const repoOf = (id: string) => settings.employees.find((e) => e.id === id)?.repo ?? (id === 'steward' ? settings.stewardRepo || null : null);
   return {
     at: now.toISOString(),
     keep: KEEP_TESTED,

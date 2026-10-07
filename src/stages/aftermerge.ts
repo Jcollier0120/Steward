@@ -4,8 +4,8 @@ import path from 'node:path';
 import type { AfterStep } from '../after.ts';
 import { gh } from '../git.ts';
 import { runLine, tail } from '../run.ts';
-import type { Employee, Settings } from '../settings.ts';
-import { result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { releasedHere, type Employee, type Settings } from '../settings.ts';
+import { notHiredHere, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
@@ -32,7 +32,12 @@ export function listedSum(sums: string, file: string): string | null {
 /** An employee's newest release, installed on this PC from its zip on GitHub, with its install command. */
 export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult> {
   const { run } = ctx;
-  if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command`);
+  // Released on this PC (an internal employee): its release built it from its clone and installed it already.
+  if (releasedHere(e)) return result(e, 'done', `installed by its release, built here from its clone (${e.release})`);
+  // No install command: it is installed another way (Heiward, by Manor, from its own installer), not by the Steward.
+  if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command, so it is installed another way (Manor's updates), not by the Steward`);
+  const away = notHiredHere(e);
+  if (away) return result(e, 'skipped', away);
   const latest = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
   const dir = installDirOf(ctx.settings, e);
@@ -76,7 +81,8 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
 export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<EmployeeResult> {
   const asking = prs.filter((p) => p.after?.steps.includes('approve-jobs'));
   const jobs = [...new Set(asking.flatMap((p) => p.after!.jobs))];
-  if (!e.approve) return result(e, 'refused', `Settings give ${e.name} no approve command, so ${jobs.join(', ')} ${jobs.length === 1 ? 'waits' : 'wait'} for you`);
+  // No approve command: its jobs are approved another way, not by the Steward.
+  if (!e.approve) return result(e, 'skipped', `Settings give ${e.name} no approve command, so the Steward leaves ${jobs.join(', ')} to be approved another way`);
   const unnamed: string[] = [];
   for (const p of asking) {
     try {
@@ -116,7 +122,7 @@ export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise
  * Settings release after merging (`releaseKit`, the kit that release must carry). Each step is a line of the
  * stage's results ("release: …", "install: …", "approve-jobs: …").
  */
-export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: string; merged: PrInfo[] }[], o: { releaseKit: string | null }): Promise<EmployeeResult[]> {
+export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: string; merged: PrInfo[] }[], o: { releaseKit: string | null; releaseAny?: boolean }): Promise<EmployeeResult[]> {
   const out: EmployeeResult[] = [];
   for (const m of merged) {
     const e = employees.find((x) => x.id === m.id);
@@ -138,8 +144,9 @@ export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: 
     if (asking('release').length) {
       ctx.log(`[${e.id}] release, as ${by(asking('release'))} asks`);
       release = await step('release', () => releaseOne(ctx, e, { kit: null }));
-    } else if (o.releaseKit) {
-      await step('release', () => releaseOne(ctx, e, { kit: o.releaseKit! }));
+    } else if (o.releaseKit || o.releaseAny) {
+      // Settings release after merging: at the kit handed out, or (a PC with no kit to hand out) whatever its branch carries.
+      await step('release', () => releaseOne(ctx, e, { kit: o.releaseKit ?? null }));
     }
     let install: EmployeeResult | null = null;
     if (asking('install').length) {

@@ -13,13 +13,14 @@ process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
+const { closeResolved, fileWork, holdForWork, marker, reeveItems, withoutPublish, workFiledFile, workItems } = await import('../src/work.ts');
 const { alarmsFile, watchAlarms } = await import('../src/alarms.ts');
-const { DEFAULT_SETTINGS, DEFAULT_EMPLOYEES, normalizeSettings } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { checksLogOf } = await import('../src/stages/bump.ts');
 const { bumpDirOf, releaseDirOf } = await import('../src/stages/common.ts');
 const { KEEP_TESTED, recordTested, testedFile, testedView } = await import('../src/tested.ts');
-const { ok, runner } = await import('./helpers.ts');
+const { employee, fakeEmployee, ok, runner } = await import('./helpers.ts');
 
 const HOUR = 3_600_000;
 const T0 = Date.parse('2026-10-05T08:00:00Z');
@@ -35,13 +36,20 @@ const roundResult = (more = {}) => ({ stage: 'round' as const, started: at(0).to
 const WORK = (more = {}) => ({ at: 'x', takesWork: true, label: 'manor:work', repos: ['Jcollier0120/Porter', 'Jcollier0120/Reeve', 'Jcollier0120/GamerNexus'], team: ['Jcollier0120'], needsYou: [], recent: [], error: null, ...more });
 
 /** gh as GitHub answers it: signed in as the team, no open work, and each issue created given the next number. */
-function gh(o: { login?: string; open?: { number: number; url: string; body: string }[] } = {}) {
+function gh(o: { login?: string; open?: { number: number; url: string; body: string }[]; noLabel?: boolean } = {}) {
   let next = 40;
+  let labelled = !o.noLabel;
   const bodies: string[] = [];
   const r = runner((args) => {
     if (args[0] === 'api' && args[1] === 'user') return ok(`${o.login ?? 'Jcollier0120'}\n`);
     if (args[0] === 'issue' && args[1] === 'list') return ok(o.open ?? []);
+    if (args[0] === 'label' && args[1] === 'create') {
+      if (labelled) return { code: 1, out: '', err: `label with name "${args[2]}" already exists; use \`--force\` to update its color and description` };
+      labelled = true;
+      return ok('');
+    }
     if (args[0] === 'issue' && args[1] === 'create') {
+      if (!labelled) return { code: 1, out: '', err: `could not add label: '${args[args.indexOf('--label') + 1]}' not found` };
       bodies.push(readFileSync(args[args.indexOf('--body-file') + 1], 'utf8'));
       const repo = args[args.indexOf('--repo') + 1];
       return ok(`https://github.com/${repo}/issues/${next++}\n`);
@@ -145,13 +153,100 @@ test('filed once where the Wright works, by its team, with the label and a marke
   assert.deepEqual([...s4.values()].map((s) => s.state), ['filed', 'filed', 'filed']);
 });
 
+test("a newer kit's failed bump takes over the employee's open bump issue, and closes the older ones, rather than filing another", async () => {
+  const issue = (n: number, id: string) => ({ number: n, url: `https://github.com/Jcollier0120/Porter/issues/${n}`, body: `x\n${marker(id)}` });
+  // Porter's three, one a kit; and the Developer Herald's, which is no Herald's.
+  const open = [issue(45, 'bump:porter:2.21.0'), issue(46, 'bump:porter:2.23.0'), issue(48, 'bump:porter:2.24.0'), issue(17, 'bump:developer-herald:2.24.0'), issue(50, 'release:porter:abc1234')];
+  const r = runner((args) => {
+    if (args[0] === 'api' && args[1] === 'user') return ok('Jcollier0120\n');
+    if (args[0] === 'issue' && args[1] === 'list') return ok(open);
+    if (args[0] === 'issue' && (args[1] === 'edit' || args[1] === 'close')) return ok('');
+    return undefined;
+  });
+  const item = { id: 'bump:porter:2.26.0', condition: 'rollout:porter:2.26.0', repo: 'Jcollier0120/Porter', title: "Porter's bump to kit 2.26.0 fails its checks", body: `b\n${marker('bump:porter:2.26.0')}` };
+  const lines: string[] = [];
+  // Even with the day's few all filed: taking one over files nothing new.
+  const s = await fileWork({ items: [item], work: WORK(), employees, run: r.run, cwd: home, now: at(0), log: (l) => lines.push(l), perDay: 0 });
+  assert.deepEqual(s.get(item.id), { state: 'filed', url: 'https://github.com/Jcollier0120/Porter/issues/48', at: at(0).toISOString() });
+  const edit = r.gh.find((a) => a[1] === 'edit')!;
+  assert.deepEqual(edit.slice(0, 6), ['issue', 'edit', '48', '--repo', 'Jcollier0120/Porter', '--title']);
+  assert.equal(edit[6], item.title);
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'close').map((a) => a[2]), ['46', '45']);
+  assert.match(r.gh.find((a) => a[1] === 'close')!.at(-1)!, /Superseded by #48, now the bump to kit 2\.26\.0/);
+  assert.ok(!r.gh.some((a) => a[1] === 'create'));
+  assert.match(lines.join('\n'), /issues\/48 is now the bump to kit 2\.26\.0; #46, #45 closed as superseded/);
+  // Kept under its new id; the next round asks GitHub nothing.
+  const kept = JSON.parse(readFileSync(workFiledFile(), 'utf8'));
+  assert.equal(kept['bump:porter:2.26.0'].number, 48);
+  const again = gh();
+  await fileWork({ items: [item], work: WORK(), employees, run: again.run, cwd: home, now: at(1), log: () => {} });
+  assert.deepEqual(again.gh, []);
+
+  // The Herald's bump never takes the Developer Herald's issue; with none of its own open, it is filed anew.
+  const herald = { ...item, id: 'bump:herald:2.26.0', condition: 'rollout:herald:2.26.0' };
+  const h = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok(open) : args[1] === 'create' ? ok('https://github.com/Jcollier0120/Porter/issues/60\n') : undefined));
+  await fileWork({ items: [herald], work: WORK(), employees, run: h.run, cwd: home, now: at(2), log: () => {} });
+  assert.ok(!h.gh.some((a) => a[1] === 'edit' || a[1] === 'close'));
+  assert.equal(h.gh.filter((a) => a[1] === 'create').length, 1);
+});
+
+test("a kit's failed bumps count as one of the day's few: a kit that breaks six agents' checks has all six filed that day", async () => {
+  const bumps = ['porter', 'reeve', 'gamernexus', 'herald', 'miller', 'pinder'].map((e) => ({ id: `bump:${e}:2.21.0`, condition: `rollout:${e}:2.21.0`, repo: 'Jcollier0120/Porter', title: e, body: e }));
+  const others = ['a', 'b', 'c'].map((k) => ({ id: `release:porter:${k}`, condition: `release:porter:${k}`, repo: 'Jcollier0120/Porter', title: k, body: k }));
+  const g = gh();
+  const s = await fileWork({ items: [...bumps, ...others], work: WORK(), employees, run: g.run, cwd: home, now: at(0), log: () => {} });
+  // The kit's six are one; two releases make three; the third release waits for tomorrow.
+  assert.deepEqual([...s.values()].map((x) => x.state), [...bumps.map(() => 'filed'), 'filed', 'filed', 'not-filed']);
+  assert.equal(g.creates().length, 8);
+  // Another kit's bumps are another one, and today's few are filed.
+  const next = await fileWork({ items: [{ ...bumps[0], id: 'bump:porter:2.22.0' }], work: WORK(), employees, run: gh().run, cwd: home, now: at(1), log: () => {} });
+  assert.equal([...next.values()][0].state, 'not-filed');
+});
+
+test("a repository without the Wright's label yet has it made, as the others have it, and the issue filed", async () => {
+  const item = { id: 'release:porter:abc1234', condition: 'release:porter:abc1234', repo: 'Jcollier0120/Porter', title: 't', body: 'b' };
+  const g = gh({ noLabel: true });
+  const lines: string[] = [];
+  const s = await fileWork({ items: [item], work: WORK(), employees, run: g.run, cwd: home, now: at(0), log: (l) => lines.push(l) });
+  assert.deepEqual(s.get(item.id), { state: 'filed', url: 'https://github.com/Jcollier0120/Porter/issues/40', at: at(0).toISOString() });
+  assert.deepEqual(g.gh.filter((a) => a[0] === 'label'), [['label', 'create', 'manor:work', '--repo', 'Jcollier0120/Porter', '--color', '1d76db', '--description', 'Queued for the Wright']]);
+  assert.equal(g.creates().length, 2, 'tried again once');
+  assert.ok(lines.includes("work: created the manor:work label in Jcollier0120/Porter, which hadn't it"));
+
+  // Made meanwhile by someone else: "already exists" is as good, and the issue is filed.
+  rmSync(workFiledFile(), { force: true });
+  const raced = runner((args) => {
+    if (args[1] === 'user') return ok('Jcollier0120\n');
+    if (args[1] === 'list') return ok([]);
+    if (args[0] === 'label') return { code: 1, out: '', err: 'label with name "manor:work" already exists; use `--force` to update its color and description' };
+    return raced.gh.filter((a) => a[1] === 'create').length < 2 ? { code: 1, out: '', err: "could not add label: 'manor:work' not found" } : ok('https://github.com/Jcollier0120/Porter/issues/41\n');
+  });
+  const s2 = await fileWork({ items: [item], work: WORK(), employees, run: raced.run, cwd: home, now: at(0), log: () => {} });
+  assert.equal(s2.get(item.id)!.state, 'filed');
+
+  // gh can't make it either: not filed, and said why, with no third try.
+  rmSync(workFiledFile(), { force: true });
+  const refused = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok([]) : args[0] === 'label' ? { code: 1, out: '', err: 'HTTP 403: Resource not accessible' } : { code: 1, out: '', err: "could not add label: 'manor:work' not found" }));
+  const quiet: string[] = [];
+  const s3 = await fileWork({ items: [item], work: WORK(), employees, run: refused.run, cwd: home, now: at(0), log: (l) => quiet.push(l) });
+  assert.deepEqual(s3.get(item.id), { state: 'not-filed', why: "gh couldn't file it in Jcollier0120/Porter" });
+  assert.equal(refused.gh.filter((a) => a[1] === 'create' && a[0] === 'issue').length, 1);
+  assert.ok(quiet.some((l) => l.startsWith("work: couldn't create the manor:work label in Jcollier0120/Porter: HTTP 403")));
+
+  // Another failure isn't a missing label: no label made.
+  rmSync(workFiledFile(), { force: true });
+  const other = runner((args) => (args[1] === 'user' ? ok('Jcollier0120\n') : args[1] === 'list' ? ok([]) : { code: 1, out: '', err: 'HTTP 502' }));
+  await fileWork({ items: [item], work: WORK(), employees, run: other.run, cwd: home, now: at(0), log: () => {} });
+  assert.ok(!other.gh.some((a) => a[0] === 'label'));
+});
+
 test('no queue, no team, or an issue already open with its marker: not filed again', async () => {
   const item = { id: 'release:porter:abc1234', condition: 'release:porter:abc1234', repo: 'Jcollier0120/Porter', title: 't', body: 'b' };
   const why = async (work: unknown, g = gh()) => {
     const s = (await fileWork({ items: [item], work, employees, run: g.run, cwd: home, now: at(0), log: () => {} })).get(item.id)!;
     return 'why' in s ? s.why : s.state;
   };
-  assert.match(await why(null), /the Wright's page isn't set/);
+  assert.match(await why(null), /the Wright isn't on this PC, so it waits for a person/);
   assert.match(await why({ error: 'ECONNREFUSED' }), /doesn't answer \(ECONNREFUSED\)/);
   assert.match(await why(WORK({ takesWork: false })), /takes no work now/);
   assert.match(await why({ at: 'x', needsYou: [] }), /a Wright before 0\.1\.5/);
@@ -160,6 +255,8 @@ test('no queue, no team, or an issue already open with its marker: not filed aga
   assert.equal(await why(WORK(), g), 'filed');
   assert.deepEqual(g.creates(), [], 'found open: not filed twice');
   assert.equal(JSON.parse(readFileSync(workFiledFile(), 'utf8'))[item.id].url, 'https://github.com/Jcollier0120/Porter/issues/7');
+  // Filed, and then the Wright is gone from this PC: nobody works on it, so its alarm isn't held back.
+  assert.match(await why(null), /the Wright isn't on this PC, so it waits for a person .*; https:\/\/github\.com\/Jcollier0120\/Porter\/issues\/7 was filed/);
 });
 
 test("the alarm waits a day from when it was filed; at once when the Wright is stuck, its PR waits for you, or it couldn't be filed", async () => {
@@ -226,4 +323,31 @@ test('tested: the newest first, a commit and stage once, the last few of each em
   assert.deepEqual(v.employees.porter.tested.slice(0, 2).map((t) => [t.commit, t.at]), [['c24', at(30).toISOString()], ['c23', at(23).toISOString()]]);
   assert.deepEqual(v.employees.steward, { repo: 'Jcollier0120/Steward', tested: [{ commit: 'd1', stage: 'release', branch: 'main', version: '0.9.0', at: at(1).toISOString() }] });
   assert.ok(existsSync(testedFile()));
+});
+
+test("a bump issue whose failure is gone is closed: the employee's branch pins that kit or a newer one now; one still failing, or still behind, stays", async () => {
+  // Two employees on fake git: one bumped past the kit since, one still behind it.
+  const past = employee(fakeEmployee(path.join(home, 'resolved-past'), { kit: '2.26.0' }).checkout, { id: 'past', name: 'Past', repo: 'Jcollier0120/Past' });
+  const behind = employee(fakeEmployee(path.join(home, 'resolved-behind'), { kit: '2.19.0' }).checkout, { id: 'behind', name: 'Behind', repo: 'Jcollier0120/Behind' });
+  const entry = (repo: string, n: number) => ({ url: `https://github.com/${repo}/issues/${n}`, number: n, repo, at: at(0).toISOString(), condition: 'x' });
+  writeFileSync(workFiledFile(), JSON.stringify({
+    'bump:past:2.23.0': entry('Jcollier0120/Past', 42),
+    'bump:past:2.26.0': entry('Jcollier0120/Past', 46),
+    'bump:behind:2.23.0': entry('Jcollier0120/Behind', 7),
+    'release:past:abc1234': entry('Jcollier0120/Past', 9),
+  }));
+  const r = runner((args) => (args[0] === 'issue' && args[1] === 'close' ? (args[2] === '46' ? { code: 1, out: '', err: 'issue #46 is already closed' } : ok('')) : undefined));
+  const lines: string[] = [];
+  await closeResolved({ items: [], employees: [past, behind], run: r.run, cwd: home, log: (l) => lines.push(l) });
+  // Past's two: closed, or found closed already; Behind's waits; a release's is never this one's to close.
+  assert.deepEqual(r.gh.map((a) => [a[2], a[4]]), [['42', 'Jcollier0120/Past'], ['46', 'Jcollier0120/Past']]);
+  assert.match(r.gh[0].at(-1)!, /Nothing left to do: main now carries kit 2\.26\.0, so Past's bump to kit 2\.23\.0 has passed/);
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(workFiledFile(), 'utf8'))).sort(), ['bump:behind:2.23.0', 'release:past:abc1234']);
+  assert.deepEqual(lines, ['work: closed https://github.com/Jcollier0120/Past/issues/42: Past carries kit 2.26.0 now']);
+
+  // One this round's failures still name is left alone, whatever its branch says.
+  writeFileSync(workFiledFile(), JSON.stringify({ 'bump:past:2.23.0': entry('Jcollier0120/Past', 42) }));
+  const quiet = runner(() => ok(''));
+  await closeResolved({ items: [{ id: 'bump:past:2.23.0', condition: 'x', repo: 'Jcollier0120/Past', title: 't', body: 'b' }], employees: [past], run: quiet.run, cwd: home, log: () => {} });
+  assert.deepEqual(quiet.gh, []);
 });

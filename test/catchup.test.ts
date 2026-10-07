@@ -10,7 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-catchup-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { catchUp, catchUpVersion, mergeChangelogs, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
+const { catchUp, catchUpVersion, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -184,11 +184,11 @@ ${JSON.stringify(first.out.held)}`);
   assert.equal(again.gh.filter((a) => a[1] === 'comment').length, 0);
   assert.match(again.out.held[0].why, /back with the Claude Code session/);
 
-  // The Wright's: closed (its branch kept), its issue queued again; it then waits for nothing.
+  // The Wright's: closed and its branch deleted (the redo's branch has its name), its issue queued again; it then waits for nothing.
   rmSync(kickbacksFile(), { force: true });
   sh(checkout, 'push', '--quiet', 'origin', `${pr.headOid}:refs/heads/wright/7-a-feature`);
   const wright = await round(listed({ head: 'wright/7-a-feature', labels: ['wright'], body: 'A feature.\n\nCloses #7' }));
-  assert.ok(wright.gh.some((a) => a[0] === 'pr' && a[1] === 'close' && a[2] === '21' && !a.includes('--delete-branch')), JSON.stringify(wright.gh));
+  assert.ok(wright.gh.some((a) => a[0] === 'pr' && a[1] === 'close' && a[2] === '21' && a.includes('--delete-branch')), JSON.stringify(wright.gh));
   assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'edit' && a[2] === '7' && a.includes('wright:done')));
   assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'comment' && a[2] === '7'));
   assert.equal(wright.out.held.length, 0);
@@ -269,6 +269,51 @@ test("a kit PR whose checks fail after catching up isn't pushed", async () => {
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'rev-parse', 'origin/steward/kit-1.0.1'), pr.headOid);
   assert.equal(gh.length, 0);
+});
+
+test("kit.json: the newer kit of the two, every part either takes; anything else changed on both sides is left", () => {
+  const pin = (kit: string, parts: string[], more = '') => `{\n  "kit": "${kit}",\n  "parts": [${parts.map((p) => JSON.stringify(p)).join(', ')}]${more}\n}\n`;
+  // Reeve #70: the PR moved to 2.26.0 and took the react part; main took 2.25.0 by a bump.
+  assert.equal(mergeKitPins(pin('2.19.0', ['node', 'spec']), pin('2.26.0', ['node', 'web', 'spec', 'react']), pin('2.25.0', ['node', 'spec'])), pin('2.26.0', ['node', 'web', 'spec', 'react']));
+  // Chamberlain #13: the PR at 2.20.0, main bumped on to 2.24.0.
+  assert.equal(mergeKitPins(pin('2.19.0', ['node', 'web', 'spec']), pin('2.20.0', ['node', 'web', 'spec']), pin('2.24.0', ['node', 'web', 'spec'])), pin('2.24.0', ['node', 'web', 'spec']));
+  // A part only the branch took is kept too.
+  assert.equal(mergeKitPins(pin('1.0.0', ['node']), pin('1.1.0', ['node']), pin('1.0.1', ['node', 'core'])), pin('1.1.0', ['node', 'core']));
+  // Another key changed on one side is taken; on both, differently, it's a person's.
+  assert.equal(mergeKitPins(pin('1.0.0', ['node']), pin('1.1.0', ['node']), pin('1.0.1', ['node'], ',\n  "note": "x"')), pin('1.1.0', ['node'], ',\n  "note": "x"'));
+  assert.equal(mergeKitPins(pin('1.0.0', ['node']), pin('1.1.0', ['node'], ',\n  "note": "a"'), pin('1.0.1', ['node'], ',\n  "note": "b"')), null);
+  assert.equal(mergeKitPins(pin('1.0.0', ['node']), 'not json', pin('1.0.1', ['node'])), null);
+});
+
+test("a team PR whose kit.json conflicts too is caught up: the newer kit, its version lines and changelog as before", async () => {
+  const k = (v: string, parts = '"node"') => `{\n  "kit": "${v}",\n  "parts": [${parts}]\n}\n`;
+  const { dir, checkout, pr } = moved('kit-pin', { 'src/feature.ts': 'export const feature = 1;\n', 'kit.json': k('1.2.0', '"node", "web"') }, { main: { 'kit.json': k('1.1.0') } });
+  const r = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, `${c.note}\n${ctx.lines.join('\n')}`);
+  assert.match(c.note, /its version lines and kit pin resolved/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'show', 'origin/claude/feature:kit.json'), k('1.2.0', '"node", "web"').trim());
+});
+
+test("a kit PR whose branch already carries that kit, or a newer one, is closed: it has nothing left to do", async () => {
+  const { dir, checkout, pr } = kitPr('kit-redundant');
+  const { run, gh, ran } = kitRunner();
+  // main took kit 1.0.1 by another PR.
+  writeFileSync(path.join(checkout, 'kit.json'), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}\n');
+  sh(checkout, 'commit', '--quiet', '-am', 'kit 1.0.1 by hand');
+  sh(checkout, 'push', '--quiet', 'origin', 'main');
+  const e = employee(checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.deepEqual([c.done, c.closed], [false, true]);
+  assert.equal(c.note, 'main already carries kit 1.0.1, so the Steward closed it: the next round bumps Fake again from main');
+  const close = gh.find((a) => a[1] === 'close')!;
+  assert.ok(close.includes('--delete-branch'));
+  assert.match(close.at(-1)!, /main already carries kit 1\.0\.1, so this bump has nothing left to do/);
+  assert.deepEqual(ran, [], 'nothing merged or tested');
 });
 
 test('a kit PR that conflicts beyond its versions is closed, its branch deleted, for the next round to bump again', async () => {

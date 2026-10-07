@@ -14,7 +14,7 @@ process.env.MANOR_HOME = path.join(home, 'no-manor'); // never this PC's Manor a
 process.env.SMITH_HOME = path.join(home, 'no-smith');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { Reaper, reapedServers, servesBase, lastActivityMs, UNANSWERED_MS } = await import('./fixture/src/kit/keeper.ts');
+const { Reaper, reapedServers, servesBase, lastActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 type Deps = ConstructorParameters<typeof Reaper>[0];
 
@@ -75,6 +75,15 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
   };
   return { pc, deps };
 }
+
+test("a program's name reaches Windows' process list as text: quotes, curly quotes, $( ) and backticks stay in the name", async () => {
+  assert.equal(wqlName("a'b\\c.exe"), "Name='a\\'b\\\\c.exe'");
+  assert.equal(wqlName('llama-server.exe'), "Name='llama-server.exe'");
+  // Run for real: a name made to end the string early finds no process, and runs nothing.
+  for (const name of ["x\u2019; Write-Output INJECTED; \u2019y.exe", "x'; Write-Output INJECTED; 'y.exe", 'x$(Write-Output INJECTED)`n.exe', 'x" ; Write-Output INJECTED ; ".exe']) {
+    assert.deepEqual(await serverProcesses(`C:\\nowhere\\${name}`, BASE), [], name);
+  }
+});
 
 test('idle: GenieX is stopped once nobody has used the NPU for npuIdleStopMinutes, holding its lock', async () => {
   const { pc, deps } = fakePc({});
@@ -366,20 +375,35 @@ test('orphans: a model server on the manor ports that no configured server is is
   assert.equal(baseOf(`${LLAMA} --host 127.0.0.1 --port 18191 -m x.gguf`), 'http://127.0.0.1:18191');
   assert.equal(baseOf(`${GENIEX} serve --skip-update`), 'http://127.0.0.1:18181');
   assert.equal(baseOf('node.exe server.js --port 18191'), null, 'not a model server');
+  assert.equal(baseOf('"C:\\a\\ovms\\ovms.exe" --rest_port 18183 --rest_bind_address 127.0.0.1 --source_model m'), 'http://127.0.0.1:18183', "OpenVINO Model Server's --rest_port");
+  assert.equal(baseOf('C:\\a\\ovms.exe --port 9000'), null, 'OpenVINO Model Server with no REST port serves no OpenAI routes');
+  assert.equal(baseOf('C:\\a\\flm.exe serve qwen3-it:4b --port 18184'), 'http://127.0.0.1:18184', "FastFlowLM's --port");
+  assert.equal(baseOf('C:\\a\\flm.exe serve'), 'http://127.0.0.1:52625', "FastFlowLM's default port");
   assert.ok(manorPorts([card]).has(18191) && manorPorts([]).has(18282) && !manorPorts([]).has(8080));
+  const { manorOwns } = await import('./fixture/src/kit/keeper.ts');
   const { pc, deps } = fakePc({});
-  const SCRATCH = 'C:\\Users\\x\\reeve-accel-e2e\\home\\servers\\llama-server.exe';
+  // An older build in the manor's own servers folder: the manor's, but no configured server is it.
+  const SCRATCH = 'C:\\Users\\x\\.reeve\\servers\\llama.cpp\\b100-cpu\\llama-server.exe';
+  const OWN_GENIEX = 'C:\\Users\\x\\AppData\\Local\\GenieX CLI\\geniex.exe';
   let seen = [
     { pid: 1, path: LLAMA, line: `${LLAMA} --port 18191`, startedMs: 0, workingSetBytes: 1 },
     { pid: 2, path: SCRATCH, line: `${SCRATCH} --port 18191`, startedMs: 0, workingSetBytes: 8 * 1024 ** 3 },
     { pid: 3, path: LLAMA, line: `${LLAMA} --port 18195`, startedMs: 0 },
     { pid: 4, path: LLAMA, line: `${LLAMA} --port 9000`, startedMs: 0 },
+    // A person's own GenieX on its default port, which nobody in the manor started: never stopped.
+    { pid: 5, path: OWN_GENIEX, line: `"${OWN_GENIEX}" serve`, startedMs: 0 },
+    // A server whose program Windows won't name (another account's, an elevated one): never the manor's.
+    { pid: 6, path: '', line: `${LLAMA} --port 18196`, startedMs: 0 },
+    // Another program's llama-server on a manor port, outside the manor's folders: left alone too.
+    { pid: 7, path: 'C:\\Tools\\llama\\llama-server.exe', line: 'C:\\Tools\\llama\\llama-server.exe --port 18197', startedMs: 0 },
   ];
   deps.allProcesses = async () => seen;
+  deps.owned = (p) => manorOwns(p, { dirs: ['C:\\Users\\x\\.reeve\\servers'] });
+  assert.deepEqual(await new Reaper({ ...deps, owned: undefined }, { orphanGraceMs: 5 * MIN }).orphans([card]), [], 'without a way to tell the manor\'s own, nothing is an orphan');
   const reaper = new Reaper(deps, { orphanGraceMs: 5 * MIN });
   const first = await reaper.orphans([card]);
-  assert.deepEqual(first.map((o) => [o.pid, o.did]), [[2, 'seen'], [3, 'seen']], "the configured server and another program's port are left alone");
-  assert.match(pc.log.join('\n'), /saw an orphan: llama-server\.exe \(2\) at http:\/\/127\.0\.0\.1:18191.*reeve-accel-e2e/);
+  assert.deepEqual(first.map((o) => [o.pid, o.did]), [[2, 'seen'], [3, 'seen']], "the configured server, another program's port, a person's own GenieX, an unnamed program and a program outside the manor's folders are left alone");
+  assert.match(pc.log.join('\n'), /saw an orphan: llama-server\.exe \(2\) at http:\/\/127\.0\.0\.1:18191.*b100-cpu/);
   pc.clock = 4 * MIN;
   assert.deepEqual((await reaper.orphans([card])).map((o) => o.did), ['seen', 'seen']);
   seen = seen.filter((p) => p.pid !== 3); // gone by itself: its count ends
@@ -389,6 +413,27 @@ test('orphans: a model server on the manor ports that no configured server is is
   assert.deepEqual(pc.stopped, [2]);
   assert.match(pc.log.at(-1)!, /stopped an orphan: llama-server\.exe \(2\) at http:\/\/127\.0\.0\.1:18191, 8\.0 GB, seen for 5 min/);
   assert.deepEqual(await new Reaper(deps, { orphanGraceMs: 0 }).orphans([card]), [{ pid: 2, base: 'http://127.0.0.1:18191', path: SCRATCH, did: 'seen', forMs: 0 }], '0 never stops one');
+  assert.ok(!pc.stopped.includes(5) && !pc.stopped.includes(6) && !pc.stopped.includes(7));
+});
+
+test("the manor's own servers: in its servers folders, or started by it (the same pid and program, within a minute); never by port, never an unnamed program", async () => {
+  const { manorOwns, sameProgram, manorServerDirs } = await import('./fixture/src/kit/keeper.ts');
+  const dirs = ['C:\\Users\\x\\.manor\\accelerators\\servers', 'C:\\Users\\x\\.reeve\\servers'];
+  const G = 'C:\\Users\\x\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  assert.equal(manorOwns({ pid: 1, path: 'C:\\Users\\x\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms\\ovms.exe', startedMs: 0 }, { dirs }), true);
+  assert.equal(manorOwns({ pid: 1, path: 'c:\\users\\X\\.REEVE\\servers\\llama.cpp\\b1\\llama-server.exe', startedMs: 0 }, { dirs }), true, 'any case');
+  assert.equal(manorOwns({ pid: 1, path: 'C:\\Users\\x\\.reeve\\servers-old\\llama-server.exe', startedMs: 0 }, { dirs }), false, 'a folder that only starts the same');
+  assert.equal(manorOwns({ pid: 9, path: G, startedMs: 1_000 }, { dirs }), false, "GenieX's own install, with no record: someone else's");
+  const started = [{ pid: 9, program: G, base: 'http://127.0.0.1:18181', atMs: 1_500 }];
+  assert.equal(manorOwns({ pid: 9, path: G, startedMs: 1_000 }, { dirs, started }), true, 'the manor started this very process');
+  assert.equal(manorOwns({ pid: 9, path: G, startedMs: 600_000 }, { dirs, started }), false, 'the pid reused later: not the one the manor started');
+  assert.equal(manorOwns({ pid: 10, path: G, startedMs: 1_000 }, { dirs, started }), false, 'another process of the same program');
+  assert.equal(manorOwns({ pid: 9, path: '', startedMs: 1_000 }, { dirs, started }), false, 'an unreadable path is never a match');
+  assert.equal(sameProgram('', G), false);
+  assert.equal(sameProgram(G, G.toUpperCase()), true);
+  const own = manorServerDirs({ MANOR_HOME: 'C:\\M' }, 'C:\\Users\\x');
+  assert.ok(own.some((d) => /^C:\\M\\accelerators\\servers$/i.test(d)) && own.some((d) => /\\\.reeve\\servers$/i.test(d)), own.join(', '));
+  assert.deepEqual(manorServerDirs({ REEVE_HOME: 'C:\\scratch' }, 'C:\\Users\\x'), ['C:\\scratch\\servers'], 'a scratch home is its own');
 });
 
 test('who keeps the servers: the Smith where its app folder is, else Reeve', async () => {

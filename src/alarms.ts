@@ -3,11 +3,14 @@ import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import { reeveInstalled, type Employee, type Settings } from './settings.ts';
+import { BAILIFF_WAIT } from './review.ts';
+import { reeveInstalled, surveyorInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
+import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
-import { fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
+import { manorKeeps, tendConditions, type TendState } from './tend.ts';
+import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -33,6 +36,7 @@ import { fileWork, holdForWork, workItems, type WorkItem, type WorkState } from 
  *   for two (the Wright's drafts wait for it).
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
  * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
+ * - an agent on duty whose page doesn't answer, which the round couldn't open again through Manor (tend.ts), at once;
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
@@ -161,10 +165,15 @@ export function roundConditions(o: {
   tastingHolds?: Record<string, TastingHold>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
+  /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
+  migrated?: Migration | null;
+  /** The staff's pages as the round's look left them (tend.ts's tending.json); null while Settings switch it off. */
+  tending?: TendState | null;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
   const out: Condition[] = [];
+  if (o.tending) out.push(...tendConditions(o.tending));
   const wait = o.settings.alarms.waitingHours;
   for (const { employee: e, prs } of o.held) {
     for (const pr of prs) {
@@ -254,6 +263,16 @@ export function roundConditions(o: {
         `${u.kept ? `Its copy is kept in ${u.kept} for a look. ` : ''}A newer version installs as usual. Dismiss this once you've looked: that allows ${u.version} again (or node src\cli.ts allow-update ${u.version}), and Manor's next update installs it, behind the same fail-safe.`,
       ],
       since: u.at,
+      afterMs: 0,
+    });
+  }
+  if (o.migrated?.notes.length) {
+    out.push({
+      id: `settings:migrated:${o.migrated.at}`,
+      who: 'steward',
+      title: "The Steward's employees were written into its Settings from its staff table, and some need you",
+      detail: [...o.migrated.notes, 'Or fill them in yourself in Settings, under Employees, and save: that clears this too.'],
+      since: o.migrated.at,
       afterMs: 0,
     });
   }
@@ -408,6 +427,22 @@ export function bailiffConditions(reviews: unknown): Condition[] {
 }
 
 /**
+ * While the Bailiff can't review at all (its page doesn't answer, or Claude Code can't be used), the Wright's drafts
+ * that wait only for its review are named in that one alarm, not each raised again after a day: one cause, one alarm.
+ * A draft held for anything else (the Steward's look, the Bailiff's asking for changes) keeps its own. Pure.
+ */
+export function foldBailiffWaits(conditions: Condition[]): Condition[] {
+  const cant = conditions.find((c) => c.id === 'bailiff:down') ?? conditions.find((c) => c.id.startsWith('bailiff:') && c.title.startsWith("The Bailiff can't review:"));
+  if (!cant) return conditions;
+  const waits = conditions.filter((c) => c.id.startsWith('waiting:') && c.title.includes(`: ${BAILIFF_WAIT}`) && !/asked for changes/.test(c.title));
+  if (!waits.length) return conditions;
+  const named = waits.map((w) => w.url ?? w.id.slice('waiting:'.length));
+  return conditions
+    .filter((c) => !waits.includes(c))
+    .map((c) => (c === cant ? { ...c, detail: [...c.detail, `The Wright's drafts waiting on it: ${named.join(', ')}.`] } : c));
+}
+
+/**
  * From Reeve's GET /api/alerts: one condition per open alert of his jobs, at once, as he gives it; and the jobs they are
  * of. An older Reeve without the endpoint (404), or one whose page doesn't answer, is quiet here: no alarm about the
  * source (the Surveyor's agent.reeve.page problem already says when his page is down), and jobs null.
@@ -504,7 +539,7 @@ export async function watchAlarms(
     run?: Runner;
     neutralDir?: string;
   },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   const filing = o.settings.fileWork && !!o.run;
@@ -521,6 +556,8 @@ export async function watchAlarms(
     try {
       items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
+      // And the bump issues whose failure is gone, closed, so the Wright isn't sent to find nothing to do.
+      await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });
     } catch (e) {
       o.log(`work: ${(e as Error).message}`);
     }
@@ -528,24 +565,31 @@ export async function watchAlarms(
   if (!a.on) return loadAlarms();
   const conditions = roundConditions(o);
   const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
+  // The manor-wide alarms are Manor's once it says it keeps them (tend.ts's manorKeeps): then only the repositories' are the Steward's.
+  let manorWide = true;
   if (manor) {
-    conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
-    const summary = await get(new URL('/api/summary', manor).href);
-    // The summary asks every agent, so it may not answer one round: a port clash it said is kept as it was until it
-    // answers again, rather than cleared and raised a second time.
-    conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
+    const state = await get(new URL('/api/state', manor).href);
+    manorWide = !manorKeeps(state).has('alarms');
+    if (manorWide) {
+      conditions.push(...manorConditions(state));
+      const summary = await get(new URL('/api/summary', manor).href);
+      // The summary asks every agent, so it may not answer one round: a port clash it said is kept as it was until it
+      // answers again, rather than cleared and raised a second time.
+      conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
+    } else o.log("alarms: Manor keeps the manor-wide alarms itself; the Steward raises only its repositories' own");
   }
-  if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
+  // The Surveyor's page only where the Surveyor is installed: without it, there is nothing to watch, and no alarm.
+  if (manorWide && a.surveyorUrl && (deps.surveyorInstalled ?? surveyorInstalled)()) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
   if (wright !== null) conditions.push(...wrightConditions(wright));
   if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
   let reeveJobs: Set<string> | null = null;
-  if (reeve !== null) {
+  if (reeve !== null && manorWide) {
     const r = reeveConditions(reeve);
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;
   }
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
-  const kept = holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours);
+  const kept = holdForWork(foldBailiffWaits(withoutReeveDuplicates(conditions, reeveJobs)), items, states, a.waitingHours);
   const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);

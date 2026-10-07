@@ -3,22 +3,18 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_EMPLOYEES } from '../src/settings.ts';
+import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
 import {
-  carriedOldKit,
   changelogBetween,
   compareVersions,
   filesUnder,
   hirePathOf,
   kitPathOfHire,
   kitVersionOf,
-  newPathOfOld,
-  OLD_KIT_HIRES,
-  oldKitFilesIn,
-  OLD_KIT_PATHS,
   partFiles,
   pinText,
 } from '../src/kitfiles.ts';
+import { carriedOldKit, newPathOfOld, OLD_KIT_HIRES, oldKitFilesIn, OLD_KIT_PATHS } from '../tools/lib/oldkit.ts';
 import { entryFor, KIT_RELEASE_PATHS } from '../tools/kit-release.ts';
 
 // The kit's layout, and the Steward's kit\ itself: the parts, the version and changelog, and the Steward
@@ -75,8 +71,8 @@ test("kit\\VERSION has its changelog entry, the Steward pins it, and its fixture
   assert.ok(!existsSync(path.join(kitDir, 'test', 'fixture', 'kit.json')));
 });
 
-test('a kit release carries VERSION, CHANGELOG.md and the parts (the core and dotnet too), never the tests', () => {
-  assert.deepEqual(KIT_RELEASE_PATHS, ['VERSION', 'CHANGELOG.md', 'LICENSE', 'node', 'web', 'spec', 'core', 'dotnet']);
+test('a kit release carries VERSION, CHANGELOG.md and the parts (react, the core and dotnet too), never the tests', () => {
+  assert.deepEqual(KIT_RELEASE_PATHS, ['VERSION', 'CHANGELOG.md', 'LICENSE', 'node', 'web', 'spec', 'react', 'core', 'dotnet']);
   assert.ok(filesUnder(kitDir).some((f) => f.startsWith('test/')));
 });
 

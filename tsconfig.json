@@ -11,5 +11,7 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "test", "tools", "kit/test"]
+  "include": ["src", "test", "tools", "kit/test"],
+  "//": "The browser's page (src/web's .tsx, the kit's react part) is tsconfig.web.json's: DOM and JSX, not Node.",
+  "exclude": ["src/web/**/*.tsx", "src/kit/react"]
 }

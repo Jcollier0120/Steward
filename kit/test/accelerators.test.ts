@@ -39,8 +39,9 @@ async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promis
   }
 }
 
-const config = (raw: unknown): AcceleratorConfig => {
-  const cfg = A.parseAccelerators(raw);
+/** A config as an agent reads it; `hw`, what this PC has (hardware.json), names its accelerators. */
+const config = (raw: unknown, hw: import('./fixture/src/kit/accelerators.ts').Hardware | null = null): AcceleratorConfig => {
+  const cfg = A.parseAccelerators(raw, hw);
   if ('error' in cfg) throw new Error(cfg.error);
   return cfg;
 };
@@ -188,7 +189,7 @@ test('an older config with only chatEndpoint still works: one accelerator, the N
 
 test('Reeve not set up reads the same whichever way: no config.json, an empty list, or nothing that serves anything', async () => {
   const want = A.REEVE_NOT_SET_UP;
-  assert.equal(want, "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)");
+  assert.equal(want, "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI");
   const dir = path.join(home, 'reeve-unset');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'config.json');
@@ -523,14 +524,15 @@ test('every answer says where it ran, and a background request goes around a car
   try {
     const model = new Npu(config({
       accelerators: [
-        gpu('gpu-nvidia-geforce-rtx-4090', { name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, chat: { baseUrl: card.baseUrl, model: 'm' } } as any),
-        { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: npu.baseUrl, model: 'm' }, quirks: ['prefix-leak'] },
+        gpu('gpu-nvidia-geforce-rtx-4090', { name: 'Not its name', memoryGb: 24, chat: { baseUrl: card.baseUrl, model: 'm' } } as any),
+        { id: 'npu', kind: 'npu', name: 'Nor this', chat: { baseUrl: npu.baseUrl, model: 'm' }, quirks: ['prefix-leak'] },
       ],
-    }));
+    }, { npu: true, npuName: 'Snapdragon X2 Elite NPU', cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }] }));
+    // Each is named as this PC names it (hardware.json), never by the config's name.
     // The NPU first, though the card is listed first and has more room: it does the work without the card.
     const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
     assert.equal(a.text, 'from the NPU');
-    assert.deepEqual(a.accelerator, { id: 'npu', name: 'Snapdragon X2 Elite NPU' });
+    assert.deepEqual(a.accelerator, { id: 'npu', name: 'Snapdragon X2 Elite' }, 'shown without NPU, as its badge says it');
     assert.match(npu.seen[0].messages[0].content, /^\[req /, "the NPU's server gets its nonce");
     assert.equal(model.budget(100), 2300, "chunking: the NPU's cap, so the pieces fit the NPU");
     // Too big for the NPU: the card takes it, since the NPU can't.
@@ -541,7 +543,8 @@ test('every answer says where it ran, and a background request goes around a car
     assert.ok(!card.seen[0].messages.some((m: any) => /\[req /.test(m.content)), 'the card gets no nonce');
     assert.equal(A.noteLabel(b.accelerator), 'note from the NVIDIA GeForce RTX 4090, unverified');
     assert.match(unverified('<b>', b.accelerator), /note from the NVIDIA GeForce RTX 4090, unverified<\/span> &lt;b&gt;/);
-    assert.match(unverified('old note'), /note from the NPU, unverified/, 'a note kept from before came from the NPU');
+    assert.match(unverified('old note'), /note from a local model, unverified/, 'a note that says nothing of where is from a local model, never guessed to be the NPU');
+    assert.match(unverified('old note'), /title="Written by a local model. Check it/);
     // A game on the card: background work that only the card can take waits; a person waiting may still use it.
     mkdirSync(acceleratorsDir, { recursive: true });
     writeFileSync(A.gamesFile(), JSON.stringify({ checkedAt: new Date().toISOString(), cards: { 'gpu-nvidia-geforce-rtx-4090': { busy: true, percent: 91, by: ['game.exe'] } } }));
@@ -729,10 +732,10 @@ test('embeddings go to an accelerator that serves them, and a server can be left
     await assert.rejects(new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: slow.baseUrl, model: 'e' } }] })).embed(['x'], { lane: 'interactive', timeoutMs: 300 }), /timed out/);
     assert.ok(Date.now() - t0 < 1400, 'its own timeout, not the config\'s');
     fresh();
-    const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', name: 'Oryon CPU', embed: { baseUrl: server.baseUrl, model: 'e' } }] }));
+    const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: server.baseUrl, model: 'e' } }] }, { npu: false, cards: [], cpuName: 'Oryon CPU' }));
     const r = await model.embed(['one', 'two']);
     assert.deepEqual(r.vectors, [[0, 1], [1, 1]]);
-    assert.deepEqual(r.accelerator, { id: 'cpu', name: 'Oryon CPU' });
+    assert.deepEqual(r.accelerator, { id: 'cpu', name: 'Oryon' }, 'shown by its model, without CPU');
     const off = `http://127.0.0.1:${await closedPort()}`;
     const down = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', embed: { baseUrl: off, model: 'e' } }] }));
     await assert.rejects(down.embed(['x'], { start: false }), /the NPU's server isn't running/);
@@ -892,7 +895,7 @@ test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even
     // With only the card serving embeddings, they're refused, and say why.
     const cardEmbedOnly = new Npu(config({ accelerators: cfg.accelerators.filter((a) => a.kind !== 'cpu') }));
     assert.equal(cardEmbedOnly.hasEmbed, false);
-    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the gpu-adreno isn't used for models beside the NPU/.test(e.message));
+    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the graphics card isn't used for models beside the NPU/.test(e.message));
   } finally {
     noManor();
     fresh();

@@ -1,14 +1,15 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, type AcceleratorKind, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { type Accelerator, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
+import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
-import { powershell } from './ps.ts';
+import { powershell, psQuote } from './ps.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -83,6 +84,8 @@ export interface ServerSpec {
   startCommand?: string[];
   logFile?: string;
   env?: NodeJS.ProcessEnv;
+  /** The endpoint's own environment for its server (config.json's `env`), over the starter's. */
+  serverEnv?: Record<string, string>;
 }
 
 /** How long a server may go without answering, while nobody uses its accelerator, before it is restarted. */
@@ -159,6 +162,11 @@ export interface ReaperDeps {
   log: (line: string) => void;
   /** Every model server's process on this PC (llama-server, GenieX, and the configured programs), for the orphan check. */
   allProcesses?: () => Promise<SeenProcess[]>;
+  /**
+   * Whether a process is the manor's own (manorOwns): only such a process can be an orphan. Without it, none is: a
+   * program on one of the manor's ports is never stopped for its port alone.
+   */
+  owned?: (p: SeenProcess) => boolean;
 }
 
 /** "the NPU", or the card's (or processor's) own name: whose lock a message is about. */
@@ -222,7 +230,7 @@ export class Reaper {
     if (s.keptOut) {
       const pids = await this.inTurn(s, false);
       if (!pids) return taken;
-      d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: Manor keeps the graphics card out while the NPU serves (gpuWithNpu is off)`);
+      d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: Castellan's Settings keep the graphics card out while the NPU serves (gpuWithNpu is off)`);
       return { base: s.base, did: 'stopped-kept-out', pids };
     }
     const lastUse = Math.max(this.lastInUse.get(s.acc.id) ?? 0, d.lastActivityMs(s), ...procs.map((p) => p.startedMs));
@@ -291,14 +299,16 @@ export class Reaper {
   }
 
   /**
-   * The orphan check: every model server's process on the manor's ports that none of `servers` is (another
-   * program, or another port), seen for `orphanGraceMs` in a row, is stopped. A process gone, or known again,
-   * starts its count afresh.
+   * The orphan check: a model server's process that is the manor's own (`owned`: its program is in the manor's
+   * servers folders, or the manor started it), on one of the manor's ports, that none of `servers` is (another
+   * program, or another port), seen for `orphanGraceMs` in a row, is stopped. Never a process for its port alone: a
+   * program someone else runs (their own GenieX on its default 18181, say), or one whose program Windows won't name,
+   * is left alone. A process gone, or known again, starts its count afresh.
    */
   async orphans(servers: ReapedServer[]): Promise<OrphanOutcome[]> {
     const d = this.deps;
     const grace = this.o.orphanGraceMs ?? ORPHAN_GRACE_MS;
-    if (!d.allProcesses) return [];
+    if (!d.allProcesses || !d.owned) return [];
     const seen = await d.allProcesses();
     const ports = manorPorts(servers);
     const out: OrphanOutcome[] = [];
@@ -307,6 +317,7 @@ export class Reaper {
       const base = baseOf(p.line);
       if (!base || !ports.has(Number(new URL(base).port))) continue;
       if (servers.some((s) => sameProgram(p.path, s.program) && servesBase(p.line, s.base))) continue;
+      if (!p.path || !d.owned(p)) continue;
       still.add(p.pid);
       const since = this.orphanSince.get(p.pid) ?? d.now();
       this.orphanSince.set(p.pid, since);
@@ -338,7 +349,33 @@ export function manorPorts(servers: Pick<ReapedServer, 'base'>[]): Set<number> {
   return ports;
 }
 
-const sameProgram = (a: string, b: string) => !a || a.toLowerCase() === b.toLowerCase();
+/** The same program, by its full path; a path Windows wouldn't give (an elevated process) is never a match. */
+export const sameProgram = (a: string, b: string) => !!a && !!b && path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
+
+/**
+ * The manor's own servers folders, where setup puts what it installs: the tools home's `servers` (toolsHome: the
+ * accelerators' folder, or %USERPROFILE%\.reeve on a PC set up before kit 2.31.0), the accelerators' folder's, and
+ * Reeve's, each once.
+ */
+export function manorServerDirs(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string[] {
+  const dirs = [path.join(toolsHome(env, home), 'servers'), path.join(acceleratorsHome(env), 'servers'), ...(env.REEVE_HOME ? [] : [path.join(home, '.reeve', 'servers')])];
+  return [...new Map(dirs.map((d) => [path.win32.resolve(d).toLowerCase(), d])).values()];
+}
+
+const isUnder = (file: string, dir: string) => path.win32.resolve(file).toLowerCase().startsWith(path.win32.resolve(dir).toLowerCase() + '\\');
+
+/**
+ * Whether a model server's process is the manor's own, and so may be stopped as an orphan: its program's path is
+ * known (an unreadable path is never the manor's) and is in one of the manor's servers folders (`dirs`), or a record
+ * says the manor started this very process (`started`, accelerators.ts' noteStarted: the same pid and program,
+ * started within a minute of the record). A program on a manor port for any other reason (a person's own GenieX,
+ * Ollama, a test's server) is not.
+ */
+export function manorOwns(p: Pick<SeenProcess, 'pid' | 'path' | 'startedMs'>, o: { dirs: string[]; started?: StartedServer[] }): boolean {
+  if (!p.path) return false;
+  if (o.dirs.some((d) => isUnder(p.path, d))) return true;
+  return (o.started ?? []).some((r) => r.pid === p.pid && sameProgram(p.path, r.program) && Math.abs(p.startedMs - r.atMs) <= 60_000);
+}
 
 /** An accelerator's lock folders, one per slot: the kit's (the NPU's lock for the NPU; `<locks>\<id>`, `<id>.2` … for the others). */
 export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): string[] => kitLockDirsOf({ id: a.id, slots: a.kind === 'npu' ? 1 : a.slots });
@@ -373,11 +410,12 @@ export function reapedServers(
       out.set(ep.baseUrl, {
         base: ep.baseUrl,
         program: expandEnv(ep.startCommand[0]),
-        spec: { base: ep.baseUrl, startCommand: ep.startCommand, logFile: path.join(logDir, `${a.id}.${kind === 'vision' && !a.vision?.baseUrl ? 'chat' : kind}.log`) },
+        spec: { base: ep.baseUrl, startCommand: ep.startCommand, ...(ep.env ? { serverEnv: ep.env } : {}), logFile: path.join(logDir, `${a.id}.${kind === 'vision' && !a.vision?.baseUrl ? 'chat' : kind}.log`) },
         acc: { id: a.id, kind: a.kind, name: a.name },
         lockDirs: typeof lockDirs === 'string' ? (a.kind === 'npu' ? [lockDirs] : slotDirs(path.join(path.dirname(lockDirs), a.id), a.slots)) : lockDirs(a),
         ...(idleMs !== undefined ? { idleMs } : {}),
-        ...(a.kind === 'npu' ? { recycle: true } : {}),
+        // GenieX alone keeps memory from every model load until it exits: the NPU's other servers aren't recycled.
+        ...(a.kind === 'npu' && /geniex/i.test(path.win32.basename(expandEnv(ep.startCommand[0]))) ? { recycle: true } : {}),
         ...(o.keepGpuOut && a.kind === 'gpu' ? { keptOut: true } : {}),
       });
     }
@@ -387,18 +425,39 @@ export function reapedServers(
 
 const arg = (commandLine: string, name: string) => new RegExp(`(?:^|\\s)--${name}(?:=|\\s+)"?([^\\s"]+)"?`, 'i').exec(commandLine)?.[1];
 
+/** The model servers the keeper knows by their command lines, each with how it's given its address and its default port. */
+const SERVERS: { program: RegExp; host: string; port: string; defaultPort: number }[] = [
+  { program: /llama-server/i, host: 'host', port: 'port', defaultPort: 8080 },
+  { program: /geniex/i, host: 'host', port: 'port', defaultPort: 18181 },
+  // OpenVINO Model Server (an Intel NPU's): --rest_port, --rest_bind_address (all addresses without it).
+  { program: /(^|[\\/"\s])ovms(\.exe)?["\s]/i, host: 'rest_bind_address', port: 'rest_port', defaultPort: 0 },
+  // FastFlowLM (an AMD NPU's): flm serve --port, 52625 without it.
+  { program: /(^|[\\/"\s])flm(\.exe)?["\s]/i, host: 'host', port: 'port', defaultPort: 52625 },
+];
+
+/** The host:port a server's command line serves, by its kind's flags; null when it's none the keeper knows. */
+function hostOf(commandLine: string): string | null {
+  const s = SERVERS.find((x) => x.program.test(`${commandLine} `));
+  if (!s) return null;
+  let host = (arg(commandLine, s.host) ?? '127.0.0.1').replace(/^https?:\/\//i, '');
+  if (host === '0.0.0.0') host = '127.0.0.1';
+  const port = arg(commandLine, s.port);
+  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
+  else if (!/:\d+$/.test(host)) {
+    if (!s.defaultPort) return null;
+    host = `${host}:${s.defaultPort}`;
+  }
+  return host;
+}
+
 /**
  * The address a server's command line serves: GenieX takes `--host <host:port>` (127.0.0.1:18181 without it),
- * llama.cpp's server `--host <host>` and `--port <port>` (127.0.0.1 and 8080 without them). Null for a command
- * line that is neither.
+ * llama.cpp's server `--host <host>` and `--port <port>` (127.0.0.1 and 8080 without them), OpenVINO Model Server
+ * `--rest_port`, FastFlowLM `--port` (52625 without it). Null for a command line that is none of them.
  */
 export function baseOf(commandLine: string): string | null {
-  const llama = /llama-server/i.test(commandLine);
-  if (!llama && !/geniex/i.test(commandLine)) return null;
-  let host = (arg(commandLine, 'host') ?? '127.0.0.1').replace(/^https?:\/\//i, '');
-  const port = arg(commandLine, 'port');
-  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
-  else if (!/:\d+$/.test(host)) host = `${host}:${llama ? 8080 : 18181}`;
+  const host = hostOf(commandLine);
+  if (!host) return null;
   try {
     return new URL(`http://${host}`).origin;
   } catch {
@@ -412,17 +471,16 @@ export function baseOf(commandLine: string): string | null {
  * another port (a test's, say, or another card's) is left alone.
  */
 export function servesBase(commandLine: string, base: string): boolean {
-  const want = new URL(base).host;
-  let host = (arg(commandLine, 'host') ?? '127.0.0.1').replace(/^https?:\/\//i, '');
-  const port = arg(commandLine, 'port');
-  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
-  else if (!/:\d+$/.test(host)) host = `${host}:${/llama-server/i.test(commandLine) ? 8080 : 18181}`;
-  return host === want;
+  return hostOf(commandLine) === new URL(base).host;
 }
 
+/** WQL's `Name='<name>'`: in a WQL string, a backslash and a quote are each escaped with a backslash. */
+export const wqlName = (name: string) => `Name='${name.replace(/[\\']/g, (c) => `\\${c}`)}'`;
+
+/** Windows' processes that match a WQL filter, handed to PowerShell as a single-quoted literal, never as code. */
 const listProcesses = async (filter: string): Promise<SeenProcess[]> => {
   const out = await powershell(
-    `Get-CimInstance Win32_Process -Filter "${filter}" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; path = [string]$_.ExecutablePath; line = [string]$_.CommandLine; started = $_.CreationDate.ToUniversalTime().ToString('o'); ws = [double]$_.WorkingSetSize } } | ConvertTo-Json -Compress`,
+    `Get-CimInstance Win32_Process -Filter ${psQuote(filter)} |ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; path = [string]$_.ExecutablePath; line = [string]$_.CommandLine; started = $_.CreationDate.ToUniversalTime().ToString('o'); ws = [double]$_.WorkingSetSize } } | ConvertTo-Json -Compress`,
     { timeoutMs: 30_000 },
   );
   const rows = out.trim() ? [JSON.parse(out)].flat() : [];
@@ -431,15 +489,14 @@ const listProcesses = async (filter: string): Promise<SeenProcess[]> => {
 
 /** The program's processes serving `base`, from Windows' process list. */
 export async function serverProcesses(program: string, base: string): Promise<ServerProcess[]> {
-  const name = path.win32.basename(program).replace(/'/g, "''");
-  const rows = await listProcesses(`Name='${name}'`);
+  const rows = await listProcesses(wqlName(path.win32.basename(program)));
   return rows.filter((r) => sameProgram(r.path, program) && servesBase(r.line, base)).map(({ pid, startedMs, workingSetBytes }) => ({ pid, startedMs, workingSetBytes }));
 }
 
 /** Every llama-server's and GenieX's process on this PC, and every other program the servers are started with. */
 export async function modelServerProcesses(programs: string[] = []): Promise<SeenProcess[]> {
   const names = [...new Set(['llama-server.exe', 'geniex.exe', ...programs.map((p) => path.win32.basename(p).toLowerCase())])].filter((n) => /\.exe$/i.test(n) && !/^python/i.test(n));
-  return listProcesses(names.map((n) => `Name='${n.replace(/'/g, "''")}'`).join(' OR '));
+  return listProcesses(names.map(wqlName).join(' OR '));
 }
 
 const mtimeMs = (p: string) => {
@@ -513,9 +570,10 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
         const card = games?.cards?.[s.acc.id];
         return card?.busy ? card.by : null;
       },
-      start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand }, { logFile: spec.logFile, env: spec.env }),
+      start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
       log: (line) => logLine(logFile, line),
       allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => SERVE_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
+      owned: (p) => manorOwns(p, { dirs: manorServerDirs(), started: readStarted() }),
     },
     o.options,
   );
@@ -528,8 +586,38 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
   return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000 }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
 }
 
+/** How old hardware.json may get before the keeper asks this PC again: a card or an NPU driver can come and go. */
+const HARDWARE_DAYS = 1;
+/** How old a hardware.json without the processor's name may get before it's asked again (detection may not have had it). */
+const HARDWARE_UNNAMED_MS = 3_600_000;
+
+/**
+ * hardware.json afresh when there's none or it's a day old: what this PC has, asked with detection (a few seconds of
+ * PowerShell, once a day), so every program knows whether it has an NPU, and a model on a graphics card is never
+ * called the NPU. A detection that couldn't tell writes nothing; the next look tries again. One written before the
+ * accelerators' names were kept in it (kit 2.27.0) is asked again at once when it says there's an NPU but not its
+ * name, and after an hour when it lacks the processor's: every program names the accelerators from it.
+ */
+export async function refreshHardware(o: { file?: string; detect?: () => Promise<Detection>; nowMs?: number } = {}): Promise<boolean> {
+  const file = o.file ?? hardwareFile();
+  let age = Infinity;
+  try {
+    age = (o.nowMs ?? Date.now()) - statSync(file).mtimeMs;
+  } catch {
+    // none yet
+  }
+  const had = Number.isFinite(age) ? readHardware(file) : null;
+  const unnamed = !!had && ((had.npu && !had.npuName) || (!had.cpuName && age >= HARDWARE_UNNAMED_MS));
+  if (age < HARDWARE_DAYS * 86_400_000 && !unnamed) return false;
+  const hw = hardwareOf(await (o.detect ?? detect)());
+  if (!hw) return false;
+  rememberHardware(hw, file);
+  return true;
+}
+
 /** One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the next look. */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
+  if (!o.config) await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
   const looked = await reaper.look(servers);
   const orphans = await reaper.orphans(servers);

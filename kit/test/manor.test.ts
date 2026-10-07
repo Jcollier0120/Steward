@@ -16,7 +16,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(tmp, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(tmp, 'no-manor');
 process.env.STEWARD_HOME = path.join(tmp, 'no-steward');
 
-const { HOUSE_SVG, developerOptions, forgetManorIcon, githubRepo, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
+const { HOUSE_SVG, agentUrl, developerOptions, forgetGithubOwner, forgetManorIcon, githubOwner, githubRepo, mayNotify, notifyAllowed, notifyFrom, notifyPrefs, gpuWithNpu, manorIcon, manorLink, manorOwn, manorProjects, manorSettingsUrl, originRepo, projectsFrom, safeSvg } = await import('./fixture/src/kit/manor.ts');
 const { developerOptionsNote, page } = await import('./fixture/src/kit/page.ts');
 
 /** A Manor folder: settings.json, and an app folder (with its own art) when installed. */
@@ -31,9 +31,9 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
 
 test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
   assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
-  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults');
-  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
-  assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Manor');
+  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults: no name is Castellan');
+  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
+  assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Castellan');
   assert.equal(manorLink(manorAt('not-an-object', 'null'))!.theme, 'system');
   assert.equal(manorLink(manorAt('bom', '﻿{"theme": "quest"}'))!.theme, 'quest');
   for (const theme of ['system', 'light', 'dark', 'arcade', 'onyx', 'carbon', 'tinsel', 'rosegold', 'quest']) assert.equal(manorLink(manorAt(`theme-${theme}`, { theme }))!.theme, theme);
@@ -306,7 +306,7 @@ test("a clone's origin: from its git config, a worktree's too; GitHub's alone", 
   assert.equal(githubRepo('ssh://git@github.com/a/b'), 'a/b');
 });
 
-test("the manor's own: Manor's repository, its staff's and announced agents', the Steward's employees and its own checkout", () => {
+test("the manor's own: its staff's and announced agents' repositories, the Steward's employees and its own checkout; no one's by name", () => {
   const home = manorAt('own-home', {});
   writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', release: { repo: 'Jcollier0120/Porter' } }, { id: 'odd' }, null] }));
   writeFileSync(path.join(home, 'agents.json'), JSON.stringify({ agents: [{ id: 'chamberlain', release: { repo: 'Jcollier0120/Chamberlain' } }] }));
@@ -315,17 +315,17 @@ test("the manor's own: Manor's repository, its staff's and announced agents', th
   // The staff table the Steward keeps, when its settings name no employees.
   writeFileSync(path.join(steward, 'staff.json'), JSON.stringify({ rows: [{ id: 'miller', repo: 'Jcollier0120/Miller', checkout: { path: 'C:\\Projects\\Miller', exists: true } }] }));
   assert.deepEqual(manorOwn({ home, stewardHome: steward }), {
-    repos: ['Jcollier0120/Manor', 'Jcollier0120/Porter', 'Jcollier0120/Chamberlain', 'Jcollier0120/Miller'],
-    checkouts: ['C:\\Projects\\Miller', 'C:\\Projects\\Steward'],
+    repos: ['Jcollier0120/Porter', 'Jcollier0120/Chamberlain', 'Jcollier0120/Miller'],
+    checkouts: ['C:\\Projects\\Miller'],
   });
   // Its settings' employees, and its own checkout, when they say.
   writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk' }], stewardCheckout: 'E:\\src\\Steward' }));
   assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: path.join(tmp, 'no-staff.json') }), {
-    repos: ['Jcollier0120/Manor', 'Jcollier0120/Chamberlain', 'me/Clerk'],
+    repos: ['Jcollier0120/Chamberlain', 'me/Clerk'],
     checkouts: ['E:\\src\\Clerk', 'E:\\src\\Steward'],
   });
-  // Nothing installed: Manor's repository and the Steward's usual checkout.
-  assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere') }), { repos: ['Jcollier0120/Manor'], checkouts: ['C:\\Projects\\Steward'] });
+  // Nothing installed: nothing, never a name or folder of the kit's own.
+  assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere'), stewardHome: path.join(tmp, 'nowhere') }), { repos: [], checkouts: [] });
 });
 
 test("manorProjects: Manor's projects, checked, read afresh; none without an installed Manor", () => {
@@ -344,4 +344,63 @@ test("manorProjects: Manor's projects, checked, read afresh; none without an ins
   } finally {
     process.env.MANOR_HOME = path.join(tmp, 'no-manor');
   }
+});
+
+test("the manor's notify preferences: Manor's when it says, each wrong field its default; none without Manor's say", () => {
+  assert.deepEqual(notifyPrefs(manorAt('notify', { notify: { on: true, quietFrom: '21:30', quietTo: '06:45' } })), { on: true, quietFrom: '21:30', quietTo: '06:45' });
+  assert.deepEqual(notifyFrom({ on: false, quietFrom: '25:00', quietTo: '7:00' }), { on: false, quietFrom: '22:00', quietTo: '07:00' }, 'a bad time: its default');
+  assert.deepEqual(notifyFrom({ on: 'yes', quietFrom: '08:00', quietTo: '08:00' }), { on: true, quietFrom: null, quietTo: null }, 'equal times: no quiet hours');
+  assert.deepEqual(notifyFrom(null), { on: true, quietFrom: '22:00', quietTo: '07:00' });
+  assert.deepEqual(notifyFrom({ quietFrom: ' 23:00', quietTo: '06:00 ' }), { on: true, quietFrom: '22:00', quietTo: '07:00' }, 'spaces are not trimmed: as Manor reads it');
+  assert.equal(notifyPrefs(manorAt('notify-unsaid', {})), null, 'an older Manor, which says nothing');
+  assert.equal(notifyPrefs(manorAt('notify-not-installed', { notify: { on: false } }, { installed: false })), null);
+  assert.equal(notifyPrefs(path.join(tmp, 'nowhere')), null);
+});
+
+test('may an agent notify now: on, and outside the quiet hours, which may span midnight; always without Manor', () => {
+  const at = (h: number, m = 0) => new Date(2026, 9, 5, h, m);
+  const night = { on: true, quietFrom: '22:00', quietTo: '07:00' };
+  assert.equal(notifyAllowed(night, at(21, 59)), true);
+  assert.equal(notifyAllowed(night, at(22)), false);
+  assert.equal(notifyAllowed(night, at(3)), false);
+  assert.equal(notifyAllowed(night, at(6, 59)), false);
+  assert.equal(notifyAllowed(night, at(7)), true);
+  const lunch = { on: true, quietFrom: '12:00', quietTo: '13:30' };
+  assert.equal(notifyAllowed(lunch, at(12, 30)), false);
+  assert.equal(notifyAllowed(lunch, at(13, 30)), true);
+  assert.equal(notifyAllowed(lunch, at(23)), true);
+  assert.equal(notifyAllowed({ on: true, quietFrom: null, quietTo: null }, at(3)), true);
+  assert.equal(notifyAllowed({ on: false, quietFrom: null, quietTo: null }, at(12)), false, 'off: never');
+  assert.equal(notifyAllowed(null, at(3)), true, "no say from Manor: nothing holds it back");
+  assert.equal(mayNotify(at(3), manorAt('notify-may', { notify: night })), false);
+  assert.equal(mayNotify(at(3), path.join(tmp, 'nowhere')), true);
+});
+
+test("another agent's page: its home in Manor's agents.json, else its staff.json; a checkout's 10000 above", () => {
+  const home = manorAt('agents', {});
+  writeFileSync(path.join(home, 'agents.json'), JSON.stringify({ agents: [{ id: 'reeve', home: 'http://reeve.localhost:18383/' }, { id: 'odd', home: 'javascript:alert(1)' }, { id: 'none' }] }));
+  writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'reeve', home: 'http://reeve.localhost:1/' }, { id: 'porter', home: 'http://porter.localhost:18686/' }] }));
+  assert.equal(agentUrl('reeve', { home }), 'http://reeve.localhost:18383/', 'announced first');
+  assert.equal(agentUrl('porter', { home }), 'http://porter.localhost:18686/', 'else its staff');
+  assert.equal(agentUrl('reeve', { home, dev: true }), 'http://reeve.localhost:28383/');
+  assert.equal(agentUrl('odd', { home }), null, 'only http(s)');
+  assert.equal(agentUrl('none', { home }), null);
+  assert.equal(agentUrl('smith', { home }), null);
+  assert.equal(agentUrl('reeve', { home: path.join(tmp, 'nowhere') }), null);
+});
+
+test("the GitHub owner: gh's signed-in login, from its config, else GitHub; kept once known, asked again later when not", () => {
+  forgetGithubOwner();
+  const asked: string[][] = [];
+  const gh = (said: Record<string, string>) => (args: string[]) => (asked.push(args), said[args[0]] ?? '');
+  assert.equal(githubOwner({ run: gh({ config: 'Jcollier0120\n' }), now: 0 }), 'Jcollier0120');
+  assert.equal(githubOwner({ run: gh({ config: 'someone-else' }), now: 1 }), 'Jcollier0120', 'kept');
+  assert.equal(asked.length, 1);
+  forgetGithubOwner();
+  assert.equal(githubOwner({ run: gh({ config: '', api: 'octo-cat' }), now: 0 }), 'octo-cat', "gh's config empty: GitHub");
+  forgetGithubOwner();
+  assert.equal(githubOwner({ run: gh({ config: 'not a login!' }), now: 0 }), null);
+  assert.equal(githubOwner({ run: gh({ config: 'late' }), now: 60_000 }), null, 'not known: not asked again at once');
+  assert.equal(githubOwner({ run: gh({ config: 'late' }), now: 10 * 60_000 }), 'late', 'but after ten minutes');
+  forgetGithubOwner();
 });

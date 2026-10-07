@@ -1,14 +1,16 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { git, removeWorktree, showFile } from '../git.ts';
+import { entryOf } from '../kit/notes.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
-import type { Employee } from '../settings.ts';
+import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../settings.ts';
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
-import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, exchequerNote, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -87,6 +89,12 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
 export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null }): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
+  // Released only once the person said how (Settings' Release it), and only a repository with a version.
+  if (!e.release) return result(e, 'skipped', NO_RELEASE);
+  if (!e.versionFiles.length) return result(e, 'skipped', 'no version files in Settings, so no version to release');
+  // Released here, its release installs it: not for one that was removed from this PC.
+  const away = releasedHere(e) ? notHiredHere(e) : null;
+  if (away) return result(e, 'skipped', away);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
   const remote = `origin/${e.branch}`;
@@ -96,7 +104,10 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
   const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
   const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
-  if (!decision.release) return result(e, 'skipped', 'error' in v ? v.error : decision.why);
+  if (!decision.release) {
+    const out = 'version' in v && released.includes(v.version);
+    return result(e, 'skipped', 'error' in v ? v.error : decision.why, out ? { released: true, version: v.version } : {});
+  }
   const version = (v as { version: string }).version;
   const not = o.unless?.(commit, version);
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
@@ -107,6 +118,9 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   }
   if (gate.note) ctx.log(`[${e.id}] ${gate.note}`);
   const noted = gate.note ? `; ${gate.note}` : '';
+
+  // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
+  if (e.release === TAG_RELEASE) return tagRelease(ctx, e, { repo, commit, version, remote, noted });
 
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
@@ -124,7 +138,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
         return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
       }
     }
-    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000 });
+    // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
+    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
       keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
@@ -132,9 +147,21 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     }
     // Its releases have changed: the glance no longer says how they are.
     forgetGlance(ctx, e);
+    // A repository's own release command must make the GitHub release, or the next round would run it again: one that
+    // didn't is a failed release, which the rounds then leave to the person at that commit. (Castellan's own agents, and
+    // one released only on this PC, are known to.)
+    if (!ctx.settings.releasesCastellan && !releasedHere(e)) {
+      const now = await releasedOf(ctx, e).catch(() => null);
+      if (now && !now.some((x) => x.version === version)) {
+        keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
+        return result(e, 'failed', `${e.release} finished, but GitHub has no release v${version} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
+      }
+    }
     // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit, stage: 'release', branch: e.branch, version });
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
+    // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
+    const exchequer = exchequerNote(`${r.out}\n${r.err}`);
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
@@ -156,7 +183,37 @@ function keepOutput(dir: string, step: string, code: number, output: string): vo
   }
 }
 
-export async function release(ctx: Ctx, employees: Employee[], o: { kit: string }): Promise<EmployeeResult[]> {
+/** Why a repository isn't released: Settings name no way to. */
+export const NO_RELEASE = 'not released by the Steward: Settings name no way to (Release it)';
+
+/**
+ * A GitHub release the Steward makes itself (Release it: tag): v<version> in the repository, at the branch's commit, titled
+ * "<name> <version>", its notes the version's entry in CHANGELOG.md at that commit (kit/node/notes.ts), else GitHub's own
+ * from the commits since the release before.
+ */
+async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; remote: string; noted: string }): Promise<EmployeeResult> {
+  const tag = `v${o.version}`;
+  const entry = entryOf((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md')) ?? '', o.version);
+  const notesDir = mkdtempSync(path.join(os.tmpdir(), 'steward-notes-'));
+  try {
+    let notes: string[];
+    if (entry) {
+      const file = path.join(notesDir, 'notes.md');
+      writeFileSync(file, entry);
+      notes = ['--notes-file', file];
+    } else notes = ['--generate-notes'];
+    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a GitHub release, its notes ${entry ? 'the CHANGELOG.md entry' : "GitHub's, from the commits"}`);
+    const r = await ctx.run('gh', ['release', 'create', tag, '--repo', e.repo, '--target', o.commit, '--title', `${e.name} ${o.version}`, ...notes], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+    if (r.code !== 0) return result(e, 'failed', `gh release create ${tag} failed (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
+  } finally {
+    rmSync(notesDir, { recursive: true, force: true });
+  }
+  forgetGlance(ctx, e);
+  recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
+  return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)})${o.noted}`, { version: o.version, commit: o.commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/${tag}` });
+}
+
+export async function release(ctx: Ctx, employees: Employee[], o: { kit: string | null }): Promise<EmployeeResult[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
       return await releaseOne(ctx, e, o);

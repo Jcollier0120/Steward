@@ -73,6 +73,7 @@ export async function kitInfo(run: Runner, cwd: string, stewardRepo: string): Pr
   const localDir = localKitDir();
   let released: string[] = [];
   let releasesError: string | null = null;
+  if (!stewardRepo) return { released, releasesError: "Settings name no Steward repository (The Steward's repository), so no kit releases are looked for", local: localDir ? kitVersionOf(localDir) : null, localDir };
   try {
     released = kitReleasesIn(await gh(run, cwd, 'release', 'list', '--repo', stewardRepo, '--limit', '100', '--json', 'tagName,isDraft'));
   } catch (e) {

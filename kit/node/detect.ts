@@ -2,6 +2,9 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type Accelerator, acceleratorId, autoOrder, OWN_MEMORY_GB } from './accelerator-config.ts';
+import type { Hardware } from './accelerators.ts';
+import * as core from './core/index.js';
+import { type NpuSupport, npuSupport } from './npu-vendors.ts';
 
 /**
  * What this PC has to run models on (`smith accelerators`, `reeve accelerators`): its graphics cards as DXGI lists them,
@@ -37,9 +40,19 @@ export interface GpuCard {
   memoryGb: number;
 }
 
+/** The NPU as detection found it: Windows' name for it, its driver, its maker and generation, and what the manor can do with it. */
+export interface DetectedNpu extends NpuSupport {
+  name: string;
+  device: string;
+  driver: string;
+  driverDate: string;
+  manufacturer: string;
+  deviceId: string;
+}
+
 export interface Detection {
   cards: GpuCard[];
-  npu: { name: string; device: string; driver: string; driverDate: string } | null;
+  npu: DetectedNpu | null;
   /** GenieX's program, when it's installed. */
   geniex: string | null;
   cpu: { name: string; arch: 'arm64' | 'x64' | string; cores: number } | null;
@@ -120,9 +133,19 @@ $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
 ${DXGI_PS}
 try {
-  foreach ($d in @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Hexagon%'" | Sort-Object DeviceName)) {
-    $date = ''; if ($d.DriverDate) { $date = ([datetime]$d.DriverDate).ToString('yyyy-MM-dd') }
-    'npu|' + $d.DriverVersion + '|' + $date + '|' + $d.DeviceName
+  $drivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceClass='COMPUTEACCELERATOR'")
+  $npus = @(Get-CimInstance -ClassName Win32_PnPEntity -Filter "PNPClass='ComputeAccelerator'" | Sort-Object Name)
+  foreach ($n in $npus) {
+    $d = $drivers | Where-Object { $_.DeviceID -eq $n.PNPDeviceID } | Select-Object -First 1
+    $ver = ''; $date = ''
+    if ($d) { $ver = [string]$d.DriverVersion; if ($d.DriverDate) { $date = ([datetime]$d.DriverDate).ToString('yyyy-MM-dd') } }
+    'npu2|' + $ver + '|' + $date + '|' + ([string]$n.Manufacturer).Replace('|', ' ') + '|' + $n.PNPDeviceID + '|' + $n.Name
+  }
+  if (-not $npus.Count) {
+    foreach ($d in @(Get-CimInstance -ClassName Win32_PnPSignedDriver -Filter "DeviceName LIKE '%Hexagon%'" | Sort-Object DeviceName)) {
+      $date = ''; if ($d.DriverDate) { $date = ([datetime]$d.DriverDate).ToString('yyyy-MM-dd') }
+      'npu|' + $d.DriverVersion + '|' + $date + '|' + $d.DeviceName
+    }
   }
 } catch { 'problem|NPU: ' + $_.Exception.Message }
 try {
@@ -190,27 +213,45 @@ export function recommendedCard(cards: GpuCard[]): GpuCard | undefined {
 const tm = (s: string) => s.replace(/\((R|TM|C)\)/gi, '').replace(/\s+/g, ' ').trim();
 
 /**
- * The NPU's own name from its driver's device name: "Snapdragon(R) X2 Elite Extreme - X2E94100 -
- * Qualcomm(R) Hexagon(TM) NPU" is "Snapdragon X2 Elite Extreme NPU".
+ * The NPU's name as hardware.json keeps it: its device name as Windows lists it, in full, with (R) and (TM) taken
+ * out and its spaces collapsed: "Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU" is
+ * "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU". "NPU" when Windows gives none. It is shown
+ * shorter, by its model (the core's deviceName): "Qualcomm Hexagon".
  */
 export function npuName(device: string): string {
-  const parts = device.split(/\s+-\s+/);
-  if (parts.length > 1 && /snapdragon/i.test(parts[0])) return `${tm(parts[0])} NPU`;
   return tm(device) || 'NPU';
+}
+
+/**
+ * The NPUs in DETECT_PS' output: `npu2|<driver>|<date>|<manufacturer>|<device id>|<name>`, each a device Windows lists
+ * as a Neural processor (the ComputeAccelerator class, as Heiward's NpuHardware.cs reads it), or an older line
+ * `npu|<driver>|<date>|<name>` (a Hexagon driver, before kit 2.31.0). Each is judged for this PC's processor
+ * (npu-vendors.ts' npuSupport); one the manor can use comes first.
+ */
+export function parseNpus(text: string, arch: string): DetectedNpu[] {
+  const out: DetectedNpu[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim();
+    let m: RegExpExecArray | null;
+    let dev: { device: string; manufacturer: string; deviceId: string; driver: string; driverDate: string } | null = null;
+    if ((m = /^npu2\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$/.exec(l))) dev = { driver: m[1], driverDate: m[2], manufacturer: m[3].trim(), deviceId: m[4], device: m[5] };
+    else if ((m = /^npu\|([^|]*)\|([^|]*)\|(.*)$/.exec(l))) dev = { driver: m[1], driverDate: m[2], manufacturer: '', deviceId: '', device: m[3] };
+    if (dev) out.push({ name: npuName(dev.device), ...dev, ...npuSupport(dev, arch) });
+  }
+  return out.sort((a, b) => Number(b.supported) - Number(a.supported));
 }
 
 /** Everything DETECT_PS printed. */
 export function parseDetection(text: string, geniex: string | null = null): Detection {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
   const problems = lines.filter((l) => l.startsWith('problem|')).map((l) => l.slice('problem|'.length));
-  const npuLine = lines.map((l) => /^npu\|([^|]*)\|([^|]*)\|(.*)$/.exec(l)).find(Boolean);
   const cpuLine = lines.map((l) => /^cpu\|(\d*)\|(\d*)\|(.*)$/.exec(l)).find(Boolean);
   const ram = lines.map((l) => /^ram\|(\d+)$/.exec(l)).find(Boolean);
   // Win32_Processor.Architecture: 12 is ARM64, 9 x64.
   const arch = cpuLine ? ({ '12': 'arm64', '9': 'x64', '5': 'arm', '0': 'x86' } as Record<string, string>)[cpuLine[1]] ?? `arch ${cpuLine[1]}` : '';
   return {
     cards: keyCards(parseAdapters(text)),
-    npu: npuLine ? { name: npuName(npuLine[3]), device: npuLine[3], driver: npuLine[1], driverDate: npuLine[2] } : null,
+    npu: parseNpus(text, arch || (process.arch === 'arm64' ? 'arm64' : 'x64'))[0] ?? null,
     geniex,
     cpu: cpuLine ? { name: tm(cpuLine[3]) || 'Processor', arch, cores: Number(cpuLine[2]) || 0 } : null,
     ramBytes: ram ? Number(ram[1]) : 0,
@@ -250,6 +291,24 @@ export function noNpu(d: Pick<Detection, 'npu' | 'problems' | 'cpu'>): boolean {
   return !d.npu && pastNpu && !d.problems.some((p) => /^(NPU|PowerShell): |^only Windows/.test(p));
 }
 
+/**
+ * What this PC has, for hardware.json (accelerators.ts' rememberHardware): whether it has an NPU, and its graphics
+ * cards, with the NPU's and the processor's names. Null unless both were answered: an NPU found, or none for certain
+ * (noNpu), and the cards listed. A model is then never called the NPU on a PC without one, whatever model it is (the
+ * core's notTheNpu), and every accelerator is named as this PC names it (the core's acceleratorName).
+ */
+export function hardwareOf(d: Detection): Hardware | null {
+  const npuKnown = !!d.npu || noNpu(d);
+  const cardsKnown = !d.problems.some((p) => /^(graphics cards|PowerShell): |^only Windows/.test(p));
+  if (!npuKnown || !cardsKnown) return null;
+  return {
+    npu: !!d.npu,
+    cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })),
+    ...(d.npu ? { npuName: d.npu.name } : {}),
+    ...(d.cpu ? { cpuName: d.cpu.name } : {}),
+  };
+}
+
 /** Asks this PC. */
 export async function detect(run: (script: string) => Promise<string> = runPowerShell): Promise<Detection> {
   if (process.platform !== 'win32') return { cards: [], npu: null, geniex: null, cpu: null, ramBytes: 0, problems: ['only Windows is asked'] };
@@ -258,9 +317,10 @@ export async function detect(run: (script: string) => Promise<string> = runPower
 
 /** What was detected, as accelerators (no endpoints yet), in the auto order: what `setup` and the Settings page start from. */
 export function detectedAccelerators(d: Detection): Accelerator[] {
-  const list: Accelerator[] = d.cards.map((c) => ({ id: c.id, kind: 'gpu' as const, name: c.name, memoryGb: c.memoryGb, slots: 1, maxContextTokens: 4096, quirks: [] }));
-  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: d.npu.name, slots: 1, maxContextTokens: 2400, quirks: [] });
-  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: d.cpu.name, slots: 1, maxContextTokens: 4096, quirks: [] });
+  // Each is shown as Manor shows it (the core's deviceName); a card's id stays the one its DXGI name gives.
+  const list: Accelerator[] = d.cards.map((c) => ({ id: c.id, kind: 'gpu' as const, name: core.deviceName(c.name), memoryGb: c.memoryGb, slots: 1, maxContextTokens: 4096, quirks: [] }));
+  if (d.npu) list.push({ id: 'npu', kind: 'npu', name: core.deviceName(d.npu.name), slots: 1, maxContextTokens: 2400, quirks: [] });
+  if (d.cpu) list.push({ id: 'cpu', kind: 'cpu', name: core.deviceName(d.cpu.name), slots: 1, maxContextTokens: 4096, quirks: [] });
   return autoOrder(list);
 }
 

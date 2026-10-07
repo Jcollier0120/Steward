@@ -18,7 +18,8 @@ const { releaseOne } = await import('../src/stages/release.ts');
 const { releaseUnreleased } = await import('../src/stages/round.ts');
 const { afterRound } = await import('../src/stages/changes.ts');
 const { roundConditions } = await import('../src/alarms.ts');
-const { DEFAULT_EMPLOYEES, DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner } = await import('./helpers.ts');
 type HttpRequest = import('../src/upkeep.ts').HttpRequest;
 type TastingDeps = import('../src/tasting.ts').TastingDeps;
@@ -200,4 +201,19 @@ test("in a release: a hold publishes nothing and asks again next round; a pass r
   assert.match(done.message, /^released v0\.4\.1 from origin\/main \([0-9a-f]{7}\), with kit 1\.0\.0; tasted by the Aletaster: pass$/);
   assert.ok(existsSync(marker));
   assert.equal(loadTastingHolds().fake, undefined);
+});
+
+test("a release marked failed is cleared once its version is out, by a person or a run that beat the round to it", async () => {
+  const { roundFailuresFile } = await import('../src/stages/round.ts');
+  const { readFileSync } = await import('node:fs');
+  const dir = path.join(home, 'released-elsewhere');
+  const { checkout } = fakeEmployee(dir, { version: '0.4.1', kit: '1.0.0' });
+  const e = employee(checkout, { release: 'node -e "process.exit(1)"' });
+  // GitHub lists v0.4.1: it was published, though this PC's round failed at it ("a release with the same tag name already exists").
+  const { run } = runner((a) => (a[0] === 'release' && a[1] === 'list' ? ok([{ tagName: 'v0.4.1', isDraft: false }]) : undefined));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  writeFileSync(roundFailuresFile(), JSON.stringify({ fake: 'f2e18a8', other: 'abc1234' }));
+  const [r] = await releaseUnreleased(ctx, [e]);
+  assert.deepEqual([r.outcome, r.released, r.message], ['skipped', true, 'v0.4.1 is already released']);
+  assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { other: 'abc1234' }, "its failure no longer stands; another employee's does");
 });

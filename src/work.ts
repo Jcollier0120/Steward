@@ -8,7 +8,10 @@ import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
 import { checksLogOf } from './stages/bump.ts';
-import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { showFile } from './git.ts';
+import { compareVersions } from './kitfiles.ts';
+import { readPin } from './stages/staff.ts';
 
 /**
  * Work for the Wright: what fails in a round that someone working in the employee's repository can fix, filed as an
@@ -26,17 +29,32 @@ import { bumpBranch, bumpDirOf, releaseDirOf, type StageResult } from './stages/
  *   and only when gh here is signed in as one of its `team` (it takes no one else's issues), as the Surveyor and the
  *   Aletaster file.
  * - **How much:** each once, by a hidden marker in its body (<!-- steward:work:<id> -->, the id per employee, kind and
- *   kit version or commit), so an issue already open is never filed twice; at most PER_DAY a day.
+ *   kit version or commit), so an issue already open is never filed twice; at most PER_DAY a day, a kit's failed bumps
+ *   counting as one (slotOf). A newer kit's failed bump takes over the employee's open bump issue for an older kit,
+ *   closing any others, rather than filing one more (supersede).
  * - **The alarm:** held back for the alarms' while for a PR (waitingHours, a day) from when it was filed: by then the
  *   Wright's draft has been reviewed, merged and released, or bumped again, and the failure is gone. Raised at once
  *   when the Wright gets stuck on the issue (wright:stuck), its PR for it waits for a person (wright:needs-you), the
  *   Wright no longer works in that repository, or it couldn't be filed (the Wright's page not set, no queue for that
  *   repository, today's issues all filed, gh refusing): then it is an alarm as before, saying why.
  *
+ * A bump issue whose failure is gone (the employee's branch pins that kit or a newer one now) is closed by itself
+ * (closeResolved), rather than left for the Wright to find nothing to fix and get stuck on.
+ *
  * Kept in work-filed.json: each issue filed, by its id, with when; the Settings switch is fileWork.
  */
 
 export const PER_DAY = 3;
+
+/**
+ * What an issue counts as against the day's few: each its own, but a kit's failed bumps one between them. They are one
+ * change's (the kit's), usually with one cause, so the bumps a kit breaks are all filed the day it breaks them, rather
+ * than three a day while the rest are alarms.
+ */
+export function slotOf(id: string): string {
+  const kit = /^bump:[^:]+:(.+)$/.exec(id)?.[1];
+  return kit ? `bump:${kit}` : id;
+}
 export const workFiledFile = () => dataFile('work-filed.json');
 
 export interface WorkItem {
@@ -221,9 +239,12 @@ export function workItems(o: { failedReleases: Record<string, string>; failedRol
   return out;
 }
 
+/** Why nothing goes to the Wright when its page isn't read: it isn't on this PC (or Settings name no page for it). */
+export const NO_WRIGHT = "the Wright isn't on this PC, so it waits for a person (hire the Wright in Manor to hand such work to it)";
+
 /** The Wright's queue as its GET /api/work says, or why work can't go to it. */
 export function readQueue(work: unknown): { label: string; repos: string[]; team: string[] } | { why: string } {
-  if (work === null || work === undefined) return { why: "the Wright's page isn't set (The Wright's page, under Alarms in Settings)" };
+  if (work === null || work === undefined) return { why: NO_WRIGHT };
   const w = work as any;
   if (typeof w !== 'object' || Array.isArray(w)) return { why: "the Wright's page doesn't answer" };
   if (Object.keys(w).length === 1 && 'error' in w) return { why: `the Wright's page doesn't answer (${String(w.error)})` };
@@ -261,9 +282,63 @@ async function withBody(run: Runner, cwd: string, args: string[], body: string) 
   }
 }
 
+/** Whether gh refused to file an issue because the repository has no such label: "could not add label: 'manor:work' not found". */
+const labelMissing = (r: { out: string; err: string }, label: string) => {
+  const text = `${r.err}\n${r.out}`;
+  return /could not add label/i.test(text) && text.includes(`'${label}' not found`);
+};
+
+/** The Wright's queue label made in a repository that hasn't it, as the others have it; one there already is as good. */
+async function createLabel(o: { run: Runner; cwd: string; log: (line: string) => void }, repo: string, label: string): Promise<boolean> {
+  const r = await o.run('gh', ['label', 'create', label, '--repo', repo, '--color', '1d76db', '--description', 'Queued for the Wright'], { cwd: o.cwd, timeoutMs: 60_000 });
+  if (r.code === 0) {
+    o.log(`work: created the ${label} label in ${repo}, which hadn't it`);
+    return true;
+  }
+  if (/already exists/i.test(`${r.err}\n${r.out}`)) return true;
+  o.log(`work: couldn't create the ${label} label in ${repo}: ${redact(lastLine(r))}`);
+  return false;
+}
+
+/** `bump:<employee>:`, the start of every bump item's id for that employee, or null for any other item. */
+export const bumpPrefixOf = (id: string) => /^(bump:[^:]+:)/.exec(id)?.[1] ?? null;
+
+/**
+ * A newer kit's failed bump, where an older kit's bump issue for the same employee is still open: the same agent
+ * failing its checks, which one fix on its branch makes pass for both. The newest such issue becomes this one (its
+ * title and body this kit's, its marker too), and any others close as superseded, rather than an issue for each kit
+ * while the Wright hasn't got to the first. Its URL when it was taken over; null when there's none, or gh refused (a new
+ * issue is filed then, as before). Not a new issue, so it counts for no day.
+ */
+async function supersede(o: { run: Runner; cwd: string; log: (line: string) => void }, item: WorkItem, list: { number: number; url: string; body: string }[], filed: Record<string, FiledWork>, at: string): Promise<string | null> {
+  const prefix = bumpPrefixOf(item.id);
+  if (!prefix) return null;
+  const older = list.filter((i) => String(i.body ?? '').includes(`<!-- steward:work:${prefix}`)).sort((a, b) => b.number - a.number);
+  if (!older.length) return null;
+  const [keep, ...rest] = older;
+  const kit = item.id.slice(prefix.length);
+  const r = await withBody(o.run, o.cwd, ['issue', 'edit', String(keep.number), '--repo', item.repo, '--title', item.title], item.body);
+  if (r.code !== 0) {
+    o.log(`work: couldn't make ${keep.url} the bump to kit ${kit}: ${redact(lastLine(r))}`);
+    return null;
+  }
+  const closed: number[] = [];
+  for (const x of rest) {
+    const c = await o.run('gh', ['issue', 'close', String(x.number), '--repo', item.repo, '--reason', 'not planned', '--comment', `Superseded by #${keep.number}, now the bump to kit ${kit}: one fix on the branch makes both pass.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    if (c.code === 0) closed.push(x.number);
+    else o.log(`work: couldn't close ${x.url} as superseded: ${redact(lastLine(c))}`);
+  }
+  const numbers = new Set([keep.number, ...closed]);
+  for (const [id, f] of Object.entries(filed)) if (id.startsWith(prefix) && f.repo.toLowerCase() === item.repo.toLowerCase() && numbers.has(f.number)) delete filed[id];
+  filed[item.id] = { url: keep.url, number: keep.number, repo: item.repo, at, condition: item.condition, adopted: true };
+  o.log(`work: ${keep.url} is now the bump to kit ${kit}${closed.length ? `; ${closed.map((n) => `#${n}`).join(', ')} closed as superseded` : ''}`);
+  return keep.url;
+}
+
 /**
  * One round's filing: each item already filed looked up in the Wright's work, each new one filed where the Wright works,
- * as the module's comment says. What each item's state is comes back by its id; work-filed.json is kept.
+ * as the module's comment says, or an older kit's open bump issue taken over (supersede). What each item's state is
+ * comes back by its id; work-filed.json is kept.
  */
 export async function fileWork(o: { items: WorkItem[]; work: unknown; employees: Employee[]; run: Runner; cwd: string; now: Date; log: (line: string) => void; perDay?: number }): Promise<Map<string, WorkState>> {
   const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
@@ -273,15 +348,16 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   const takes = 'why' in q ? null : new Set(q.repos.map((r) => r.toLowerCase()));
   const perDay = o.perDay ?? PER_DAY;
   const at = o.now.toISOString();
-  let today = Object.values(filed).filter((f) => !f.adopted && localDay(Date.parse(f.at)) === localDay(o.now.getTime())).length;
+  const today = new Set(Object.entries(filed).filter(([, f]) => !f.adopted && localDay(Date.parse(f.at)) === localDay(o.now.getTime())).map(([id]) => slotOf(id)));
   let login: string | null | undefined;
   const open = new Map<string, { number: number; url: string; body: string }[] | null>();
 
   for (const item of o.items) {
     const f = filed[item.id];
     if (f) {
-      // A Wright that no longer works there leaves it to a person; one that doesn't answer is the Wright's own alarm.
-      if (takes && !takes.has(f.repo.toLowerCase())) states.set(item.id, { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` });
+      // A Wright that no longer works there, or is gone from this PC, leaves it to a person; one that doesn't answer is the Wright's own alarm.
+      if (o.work === null || o.work === undefined) states.set(item.id, { state: 'not-filed', why: `${NO_WRIGHT}; ${f.url} was filed` });
+      else if (takes && !takes.has(f.repo.toLowerCase())) states.set(item.id, { state: 'not-filed', why: `the Wright no longer works in ${f.repo} (${f.url} was filed)` });
       else {
         const says = wrightSays(o.work, f);
         states.set(item.id, says ? { ...says, url: f.url, at: f.at } : { state: 'filed', url: f.url, at: f.at });
@@ -299,10 +375,6 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
     }
     if (!takes!.has(item.repo.toLowerCase())) {
       states.set(item.id, { state: 'not-filed', why: `the Wright doesn't work in ${item.repo}` });
-      continue;
-    }
-    if (today >= perDay) {
-      states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
       continue;
     }
     if (login === undefined) {
@@ -336,7 +408,19 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       states.set(item.id, { state: 'filed', url: already.url, at });
       continue;
     }
-    const r = await withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);
+    const taken = await supersede(o, item, list, filed, at);
+    if (taken) {
+      states.set(item.id, { state: 'filed', url: taken, at });
+      continue;
+    }
+    if (!today.has(slotOf(item.id)) && today.size >= perDay) {
+      states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
+      continue;
+    }
+    const create = () => withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);
+    let r = await create();
+    // A repository new to the Wright's queue (an employee just taken on) hasn't its label yet, and gh won't file without it.
+    if (r.code !== 0 && labelMissing(r, q.label) && (await createLabel(o, item.repo, q.label))) r = await create();
     const url = /https:\/\/github\.com\/\S+\/issues\/(\d+)/.exec(r.out);
     if (r.code !== 0 || !url) {
       o.log(`work: couldn't file "${item.title}" in ${item.repo}: ${redact(lastLine(r))}`);
@@ -344,7 +428,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       continue;
     }
     filed[item.id] = { url: url[0], number: Number(url[1]), repo: item.repo, at, condition: item.condition };
-    today++;
+    today.add(slotOf(item.id));
     o.log(`work: filed ${url[0]} for the Wright: ${item.title}`);
     states.set(item.id, { state: 'filed', url: url[0], at });
   }
@@ -353,6 +437,37 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   for (const [id, f] of Object.entries(filed)) if (!current.has(id) && o.now.getTime() - Date.parse(f.at) > 30 * 24 * 3_600_000) delete filed[id];
   if (JSON.stringify(filed) !== before) writeJson(workFiledFile(), filed);
   return states;
+}
+
+/**
+ * Each bump issue filed whose failure is gone, closed: the employee's branch on origin now pins that kit or a newer one
+ * (a later bump passed, or a fix landed and its bump merged), so there is nothing left to do. Left open, it waits in the
+ * Wright's queue for the Wright to find nothing to fix, make no commit, and get stuck: an alarm for nothing. Not one
+ * this round's failures still name (`items`), and only bump issues: a release's failure ends with a new commit, which
+ * says nothing of the old one. Forgotten in work-filed.json once closed, or found closed already.
+ */
+export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }): Promise<void> {
+  const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
+  const current = new Set(o.items.map((i) => i.id));
+  let changed = false;
+  for (const [id, f] of Object.entries(filed)) {
+    const m = /^bump:([^:]+):(\d+\.\d+\.\d+)$/.exec(id);
+    if (!m || current.has(id)) continue;
+    const e = o.employees.find((x) => x.id === m[1]);
+    if (!e || !existsSync(checkoutOf(e))) continue;
+    const pin = readPin(await showFile(o.run, checkoutOf(e), `origin/${e.branch}`, 'kit.json'));
+    if (!pin || compareVersions(pin.kit, m[2]) < 0) continue;
+    const r = await o.run('gh', ['issue', 'close', String(f.number), '--repo', f.repo, '--reason', 'completed', '--comment', `Nothing left to do: ${e.branch} now carries kit ${pin.kit}, so ${e.name}'s bump to kit ${m[2]} has passed. Closed by the ${APP.name}.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
+    if (!gone) {
+      o.log(`work: couldn't close ${f.url}, whose failure is gone: ${redact(lastLine(r))}`);
+      continue;
+    }
+    delete filed[id];
+    changed = true;
+    if (r.code === 0) o.log(`work: closed ${f.url}: ${e.name} carries kit ${pin.kit} now`);
+  }
+  if (changed) writeJson(workFiledFile(), filed);
 }
 
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;

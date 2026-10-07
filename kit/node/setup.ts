@@ -5,16 +5,23 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { expandEnv } from './accelerators.ts';
-import { type Accelerator, acceleratorConfigFile, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
-import { type Detection, detect, detectedAccelerators, type GpuCard, noNpu, recommendedCard } from './detect.ts';
+import { chatBody, ensureServer, expandEnv, lockDirsOf, postJson, rememberHardware, serverEnv, visionBody } from './accelerators.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
+import * as core from './core/index.js';
+import { withAcceleratorTurn } from './npu-queue.ts';
+import { checkPinned, expandRoute, type NpuPlan, npuEntry, planNpu, routeEnv, runProgram, testImage } from './npu-vendors.ts';
 
 /**
- * Accelerator setup (`smith accelerators setup`, Reeve's where there is no Smith, and their Settings pages' Set up): llama.cpp's server for each graphics
- * card (and the processor, when asked) from ggml-org/llama.cpp's newest build, the models as GGUF files
- * from Hugging Face, and an accelerator entry per card in config.json. It says how much it will
- * download and asks first. The NPU's GenieX entry is never changed, only put in the list, but on a PC
- * with no NPU the one install wrote by default (and only that one) is dropped.
+ * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
+ * Settings pages' Set up): the NPU first, then the graphics cards, then the processor. The NPU's own model server for its
+ * maker (npu-vendors.ts: GenieX on a Snapdragon, OpenVINO Model Server on an Intel Core Ultra, FastFlowLM on an AMD
+ * Ryzen AI 300), downloaded and checked against its pinned SHA-256, installed for this user, its models pulled, and its
+ * entry written only once it has answered a test request; llama.cpp's server for each graphics card (and the
+ * processor, when there's no card) from ggml-org/llama.cpp's newest build, the models as GGUF files from Hugging
+ * Face, and an accelerator entry per card in config.json. It says how much it will download and asks first. An NPU
+ * entry a person configured is left as it is; on a PC with no NPU (or one the manor can't use) the one install wrote by
+ * default (and only that one) is dropped.
  *
  * Planning is separate from downloading, and every outside answer (the release list, Hugging Face,
  * `llama-server --list-devices`) is parsed by a function of its own, so tests run on fixtures.
@@ -279,7 +286,6 @@ export function portablePath(p: string, home = homedir()): string {
 export interface EntryInput {
   id: string;
   kind: 'gpu' | 'cpu';
-  name: string;
   memoryGb?: number;
   /** --device's name (none for the processor). */
   device: string | null;
@@ -290,9 +296,12 @@ export interface EntryInput {
   maxContextTokens: number;
 }
 
-/** The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device. */
-export function acceleratorEntry(e: EntryInput): Accelerator {
-  const a: Accelerator = { id: e.id, kind: e.kind, name: e.name, slots: e.slots, maxContextTokens: e.maxContextTokens, quirks: [] };
+/**
+ * The config.json entry: one llama-server per kind it serves, each on its own port, pinned to its device. No name: an
+ * accelerator's name comes from the PC (the core's acceleratorName), never from config.json.
+ */
+export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
+  const a: AcceleratorEntry = { id: e.id, kind: e.kind, slots: e.slots, maxContextTokens: e.maxContextTokens, quirks: [] };
   if (e.memoryGb !== undefined) a.memoryGb = e.memoryGb;
   const server = portablePath(e.server);
   const pin = e.device ? ['--device', e.device, '-ngl', '99'] : ['-ngl', '0'];
@@ -334,14 +343,14 @@ export function usedPorts(list: Accelerator[]): Set<number> {
 /**
  * config.json with the set-up entries in its list: each replaces the one with its id or joins the
  * end. An old config's accelerators (the NPU's GenieX) are put in the list unchanged; nothing else
- * in the file changes, and acceleratorOrder is "auto" unless it says otherwise.
+ * in the file changes, and acceleratorOrder is "auto" unless it says otherwise. No entry keeps a name (it comes
+ * from the PC): an older list's names are dropped.
  */
-export function mergeEntries(raw: Record<string, any>, entries: Accelerator[], npuName?: string): Record<string, any> {
-  const read = readAccelerators(raw);
+export function mergeEntries(raw: Record<string, any>, entries: (Accelerator | AcceleratorEntry)[]): Record<string, any> {
   const list: any[] = Array.isArray(raw.accelerators)
-    ? [...raw.accelerators]
-    : read.accelerators.map((a) => (a.kind === 'npu' && npuName && a.name === 'NPU' ? { ...a, name: npuName } : a));
-  for (const e of entries) {
+    ? raw.accelerators.map((x: any) => (x && typeof x === 'object' && !Array.isArray(x) ? entryOf(x) : x))
+    : readAccelerators(raw).accelerators.map(entryOf);
+  for (const e of entries.map(entryOf)) {
     const i = list.findIndex((x) => x?.id === e.id);
     if (i >= 0) list[i] = e;
     else list.push(e);
@@ -397,6 +406,10 @@ export interface SetupTarget {
 }
 
 export interface SetupPlan {
+  /** The NPU's server and models to set up (npu-vendors.ts' planNpu), or null. */
+  npu: NpuPlan | null;
+  /** Why the NPU isn't set up this time, when this PC has one: unsupported, already configured, or missing something. */
+  npuNote?: string;
   build: string | null;
   /** config.json's `npu` is install's GenieX default and this PC has no NPU: setup drops it (withoutNpu). */
   dropNpu: boolean;
@@ -422,8 +435,10 @@ export interface PlanInput {
   raw: Record<string, any>;
   releases: Release[];
   hfFiles: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>;
-  /** %USERPROFILE%\.reeve (toolsHome). */
+  /** Where servers and models go (toolsHome: the accelerators' folder, or %USERPROFILE%\.reeve on a PC set up before). */
   home: string;
+  /** The environment the NPU route's paths are expanded from (tests give one). */
+  env?: Record<string, string | undefined>;
   /** %LOCALAPPDATA%, where install's default GenieX entry starts geniex.exe from. */
   localAppData?: string;
   exists?: (p: string) => boolean;
@@ -441,25 +456,45 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const ramGb = o.detection.ramBytes / 1024 ** 3;
   const kinds = o.kinds?.length ? o.kinds : (['chat', 'vision', 'embed'] as ServeKind[]);
   const localAppData = o.localAppData ?? process.env.LOCALAPPDATA ?? path.join(homedir(), 'AppData', 'Local');
-  const dropNpu = noNpu(o.detection) && isInstallDefaultNpu(o.raw, localAppData);
+  const det = o.detection.npu;
+  const installDefault = isInstallDefaultNpu(o.raw, localAppData);
+  // GenieX's default entry is wrong on a PC without an NPU, and on one whose NPU isn't a Snapdragon the manor can use.
+  const dropNpu = installDefault && (noNpu(o.detection) || (!!det && (!det.supported || det.vendor !== 'qualcomm')));
 
-  // Which accelerators.
+  // The NPU first: its own server, when it's one the manor can use and nobody configured it otherwise.
+  const configuredNpu = readAccelerators(o.raw).accelerators.find((a) => a.kind === 'npu');
+  const askedNpu = o.ids.includes('npu');
+  let npu: NpuPlan | null = null;
+  let npuNote: string | undefined;
+  if (det && !det.supported) npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
+  else if (det && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault)))) {
+    npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists });
+    if (npu?.missing.length) {
+      npuNote = `${det.label} (npu): not set up: ${npu.route.server} needs ${npu.missing.join('; and ')}. Until then the graphics card or the processor takes its work.`;
+      npu = null;
+    }
+  } else if (det && configuredNpu) npuNote = `${det.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
+  if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
+  // What the NPU will serve (set up now, or configured before).
+  const npuServes = new Set<ServeKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? SERVE_KINDS.filter((k) => serves(configuredNpu, k)) : []);
+
+  // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
+  // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats when the NPU
+  // doesn't, and makes the embeddings when the NPU chats but serves none (every NPU route but a configured one).
   const cards = o.detection.cards;
-  let wanted = o.ids.length ? o.ids : cards.map((c) => c.id);
-  if (!o.ids.length && !cards.length && !o.detection.npu && o.detection.cpu) wanted = ['cpu'];
+  let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
+  const cpuDefault: ServeKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
+  if (!o.ids.length && !cards.length && o.detection.cpu && cpuDefault.length) wanted = ['cpu'];
   const targets: SetupTarget[] = [];
   for (const id of wanted) {
-    if (id === 'npu') {
-      if (!dropNpu) problems.push('npu: the NPU runs GenieX; setup leaves its entry as it is');
-      continue;
-    }
     const card = cards.find((c) => c.id === id);
     if (!card && id !== 'cpu') {
       problems.push(`${id}: no such graphics card on this PC (${cards.map((c) => c.id).join(', ') || 'none found'})`);
       continue;
     }
     const kind = card ? 'gpu' : 'cpu';
-    const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? kinds.filter((k) => k === 'chat') : kinds, keepKinds: !!o.kinds?.length });
+    const cpuKinds = o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat') : cpuDefault;
+    const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : kinds, keepKinds: !!o.kinds?.length });
     const v = variantFor({ kind, vendor: card?.vendor, arch });
     const t: SetupTarget = {
       id,
@@ -527,8 +562,13 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       taken.add(t.ports[k]!);
     }
   }
-  const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0);
-  return { build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
+  // The NPU's port: its route's, unless a card or the processor already has it.
+  if (npu && taken.has(npu.port)) {
+    while (taken.has(next)) next++;
+    npu.port = next;
+  }
+  const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
+  return { npu, ...(npuNote ? { npuNote } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -537,7 +577,14 @@ export const mb = (bytes: number) => (bytes >= 1e9 ? gb(bytes) : `${Math.max(1, 
 /** The plan in a few lines: what it sets up, what it downloads, how much. */
 export function describePlan(p: SetupPlan): string[] {
   const lines: string[] = [];
-  if (p.dropNpu) lines.push("NPU (npu): removed from config.json. It's the GenieX server install wrote by default, and this PC has no NPU, so requests tried it first and failed.");
+  if (p.dropNpu) lines.push("NPU (npu): removed from config.json. It's the GenieX server install wrote by default, and this PC has no NPU it can run on, so requests tried it first and failed.");
+  if (p.npu) {
+    const n = p.npu;
+    lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${n.support.verified ? '' : ' (not yet tried on this kind of NPU)'}`);
+    lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
+    for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
+  }
+  if (p.npuNote) lines.push(p.npuNote);
   for (const t of p.targets) {
     if (t.problem) {
       lines.push(`${t.name} (${t.id}): skipped, ${t.problem}`);
@@ -625,7 +672,7 @@ export async function listDevices(server: string): Promise<string> {
   return existsSync(bench) ? `${text}\n${await run(bench)}` : text;
 }
 
-export interface SetupIo {
+export interface SetupIo extends NpuIo {
   log: (line: string) => void;
   download?: (d: Download, progress: (done: number, total: number) => void) => Promise<void>;
   unpack?: (zip: string, into: string) => void;
@@ -636,8 +683,15 @@ export interface SetupIo {
  * Downloads what the plan lacks, finds each card's llama.cpp device, and returns config.json's new
  * content (mergeEntries) with an entry per accelerator it set up. The caller writes it.
  */
-export async function runSetup(plan: SetupPlan, raw: Record<string, any>, npuName: string | undefined, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[] }> {
+export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[] }> {
   const problems: string[] = [];
+  const entries: Accelerator[] = [];
+  // The NPU first: its entry is written only once its server has answered a test request.
+  if (plan.npu) {
+    const r = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    problems.push(...r.problems);
+    if (r.entry) entries.push({ ...r.entry, name: core.deviceName(plan.npu.support.label) });
+  }
   for (const d of plan.downloads.filter((d) => !d.have)) {
     io.log(`downloading ${d.what} (${mb(d.size)})`);
     await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
@@ -650,7 +704,6 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, npuNam
     const m = plan.models.find((x) => x.kind === kind && x.role === role);
     return m ? path.join(plan.modelsDir, path.basename(m.file)) : undefined;
   };
-  const entries: Accelerator[] = [];
   for (const t of plan.targets) {
     if (t.problem || !t.variant || !t.folder) {
       if (t.problem) problems.push(`${t.id}: ${t.problem}`);
@@ -672,10 +725,113 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, npuNam
       const p = modelPath(k, 'model');
       if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(k, 'mmproj') : undefined };
     }
-    entries.push(acceleratorEntry({ id: t.id, kind: t.kind, name: t.name, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens }));
+    // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
+    entries.push({ ...acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens }), name: core.deviceName(t.name) });
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
-  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries, npuName), entries, problems };
+  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems };
+}
+
+// ------------------------------------------------------------------------------------------------
+// The NPU's own server
+
+export interface NpuIo {
+  log: (line: string) => void;
+  download?: (d: Download, progress: (done: number, total: number) => void) => Promise<void>;
+  unpack?: (zip: string, into: string) => void;
+  /** Runs a program (the installer, the server's pull): its exit code and output. */
+  run?: (exe: string, args: string[], o?: { timeoutMs?: number; env?: NodeJS.ProcessEnv }) => Promise<{ code: number | null; out: string }>;
+  exists?: (p: string) => boolean;
+  /** The test request: problems, none when the server answered every kind it serves. */
+  testNpu?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** A file's SHA-256 (the pinned model files). */
+  hash?: (file: string) => Promise<string>;
+}
+
+/** The last lines of a program's output, for a problem's line. */
+const tail = (out: string) => out.trim().split(/\r?\n/).slice(-3).join(' / ').slice(0, 300);
+
+/**
+ * Sets the NPU up on its route: its server downloaded (checked against the pinned SHA-256) and installed for this user
+ * unless it's there, each model pulled unless it's there (and, where pinned for this generation, checked file by file),
+ * then a test request of each kind it serves. Its entry comes back only when every step worked; otherwise the problems
+ * say which step failed, and config.json gets no NPU entry from it.
+ */
+export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ entry?: AcceleratorEntry; problems: string[] }> {
+  const exists = io.exists ?? existsSync;
+  const run = io.run ?? runProgram;
+  const fail = (what: string) => ({ problems: [`npu: ${what}. config.json gets no NPU entry; its work goes to the graphics card or the processor`] });
+  if (!n.installed && n.download) {
+    const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
+    io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
+    try {
+      await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+    } catch (e: any) {
+      return fail(`${n.route.server}'s download failed: ${e?.message ?? e}`);
+    }
+    const inst = n.route.install;
+    if (inst.kind === 'inno') {
+      io.log(`installing ${n.route.server} for this user (no administrator)`);
+      const r = await run(d.dest, inst.args, { timeoutMs: 15 * 60_000 });
+      if (r.code !== 0) return fail(`${n.route.server}'s installer ended with ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''}`);
+    } else {
+      const into = expandRoute(inst.into, { tools });
+      io.log(`unpacking ${n.route.server} into ${into}`);
+      try {
+        (io.unpack ?? unpack)(d.dest, into);
+      } catch (e: any) {
+        return fail(`${n.route.server} couldn't be unpacked: ${e?.message ?? e}`);
+      }
+    }
+    rmSync(d.dest, { force: true });
+    if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`);
+  }
+  const env = serverEnv({ env: routeEnv(n.route, tools) });
+  for (const m of n.models) {
+    if (!m.have) {
+      io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
+      const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
+      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`);
+    }
+    const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
+    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`);
+  }
+  const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p) });
+  io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);
+  const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e)))(entry);
+  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`);
+  io.log(`${n.route.server} answered on the NPU: ${n.kinds.join(', ')}`);
+  return { entry, problems: [] };
+}
+
+/**
+ * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
+ * then one short chat answer, and one about a picture when it serves vision. Problems in words; none when each
+ * answered with text. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is given 15.
+ */
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string } = {}): Promise<string[]> {
+  const acc = readAccelerator(e);
+  if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
+  const problems: string[] = [];
+  const text = (j: any) => j?.choices?.[0]?.message?.content;
+  const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
+  await withAcceleratorTurn(
+    lockDirsOf({ id: 'npu', slots: 1 }),
+    async () => {
+      const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
+      await ensureServer(chat, { waitMs: 120_000, readyMs: 15 * 60_000 });
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 8), 15 * 60_000, { loading: true });
+      if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
+      if (acc.vision?.model) {
+        const v = { ...chat, model: acc.vision.model };
+        const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
+        const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, img, 'What colour is this picture? One word.', 8), 15 * 60_000, { loading: true });
+        if (typeof text(r.json) !== 'string') problems.push(`vision gave no answer (${JSON.stringify(r.json).slice(0, 160)})`);
+      }
+    },
+    { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
+  ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
+  return problems;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -780,8 +936,10 @@ export interface SetupOptions {
   validate?: (raw: unknown) => string[];
   /** How the closing line says no accelerator is left (Reeve's: "none configured (Foundry Local)"). */
   noneConfigured?: string;
-  /** Run setup's own download, unpack and device listing (tests give fakes). */
+  /** Run setup's own download, unpack, device listing, installs, pulls and test requests (tests give fakes). */
   io?: Omit<SetupIo, 'log'>;
+  /** The environment the NPU route's paths are expanded from (tests give one). */
+  env?: Record<string, string | undefined>;
 }
 
 /** Accelerator setup as a command: plan, ask, download, find devices, write config.json. Exit code. */
@@ -794,10 +952,13 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     return { code: 2 };
   }
   const detection = o.detection ?? (await detect());
+  // What this PC has, for every program that reads Reeve's config: a model is never called the NPU on a PC without one.
+  const hw = o.detection ? null : hardwareOf(detection);
+  if (hw) rememberHardware(hw);
   log("Looking up llama.cpp's newest build and the models...");
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases: await (o.releases ?? llamaReleases)(), hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome() });
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases: await (o.releases ?? llamaReleases)(), hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
   for (const l of describePlan(plan)) log(l);
-  const settingUp = plan.targets.some((t) => !t.problem);
+  const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
   if (!settingUp && !plan.dropNpu) {
     log('Nothing to set up.');
     return { code: plan.targets.length || o.ids.length ? 1 : 0, plan };
@@ -813,7 +974,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       return { code: 1, plan };
     }
   }
-  const r = await runSetup(plan, file.raw, detection.npu?.name, { log, ...o.io });
+  const r = await runSetup(plan, file.raw, { log, ...o.io });
   for (const p of r.problems) log(`problem: ${p}`);
   if (!r.entries.length && !plan.dropNpu) return { code: 1, plan };
   const saved = writeConfigFile(configFile, r.raw, o.validate ?? validateKeeperConfig);
@@ -869,7 +1030,13 @@ export function printReport(r: AcceleratorReport, out: (s: string) => void = con
     out(`    ${c.vendor}, ${c.memoryGb} GB of its own${c.memoryGb < 2 ? ` (shares the PC's ${Math.round(c.sharedBytes / 1024 ** 3)} GB)` : ''}, DXGI ${c.index}, LUID ${c.luid}${r.recommendedCard === c.id ? ', the card Heiward would pick' : ''}`);
   }
   if (!d.cards.length) out("  no graphics card (DXGI lists none but Windows' own)");
-  out(d.npu ? `  ${d.npu.name}  (npu)\n    driver ${d.npu.driver} (${d.npu.driverDate}); GenieX ${d.geniex ? `at ${d.geniex}` : 'not installed'}` : '  no NPU (no Hexagon driver)');
+  const n = d.npu;
+  const npuServer = n?.vendor === 'qualcomm' ? `; GenieX ${d.geniex ? `at ${d.geniex}` : 'not installed'}` : '';
+  out(
+    n
+      ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${n.verified ? '' : ' (not yet tried on this kind of NPU)'}` : `not used: ${n.why}`}`
+      : "  no NPU (Windows lists no Neural processor)",
+  );
   if (d.cpu) out(`  ${d.cpu.name}  (cpu)\n    ${d.cpu.arch}, ${d.cpu.cores} threads, ${Math.round(d.ramBytes / 1024 ** 3)} GB of memory`);
   for (const p of d.problems) out(`  (couldn't ask: ${p})`);
   out(`Recommended order: ${r.recommendedOrder.join(', ') || '(nothing found)'}`);

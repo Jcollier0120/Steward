@@ -11,6 +11,8 @@
   if (!root) return;
   const token = document.querySelector('meta[name="page-token"]')?.getAttribute('content') || '';
   const SCALAR = ['switch', 'whole', 'number', 'text', 'choice'];
+  // settings-kit.ts's APPLIES_NOTE: beside a setting that isn't used at once.
+  const APPLIES_NOTE = { restart: 'takes effect at the next start', reinstall: 'takes effect at the next install or update', admin: 'takes effect when installed as an administrator' };
   let ids = 0;
   const newId = () => `sf${++ids}`;
 
@@ -460,7 +462,7 @@
       meta.append(reset);
       tracked.push({ f, ed, node, def, reset, saved: opts.saved });
     } else if (opts.saved) tracked.push({ f, ed, node, saved: opts.saved });
-    if (opts.top && f.applies === 'restart') meta.append(h('span', { class: 'badge warn', text: 'takes effect at the next start' }));
+    if (opts.top && APPLIES_NOTE[f.applies]) meta.append(h('span', { class: 'badge warn', text: APPLIES_NOTE[f.applies] }));
     if (!meta.childNodes.length) meta.remove();
     const slot = (parts) => (parts.length && ed.slot(parts)) || { msg, control: ed.control };
     return { node, ed, msg, slot };
@@ -560,12 +562,12 @@
       return;
     }
     saved = clone(data.values);
-    const later = data.schema.some((f) => f.applies === 'restart');
+    const later = [...new Set(data.schema.map((f) => APPLIES_NOTE[f.applies]).filter(Boolean))];
     const usedFrom = data.usedFrom || 'from the next round on';
     intro.replaceChildren(
       'Changes are checked and saved here, into ',
       h('code', { text: data.file }),
-      later ? `. They are used ${usedFrom}, except those marked "takes effect at the next start".` : `. They are used ${usedFrom}.`,
+      later.length ? `. They are used ${usedFrom}, except those marked ${later.map((n) => `"${n}"`).join(' or ')}.` : `. They are used ${usedFrom}.`,
     );
     root.replaceChildren(intro, problems, general, form, actions);
     showProblems();

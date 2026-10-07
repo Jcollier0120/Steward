@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -12,6 +13,13 @@ import { themeNamed } from './themes.ts';
  * loads images from itself only). Without Manor installed there's nothing to go back to: the title bar says nothing,
  * the agent's own Theme menu chooses its theme, and its own switch its developer features.
  */
+/**
+ * What the manor is called when its settings name none (or a blank name): Castellan, the product's name, on the title
+ * bar's "Back to <manor>" and wherever an agent names the manor. The tour's "Back to <manor>" (react/tour.tsx) says
+ * the same.
+ */
+export const MANOR_DEFAULT_NAME = 'Castellan';
+
 export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
 
 export interface ManorLink {
@@ -46,27 +54,27 @@ export function manorLink(home = manorHome()): ManorLink | null {
 }
 
 /** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
-function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean } | null {
+function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown } | null {
   const file = path.join(home, 'settings.json');
   if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
-  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown } = {};
+  let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown } = {};
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
   } catch {
     // Unreadable settings: Manor uses its defaults, and so does this link.
   }
-  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : 'Manor';
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : MANOR_DEFAULT_NAME;
   const port = Number.isInteger(raw.port) && (raw.port as number) >= 1024 && (raw.port as number) <= 65535 ? (raw.port as number) : DEFAULT_PORT;
   let theme = 'system';
   try {
     theme = themeNamed(raw.theme)?.name ?? 'system';
   } catch {
-    // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to Manor still works.
+    // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to <manor> still works.
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
   const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
-  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu };
+  return { link: { name, port, url: `http://manor.localhost:${port}/`, theme, developerOptions, gpuWithNpu: raw.gpuWithNpu !== false }, saysGpuWithNpu, notify: raw.notify };
 }
 
 /** Manor's Settings page, where its Developer options switch is (Manor's page at #/settings). */
@@ -93,6 +101,135 @@ export function developerOptions(own: boolean, home = manorHome()): { on: boolea
 export function gpuWithNpu(own = true, home = manorHome()): { on: boolean; setBy: ManorLink | null } {
   const m = readManor(home);
   return m?.saysGpuWithNpu ? { on: m.link.gpuWithNpu, setBy: m.link } : { on: own, setBy: null };
+}
+
+/**
+ * The manor's notification preferences (settings.json's "notify", on Manor's Settings page): whether agents notify
+ * the owner at all, and the quiet hours when none does. Every agent follows them; none has a switch of its own.
+ * Quiet hours are local times, "HH:MM" (24-hour), from `quietFrom` until `quietTo`, and may span midnight; null for
+ * both when there are none (equal times, as Manor says, or none given).
+ */
+export interface NotifyPrefs {
+  on: boolean;
+  quietFrom: string | null;
+  quietTo: string | null;
+}
+
+/** Manor's defaults for "notify", which a value it can't use falls back to, field by field, as Manor's panel does. */
+export const NOTIFY_DEFAULT: NotifyPrefs = { on: true, quietFrom: '22:00', quietTo: '07:00' };
+
+const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const minutesOf = (t: string) => {
+  const m = CLOCK.exec(t)!;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
+/** "notify" as Manor keeps it, checked: each wrong field its default; equal quiet times, no quiet hours. */
+export function notifyFrom(raw: unknown): NotifyPrefs {
+  const o = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const clock = (v: unknown, def: string | null) => (typeof v === 'string' && CLOCK.test(v) ? v : def);
+  const quietFrom = clock(o.quietFrom, NOTIFY_DEFAULT.quietFrom);
+  const quietTo = clock(o.quietTo, NOTIFY_DEFAULT.quietTo);
+  const quiet = quietFrom && quietTo && quietFrom !== quietTo;
+  return { on: typeof o.on === 'boolean' ? o.on : NOTIFY_DEFAULT.on, quietFrom: quiet ? quietFrom : null, quietTo: quiet ? quietTo : null };
+}
+
+/**
+ * The manor's notification preferences, read afresh; null without an installed Manor, or one that doesn't say (an
+ * older Manor, with no "notify"): then nothing holds an agent back (mayNotify()).
+ */
+export function notifyPrefs(home = manorHome()): NotifyPrefs | null {
+  const m = readManor(home);
+  return m && m.notify !== undefined ? notifyFrom(m.notify) : null;
+}
+
+/**
+ * Whether an agent may notify the owner now: Manor's "notify me" is on and `now` (local time) is outside its quiet
+ * hours. Always true without Manor's say (notifyPrefs() null). Call it for each notification, so a change in Manor
+ * applies at once; what's held back is the agent's to keep for its page, or drop, never to send later in a burst.
+ */
+export function mayNotify(now = new Date(), home = manorHome()): boolean {
+  return notifyAllowed(notifyPrefs(home), now);
+}
+
+/** mayNotify() for preferences in hand. */
+export function notifyAllowed(p: NotifyPrefs | null, now = new Date()): boolean {
+  if (!p) return true;
+  if (!p.on) return false;
+  if (!p.quietFrom || !p.quietTo) return true;
+  const t = now.getHours() * 60 + now.getMinutes();
+  const from = minutesOf(p.quietFrom);
+  const to = minutesOf(p.quietTo);
+  const quiet = from < to ? t >= from && t < to : t >= from || t < to;
+  return !quiet;
+}
+
+/** How far above the installed copy's port a development checkout serves, for every agent (each app.ts) and Manor. */
+export const DEV_PORT_OFFSET = 10000;
+
+/**
+ * Another agent's page in this manor: its "home" in Manor's agents.json (the agents it announces), else in its
+ * staff.json (`staffFile`, the installed Manor's app\staff.json unless said). With `dev`, its development checkout's,
+ * on its port + DEV_PORT_OFFSET. Null when Manor doesn't know the agent, or says no http(s) address for it. Read
+ * afresh, and never written into settings: the address is Manor's to say.
+ */
+export function agentUrl(id: string, o: { dev?: boolean; home?: string; staffFile?: string } = {}): string | null {
+  const home = o.home ?? manorHome();
+  for (const a of [...listOf(jsonAt(path.join(home, 'agents.json')), 'agents'), ...listOf(jsonAt(o.staffFile ?? path.join(home, 'app', 'staff.json')), 'agents')]) {
+    if (a.id !== id) continue;
+    const at = textAt(a, 'home');
+    if (!at) continue;
+    let url: URL;
+    try {
+      url = new URL(at);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+    if (o.dev) url.port = String(Number(url.port || (url.protocol === 'https:' ? 443 : 80)) + DEV_PORT_OFFSET);
+    return url.href;
+  }
+  return null;
+}
+
+let owner: { login: string | null; at: number } | null = null;
+const OWNER_RETRY_MS = 10 * 60_000;
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+
+/**
+ * The GitHub account gh is signed in as on this PC (its login, the owner of the owner's repositories), for defaults
+ * that would otherwise name someone: settings start empty and mean this. From gh's own config, without the network;
+ * else from GitHub, through gh. Kept once known; when not (no gh, or not signed in), asked again after ten minutes.
+ * Null when there's none. `run` runs gh with its arguments and returns what it printed (for tests).
+ */
+export function githubOwner(o: { run?: (args: string[]) => string; now?: number } = {}): string | null {
+  const now = o.now ?? Date.now();
+  if (owner && (owner.login || now - owner.at < OWNER_RETRY_MS)) return owner.login;
+  const run = o.run ?? ghText;
+  let login: string | null = null;
+  for (const args of [['config', 'get', '-h', 'github.com', 'user'], ['api', 'user', '--jq', '.login']]) {
+    const said = run(args).trim();
+    if (LOGIN.test(said)) {
+      login = said;
+      break;
+    }
+  }
+  owner = { login, at: now };
+  return login;
+}
+
+/** For tests: forget the GitHub owner. */
+export const forgetGithubOwner = () => {
+  owner = null;
+};
+
+/** What gh (on PATH) printed, or nothing when it isn't there or fails. */
+function ghText(args: string[]): string {
+  try {
+    return execFileSync('gh', args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -130,8 +267,6 @@ export interface ManorOwn {
 /** The most projects settings.json may list, and the most version files one may name. */
 export const MAX_PROJECTS = 50;
 export const MAX_VERSION_FILES = 20;
-/** Manor's own repository: it isn't in its staff.json, which lists the agents. */
-export const MANOR_REPO = 'Jcollier0120/Manor';
 
 const FULL_PATH = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
@@ -191,15 +326,17 @@ const textAt = (o: unknown, ...keys: string[]): string | null => {
 };
 
 /**
- * The manor's own, which no project may be: Manor's repository; every agent's in Manor's staff.json (`staffFile`, the
- * installed Manor's app\staff.json unless said) and in its agents.json, the announced ones among them; and the Steward's
- * employees, their repositories and checkouts, from its settings.json (or, when that names none, the staff table it
- * keeps, staff.json), with the Steward's own checkout. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward.
+ * The manor's own, which no project may be: every agent's repository that Manor's staff.json (`staffFile`, the installed
+ * Manor's app\staff.json unless said) or its agents.json still names (newer ones name none: releases are found in the
+ * public releases repository by id); and the Steward's employees, their repositories and checkouts, from its
+ * settings.json (or, when that names none, the staff table it keeps, staff.json), with the Steward's own checkout when
+ * its settings name one. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward. Nothing here names anyone's
+ * account or folder: what runs on someone else's PC knows only what that PC says.
  */
 export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: string } = {}): ManorOwn {
   const home = o.home ?? manorHome();
   const steward = o.stewardHome ?? process.env.STEWARD_HOME ?? path.join(os.homedir(), '.steward');
-  const repos = new Set<string>([MANOR_REPO]);
+  const repos = new Set<string>();
   const checkouts = new Set<string>();
   for (const a of [...listOf(jsonAt(o.staffFile ?? path.join(home, 'app', 'staff.json')), 'agents'), ...listOf(jsonAt(path.join(home, 'agents.json')), 'agents')]) {
     const repo = textAt(a, 'release', 'repo');
@@ -213,8 +350,8 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
     const checkout = textAt(e, 'checkout') ?? textAt(e, 'checkout', 'path');
     if (checkout && FULL_PATH.test(checkout)) checkouts.add(checkout);
   }
-  const own = textAt(settings, 'stewardCheckout') ?? 'C:\\Projects\\Steward';
-  if (FULL_PATH.test(own)) checkouts.add(own);
+  const own = textAt(settings, 'stewardCheckout');
+  if (own && FULL_PATH.test(own)) checkouts.add(own);
   return { repos: [...repos], checkouts: [...checkouts] };
 }
 
@@ -245,7 +382,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     if (!name || name.length > 60) return wrong('should have a "name" of 1 to 60 characters');
     const checkout = typeof e.checkout === 'string' ? e.checkout.trim() : '';
     if (!checkout || checkout.length > 260 || !FULL_PATH.test(checkout) || /[\u0000-\u001f<>"|?*]/.test(checkout.slice(2))) {
-      return wrong('should have a "checkout": the full path of its clone, like C:\\Projects\\Example');
+      return wrong('should have a "checkout": the full path of its clone, like D:\\Code\\Example');
     }
     let repo: string | null = null;
     if (given(e.repo)) {

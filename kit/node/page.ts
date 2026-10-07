@@ -38,11 +38,11 @@ export function until(at: number | string | null | undefined, now = Date.now()):
 
 /**
  * The label every model answer carries: a 4B model's words, for a person to check, and where they were
- * written ("note from the NVIDIA GeForce RTX 4090, unverified"). A note kept from before the
- * accelerators says nothing of where, and came from the NPU.
+ * written ("note from the NVIDIA GeForce RTX 4090, unverified"). A note that says nothing of where (one kept from
+ * before the accelerators) is "from a local model": it is never guessed to be the NPU's.
  */
 export const unverified = (text: string, from?: AcceleratorRef | null) =>
-  `<span class="note"><span class="badge npu" title="Written by a local model on ${esc(theAccelerator(from))}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
+  `<span class="note"><span class="badge npu" title="Written by a local model${from?.name ? ` on ${esc(theAccelerator(from))}` : ''}. Check it against the facts beside it.">${esc(noteLabel(from))}</span> ${esc(text)}</span>`;
 
 /**
  * Where the Settings panel goes on an agent's page. The kit's web part draws it: settings-panel.js
@@ -100,10 +100,18 @@ ${items.join('\n')}
  * on duty (with its next round, when the agent says when that is), or off duty.
  */
 export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number }): string {
-  if (o.busy) return `<span class="status-pill busy" title="A round is under way. This page refreshes itself until it's done.">${esc(o.look.busy)}</span>`;
-  if (!o.duty.onDuty) return `<span class="status-pill off" title="Off duty since ${esc(ago(o.duty.since, o.now))}: its scheduled rounds are paused. Run now still works.">Off duty</span>`;
+  const p = pillOf(o);
+  return `<span class="status-pill ${p.kind}" title="${esc(p.title)}">${esc(p.text)}</span>`;
+}
+
+/** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
+export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+  if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
+  // Its required settings not filled in yet (required.ts): nothing runs until they are.
+  if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
+  if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
   const next = until(o.nextAt, o.now);
-  return `<span class="status-pill on" title="On duty: its rounds run on their schedule. Manor's Stop pauses them.">On duty${next ? ` · next round ${esc(next)}` : ''}</span>`;
+  return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Castellan's Stop pauses them." };
 }
 
 /**
@@ -328,10 +336,31 @@ document.addEventListener('click', (e) => {
   route();
   link.hidden = false;
 })();
+// Someone at the page: typing, ticking, in Settings or the theme menu. A reload then waits for them.
+const engaged = () => !!document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
 if (REFRESH) setInterval(() => {
-  const busy = document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
-  if (!busy) location.reload();
+  if (!engaged()) location.reload();
 }, REFRESH * 1000);
+// A round that starts or ends after the page was drawn, by the schedule, Run now or another program: the ping
+// says so (busy, its last and current run), and the page is drawn again with what it found. Without this, a page
+// drawn between rounds never showed the next one's work until someone reloaded it.
+(() => {
+  let seen = null;
+  let due = false;
+  const look = async () => {
+    try {
+      const r = await fetch('/api/ping', { cache: 'no-store' });
+      if (!r.ok) return;
+      const p = await r.json();
+      const now = JSON.stringify([!!p.busy, p.lastRunAt ?? null, p.runningSince ?? null]);
+      if (seen === null) seen = now;
+      else if (now !== seen) due = true;
+      if (due && !engaged()) location.reload();
+    } catch (e) { /* the page's server is stopping or restarting: the next look tries again */ }
+  };
+  look();
+  setInterval(look, 5000);
+})();
 </script>
 <script src="/settings.js" defer></script>
 </body>
@@ -369,7 +398,7 @@ function offDuty(d: Duty): string {
  * The agent's own colour for its scene, and its scene's motion: its Light colour on a light theme, its Dark colour on
  * a dark one (Dark and the dark colour themes, or Match Windows while Windows is dark).
  */
-function lookCss(look: Look): string {
+export function lookCss(look: Look): string {
   const dark = themes().filter((t) => t.scheme === 'dark').map((t) => `:root[data-theme="${t.name}"]`);
   return `
 :root { --role: ${look.accent.light}; }
@@ -384,7 +413,7 @@ ${look.motion}
  * page() puts before these). The kit's older names stay for the agents' own styles: --card (a card's background)
  * and --soft (a quiet fill). --ink and --ink-soft are the agents' icons' own colours, for the scenes' outlines.
  */
-const CSS = `
+export const CSS = `
 :root { --card: var(--surface-2); --soft: var(--quiet-bg); --role-soft: color-mix(in srgb, var(--role) 22%, var(--bg)); --titlebar-h: 57px; }
 * { box-sizing: border-box; }
 /* The title bar stays at the top as the page scrolls, so a jump to #a-section lands below it, not under it.
@@ -566,8 +595,10 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
   .brand { flex: 1 1 0; }
   .brand .role { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .scene { width: 52px; height: 33px; }
-  .tools { flex-basis: 100%; margin-left: 0; }
-  .status-pill { margin-right: auto; }
+  /* The tools wrap rather than run off the side: the title bar's action goes under the pill when they don't fit, and a
+     long pill is cut with an ellipsis (its title says it all). */
+  .tools { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; row-gap: 6px; }
+  .status-pill { margin-right: auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .tool-link { width: 32px; padding: 0; justify-content: center; }
   .tool-link span { display: none; }
   .theme-picker { position: static; }
@@ -576,6 +607,8 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
   main.view { padding: 10px 14px 22px; }
   footer { margin: 0 8px; }
   th, td { padding: 6px 6px; }
+  /* A table wider than the phone scrolls inside itself, never the page: GitHub's way, as a block that holds the table. */
+  main.view table { display: block; max-width: 100%; overflow-x: auto; }
 }
 `;
 /* The Settings panel's own styles are the kit's web part: web/settings-panel.css, linked as /settings.css. */

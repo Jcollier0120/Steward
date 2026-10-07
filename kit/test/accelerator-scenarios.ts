@@ -42,7 +42,7 @@ const adapters = [
   { index: 4, name: 'nvidia geforce rtx 4090', luid: '0x00000000_0x0000f3c7', dedicatedMemory: 24e9, vendorId: 0x10de, software: false },
 ];
 
-const configs: { case: string; raw: unknown }[] = [
+const configs: { case: string; raw: unknown; hw?: core.Hardware }[] = [
   {
     case: "Reeve's config lists the accelerators: auto order by memory, a vision model without an address on the chat server, a bad id and a second npu named as problems",
     raw: {
@@ -65,7 +65,7 @@ const configs: { case: string; raw: unknown }[] = [
     },
   },
   {
-    case: 'a card has at most 16 slots, the NPU always 1; a name left out is the kind\'s; no cap is 2400',
+    case: "a card has at most 16 slots, the NPU always 1; without hardware.json each is its kind's name, whatever the entry says; no cap is 2400",
     raw: { accelerators: [{ id: 'gpu-big', slots: 40, memoryGb: 24, chat: { baseUrl: 'http://x:1', model: 'm' } }, { id: 'npu', slots: 3, chat: { baseUrl: 'http://x:2', model: 'm' } }, { id: 'cpu', name: '  ', embed: { baseUrl: 'http://x:3', model: 'e' } }], requestTimeoutMs: 5000 },
   },
   {
@@ -112,6 +112,39 @@ const configs: { case: string; raw: unknown }[] = [
   { case: 'a list where nothing serves anything is Reeve not set up', raw: { accelerators: [{ id: 'npu', chat: { baseUrl: 'http://x:1', model: 'm' }, enabled: false }, { id: 'cpu', name: 'Oryon' }] } },
   { case: 'an older config with no endpoint is Reeve not set up', raw: { npuMaxContextTokens: 2400 } },
   { case: "entries that can't be read are named, not taken for Reeve not set up", raw: { accelerators: [{ name: 'no id' }, { id: 'tpu-1', chat: { baseUrl: 'http://x:1', model: 'm' } }] } },
+  {
+    case: "names come from this PC (hardware.json), never from the config: the NPU's as Windows lists it, a card's as DXGI does, found by its id (made from DXGI's name), shown without (R) and (TM); the processor's; a card it doesn't list is the kind's",
+    raw: {
+      accelerators: [
+        { id: 'npu', name: 'My NPU', chat: { baseUrl: 'http://x:1', model: 'm' } },
+        { id: 'gpu-nvidia-geforce-rtx-4090-2', name: 'The second one', memoryGb: 24, chat: { baseUrl: 'http://x:2', model: 'm' } },
+        { id: 'gpu-gone', name: 'A card taken out', memoryGb: 8, chat: { baseUrl: 'http://x:3', model: 'm' } },
+        { id: 'gpu-intel-r-uhd-graphics-770', memoryGb: 0.1, chat: { baseUrl: 'http://x:5', model: 'm' } },
+        { id: 'cpu', name: 'Mine', chat: { baseUrl: 'http://x:4', model: 'm' } },
+      ],
+    },
+    hw: {
+      npu: true,
+      cards: [{ name: 'NVIDIA GeForce RTX 4090', memoryGb: 24 }, { name: 'NVIDIA GeForce RTX 4090 #2', memoryGb: 24 }, { name: 'Intel(R)  UHD Graphics 770', memoryGb: 0.1 }],
+      npuName: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU',
+      cpuName: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU',
+    },
+  },
+  {
+    case: "an older config's NPU is named from this PC too",
+    raw: { chatEndpoint: { baseUrl: 'http://x:1', model: 'm', device: 'Npu' } },
+    hw: { npu: true, cards: [], npuName: 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU' },
+  },
+  {
+    case: "on a PC with no NPU, an entry listed as the NPU runs on its one card, by the card's name and id, whatever name the entry carries",
+    raw: { accelerators: [{ id: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: 'http://x:1', model: 'm' } }], acceleratorOrder: ['npu'] },
+    hw: { npu: false, cards: [{ name: 'NVIDIA(R) GeForce RTX 4080 SUPER', memoryGb: 16 }], npuName: 'left from before', cpuName: 'AMD Ryzen 9 7950X 16-Core Processor' },
+  },
+  {
+    case: "on a PC with no NPU and no card, an older config's NPU runs on the processor, by its name",
+    raw: { chatEndpoint: { baseUrl: 'http://x:1', model: 'm', device: 'Npu' } },
+    hw: { npu: false, cards: [], cpuName: 'AMD Ryzen 9 7950X 16-Core Processor' },
+  },
 ];
 
 const files: { case: string; file: string; text: string | null }[] = [
@@ -227,7 +260,7 @@ export function makeAcceleratorVectors() {
   const byId = (list: core.Accelerator[]) => list.map((a) => a.id);
   return {
     about:
-      "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; accelerators are given as a config's raw entries, read by parseAccelerators first. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
+      "Shared test data for the accelerators (ACCELERATORS.md, beside this file): the ids, a card's name, reading Reeve's config, the order, the failure markers, the game check, the candidates for a request and the pick, as the kit's core answers them, with the timings of rules.json. Every implementation of these rules runs them: the kit's core directly, its node part, its dotnet part (the core in Jint). nowMs is the clock unless a case gives its own; accelerators are given as a config's raw entries, read by parseAccelerators first; a config's hw, when it has one, is what the PC has (hardware.json), and none is null. Made by kit/test/accelerator-scenarios.ts; take this file from a kit release, unchanged.",
     nowMs: NOW,
     ids: names.map((name) => ({ name, id: core.acceleratorId('gpu', name) })),
     isId: ids.map((id) => ({ id, valid: core.isId(id), kind: core.kindOfId(id) })),
@@ -240,7 +273,7 @@ export function makeAcceleratorVectors() {
       { case: "software adapters left out; a second card of a name, in any case, is #2; no name is 'Graphics card <n>'", adapters, software: false, keys: core.keyedCards(adapters).map((c) => c.key) },
       { case: 'software adapters listed when asked', adapters, software: true, keys: core.keyedCards(adapters, { software: true }).map((c) => c.key) },
     ],
-    configs: configs.map((c) => ({ ...c, expect: core.parseAccelerators(RULES, c.raw) })),
+    configs: configs.map((c) => ({ ...c, expect: core.parseAccelerators(RULES, c.raw, c.hw ?? null) })),
     files: files.map((f) => ({ ...f, expect: core.readConfig(RULES, f.file, f.text) })),
     failures: failures.map((f) => ({ ...f, expect: core.failureOf(RULES, f.text, NOW) })),
     reasons: reasons.map((text) => ({ text, expect: core.oneLine(RULES, text) })),
@@ -275,7 +308,7 @@ export function makeAcceleratorVectors() {
       { case: 'an older config\'s card', ref: { id: 'gpu-graphics-card', name: 'Graphics card' } },
       { case: 'the processor', ref: { id: 'cpu', name: 'Processor' } },
       { case: 'a name that says "the"', ref: { id: 'cpu', name: 'The Oryon CPU' } },
-      { case: 'none: a note from before the accelerators came from the NPU', ref: null },
+      { case: 'none: a note that says nothing of where (from before the accelerators) is from a local model, never guessed to be the NPU', ref: null },
     ].map((m) => ({ ...m, theAccelerator: core.theAccelerator(m.ref), noteLabel: core.noteLabel(m.ref) })),
     tokens: [
       { text: 'x'.repeat(9000), estimate: core.estimateTokens(RULES, 'x'.repeat(9000)) },

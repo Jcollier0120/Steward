@@ -1,9 +1,12 @@
 // Made by kit/test/core-types.ts from messages.js's JSDoc: don't edit it, run npm run core-types.
 import type { AcceleratorRef } from './ids.js';
 /** @import { AcceleratorRef } from './ids.js' */
+/** What an accelerator nobody recorded is called: never "the NPU", which a PC may not have. */
+export declare const UNKNOWN_ACCELERATOR = "a local model";
 /**
  * "the NPU", "the NVIDIA GeForce RTX 4090", "the graphics card": an accelerator in a sentence. A name that
- * starts with "the" is left as it is; none is the NPU (a note kept from before accelerators).
+ * starts with "the" is left as it is. None (a note kept from before accelerators, or one that didn't say) is
+ * "a local model": it may have been a graphics card, so it is never guessed to be the NPU.
  * @param {AcceleratorRef | { name: string } | null | undefined} a
  * @returns {string}
  */
@@ -19,11 +22,13 @@ export declare function noteLabel(a: AcceleratorRef | {
     name: string;
 } | null | undefined): string;
 /**
- * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a
- * PC without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
- * serves anything. The same words in each case.
+ * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
+ * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since
+ * kit 2.31.0 it points to the app's own setup (Set up local AI), which every PC has, not to Reeve, which a household
+ * may never hire; since 2.32.1 it names the app as the person bought it, Castellan. The old name stays for the agents that import it.
  */
-export declare const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings \u2192 Set up (or run `reeve accelerators setup`)";
+export declare const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI";
+export declare const REEVE_NOT_SET_UP = "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI";
 /**
  * What the lock's folder is called in a message: "the NPU" for the NPU's, else its name.
  * @param {string} folder The lock's first folder name (`npu`, `gpu-…`).
@@ -55,6 +60,8 @@ export declare const say: Readonly<{
     badId: (id: string) => string;
     /** @param {string} id */
     listedTwice: (id: string) => string;
+    /** @param {string} id @param {string} instead */
+    notTheNpu: (id: string, instead: string) => string;
     /** @param {AcceleratorRef} acc @param {string} reason @param {number} min */
     skippedFailed: (acc: AcceleratorRef, reason: string, min: number) => string;
     /** @param {AcceleratorRef} acc @param {string[]} by */
@@ -75,7 +82,7 @@ export declare const say: Readonly<{
     notServing: (id: string, work: string) => string;
     /** @param {AcceleratorRef} acc */
     gpuSetAside: (acc: AcceleratorRef) => string;
-    noVisionModel: () => "no vision model in Reeve's config.json (an accelerator's \"vision\", or \"visionModel\" in an older config)";
+    noVisionModel: () => "no vision model in the accelerators' config.json (an accelerator's \"vision\", or \"visionModel\" in an older config)";
     /** @param {string} work */
     noneServes: (work: string) => string;
     /** @param {number} promptTokens @param {number} maxTokens @param {number} cap @param {boolean} several */

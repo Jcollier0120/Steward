@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { afterWords } from '../after.ts';
 import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
@@ -8,9 +9,10 @@ import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
+import { kitTrialHold } from './trial.ts';
 import { claimsOn } from '../claims.ts';
 import type { Held } from '../alarms.ts';
-import { bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
+import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 
 /**
@@ -22,13 +24,17 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
  * branch is theirs, and stays. The rest wait, and say why.
  *
  * A PR can ask for steps after it is merged, in a steward block in its description (src/after.ts): release,
- * install, approve-jobs. One whose block can't be read waits, and so does one whose steps couldn't happen: an
- * install with no install command in Settings, or a release of a version that is already released. With
- * --yes, the steps run after the merge (stages/aftermerge.ts).
+ * install, approve-jobs. One whose block can't be read waits, and so does one whose release couldn't happen: its
+ * version, once merged, is already released. An install or approval with no command for it in Settings doesn't hold
+ * it: that employee is installed (Heiward, by Manor, from its own installer) or has its jobs approved another way, so
+ * the step is skipped after the merge, and its line says so. With --yes, the steps run after the merge
+ * (stages/aftermerge.ts).
  *
  * A team PR is held to more, since no one asked for it here: the version it sets must be new (not released, above
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
- * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump.
+ * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
+ * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
+ * (stages/trial.ts), or is labelled to say the agents change with it.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -38,7 +44,7 @@ import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
-  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `a draft from the Wright, with the Bailiff: ${pr.bailiffHold}` : 'a draft';
+  if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `${BAILIFF_WAIT}${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return 'GitHub is still working out whether it merges: try again in a minute';
@@ -85,14 +91,13 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
 export const RAISE = 'raise the version in the PR';
 
 /**
- * Why the steps a mergeable PR asks for couldn't happen, or null: an install or approval with no command for it in
- * Settings, or a release whose version once merged (the PR's when it sets one, else its branch's) is already released.
+ * Why the steps a mergeable PR asks for couldn't happen, or null: a release whose version once merged (the PR's when
+ * it sets one, else its branch's) is already released. An install or approval with no command for it in Settings
+ * isn't one: it is skipped after the merge (stages/aftermerge.ts).
  */
 export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<string | null> {
   const a = pr.after;
   if (!a) return null;
-  if (a.steps.includes('install') && !e.install) return `it asks for install, but Settings give ${e.name} no install command`;
-  if (a.steps.includes('approve-jobs') && !e.approve) return `it asks for approve-jobs, but Settings give ${e.name} no approve command`;
   if (!a.steps.includes('release')) return null;
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return `it asks for a release, but there's no checkout at ${repo} to read its version from`;
@@ -136,16 +141,24 @@ export const behindItsBranch = (pr: PrInfo, branch: string) =>
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
+/** Why a repository's ready PRs aren't merged: the person hasn't said yes for it. */
+export const NOT_MERGING = "left to you: the Steward merges PRs to it only once you say yes (Merges your ready PRs, in Settings)";
+
+/** Why a draft of the Wright's waits where the Bailiff isn't installed. */
+export const NO_BAILIFF = "the Bailiff isn't on this PC to review it: review it yourself and mark it ready, or hire the Bailiff";
+
 /**
  * Each of the Wright's drafts, looked at (review.ts): one that passes is marked ready on GitHub, with a comment saying
  * what was looked at, and goes on as any ready team PR (tested here at its head, then merged); one that doesn't keeps
- * the reason, which its hold then says. Where the Bailiff is installed (`bailiff`), one that passes is marked ready
- * only once the Bailiff has approved its current head commit; until then it waits for the Bailiff, and says so.
+ * the reason, which its hold then says. One that passes is marked ready only once the Bailiff has approved its current
+ * head commit; until then it waits for the Bailiff, and says so. Where the Bailiff isn't installed (`bailiff` false),
+ * none is marked ready: the Wright's work waits for a person, as the manor takes on no new work without both.
  */
+
 export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], bailiff = bailiffInstalled()): Promise<void> {
   const s = ctx.settings.wrightReview;
   for (const pr of prs.filter(isWrightDraft)) {
-    let why = reviewHold(pr, s);
+    let why = reviewHold(pr, s, e.id);
     if (!why) {
       try {
         why = await dependencyHold(ctx, e, pr);
@@ -157,12 +170,15 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], b
       pr.reviewHold = why;
       continue;
     }
-    if (bailiff) {
-      const waits = await bailiffHold(ctx, e, pr);
-      if (waits) {
-        pr.bailiffHold = waits;
-        continue;
-      }
+    // New work needs both: without the Bailiff, a draft of the Wright's waits for a person to review it and mark it ready.
+    if (!bailiff) {
+      pr.reviewHold = NO_BAILIFF;
+      continue;
+    }
+    const waits = await bailiffHold(ctx, e, pr);
+    if (waits) {
+      pr.bailiffHold = waits;
+      continue;
     }
     const ready = await ctx.run('gh', ['pr', 'ready', String(pr.number), '--repo', e.repo], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
     if (ready.code !== 0) {
@@ -182,7 +198,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
   const g = glanceOf(ctx, e);
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
-  if (!prs.length) return { ...result(e, 'skipped', o.team ? "no open PRs of the Steward's or the team's" : 'no open Steward PRs'), merged: [], held: [] };
+  const none = !o.team ? 'no open Steward PRs' : ctx.settings.team.length ? "no open PRs of the Steward's or the team's" : `no open Steward PRs (${NO_TEAM})`;
+  if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
+  // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
+  if (o.yes && !e.merges) return { ...result(e, 'skipped', `${prs.length} open PR${prs.length === 1 ? '' : 's'} (${prs.map((p) => `#${p.number}`).join(', ')}) ${NOT_MERGING}`, { url: prs[0].url }), merged: [], held: [] };
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
@@ -270,6 +289,18 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
       notes.set(pr.number, t.note);
+    }
+    // A PR to the Steward that raises the kit: the new kit tried on every agent first (stages/trial.ts).
+    let trial: string | null;
+    try {
+      trial = await kitTrialHold(ctx, e, pr);
+    } catch (err) {
+      trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
+    }
+    if (trial) {
+      waits.push(`${describe(pr)} waits: ${trial}`);
+      held.push(heldOf(pr, trial));
+      continue;
     }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';

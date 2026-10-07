@@ -10,16 +10,19 @@ import { after, before, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-page-'));
 process.env.STEWARD_HOME = home;
 process.env.STEWARD_PORT = String(41000 + Math.floor(Math.random() * 8000));
-writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [] }));
+writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], stewardRepo: 'octocat/steward' }));
 
 const { APP, port } = await import('../src/app.ts');
 const { serveSteward, askOf } = await import('../src/agent.ts');
 const { runner } = await import('./helpers.ts');
+const { bundleForNode, importPath } = await import('../kit/test/react-render.ts');
 
 const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? { code: 0, out: JSON.stringify([{ tagName: 'kit-v1.0.0', isDraft: false }]), err: '' } : undefined));
 let served: Awaited<ReturnType<typeof serveSteward>>;
+/** While a test holds it, every command waits: a stage stays running until it lets go. */
+let hold: Promise<void> = Promise.resolve();
 before(async () => {
-  served = await serveSteward({ run: r.run });
+  served = await serveSteward({ run: async (cmd, args, opts) => (await hold, r.run(cmd, args, opts)) });
   await served.idle();
 });
 after(async () => {
@@ -29,6 +32,16 @@ after(async () => {
 });
 
 const base = () => `http://127.0.0.1:${port}`;
+
+/** The page's body (src/web/steward.tsx), or Run now, as HTML from /api/page's body: what the browser draws. */
+const renderStewardBody = async (name: 'StewardBody' | 'RunNow' = 'StewardBody') => {
+  const m = await bundleForNode<{ render: (body: unknown) => string }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { ${name} } from '${importPath('src/web/steward.tsx')}';
+     export const render = (v) => renderToStaticMarkup(<${name} v={v} />);`,
+  );
+  return m.render;
+};
 const post = (route: string, headers: Record<string, string>, body: unknown = { employees: [], kit: '1.0.0' }) =>
   fetch(`${base()}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
@@ -43,16 +56,39 @@ test('it pings as the Steward, on duty and idle', async () => {
   assert.equal((await fetch(`${base()}/favicon.svg`)).headers.get('content-type'), 'image/svg+xml');
 });
 
-test('the page shows the kit, the stages and Settings, and carries its token', async () => {
+test('the page is drawn in the browser: its shell carries the token, its first data and the bundle', async () => {
   const html = await (await fetch(`${base()}/`)).text();
   assert.match(html, /<meta name="page-token" content="[0-9a-f]{48}">/);
-  assert.match(html, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
-  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(html, new RegExp(`data-post="/api/stage/${stage}"[^>]*data-confirm=`));
-  assert.match(html, /data-confirm="Merge the open PRs the team opened \(Jcollier0120\), and the Steward&#39;s, [^"]*"[^>]*>Merge the team's PRs</);
-  assert.match(html, /data-settings-panel/);
-  // By itself (Settings' default): its rounds, and Run now, which the kit lifts into the title bar.
-  assert.match(html, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team&#39;s that is ready/);
-  assert.match(html, /data-post="\/api\/run" data-confirm="A round now: [^"]*"[^>]*>Run now</);
+  assert.match(html, /<div id="root">/);
+  assert.match(html, /<script type="module" src="\/page\.js"><\/script>/);
+  const first = JSON.parse(html.match(/<script type="application\/json" id="page-data">([^<]*)<\/script>/)![1]);
+  const page = await (await fetch(`${base()}/api/page`)).json();
+  assert.equal(first.body.staff?.kit ?? null, page.body.staff?.kit ?? null, 'the first data is /api/page');
+  assert.equal(page.shell.app.name, 'Steward');
+  assert.equal(page.shell.pill.kind, 'on');
+  const js = await fetch(`${base()}/page.js`);
+  assert.equal(js.status, 200, 'a checkout builds its bundle');
+  assert.match(js.headers.get('content-type') ?? '', /javascript/);
+});
+
+test('the page shows the kit, the stages, its rounds and Run now', async () => {
+  const { body } = await (await fetch(`${base()}/api/page`)).json();
+  const html = (await renderStewardBody())(body);
+  // No repositories here: the kit is the one it keeps to run on, its rounds keep the staff's pages up, and no stages.
+  assert.equal(body.round.repos, false);
+  assert.match(html, /The kit the Steward manages: <strong>1\.0\.0<\/strong>/);
+  assert.match(html, /No repositories yet\. Pick the ones to look after from those Reeve found/, 'no repositories: how to add one');
+  assert.match(html, /No repositories to look after on this PC, so a round every 10 minutes while on duty opens again, through Manor, the page of any agent/);
+  assert.doesNotMatch(html, /data-post="\/api\/stage\//, 'no stages, with no one to run them for');
+  // With an employee: the kit it hands out, the stages and the whole round (the same data, drawn as if it had one).
+  const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: ['node'], usesKit: true, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
+  const withOne = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true } });
+  assert.match(withOne, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
+  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
+  assert.match(withOne, />Merge the team(&#x27;|')s PRs</);
+  // By itself (Settings' default): its rounds; and Run now, in the title bar.
+  assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
+  assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   const ping = await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
@@ -88,6 +124,35 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   assert.deepEqual(await round.json(), { started: true });
   await served.idle();
   assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'merge', 'a round with nothing done is not recorded');
+});
+
+test("Manor's ask after an install: the jobs approved now, with the token as the CLI sends it; while a round runs, once it ends", async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  assert.equal((await post('/api/jobs/approve', {}, { ids: ['reeve'] })).status, 403);
+  // No Origin: Manor posts as the Steward's own CLI does, with the token from its server.json.
+  const now = await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve'] });
+  assert.deepEqual(await now.json(), { started: true });
+  await served.idle();
+  // During a round: queued, and approved once it ends, nothing left running after. The round has a repository to look
+  // at (a clone here), so it asks GitHub, and waits while the commands are held.
+  const settingsFile = path.join(home, 'settings.json');
+  const was = readFileSync(settingsFile, 'utf8');
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
+  let letGo = () => {};
+  hold = new Promise((done) => (letGo = done));
+  const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
+  assert.deepEqual(await round.json(), { started: true });
+  const queued = await (await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve', '../x', 7] })).json();
+  assert.equal(queued.queued, true);
+  assert.match(queued.message, /round is running; the jobs are approved once it ends/);
+  letGo();
+  hold = Promise.resolve();
+  await served.idle();
+  writeFileSync(settingsFile, was);
+  const ping = await (await fetch(`${base()}/api/ping`)).json();
+  assert.equal(ping.busy, false);
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {

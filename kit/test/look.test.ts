@@ -20,7 +20,7 @@ const { page, statusPill, until } = await import('./fixture/src/kit/page.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 type Look = import('./fixture/src/kit/look.ts').Look;
 
-const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd'];
+const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd'];
 const HEX = /^#[0-9a-f]{6}$/;
 
 /** A scene's motion without its @keyframes blocks: the rules left, as [selector, declarations]. */
@@ -151,6 +151,9 @@ test('the page uses the width of the window: no column for text, panels or Setti
     '.brand max-content',
     '.theme-menu calc(100vw - 24px)',
     ':where(input:not([type=checkbox], [type=radio], [type=range]), select, textarea) 100%',
+    // On a phone: a long status pill is cut, and a wide table scrolls inside itself.
+    '.status-pill 100%',
+    'main.view table 100%',
   ]);
   assert.doesNotMatch(html, /max-width: [\d.]+(ch|em|rem)\b/, 'no measure in characters');
   // The role: one line, up to its own width, cut with an ellipsis only when the bar has no room for it.
