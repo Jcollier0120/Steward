@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.14.1
+
+**It names no folders of one particular PC.**
+
+### What changed
+
+- Its entry for Manor (manor-agent.json) no longer names a Node in a folder only one PC has: it runs on Manor's own Node, or one installed in the usual place.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.12.6
 
 **A security fix: it hands out kit 2.28.1, where a value with curly quotes can no longer break out of a PowerShell string.**
