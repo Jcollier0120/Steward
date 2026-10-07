@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.2
+
+**It installs one of your own agents the first time, when Manor's Hire asks.**
+
+### What's new
+
+- An agent that is yours alone (built here from its clone, never published) can now be hired the first time: Manor's Hire asks the Steward, which builds the version on its branch and installs it. Before, a release only kept such an agent up to date once it was installed, and the first install was a command run by hand in its clone.
+- In a terminal: `node src\cli.ts release --employees <id> --hire`.
+
+### What changed
+
+- A hire installs only an agent built here that isn't installed yet. One that is fired stays gone until it is hired again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor shows Hire for your own agents once it is updated too.
 ## 0.27.0
 
 **Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**
