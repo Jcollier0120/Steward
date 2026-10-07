@@ -53,6 +53,11 @@ export interface StageAsk {
   yes?: boolean;
   /** merge: the team's PRs too, not only the Steward's. */
   team?: boolean;
+  /**
+   * release: hire the employees named on this PC: the first install of one built here (this PC's own agents, Manor's
+   * staff.local.json), which a release otherwise never does for one that isn't installed. Manor's Hire asks for it.
+   */
+  hire?: boolean;
   /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
   full?: boolean;
   /**
@@ -444,6 +449,11 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', 'nothing new on GitHub since the last round')));
           }
+        } else if (name === 'release' && ask.hire) {
+          // A hire: the agents named, installed here from their clones, whatever kit is being rolled out, on this PC's own
+          // account (no turns with the licence's other PCs: an install is this PC's).
+          if (!ask.employees?.length) throw new Error('a hire names the agents to install: release --employees <id> --hire');
+          out.results = await release(ctx, picked.employees, { kit: null, hire: true });
         } else if (!ctx.settings.releasesCastellan) {
           // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
           if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
