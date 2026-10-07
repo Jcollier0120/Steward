@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.36.0
+
+**Castellan's staff releases are published only where the Exchequer's publisher key is.** On 2026-10-07, 12 staff releases reached the public releases repository and never the Exchequer. They were published by a release run outside the PC that releases Castellan, which has no publisher key, and kit 2.35.0 let such a release go to GitHub alone with just a line saying so.
+- **node/release.ts: `publishTo`** first checks the publisher key when there is a releases repository (Castellan's own agents) and the agent isn't Manor or Heiward. Without the key, it publishes nothing: no GitHub release, in the releases repository or the agent's own, and no Exchequer call. It says why ("Not published: <id>-v<version> is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key …") and exits 1. That covers a Steward from before 0.19.0 that still releases to the releases repository, another PC's Steward, and a release run by hand.
+- `PublishSteps.keyMissing()` is new: where the key was looked for when it isn't there, else null (exchequer.ts `publisherKey`). The key itself is never read into a line.
+- Unchanged: with the key, everything is as in 2.35.0. Manor and Heiward publish to GitHub as before with or without it. An agent with no releases repository (anyone else's) publishes to its own repository as before.
+- **spec/RELEASES.md** says so.
+- **What an agent must do:** nothing. Its next release, made by the Steward on the PC that releases Castellan, has the key.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Publishing a staff release by hand now needs the publisher key on that PC (`%USERPROFILE%\.steward\exchequer-publisher.key` or `EXCHEQUER_PUBLISHER_KEY`).
+
 ## 2.35.0
 
 **A release of an agent Castellan sells goes to the Exchequer, and no longer to the public releases repository.** Castellan's paid agents are served by the Exchequer alone. Their releases were also going to GitHub's public releases repository, where anyone could download them.
