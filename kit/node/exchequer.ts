@@ -4,11 +4,12 @@
  * `publishToExchequer` after the release is on GitHub, with the very files it published there: the zip,
  * SHA256SUMS.txt and manor-agent.json when the agent announces itself.
  *
- * Since kit 2.35.0 release.ts asks first whether the Exchequer sells the agent (`saleOf`: the list's `forSale`): one
- * for sale is published here first and not to the public releases repository (release.ts' publishTo).
+ * Since kit 2.37.0 every agent of Castellan's but Heiward, for sale or held back from sale, Manor among them, is
+ * published here first and never to the public releases repository (release.ts' publishTo). `saleOf` (the list's
+ * `forSale`) still says whether one is offered for hire.
  *
- * It publishes only an agent the Exchequer serves (its public `GET /api/v1/agents` lists it; Manor and Heiward never
- * are), and only with the publisher's key: `EXCHEQUER_PUBLISHER_KEY`, or `%USERPROFILE%\.steward\exchequer-publisher.key`.
+ * It publishes only an agent the Exchequer serves (its public `GET /api/v1/agents` lists it; Heiward never is, and
+ * since kit 2.37.0 Manor is), and only with the publisher's key: `EXCHEQUER_PUBLISHER_KEY`, or `%USERPROFILE%\.steward\exchequer-publisher.key`.
  * The key is sent to the Exchequer alone, as a Bearer token, never to the storage its upload URLs point at, and never
  * printed: every line this module gives back has it taken out.
  *
@@ -26,8 +27,11 @@ import path from 'node:path';
 export const EXCHEQUER_URL = 'https://api.castellan-software.com';
 /** The publisher's key, beside the Steward's data on the PC that releases. */
 export const KEY_FILE = path.join('.steward', 'exchequer-publisher.key');
-/** Agents never published there, whatever it lists: Manor is free and updates from GitHub; Heiward is free and AGPL. */
-export const NEVER_SOLD = ['manor', 'heiward'];
+/**
+ * Agents never published there, whatever it lists: Heiward, free, AGPL and public. Since kit 2.37.0 Manor is published
+ * there (it updates from the Exchequer from 0.16.0 on), and nothing of Castellan's but Heiward is on GitHub.
+ */
+export const NEVER_SOLD = ['heiward'];
 /** manor-agent.json, sent as the draft's announcement too (release.ts' ANNOUNCEMENT). */
 const ANNOUNCEMENT = 'manor-agent.json';
 
