@@ -6,7 +6,7 @@ import { originRepo } from './kit/manor.ts';
 import { stewardCloneAt } from './migrate.ts';
 import type { Employee, Settings } from './settings.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
-import { checkoutOf, freshBranch, releasedOf, type Ctx } from './stages/common.ts';
+import { checkoutOf, freshBranch, hostIs, releasedOf, type Ctx } from './stages/common.ts';
 import { gh } from './git.ts';
 import { agreedVersion, bumpPatch } from './versions.ts';
 
@@ -92,7 +92,8 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const read = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, repo, `origin/${e.branch}`, f)] as [string, string | null])));
   const branchVersion = 'version' in read ? read.version : null;
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
-  const prs = JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[];
+  // Worked with plain git (scm.ts): no pull requests, so none sets a version.
+  const prs = hostIs(ctx, e) === 'git' ? [] : (JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[]);
   const openVersions = titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
   return withLock(claimsLock(), async () => {

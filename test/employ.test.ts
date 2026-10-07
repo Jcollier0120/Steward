@@ -101,7 +101,7 @@ test('it refuses one it looks after already, a folder that is no clone, and a cl
   assert.match(refused([employee('C:\\elsewhere')]), /looks after Fake .* already/);
   assert.match(refused([employee('C:\\elsewhere', { id: 'other', repo: 'jcollier0120/fake' })]), /already/);
   assert.match(refused([employee(checkout, { id: 'other', repo: 'o/other' })]), /already/);
-  assert.match(refused([], { origin: () => null, internal: none, staff: none }), /origin isn't a GitHub repository/);
+  assert.match(refused([], { origin: () => null, internal: none, staff: none }), /has no origin/);
   const bare = path.join(home, 'not-a-clone');
   mkdirSync(bare);
   assert.match(refused([], undefined, bare), /isn't a clone/);
