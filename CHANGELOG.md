@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.25.4
+## 0.27.3
 
 **It hands out kit 2.36.2: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
 
@@ -13,6 +13,47 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
+## 0.27.0
+
+**Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**
+
+### What's new
+
+- Each repository gets one release PC, chosen by your PCs through a small marker in the repository's own remote. It works with any Git host, and for anyone, with or without a licence.
+- The Steward's page shows who has each repository ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with **Do it here** to move it now, and **Keep it on this PC** to keep it there. A kept PC that goes quiet for a day can be taken over, and the page says so.
+- Version claims are shared through the repository too, so work started side by side on two PCs never takes the same version. Offline, a claim is made on the PC as before, and shared once it can reach the remote. If another PC took the same version meanwhile, the page says so and the later work gets a new version when it merges.
+
+### What changed
+
+- Only publishing waits for a PC's turn: merging, releasing, and the pushes of a refresh, a kit update or a catch-up. Builds, tests, tastings, bumps and claims never wait, online or offline.
+- When this PC can't reach a repository's remote, the page says releasing waits until it can. Nothing else stops.
+- Taking turns no longer goes through Castellan's release service. The turns from 0.24.0 are gone.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On its first round each PC marks the repositories it looks after. With only one PC, everything works exactly as before.
+- Update the Steward on every PC: an older one doesn't take turns, and the alarm for another Steward names it.
+
+## 0.26.0
+
+**GitHub is no longer required: the Steward finds the source control on your PC and sets itself up for each repository.**
+
+### What's new
+
+- The Steward looks at what is installed on your PC (Git, the GitHub CLI, and others such as Mercurial or Subversion) and chooses by itself how to work with each repository. A new Settings choice, **Source control**, shows what it found and offers only what you have, usually one option. Automatic is the default.
+- **Repositories on any host.** GitLab, Azure DevOps, Bitbucket, your own server or a shared folder: anything you reach with plain git. The Steward reads each repository's branch and tags from its origin. When the branch carries a version that isn't released yet, it runs your release command (or none, with Release it set to tag) and pushes a `v<version>` tag to the repository, with that version's changelog entry as the tag's message. There are no pull requests to merge that way: what lands on the branch is released.
+- **Look after** now offers your clones on any host, not only the ones on GitHub.
+- Repositories on GitHub work exactly as before wherever the GitHub CLI is installed and signed in. Without it, they're worked with plain git too.
+
+### What changed
+
+- A repository's name in Settings can be a host and path, such as `gitlab.com/group/app`, as well as GitHub's `owner/name`.
+- Mercurial, Subversion, Perforce and Plastic SCM are found and named, but the Steward doesn't work with them yet.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PC where the GitHub CLI is installed and signed in keeps working with GitHub as before.
 
 ## 0.25.2
 

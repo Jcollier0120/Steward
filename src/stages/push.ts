@@ -45,6 +45,8 @@ export async function pushOne(ctx: Ctx, e: Employee, o: { kit: string; changelog
   const remoteSha = pushed?.trim().split(/\s+/)[0] ?? '';
   const localSha = (await commitOf(run, repo, `refs/heads/${branch}`)) ?? '';
   if (remoteSha !== localSha) {
+    // Another PC's turn here now (lease.ts): it rolls the kit out there. The bump stays on this PC's branch.
+    if (ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `${branch} is ready here, but another PC publishes ${e.name} now, so it wasn't pushed`);
     // A plain push: if origin's branch has moved on, git refuses, and so does the Steward.
     const r = await run('git', ['push', '--quiet', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { cwd: repo, timeoutMs: 5 * 60_000 });
     if (r.code !== 0) return result(e, 'failed', `git push refused (never forced): ${(r.err || r.out).trim().split('\n').slice(-2).join(' ')}`);

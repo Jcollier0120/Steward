@@ -6,6 +6,7 @@ import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { originRepo } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
+import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
 /** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
@@ -126,6 +127,11 @@ export interface Settings {
   releasesRepo: string;
   /** A .NET with an SDK, for a .NET repository's tests and release. Empty: DOTNET_ROOT's, else Program Files'. */
   dotnetRoot: string;
+  /**
+   * How the Steward works with the repositories (scm.ts): auto, chosen by itself from what is installed and where each
+   * repository is; git, plain git on any host for every one; github, GitHub's for every one.
+   */
+  sourceControl: SourceControl;
   /** Whether the Wright is installed on this PC (wrightInstalled): read from the PC, never set. Its settings show only then. */
   wrightHere: boolean;
 }
@@ -258,6 +264,7 @@ export const DEFAULT_SETTINGS: Settings = {
   releasesCastellan: false,
   releasesRepo: '',
   dotnetRoot: '',
+  sourceControl: 'auto',
   wrightHere: wrightInstalled(),
 };
 
@@ -269,6 +276,19 @@ const WRIGHT = { shownWhen: { key: 'wrightHere', is: ['true'] } };
 const REPO ={ pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like octocat/hello-world' };
 const command = { maxLength: 500 };
 
+/** Source control (scm.ts): its options are narrowed to what this PC has, and its help says what was found, as served. */
+const SOURCE_CONTROL: Field = {
+  key: 'sourceControl',
+  kind: 'choice',
+  label: 'Source control',
+  help: "How the Steward works with your repositories. GitHub: pull requests merged, GitHub releases (needs the GitHub CLI, signed in). Git: any host (GitLab, Azure DevOps, Bitbucket, a server or folder of your own) with plain git: a release is a v<version> tag pushed to the repository, and what lands on the branch is released (there are no pull requests to merge). Automatic: the Steward chooses for each repository from what this PC has.",
+  options: [
+    { value: 'auto', label: 'Automatic' },
+    { value: 'github', label: 'GitHub, for every repository' },
+    { value: 'git', label: 'Git, for every repository (any host)' },
+  ],
+};
+
 /** Each setting as the page's Settings panel shows it, and as the kit's settings-kit.ts checks it. */
 export const SETTINGS_SCHEMA: Field[] = [
   {
@@ -278,13 +298,21 @@ export const SETTINGS_SCHEMA: Field[] = [
     title: 'name',
     unique: 'id',
     label: 'Repositories',
-    help: "Each repository of yours the Steward looks after: its GitHub repository (owner/name), your clone of it, how to test it, the files that carry its version, and how to release it. None to begin with: the Steward's page lists the ones Reeve finds that you can push to, each with Look after; or add one here.",
+    help: "Each repository of yours the Steward looks after: its name (owner/name on GitHub, host/path anywhere else), your clone of it, how to test it, the files that carry its version, and how to release it. None to begin with: the Steward's page lists the ones Reeve finds that you can push to, each with Look after; or add one here.",
     maxItems: 50,
     blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', merges: false, usesKit: false, parts: [], fill: '', test: [], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like my-app' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
-      { key: 'repo', kind: 'text', label: 'GitHub repository', maxLength: 140, ...REPO },
+      {
+        key: 'repo',
+        kind: 'text',
+        label: 'Repository',
+        help: "owner/name for a repository on GitHub; host/path for one anywhere else (gitlab.com/group/app), as its clone's origin says. Look after fills it in.",
+        maxLength: 200,
+        pattern: '[A-Za-z0-9_.-]+(/[A-Za-z0-9_.~@-]+)+',
+        patternHint: 'owner/name, like octocat/hello-world, or host/path, like gitlab.com/group/app',
+      },
       { key: 'checkout', kind: 'text', label: 'Checkout', help: 'Your clone. The Steward adds worktrees of it in the work folder and fetches; it never changes your working tree.', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
       { key: 'branch', kind: 'text', label: 'Branch', help: 'Where releases come from and PRs go.', maxLength: 100, pattern: '[A-Za-z0-9._/-]+', patternHint: 'a branch name, like main' },
       {
@@ -435,6 +463,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     ],
   },
   { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC: its drafts and the work handed to it are above.', readOnly: true, ...WRIGHT },
+  SOURCE_CONTROL,
   {
     key: 'dotnetRoot',
     kind: 'text',
@@ -557,6 +586,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       releasesCastellan: typeof r.releasesCastellan === 'boolean' ? r.releasesCastellan : d.releasesCastellan,
       releasesRepo: typeof r.releasesRepo === 'string' && (r.releasesRepo.trim() === '' || REPO_NAME.test(r.releasesRepo.trim())) ? r.releasesRepo.trim() : d.releasesRepo,
       dotnetRoot: str(r.dotnetRoot, d.dotnetRoot),
+      sourceControl: r.sourceControl === 'git' || r.sourceControl === 'github' ? r.sourceControl : d.sourceControl,
       // Never read from the file: whether the Wright is on this PC now.
       wrightHere: wrightInstalled(),
     },
@@ -602,7 +632,16 @@ export const selfRepoOf = (s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>)
 
 /** The Steward's settings, for the kit's Settings panel and its API. */
 export const SETTINGS_SPEC: SettingsSpec<Settings> = {
-  schema: SETTINGS_SCHEMA,
+  // Source control offered as this PC has it (scm.ts), from the last look at what is installed.
+  get schema() {
+    let chosen = DEFAULT_SETTINGS.sourceControl as string;
+    try {
+      chosen = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings.sourceControl;
+    } catch {
+      // The default, then.
+    }
+    return SETTINGS_SCHEMA.map((f) => (f.key === 'sourceControl' ? sourceControlField(f, loadScm(), chosen) : f));
+  },
   defaults: DEFAULT_SETTINGS,
   file: settingsFile,
   normalize: normalizeSettings,

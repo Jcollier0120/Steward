@@ -20,7 +20,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
-import { pruneClaims, syncClaims } from './claims.ts';
+import { pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, refreshAfterReleases } from './stages/refresh.ts';
 import { release } from './stages/release.ts';
@@ -32,8 +32,9 @@ import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent } from './tend.ts';
-import { coordHere, takeTurns, type Coord } from './lease.ts';
+import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
+import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -70,10 +71,13 @@ export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(),
 export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
 
 /** One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way. */
-export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}): Promise<Glance | null> {
+export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host): Promise<Glance | null> {
   try {
-    const g = await takeGlance(run, dataDir, settings);
-    for (const [id, why] of Object.entries(g.errors)) log(`[${id}] GitHub said nothing of ${settings.employees.find((e) => e.id === id)?.repo ?? id} at a glance (${why}): it is asked on its own`);
+    const g = await takeGlance(run, dataDir, settings, host);
+    for (const [id, why] of Object.entries(g.errors)) {
+      const e = settings.employees.find((x) => x.id === id);
+      log(e && host?.(e) === 'git' ? `[${id}] git couldn't read ${e.repo}'s origin (${why}): it is asked on its own` : `[${id}] GitHub said nothing of ${e?.repo ?? id} at a glance (${why}): it is asked on its own`);
+    }
     return g;
   } catch (e) {
     log(`couldn't ask GitHub about everyone at once (${(e as Error).message}): each is asked on its own`);
@@ -96,21 +100,28 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
  * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
  * `owner` stands in for the account gh is signed in as (tests).
  */
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner } = {}): Promise<Ctx> {
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner; scm?: ScmLook | null } = {}): Promise<Ctx> {
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
   const given = o.settings ?? loadSettings();
+  // How each repository is worked with (scm.ts), from what this PC has: looked at once an hour. Under node --test, only
+  // what a test says (else GitHub's way, as before), so a test never depends on this PC's tools.
+  const look = o.scm !== undefined ? o.scm : process.env.NODE_TEST_CONTEXT ? null : await scmNow(realRun);
+  const host = (e: Employee) => hostOf(e, given, look);
   // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
   const own = { ...given, stewardRepo: selfRepoOf(given) };
-  const settings = o.team === false ? own : withTeam(own, log, o.owner);
+  // The team is GitHub's: when every repository is worked with plain git, or (with none) the GitHub CLI isn't signed in
+  // here, gh isn't asked who it is.
+  const noGithub = own.employees.length ? !own.employees.some((e) => host(e) === 'github') : look !== null && !githubReady(look);
+  const settings = o.team === false || noGithub ? own : withTeam(own, log, o.owner);
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
-  const glance = o.glance === false ? null : await tryGlance(run, settings, log);
+  const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
   const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(kitRun, dataDir, settings.stewardRepo);
-  return { settings, run, kit, log, neutralDir: dataDir, glance };
+  return { settings, run, kit, log, neutralDir: dataDir, glance, host };
 }
 
 /** The kit's changelog for a PR's body: this checkout's, or the kit release's notes. */
@@ -204,11 +215,13 @@ export interface StageOptions {
    * node --test the staff are looked at only when this is given, so a test never opens a real agent.
    */
   tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+  /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
+  scm?: ScmLook | null;
   /**
-   * The Exchequer for the turns with the licence's other PCs (lease.ts): null for none. Left out, this PC's licence
-   * decides; under node --test there is none unless given.
+   * The turns with this PC's others (lease.ts): who this PC is, the clock and the remotes. Null: no turns. Left out, this
+   * PC's own; under node --test there are none unless given.
    */
-  coord?: Coord | null;
+  turns?: TurnsDeps | null;
 }
 
 /**
@@ -242,20 +255,40 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
 
+/** The turns this stage takes (lease.ts): StageOptions' own, else this PC's; none under node --test unless given. */
+const turnsDeps = (o: StageOptions): TurnsDeps | null => (o.turns !== undefined ? o.turns : process.env.NODE_TEST_CONTEXT ? null : {});
+
 /**
- * The turns a merge, release or round takes with the licence's other PCs (lease.ts), before it acts: on the employees
+ * The turns a merge, release or round takes with this PC's others (lease.ts), before it publishes: on the employees
  * asked about, the repositories refreshed after releases, and the Steward's own while it merges or releases itself.
- * Sets ctx.lease; gives back the employees asked about that are this PC's to act in, and a line for each that isn't.
+ * Sets ctx.lease; gives back the employees asked about that are this PC's to publish for, and a line for each that isn't.
+ * Only publishing waits on a turn: nothing here stops a build, a test, a tasting or a bump.
  */
-async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; shared: Coord | null }> {
+async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
   const refreshed = ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
-  const coord = o.coord !== undefined ? o.coord : coordHere();
-  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { coord, settings: ctx.settings, log: ctx.log });
+  const deps = turnsDeps(o);
+  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { run: ctx.run, settings: ctx.settings, log: ctx.log, deps });
   ctx.lease = t.guard;
-  if (t.mode === 'unreachable') ctx.log('turns: the Exchequer could not be reached; only repositories whose turn this PC already held are looked after');
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
-  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), shared: t.mode === 'on' ? coord : null };
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), on: !!deps };
+}
+
+/**
+ * The repositories whose claims ref this round's turns looked at (reachable, and taking the ref), with that ref's commit
+ * then: claims.ts's shareClaims reads each that moved.
+ */
+async function claimRemotes(ctx: Ctx, o: StageOptions): Promise<{ repo: string; remote: import('./remote-ref.ts').RemoteRepo; sha: string | null }[]> {
+  const repos = loadTurns().repos;
+  const self = ctx.settings.stewardRepo ? [stewardEmployee(ctx.settings, o.self?.checkout ?? ctx.settings.stewardCheckout)] : [];
+  const out: { repo: string; remote: import('./remote-ref.ts').RemoteRepo; sha: string | null }[] = [];
+  for (const e of [...ctx.settings.employees, ...self]) {
+    const t = repos[e.repo.toLowerCase()];
+    if (!t || (t.status !== 'here' && t.status !== 'elsewhere') || t.claimsSha === undefined) continue;
+    const remote = await (o.turns?.remote ?? ((x: Employee) => remoteFor(ctx.run, ctx.settings, x)))(e).catch(() => null);
+    if (remote) out.push({ repo: e.repo, remote, sha: t.claimsSha });
+  }
+  return out;
 }
 
 /** The Steward's own repository as an employee, for its turn: while Settings say it merges or releases itself, with a checkout. */
@@ -327,7 +360,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
       const offline = name === 'round' && !tendOnly && !(await (o.online ?? onlineNow)());
       const quiet = offline || tendOnly;
-      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined });
+      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
@@ -340,8 +373,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       const own = o.ownKit !== undefined ? o.ownKit : ownKit();
       /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
       let rolloutWaits: { kit: string; own: string } | null = null;
-      /** The Exchequer, when this round took turns through it (lease.ts): the licence's claims are copied from it. */
-      let shared: Coord | null = null;
+      /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
+      let turnsOn = false;
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -359,10 +392,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
-          // Turns with the licence's other PCs first (lease.ts): a repository another PC has its turn in is left to it.
+          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
           const whole = !ask.employees?.length;
           const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
-          shared = turns.shared;
+          turnsOn = turns.on;
           let employees = turns.acting;
           if (round) {
             plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
@@ -450,7 +483,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             out.results = await bump(ctx, picked.employees, { kit: chosen.version, base: ask.base, kitFrom: ask.kitFrom, changelog: await changelogFor(ctx, chosen.version) });
           } else if (name === 'push') {
             clearRolloutHolds(picked.employees.map((e) => e.id));
-            out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });
+            // A push publishes: only where this PC has the turn (lease.ts). The bumps stay prepared here either way.
+            const turns = await takeTurnsFor(ctx, o, picked.employees, null);
+            out.results = [...turns.elsewhere, ...(await push(ctx, turns.acting, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) }))];
           } else {
             const turns = await takeTurnsFor(ctx, o, picked.employees, null);
             out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: chosen.version }))];
@@ -482,9 +517,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
       if (name === 'round') {
         try {
-          // With a licence, every PC's claims are copied here first, and those dropped are given back there too.
-          await syncClaims(shared);
-          await pruneClaims(loadStaff()?.rows ?? [], Date.now(), { coord: shared });
+          await pruneClaims(loadStaff()?.rows ?? []);
+          // With turns, each repository's claims ref too: every PC's claims copied here, this PC's own shared.
+          if (turnsOn) await shareClaims(ctx.run, loadStaff()?.rows ?? [], await claimRemotes(ctx, o));
         } catch (e) {
           log(`claims: ${(e as Error).message}`);
         }
@@ -531,7 +566,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (tendOnly) return out;
       try {
         // The stage changed things on GitHub: a fresh glance for the table.
-        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings) });
+        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings, undefined, ctx.host) });
       } catch (e) {
         log(`couldn't refresh the staff's table: ${(e as Error).message}`);
       }

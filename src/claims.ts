@@ -6,12 +6,15 @@ import { originRepo } from './kit/manor.ts';
 import { stewardCloneAt } from './migrate.ts';
 import type { Employee, Settings } from './settings.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
-import { checkoutOf, freshBranch, releasedOf, type Ctx } from './stages/common.ts';
+import { checkoutOf, freshBranch, hostIs, releasedOf, type Ctx } from './stages/common.ts';
 import { gh } from './git.ts';
 import { agreedVersion, bumpPatch } from './versions.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './stages/kitpart.ts';
 import { kitInfo } from './kitsource.ts';
-import { ask, coordHere, type Coord } from './lease.ts';
+import { CLAIMS_FILE, CLAIMS_REF, remoteFor } from './lease.ts';
+export { CLAIMS_FILE, CLAIMS_REF };
+import { fileAt, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
+import type { Runner } from './run.ts';
 
 /**
  * Versions claimed up front. Two pieces of work started side by side on one repository each used to take "the next
@@ -43,10 +46,12 @@ export interface Claim {
   for: string;
   at: string;
   /**
-   * 'exchequer': claimed through the Exchequer, for every PC of the licence (lease.ts's Coord), and kept here as a
-   * copy, so the merge stage sees it. Left out: claimed here alone.
+   * 'shared': a copy of a claim in the repository's claims ref (refs/manor/claims), for every PC that looks after it.
+   * Left out: claimed here alone ('exchequer', from 0.24, counts as that).
    */
-  source?: 'exchequer';
+  source?: 'shared' | 'exchequer';
+  /** Set when another PC claimed the same version while this PC couldn't reach the remote: what the page says. */
+  clash?: string;
 }
 
 export const claimsFile = () => dataFile('version-claims.json');
@@ -93,10 +98,12 @@ export function stillHeld(c: Claim, o: { branchVersion: string | null; released:
 export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filter((c) => same(c.repo, repo));
 
 /**
- * A version for new work on an employee, claimed: as the module's comment says. `now` and the facts it reads stand
- * in for tests through ctx.run.
+ * A version for new work on an employee, claimed: as the module's comment says. Where the repository's remote can be
+ * reached, through its claims ref (refs/manor/claims), for every PC that looks after it; else in this PC's store alone,
+ * as always, and shared on the next round that reaches the remote (shareClaims). `now`, the facts it reads and `remote`
+ * stand in for tests (under node --test there's no remote unless given).
  */
-export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; coord?: Coord | null }): Promise<{ claim: Claim; again: boolean }> {
+export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
   const kit = o.part === 'kit';
   const key = kit ? kitClaimKey(e.repo) : e.repo;
@@ -107,32 +114,203 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const read = agreedVersion(await Promise.all(files.map(async (f) => [f, await showFile(ctx.run, repo, `origin/${e.branch}`, f)] as [string, string | null])));
   const branchVersion = 'version' in read ? read.version : null;
   const released = kit ? (await kitInfo(ctx.run, ctx.neutralDir, e.repo)).released : (await releasedOf(ctx, e)).map((r) => r.version);
-  const prs = JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[];
+  // Worked with plain git (scm.ts): no pull requests, so none sets a version.
+  const prs = hostIs(ctx, e) === 'git' ? [] : (JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[]);
   const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
-  // With a licence, the Exchequer hands it out for every PC of the licence; with none, or no Exchequer, it's this PC's alone.
-  const coord = o.coord !== undefined ? o.coord : coordHere();
-  if (coord) {
-    const shared = await claimShared(coord, e, { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts: { branchVersion, released, openBranches, openVersions, now } });
+  const facts = { branchVersion, released, openBranches, openVersions, now };
+  const ask: Ask = { key, branch: o.branch ?? null, by: o.by, for: o.for, minor: !!o.minor, now, facts, what: kit ? 'The kit' : e.name, files, from: `origin/${e.branch}` };
+  const remote = o.remote !== undefined ? o.remote : process.env.NODE_TEST_CONTEXT ? null : await remoteFor(ctx.run, ctx.settings, e).catch(() => null);
+  if (remote) {
+    const shared = await claimShared(ctx.run, remote, ask);
     if (shared) return shared;
   }
   return withLock(claimsLock(), async () => {
     const all = loadClaims();
-    const facts = { branchVersion, released, openBranches, openVersions, now };
     const live = all.filter((c) => !same(c.repo, key) || stillHeld(c, facts));
-    const mine = live.filter((c) => same(c.repo, key));
-    const had = o.branch ? mine.find((c) => c.branch === o.branch) : undefined;
-    if (had) {
-      writeJson(claimsFile(), live);
-      return { claim: had, again: true };
-    }
-    const top = highest([branchVersion, ...released, ...openVersions, ...mine.map((c) => c.version)]);
-    if (!top) throw new Error(`${kit ? 'The kit' : e.name} has no version to count from (${files.join(', ')} on origin/${e.branch})`);
-    const claim: Claim = { repo: key, version: after(top, o.minor), branch: o.branch ?? null, by: o.by, for: o.for, at: new Date(now).toISOString() };
-    writeJson(claimsFile(), [...live, claim]);
-    return { claim, again: false };
+    const r = choose(live.filter((c) => same(c.repo, key)), ask);
+    writeJson(claimsFile(), r.again ? live : [...live, r.claim]);
+    return { claim: r.claim, again: r.again };
   });
 }
+
+type Ask = { key: string; branch: string | null; by: string; for: string; minor: boolean; now: number; facts: Parameters<typeof stillHeld>[1]; what: string; files: string[]; from: string };
+
+/** The claim for this work, from the live claims on its repository: the branch's own again, or the next free version. Pure. */
+function choose(mine: Claim[], a: Ask): { claim: Claim; again: boolean } {
+  const had = a.branch ? mine.find((c) => c.branch === a.branch) : undefined;
+  if (had) return { claim: had, again: true };
+  const f = a.facts;
+  const top = highest([f.branchVersion, ...f.released, ...f.openVersions, ...mine.map((c) => c.version)]);
+  if (!top) throw new Error(`${a.what} has no version to count from (${a.files.join(', ')} on ${a.from})`);
+  return { claim: { repo: a.key, version: after(top, a.minor), branch: a.branch, by: a.by, for: a.for, at: new Date(a.now).toISOString() }, again: false };
+}
+
+/** The claims ref's claims, read from its file; nothing when it can't be read. */
+export function parseClaims(text: string | null | undefined): Claim[] {
+  try {
+    const j = JSON.parse(text ?? '[]');
+    return (Array.isArray(j) ? j : [])
+      .filter((c) => typeof c?.repo === 'string' && typeof c?.version === 'string' && /^\d+\.\d+\.\d+$/.test(c.version) && typeof c?.at === 'string')
+      .map((c) => ({ repo: c.repo, version: c.version, branch: typeof c.branch === 'string' ? c.branch : null, by: String(c.by ?? ''), for: String(c.for ?? ''), at: c.at }));
+  } catch {
+    return [];
+  }
+}
+
+const sharedText = (list: Claim[]) => `${JSON.stringify(list.map(({ source: _s, clash: _c, ...c }) => c), null, 2)}\n`;
+/** Whether a claim is this repository's: its own, or its kit's. */
+const belongs = (c: Pick<Claim, 'repo'>, repo: string) => same(c.repo, repo) || same(c.repo, kitClaimKey(repo));
+/** The repository a claim's key names (a kit's key is `<repo>#kit`). */
+const repoOfKey = (key: string) => key.replace(/#kit$/i, '');
+
+/**
+ * A claim through the repository's claims ref, by compare-and-swap, tried again when another PC wrote first: chosen
+ * as here, from the shared live claims and this PC's own (those it made while it couldn't reach the remote), which go
+ * up with it. Kept here too, as copies (source: shared). Null when the remote can't be reached or refuses the ref.
+ */
+async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ claim: Claim; again: boolean } | null> {
+  for (let i = 0; i < 8; i++) {
+    const read = await readRef(run, remote, CLAIMS_REF, CLAIMS_FILE);
+    if (read.kind === 'unreachable') return null;
+    const there = read.kind === 'found' ? parseClaims(read.text) : [];
+    const sharedLive = there.filter((c) => same(c.repo, a.key) && stillHeld(c, a.facts));
+    const mineOnly = loadClaims().filter((c) => same(c.repo, a.key) && c.source !== 'shared' && !c.clash && stillHeld(c, a.facts));
+    // One of this PC's own whose version another PC has meanwhile stays here; its work gets a new one at merge.
+    const going = mineOnly.filter((c) => !sharedLive.some((s) => s.version === c.version));
+    const r = choose([...sharedLive, ...going], a);
+    const list = [...there.filter((c) => !same(c.repo, a.key)), ...sharedLive, ...going, ...(r.again ? [] : [r.claim])];
+    const unchanged = r.again && !going.length && sharedLive.length === there.filter((c) => same(c.repo, a.key)).length;
+    if (!unchanged) {
+      const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(list), read.kind === 'found' ? read.sha : null, `${a.key} ${r.claim.version}: claimed${a.branch ? ` for ${a.branch}` : ''}`);
+      if (w.kind === 'stale') {
+        // Another PC (or worker) wrote first: a moment's wait, so two never keep colliding.
+        await new Promise((ok) => setTimeout(ok, 50 + Math.random() * 250));
+        continue;
+      }
+      if (w.kind !== 'ok') return null;
+    }
+    await keepCopies(repoOfKey(a.key), list);
+    const { source: _s, ...claim } = r.claim;
+    return { claim: { ...claim, source: 'shared' }, again: r.again };
+  }
+  return null;
+}
+
+/** A repository's shared claims, copied here in place of the copies before; this PC's own that went up become copies. */
+async function keepCopies(repo: string, shared: Claim[], clashes: Claim[] = []): Promise<void> {
+  await withLock(claimsLock(), async () => {
+    const mine = shared.filter((c) => belongs(c, repo));
+    // This PC's own stay, unless they went up (the same version, for the same branch).
+    const rest = loadClaims().filter((c) => !belongs(c, repo) || (c.source !== 'shared' && !mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch)));
+    const marked = rest.map((c) => {
+      const clash = clashes.find((x) => same(x.repo, c.repo) && x.version === c.version && x.branch === c.branch);
+      if (!clash) return c;
+      const what = c.repo.endsWith('#kit') ? `The kit ${c.version}` : `${c.repo} ${c.version}`;
+      return { ...c, clash: `${what} was claimed on another PC too (for ${clash.clash}) while this PC couldn't reach the remote: ${c.branch ?? 'this work'} gets a new version when it merges` };
+    });
+    writeJson(claimsFile(), [...marked, ...mine.map((c) => ({ ...c, source: 'shared' as const }))]);
+  });
+}
+
+/** Gives a claim back, here and in its repository's claims ref when that can be reached; false when there was none. */
+export async function releaseClaim(repo: string, version: string, o: { remote?: RemoteRepo | null; run?: Runner } = {}): Promise<boolean> {
+  let shared = false;
+  if (o.remote && o.run) {
+    for (let i = 0; i < 8; i++) {
+      const read = await readRef(o.run, o.remote, CLAIMS_REF, CLAIMS_FILE);
+      if (read.kind !== 'found') break;
+      const there = parseClaims(read.text);
+      const left = there.filter((c) => !(same(c.repo, repo) && c.version === version));
+      if (left.length === there.length) break;
+      const w = await writeRef(o.run, o.remote, CLAIMS_REF, CLAIMS_FILE, sharedText(left), read.sha, `${repo} ${version}: given back`);
+      if (w.kind === 'stale') {
+        // Another PC (or worker) wrote first: a moment's wait, so two never keep colliding.
+        await new Promise((ok) => setTimeout(ok, 50 + Math.random() * 250));
+        continue;
+      }
+      shared = w.kind === 'ok';
+      break;
+    }
+  }
+  const local = await withLock(claimsLock(), async () => {
+    const all = loadClaims();
+    const left = all.filter((c) => !(same(c.repo, repo) && c.version === version));
+    if (left.length === all.length) return false;
+    writeJson(claimsFile(), left);
+    return true;
+  });
+  return local || shared;
+}
+
+type Row = { repo: string; name: string; main: { version: string | null } | null; release: { version: string } | null; prs: { head: string; title: string }[] };
+
+/** Whether a claim still holds by what the staff's table says (a kit's by its age and PRs); true when the table says nothing of it. */
+function holdsBy(rows: Row[], c: Claim, now: number): boolean {
+  const k = c.repo.endsWith('#kit') ? rows.find((x) => same(kitClaimKey(x.repo), c.repo)) : undefined;
+  if (k) return now - Date.parse(c.at) < CLAIM_DAYS * DAY || (!!c.branch && k.prs.some((p) => p.head === c.branch)) || kitTitleVersions(k.prs.map((p) => p.title)).includes(c.version);
+  const r = rows.find((x) => same(x.repo, c.repo));
+  if (!r) return true;
+  return stillHeld(c, { branchVersion: r.main?.version ?? null, released: r.release ? [r.release.version] : [], openBranches: r.prs.map((p) => p.head), openVersions: titleVersions(r.name, r.prs.map((p) => p.title)), now });
+}
+
+/**
+ * The claims that still hold after a round, by what the staff's table says of each repository: those whose work
+ * landed, or that went stale with no PR, are dropped.
+ */
+export async function pruneClaims(rows: Row[], now = Date.now()): Promise<void> {
+  await withLock(claimsLock(), async () => {
+    const all = loadClaims();
+    const kept = all.filter((c) => holdsBy(rows, c, now));
+    if (kept.length !== all.length) writeJson(claimsFile(), kept);
+  });
+}
+
+const claimsSeenFile = () => dataFile('claims-seen.json');
+
+/**
+ * Each round that took turns: each repository's claims ref, where it moved since the last look or this PC holds claims
+ * of its own there (made while it couldn't reach the remote). Its live claims are copied here; this PC's own go up,
+ * but one whose version another PC claimed meanwhile stays here, marked, and its work gets a new version when it
+ * merges (the merge stage holds a PR that sets a version another branch claimed, and catch-up gives it a free one).
+ * Landed and stale claims are let go there too. A repository out of reach is left for the next round.
+ */
+export async function shareClaims(run: Runner, rows: Row[], repos: { repo: string; remote: RemoteRepo; sha: string | null }[], now = Date.now()): Promise<void> {
+  const seen = readJson<Record<string, string | null>>(claimsSeenFile(), {});
+  for (const { repo, remote, sha } of repos) {
+    const k = repo.toLowerCase();
+    const mineOnly = loadClaims().filter((c) => belongs(c, repo) && c.source !== 'shared' && !c.clash);
+    if (k in seen && seen[k] === sha && !mineOnly.length) continue;
+    try {
+      const text = sha ? await fileAt(run, remote, CLAIMS_REF, sha, CLAIMS_FILE) : '[]';
+      if (text === null) continue;
+      const there = parseClaims(text);
+      const live = there.filter((c) => !belongs(c, repo) || holdsBy(rows, c, now));
+      const clashes: Claim[] = [];
+      const going: Claim[] = [];
+      for (const c of mineOnly.filter((x) => holdsBy(rows, x, now))) {
+        const other = live.find((s) => same(s.repo, c.repo) && s.version === c.version);
+        if (!other) going.push(c);
+        else if (other.branch !== c.branch) clashes.push({ ...c, clash: other.for || other.branch || 'other work' });
+      }
+      const list = [...live, ...going];
+      let at = sha;
+      if (going.length || live.length !== there.length) {
+        const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(list), sha, `${repo}: claims shared`);
+        if (w.kind !== 'ok') continue;
+        at = w.sha;
+      }
+      await keepCopies(repo, list, clashes);
+      seen[k] = at;
+    } catch {
+      // Left for the next round.
+    }
+  }
+  writeJson(claimsSeenFile(), seen);
+}
+
+/** This PC's claims that clash with another PC's (made while it couldn't reach the remote): the page says so. */
+export const claimClashes = (): string[] => loadClaims().flatMap((c) => (c.clash ? [c.clash] : []));
 
 /**
  * A branch's claim moved to the version a catch-up gave its PR (stages/catchup.ts): the old one is free again and the
@@ -148,82 +326,6 @@ export async function reclaim(key: string, branch: string, version: string, now 
     const claim: Claim = { repo: key, version, branch, by: had?.by ?? 'steward', for: had?.for ?? 'caught up by the Steward', at: new Date(now).toISOString() };
     writeJson(claimsFile(), [...rest, claim]);
   });
-}
-
-/**
- * A claim through the Exchequer (POST /claims), as claimVersion would make it here: the facts, and the versions only this
- * PC has claimed (from before claims were shared) as taken. Kept here too, as a copy. Null when the Exchequer doesn't
- * hand it out (no coordination, out of reach, or refused): then it's claimed here, as before.
- */
-async function claimShared(coord: Coord, e: Employee, o: { key: string; branch: string | null; by: string; for: string; minor: boolean; now: number; facts: Parameters<typeof stillHeld>[1] }): Promise<{ claim: Claim; again: boolean } | null> {
-  const mineOnly = loadClaims().filter((c) => same(c.repo, o.key) && c.source !== 'exchequer' && stillHeld(c, o.facts));
-  // A claim this PC made alone for the same branch stands: the same version again.
-  const had = o.branch ? mineOnly.find((c) => c.branch === o.branch) : undefined;
-  if (had) return { claim: had, again: true };
-  const f = o.facts;
-  const r = await ask(coord, 'POST', '/claims', { repo: o.key, branch: o.branch, by: o.by, for: o.for, minor: o.minor, branchVersion: f.branchVersion, released: f.released, openBranches: f.openBranches, openVersions: f.openVersions, taken: mineOnly.map((c) => c.version) });
-  if (r.kind === 'refused' && r.body?.error === 'no-version') throw new Error(`${e.name} has no version to count from (${e.versionFiles.join(', ')} on origin/${e.branch})`);
-  const c = r.kind === 'ok' ? r.body?.claim : null;
-  if (!c || typeof c.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(c.version)) return null;
-  const claim: Claim = { repo: o.key, version: c.version, branch: c.branch ?? null, by: String(c.by ?? o.by), for: String(c.for ?? o.for), at: String(c.at ?? new Date(o.now).toISOString()), source: 'exchequer' };
-  await withLock(claimsLock(), async () => {
-    writeJson(claimsFile(), [...loadClaims().filter((x) => !(same(x.repo, claim.repo) && x.version === claim.version)), claim]);
-  });
-  return { claim, again: r.kind === 'ok' && r.body?.again === true };
-}
-
-/** Gives a claim back, on the Exchequer too when this PC holds a licence; false when there was none. */
-export async function releaseClaim(repo: string, version: string, o: { coord?: Coord | null } = {}): Promise<boolean> {
-  const coord = o.coord !== undefined ? o.coord : coordHere();
-  const shared = coord ? await ask(coord, 'DELETE', '/claims', { repo, version }) : null;
-  const local = await withLock(claimsLock(), async () => {
-    const all = loadClaims();
-    const left = all.filter((c) => !(same(c.repo, repo) && c.version === version));
-    if (left.length === all.length) return false;
-    writeJson(claimsFile(), left);
-    return true;
-  });
-  return local || (shared?.kind === 'ok' && shared.body?.released === true);
-}
-
-/**
- * Each round with a licence: the licence's claims on the Exchequer copied here (those of every PC), so the merge stage
- * holds a PR that takes another work's version whichever PC claimed it. The copies made before are replaced; claims
- * made here alone are kept. Nothing changes when the Exchequer doesn't answer.
- */
-export async function syncClaims(coord: Coord | null): Promise<void> {
-  if (!coord) return;
-  const r = await ask(coord, 'GET', '/claims');
-  if (r.kind !== 'ok' || !Array.isArray(r.body?.claims)) return;
-  const shared: Claim[] = r.body.claims
-    .filter((c: any) => typeof c?.repo === 'string' && typeof c?.version === 'string' && /^\d+\.\d+\.\d+$/.test(c.version))
-    .map((c: any) => ({ repo: c.repo, version: c.version, branch: c.branch ?? null, by: String(c.by ?? ''), for: String(c.for ?? ''), at: String(c.at ?? new Date().toISOString()), source: 'exchequer' as const }));
-  await withLock(claimsLock(), async () => {
-    const alone = loadClaims().filter((c) => c.source !== 'exchequer' && !shared.some((s) => same(s.repo, c.repo) && s.version === c.version));
-    writeJson(claimsFile(), [...alone, ...shared]);
-  });
-}
-
-/**
- * The claims that still hold after a round, by what the staff's table says of each repository: those whose work
- * landed, or that went stale with no PR, are dropped.
- */
-export async function pruneClaims(rows: { repo: string; name: string; main: { version: string | null } | null; release: { version: string } | null; prs: { head: string; title: string }[] }[], now = Date.now(), o: { coord?: Coord | null } = {}): Promise<void> {
-  const dropped = await withLock(claimsLock(), async () => {
-    const all = loadClaims();
-    const kept = all.filter((c) => {
-      const r = rows.find((x) => same(x.repo, c.repo));
-      // A kit's claim (`<repo>#kit`): kept while young, or while an open PR on its repository names it.
-      const k = c.repo.endsWith('#kit') ? rows.find((x) => same(kitClaimKey(x.repo), c.repo)) : undefined;
-      if (k) return now - Date.parse(c.at) < CLAIM_DAYS * DAY || (!!c.branch && k.prs.some((p) => p.head === c.branch)) || kitTitleVersions(k.prs.map((p) => p.title)).includes(c.version);
-      if (!r) return true;
-      return stillHeld(c, { branchVersion: r.main?.version ?? null, released: r.release ? [r.release.version] : [], openBranches: r.prs.map((p) => p.head), openVersions: titleVersions(r.name, r.prs.map((p) => p.title)), now });
-    });
-    if (kept.length !== all.length) writeJson(claimsFile(), kept);
-    return all.filter((c) => !kept.includes(c));
-  });
-  // Those the Exchequer handed out are given back there too: their work landed, or went stale.
-  if (o.coord) for (const c of dropped.filter((x) => x.source === 'exchequer')) await ask(o.coord, 'DELETE', '/claims', { repo: c.repo, version: c.version });
 }
 
 /**
