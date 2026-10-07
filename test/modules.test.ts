@@ -107,3 +107,20 @@ test('the sets most lately used are kept, and a half-done install a day old goes
   assert.deepEqual(pruneSets(root, undefined, now).sort(), [...sets.slice(KEEP_SETS), `${sets[0]}.tmp-1-abc`].sort());
   assert.ok(existsSync(path.join(root, sets[0])));
 });
+
+test("a Next.js project's packages aren't linked from a shared set: its build refuses a link out of the project", async () => {
+  const { sharesModules } = await import('../src/stages/modules.ts');
+  const site = path.join(tmp, 'next-site');
+  mkdirSync(site, { recursive: true });
+  writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'site', version: '0.1.0', dependencies: { next: '^16.4.0' } }));
+  writeFileSync(path.join(site, 'package-lock.json'), lock('site', '0.1.0', { next: '^16.4.0' }));
+  assert.equal(sharesModules(site), false);
+  const said: string[] = [];
+  const ctx = ctxFor({ employees: [], workRoot: path.join(tmp, 'next-work'), run: runner().run, neutralDir: tmp });
+  const { linkSharedModules } = await import('../src/stages/modules.ts');
+  assert.equal(await linkSharedModules(ctx, site, (l) => said.push(l)), false, 'its own npm ci instead');
+  assert.equal(existsSync(path.join(site, 'node_modules')), false);
+  assert.match(said.join('\n'), /its own \(npm ci\)/);
+  writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'agent', version: '0.1.0', devDependencies: { typescript: '^7.0.2' } }));
+  assert.equal(sharesModules(site), true, 'any other project shares, as before');
+});

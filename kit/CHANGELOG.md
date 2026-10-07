@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.33.0
+## 2.36.2
 
 **The Thatcher, the Reckoner, the Weigher and the Shepherd have their own title-bar scenes, and say where their work runs.**
 - **node/look.ts:** a scene and an accent for each, moving while it works (`LOOK`): the Thatcher thatches a roof course by course from the eaves up, patting each down with the leggett ("Mending the roof"); the Reckoner slides counters across a counting board ("Taking stock"); the Weigher's balance tips as a load drops into one pan, swings and settles level ("Weighing"); the Shepherd's crook walks a sheep the other way from the Pinder's, into a stone fold where another waits ("Bringing them in"). The sheep is now one drawing (`sheep`) the Pinder's and the Shepherd's share. Until now each showed the cog every agent without a look has.
@@ -12,6 +12,65 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 Nothing: it updates itself as usual.
+
+## 2.36.1
+
+**GenieX 0.8.0 is the NPU's server on a Snapdragon.** spec/npu-vendors.json's qualcomm route pins GenieX 0.8.0's installer (`geniex-cli-setup-windows-arm64-v0.8.0.exe`, 65,196,910 bytes, SHA-256 `fcc4d932…1ec734`, as GitHub publishes it) in place of 0.7.0's. Its install arguments, its `serve` arguments and the model (Qwen3-VL-4B-Instruct W4A16, every pinned file unchanged) stay as they were.
+- **Run on real hardware** (the Snapdragon X2 Elite, 2026-10-07, the Smith's first scout try): the silent per-user install over 0.7.0, the test request (chat and vision) on the route's own arguments and on the PC's configured entry, and the pinned model files under it. spec/NPU-VENDORS.md says so.
+- **The quirks stay as measured on 0.7.0** (`prefix-leak`, `image-path`, the keepalive notes): 0.8.0 answered the test with them on.
+- **What an agent must do:** nothing. Setup installs 0.8.0 on a PC whose NPU isn't set up yet; a PC with 0.7.0 keeps it until the person tries 0.8.0 from the Smith's New for your NPU, or sets the NPU up again.
+- **Its tests:** kit/test/npu-vendors.test.ts names 0.8.0's installer.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This kit comes after 2.36.0; 2.33.0 (Steward 0.19.4) is still to be released and doesn't depend on it.
+
+## 2.36.0
+
+**Castellan's staff releases are published only where the Exchequer's publisher key is.** On 2026-10-07, 12 staff releases reached the public releases repository and never the Exchequer. They were published by a release run outside the PC that releases Castellan, which has no publisher key, and kit 2.35.0 let such a release go to GitHub alone with just a line saying so.
+- **node/release.ts: `publishTo`** first checks the publisher key when there is a releases repository (Castellan's own agents) and the agent isn't Manor or Heiward. Without the key, it publishes nothing: no GitHub release, in the releases repository or the agent's own, and no Exchequer call. It says why ("Not published: <id>-v<version> is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key …") and exits 1. That covers a Steward from before 0.19.0 that still releases to the releases repository, another PC's Steward, and a release run by hand.
+- `PublishSteps.keyMissing()` is new: where the key was looked for when it isn't there, else null (exchequer.ts `publisherKey`). The key itself is never read into a line.
+- Unchanged: with the key, everything is as in 2.35.0. Manor and Heiward publish to GitHub as before with or without it. An agent with no releases repository (anyone else's) publishes to its own repository as before.
+- **spec/RELEASES.md** says so.
+- **What an agent must do:** nothing. Its next release, made by the Steward on the PC that releases Castellan, has the key.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Publishing a staff release by hand now needs the publisher key on that PC (`%USERPROFILE%\.steward\exchequer-publisher.key` or `EXCHEQUER_PUBLISHER_KEY`).
+
+## 2.35.0
+
+**A release of an agent Castellan sells goes to the Exchequer, and no longer to the public releases repository.** Castellan's paid agents are served by the Exchequer alone. Their releases were also going to GitHub's public releases repository, where anyone could download them.
+- **node/exchequer.ts: `saleOf(id)`** is new. It reads the Exchequer's public agents list, where each agent has `forSale` (Exchequer 0.6.0):
+  - `true`: for sale.
+  - `false`: not for sale (Manor, Heiward, the agents held back from sale), or not listed at all.
+  - `null`: the Exchequer couldn't say. It didn't answer, or its answer has no `forSale` (an Exchequer from before 0.6.0, or one whose database isn't migrated yet).
+  - It never throws. `reachedExchequer(outcome)` is new too: published, or there already.
+- **node/release.ts: `publishTo(release, steps)`** now decides where `--publish` goes. With a releases repository (Castellan's own agents):
+  - **For sale:** the Exchequer first, from the files just built, then `v<version>` in the agent's own repository, and never the releases repository. It's refused when the agent's own repository already has the version. If the Exchequer doesn't take it (it's down or refuses, or this PC has no publisher's key), the release goes to the releases repository as before, so it's never missing everywhere. The Exchequer's line stays a note.
+  - **Not for sale, unknown, or the Exchequer can't say:** exactly as before. The releases repository, then the agent's own, then the Exchequer too, so an agent held back from sale is already there when it goes on sale.
+  - Without a releases repository (anyone else's agent), nothing changes. The exit code is still GitHub's.
+- **`npm run release -- --exchequer`** takes the release from the releases repository, else from the agent's own `v<version>` (where an agent for sale has it).
+- **spec/RELEASES.md** says so.
+- **What an agent must do:** nothing. Its next release follows the Exchequer's list. Until the Exchequer says `forSale`, every release goes to GitHub as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents for sale stop appearing in the public releases repository once the Exchequer 0.6.0 is deployed with its migration applied. Until then, releases go there as before.
+
+## 2.34.0
+
+**An agent's rounds never stop silently.** On 2026-10-07 the Chamberlain finished no round for 18 hours. Nothing had hung: it declared a mail source `required`, so `every()` skipped each round, documents too, and a skipped round wrote nothing, so it looked like an agent that had stopped.
+- **node/schedule.ts: a held round is recorded.** A scheduled round held for the agent's required settings still runs nothing, but writes its round.json entry each interval with `"ok": null` and `"waiting": "<what>"` (needsSettings' text), and `RoundState.waiting` (in /api/ping's `rounds`) says the same. Run now is still refused while it waits.
+- **node/schedule.ts: a time limit on every round.** A round that runs past `timeoutMs` (new in `every()`'s options, a number or a function; else `roundTimeLimit(everyMs)`, three intervals and at least two hours) is let go. Its job's signal is aborted, it is recorded with `"ok": false`, `"timedOut": true` and an error saying so, and the next round is scheduled, which tries again. A hung await can no longer stop every round after it. If the job let go ends later, the log says so and nothing else changes. `RoundTimeout` is new.
+- **The job is handed `{ signal }`** (`every(everyMs, ({ signal }) => …)`): a job that can stop when asked passes it on (fetch, child processes). One that ignores it simply isn't waited for after the limit.
+- **`required` is only for an agent that can do nothing at all without the setting** (node/onboarding.ts, required.ts). A setting that only part of the work needs goes in `settings` alone, and the page says what it adds: one missing setting must not stop the work that doesn't need it.
+- **spec/ROUND.md** documents `waiting` and `timedOut`.
+- **What an agent must do:** nothing. A job that takes no arguments works as before. An agent whose rounds can rightly run longer than three intervals and two hours passes its own `timeoutMs`. An agent with `required` checks that it can truly do nothing without it; only the Developer Herald has one (its feeds), and it can't.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This kit comes after 2.33.0 (Steward 0.19.4); if 2.33.0 isn't released yet, release it first.
 
 ## 2.32.1
 

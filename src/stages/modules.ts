@@ -82,10 +82,28 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
 }
 
 /**
+ * Whether a worktree's packages may be linked from a shared set: not a Next.js project's. Its build (Turbopack) refuses
+ * a node_modules that is a link leading out of the project ("the symlink target leaves the filesystem root"), so a
+ * site's `npm run build` would fail there; it gets its own `npm ci` instead. Anything unreadable shares, as before.
+ */
+export function sharesModules(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8').replace(/^﻿/, ''));
+    return !(pkg?.dependencies?.next || pkg?.devDependencies?.next);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * The worktree's node_modules, linked to its set of packages (installed first if need be); false when that couldn't be
  * done, and the worktree should `npm ci` itself.
  */
 export async function linkSharedModules(ctx: Ctx, dir: string, say: (line: string) => void): Promise<boolean> {
+  if (!sharesModules(dir)) {
+    say("node_modules: its own (npm ci), as a Next.js build refuses packages linked from outside the project");
+    return false;
+  }
   try {
     const key = packagesKey(readFileSync(path.join(dir, 'package-lock.json'), 'utf8'));
     const modules = await setFor(ctx, dir, key, say);

@@ -16,6 +16,8 @@ export interface RoundState {
   nextRunAt: string | null;
   /** When the round under way began; null when none is. */
   runningSince: string | null;
+  /** What its rounds wait for from the person (required.ts's needsSettings, in words); null when they wait for nothing. */
+  waiting: string | null;
 }
 
 /**
@@ -35,7 +37,24 @@ export interface RoundRecord {
   everyMs: number;
   /** When the next scheduled round is due; null off duty, or once stopped (as /api/ping's nextRunAt). */
   next: string | null;
+  /** A round held for the agent's required settings (required.ts): what it waits for, in words. `ok` is null then. */
+  waiting?: string;
+  /** true when the round ran past its time limit and was let go (every()'s timeoutMs): `ok` is false then. */
+  timedOut?: boolean;
 }
+
+/** A round that ran past its time limit: every() lets it go, records it, and the next round tries again. */
+export class RoundTimeout extends Error {
+  constructor(ms: number) {
+    super(`it ran past its time limit (${span(ms)}): let go, and the next round tries again`);
+    this.name = 'RoundTimeout';
+  }
+}
+
+const span = (ms: number) => (ms >= 3_600_000 && ms % 3_600_000 === 0 ? `${ms / 3_600_000} h` : ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
+
+/** How long a round may run before it is let go, unless the agent says: three intervals, and at least two hours. */
+export const roundTimeLimit = (everyMs: number) => Math.max(3 * everyMs, 2 * 3_600_000);
 
 /** round.json, in the agent's data folder: `{ "rounds": { "<name>": RoundRecord } }`, one entry per schedule. */
 export const roundFile = () => dataFile('round.json');
@@ -121,8 +140,23 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * answers, or an Offline thrown) is no failure: it waited for the network. Its lastRunOk is null and
  * lastRunOffline true, round.json says `"ok": null, "offline": true`, and the log says it waits, never
  * "run failed". The next round comes at its usual time.
+ *
+ * Its rounds never stop silently (kit 2.34.0):
+ * - Held for its required settings (required.ts), a scheduled round runs nothing, but is still recorded: round.json
+ *   says `"ok": null, "waiting": "<what>"` at each interval, and its state says `waiting`, so a reader sees a reason
+ *   and a schedule still going, never silence.
+ * - A round that runs past its time limit (`timeoutMs`, a number or a function read at each round; else
+ *   roundTimeLimit(), three intervals and at least two hours) is let go: its job's signal is aborted, it is recorded
+ *   as failed with `"timedOut": true`, and the next round is scheduled, which tries again. A hung await (a request
+ *   that never answers, a child process that never ends) can't stop the rounds after it. The job that was let go
+ *   may still finish later: then the log says so, and nothing else changes. A job that can stop when asked takes
+ *   the signal (`job({ signal })`); one that can't is simply no longer waited for.
  */
-export function every(everyMs: number | (() => number), job: () => Promise<void>, opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string } = {}) {
+export function every(
+  everyMs: number | (() => number),
+  job: (round: { signal: AbortSignal }) => Promise<void>,
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number) } = {},
+) {
   let running = false;
   let timer: NodeJS.Timeout | undefined;
   let lastError: string | null = null;
@@ -132,6 +166,8 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
   let lastOk: boolean | null = null;
   let lastOffline = false;
   let startedAt: number | null = null;
+  /** What the rounds wait for from the person, as the last tick found it. */
+  let waiting: string | null = null;
   /** When the wait under way ends. */
   let dueAt: number | null = null;
   let jitter = 1;
@@ -148,9 +184,19 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
   const tick = async (asked = false) => {
     clearTimeout(timer);
     if (running) return;
-    // Off duty, only the rounds asked for run; waiting for its required settings (required.ts), none do: it can't work yet.
-    if ((!asked && !duty().onDuty) || needsSettings()) {
+    // Off duty, only the rounds asked for run.
+    if (!asked && !duty().onDuty) {
       if (!stopped) wait();
+      return;
+    }
+    // Waiting for its required settings (required.ts), none do: it can't work yet. Said in round.json, never silent.
+    const needs = needsSettings();
+    waiting = needs?.text ?? null;
+    if (needs) {
+      if (stopped) return;
+      wait();
+      const now = new Date().toISOString();
+      recordRound(opts.name ?? 'round', { started: now, finished: now, ok: null, waiting: needs.text, error: null, everyMs: interval(), next: null });
       return;
     }
     running = true;
@@ -158,8 +204,26 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     startedAt = started;
     let error: string | null = null;
     let offline = false;
+    let timedOut = false;
+    const controller = new AbortController();
+    const limit = typeof opts.timeoutMs === 'function' ? opts.timeoutMs() : opts.timeoutMs ?? roundTimeLimit(interval());
+    let limitTimer: NodeJS.Timeout | undefined;
     try {
-      await job();
+      const work = job({ signal: controller.signal });
+      const late = new Promise<never>((_, reject) => {
+        limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
+      });
+      try {
+        await Promise.race([work, late]);
+      } catch (e) {
+        if (!(e instanceof RoundTimeout)) throw e;
+        timedOut = true;
+        controller.abort(e);
+        // The job let go may still end: said in the log, and nothing else changes.
+        const ended = () => console.log(`${new Date().toISOString()} a round that was let go at its time limit has ended, after ${span(Date.now() - started)}`);
+        work.then(ended, ended);
+        throw e;
+      }
       lastError = null;
       lastOk = true;
     } catch (e) {
@@ -170,6 +234,7 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
       if (offline) console.log(`${new Date().toISOString()} this PC is offline, so the round waits for the network: ${error}`);
       else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
     } finally {
+      clearTimeout(limitTimer);
       lastOffline = offline;
       running = false;
       startedAt = null;
@@ -182,6 +247,7 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
         finished: new Date(ended).toISOString(),
         ok: offline ? null : error === null,
         ...(offline ? { offline: true } : {}),
+        ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
         next: state().nextRunAt,
@@ -199,6 +265,7 @@ export function every(everyMs: number | (() => number), job: () => Promise<void>
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
     nextRunAt: stopped || running || !duty().onDuty || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
+    waiting,
   });
   schedules.add(state);
 

@@ -4,7 +4,10 @@
  * `publishToExchequer` after the release is on GitHub, with the very files it published there: the zip,
  * SHA256SUMS.txt and manor-agent.json when the agent announces itself.
  *
- * It publishes only an agent the Exchequer sells (its public `GET /api/v1/agents` lists it; Manor and Heiward never
+ * Since kit 2.35.0 release.ts asks first whether the Exchequer sells the agent (`saleOf`: the list's `forSale`): one
+ * for sale is published here first and not to the public releases repository (release.ts' publishTo).
+ *
+ * It publishes only an agent the Exchequer serves (its public `GET /api/v1/agents` lists it; Manor and Heiward never
  * are), and only with the publisher's key: `EXCHEQUER_PUBLISHER_KEY`, or `%USERPROFILE%\.steward\exchequer-publisher.key`.
  * The key is sent to the Exchequer alone, as a Bearer token, never to the storage its upload URLs point at, and never
  * printed: every line this module gives back has it taken out.
@@ -107,6 +110,45 @@ async function errorCode(res: Response): Promise<{ code: string | null; text: st
 }
 
 const tagOf = (r: Pick<ExchequerRelease, 'id' | 'version'>) => `${r.id}-v${r.version}`;
+
+/**
+ * Whether the Exchequer sells an agent, and so serves its releases alone (kit 2.35.0): its public `GET /api/v1/agents`
+ * gives each agent's `forSale` (Exchequer 0.6.0). `forSale` is
+ * - true: for sale. Its release is published to the Exchequer, and not to the public releases repository.
+ * - false: not for sale (Manor, Heiward, an agent held back from sale), or one the Exchequer doesn't list. Published to
+ *   GitHub as before, and to the Exchequer when it takes it, so one that goes on sale is there already.
+ * - null: the Exchequer couldn't say: it didn't answer, or answered without `forSale` (one from before 0.6.0, or whose
+ *   database isn't migrated yet). Published to GitHub as before: an unsure Exchequer never keeps a release from it.
+ * `line` says which, in words. Never throws.
+ */
+export interface Sale {
+  forSale: boolean | null;
+  line: string;
+}
+
+export async function saleOf(id: string, o: ExchequerOptions = {}): Promise<Sale> {
+  if (NEVER_SOLD.includes(id)) return { forSale: false, line: `The Exchequer: ${id} isn't sold there.` };
+  const base = exchequerUrl(o.env ?? process.env);
+  const unsure = (said: string): Sale => ({ forSale: null, line: `The Exchequer couldn't say whether ${id} is for sale (${said}), so its release goes to GitHub as before.` });
+  try {
+    const listed = await (o.fetch ?? fetch)(`${base}/api/v1/agents`, { signal: AbortSignal.timeout(ASK_MS) });
+    if (!listed.ok) return unsure(await why(listed));
+    const agents = ((await listed.json().catch(() => null)) as { agents?: unknown } | null)?.agents;
+    if (!Array.isArray(agents)) return unsure(`${base} didn't list its agents`);
+    const agent = (agents as { id?: unknown; forSale?: unknown }[]).find((a) => a?.id === id);
+    if (!agent) return { forSale: false, line: `The Exchequer doesn't sell ${id}, so its release goes to GitHub as before.` };
+    if (typeof agent.forSale !== 'boolean') return unsure(`${base} doesn't say which agents are for sale yet`);
+    return agent.forSale
+      ? { forSale: true, line: `The Exchequer sells ${id}: its release is published there, and not to the public releases repository.` }
+      : { forSale: false, line: `The Exchequer doesn't sell ${id} yet: its release goes to GitHub as before, and to the Exchequer too.` };
+  } catch (e) {
+    const err = e as Error;
+    return unsure(err.name === 'TimeoutError' ? `${base} timed out` : `couldn't reach ${base}: ${err.message}`);
+  }
+}
+
+/** Whether a release reached the Exchequer: published by this call, or there already. */
+export const reachedExchequer = (out: Pick<ExchequerOutcome, 'outcome'>) => out.outcome === 'published' || out.outcome === 'already';
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
 /**

@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.19.4
+## 0.23.3
 
 **It hands out kit 2.33.0: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
 
@@ -13,6 +13,111 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
+## 0.23.2
+
+**It raises an alarm when another Steward, or someone else, merges its PRs or releases its agents.**
+
+### What's new
+
+- On the PC that releases Castellan, the Steward now notices when one of its own PRs is merged, or one of its agents is released, and no round of its own did it. Most likely another PC runs a Steward signed in to the same GitHub account. One alarm names the agents, the PRs and the releases, in the Steward's page and in Manor, and clears by itself a day after the last one.
+- Did it yourself, by hand? Dismiss the alarm: what it names is taken as yours, and only a new one raises it again. Or mark it as yours, before or after: `node src\cli.ts mine porter v0.5.14` (or `#65` for a PR).
+- It is seen from what each round already reads from GitHub, plus git in the agent's checkout here. Nothing more is asked of GitHub.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first round after the update only learns which releases and PRs are already there, so the update itself raises nothing. On every other PC nothing changes.
+
+## 0.21.3
+
+**It hands out the kit 2.36.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**
+
+### What changed
+
+- A Snapdragon PC whose NPU is set up from now on gets GenieX 0.8.0 instead of 0.7.0. It has been run on a Snapdragon X2 Elite: it installs the same way, answers chat and pictures, and uses the same model files.
+- A PC already running 0.7.0 keeps it. The Smith offers 0.8.0 to try under New for your NPU, and puts 0.7.0 back if you remove it.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.21.2
+
+**It hands out the kit 2.36.0: a staff release is published only on the PC that holds the Exchequer's key, so none skips the Exchequer.**
+
+### What changed
+
+- A release of one of Castellan's staff now publishes nothing on a PC without the Exchequer's publisher key. That means no GitHub release, public or private. Before, such a release went to GitHub alone, and paying customers never got it from the Exchequer.
+- With the key, as on the PC that releases Castellan, releases go out exactly as before.
+- Manor and Heiward, which are never sold, are released as before.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.21.0
+
+**It hands out the kit 2.35.0: a release of an agent Castellan sells goes to the Exchequer, not the public releases repository.**
+
+### What changed
+
+- The release of an agent that Castellan sells is published to the Exchequer, Castellan's release service, and no longer to the public releases repository. The Steward still sees it released, by the agent's own repository.
+- The agents not for sale go to the releases repository as before, and to the Exchequer too. That's Manor, Heiward, and the agents held back from sale.
+- If the Exchequer can't say which agents it sells, or doesn't take a release, the release goes to the releases repository as before. A release is never held back, and nothing becomes an alarm.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents for sale stop appearing in the public releases repository once the Exchequer says which ones are for sale (its 0.6.0).
+
+## 0.20.1
+
+**A refresh after releases cleans up after itself, however deep its packages go.**
+
+### What changed
+
+- A refresh's working copy is removed whatever the length of the paths in it. A site's packages go deeper than git on Windows deletes, so its copy could be left behind, and the next refresh would then have failed to start.
+- One left behind by a refresh cut short (the PC turned off mid-run) is cleared before the next refresh.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.20.0
+
+**A repository can be refreshed after every release: a site that lists your release notes and downloads stays up to date by itself.**
+
+### What's new
+
+- **Refresh after releases**, a new setting for each repository in Settings, under Repositories. Name a command (a site's `npm run sync`, say), and after the Steward releases anything, it runs that command in a fresh copy of the repository's branch. When the command changed something, the repository's tests run, and only when they all pass is the change committed ("Release notes and downloads after …") and pushed to the branch, never forced. When nothing changed, nothing is pushed. A round that released nothing runs no refresh.
+- A refresh that fails, or whose tests fail, pushes nothing and is an alarm on the Steward's page and in Castellan, until a later refresh goes through.
+- **Note**, a new setting for each repository: a word shown first on its row of the Steward's page, such as why its pull requests are left to you.
+
+### What changed
+
+- A version kept in a TypeScript constant (`export const VERSION = '1.2.3'`) is read and claimed like one in `version: '1.2.3'`, and Look after finds it.
+- A Next.js project's tests get their own packages in the Steward's worktree, as its build refuses packages linked from elsewhere. Other projects still share theirs.
+- Settings save when a repository has no kit to fill, as one you looked after from the list of repositories found on this PC. Before, its empty "Fill its kit" stopped the save.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Nothing is refreshed until you name a command for a repository.
+
+## 0.19.5
+
+**It hands out the kit 2.34.0: an agent's rounds never stop silently.**
+
+### What changed
+
+- An agent waiting for a setting only you can give now says so in its round record each time a round comes due. Before, it went quiet, and looked to the Surveyor like an agent whose rounds had stopped.
+- A round that hangs, waiting on something that never answers, is let go after its time limit (three intervals, and at least two hours), recorded as failed, and tried again at the next round. Before, one hung round stopped every round after it until the agent was restarted.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.19.3
 

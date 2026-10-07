@@ -21,7 +21,8 @@ const kindOf = (file: string): 'package' | 'lock' | 'csproj' | 'code' => {
   return 'code';
 };
 
-const CODE = /(\bversion\s*:\s*)(['"])(\d+\.\d+\.\d+)\2/;
+/** `version: 'x.y.z'` (an object's), or `VERSION = 'x.y.z'` (a constant's, as a site's src/version.ts). */
+const CODE = /(\b(?:version\s*:|VERSION\s*=)\s*)(['"])(\d+\.\d+\.\d+)\2/;
 const CSPROJ = /(<(VersionPrefix|Version)>)(\d+\.\d+\.\d+)(<\/\2>)/;
 
 /** The version a file carries, or null when it has none where it should. */

@@ -6,6 +6,7 @@
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
  *   npm run release -- --publish     builds it, then publishes it: v<version> in the agent's own repository, and
  *                                    <id>-v<version> in the releases repository too when there is one (releasesRepo)
+ *                                    and the Exchequer doesn't sell the agent (publishTo)
  *   npm run release -- --readable    builds it without minifying, to look into on this PC; it can't be published
  *   npm run release -- --exchequer   publishes the release already on GitHub (the releases repository's, else the
  *                                    agent's own), at package.json's version, to the Exchequer from GitHub's own
@@ -17,9 +18,13 @@
  * README stays out: it's for the repository. The public repository holds the releases alone, so any PC downloads
  * them with no sign-in; the agent's own repository keeps them too, while Manors that look there are about.
  *
- * --publish also publishes the same files to the Exchequer, Castellan's release service (exchequer.ts), when it sells
+ * --publish also publishes the same files to the Exchequer, Castellan's release service (exchequer.ts), when it serves
  * the agent and this PC has the publisher's key. That step never fails the release: GitHub's stands, and the line it
- * prints says what happened (--exchequer finishes it).
+ * prints says what happened (--exchequer finishes it). An agent the Exchequer sells (its agents list says `forSale`,
+ * kit 2.35.0) goes to the Exchequer first and not to the public releases repository, unless the Exchequer doesn't
+ * take it; one it doesn't sell, or when it can't say, goes to GitHub as before (publishTo). A release of Castellan's
+ * (one with a releases repository) is published only where the Exchequer's publisher key is (kit 2.36.0): on any other
+ * PC it publishes nothing, so a staff release never reaches GitHub without going through the Exchequer.
  *
  * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
  * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
@@ -48,7 +53,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
-import { publishToExchequer } from './exchequer.ts';
+import { NEVER_SOLD, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome, type Sale } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
@@ -321,17 +326,12 @@ function released(gh: string, tag: string, repo: string): 'there' | 'none' | { e
 
 /**
  * Publishes a built release from a clean, pushed HEAD, with the zip and SHA256SUMS.txt (and manor-agent.json, when
- * there is one): as v<version> in the agent's own repository, and, when there is a releases repository (releasesRepo:
- * Castellan's own agents), as <id>-v<version> there too, where every Manor looks. Refused when the releases repository
- * has it already (or, with none, the agent's own); one already in the agent's own (a version released before the
- * releases repository) is published in the releases repository alone. Once GitHub has it (the releases repository,
- * or with none the agent's own), the same files go to the Exchequer too (toExchequer), which never changes the exit
- * code: the Exchequer itself takes only the agents it sells.
+ * there is one): as v<version> in the agent's own repository; as <id>-v<version> in the releases repository too, when
+ * there is one (releasesRepo: Castellan's own agents) and the Exchequer doesn't sell the agent; and to the Exchequer.
+ * publishTo says where, and in what order.
  */
 async function publish(b: Built): Promise<number> {
   const { release } = b;
-  const tag = releaseTag(release.id, release.version);
-  const ownTag = `v${release.version}`;
   if (release.form !== 'minified') {
     console.error('Not published: a readable release stays on this PC. Release again without --readable.');
     return 1;
@@ -354,56 +354,135 @@ async function publish(b: Built): Promise<number> {
     console.error(`Not published: ${NO_GH}.`);
     return 1;
   }
-  const RELEASES_REPO = releasesRepo();
-  const there = RELEASES_REPO ? released(gh, tag, RELEASES_REPO) : 'none';
-  if (there === 'there') {
-    console.error(`Not published: ${RELEASES_REPO} already has ${tag}. Raise the version in package.json and src/app.ts first. (To publish that release to the Exchequer alone: npm run release -- --exchequer.)`);
-    return 1;
-  }
-  if (typeof there === 'object') {
-    console.error(`Not published: couldn't ask GitHub about ${tag} in ${RELEASES_REPO}: ${there.error}`);
-    return 1;
-  }
-  const own = released(gh, ownTag, repo);
-  if (typeof own === 'object') {
-    console.error(`Not published: couldn't ask GitHub about ${ownTag} in ${repo}: ${own.error}`);
-    return 1;
-  }
-  if (!RELEASES_REPO && own === 'there') {
-    console.error(`Not published: ${repo} already has ${ownTag}. Raise the version in package.json and src/app.ts first. (To publish that release to the Exchequer alone: npm run release -- --exchequer.)`);
-    return 1;
-  }
   const assets = [b.zip, b.sums, ...(b.announcement ? [b.announcement] : [])];
   // The notes go in a file: a double quote inside an argument can reach gh split on Windows, and an entry has them.
   const notesDir = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-notes-`));
   const notesFile = path.join(notesDir, 'notes.md');
   writeFileSync(notesFile, b.notes.notes);
-  let code: number;
   try {
-    // TODO(Manor's SELLING.md, phase 3): once Manor takes the staff's releases from the Exchequer and every current
-    // release is loaded there, the staff stop publishing to GitHub: the releases repository (and the agent's own
-    // repository) keep only what isn't sold, Manor's and Heiward's. Until then GitHub stays where every Manor looks.
-    if (RELEASES_REPO) {
-      // The releases repository holds no source, so its tag points at its own default branch: the commit is in the notes and release.json.
-      const pub = spawnSync(gh, ['release', 'create', tag, ...assets, '--repo', RELEASES_REPO, '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], { stdio: 'inherit', windowsHide: true });
-      if (pub.status !== 0) return pub.status ?? 1;
-    }
-    if (RELEASES_REPO && own === 'there') {
-      console.log(`${repo} has ${ownTag} already (released before the releases repository): published in ${RELEASES_REPO} alone.`);
-      code = 0;
-    } else {
-      const r = spawnSync(gh, ['release', 'create', ownTag, ...assets, '--repo', repo, '--target', git('rev-parse', 'HEAD'), '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], {
-        stdio: 'inherit',
-        windowsHide: true,
-      });
-      code = r.status ?? 1;
-    }
+    return await publishTo(
+      { id: release.id, version: release.version, repo, releasesRepo: releasesRepo() },
+      {
+        released: (t, where) => released(gh, t, where),
+        create: (t, where, own) => {
+          // The releases repository holds no source, so its tag points at its own default branch: the commit is in the
+          // notes and release.json. The agent's own tag points at the commit released.
+          const target = own ? ['--target', git('rev-parse', 'HEAD')] : [];
+          const r = spawnSync(gh, ['release', 'create', t, ...assets, '--repo', where, ...target, '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], { stdio: 'inherit', windowsHide: true });
+          return r.status ?? 1;
+        },
+        keyMissing: () => {
+          const found = publisherKey();
+          return 'missing' in found ? found.missing : null;
+        },
+        sale: (id) => saleOf(id),
+        exchequer: () => publishToExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets }),
+        log: (line) => console.log(line),
+        error: (line) => console.error(line),
+      },
+    );
   } finally {
     rmSync(notesDir, { recursive: true, force: true });
   }
+}
+
+/** What publishTo does on GitHub and at the Exchequer: gh's calls, the Exchequer's, and where its lines go. */
+export interface PublishSteps {
+  /** gh release view: 'there', 'none', or why GitHub couldn't be asked. */
+  released(tag: string, repo: string): 'there' | 'none' | { error: string };
+  /** gh release create with the release's files: in the agent's own repository (`own`) at the commit, else in the releases repository. Its exit code. */
+  create(tag: string, repo: string, own: boolean): number;
+  /** Where the Exchequer's publisher key was looked for when this PC hasn't it, else null (exchequer.ts publisherKey). */
+  keyMissing(): string | null;
+  /** Whether the Exchequer sells the agent (exchequer.ts saleOf). */
+  sale(id: string): Promise<Sale>;
+  /** The release's files published to the Exchequer (exchequer.ts publishToExchequer). */
+  exchequer(): Promise<ExchequerOutcome>;
+  log(line: string): void;
+  error(line: string): void;
+}
+
+/**
+ * Where a built release is published, and the exit code (GitHub's). `repo` is the agent's own repository (origin);
+ * `releasesRepo` the public releases repository, or null (releasesRepo()).
+ *
+ * - **With no releases repository** (anyone else's agent built on the kit): v<version> in the agent's own repository,
+ *   refused when it has it already; then the Exchequer, which takes only an agent it sells.
+ * - **An agent the Exchequer sells** (kit 2.35.0: saleOf's forSale true): the Exchequer first, from the files built,
+ *   and not the public releases repository; then v<version> in the agent's own (the Steward knows a release by it).
+ *   Refused when the agent's own has it already. When the Exchequer doesn't take it (down, or refusing), it goes to
+ *   the releases repository as before, so a release is never left out of every place Manor looks.
+ * - **Any other** (not for sale, unknown to the Exchequer, or the Exchequer couldn't say): as before kit 2.35.0, the
+ *   releases repository as <id>-v<version> (refused when it has it), then the agent's own (unless it has it from before
+ *   the releases repository), then the Exchequer too, so one held back from sale is there already when it goes on sale.
+ *
+ * Whatever happens at the Exchequer, the exit code is GitHub's: it never fails a release that GitHub took.
+ *
+ * A release of Castellan's (a releases repository) of any agent but Manor and Heiward is published only on a PC with
+ * the Exchequer's publisher key (kit 2.36.0): without it, nothing is published and the exit code is 1. The PC that
+ * releases Castellan has the key. Anywhere else (another PC's Steward, one from before 0.19.0 that still releases to
+ * the releases repository, a release run by hand) a staff release would reach GitHub, the public releases repository
+ * among it, and never the Exchequer.
+ */
+export async function publishTo(r: { id: string; version: string; repo: string; releasesRepo: string | null }, s: PublishSteps): Promise<number> {
+  const tag = releaseTag(r.id, r.version);
+  const ownTag = `v${r.version}`;
+  const RAISE = 'Raise the version in package.json and src/app.ts first. (To publish that release to the Exchequer alone: npm run release -- --exchequer.)';
+  if (r.releasesRepo && !NEVER_SOLD.includes(r.id)) {
+    const missing = s.keyMissing();
+    if (missing) {
+      s.error(`Not published: ${tag} is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key (${missing}, or EXCHEQUER_PUBLISHER_KEY). Only the PC that releases Castellan publishes them.`);
+      return 1;
+    }
+  }
+  const sale = r.releasesRepo ? await s.sale(r.id) : null;
+  if (sale) s.log(sale.line);
+  const sold = sale?.forSale === true;
+  let toReleases = r.releasesRepo && !sold ? r.releasesRepo : null;
+  if (toReleases) {
+    const there = s.released(tag, toReleases);
+    if (there === 'there') {
+      s.error(`Not published: ${toReleases} already has ${tag}. ${RAISE}`);
+      return 1;
+    }
+    if (typeof there === 'object') {
+      s.error(`Not published: couldn't ask GitHub about ${tag} in ${toReleases}: ${there.error}`);
+      return 1;
+    }
+  }
+  const own = s.released(ownTag, r.repo);
+  if (typeof own === 'object') {
+    s.error(`Not published: couldn't ask GitHub about ${ownTag} in ${r.repo}: ${own.error}`);
+    return 1;
+  }
+  if (!toReleases && own === 'there') {
+    s.error(`Not published: ${r.repo} already has ${ownTag}. ${RAISE}`);
+    return 1;
+  }
+  const say = (out: ExchequerOutcome) => (out.ok ? s.log : s.error)(out.line);
+  let exchequerAsked = false;
+  if (sold && r.releasesRepo) {
+    const out = await s.exchequer();
+    say(out);
+    exchequerAsked = true;
+    if (reachedExchequer(out)) s.log(`${tag} isn't published to ${r.releasesRepo}: the Exchequer serves it.`);
+    else {
+      toReleases = r.releasesRepo;
+      s.log(`So ${tag} goes to ${toReleases} as before, where every Manor finds it.`);
+    }
+  }
+  if (toReleases) {
+    const pub = s.create(tag, toReleases, false);
+    if (pub !== 0) return pub;
+  }
+  let code: number;
+  if (toReleases && own === 'there') {
+    s.log(`${r.repo} has ${ownTag} already (released before the releases repository): published in ${toReleases} alone.`);
+    code = 0;
+  } else code = s.create(ownTag, r.repo, true);
   // The Exchequer too, with the same files, once GitHub has them: the releases repository did (or it returned above),
   // or with none, the agent's own. Whatever happens there, GitHub's release stands and the exit code is GitHub's.
-  if (RELEASES_REPO || code === 0) await toExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets });
+  if (!exchequerAsked && (toReleases || code === 0)) say(await s.exchequer());
   return code;
 }
 
@@ -424,20 +503,32 @@ async function exchequerOnly(): Promise<number> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   const version = String(pkg.version);
   const releases = releasesRepo();
-  const from = releases ?? originRepo();
-  if (!from) {
+  const origin = originRepo();
+  // The releases repository's <id>-v<version>, else the agent's own v<version>: an agent the Exchequer sells isn't
+  // published to the releases repository (kit 2.35.0), so its own repository has the files.
+  const sources = [...(releases ? [{ from: releases, tag: releaseTag(APP.id, version) }] : []), ...(origin ? [{ from: origin, tag: `v${version}` }] : [])];
+  if (!sources.length) {
     console.error("Not published to the Exchequer: there's no releases repository, and origin isn't a GitHub repository.");
     return 1;
   }
-  const tag = releases ? releaseTag(APP.id, version) : `v${version}`;
   const gh = ghExe();
-  const view = spawnSync(gh, ['release', 'view', tag, '--repo', from, '--json', 'body,assets'], { encoding: 'utf8', windowsHide: true });
-  if (view.status !== 0) {
-    const missing = /not found/i.test(`${view.stderr}`);
-    console.error(missing ? `${from} has no ${tag}: publish it with npm run release -- --publish.` : `Couldn't ask GitHub about ${tag} in ${from}: ${`${view.stderr}`.trim() || view.error?.message}`);
+  let found: { from: string; tag: string; body: string; assets: { name: string }[] } | null = null;
+  for (const { from, tag } of sources) {
+    const view = spawnSync(gh, ['release', 'view', tag, '--repo', from, '--json', 'body,assets'], { encoding: 'utf8', windowsHide: true });
+    if (view.status === 0) {
+      found = { from, tag, ...(JSON.parse(view.stdout) as { body: string; assets: { name: string }[] }) };
+      break;
+    }
+    if (!/not found/i.test(`${view.stderr}`)) {
+      console.error(`Couldn't ask GitHub about ${tag} in ${from}: ${`${view.stderr}`.trim() || view.error?.message}`);
+      return 1;
+    }
+  }
+  if (!found) {
+    console.error(`${sources.map((x) => `${x.from} has no ${x.tag}`).join(', and ')}: publish it with npm run release -- --publish.`);
     return 1;
   }
-  const { body, assets } = JSON.parse(view.stdout) as { body: string; assets: { name: string }[] };
+  const { from, tag, body, assets } = found;
   const dir = mkdtempSync(path.join(os.tmpdir(), `${APP.id}-exchequer-`));
   try {
     const got = spawnSync(gh, ['release', 'download', tag, '--repo', from, '--dir', dir], { stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true });
