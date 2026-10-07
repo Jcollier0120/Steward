@@ -48,7 +48,19 @@ test('detection: DXGI with Heiward\'s naming (software and Microsoft adapters le
       memoryGb: 0.1,
     },
   ]);
-  assert.deepEqual(laptop.npu, { name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU', device: 'Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU', driver: '30.0.228.10000', driverDate: '2026-07-20' });
+  assert.deepEqual(laptop.npu, {
+    name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU',
+    device: 'Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU',
+    driver: '30.0.228.10000',
+    driverDate: '2026-07-20',
+    manufacturer: '',
+    deviceId: '',
+    vendor: 'qualcomm',
+    generation: 'snapdragon-x2',
+    label: 'Snapdragon X2 Elite / X2 Plus (Hexagon v81)',
+    supported: true,
+    verified: true,
+  }, 'an older npu| line (a Hexagon driver) still reads, its maker and generation from its name');
   assert.deepEqual(laptop.cpu, { name: 'Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Oryon CPU', arch: 'arm64', cores: 18 });
   assert.equal(laptop.geniex, 'C:\\geniex.exe');
   assert.deepEqual(detectedAccelerators(laptop).map((a) => a.id), ['npu', 'gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'cpu'], 'the recommended order');
@@ -273,7 +285,7 @@ test('the plan for this laptop: the Adreno\'s OpenCL build; the NPU is left alon
   };
   const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'npu', 'gpu-nope'], raw, releases: RELEASES, hfFiles: hf, home });
   assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant, t.ports]), [['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'opencl-adreno-arm64', { chat: 18192, vision: 18193, embed: 18300 }]]);
-  assert.ok(plan.problems.some((p) => /^npu: the NPU runs GenieX/.test(p)));
+  assert.equal(plan.npu?.route.server, 'GenieX', 'asked for by name, the NPU is set up again on its route');
   assert.ok(plan.problems.some((p) => /^gpu-nope: no such graphics card/.test(p)));
 });
 

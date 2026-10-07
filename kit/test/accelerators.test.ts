@@ -189,7 +189,7 @@ test('an older config with only chatEndpoint still works: one accelerator, the N
 
 test('Reeve not set up reads the same whichever way: no config.json, an empty list, or nothing that serves anything', async () => {
   const want = A.REEVE_NOT_SET_UP;
-  assert.equal(want, "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)");
+  assert.equal(want, "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI");
   const dir = path.join(home, 'reeve-unset');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'config.json');

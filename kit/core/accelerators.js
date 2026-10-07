@@ -19,6 +19,18 @@ import { slotNames } from './queue.js';
  * @property {string} baseUrl
  * @property {string} model
  * @property {string[]} [startCommand]
+ * @property {Record<string, string>} [env] What its server's environment needs besides this one's (OpenVINO Model Server's
+ * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+ * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
+ * vision model may take less than its chat model): capFor.
+ */
+
+/**
+ * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
+ * server that loads its model slowly). Each left out is the rule's.
+ * @property {number} [requestBaseMs]
+ * @property {number} [requestPerTokenMs]
+ * @property {number} [coldLoadMs]
  */
 
 /**
@@ -35,6 +47,7 @@ import { slotNames } from './queue.js';
  * @property {Endpoint} [embed]
  * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
+ * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
 
 /**
@@ -127,7 +140,20 @@ const baseUrlOf = (u) => String(u).replace(/\/(v1\/?)?$/, '');
 /** @param {unknown} v */
 const positiveInt = (v) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
 
-/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[] }} Written */
+/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number }} Written */
+
+/**
+ * A server's own environment as written: names to strings, anything else left out.
+ * @param {any} v
+ * @returns {Record<string, string> | undefined}
+ */
+function readEnv(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const [k, x] of Object.entries(v)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof x === 'string') out[k] = x;
+  return Object.keys(out).length ? out : undefined;
+}
 
 /**
  * One served kind as written; a vision endpoint may leave out its server (it's the chat endpoint's).
@@ -140,7 +166,36 @@ function readEndpoint(v) {
     model: v.model,
     ...(typeof v.baseUrl === 'string' && v.baseUrl ? { baseUrl: baseUrlOf(v.baseUrl) } : {}),
     ...(Array.isArray(v.startCommand) ? { startCommand: v.startCommand.map(String) } : {}),
+    ...(readEnv(v.env) ? { env: readEnv(v.env) } : {}),
+    ...(positiveInt(v.maxContextTokens) ? { maxContextTokens: v.maxContextTokens } : {}),
   };
+}
+
+/**
+ * An accelerator's own timings as written: each a whole number of ms, the others left to the rules.
+ * @param {any} v
+ * @returns {Timeouts | undefined}
+ */
+function readTimeouts(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const k of ['requestBaseMs', 'requestPerTokenMs', 'coldLoadMs']) {
+    const n = v[k];
+    if (typeof n === 'number' && Number.isInteger(n) && n >= 0) out[k] = n;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
+ * when it has one, else the accelerator's.
+ * @param {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {number}
+ */
+export function capFor(a, work) {
+  return a[work]?.maxContextTokens ?? a.maxContextTokens;
 }
 
 /**
@@ -155,8 +210,10 @@ function withServers(a, eps) {
   for (const w of WORKS) {
     const ep = eps[w];
     if (!ep) continue;
-    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}) };
-    else if (w === 'vision' && eps.chat?.baseUrl) out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}) };
+    const cap = ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {};
+    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...cap };
+    else if (w === 'vision' && eps.chat?.baseUrl)
+      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...cap };
   }
   return out;
 }
@@ -241,6 +298,7 @@ function readOne(rules, v, hw) {
       maxContextTokens: positiveInt(v.maxContextTokens) ?? rules.accelerators.defaultMaxContextTokens,
       quirks: Array.isArray(v.quirks) ? v.quirks.filter((/** @type {unknown} */ q) => typeof q === 'string' && QUIRKS.includes(q)) : [],
       ...(v.enabled === false ? { enabled: false } : {}),
+      ...(readTimeouts(v.timeouts) ? { timeouts: readTimeouts(v.timeouts) } : {}),
     },
     { chat: readEndpoint(v.chat), vision: readEndpoint(v.vision), embed: readEndpoint(v.embed) },
   );
@@ -669,7 +727,7 @@ export function candidates(rules, accs, need, state = {}) {
   const list = [];
   /** @type {Skipped[]} */
   const skipped = [];
-  const fitting = accs.filter((acc) => serves(acc, need.work) && need.tokens <= acc.maxContextTokens);
+  const fitting = accs.filter((acc) => serves(acc, need.work) && need.tokens <= capFor(acc, need.work));
   /** @param {Accelerator} acc */
   const failureOfAcc = (acc) => state.failures?.[acc.id] ?? null;
   // When every one that would do has failed, they're tried anyway (the last resort, as Reeve does), rather
@@ -771,15 +829,18 @@ export function visionTokens(rules, question) {
 }
 
 /**
- * Why a request is refused before anything is sent: over every candidate's cap (null when one fits).
- * @param {{ maxContextTokens: number }[]} serving
+ * Why a request is refused before anything is sent: over every candidate's cap (null when one fits). With `work`,
+ * each one's cap for that kind (capFor).
+ * @param {(Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[]} serving
  * @param {number} promptTokens
  * @param {number} maxTokens
+ * @param {Work} [work]
  * @returns {string | null}
  */
-export function tooBig(serving, promptTokens, maxTokens) {
-  if (!serving.length || serving.some((a) => promptTokens + maxTokens <= a.maxContextTokens)) return null;
-  const cap = Math.max(...serving.map((a) => a.maxContextTokens));
+export function tooBig(serving, promptTokens, maxTokens, work) {
+  const capOf = (/** @type {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} */ a) => (work ? capFor(a, work) : a.maxContextTokens);
+  if (!serving.length || serving.some((a) => promptTokens + maxTokens <= capOf(a))) return null;
+  const cap = Math.max(...serving.map(capOf));
   return say.tooBig(promptTokens, maxTokens, cap, serving.length > 1);
 }
 
@@ -791,13 +852,14 @@ export function tooBig(serving, promptTokens, maxTokens) {
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
+ * the rules' place, each one it gives.
  * @param {Rules} rules
- * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}
  */
 export function requestTimeoutMs(rules, r) {
-  const a = rules.accelerators;
+  const a = { ...rules.accelerators, ...(r.timeouts ?? {}) };
   const own = r.lane === 'background' && r.work !== 'embed' ? Math.min(r.ceilingMs, a.requestBaseMs + a.requestPerTokenMs * Math.max(0, r.maxTokens)) : r.ceilingMs;
   return own + (r.coldLoad ? a.coldLoadMs : 0);
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
@@ -17,10 +17,66 @@ const kit = await import('./fixture/src/kit/accelerators.ts');
 const NPU = { id: 'npu', kind: 'npu', name: 'Snapdragon X2 Elite NPU', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'qwen', startCommand: ['geniex.exe', 'serve'] }, vision: { model: 'qwen-vl' }, quirks: ['prefix-leak', 'image-path'] };
 const CARD = { id: 'gpu-nvidia-geforce-rtx-4090', kind: 'gpu', name: 'NVIDIA GeForce RTX 4090', memoryGb: 24, slots: 2, maxContextTokens: 16384, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } };
 
-test("the file is Reeve's config.json, where every agent already reads it; REEVE_CONFIG names another", () => {
+test('a scratch REEVE_HOME keeps one config.json, as before; REEVE_CONFIG names another', () => {
   assert.equal(C.acceleratorConfigFile(), path.join(home, 'config.json'));
-  assert.equal(C.acceleratorConfigFile({ REEVE_CONFIG: 'X:\c.json' }), 'X:\c.json');
+  assert.equal(C.acceleratorConfigFile({ REEVE_CONFIG: 'X:\\c.json' }), 'X:\\c.json');
   assert.equal(C.toolsHome(), home);
+  assert.equal(C.legacyConfigFile(), null, 'a scratch home is one file: nothing to move or mirror');
+});
+
+test("the accelerators' own folder (kit 2.31.0): Manor's, not Reeve's; a PC set up before keeps its servers in .reeve", () => {
+  const profile = mkdtempSync(path.join(home, 'profile-'));
+  assert.equal(C.acceleratorsHome({}), path.join(homedir(), '.manor', 'accelerators'));
+  assert.equal(C.acceleratorConfigFile({ MANOR_HOME: 'D:\\m' }), path.join('D:\\m', 'accelerators', 'config.json'));
+  assert.equal(C.acceleratorConfigFile({ ACCELERATORS_HOME: 'D:\\a' }), path.join('D:\\a', 'config.json'));
+  assert.equal(C.acceleratorConfigFile({ ACCELERATORS_CONFIG: 'D:\\x.json', REEVE_HOME: 'D:\\r' }), 'D:\\x.json');
+  assert.equal(C.toolsHome({}, profile), path.join(homedir(), '.manor', 'accelerators'), "a new PC: the accelerators' folder");
+  mkdirSync(path.join(profile, '.reeve', 'models'), { recursive: true });
+  assert.equal(C.toolsHome({}, profile), path.join(profile, '.reeve'), 'a PC set up before: its builds and models stay where they are');
+});
+
+test("moving the accelerators out of Reeve's config.json: a copy of their keys, Reeve's file untouched, later saves mirrored back", () => {
+  const profile = mkdtempSync(path.join(home, 'move-'));
+  const env = { MANOR_HOME: path.join(profile, '.manor') };
+  const reeveFile = path.join(profile, '.reeve', 'config.json');
+  mkdirSync(path.dirname(reeveFile), { recursive: true });
+  // The owner's file as it is on the laptop: the NPU, its idle time, and Reeve's own keys beside them.
+  const owner = { accelerators: [{ ...NPU, chat: { ...NPU.chat, startCommand: ['geniex.exe', 'serve', '--keepalive', '86400'] } }], npuIdleStopMinutes: 240, repos: { roots: ['C:\\Projects'] }, jobs: { toast: false } };
+  const text = JSON.stringify(owner, null, 2);
+  writeFileSync(reeveFile, text);
+  const own = C.acceleratorConfigFile(env);
+  assert.equal(own, path.join(profile, '.manor', 'accelerators', 'config.json'));
+  assert.equal(C.legacyConfigFile(env, profile), reeveFile);
+  assert.equal(C.readableConfigFile(env, profile), reeveFile, "not moved yet: agents read Reeve's");
+
+  const moved = C.migrateAcceleratorConfig(env, profile, new Date('2026-10-07T00:00:00Z'));
+  assert.deepEqual(moved, { file: own, from: reeveFile, keys: ['accelerators', 'npuIdleStopMinutes'] });
+  const copy = JSON.parse(readFileSync(own, 'utf8'));
+  assert.deepEqual(copy.accelerators[0].chat.startCommand, ['geniex.exe', 'serve', '--keepalive', '86400'], "the owner's working NPU entry, word for word");
+  assert.equal(copy.npuIdleStopMinutes, 240);
+  assert.equal(copy.accelerators[0].name, undefined, 'no name kept (kit 2.27.0)');
+  assert.equal(copy.repos, undefined, "Reeve's own keys stay his");
+  assert.equal(copy.movedFrom, reeveFile);
+  assert.equal(readFileSync(reeveFile, 'utf8'), text, "Reeve's file untouched");
+  assert.equal(C.readableConfigFile(env, profile), own, "moved: agents read the accelerators' own");
+  assert.equal(C.migrateAcceleratorConfig(env, profile), null, 'once');
+  assert.deepEqual([...C.validateKeeperConfig(copy), ...C.validateAccelerators(copy)], []);
+
+  // A later change through the keeper is mirrored into Reeve's file for older agents: only the keeper's keys.
+  const next = { ...copy, npuIdleStopMinutes: 30, gpuIdleStopMinutes: 5 };
+  assert.equal(C.mirrorToLegacy(next, env, profile), true);
+  const mirrored = JSON.parse(readFileSync(reeveFile, 'utf8'));
+  assert.deepEqual([mirrored.npuIdleStopMinutes, mirrored.gpuIdleStopMinutes, mirrored.repos, mirrored.jobs], [30, 5, { roots: ['C:\\Projects'] }, { toast: false }]);
+  assert.equal(mirrored.movedFrom, undefined, "only the keeper's keys go back");
+  assert.equal(C.mirrorToLegacy(next, env, profile), false, 'nothing changed: not written');
+
+  // Nothing to move: no Reeve file, or one without accelerators.
+  const bare = mkdtempSync(path.join(home, 'bare-'));
+  assert.equal(C.migrateAcceleratorConfig({ MANOR_HOME: path.join(bare, '.manor') }, bare), null);
+  mkdirSync(path.join(bare, '.reeve'), { recursive: true });
+  writeFileSync(path.join(bare, '.reeve', 'config.json'), JSON.stringify({ repos: {} }));
+  assert.equal(C.migrateAcceleratorConfig({ MANOR_HOME: path.join(bare, '.manor') }, bare), null, 'Reeve without accelerators: not moved');
+  assert.equal(existsSync(path.join(bare, '.manor', 'accelerators', 'config.json')), false);
 });
 
 test("the keeper's idle times: rules.json's defaults (10 and 10) unless config.json gives good ones", () => {

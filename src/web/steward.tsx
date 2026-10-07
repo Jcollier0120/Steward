@@ -202,8 +202,29 @@ function StaffTable({ s, castellan }: { s: StaffView; castellan: boolean }) {
 
 const OUTCOME: Record<EmployeeResult['outcome'], BadgeTone> = { done: 'success', skipped: 'neutral', refused: 'caution', failed: 'danger' };
 
-/** A stage's result for each employee: how it went, in what words, and a link when there is one. */
+/**
+ * A stage's result for each employee: how it went, in what words, and a link when there is one. What it did (merged,
+ * released, failed) first; the employees it skipped, which had nothing to do, folded under their count.
+ */
 function StageResults({ results }: { results: StageResult['results'] }) {
+  const acted = results.filter((r) => r.outcome !== 'skipped');
+  const skipped = results.filter((r) => r.outcome === 'skipped');
+  return (
+    <>
+      {acted.length > 0 ? <ResultTable results={acted} /> : <Text variant="muted" as="p">Nothing to do for anyone.</Text>}
+      {skipped.length > 0 && (
+        <details>
+          <summary>
+            {skipped.length} skipped, with nothing to do
+          </summary>
+          <ResultTable results={skipped} />
+        </details>
+      )}
+    </>
+  );
+}
+
+function ResultTable({ results }: { results: StageResult['results'] }) {
   return (
     <table>
       <thead>

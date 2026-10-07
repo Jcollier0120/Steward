@@ -10,7 +10,7 @@ import { agreedVersion } from '../versions.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
-import { checkoutOf, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, exchequerNote, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -159,7 +159,9 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     }
     // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit, stage: 'release', branch: e.branch, version });
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
+    // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
+    const exchequer = exchequerNote(`${r.out}\n${r.err}`);
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

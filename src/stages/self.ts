@@ -8,7 +8,7 @@ import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } fr
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { exchequerNote, networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
 
@@ -130,6 +130,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
       if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
     }
     const commands = SELF_COMMANDS[step.what];
+    let exchequer = '';
     for (const [i, line] of commands.entries()) {
       // The last one publishes: never from a tree with anything uncommitted in it.
       if (i === commands.length - 1) {
@@ -140,10 +141,11 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
       const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
+      exchequer ||= exchequerNote(`${r.out}\n${r.err}`);
     }
     // Released from this commit of main: the Surveyor's GET /api/tested (tested.ts).
     recordTested(APP.id, { commit: step.commit, stage: 'release', branch: STEWARD_BRANCH, version: step.version });
-    return selfResult('done', `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})`, { version: step.version, commit: at, url: `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}` });
+    return selfResult('done', `released ${step.tag} from origin/${STEWARD_BRANCH} (${at})${exchequer}`, { version: step.version, commit: at, url: `https://github.com/${ctx.settings.stewardRepo}/releases/tag/${step.tag}` });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

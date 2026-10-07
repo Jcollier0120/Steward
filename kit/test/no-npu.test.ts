@@ -127,7 +127,7 @@ test('the keeper asks this PC again when hardware.json is a day old, and not bef
 test('the keeper asks again at once when hardware.json has an NPU but not its name, and after an hour without the processor\'s', async () => {
   const file = path.join(home, 'hw-unnamed.json');
   let asked = 0;
-  const npu = { name: 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', device: 'Snapdragon(R) X2 Elite - X2E88100 - Qualcomm(R) Hexagon(TM) NPU', driver: '1', driverDate: '2026-01-01' };
+  const npu = { name: 'Snapdragon X2 Elite - X2E88100 - Qualcomm Hexagon NPU', device: 'Snapdragon(R) X2 Elite - X2E88100 - Qualcomm(R) Hexagon(TM) NPU', driver: '1', driverDate: '2026-01-01', manufacturer: 'Qualcomm', deviceId: '', vendor: 'qualcomm' as const, generation: 'snapdragon-x2', label: 'Snapdragon X2 Elite', supported: true, verified: true };
   const detect = async (): Promise<Detection> => (asked++, { cards: [], npu, geniex: null, cpu: { name: 'Oryon', arch: 'arm64', cores: 12 }, ramBytes: 1, problems: [] });
   writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), npu: true, cards: [] }));
   assert.equal(await refreshHardware({ file, detect }), true, 'from before names were kept: asked at once');

@@ -1,8 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, type AcceleratorKind, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
-import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, rememberHardware, type Accelerator as KitAccelerator } from './accelerators.ts';
+import { type Accelerator, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
+import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
 import { withLock } from './lock.ts';
@@ -84,6 +84,8 @@ export interface ServerSpec {
   startCommand?: string[];
   logFile?: string;
   env?: NodeJS.ProcessEnv;
+  /** The endpoint's own environment for its server (config.json's `env`), over the starter's. */
+  serverEnv?: Record<string, string>;
 }
 
 /** How long a server may go without answering, while nobody uses its accelerator, before it is restarted. */
@@ -160,6 +162,11 @@ export interface ReaperDeps {
   log: (line: string) => void;
   /** Every model server's process on this PC (llama-server, GenieX, and the configured programs), for the orphan check. */
   allProcesses?: () => Promise<SeenProcess[]>;
+  /**
+   * Whether a process is the manor's own (manorOwns): only such a process can be an orphan. Without it, none is: a
+   * program on one of the manor's ports is never stopped for its port alone.
+   */
+  owned?: (p: SeenProcess) => boolean;
 }
 
 /** "the NPU", or the card's (or processor's) own name: whose lock a message is about. */
@@ -292,14 +299,16 @@ export class Reaper {
   }
 
   /**
-   * The orphan check: every model server's process on the manor's ports that none of `servers` is (another
-   * program, or another port), seen for `orphanGraceMs` in a row, is stopped. A process gone, or known again,
-   * starts its count afresh.
+   * The orphan check: a model server's process that is the manor's own (`owned`: its program is in the manor's
+   * servers folders, or the manor started it), on one of the manor's ports, that none of `servers` is (another
+   * program, or another port), seen for `orphanGraceMs` in a row, is stopped. Never a process for its port alone: a
+   * program someone else runs (their own GenieX on its default 18181, say), or one whose program Windows won't name,
+   * is left alone. A process gone, or known again, starts its count afresh.
    */
   async orphans(servers: ReapedServer[]): Promise<OrphanOutcome[]> {
     const d = this.deps;
     const grace = this.o.orphanGraceMs ?? ORPHAN_GRACE_MS;
-    if (!d.allProcesses) return [];
+    if (!d.allProcesses || !d.owned) return [];
     const seen = await d.allProcesses();
     const ports = manorPorts(servers);
     const out: OrphanOutcome[] = [];
@@ -308,6 +317,7 @@ export class Reaper {
       const base = baseOf(p.line);
       if (!base || !ports.has(Number(new URL(base).port))) continue;
       if (servers.some((s) => sameProgram(p.path, s.program) && servesBase(p.line, s.base))) continue;
+      if (!p.path || !d.owned(p)) continue;
       still.add(p.pid);
       const since = this.orphanSince.get(p.pid) ?? d.now();
       this.orphanSince.set(p.pid, since);
@@ -339,7 +349,33 @@ export function manorPorts(servers: Pick<ReapedServer, 'base'>[]): Set<number> {
   return ports;
 }
 
-const sameProgram = (a: string, b: string) => !a || a.toLowerCase() === b.toLowerCase();
+/** The same program, by its full path; a path Windows wouldn't give (an elevated process) is never a match. */
+export const sameProgram = (a: string, b: string) => !!a && !!b && path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
+
+/**
+ * The manor's own servers folders, where setup puts what it installs: the tools home's `servers` (toolsHome: the
+ * accelerators' folder, or %USERPROFILE%\.reeve on a PC set up before kit 2.31.0), the accelerators' folder's, and
+ * Reeve's, each once.
+ */
+export function manorServerDirs(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string[] {
+  const dirs = [path.join(toolsHome(env, home), 'servers'), path.join(acceleratorsHome(env), 'servers'), ...(env.REEVE_HOME ? [] : [path.join(home, '.reeve', 'servers')])];
+  return [...new Map(dirs.map((d) => [path.win32.resolve(d).toLowerCase(), d])).values()];
+}
+
+const isUnder = (file: string, dir: string) => path.win32.resolve(file).toLowerCase().startsWith(path.win32.resolve(dir).toLowerCase() + '\\');
+
+/**
+ * Whether a model server's process is the manor's own, and so may be stopped as an orphan: its program's path is
+ * known (an unreadable path is never the manor's) and is in one of the manor's servers folders (`dirs`), or a record
+ * says the manor started this very process (`started`, accelerators.ts' noteStarted: the same pid and program,
+ * started within a minute of the record). A program on a manor port for any other reason (a person's own GenieX,
+ * Ollama, a test's server) is not.
+ */
+export function manorOwns(p: Pick<SeenProcess, 'pid' | 'path' | 'startedMs'>, o: { dirs: string[]; started?: StartedServer[] }): boolean {
+  if (!p.path) return false;
+  if (o.dirs.some((d) => isUnder(p.path, d))) return true;
+  return (o.started ?? []).some((r) => r.pid === p.pid && sameProgram(p.path, r.program) && Math.abs(p.startedMs - r.atMs) <= 60_000);
+}
 
 /** An accelerator's lock folders, one per slot: the kit's (the NPU's lock for the NPU; `<locks>\<id>`, `<id>.2` … for the others). */
 export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): string[] => kitLockDirsOf({ id: a.id, slots: a.kind === 'npu' ? 1 : a.slots });
@@ -374,11 +410,12 @@ export function reapedServers(
       out.set(ep.baseUrl, {
         base: ep.baseUrl,
         program: expandEnv(ep.startCommand[0]),
-        spec: { base: ep.baseUrl, startCommand: ep.startCommand, logFile: path.join(logDir, `${a.id}.${kind === 'vision' && !a.vision?.baseUrl ? 'chat' : kind}.log`) },
+        spec: { base: ep.baseUrl, startCommand: ep.startCommand, ...(ep.env ? { serverEnv: ep.env } : {}), logFile: path.join(logDir, `${a.id}.${kind === 'vision' && !a.vision?.baseUrl ? 'chat' : kind}.log`) },
         acc: { id: a.id, kind: a.kind, name: a.name },
         lockDirs: typeof lockDirs === 'string' ? (a.kind === 'npu' ? [lockDirs] : slotDirs(path.join(path.dirname(lockDirs), a.id), a.slots)) : lockDirs(a),
         ...(idleMs !== undefined ? { idleMs } : {}),
-        ...(a.kind === 'npu' ? { recycle: true } : {}),
+        // GenieX alone keeps memory from every model load until it exits: the NPU's other servers aren't recycled.
+        ...(a.kind === 'npu' && /geniex/i.test(path.win32.basename(expandEnv(ep.startCommand[0]))) ? { recycle: true } : {}),
         ...(o.keepGpuOut && a.kind === 'gpu' ? { keptOut: true } : {}),
       });
     }
@@ -388,18 +425,39 @@ export function reapedServers(
 
 const arg = (commandLine: string, name: string) => new RegExp(`(?:^|\\s)--${name}(?:=|\\s+)"?([^\\s"]+)"?`, 'i').exec(commandLine)?.[1];
 
+/** The model servers the keeper knows by their command lines, each with how it's given its address and its default port. */
+const SERVERS: { program: RegExp; host: string; port: string; defaultPort: number }[] = [
+  { program: /llama-server/i, host: 'host', port: 'port', defaultPort: 8080 },
+  { program: /geniex/i, host: 'host', port: 'port', defaultPort: 18181 },
+  // OpenVINO Model Server (an Intel NPU's): --rest_port, --rest_bind_address (all addresses without it).
+  { program: /(^|[\\/"\s])ovms(\.exe)?["\s]/i, host: 'rest_bind_address', port: 'rest_port', defaultPort: 0 },
+  // FastFlowLM (an AMD NPU's): flm serve --port, 52625 without it.
+  { program: /(^|[\\/"\s])flm(\.exe)?["\s]/i, host: 'host', port: 'port', defaultPort: 52625 },
+];
+
+/** The host:port a server's command line serves, by its kind's flags; null when it's none the keeper knows. */
+function hostOf(commandLine: string): string | null {
+  const s = SERVERS.find((x) => x.program.test(`${commandLine} `));
+  if (!s) return null;
+  let host = (arg(commandLine, s.host) ?? '127.0.0.1').replace(/^https?:\/\//i, '');
+  if (host === '0.0.0.0') host = '127.0.0.1';
+  const port = arg(commandLine, s.port);
+  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
+  else if (!/:\d+$/.test(host)) {
+    if (!s.defaultPort) return null;
+    host = `${host}:${s.defaultPort}`;
+  }
+  return host;
+}
+
 /**
  * The address a server's command line serves: GenieX takes `--host <host:port>` (127.0.0.1:18181 without it),
- * llama.cpp's server `--host <host>` and `--port <port>` (127.0.0.1 and 8080 without them). Null for a command
- * line that is neither.
+ * llama.cpp's server `--host <host>` and `--port <port>` (127.0.0.1 and 8080 without them), OpenVINO Model Server
+ * `--rest_port`, FastFlowLM `--port` (52625 without it). Null for a command line that is none of them.
  */
 export function baseOf(commandLine: string): string | null {
-  const llama = /llama-server/i.test(commandLine);
-  if (!llama && !/geniex/i.test(commandLine)) return null;
-  let host = (arg(commandLine, 'host') ?? '127.0.0.1').replace(/^https?:\/\//i, '');
-  const port = arg(commandLine, 'port');
-  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
-  else if (!/:\d+$/.test(host)) host = `${host}:${llama ? 8080 : 18181}`;
+  const host = hostOf(commandLine);
+  if (!host) return null;
   try {
     return new URL(`http://${host}`).origin;
   } catch {
@@ -413,12 +471,7 @@ export function baseOf(commandLine: string): string | null {
  * another port (a test's, say, or another card's) is left alone.
  */
 export function servesBase(commandLine: string, base: string): boolean {
-  const want = new URL(base).host;
-  let host = (arg(commandLine, 'host') ?? '127.0.0.1').replace(/^https?:\/\//i, '');
-  const port = arg(commandLine, 'port');
-  if (port) host = `${host.replace(/:\d+$/, '')}:${port}`;
-  else if (!/:\d+$/.test(host)) host = `${host}:${/llama-server/i.test(commandLine) ? 8080 : 18181}`;
-  return host === want;
+  return hostOf(commandLine) === new URL(base).host;
 }
 
 /** WQL's `Name='<name>'`: in a WQL string, a backslash and a quote are each escaped with a backslash. */
@@ -517,9 +570,10 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
         const card = games?.cards?.[s.acc.id];
         return card?.busy ? card.by : null;
       },
-      start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand }, { logFile: spec.logFile, env: spec.env }),
+      start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
       log: (line) => logLine(logFile, line),
       allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => SERVE_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
+      owned: (p) => manorOwns(p, { dirs: manorServerDirs(), started: readStarted() }),
     },
     o.options,
   );
