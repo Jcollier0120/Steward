@@ -36,6 +36,21 @@ test("the owner's settings: migrated once, and the Steward does all it did befor
   assert.equal(loadSettings().byItself, false);
 });
 
+test("a Steward that ran before on a PC without the Exchequer's key: updated with Castellan's work off, waiting for a yes", () => {
+  const file = path.join(home, 'elsewhere-settings.json');
+  writeFileSync(file, JSON.stringify({ ...before, byItself: true }));
+  assert.equal(migrateToOwnRepos({ settingsFile: file, dataDir: home, hasPublisherKey: () => false }), 'elsewhere');
+  const written = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual([written.releasesCastellan, written.byItself, written.releasesRepo], [false, false, undefined]);
+  const s = normalizeSettings(written).settings;
+  assert.ok(s.employees.every((e) => !e.merges), 'no repository merges by itself');
+  assert.equal(migrateToOwnRepos({ settingsFile: file, dataDir: home, hasPublisherKey: () => true }), null, 'decided once: a key later changes nothing by itself');
+  // With the key, the same settings are the owner's.
+  writeFileSync(file, JSON.stringify(before));
+  assert.equal(migrateToOwnRepos({ settingsFile: file, dataDir: home, hasPublisherKey: () => true }), 'before');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).releasesCastellan, true);
+});
+
 test('the .NET SDK it found in its old place is kept, as a setting; nothing is written where there was none', () => {
   const file = path.join(home, 'dotnet-settings.json');
   writeFileSync(file, JSON.stringify(before));
