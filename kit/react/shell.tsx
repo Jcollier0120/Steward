@@ -261,7 +261,7 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
   const onSettings = route === 'settings';
   const [settingsDrawn, setSettingsDrawn] = useState(0);
   // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
-  const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} needs={s.needs ?? null} onSettingsSaved={() => { setSettingsDrawn((n) => n + 1); void reload(); }} />);
+  const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} needs={s.needs ?? null} manorName={s.manor?.name ?? null} onSettingsSaved={() => { setSettingsDrawn((n) => n + 1); void reload(); }} />);
   return (
     <ReloadProvider value={reload}>
       <style>{UI_CSS}</style>

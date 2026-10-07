@@ -16,6 +16,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - Every release goes to the repository's own GitHub repository (kit 2.32.0: the releases repository is a setting now, never built in).
+- Kit 2.32.0: an agent's **Back to …** link, and its tour's, says your manor's name as before, and **Back to Castellan** when it has none (it said Back to Manor).
 - The kit, its rollout and the Steward's own releases happen only on the PC that releases Castellan itself (**Releases Castellan itself**, in Settings' advanced part), with their settings shown only there.
 - The Wright's and the Bailiff's settings show, and their work runs, only where the Wright is installed. A pull request labelled `wright` is anyone's where it isn't.
 - No alarm that the Surveyor's page doesn't answer where the Surveyor isn't installed.
