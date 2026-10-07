@@ -18,7 +18,7 @@ const { queueDirFor } = await import('./fixture/src/kit/npu-queue.ts');
 const { Npu, NpuBusy, NpuError, loadNpuConfig, npuDeferredFor, npuLine, npuLockDir, npuTurn, pieces, resetNpuManners } = await import('./fixture/src/kit/npu.ts');
 const { esc, ago } = await import('./fixture/src/kit/page.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
-const { powershell } = await import('./fixture/src/kit/ps.ts');
+const { powershell, psQuote } = await import('./fixture/src/kit/ps.ts');
 const { duty, setDuty } = await import('./fixture/src/kit/duty.ts');
 const { every, rounds } = await import('./fixture/src/kit/schedule.ts');
 const { statusJson } = await import('./fixture/src/kit/service.ts');
@@ -265,6 +265,31 @@ test('a PowerShell script too long for a command line runs from a file, and the 
   assert.equal((await powershell(script)).trim(), 'ok: é');
   assert.equal((await powershell('Write-Output short')).trim(), 'short');
   assert.ok(!readdirSync(os.tmpdir()).some((f) => f.startsWith(`ps-${process.pid}-`)), 'the script file is removed');
+});
+
+test('psQuote: PowerShell reads back exactly the text, whatever quotes, $( ) or backticks it holds', async () => {
+  // PowerShell ends a single-quoted string at ' and at the curly quotes ‘ ’ ‚ ‛ alike: each is doubled.
+  assert.equal(psQuote("it's"), "'it''s'");
+  assert.equal(psQuote('O\u2019Brien'), "'O\u2019\u2019Brien'");
+  assert.equal(psQuote('\u2018\u201A\u201B'), "'\u2018\u2018\u201A\u201A\u201B\u201B'");
+  const values = [
+    "'", '\u2018', '\u2019', '\u201A', '\u201B', "''", '\u2019\u2019', "'\u2018\u2019\u201A\u201B'",
+    'x\u2019; Write-Output INJECTED; \u2019y',
+    "x'; Write-Output INJECTED; 'y",
+    'x\u2018; Write-Output INJECTED; \u201By',
+    'C:\\Users\\O\u2019Brien',
+    'C:\\Users\\x\\Downloads\\x\u2019;Write-Output INJECTED;\u2019.pdf',
+    'a $(Write-Output INJECTED) b $env:USERNAME',
+    'tick `n `" `$x`',
+    '\u201Cdouble\u201D \u201Elow\u201D "plain"',
+    '',
+  ];
+  // One script, each value printed between markers, so a value that broke out would add or change a line.
+  const script = values.map((v) => `[Console]::Out.Write('<' + ${psQuote(v)} + ">\`n")`).join('\n');
+  assert.deepEqual((await powershell(script)).split('\n').filter(Boolean), values.map((v) => `<${v}>`));
+  // The same through a script long enough to go in as a file.
+  const long = '# ' + 'x'.repeat(15_000) + '\n' + script;
+  assert.deepEqual((await powershell(long)).split('\n').filter(Boolean), values.map((v) => `<${v}>`));
 });
 
 test('off duty, scheduled rounds pause but Run now still runs one; back on duty, they resume', async () => {
