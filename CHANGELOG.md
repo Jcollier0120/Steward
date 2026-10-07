@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.23.2
+
+**It raises an alarm when another Steward, or someone else, merges its PRs or releases its agents.**
+
+### What's new
+
+- On the PC that releases Castellan, the Steward now notices when one of its own PRs is merged, or one of its agents is released, and no round of its own did it. Most likely another PC runs a Steward signed in to the same GitHub account. One alarm names the agents, the PRs and the releases, in the Steward's page and in Manor, and clears by itself a day after the last one.
+- Did it yourself, by hand? Dismiss the alarm: what it names is taken as yours, and only a new one raises it again. Or mark it as yours, before or after: `node src\cli.ts mine porter v0.5.14` (or `#65` for a PR).
+- It is seen from what each round already reads from GitHub, plus git in the agent's checkout here. Nothing more is asked of GitHub.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first round after the update only learns which releases and PRs are already there, so the update itself raises nothing. On every other PC nothing changes.
+
 ## 0.21.3
 
 **It hands out the kit 2.36.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**
