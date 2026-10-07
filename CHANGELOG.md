@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.20.2
+
+**It hands out the kit 2.34.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**
+
+### What changed
+
+- A Snapdragon PC whose NPU is set up from now on gets GenieX 0.8.0 instead of 0.7.0. It has been run on a Snapdragon X2 Elite: it installs the same way, answers chat and pictures, and uses the same model files.
+- A PC already running 0.7.0 keeps it. The Smith offers 0.8.0 to try under New for your NPU, and puts 0.7.0 back if you remove it.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.20.0
 
 **A repository can be refreshed after every release: a site that lists your release notes and downloads stays up to date by itself.**

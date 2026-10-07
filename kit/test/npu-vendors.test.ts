@@ -267,8 +267,8 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   assert.deepEqual(ok.problems, []);
   assert.equal(ok.entry?.chat?.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
   assert.deepEqual(qr.did, [
-    'download geniex-cli-setup-windows-arm64-v0.7.0.exe',
-    'run geniex-cli-setup-windows-arm64-v0.7.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER',
+    'download geniex-cli-setup-windows-arm64-v0.8.0.exe',
+    'run geniex-cli-setup-windows-arm64-v0.8.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER',
     'run geniex.exe pull qualcomm/Qwen3-VL-4B-Instruct:W4A16 --model-type vlm --skip-update',
   ]);
   // Intel: OpenVINO Model Server's zip unpacked into the tools home, its model pulled by the server itself.
@@ -289,7 +289,7 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     ['the server never answers', { answers: false }, /GenieX didn't answer its test request: chat gave no answer/],
     ['the installer leaves nothing', { installs: false }, /GenieX was installed, but .*geniex\.exe isn't there/],
     ['the pull fails', { pullFails: true }, /GenieX couldn't download qualcomm\/Qwen3-VL-4B-Instruct:W4A16 \(exit 1: Error: model not found\)/],
-    ['the download is not the pinned one', { downloadFails: "geniex-cli-setup-windows-arm64-v0.7.0.exe: sha256 00 isn't the published 04e0" }, /GenieX's download failed: .*sha256 00 isn't the published/],
+    ['the download is not the pinned one', { downloadFails: "geniex-cli-setup-windows-arm64-v0.8.0.exe: sha256 00 isn't the published fcc4" }, /GenieX's download failed: .*sha256 00 isn't the published/],
   ];
   for (const [what, o, re] of fails) {
     const r = await setUpNpu(planFor(NPU.x1, 'arm64', tools), tools, fakeNpuIo(o).io);

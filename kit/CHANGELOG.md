@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.34.1
+
+**GenieX 0.8.0 is the NPU's server on a Snapdragon.** spec/npu-vendors.json's qualcomm route pins GenieX 0.8.0's installer (`geniex-cli-setup-windows-arm64-v0.8.0.exe`, 65,196,910 bytes, SHA-256 `fcc4d932…1ec734`, as GitHub publishes it) in place of 0.7.0's. Its install arguments, its `serve` arguments and the model (Qwen3-VL-4B-Instruct W4A16, every pinned file unchanged) stay as they were.
+- **Run on real hardware** (the Snapdragon X2 Elite, 2026-10-07, the Smith's first scout try): the silent per-user install over 0.7.0, the test request (chat and vision) on the route's own arguments and on the PC's configured entry, and the pinned model files under it. spec/NPU-VENDORS.md says so.
+- **The quirks stay as measured on 0.7.0** (`prefix-leak`, `image-path`, the keepalive notes): 0.8.0 answered the test with them on.
+- **What an agent must do:** nothing. Setup installs 0.8.0 on a PC whose NPU isn't set up yet; a PC with 0.7.0 keeps it until the person tries 0.8.0 from the Smith's New for your NPU, or sets the NPU up again.
+- **Its tests:** kit/test/npu-vendors.test.ts names 0.8.0's installer.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This kit comes after 2.34.0; 2.33.0 (Steward 0.19.4) is still to be released and doesn't depend on it.
+
 ## 2.34.0
 
 **An agent's rounds never stop silently.** On 2026-10-07 the Chamberlain finished no round for 18 hours. Nothing had hung: it declared a mail source `required`, so `every()` skipped each round, documents too, and a skipped round wrote nothing, so it looked like an agent that had stopped.
