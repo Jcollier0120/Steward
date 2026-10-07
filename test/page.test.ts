@@ -89,7 +89,15 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   // By itself (Settings' default): its rounds; and Run now, in the title bar.
   assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
-  const ping = await (await fetch(`${base()}/api/ping`)).json();
+  // No licence here: no turns with other PCs, and nothing said of them.
+  assert.equal(body.turns, null);
+  assert.doesNotMatch(html, /Your other PCs/);
+  // Another PC of the licence merges and releases one: said, with Do it here.
+  const turns = { mode: 'on', note: null, at: null, here: 1, elsewhere: [{ id: 'clerk', name: 'Clerk', repo: 'octocat/clerk', holder: 'DESKTOP-ABC', until: '2026-10-08T12:30:00Z' }] };
+  const withTurns = (await renderStewardBody())({ ...body, turns });
+  assert.match(withTurns, /Merging and releasing for Clerk: done by <strong>DESKTOP-ABC<\/strong>/);
+  assert.match(withTurns, /data-post="\/api\/turns\/take"[^>]*>Do it here</);
+  const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
 });

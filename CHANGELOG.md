@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.24.0
+
+**Your PCs on one Castellan licence take turns: each repository is merged and released by one Steward, and versions are claimed once for all of them.**
+
+### What's new
+
+- On a PC with a Castellan licence, the Steward takes its turn at each repository before it merges or releases there, through the Exchequer. A repository another of your PCs is looking after is left alone, so two Stewards never merge and release the same pull requests.
+- The page says which repositories another PC looks after ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with a **Do it here** button that moves it to this PC at once.
+- A repository cloned on only one PC is always looked after there.
+- `claim-version` hands out versions for all your PCs at once, so work started on the desktop and the laptop side by side never takes the same version.
+
+### What changed
+
+- When the Exchequer can't be reached, the Steward keeps looking after the repositories it already had, until its turn runs out, and takes on no others: a round may be slower, but nothing is merged twice.
+- The alarm for another Steward (0.23.2) doesn't count what a PC does in a repository whose turn it has: only a Steward that doesn't take turns raises it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Without a licence on the PC, or until the Exchequer takes turns (its 0.7.0), everything works exactly as before.
+- For the turns to work, update the Steward on every PC: an older one doesn't take turns.
+
 ## 0.23.5
 
 **An old Steward on a second PC updates quietly: it no longer takes itself for the PC that releases Castellan.**
