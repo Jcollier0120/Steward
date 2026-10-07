@@ -206,6 +206,19 @@ Both take the kit (`usesKit` in Settings), so every stage covers them as it does
 
 **How a logic change reaches Heiward:** the rule changes in the core (and, for a timing, rules.json), with the vectors that show it, released as a kit version; the Steward's bump moves Heiward's pin, its build embeds the new core, and its tests run the new vectors. No C# changes, unless the core asks for a new kind of action.
 
+## Taking on a new agent
+
+A new agent (one the Wright built, or you did) is taken on from its clone, so the Steward's page lists it and its rounds test, merge and release it, with no hand-editing of settings.json (`src/employ.ts`):
+
+```powershell
+node %USERPROFILE%.stewardappsrccli.ts employ C:CodeAssayer --dry-run   # what it would add
+node %USERPROFILE%.stewardappsrccli.ts employ C:CodeAssayer
+```
+
+Everything comes from the clone, on its branch as origin has it (`--branch`, main unless said), as the migration reads one: its id and name from its `manor-agent.json` (else its `src/app.ts`), its repository from origin, its kit parts from `kit.json` (none: listed, but off the kit's stages), and how to fill, test, version and release it from its files. What it can't find is named, to fill in on the Settings page. An agent, repository or clone the Steward looks after already is refused.
+
+How it is released follows what Manor makes of it. One that announces itself (`manor-agent.json`), or that Manor already lists as staff, is published (`npm run release -- --publish`) and installed from its release, so every Manor finds it and offers **Hire**. Manor's internal staff (`staff.local.json`) are built and installed here (`npm run release -- --install`), never published, and so is one that neither announces itself nor is listed, until it does.
+
 ## Versions claimed up front
 
 Two pieces of work started side by side on one repository each used to take "the next version" when they began, the same one, and found out when the second conflicted on its way in. Now whoever starts work asks the Steward for its version first (`src/claims.ts`):
@@ -248,6 +261,7 @@ node src/cli.ts merge [--yes] [--team] [--employees a,b]
 node src/cli.ts release [--kit <version>] [--employees a,b]
 node src/cli.ts round [--employees a,b]   # one round, as it runs by itself on duty (Run now)
 node src/cli.ts staff [--json] [--no-fetch]
+node src/cli.ts employ <its clone> [--branch <b>] [--dry-run]   # take on a new agent (Taking on a new agent)
 node src/cli.ts start            # on duty, and its page up (Manor's Start)
 node src/cli.ts stop             # off duty (Manor's Stop); the page stays up
 node src/cli.ts open             # make sure its page is up, without changing duty

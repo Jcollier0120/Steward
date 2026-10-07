@@ -6,7 +6,8 @@ import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
 import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
 import { anyRepo } from './found.ts';
-import type { Employee, Settings } from './settings.ts';
+import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
+import { loadSettings, settingsFile, type Employee, type Settings } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
@@ -41,6 +42,13 @@ const USAGE = `${APP.id}: ${APP.role}
                    each employee: its checkout, its branch's version and kit, its latest release and the
                    kit in it, the open PRs of the Steward and the team (--hires is the same as --employees,
                    everywhere)
+
+  employ <its clone> [--branch <b>] [--dry-run]
+                   take on a new agent: add it to Settings' employees from its clone (its id and name
+                   from manor-agent.json or src/app.ts, its repository from origin, its kit parts, how
+                   to fill, test, version and release it), so the page lists it and the rounds test,
+                   merge and release it. One that announces itself is published; Manor's internal staff,
+                   and one that doesn't announce itself, are built and installed here. --dry-run: only show it
 
   start            on duty, and its page up at ${pageUrl}
   stop             off duty: its rounds wait until it is back on duty (the page stays up)
@@ -193,6 +201,33 @@ switch (cmd) {
   case 'uninstall':
     process.exitCode = await installCli(cmd, rest);
     break;
+  case 'employ': {
+    const where = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
+    const bad = rest.slice(1).filter((a) => a.startsWith('--') && !['--branch', '--dry-run'].includes(a));
+    if (!where || bad.length) {
+      console.error(`employ takes the agent's clone, then --branch <b> --dry-run${bad.length ? `; not ${bad.join(' ')}` : ''}: employ C:\\Code\\Assayer`);
+      process.exitCode = 2;
+      break;
+    }
+    const got = employeeFromCheckout(where, loadSettings().employees, { branch: opt(rest, '--branch') });
+    if ('error' in got) {
+      console.error(got.error);
+      process.exitCode = 1;
+      break;
+    }
+    const e = got.employee;
+    const dry = rest.includes('--dry-run');
+    console.log(`${dry ? 'Would take on' : 'Took on'} ${e.name} (${e.id}): ${e.repo}, its clone ${e.checkout} on ${e.branch}.`);
+    console.log(`  kit parts ${e.parts.join(', ') || 'none'}; fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
+    console.log(`  version in ${e.versionFiles.join(', ') || '-'}; release ${e.release || '-'}; install ${e.install || '-'}`);
+    for (const n of got.notes) console.log(`  ${n}`);
+    if (got.missing.length) console.log(`  Not found, so fill it in on the Settings page: ${got.missing.join(', ')}.`);
+    if (!dry) {
+      addEmployee(settingsFile(), e);
+      console.log(`Its next round looks after it; it is on the page at ${pageUrl}.`);
+    }
+    break;
+  }
   case 'claim-version': {
     const who = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
     const bad = rest.slice(1).filter((a, i, all) => a.startsWith('--') && !['--branch', '--for', '--by', '--minor', '--json'].includes(a) && !['--branch', '--for', '--by'].includes(all[i - 1]));
