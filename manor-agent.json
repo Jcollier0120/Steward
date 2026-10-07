@@ -18,7 +18,6 @@
       ],
       "node": [
         "%USERPROFILE%\\.manor\\node\\node.exe",
-        "C:\\tools\\node-v22.23.3-win-arm64\\node.exe",
         "%ProgramFiles%\\nodejs\\node.exe"
       ]
     },

@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.12.5
+## 0.17.1
 
 **It hands out kit 2.30.0: each staff release is published to the Exchequer, Castellan's release service, as well as to GitHub.**
 
@@ -18,6 +18,43 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out. To publish to the Exchequer, the PC that releases needs the publisher's key in `%USERPROFILE%\.steward\exchequer-publisher.key` (or `EXCHEQUER_PUBLISHER_KEY`); without it, releases go to GitHub alone, as before.
+
+## 0.16.1
+
+**It hands out kit 2.29.0: every agent's page fits a phone.**
+
+### What changed
+
+- On a phone, an agent's title bar no longer runs off the side: its action button (Run now, Check the fingerprints now) moves under the status instead. A wide table scrolls by itself instead of dragging the whole page sideways. This covers the Steward's own page too.
+- **Last stage** lists what the stage did (merged, released, refused, failed) first, and folds the employees it skipped, with nothing to do, under their count. After a round, most of the 60-odd lines were "skipped".
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
+## 0.14.1
+
+**It names no folders of one particular PC.**
+
+### What changed
+
+- Its entry for Manor (manor-agent.json) no longer names a Node in a folder only one PC has: it runs on Manor's own Node, or one installed in the usual place.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
+## 0.12.6
+
+**A security fix: it hands out kit 2.28.1, where a value with curly quotes can no longer break out of a PowerShell string.**
+
+### What changed
+
+- Kit 2.28.1: Windows PowerShell treats the curly quotes ‘ ’ ‚ ‛ as quote marks, and the kit's quoting only escaped the plain one, so a file or folder name with curly quotes in it, handed to PowerShell by an agent, could be read as a command. Every quote mark is escaped now, and each agent is fixed as it takes the new kit.
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
 
 ## 0.12.3
 

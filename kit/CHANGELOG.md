@@ -19,6 +19,28 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 Nothing: it updates itself as usual. A PC that releases without the publisher's key publishes to GitHub alone, as before, and says so in a line.
 
+## 2.29.0
+
+**Every agent's page fits a phone: the title bar's action and wide tables no longer push the page sideways.**
+- **node/page.ts, at 640px and narrower:** the title bar's tools wrap, so its action (Run now, Check the fingerprints now) goes under the status pill instead of off the side, and a long pill is cut with an ellipsis (its title says it all). A table in the page (`main.view table`) scrolls inside itself instead of the page: it is laid out as a block that holds the table, as GitHub shows tables. On seven agents' pages the title bar ran off the side, and on seven a table did.
+- **What an agent must do:** nothing. One that wrapped its tables in its own scrolling box keeps working; a table narrower than a phone no longer stretches to its full width there.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
+## 2.28.1
+
+**Security fix: a value with curly quotes in it could break out of a PowerShell string.** Windows PowerShell ends a single-quoted string at the curly quotes ‘ ’ ‚ ‛ as well as at `'`, and `psQuote` doubled only `'`. A file name, folder or other text that an agent hands to PowerShell could end the string early and be read as code.
+- **node/ps.ts: `psQuote` doubles every one of `'` ‘ ’ ‚ ‛** (`PS_SINGLE_QUOTES`, new), each with itself, which is how a single-quoted string holds one: PowerShell reads back exactly the text, curly quotes, `$( )` and backticks included.
+- **node/keeper.ts:** the WQL filter for a model server's processes went to PowerShell in double quotes, where `$` and backticks are live. It now goes as a `psQuote`d literal, and the program's name in it is escaped as WQL escapes it (`wqlName`, new: a backslash before `\` and `'`).
+- Tests run every quote, a profile like `O’Brien`, `$( )` and backticks through PowerShell, both as `-EncodedCommand` and as a script file, and check each comes back unchanged.
+- **What an agent must do:** nothing, if it quotes with the kit's `psQuote`: taking this kit fixes it. An agent with its own copy of the rule (a `replace(/'/g, "''")` of its own, in TypeScript or in C#) should use `psQuote`, or double the curly quotes too.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.28.0
 
 **Required settings: an agent that can't work without something from you waits for it, and onboarding asks for it.** The user's call: "each agent has designated which of its settings fields are required for the agent to operate... get the user to fill those out during onboarding... before the agent can begin", as the Chamberlain can do nothing until a mail account is set up.

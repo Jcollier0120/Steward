@@ -60,5 +60,12 @@ export async function powershellList<T>(script: string, opts: { timeoutMs?: numb
   return Array.isArray(json) ? json : [json];
 }
 
-/** A PowerShell single-quoted string literal. */
-export const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** Every character PowerShell ends a single-quoted string at: ' and the curly quotes ‘ ’ ‚ ‛. */
+export const PS_SINGLE_QUOTES = /['‘’‚‛]/g;
+
+/**
+ * A PowerShell single-quoted string literal: whatever `s` holds, PowerShell reads back exactly `s`, never code.
+ * PowerShell takes the curly quotes (U+2018 to U+201B) as single quotes too, so each of those is doubled
+ * as well as the ASCII one: a doubled quote is how a single-quoted string holds one.
+ */
+export const psQuote = (s: string) => `'${s.replace(PS_SINGLE_QUOTES, '$&$&')}'`;
