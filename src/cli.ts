@@ -4,7 +4,8 @@ import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
-import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
+import { claimVersion, employeeFor, loadClaims, releaseClaim, selfFor } from './claims.ts';
+import { kitClaimKey } from './stages/kitpart.ts';
 import { anyRepo } from './found.ts';
 import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
 import { loadSettings, settingsFile, type Employee, type Settings } from './settings.ts';
@@ -62,7 +63,7 @@ const USAGE = `${APP.id}: ${APP.role}
                    ${TASK_NAME} that brings its page up, and start it. An update keeps the version
                    before it, and goes back to it when the new one doesn't hold up for its probation;
                    that version is then flagged, and refused until allowed again
-  claim-version <repository: id, name or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
+  claim-version <repository: id, name or owner/repo, or kit> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
                    before starting work on a repository: the next version no one has (above its branch,
                    its releases, its open PRs and every live claim), claimed for that work. The same
                    branch asking again gets the same version. Any repository works: one in Settings, one
@@ -242,26 +243,31 @@ switch (cmd) {
       break;
     }
     const ctx = await context({ glance: false, team: false });
-    const e = employeeFor(ctx.settings, who) ?? anyRepo(who);
+    // The kit is a part of the Steward's own repository, claimed under its own key (stages/kitpart.ts).
+    const kit = who.toLowerCase() === 'kit';
+    const e = kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, who) ?? anyRepo(who));
     if (!e) {
       console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, the clone this runs in, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
       process.exitCode = 2;
       break;
     }
-    const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor') });
+    const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), ...(kit ? { part: 'kit' as const } : {}) });
     if (rest.includes('--json')) console.log(JSON.stringify({ ...claim, again }));
+    else if (kit) console.log(`Kit ${claim.version}${again ? ' (claimed already for this branch)' : ''}: yours. Set it in kit/VERSION, and in kit.json where the Steward pins its own kit.`);
     else console.log(`${e.name} ${claim.version}${again ? ' (claimed already for this branch)' : ''}: yours. Set it in ${e.versionFiles.join(', ')}.`);
     break;
   }
   case 'release-version': {
     const ctx = await context({ glance: false, team: false });
-    const e = rest[0] ? (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0])) : null;
+    const kit = rest[0]?.toLowerCase() === 'kit';
+    const e = rest[0] ? (kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0]))) : null;
     if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
       console.error('release-version takes an employee and a version: release-version porter 0.4.12');
       process.exitCode = 2;
       break;
     }
-    console.log((await releaseClaim(e.repo, rest[1])) ? `${e.name} ${rest[1]} is free again.` : `${e.name} ${rest[1]} wasn't claimed.`);
+    const name = kit ? 'Kit' : e.name;
+    console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1])) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
     break;
   }
   case 'claims': {

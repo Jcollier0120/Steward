@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { afterWords } from '../after.ts';
 import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { NO_TEAM } from '../team.ts';
@@ -10,7 +11,9 @@ import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, N
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { kitTrialHold } from './trial.ts';
-import { claimsOn } from '../claims.ts';
+import { claimsOn, reclaim } from '../claims.ts';
+import { kitInfo } from '../kitsource.ts';
+import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
@@ -354,16 +357,28 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   const merged = new Set(o.merged.map((p) => p.number));
   const taken = o.ready.filter((r) => r.sets && !merged.has(r.pr.number) && !o.catchable.has(r.pr.number)).map((r) => r.sets!);
   const lines: string[] = [];
+  const kitTaken: string[] = [];
+  let kitReleases: string[] | null = null;
+  const kitReleased = async () => (kitReleases ??= (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released);
   for (const pr of [...o.catchable.values()].sort((a, b) => a.number - b.number)) {
     let c: CaughtUp;
     try {
       // Versions claimed up front by other work are taken too (claims.ts); this PR's own branch's claim is its own.
       const claimed = claimsOn(e.repo).filter((x) => x.branch !== pr.head).map((x) => x.version);
-      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed] });
+      // The kit's too, in the Steward's own repository (stages/kitpart.ts): its releases, and the kit versions other
+      // PRs name and other work has claimed.
+      const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
+        ? { released: await kitReleased(), taken: [...kitTaken, ...kitTitleVersions(o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head).map((x) => x.version)] }
+        : undefined;
+      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}) });
     } catch (err) {
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }
     if (c.version) taken.push(c.version);
+    if (c.kitVersion) kitTaken.push(c.kitVersion);
+    // Its branch's claims follow the versions it now carries, so no one is handed them, and its worker asking again gets them.
+    if (c.done && c.version) await reclaim(e.repo, pr.head, c.version).catch(() => {});
+    if (c.done && c.kitVersion) await reclaim(kitClaimKey(e.repo), pr.head, c.kitVersion).catch(() => {});
     // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
     if (c.conflicts?.length && pr.whose === 'team') {
       try {
