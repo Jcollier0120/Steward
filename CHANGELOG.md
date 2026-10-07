@@ -18,6 +18,26 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Manor shows Hire for your own agents once it is updated too.
+## 0.27.0
+
+**Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**
+
+### What's new
+
+- Each repository gets one release PC, chosen by your PCs through a small marker in the repository's own remote. It works with any Git host, and for anyone, with or without a licence.
+- The Steward's page shows who has each repository ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with **Do it here** to move it now, and **Keep it on this PC** to keep it there. A kept PC that goes quiet for a day can be taken over, and the page says so.
+- Version claims are shared through the repository too, so work started side by side on two PCs never takes the same version. Offline, a claim is made on the PC as before, and shared once it can reach the remote. If another PC took the same version meanwhile, the page says so and the later work gets a new version when it merges.
+
+### What changed
+
+- Only publishing waits for a PC's turn: merging, releasing, and the pushes of a refresh, a kit update or a catch-up. Builds, tests, tastings, bumps and claims never wait, online or offline.
+- When this PC can't reach a repository's remote, the page says releasing waits until it can. Nothing else stops.
+- Taking turns no longer goes through Castellan's release service. The turns from 0.24.0 are gone.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On its first round each PC marks the repositories it looks after. With only one PC, everything works exactly as before.
+- Update the Steward on every PC: an older one doesn't take turns, and the alarm for another Steward names it.
 
 ## 0.26.0
 

@@ -89,14 +89,24 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   // By itself (Settings' default): its rounds; and Run now, in the title bar.
   assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
-  // No licence here: no turns with other PCs, and nothing said of them.
+  // No turn taken yet: nothing said of release PCs.
   assert.equal(body.turns, null);
-  assert.doesNotMatch(html, /Your other PCs/);
-  // Another PC of the licence merges and releases one: said, with Do it here.
-  const turns = { mode: 'on', note: null, at: null, here: 1, elsewhere: [{ id: 'clerk', name: 'Clerk', repo: 'octocat/clerk', holder: 'DESKTOP-ABC', until: '2026-10-08T12:30:00Z' }] };
-  const withTurns = (await renderStewardBody())({ ...body, turns });
+  assert.doesNotMatch(html, /Release PC/);
+  // Who has each repository: another PC (with Do it here and Keep it on this PC), this PC kept here (Unpin), and one
+  // whose remote this PC can't reach; and a claim another PC made too.
+  const row = (o: object) => ({ id: 'clerk', name: 'Clerk', repo: 'octocat/clerk', status: 'elsewhere', holder: 'DESKTOP-ABC', pinned: false, quiet: false, until: '2026-10-08T12:30:00Z', note: null, ...o });
+  const turns = {
+    at: null,
+    rows: [row({}), row({ id: 'porter', name: 'Porter', repo: 'octocat/porter', status: 'here', holder: 'this PC', pinned: true }), row({ id: 'away', name: 'Away', repo: 'octocat/away', status: 'unreachable', holder: '', note: 'releasing Away waits until this PC can reach its remote' })],
+  };
+  const withTurns = (await renderStewardBody())({ ...body, turns, claimClashes: ['octocat/clerk 0.4.13 was claimed on another PC too'] });
   assert.match(withTurns, /Merging and releasing for Clerk: done by <strong>DESKTOP-ABC<\/strong>/);
   assert.match(withTurns, /data-post="\/api\/turns\/take"[^>]*>Do it here</);
+  assert.match(withTurns, /data-post="\/api\/turns\/take"[^>]*>Keep it on this PC</);
+  assert.match(withTurns, /Merging and releasing for Porter: this PC \(kept there\)/);
+  assert.match(withTurns, />Unpin</);
+  assert.match(withTurns, /Releasing Away waits until this PC can reach its remote\./);
+  assert.match(withTurns, /octocat\/clerk 0\.4\.13 was claimed on another PC too\./);
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

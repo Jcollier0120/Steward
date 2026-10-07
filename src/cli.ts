@@ -4,6 +4,7 @@ import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
+import { remoteFor } from './lease.ts';
 import { claimVersion, employeeFor, loadClaims, releaseClaim, selfFor } from './claims.ts';
 import { kitClaimKey } from './stages/kitpart.ts';
 import { claimPort, clashes, portUses, releasePort } from './ports.ts';
@@ -280,14 +281,14 @@ switch (cmd) {
       break;
     }
     const name = kit ? 'Kit' : e.name;
-    console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1])) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
+    console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1], { remote: await remoteFor(ctx.run, ctx.settings, e).catch(() => null), run: ctx.run })) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
     break;
   }
   case 'claims': {
     const all = loadClaims();
     if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
     else if (!all.length) console.log('No versions are claimed.');
-    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}${c.source === 'exchequer' ? ', for every PC of the licence' : ''}`);
+    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}${c.source === 'shared' ? ', shared by every PC that looks after it' : ''}${c.clash ? ` (${c.clash})` : ''}`);
     break;
   }
   case 'claim-port': {

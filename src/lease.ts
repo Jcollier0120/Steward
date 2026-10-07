@@ -1,274 +1,368 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { exchequerUrl } from './kit/exchequer.ts';
 import { manorHome } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import { fileAt, lsRemote, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
+import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
-import { checkoutOf, result, type EmployeeResult } from './stages/common.ts';
+import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from './stages/common.ts';
 
 /**
- * Taking turns with the other PCs on this licence (the Exchequer's docs/MULTI-PC.md). Every PC of a licence may run a
- * Steward signed in to the same GitHub account; without turns, two of them merge and release the same PRs.
+ * One release PC per repository, elected by the PCs themselves (docs/MULTI-PC.md). Every PC may run a Steward signed in
+ * to the same GitHub account; without turns, two of them merge and release the same PRs.
  *
- * Before a stage merges or releases, it takes the Exchequer's lease `steward-round` on each repository it would act
- * in that has a checkout on this PC, all in one call, for three rounds' time. A repository another PC holds is left
- * alone: nothing merged, released, refreshed or rolled out there, and the page says which PC does it, with "Do it
- * here" (a handover). Before each merge and release the lease is checked again, and renewed when it nears its end.
+ * The meeting place is a ref in the repository's own remote, on any host: `refs/manor/release-pc`, a tiny orphan commit
+ * holding release-pc.json, `{ pc, name, until, since, pinned, checkout }`, read and written with plain git
+ * (remote-ref.ts), by compare-and-swap. No licence, no Exchequer, nothing of GitHub's: it works for anyone.
  *
- * - No licence.json (development setups, older installs), or the Exchequer answering 404 (it doesn't coordinate yet)
- *   or 401 (this PC's place was given back): no turns at all; everything is exactly as before.
- * - The Exchequer unreachable (the network, a 5xx, a 429) on a PC whose turns were on: a lease this PC held is kept
- *   until it runs out, less a margin; no new one is taken. The worst case is a slow round, never a double merge.
- * - Unreachable on a PC that has never taken turns, or an answer with no leases in it: no turns, as before. An outage
- *   never stops a PC that was working alone.
+ * - Before a stage publishes (merges, releases, refresh, kit rollout and catch-up pushes, the Release button), it reads
+ *   the ref of each repository it would publish to. Free, or run out: it takes it, for three rounds. Its own: renewed
+ *   once half of that is gone. Another PC's: left alone, and the page says so, with Do it here.
+ * - Pinned (Keep it on this PC): another PC never takes it while it is renewed; a pin silent for over 24 hours may be
+ *   taken, and the page says that PC has gone quiet. A PC with a checkout takes the turn from one without.
+ * - Before each publishing act, one ls-remote: it acts only while the ref is still its own.
+ * - The remote out of reach: the stage goes on as before for that repository (it can't publish there anyway), and the
+ *   page says releasing waits until this PC can reach it. A host that refuses the ref: this PC works alone there, said
+ *   once on the page. Nothing local ever waits for a turn: builds, tests, tastings, bumps, commits and claims.
  *
- * What the last answer said is kept in leases.json, for that and for the page.
+ * What each repository's ref last said is kept in turns.json, for the guard and the page.
  */
 
-export const SCOPE = 'steward-round';
-/** A lease lasts three rounds, and never less than this. */
+export const RELEASE_PC_REF = 'refs/manor/release-pc';
+export const RELEASE_PC_FILE = 'release-pc.json';
+/** The ref, in each repository's own remote, that holds the version claims of every PC looking after it (claims.ts). */
+export const CLAIMS_REF = 'refs/manor/claims';
+export const CLAIMS_FILE = 'claims.json';
+/** A turn lasts three rounds, never less than 15 minutes; renewed once half of it is gone. */
 const MIN_TTL_S = 15 * 60;
 const MAX_TTL_S = 24 * 3600;
-/** A lease nearer its end than this is renewed before a merge or release. */
-const RENEW_MS = 5 * 60_000;
-/** Offline, a lease held is trusted only until this long before its end: the Exchequer's clock and this PC's may differ. */
-const MARGIN_MS = 2 * 60_000;
-const ASK_MS = 15_000;
+/** Clocks differ: a turn is taken over only this long after it ran out, and trusted by its holder until this long before. */
+const SKEW_MS = 2 * 60_000;
+/** A pinned turn renewed by no one for this long may be taken. */
+export const QUIET_PIN_MS = 24 * 3600_000;
 
-/** Where the Exchequer is, and this PC's token for it. */
-export interface Coord {
-  base: string;
-  token: string;
-  fetch: typeof fetch;
-  now?: () => number;
+export interface TurnRecord {
+  /** The PC's id: Manor's device.json, else the Steward's own. */
+  pc: string;
+  name: string;
+  until: string;
+  since: string;
+  pinned: boolean;
+  /** Whether that PC has a checkout of the repository: one that has takes the turn from one that hasn't. */
+  checkout?: boolean;
 }
 
-/** This PC's licence token (Manor's licence.json), or null when it holds none. */
-export function licenceToken(home = manorHome()): string | null {
-  const file = path.join(home, 'licence.json');
+export interface Device {
+  id: string;
+  name: string;
+}
+
+/** What a repository's turn came to. */
+export interface RepoTurn {
+  repo: string;
+  /** here: this PC's; elsewhere: another's; unreachable: the remote couldn't be asked; alone: the host refuses the ref. */
+  status: 'here' | 'elsewhere' | 'unreachable' | 'alone';
+  /** The ref's commit, as last read or written. */
+  sha?: string;
+  /** The claims ref's commit, as the same look saw it (null: none there): claims.ts's shareClaims reads it when it moved. */
+  claimsSha?: string | null;
+  record?: TurnRecord;
+  note?: string;
+  at: string;
+}
+
+export interface TurnsState {
+  at: string | null;
+  device: Device | null;
+  repos: Record<string, RepoTurn>;
+}
+
+/** Stands in for this PC, the clock and the remotes (tests). */
+export interface TurnsDeps {
+  device?: Device;
+  now?: () => number;
+  remote?: (e: Employee) => Promise<RemoteRepo | null>;
+}
+
+export const turnsFile = () => dataFile('turns.json');
+export const loadTurns = (): TurnsState => ({ at: null, device: null, repos: {}, ...readJson<Partial<TurnsState>>(turnsFile(), {}) });
+const key = (repo: string) => repo.toLowerCase();
+
+/** A turn's length for Settings' rounds: three of them, at least 15 minutes. */
+export const ttlFor = (s: Pick<Settings, 'roundMinutes'>) => Math.min(MAX_TTL_S, Math.max(MIN_TTL_S, Math.round(3 * (s.roundMinutes || 10) * 60)));
+
+/** This PC: Manor's device id when Manor has made one, else the Steward's own (made once); its name. */
+export function deviceHere(): Device {
+  const name = (process.env.COMPUTERNAME || os.hostname() || 'this PC').slice(0, 100);
+  for (const file of [path.join(manorHome(), 'device.json'), dataFile('device.json')]) {
+    try {
+      const id = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')).id;
+      if (typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)) return { id: id.toLowerCase(), name };
+    } catch {
+      // none there
+    }
+  }
+  const id = randomUUID();
+  writeJson(dataFile('device.json'), { id });
+  return { id, name };
+}
+
+/** A repository's remote: its checkout's origin, else its GitHub address; the scratch repository in the work folder. */
+export async function remoteFor(run: Runner, settings: Settings, e: Pick<Employee, 'repo' | 'checkout'>): Promise<RemoteRepo | null> {
+  if (!e.repo) return null;
+  const scratch = path.join(workRootOf(settings), '_turns.git');
+  const checkout = e.checkout ? checkoutOf(e as Employee) : '';
+  if (checkout && existsSync(checkout)) {
+    const r = await run('git', ['config', '--get', 'remote.origin.url'], { cwd: checkout, timeoutMs: 30_000 });
+    const url = r.code === 0 ? r.out.trim() : '';
+    if (url) return { key: key(e.repo), url, scratch };
+  }
+  return { key: key(e.repo), url: `https://github.com/${e.repo}.git`, scratch };
+}
+
+export function readRecord(text: string | null | undefined): TurnRecord | null {
+  if (!text) return null;
   try {
-    if (!existsSync(file)) return null;
-    const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')) as { token?: unknown };
-    return typeof j.token === 'string' && j.token.trim() ? j.token.trim() : null;
+    const j = JSON.parse(text);
+    if (typeof j?.pc !== 'string' || typeof j?.until !== 'string' || Number.isNaN(Date.parse(j.until))) return null;
+    return { pc: j.pc, name: String(j.name ?? ''), until: j.until, since: String(j.since ?? j.until), pinned: j.pinned === true, ...(typeof j.checkout === 'boolean' ? { checkout: j.checkout } : {}) };
   } catch {
     return null;
   }
 }
 
-/**
- * The Exchequer as this PC reaches it, or null when there are no turns to take: no licence here. Under node --test
- * never the real one: a test gives its own.
- */
-export function coordHere(env: NodeJS.ProcessEnv = process.env): Coord | null {
-  if (env.NODE_TEST_CONTEXT) return null;
-  const token = licenceToken();
-  return token ? { base: exchequerUrl(env), token, fetch: globalThis.fetch } : null;
+/** What to do with a repository's turn, from its record. Pure. */
+export function decide(rec: TurnRecord | null, me: { pc: string; checkout: boolean }, now: number, ttlMs: number): 'take' | 'renew' | 'keep' | 'elsewhere' {
+  if (!rec) return 'take';
+  const until = Date.parse(rec.until);
+  if (rec.pc === me.pc) return until - now < ttlMs / 2 ? 'renew' : 'keep';
+  if (rec.pinned) return now > until + QUIET_PIN_MS ? 'take' : 'elsewhere';
+  if (now > until + SKEW_MS) return 'take';
+  if (me.checkout && rec.checkout === false) return 'take';
+  return 'elsewhere';
 }
 
-/** What one call came to: an answer, no coordination (404, 401), the Exchequer out of reach, or another refusal. */
-export type Asked = { kind: 'ok'; body: any } | { kind: 'off'; why: string } | { kind: 'unreachable'; why: string } | { kind: 'refused'; status: number; body: any };
+/** Whether the Steward would publish anything to an employee's repository: else it takes no turn there. */
+const publishes = (e: Employee) => e.merges || !!e.release || !!e.refresh || e.usesKit;
 
-/** One call to the Exchequer's API: never throws, and never says the token. */
-export async function ask(c: Coord, method: string, route: string, body?: unknown): Promise<Asked> {
-  let res: Response;
-  try {
-    res = await c.fetch(`${c.base}/api/v1${route}`, {
-      method,
-      headers: { authorization: `Bearer ${c.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(ASK_MS),
-    });
-  } catch (e) {
-    return { kind: 'unreachable', why: `the Exchequer didn't answer (${(e as Error).name === 'TimeoutError' ? 'no answer in 15 s' : (e as Error).message})` };
-  }
-  let json: any = null;
-  try {
-    json = await res.json();
-  } catch {
-    json = null;
-  }
-  if (res.ok) return { kind: 'ok', body: json };
-  if (res.status === 404) return { kind: 'off', why: "the Exchequer doesn't take turns between PCs yet" };
-  if (res.status === 401) return { kind: 'off', why: "the Exchequer doesn't know this PC's licence any more (its place was given back?)" };
-  if (res.status === 429 || res.status >= 500) return { kind: 'unreachable', why: `the Exchequer answered ${res.status}${json?.message ? `: ${String(json.message).slice(0, 200)}` : ''}` };
-  return { kind: 'refused', status: res.status, body: json };
+function recordFor(me: Device, checkout: boolean, now: number, ttlMs: number, had: TurnRecord | null, pinned?: boolean): TurnRecord {
+  const mine = had?.pc === me.id;
+  return { pc: me.id, name: me.name, until: new Date(now + ttlMs).toISOString(), since: mine ? had!.since : new Date(now).toISOString(), pinned: pinned ?? (mine ? had!.pinned : false), checkout };
 }
 
-/** Why an answer that wasn't a lease is none, in a few words. */
-const refusal = (r: Asked) => (r.kind === 'refused' ? `${r.status}${r.body?.message ? `: ${String(r.body.message).slice(0, 200)}` : ''}` : 'an answer it could not read');
+const unreachableNote = (e: Pick<Employee, 'name'>) => `releasing ${e.name} waits until this PC can reach its remote`;
+const aloneNote = (e: Pick<Employee, 'name'>, why: string) => `${e.name}'s remote doesn't take the Steward's turn ref (${why}), so this PC works alone there`;
 
-/** One repository's lease, as the last answer said. */
-export interface LeaseSeen {
-  repo: string;
-  held: boolean;
-  until: string;
-  since?: string;
-  holder?: { deviceId: string; name: string };
+/** Writes the record over `old` (null: none); on a lost race, whatever the ref says now stands. */
+async function claimTurn(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, rec: TurnRecord, old: string | null, me: Device, now: number): Promise<RepoTurn> {
+  const at = new Date(now).toISOString();
+  const w = await writeRef(run, r, RELEASE_PC_REF, RELEASE_PC_FILE, `${JSON.stringify(rec, null, 2)}\n`, old, `${e.name}: released from ${rec.name} until ${rec.until}`);
+  if (w.kind === 'ok') return { repo: e.repo, status: 'here', sha: w.sha, record: rec, at };
+  if (w.kind === 'refused') return { repo: e.repo, status: 'alone', note: aloneNote(e, w.why), at };
+  if (w.kind === 'unreachable') return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at };
+  const again = await readRef(run, r, RELEASE_PC_REF, RELEASE_PC_FILE);
+  if (again.kind === 'unreachable') return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at };
+  if (again.kind === 'absent') return { repo: e.repo, status: 'elsewhere', at };
+  const now2 = readRecord(again.text);
+  return { repo: e.repo, status: now2?.pc === me.id ? 'here' : 'elsewhere', sha: again.sha, ...(now2 ? { record: now2 } : {}), at };
 }
 
-export interface LeaseState {
-  /** When the Exchequer was last asked. */
-  at: string | null;
-  /** on: turns are taken; off: none (no licence, or the Exchequer doesn't coordinate); unreachable: as on, from what was known. */
-  mode: 'on' | 'off' | 'unreachable';
-  note: string | null;
-  /** By repository, in lower case. */
-  leases: Record<string, LeaseSeen>;
+/** One repository's turn: read, and taken or renewed as decide() says. */
+export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number }): Promise<RepoTurn> {
+  const at = new Date(o.now).toISOString();
+  // Both refs in one look: the claims ref's commit is kept for claims.ts.
+  const ls = await lsRemote(run, r, [RELEASE_PC_REF, CLAIMS_REF]);
+  if (!ls.ok) return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at };
+  const claimsSha = ls.refs[CLAIMS_REF] ?? null;
+  const sha = ls.refs[RELEASE_PC_REF] ?? null;
+  const rec = sha ? readRecord(await fileAt(run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE)) : null;
+  const d = decide(rec, { pc: o.me.id, checkout: o.checkout }, o.now, o.ttlMs);
+  if (d === 'keep') return { repo: e.repo, status: 'here', sha: sha!, record: rec!, claimsSha, at };
+  if (d === 'elsewhere') return { repo: e.repo, status: 'elsewhere', sha: sha!, record: rec!, claimsSha, at };
+  // Taken from another PC (run out, or a pin gone quiet): not pinned here.
+  const pinned = rec && rec.pc !== o.me.id ? false : undefined;
+  return { ...(await claimTurn(run, r, e, recordFor(o.me, o.checkout, o.now, o.ttlMs, rec, pinned), sha, o.me, o.now)), claimsSha };
 }
 
-export const leasesFile = () => dataFile('leases.json');
-export const loadLeases = (): LeaseState => ({ at: null, mode: 'off', note: null, leases: {}, ...readJson<Partial<LeaseState>>(leasesFile(), {}) });
-const key = (repo: string) => repo.toLowerCase();
-
-/** A lease's length for Settings' rounds: three of them, at least 15 minutes. */
-export const ttlFor = (s: Pick<Settings, 'roundMinutes'>) => Math.min(MAX_TTL_S, Math.max(MIN_TTL_S, Math.round(3 * (s.roundMinutes || 10) * 60)));
-
-/** Whether a lease this PC held is still its own, by the clock alone (offline). */
-const stillMine = (l: LeaseSeen | undefined, now: number, margin: number) => !!l?.held && Date.parse(l.until) - margin > now;
-
-/** The words for a repository another PC looks after. */
+/** The words for a repository another PC publishes. */
 export const doneBy = (e: Pick<Employee, 'name'>, holder: string) => `merging and releasing for ${e.name}: done by ${holder || 'another PC'}`;
 
-/** Before each merge and release: whether this PC may still act in an employee's repository. */
+/** Before each publishing act: whether this PC may still publish to an employee's repository. */
 export interface LeaseGuard {
   ok(e: Pick<Employee, 'id' | 'repo'>): Promise<boolean>;
-  /** The employees left to other PCs, or to none, this stage. */
+  /** The employees another PC publishes for, this stage. */
   skip: Set<string>;
 }
 
-function readAnswer(a: any, now: number): LeaseSeen | null {
-  if (!a || typeof a.resource !== 'string' || typeof a.until !== 'string') return null;
-  return a.held === true
-    ? { repo: a.resource, held: true, until: a.until, since: typeof a.since === 'string' ? a.since : new Date(now).toISOString() }
-    : { repo: a.resource, held: false, until: a.until, holder: { deviceId: String(a.holder?.deviceId ?? ''), name: String(a.holder?.name ?? '') } };
+export interface TurnsOptions {
+  run: Runner;
+  settings: Settings;
+  log?: (line: string) => void;
+  /** Null: no turns at all (the tests, unless they give their own). */
+  deps: TurnsDeps | null;
 }
 
 /**
- * The turns this stage takes: of `employees`, those this PC acts in, and a line for each it leaves to another PC (or,
- * while the Exchequer can't be reached, to none). With no coordination, all of them act, as before.
+ * The turns a publishing stage takes: of `employees`, those this PC publishes for (its turn; nothing to publish there; a
+ * host that refuses the ref; or a remote out of reach, where it can't publish anyway), and a line for each another PC has.
  */
-export async function takeTurns(employees: Employee[], o: { coord: Coord | null; settings: Pick<Settings, 'roundMinutes'>; log?: (line: string) => void }): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; guard: LeaseGuard | null; mode: LeaseState['mode'] }> {
+export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; guard: LeaseGuard | null }> {
+  if (!o.deps) return { acting: employees, elsewhere: [], guard: null };
+  const deps = o.deps;
   const log = o.log ?? (() => {});
-  const c = o.coord;
-  const nowOf = () => c?.now?.() ?? Date.now();
-  const state = loadLeases();
-  if (!c) {
-    if (state.mode !== 'off' || Object.keys(state.leases).length) writeJson(leasesFile(), { at: null, mode: 'off', note: null, leases: {} } satisfies LeaseState);
-    return { acting: employees, elsewhere: [], guard: null, mode: 'off' };
-  }
-  const ttlSeconds = ttlFor(o.settings);
-  const here = employees.filter((e) => e.checkout && existsSync(checkoutOf(e)));
-  const repos = [...new Set(here.map((e) => key(e.repo)))];
-  let mode: LeaseState['mode'] = state.mode;
-  let note: string | null = state.note;
-  const leases: Record<string, LeaseSeen> = { ...state.leases };
-  if (repos.length) {
-    const r = await ask(c, 'POST', '/lease', { scope: SCOPE, resources: repos, ttlSeconds });
-    const now = nowOf();
-    if (r.kind === 'ok' && Array.isArray(r.body?.leases)) {
-      mode = 'on';
-      note = null;
-      for (const a of r.body.leases) {
-        const seen = readAnswer(a, now);
-        if (seen) leases[key(seen.repo)] = seen;
-      }
-    } else if (r.kind === 'off') {
-      mode = 'off';
-      note = r.why;
-    } else if (r.kind === 'ok' || (state.mode !== 'on' && state.mode !== 'unreachable')) {
-      // An answer with no leases in it, or no answer on a PC that has never taken turns: no turns, as before. Only a PC
-      // whose turns were on waits for the Exchequer, so an outage never stops one that was working alone.
-      mode = 'off';
-      note = null;
-    } else {
-      mode = 'unreachable';
-      note = r.kind === 'unreachable' ? r.why : `the Exchequer refused the turns (${refusal(r)})`;
-      log(`turns: ${note}; a repository this PC held is kept until its turn runs out, and no new one is taken`);
+  const nowOf = () => deps.now?.() ?? Date.now();
+  const me = deps.device ?? deviceHere();
+  const ttlMs = ttlFor(o.settings) * 1000;
+  const remote = deps.remote ?? ((e: Employee) => remoteFor(o.run, o.settings, e));
+  const unique = employees.filter((e, i) => employees.findIndex((x) => x.id === e.id) === i);
+  // 0.24's file, from the turns through the Exchequer: gone.
+  rmSync(dataFile('leases.json'), { force: true });
+  const remotes = new Map<string, RemoteRepo>();
+  const checkouts = new Map<string, boolean>();
+  const turns = await mapLimit(unique, 4, async (e): Promise<RepoTurn | null> => {
+    if (!publishes(e)) return null;
+    try {
+      const r = await remote(e);
+      if (!r) return null;
+      remotes.set(e.id, r);
+      const checkout = !!e.checkout && existsSync(checkoutOf(e));
+      checkouts.set(e.id, checkout);
+      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs });
+    } catch (err) {
+      log(`[${e.id}] turn: ${(err as Error).message}`);
+      return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at: new Date(nowOf()).toISOString() };
     }
-    writeJson(leasesFile(), { at: new Date(now).toISOString(), mode, note, leases } satisfies LeaseState);
-  }
-  if (mode === 'off') return { acting: employees, elsewhere: [], guard: null, mode };
-
-  const now = nowOf();
+  });
+  const repos = { ...loadTurns().repos };
   const acting: Employee[] = [];
   const elsewhere: EmployeeResult[] = [];
-  const seenIds = new Set<string>();
-  for (const e of employees) {
-    if (seenIds.has(e.id)) continue;
-    seenIds.add(e.id);
-    const l = leases[key(e.repo)];
-    if (!here.includes(e)) elsewhere.push(result(e, 'skipped', `no checkout of ${e.name} on this PC, so a PC with one merges and releases it`));
-    else if (mode === 'on' ? l?.held && Date.parse(l.until) > now : stillMine(l, now, MARGIN_MS)) acting.push(e);
-    else if (l && !l.held && Date.parse(l.until) > now) elsewhere.push(result(e, 'skipped', doneBy(e, l.holder?.name ?? '')));
-    else elsewhere.push(result(e, 'skipped', `merging and releasing for ${e.name} waits: ${note ?? "the Exchequer can't be reached"}, and this PC holds no turn there`));
-  }
+  unique.forEach((e, i) => {
+    const t = turns[i];
+    if (t) repos[key(e.repo)] = t;
+    if (t?.status === 'elsewhere') elsewhere.push(result(e, 'skipped', doneBy(e, t.record?.name ?? '')));
+    else {
+      acting.push(e);
+      if (t?.note) log(`[${e.id}] ${t.note}`);
+    }
+  });
+  writeJson(turnsFile(), { at: new Date(nowOf()).toISOString(), device: me, repos } satisfies TurnsState);
+
   const skip = new Set(elsewhere.map((r) => r.id));
   const given = new Set(acting.map((e) => e.id));
   const guard: LeaseGuard = {
     skip,
     async ok(e) {
-      // Only a repository this stage took its turn in.
       if (skip.has(e.id) || !given.has(e.id)) return false;
+      const r = remotes.get(e.id);
       const k = key(e.repo);
-      const cur = loadLeases();
-      const l = cur.leases[k];
-      const t = nowOf();
-      if (l?.held && Date.parse(l.until) - RENEW_MS > t) return true;
-      // Near its end: renewed, or, out of reach, trusted only until its end less the margin.
-      const r = await ask(c, 'POST', '/lease', { scope: SCOPE, resource: k, ttlSeconds });
-      if (r.kind === 'off') return true;
-      if (r.kind === 'ok' && typeof r.body?.until === 'string') {
-        const seen = readAnswer({ ...r.body, resource: k }, t)!;
-        writeJson(leasesFile(), { ...cur, at: new Date(t).toISOString(), mode: 'on', leases: { ...cur.leases, [k]: seen } } satisfies LeaseState);
-        if (!seen.held) skip.add(e.id);
-        return seen.held;
+      const t = loadTurns().repos[k];
+      // No turn to keep (nothing to publish there, a host that refuses the ref, or a remote out of reach): as before.
+      if (!r || !t || t.status !== 'here') return true;
+      const ls = await lsRemote(o.run, r, [RELEASE_PC_REF]).catch(() => null);
+      if (!ls || !ls.ok) return true;
+      const sha = ls.refs[RELEASE_PC_REF] ?? null;
+      const now = nowOf();
+      if (sha && sha === t.sha && t.record && Date.parse(t.record.until) - SKEW_MS > now) return true;
+      const full = unique.find((x) => x.id === e.id)!;
+      let next: RepoTurn;
+      if (sha && sha === t.sha && t.record) {
+        // Still its own, near its end: renewed.
+        const checkout = checkouts.get(e.id) ?? true;
+        next = await claimTurn(o.run, r, full, recordFor(me, checkout, now, ttlMs, t.record), sha, me, now);
+      } else {
+        // Moved: Do it here on this PC (still its own), or another PC's now.
+        const rec = sha ? readRecord(await fileAt(o.run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE)) : null;
+        next = { repo: e.repo, status: rec?.pc === me.id ? 'here' : 'elsewhere', ...(sha ? { sha } : {}), ...(rec ? { record: rec } : {}), at: new Date(now).toISOString() };
       }
-      const mine = stillMine(l, t, MARGIN_MS);
-      if (!mine) skip.add(e.id);
-      return mine;
+      const cur = loadTurns();
+      writeJson(turnsFile(), { ...cur, repos: { ...cur.repos, [k]: next } } satisfies TurnsState);
+      if (next.status === 'elsewhere') {
+        skip.add(e.id);
+        return false;
+      }
+      return true;
     },
   };
-  return { acting, elsewhere, guard, mode };
+  return { acting, elsewhere, guard };
 }
 
 /**
- * "Do it here": this PC takes an employee's lease now, whoever held it. The other PC's next round finds it held here,
- * and leaves the repository alone. Says what happened, in words.
+ * "Do it here" (pin left out), "Keep it on this PC" (pin: true), or Unpin (pin: false): the turn written to this PC by
+ * compare-and-swap, whoever held it. The other PC's next check finds it gone, and leaves the repository alone.
  */
-export async function handOver(repo: string, o: { coord: Coord | null; settings: Pick<Settings, 'roundMinutes'> }): Promise<{ ok: boolean; message: string }> {
-  if (!o.coord) return { ok: false, message: 'This PC holds no licence, so there are no turns to take: it merges and releases everything it looks after.' };
-  const k = key(repo);
-  const r = await ask(o.coord, 'POST', '/lease/handover', { scope: SCOPE, resource: k, ttlSeconds: ttlFor(o.settings) });
-  const now = o.coord.now?.() ?? Date.now();
-  if (r.kind === 'ok' && typeof r.body?.until === 'string') {
-    const cur = loadLeases();
-    writeJson(leasesFile(), { ...cur, at: new Date(now).toISOString(), mode: 'on', leases: { ...cur.leases, [k]: { repo: k, held: true, until: r.body.until, since: r.body.since } } } satisfies LeaseState);
-    const from = r.body.from?.name ? ` from ${r.body.from.name}` : '';
-    return { ok: true, message: `This PC merges and releases ${repo} now${from}.` };
+export async function handOver(e: Employee, o: { run: Runner; settings: Settings; deps?: TurnsDeps; pin?: boolean }): Promise<{ ok: boolean; message: string }> {
+  const deps = o.deps ?? {};
+  const me = deps.device ?? deviceHere();
+  const ttlMs = ttlFor(o.settings) * 1000;
+  const r = await (deps.remote ?? ((x: Employee) => remoteFor(o.run, o.settings, x)))(e);
+  if (!r) return { ok: false, message: `${e.name} has no remote to take its turn in.` };
+  const checkout = !!e.checkout && existsSync(checkoutOf(e));
+  for (let i = 0; i < 3; i++) {
+    const now = deps.now?.() ?? Date.now();
+    const read = await readRef(o.run, r, RELEASE_PC_REF, RELEASE_PC_FILE);
+    if (read.kind === 'unreachable') return { ok: false, message: `Not now: this PC can't reach ${e.name}'s remote (${read.why}). Try again once it can.` };
+    const had = read.kind === 'found' ? readRecord(read.text) : null;
+    const rec = recordFor(me, checkout, now, ttlMs, had, o.pin ?? (had?.pc === me.id ? had.pinned : false));
+    const t = await claimTurn(o.run, r, e, rec, read.kind === 'found' ? read.sha : null, me, now);
+    if (t.status === 'alone') return { ok: false, message: `${t.note}.` };
+    if (t.status === 'unreachable') return { ok: false, message: `Not now: ${t.note}.` };
+    if (t.status === 'here' && t.sha && t.record?.until === rec.until) {
+      const cur = loadTurns();
+      writeJson(turnsFile(), { ...cur, device: me, repos: { ...cur.repos, [key(e.repo)]: t } } satisfies TurnsState);
+      const from = had && had.pc !== me.id && had.name ? ` from ${had.name}` : '';
+      const words =
+        o.pin === true
+          ? `This PC keeps ${e.name}${from}: other PCs leave it alone while this PC is around.`
+          : o.pin === false
+            ? `${e.name} isn't kept on this PC any more: it stays here until another PC's turn comes.`
+            : `This PC merges and releases ${e.name} now${from}.`;
+      return { ok: true, message: words };
+    }
   }
-  if (r.kind === 'off') return { ok: false, message: `There are no turns to take: ${r.why}.` };
-  return { ok: false, message: r.kind === 'unreachable' ? `Not now: ${r.why}. Try again in a minute.` : `The Exchequer refused (${refusal(r)}).` };
+  return { ok: false, message: `Another PC kept changing ${e.name}'s turn: try again in a minute.` };
 }
 
-/** The page's view of the turns: the repositories another PC looks after, and why turns are off or out of reach. */
-export interface TurnsView {
-  mode: LeaseState['mode'];
+/** One repository's row on the page. */
+export interface TurnRow {
+  id: string;
+  name: string;
+  repo: string;
+  status: RepoTurn['status'];
+  /** "this PC", or the other PC's name. */
+  holder: string;
+  pinned: boolean;
+  /** Pinned to another PC that has stopped renewing it. */
+  quiet: boolean;
+  until: string | null;
   note: string | null;
+}
+
+/** The page's view: who has each repository's turn, pinned or not, and what waits. Null when no turn was taken yet. */
+export interface TurnsView {
   at: string | null;
-  elsewhere: { id: string; name: string; repo: string; holder: string; until: string }[];
-  here: number;
+  rows: TurnRow[];
 }
 
 export function turnsView(employees: Pick<Employee, 'id' | 'name' | 'repo'>[], now = Date.now()): TurnsView | null {
-  const s = loadLeases();
-  if (s.mode === 'off') return null;
-  const elsewhere: TurnsView['elsewhere'] = [];
-  let here = 0;
+  const s = loadTurns();
+  const rows: TurnRow[] = [];
   for (const e of employees) {
-    const l = s.leases[key(e.repo)];
-    if (!l || Date.parse(l.until) <= now) continue;
-    if (l.held) here++;
-    else elsewhere.push({ id: e.id, name: e.name, repo: e.repo, holder: l.holder?.name || 'another PC', until: l.until });
+    const t = s.repos[key(e.repo)];
+    if (!t) continue;
+    const rec = t.record;
+    rows.push({
+      id: e.id,
+      name: e.name,
+      repo: e.repo,
+      status: t.status,
+      holder: t.status === 'here' ? 'this PC' : (rec?.name ?? ''),
+      pinned: !!rec?.pinned && (t.status === 'here' || t.status === 'elsewhere'),
+      quiet: t.status === 'elsewhere' && !!rec?.pinned && Date.parse(rec.until) < now,
+      until: rec?.until ?? null,
+      note: t.note ?? null,
+    });
   }
-  return { mode: s.mode, note: s.note, at: s.at, elsewhere, here };
+  return rows.length ? { at: s.at, rows } : null;
 }

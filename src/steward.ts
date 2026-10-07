@@ -20,7 +20,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
-import { pruneClaims, syncClaims } from './claims.ts';
+import { pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, refreshAfterReleases } from './stages/refresh.ts';
 import { release } from './stages/release.ts';
@@ -32,7 +32,7 @@ import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent } from './tend.ts';
-import { coordHere, takeTurns, type Coord } from './lease.ts';
+import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 
@@ -223,10 +223,10 @@ export interface StageOptions {
   /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
   scm?: ScmLook | null;
   /**
-   * The Exchequer for the turns with the licence's other PCs (lease.ts): null for none. Left out, this PC's licence
-   * decides; under node --test there is none unless given.
+   * The turns with this PC's others (lease.ts): who this PC is, the clock and the remotes. Null: no turns. Left out, this
+   * PC's own; under node --test there are none unless given.
    */
-  coord?: Coord | null;
+  turns?: TurnsDeps | null;
 }
 
 /**
@@ -260,20 +260,40 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
 
+/** The turns this stage takes (lease.ts): StageOptions' own, else this PC's; none under node --test unless given. */
+const turnsDeps = (o: StageOptions): TurnsDeps | null => (o.turns !== undefined ? o.turns : process.env.NODE_TEST_CONTEXT ? null : {});
+
 /**
- * The turns a merge, release or round takes with the licence's other PCs (lease.ts), before it acts: on the employees
+ * The turns a merge, release or round takes with this PC's others (lease.ts), before it publishes: on the employees
  * asked about, the repositories refreshed after releases, and the Steward's own while it merges or releases itself.
- * Sets ctx.lease; gives back the employees asked about that are this PC's to act in, and a line for each that isn't.
+ * Sets ctx.lease; gives back the employees asked about that are this PC's to publish for, and a line for each that isn't.
+ * Only publishing waits on a turn: nothing here stops a build, a test, a tasting or a bump.
  */
-async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; shared: Coord | null }> {
+async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
   const refreshed = ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
-  const coord = o.coord !== undefined ? o.coord : coordHere();
-  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { coord, settings: ctx.settings, log: ctx.log });
+  const deps = turnsDeps(o);
+  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { run: ctx.run, settings: ctx.settings, log: ctx.log, deps });
   ctx.lease = t.guard;
-  if (t.mode === 'unreachable') ctx.log('turns: the Exchequer could not be reached; only repositories whose turn this PC already held are looked after');
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
-  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), shared: t.mode === 'on' ? coord : null };
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), on: !!deps };
+}
+
+/**
+ * The repositories whose claims ref this round's turns looked at (reachable, and taking the ref), with that ref's commit
+ * then: claims.ts's shareClaims reads each that moved.
+ */
+async function claimRemotes(ctx: Ctx, o: StageOptions): Promise<{ repo: string; remote: import('./remote-ref.ts').RemoteRepo; sha: string | null }[]> {
+  const repos = loadTurns().repos;
+  const self = ctx.settings.stewardRepo ? [stewardEmployee(ctx.settings, o.self?.checkout ?? ctx.settings.stewardCheckout)] : [];
+  const out: { repo: string; remote: import('./remote-ref.ts').RemoteRepo; sha: string | null }[] = [];
+  for (const e of [...ctx.settings.employees, ...self]) {
+    const t = repos[e.repo.toLowerCase()];
+    if (!t || (t.status !== 'here' && t.status !== 'elsewhere') || t.claimsSha === undefined) continue;
+    const remote = await (o.turns?.remote ?? ((x: Employee) => remoteFor(ctx.run, ctx.settings, x)))(e).catch(() => null);
+    if (remote) out.push({ repo: e.repo, remote, sha: t.claimsSha });
+  }
+  return out;
 }
 
 /** The Steward's own repository as an employee, for its turn: while Settings say it merges or releases itself, with a checkout. */
@@ -358,8 +378,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       const own = o.ownKit !== undefined ? o.ownKit : ownKit();
       /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
       let rolloutWaits: { kit: string; own: string } | null = null;
-      /** The Exchequer, when this round took turns through it (lease.ts): the licence's claims are copied from it. */
-      let shared: Coord | null = null;
+      /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
+      let turnsOn = false;
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -377,10 +397,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
-          // Turns with the licence's other PCs first (lease.ts): a repository another PC has its turn in is left to it.
+          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
           const whole = !ask.employees?.length;
           const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
-          shared = turns.shared;
+          turnsOn = turns.on;
           let employees = turns.acting;
           if (round) {
             plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
@@ -473,7 +493,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             out.results = await bump(ctx, picked.employees, { kit: chosen.version, base: ask.base, kitFrom: ask.kitFrom, changelog: await changelogFor(ctx, chosen.version) });
           } else if (name === 'push') {
             clearRolloutHolds(picked.employees.map((e) => e.id));
-            out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });
+            // A push publishes: only where this PC has the turn (lease.ts). The bumps stay prepared here either way.
+            const turns = await takeTurnsFor(ctx, o, picked.employees, null);
+            out.results = [...turns.elsewhere, ...(await push(ctx, turns.acting, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) }))];
           } else {
             const turns = await takeTurnsFor(ctx, o, picked.employees, null);
             out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: chosen.version }))];
@@ -505,9 +527,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
       if (name === 'round') {
         try {
-          // With a licence, every PC's claims are copied here first, and those dropped are given back there too.
-          await syncClaims(shared);
-          await pruneClaims(loadStaff()?.rows ?? [], Date.now(), { coord: shared });
+          await pruneClaims(loadStaff()?.rows ?? []);
+          // With turns, each repository's claims ref too: every PC's claims copied here, this PC's own shared.
+          if (turnsOn) await shareClaims(ctx.run, loadStaff()?.rows ?? [], await claimRemotes(ctx, o));
         } catch (e) {
           log(`claims: ${(e as Error).message}`);
         }
