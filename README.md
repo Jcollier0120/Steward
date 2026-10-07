@@ -2,13 +2,35 @@
 
 # Steward
 
-Keeps the essentials every agent shares, and brings each update to all of them at once.
+Looks after your repositories: claims versions, merges your ready pull requests and releases new versions, where you say yes.
 
 The *steward* ran the household for its lord: he kept the keys, saw that every servant had what the work needed, and carried the lord's orders to each of them. Its mark is a ring of keys.
 
-One of the agents employed at Manor, the home of the local agents on this PC: the senior employee. Its page is http://steward.localhost:19494/.
+One of the agents employed at Manor, the home of the local agents on this PC. Its page is http://steward.localhost:19494/.
 
-The hires (Porter, Auditor, Clerk, Herald, Warrener, Aletaster, Miller and Pinder) each carried a copy of the same kit: the page and its server, Settings, install and release, the accelerators and the NPU queue. A change to it meant the same PR in eight repositories. The Steward keeps that kit once, in this repository, and rolls each new version out to every employee: one command, or one button, per stage, each reporting per employee.
+It has two jobs, and Settings say which a PC gets:
+
+- **On your PC: your own repositories** (below). Every PC.
+- **On Castellan's own PC: Castellan's release machinery** (the kit, its rollout, and the Steward's own releases; from "The kit" on). Only where Settings' **Releases Castellan itself** (`releasesCastellan`) is on, which a new install never is.
+
+## Your own repositories
+
+Reeve lists the git repositories on this PC (his `GET /api/repos`, else the scan he keeps in `%USERPROFILE%\.reeve\repos.json`). The Steward's page offers, under **Found on this PC**, those whose origin is on GitHub and that the account gh is signed in as can push to (one `gh api graphql` query asks `viewerPermission` for all of them), less those it already looks after and those Reeve leaves alone (`src/found.ts`; the look is kept in `repos-found.json`, made again at most every hour, or with **Look again**). Nothing is looked after until you pick it.
+
+**Look after** adds one to Settings, under **Repositories**, with what its clone says at its branch's tip: how to test it (`npm run typecheck` and `npm test` when package.json has those scripts, `cargo test`, `go test ./...`, `dotnet test` on its unit tests), the files that carry its version (package.json, package-lock.json, a `src/*.ts` with the same `version: 'x.y.z'`, a .csproj or Directory.Build.props with `<VersionPrefix>`), no kit, nothing installed. Two ticks beside it, both off unless you tick them:
+
+- **Merge my ready PRs** (`merges`): Merge your ready PRs, and the rounds while **Merges and releases by itself** is on, merge each PR you (or the team) opened that isn't a draft, merges cleanly and has no failing or running checks; one with no checks on GitHub is tested here first with its test commands. Off, its PRs are listed and left to you, and no alarm counts their hours.
+- **Release each new version** (`release`): when its branch carries a version with no GitHub release yet, it is released: with its own `npm run release` when package.json has a release script, else `tag`, a GitHub release `v<version>` of the branch's commit that the Steward makes itself (`gh release create`), its notes the version's entry in CHANGELOG.md, or GitHub's from the commits. A release command of the repository's own must make that GitHub release in the repository itself: one that finishes without it is a failed release, which the rounds then leave to you at that commit. Empty, it is never released.
+
+**Merges and releases by itself** (`byItself`) is off on a new install too: until you switch it on, nothing is merged or released but by a button. **Versions claimed up front** (below) work for any repository: one in Settings, one Reeve found here, or the clone the command runs in. Every release goes to the repository's own GitHub repository, never anywhere else: the Steward passes `MANOR_RELEASES_REPO` empty to every release command it runs.
+
+What it never does on your PC: roll a kit out, release or merge anything of its own, hand work to the Wright or look at its drafts (those exist only where the Wright is installed), or read the Surveyor's page where the Surveyor isn't installed. Settings show only what applies.
+
+**Tending and the manor-wide alarms belong to Manor.** Keeping the staff's pages up (`src/tend.ts`) and the alarms about the manor as a whole (Manor's page and updates, the ports, the Surveyor's problems, Reeve's alerts, an agent down) are the household's, not a developer's, so every PC should have them whatever agents it holds: they go to Manor, which every PC has. Until a Manor does them, the Steward does, as before. A Manor that does says so in its `GET /api/state` as `"keeps": ["tend", "alarms"]`; from then on the Steward leaves both to it and raises only the alarms of the repositories it looks after.
+
+## Castellan's own PC
+
+The hires (Porter, Auditor, Clerk, Herald, Warrener, Aletaster, Miller and Pinder) each carried a copy of the same kit: the page and its server, Settings, install and release, the accelerators and the NPU queue. A change to it meant the same PR in eight repositories. The Steward keeps that kit once, in this repository, and rolls each new version out to every employee: one command, or one button, per stage, each reporting per employee. All of this, to the end of "The rollout", happens only where **Releases Castellan itself** is on. A Steward installed before 0.16.0 has it switched on, with everything it did, by a migration the first time it reads its settings (`migrateToOwnRepos`): its releases repository (`releasesRepo`), merging by itself, each repository's ready PRs merged, and the .NET SDK it found.
 
 ## The kit
 
@@ -169,13 +191,9 @@ Each stage is a command and a button on the page (each asks first, and only the 
 
 (`status --json` is Manor's command, as every agent's is: the employees' status is `staff`.)
 
-### Old kit files
-
-There are no copies of the kit to drift any more. Instead `staff` and the page flag one of the eight hires whose branch still tracks the old kit at its old paths (`src/npu.ts`, `tools/release.ts`, `test/kit.test.ts` and the rest), and `bump` refuses it: it needs converting first. Only the hires ever carried those copies (`OLD_KIT_HIRES`): Reeve has files of its own at some of the same paths (src/accelerators.ts, src/duty.ts, src/install.ts, tools/release.ts), which are never flagged.
-
 ## Converting a hire
 
-`tools/convert.ts <worktree> --version <new>` turns a hire that carries its own copy of the kit into one that takes the Steward's: it removes the 22 old kit files (`git rm`), rewrites the hire's imports to `./kit/…`, ignores `src/kit/`, adds `kit.json`, `tools/kit.ts` and `test/agent.test.ts`, makes npm fill the kit first, raises the version, and points the README at the Steward with a section on the kit. It stages; it commits nothing. It refuses any agent that isn't one of the eight hires, before it removes anything.
+Every hire has been converted, so the Steward itself no longer looks for the old kit's files; what converted them is kept in `tools/` (`tools/lib/convert.ts`, `tools/lib/relocate.ts`, `tools/lib/compare.ts` and the old kit's paths in `tools/lib/oldkit.ts`), and never ships. `tools/convert.ts <worktree> --version <new>` turns a hire that carries its own copy of the kit into one that takes the Steward's: it removes the 22 old kit files (`git rm`), rewrites the hire's imports to `./kit/…`, ignores `src/kit/`, adds `kit.json`, `tools/kit.ts` and `test/agent.test.ts`, makes npm fill the kit first, raises the version, and points the README at the Steward with a section on the kit. It stages; it commits nothing. It refuses any agent that isn't one of the eight hires, before it removes anything.
 
 The eight hires were converted that way, each on a branch **`steward/use-kit-1.0.0`** from its `release-0.3.1`, each in a worktree of its own, at version 0.4.0, then filled from this checkout's kit, typechecked and tested: all eight pass. Their `main` now has `release-0.3.1` merged, with the same tree, so each branch merges cleanly. Those branches aren't pushed. Until they are merged, each hire's main still carries the old kit, and `bump` refuses it.
 
@@ -184,7 +202,7 @@ The eight hires were converted that way, each on a branch **`steward/use-kit-1.0
 Both take the kit (`usesKit` in Settings), so every stage covers them as it does the hires.
 
 - **Reeve** (Node, with a React dashboard) takes `node` and `spec` (and node brings the core): the NPU queue and lock, the accelerator ids, and the queue's rules and vectors. The kit's core is now the original of the queue, and Reeve's own src/npu-queue.ts a copy of kit 1.0.0's, until Reeve uses the kit's. Its npu-embed/npu_lock.py stays Python, the lock's one implementation outside the core, and keeps running npu-queue-vectors.json. Its own `src/accelerators.ts` stays: it reads `config.json` as the file's owner, and a test checks that the kit's reading agrees with it. Its version is in package.json, package-lock.json and src/mcp.ts, and its release is `npm run release -- --publish`. It fills its kit with `node tools/kit.ts`, as a hire does. It has no `src/app.ts` or `SETTINGS_SPEC` (its page is its own), so it doesn't run the kit's agent checks.
-- **Heiward** (C#/.NET, public, on `master`) takes `spec`: its NpuLock tests run the queue's vectors, so the C# lock follows the same protocol. It fills `kit\` with its own `tools\kit.ps1` (Windows PowerShell 5.1), from the same sources as tools/kit.ts, and its build stops with "run tools\kit.ps1" while the kit isn't filled. Its version is `<VersionPrefix>` in HEI.Agent/HEI.Agent.csproj, its tests `dotnet test HEI.Core.Tests`, its release `powershell -File HEI.Agent\release.ps1 -Publish`. A bump changes only kit.json and the .csproj: no npm, no tools/kit.ts. The Steward runs its commands with a .NET that has an SDK (DOTNET_ROOT, then C:\tools\dotnet10, then Program Files'), since Task Scheduler's PATH finds Program Files' runtime first. From kit 2.0.0 it is to take `dotnet` instead (which brings the core and spec): HEI.Core imports `kit\dotnet\Steward.Kit.props`, and its NpuLock.cs and Accelerators.cs keep their callers and hand their insides to the part (its turns, the ids, the failure markers' rules, files and messages). For that, tools\kit.ps1 brings the parts a part needs, as tools/kit.ts does, laid out as the kit tree is (`kit\core`, `kit\dotnet`, `kit\spec`).
+- **Heiward** (C#/.NET, public, on `master`) takes `spec`: its NpuLock tests run the queue's vectors, so the C# lock follows the same protocol. It fills `kit\` with its own `tools\kit.ps1` (Windows PowerShell 5.1), from the same sources as tools/kit.ts, and its build stops with "run tools\kit.ps1" while the kit isn't filled. Its version is `<VersionPrefix>` in HEI.Agent/HEI.Agent.csproj, its tests `dotnet test HEI.Core.Tests`, its release `powershell -File HEI.Agent\release.ps1 -Publish`. A bump changes only kit.json and the .csproj: no npm, no tools/kit.ts. The Steward runs its commands with a .NET that has an SDK (Settings' **.NET SDK**, `dotnetRoot`, then DOTNET_ROOT, then Program Files'), since Task Scheduler's PATH finds Program Files' runtime first. From kit 2.0.0 it is to take `dotnet` instead (which brings the core and spec): HEI.Core imports `kit\dotnet\Steward.Kit.props`, and its NpuLock.cs and Accelerators.cs keep their callers and hand their insides to the part (its turns, the ids, the failure markers' rules, files and messages). For that, tools\kit.ps1 brings the parts a part needs, as tools/kit.ts does, laid out as the kit tree is (`kit\core`, `kit\dotnet`, `kit\spec`).
 
 **How a logic change reaches Heiward:** the rule changes in the core (and, for a timing, rules.json), with the vectors that show it, released as a kit version; the Steward's bump moves Heiward's pin, its build embeds the new core, and its tests run the new vectors. No C# changes, unless the core asks for a new kind of action.
 
@@ -210,7 +228,7 @@ node %USERPROFILE%\.steward\app\src\cli.ts claim-version porter --branch claude/
 # Porter 0.4.22: yours. Set it in package.json, package-lock.json, src/app.ts.
 ```
 
-It takes an employee's id, name or `owner/repo` (the Steward's own too), and hands out the next version no one has: above its branch's version on GitHub, every release, every open PR's (by the version in its title), and every live claim. `--minor` for the next minor; `--json` for programs; `--by` says who asks (`claude` unless said). Claims go one at a time under a machine-wide lock, so two workers asking at once get two versions; the same branch asking again gets the same one. `claims` lists them (and `GET /api/versions`); `release-version <employee> <version>` gives one back.
+It takes a repository's id, name or `owner/repo`: one in Settings, one Reeve found on this PC, the clone it runs in (by its origin), or the Steward's own; and hands out the next version no one has: above its branch's version on GitHub, every release, every open PR's (by the version in its title), and every live claim. `--minor` for the next minor; `--json` for programs; `--by` says who asks (`claude` unless said). Claims go one at a time under a machine-wide lock, so two workers asking at once get two versions; the same branch asking again gets the same one. `claims` lists them (and `GET /api/versions`); `release-version <employee> <version>` gives one back.
 
 A claim lives until its version is on the branch or overtaken by a release (the work landed), until it is given back, or for three days with no open PR that names it (its branch, or its version in a title); each round prunes them. While it lives, the merge stage holds another PR that sets that version ("it sets v0.4.22, which wright claimed for #7 (wright/7-…): it needs a version of its own") and catches it up to a free one. The Wright claims for each job before its worker starts, and gives the version back when no PR comes of it.
 
@@ -230,7 +248,7 @@ Or unpack a release zip anywhere (from GitHub, or `artifacts\steward\` after `np
 
 A checkout is a development copy, and keeps out of the installed one's way: its data is in `%USERPROFILE%\.steward-dev`, its page is on port 29494, and `install` refuses to run from it. The installed copy has no `kit\` folder: it hands out the newest kit release, or the version named with `--kit`. The details, which every agent shares, are in Manor's INSTALLING.md.
 
-The Steward needs git and `gh` (signed in, with rights to push and merge in the employees' repositories) on this PC, and each employee's checkout where Settings say.
+The Steward needs git and `gh` on PATH (signed in, with rights to push and merge in the repositories it looks after: `gh auth login`) on this PC, and each repository's clone where Settings say. Without gh, whatever needs it says "gh isn't installed: install GitHub CLI, then run gh auth login".
 
 ## Page and commands
 
@@ -292,8 +310,8 @@ After every round, done or not, the Steward lists what needs you: the few things
 | Manor's page not answering | an hour |
 | An agent on duty whose page doesn't answer, which the rounds couldn't open again through Manor (three tries), or that Manor has no Open for (`tending.json`; while `tend` is on) | at once |
 | A port two agents claim, one kept for the model servers, or one another program answers on so an agent's page can't start (Manor's `/api/summary` `ports`, Manor 0.4.38 and later), one alarm a port | a quarter of an hour |
-| A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it | 6 hours (`problemHours`) |
-| The Surveyor's page not answering | two hours |
+| A problem the Surveyor has reported (`/api/survey`; its warnings and notes never count), from when it first saw it; only where the Surveyor is installed (`%USERPROFILE%\.surveyor\app`, or `SURVEYOR_HOME`'s) | 6 hours (`problemHours`) |
+| The Surveyor's page not answering, where it is installed | two hours |
 | An issue the Wright got stuck on (`wright:stuck`), its PR that changes what a person reviews (`wright:needs-you`), or Claude Code unusable for it (not found, or not signed in), from its `/api/work` | at once |
 | The Wright's page not answering | two hours |
 | The Bailiff unable to review (Claude Code not found, or not signed in), or its review of a PR failing twice at one head, from its `/api/reviews` (only where it is installed) | at once |
@@ -307,7 +325,7 @@ After every round, done or not, the Steward lists what needs you: the few things
 
 An alarm is raised once, with one Windows notification for all raised in a round (clicking it opens this page), and stays at the top of the page under **Needs you**, and at `GET /api/alarms` for Manor, until its condition clears. **Dismiss** quiets one until it clears and comes back. The Steward never acts on an alarm: it says what it saw and what to do.
 
-**What passed here, for the Surveyor.** `GET /api/tested` lists, for each employee (and the Steward itself), the last 20 commits whose checks passed in one of the Steward's stages, newest first (`src/tested.ts`, `tested.json`): `{"at":…,"keep":20,"employees":{"porter":{"repo":"Jcollier0120/Porter","tested":[{"commit":"<40 hex>","stage":"merge","at":…,"branch":"claude/x","pr":41},…]}}}`. `stage` is `bump` (the commit on `steward/kit-<version>`, before it is pushed), `catch-up` (a kit PR's new head), `merge` (a team PR's head, tested before it merged) or `release` (the commit of the branch a release was built from and published); `branch`, `pr` and `version` are there where they are known. The Surveyor runs every agent's tests again once a day.
+**What passed here, for the Surveyor.** `GET /api/tested` lists, for each employee (and the Steward itself), the last 20 commits whose checks passed in one of the Steward's stages, newest first (`src/tested.ts`, `tested.json`): `{"at":…,"keep":20,"employees":{"porter":{"repo":"octocat/porter","tested":[{"commit":"<40 hex>","stage":"merge","at":…,"branch":"claude/x","pr":41},…]}}}`. `stage` is `bump` (the commit on `steward/kit-<version>`, before it is pushed), `catch-up` (a kit PR's new head), `merge` (a team PR's head, tested before it merged) or `release` (the commit of the branch a release was built from and published); `branch`, `pr` and `version` are there where they are known. The Surveyor runs every agent's tests again once a day.
 
 ### The Wright's drafts
 
@@ -328,13 +346,13 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Employees (`employees`) | none: add one for each repository of yours the Steward should look after. An install that ran on the old built-in list has it written to settings.json from its staff table once (`src/migrate.ts`), and an alarm names anything it couldn't read from a clone | Each: `id`, `name`, `repo` (owner/name), `checkout` (your clone), `branch` (main, or yours), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked , with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
+| Repositories (`employees`) | none: Look after on the page adds one Reeve found, or add one here. Each also says whether its ready PRs are merged (`merges`, off until you say yes) and how it is released (`release`: a command, `tag`, or empty for never). The kit's fields (`usesKit`, `parts`, `fill`) and `install`, `approve` and `installed` show only where **Releases Castellan itself** is on. An install that ran on the old built-in list has it written to settings.json from its staff table once (`src/migrate.ts`), and an alarm names anything it couldn't read from a clone | Each: `id`, `name`, `repo` (owner/name), `checkout` (your clone), `branch` (main, or yours), whether it takes the kit (`usesKit`), its kit `parts`, the command that fills its kit (`fill`), its checks (`test`), its `versionFiles`, its `release` command, and its `install` command, run in its release unpacked when a merged PR asks for install (`node src/cli.ts install`; empty for none), and its `approve` command for a job, `{job}` its name and `{sha256}` the hash of the script checked , with its `installed` copy (`%USERPROFILE%\.<id>\app`), where each round looks for jobs merged but not yet approved. |
 | Team (`team`) | empty | The GitHub accounts whose PRs `merge --team` merges as well as the Steward's (a GitHub App's as gh names it, `app/<name>`). Empty: the account gh is signed in as on this PC, which is yours, and Claude Code opens its PRs with it, so it covers them; with gh not signed in, no team, and `--team` merges only the Steward's (the page says so). Accounts named here are the whole team instead. A settings.json that already names a team keeps it. |
 | Work folder (`workRoot`) | `%USERPROFILE%\.steward\work` | Where the Steward makes its worktrees, one folder per employee. |
 | Release right after merging (`releaseAfterMerge`) | off | Release is a stage of its own unless this is on. |
 | The Steward's repository (`stewardRepo`) | none | The Steward's own GitHub repository, if you keep one: where its kit releases are, and where it releases itself. Empty, it doesn't release itself (and with a clone named below, that clone's origin is used). |
 | Checked at once (`parallel`) | 2 | How many employees a bump tests at the same time, 1 to 10. |
-| Merges and releases by itself (`byItself`) | on | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released; and, as `releaseSelf` and `rollout` say, its own new versions released and a new kit rolled out (Page and commands, above). Off: only when asked. |
+| Merges and releases by itself (`byItself`) | off (an install from before 0.16.0 keeps it on) | On duty, its round: every ready PR of its own and the team's merged, with what each asks for after, then every version not yet released released; and, as `releaseSelf` and `rollout` say, its own new versions released and a new kit rolled out (Page and commands, above). Off: only when asked. |
 | A round every (`roundMinutes`) | 10 | Minutes between rounds, 2 to 240. Each asks GitHub once, and looks again only at the employees with something new (all of them each hour). |
 | Told after a release (`afterRelease`) | `http://127.0.0.1:18585/api/updates/check`, `http://127.0.0.1:19191/api/run` | Local pages POSTed, as their own buttons, when a stage or a round has released something: Manor's update check and the Aletaster's Run now. Empty: none. |
 | The Wright's drafts (`wrightReview`) | on; 600 lines; the Wright's list | Whether rounds look at the Wright's drafts and mark ready the ones that pass (`on`), the most lines one may change (`maxLines`, 10 to 5000), and the path patterns a person reviews (`sensitive`). |
@@ -347,6 +365,12 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Releases its own new versions (`releaseSelf`) | on | Whether rounds release a kit version or a Steward version on the Steward's own main that has no release yet (Its own releases, above). |
 | The Steward's checkout (`stewardCheckout`) | none | Your clone of the Steward, if you keep one, which its own releases are made from: a worktree of it at origin/main, in the work folder. Without one, it doesn't release itself or merge its own PRs; `claim-version steward` then uses the Steward clone it is run in. |
 | Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595`, `http://127.0.0.1:18383`; the Wright's `http://127.0.0.1:19797` and the Bailiff's `http://127.0.0.1:19999` only where each is installed | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`), a Surveyor's problem lasts (`problemHours`) and the Aletaster's tasting holds a release (`tastingHours`), 1 to 168, before it is one; Manor's page (`manorUrl`), the Surveyor's (`surveyorUrl`), Reeve's (`reeveUrl`, read only where Reeve is installed) the Wright's (`wrightUrl`) and the Bailiff's (`bailiffUrl`), local addresses only, empty for not read. |
+
+| Releases Castellan itself (`releasesCastellan`) | off (an install from before 0.16.0: on) | Only on the PC Castellan is made on: the kit's rollout, the Steward's own releases and PRs, and each release published to the releases repository too. Off, `rollout`, `releaseSelf`, `mergeSelf`, `stewardRepo`, `stewardCheckout` and each repository's `usesKit` count as off, whatever the file says, and those settings aren't shown. |
+| The releases repository (`releasesRepo`) | none (an install from before 0.16.0: the one it published to) | Where each of Castellan's releases is published for every Manor, as well as in the agent's own repository: passed to every release command as `MANOR_RELEASES_REPO`, which the kit's release.ts reads (kit 2.32.0). |
+| .NET SDK (`dotnetRoot`) | none: DOTNET_ROOT's, else Program Files' | A folder with dotnet.exe and an SDK, for a .NET repository's tests and release. |
+
+The Wright's settings (`fileWork`, `wrightReview`, `alarms.wrightUrl`, `alarms.bailiffUrl`) show only where the Wright is installed (`wrightHere`, read from this PC), and are used only there.
 
 ## Files
 
@@ -369,6 +393,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `alarms.json` | The alarms: open, dismissed and lately cleared, and each condition watched since it was first seen. |
 | `work-filed.json` | Each issue filed for the Wright (by its marker's id): its URL, repository and when. Forgotten a month after its failure is gone. |
 | `tested.json` | Each employee's last 20 commits whose checks passed here, newest first, by stage: `GET /api/tested`, for the Surveyor. |
+| `repos-found.json` | The repositories Reeve found, with whether gh's account can push to each, and when it looked (`src/found.ts`). |
 | `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when. |
 | `kickbacks.json` | Each conflicting team PR sent back to its author, by its head and its branch's: sent once, and again only when either moves. |
 | `unsafe-updates.json` | Each version of the Steward its install rolled back: what failed, the version it went back to, and where the failed copy is kept. Refused until allowed again. |

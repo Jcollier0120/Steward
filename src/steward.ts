@@ -8,7 +8,8 @@ import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { gh } from './git.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
-import { run as realRun, type Runner } from './run.ts';
+import { run as realRun, useDotnet, type Runner } from './run.ts';
+import { expandEnv } from './kit/settings-kit.ts';
 import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
@@ -99,6 +100,8 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
   const own = { ...given, stewardRepo: selfRepoOf(given) };
   const settings = o.team === false ? own : withTeam(own, log, o.owner);
+  // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
+  useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
   const glance = o.glance === false ? null : await tryGlance(run, settings, log);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
@@ -346,7 +349,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           if (yes && done.length) {
             // A release when Settings say so, at the kit the Steward hands out; and whatever each merged PR asks for.
             let releaseKit: string | null = null;
-            if (ctx.settings.releaseAfterMerge) {
+            const releaseAny = ctx.settings.releaseAfterMerge && !ctx.settings.releasesCastellan;
+            if (releaseAny) log(`release after merge (Settings): ${done.join(', ')}`);
+            else if (ctx.settings.releaseAfterMerge) {
               const chosen = chooseKit(ctx.kit, ask.kit);
               if ('error' in chosen) log(`release after merge: ${chosen.error}`);
               else {
@@ -355,7 +360,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                 releaseKit = chosen.version;
               }
             }
-            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit })));
+            out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit, releaseAny })));
           }
           if (round) {
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
@@ -386,6 +391,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', 'nothing new on GitHub since the last round')));
           }
+        } else if (!ctx.settings.releasesCastellan) {
+          // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
+          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
+          out.results = await release(ctx, picked.employees, { kit: null });
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
           if ('error' in chosen) throw new Error(chosen.error);

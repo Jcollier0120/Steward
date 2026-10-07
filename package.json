@@ -1,9 +1,9 @@
 {
   "name": "steward",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "license": "UNLICENSED",
-  "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",
+  "description": "Looks after your repositories: claims versions, merges your ready pull requests and releases new versions, where you say yes",
   "type": "module",
   "bin": {
     "steward": "src/cli.ts"

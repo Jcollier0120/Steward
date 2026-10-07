@@ -59,9 +59,23 @@ export interface TendState {
   down: Record<string, DownAgent>;
   /** The last agents brought back, newest first. */
   revived: { id: string; name: string; at: string; tries: number }[];
+  /** Manor said it keeps the staff's pages up itself (manorKeeps): the Steward left them to it. */
+  keptByManor?: boolean;
 }
 
 export const tendFile = () => dataFile('tending.json');
+
+/**
+ * What Manor says it keeps itself, in its /api/state's `keeps`: 'tend' (the staff's pages kept up) and 'alarms' (the
+ * manor-wide alarms: Manor's own updates and page, the ports, the Surveyor's problems, Reeve's alerts, an agent down).
+ * Both belong to Manor, which every PC has, whatever agents it holds: once a Manor does them, the Steward leaves them to
+ * it, and keeps only the alarms of the repositories it looks after. A Manor that says nothing keeps nothing, and the
+ * Steward does them as before.
+ */
+export function manorKeeps(state: unknown): Set<string> {
+  const k = (state as any)?.keeps;
+  return new Set(Array.isArray(k) ? k.filter((x: unknown): x is string => typeof x === 'string') : []);
+}
 export const loadTending = (): TendState => ({ at: null, manor: false, down: {}, revived: [], ...readJson<Partial<TendState>>(tendFile(), {}) });
 
 /**
@@ -123,7 +137,13 @@ export function openThroughManor(manorUrl: string): OpenAgent {
 export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenAgent; now?: () => Date; log: (line: string) => void }): Promise<EmployeeResult[]> {
   const was = loadTending();
   const now = o.now ?? (() => new Date());
-  const staff = staffFromState(await o.getJson(new URL('/api/state', o.manorUrl).href));
+  const state = await o.getJson(new URL('/api/state', o.manorUrl).href);
+  // Manor keeps its staff's pages up itself: nothing for the Steward to do, and nothing of its own to raise.
+  if (manorKeeps(state).has('tend')) {
+    writeJson(tendFile(), { at: now().toISOString(), manor: true, down: {}, revived: was.revived, keptByManor: true } satisfies TendState);
+    return [];
+  }
+  const staff = staffFromState(state);
   if (!staff) {
     writeJson(tendFile(), { ...was, at: now().toISOString(), manor: false });
     return [];

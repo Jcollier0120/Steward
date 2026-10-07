@@ -4,12 +4,12 @@ import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { BAILIFF_WAIT } from './review.ts';
-import { reeveInstalled, type Employee, type Settings } from './settings.ts';
+import { reeveInstalled, surveyorInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
-import { tendConditions, type TendState } from './tend.ts';
+import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
@@ -539,7 +539,7 @@ export async function watchAlarms(
     run?: Runner;
     neutralDir?: string;
   },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   const filing = o.settings.fileWork && !!o.run;
@@ -565,18 +565,25 @@ export async function watchAlarms(
   if (!a.on) return loadAlarms();
   const conditions = roundConditions(o);
   const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
+  // The manor-wide alarms are Manor's once it says it keeps them (tend.ts's manorKeeps): then only the repositories' are the Steward's.
+  let manorWide = true;
   if (manor) {
-    conditions.push(...manorConditions(await get(new URL('/api/state', manor).href)));
-    const summary = await get(new URL('/api/summary', manor).href);
-    // The summary asks every agent, so it may not answer one round: a port clash it said is kept as it was until it
-    // answers again, rather than cleared and raised a second time.
-    conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
+    const state = await get(new URL('/api/state', manor).href);
+    manorWide = !manorKeeps(state).has('alarms');
+    if (manorWide) {
+      conditions.push(...manorConditions(state));
+      const summary = await get(new URL('/api/summary', manor).href);
+      // The summary asks every agent, so it may not answer one round: a port clash it said is kept as it was until it
+      // answers again, rather than cleared and raised a second time.
+      conditions.push(...(noAnswer(summary) === null ? portConditions(summary) : portsAsTheyWere(loadAlarms())));
+    } else o.log("alarms: Manor keeps the manor-wide alarms itself; the Steward raises only its repositories' own");
   }
-  if (a.surveyorUrl) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
+  // The Surveyor's page only where the Surveyor is installed: without it, there is nothing to watch, and no alarm.
+  if (manorWide && a.surveyorUrl && (deps.surveyorInstalled ?? surveyorInstalled)()) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
   if (wright !== null) conditions.push(...wrightConditions(wright));
   if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
   let reeveJobs: Set<string> | null = null;
-  if (reeve !== null) {
+  if (reeve !== null && manorWide) {
     const r = reeveConditions(reeve);
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;

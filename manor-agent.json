@@ -2,8 +2,8 @@
   "agent": {
     "id": "steward",
     "name": "Steward",
-    "role": "Keeps the essentials every agent shares, and brings each update to all of them at once",
-    "description": "Holds the kit every hire shares (the NPU and accelerator queue, settings, install, the page) and rolls a change out to all of them in one go: prepares and tests each, opens the PRs, merges the green ones and publishes their releases from main.",
+    "role": "Looks after your repositories: claims versions, merges your ready pull requests and releases new versions, where you say yes",
+    "description": "Looks after the repositories of yours that you pick from the ones Reeve finds on this PC: claims each new version up front so parallel work never collides, watches your pull requests and releases, merges your ready, green pull requests and releases new versions, each only where you say yes.",
     "fills": [
       "steward"
     ],
@@ -61,8 +61,8 @@
     {
       "id": "steward",
       "title": "Steward",
-      "duty": "Runs the household staff.",
-      "description": "The steward ran the household and its servants: took them on, taught them the ways of the house, and passed the lord's orders down to them. Here the steward keeps the essentials every agent shares (the kit), and brings each update to all of them at once: one change, tested in each agent, then merged and released together."
+      "duty": "Looks after your repositories.",
+      "description": "The steward ran the household and its servants: took them on, taught them the ways of the house, and passed the lord's orders down to them. Here the steward keeps your repositories in order: versions claimed before the work starts, ready pull requests merged, and new versions released, as you allow."
     }
   ]
 }

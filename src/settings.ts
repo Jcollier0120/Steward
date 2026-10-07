@@ -5,7 +5,7 @@ import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { originRepo } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
-import { fillMigrationGaps, migrateSettings } from './migrate.ts';
+import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
 /** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
@@ -35,6 +35,11 @@ export interface Employee {
   checkout: string;
   /** The branch releases come from, and PRs go to. */
   branch: string;
+  /**
+   * Whether the rounds and Merge merge the team's ready PRs to it: off until the person says yes, repository by
+   * repository. Off, its PRs are listed, and nothing more.
+   */
+  merges: boolean;
   /** Whether it takes the Steward's kit yet. The stages pass over one that doesn't, and say so. */
   usesKit: boolean;
   parts: string[];
@@ -44,7 +49,10 @@ export interface Employee {
   test: string[];
   /** The files that carry its version, all bumped together (package.json, package-lock.json, a .ts, a .csproj). */
   versionFiles: string[];
-  /** Publishes the GitHub release of the version on its branch. */
+  /**
+   * Publishes the GitHub release of the version on its branch: a command run in a worktree of it, or `tag` (TAG_RELEASE),
+   * a GitHub release of the branch's commit that the Steward makes itself. Empty: the Steward never releases it.
+   */
   release: string;
   /** Installs it on this PC, run in its release unpacked, when a merged PR asks (after: install). Empty: never. */
   install: string;
@@ -97,6 +105,21 @@ export interface Settings {
    * (tend.ts). With no repositories to look after here, this is the whole round.
    */
   tend: boolean;
+  /**
+   * This PC releases Castellan itself (its makers' PC): the kit's rollout, the Steward's own releases and PRs, and each
+   * staff release published to the releases repository too. Off, as on every other PC, the Steward looks after the
+   * person's own repositories and nothing of Castellan's (inEffect).
+   */
+  releasesCastellan: boolean;
+  /**
+   * Where Castellan's releases are published for every Manor, as well as in each agent's own repository (owner/name):
+   * handed to the kit's release as MANOR_RELEASES_REPO. Used only while releasesCastellan is on; empty: each in its own.
+   */
+  releasesRepo: string;
+  /** A .NET with an SDK, for a .NET repository's tests and release. Empty: DOTNET_ROOT's, else Program Files'. */
+  dotnetRoot: string;
+  /** Whether the Wright is installed on this PC (wrightInstalled): read from the PC, never set. Its settings show only then. */
+  wrightHere: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -143,6 +166,7 @@ export const blankEmployee = (id: string, name: string): Employee => ({
   repo: '',
   checkout: '',
   branch: 'main',
+  merges: false,
   usesKit: true,
   parts: ['node', 'web', 'spec'],
   fill: 'node tools/kit.ts',
@@ -175,6 +199,15 @@ export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => exists
 export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
+ * The Surveyor is installed here when its home (%USERPROFILE%\.surveyor, or SURVEYOR_HOME) has an app folder: only then is
+ * its page read for problems, so a PC without it has no standing alarm that its page doesn't answer.
+ */
+export const surveyorInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.SURVEYOR_HOME ?? path.join(os.homedir(), '.surveyor'), 'app'));
+
+/** A release the Steward makes itself: a GitHub release v<version> of the branch's commit, its notes the CHANGELOG.md entry. */
+export const TAG_RELEASE = 'tag';
+
+/**
  * None: the Steward looks after the repositories you give it, each an employee in Settings (its GitHub repository, your
  * clone of it, and how to test and release it). Nobody's list is built in. An install that ran on the defaults, before
  * this, has its staff table's employees written to settings.json once instead (migrate.ts).
@@ -200,7 +233,8 @@ export const DEFAULT_SETTINGS: Settings = {
   releaseAfterMerge: false,
   stewardRepo: '',
   parallel: 2,
-  byItself: true,
+  // It merges and releases by itself only once the person says yes: here, and for each repository (Employee.merges).
+  byItself: false,
   roundMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '', reeveUrl: REEVE_URL, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
@@ -213,9 +247,18 @@ export const DEFAULT_SETTINGS: Settings = {
   stewardCheckout: '',
   fileWork: true,
   tend: true,
+  releasesCastellan: false,
+  releasesRepo: '',
+  dotnetRoot: '',
+  wrightHere: wrightInstalled(),
 };
 
-const REPO = { pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like octocat/hello-world' };
+/** Shown only on the PC that releases Castellan itself (releasesCastellan): the kit, the Steward's own releases, Manor's staff. */
+const CASTELLAN = { shownWhen: { key: 'releasesCastellan', is: ['true'] } };
+/** Shown only where the Wright is installed (wrightHere): its drafts, and the work handed to it. */
+const WRIGHT = { shownWhen: { key: 'wrightHere', is: ['true'] } };
+
+const REPO ={ pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', patternHint: 'owner/name, like octocat/hello-world' };
 const command = { maxLength: 500 };
 
 /** Each setting as the page's Settings panel shows it, and as the kit's settings-kit.ts checks it. */
@@ -226,25 +269,31 @@ export const SETTINGS_SCHEMA: Field[] = [
     noun: 'employee',
     title: 'name',
     unique: 'id',
-    label: 'Employees',
-    help: 'Every repository of yours the Steward looks after: its GitHub repository (owner/name), your clone of it, which kit parts it takes, and how to fill its kit, test it, bump its version and release it. None to begin with: add one for each repository you want looked after.',
+    label: 'Repositories',
+    help: "Each repository of yours the Steward looks after: its GitHub repository (owner/name), your clone of it, how to test it, the files that carry its version, and how to release it. None to begin with: the Steward's page lists the ones Reeve finds that you can push to, each with Look after; or add one here.",
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'], fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: 'npm run release -- --publish', install: 'node src/cli.ts install', approve: '', installed: '' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', merges: false, usesKit: false, parts: [], fill: '', test: [], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '' },
     fields: [
-      { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like porter' },
+      { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like my-app' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
       { key: 'repo', kind: 'text', label: 'GitHub repository', maxLength: 140, ...REPO },
       { key: 'checkout', kind: 'text', label: 'Checkout', help: 'Your clone. The Steward adds worktrees of it in the work folder and fetches; it never changes your working tree.', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
       { key: 'branch', kind: 'text', label: 'Branch', help: 'Where releases come from and PRs go.', maxLength: 100, pattern: '[A-Za-z0-9._/-]+', patternHint: 'a branch name, like main' },
-      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the stages pass over it (\"not using the kit yet\"), except merging the team's PRs." },
-      { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })) },
-      { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', ...command },
-      { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass before a bump is committed.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
-      { key: 'versionFiles', kind: 'list', label: 'Version files', help: 'Bumped together: package.json, package-lock.json, a .ts with version: \'x.y.z\', a .csproj with <VersionPrefix>.', item: { label: 'File', maxLength: 200 }, minItems: 1, maxItems: 10 },
-      { key: 'release', kind: 'text', label: 'Release it', help: "The command that publishes the GitHub release of its branch's version.", ...command },
-      { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command },
-      { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name, and {sha256} the hash of the script the Steward checked (so only that script is approved): for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command },
-      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, laid out as its repository is (jobs\\jobs.json, release.json): where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true } },
+      {
+        key: 'merges',
+        kind: 'switch',
+        label: 'Merges your ready PRs',
+        help: "Off until you say yes. On: Merge, and the rounds while \"Merges and releases by itself\" is on, merge each PR to it that you (or the team) opened, that isn't a draft, merges cleanly and has no failing or running checks; one with no checks on GitHub is tested here first with the commands below. Off: its PRs are listed, and left to you.",
+      },
+      { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the kit's stages pass over it (\"not using the kit yet\"), except merging the team's PRs.", ...CASTELLAN },
+      { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })), ...CASTELLAN },
+      { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', ...command, ...CASTELLAN },
+      { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass, in a worktree of the PR, before a PR with no checks on GitHub is merged. None: such a PR waits for you.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
+      { key: 'versionFiles', kind: 'list', label: 'Version files', help: "Where its version is, kept in step: package.json, package-lock.json, a .ts with version: 'x.y.z', a .csproj or .props with <VersionPrefix>. Versions are claimed from these, and a release is made of the version they carry. None: no versions, and no releases.", item: { label: 'File', maxLength: 200 }, maxItems: 10 },
+      { key: 'release', kind: 'text', label: 'Release it', help: "Off until you say how. A command run in a fresh worktree of the branch, which must make the GitHub release v<version> (npm run release, say); or tag, for a GitHub release of the branch's commit that the Steward makes itself, its notes the version's CHANGELOG.md entry. Released whenever the branch carries a version with no release yet.", empty: 'Never released by the Steward', ...command },
+      { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command, ...CASTELLAN },
+      { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name, and {sha256} the hash of the script the Steward checked (so only that script is approved): for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN },
+      { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, laid out as its repository is (jobs\\jobs.json, release.json): where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN },
     ],
   },
   {
@@ -264,13 +313,13 @@ export const SETTINGS_SCHEMA: Field[] = [
     path: { is: 'folder', missing: 'warn', missingNote: 'The Steward makes it.', env: true },
   },
   { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', help: 'Off: Release is a stage of its own.' },
-  { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: "The Steward's own GitHub repository, if you keep one: where its kit releases (kit-v<version>) are, and where it releases itself.", empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO },
+  { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: "The Steward's own GitHub repository, if you keep one: where its kit releases (kit-v<version>) are, and where it releases itself.", empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO, ...CASTELLAN },
   { key: 'parallel', kind: 'whole', min: 1, max: 10, unit: 'employees', label: 'Checked at once', help: 'How many employees a bump tests at the same time.' },
   {
     key: 'byItself',
     kind: 'switch',
     label: 'Merges and releases by itself',
-    help: "On duty, a round every few minutes: every PR of the Steward's and the team's that is ready (not a draft, mergeable, no failing or running checks; a team PR with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then every employee whose branch carries a version with no release is released, and jobs whose installed scripts are the merged ones are approved (Reeve); and, as the two switches below say, a new kit is rolled out and its own new versions released. Off: only when asked.",
+    help: "Off until you say yes. On duty, a round every few minutes: in each repository whose \"Merges your ready PRs\" is on, every PR of yours (or the team's) that is ready (not a draft, mergeable, no failing or running checks; one with none tested here first, and with a new version if it sets one) is merged, with what it asks for after; then each repository with a way to release it whose branch carries a version with no release is released. Off: only when you press a button.",
   },
   {
     key: 'catchUp',
@@ -282,24 +331,28 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'rollout',
     kind: 'switch',
     label: 'Rolls out a new kit by itself',
+    ...CASTELLAN,
     help: "In its rounds, each employee whose branch pins a kit older than the newest kit release is bumped (a worktree of its branch, the new pin and the next patch version, its checks run) and its PR pushed, a few at a time; later rounds merge and release it. Not one with a kit PR already open. A bump whose checks fail is handed to the Wright (or an alarm: Hands failures to the Wright, below), and isn't tried again for that kit until a new commit lands on its branch, or you press Bump or Push. It waits while this Steward carries a kit older than the newest release, since its tools/kit.ts is the one handed out. Off: Bump and Push only when asked.",
   },
   {
     key: 'releaseSelf',
     kind: 'switch',
     label: 'Releases its own new versions',
+    ...CASTELLAN,
     help: "In its rounds, when the Steward's own main carries a kit version with no kit-v release, or a Steward version with no v release, it is released from a clean worktree of main, as a person would: npm run kit-release -- --publish, then npm run release -- --publish. Never a version already released; a release that fails is an alarm, and isn't tried again at that commit.",
   },
   {
     key: 'mergeSelf',
     kind: 'switch',
     label: 'Merges its own PRs',
+    ...CASTELLAN,
     help: "In its rounds, the team's ready PRs to the Steward's own repository are merged as an employee's are: tested here first (npm run typecheck and npm test, in a worktree of its own), with a new version each, caught up with main or sent back to their author when they conflict. Then it releases itself, and Manor installs it. An update that doesn't come up, or doesn't stay up, is rolled back to the version before it and ignored until you look: its alarm says how to allow it again. Off: its PRs are left to you.",
   },
   {
     key: 'stewardCheckout',
     kind: 'text',
     label: "The Steward's checkout",
+    ...CASTELLAN,
     help: 'Your clone of the Steward, if you keep one, which its own releases are made from: a worktree of it at origin/main, in the work folder. Your working tree is never touched.',
     empty: "None: it doesn't release itself or merge its own PRs",
     maxLength: 260,
@@ -315,6 +368,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'fileWork',
     kind: 'switch',
     label: 'Hands failures to the Wright',
+    ...WRIGHT,
     help: "An employee's bump or release that fails, and one of Reeve's alerts that is code work in an employee's repository (a security advisory, a failing UI test), is filed as an issue in the Wright's queue (manor:work), with what failed, its output (secrets taken out) and what done means: once each, at most a few a day, and only in a repository the Wright's page (The Wright's page, under Alarms) says it works in. Its alarm then waits: it is raised only when the Wright gets stuck or its PR waits for your review, the Wright has no queue for that repository, or nothing has landed after the alarms' while for a PR (a day). The Steward's own releases stay alarms. Off: each is an alarm at once, as before.",
   },
   {
@@ -343,17 +397,18 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "Read for updates it couldn't install, and for the staff's pages to keep up (Keeps the staff's pages up).", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585' },
-      { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
+      { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'Read for its problems, where the Surveyor is installed.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for", help: 'With the reason the tasting gave, and a link to it.' },
       { key: 'reeveUrl', kind: 'text', label: "Reeve's page", help: "Read for his jobs' open alerts (GET /api/alerts), where Reeve is installed: each is an alarm at once. An older Reeve without them is passed over quietly.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18383' },
-      { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797' },
-      { key: 'bailiffUrl', kind: 'text', label: "The Bailiff's page", help: "Read for the reviews it can't do: Claude Code not signed in, or a review that keeps failing.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19999' },
+      { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'Read for the issues it got stuck on, and its PRs that change what a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797', ...WRIGHT },
+      { key: 'bailiffUrl', kind: 'text', label: "The Bailiff's page", help: "Read for the reviews it can't do: Claude Code not signed in, or a review that keeps failing.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19999', ...WRIGHT },
     ],
   },
   {
     key: 'wrightReview',
     kind: 'group',
     label: "The Wright's drafts",
+    ...WRIGHT,
     help: "The Wright opens every pull request as a draft. In its rounds the Steward looks at each, in code: not labelled wright:needs-you, no changed file a person reviews, no dependency changes, not too large; and where the Bailiff is installed, its approval of the draft's head commit. One that passes is marked ready, then tested here and merged as any team PR; one that doesn't stays a draft, and says why.",
     fields: [
       { key: 'on', kind: 'switch', label: 'Look at the Wright\'s drafts, and merge the ones that pass' },
@@ -361,6 +416,25 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file that matches one of these waits for you. * is any part of a name, ** any folders. Whatever this list says, Claude Code's settings and instructions (.claude, CLAUDE.md, AGENTS.md, .mcp.json), .npmrc, secrets (.env, keys), and the Steward's, the Wright's and the Bailiff's own guards always wait for you too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
   },
+  { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC: its drafts and the work handed to it are above.', readOnly: true, ...WRIGHT },
+  {
+    key: 'dotnetRoot',
+    kind: 'text',
+    label: '.NET SDK',
+    help: "A folder with dotnet.exe and an SDK, for a .NET repository's tests and release. A runtime alone can't build.",
+    empty: "DOTNET_ROOT's, else Program Files'",
+    maxLength: 260,
+    path: { is: 'folder', missing: 'warn', env: true },
+    advanced: true,
+  },
+  {
+    key: 'releasesCastellan',
+    kind: 'switch',
+    label: 'Releases Castellan itself',
+    help: "Only on the PC Castellan is made on. On: the Steward also rolls its kit out to Castellan's agents, releases and merges its own new versions, and publishes each agent's release to the releases repository below as well as to its own. Off, as on every other PC: it looks after your repositories, and nothing of Castellan's.",
+    advanced: true,
+  },
+  { key: 'releasesRepo', kind: 'text', label: 'The releases repository', help: "Where each of Castellan's releases is published for every Manor, as well as in the agent's own repository (the kit's release, as MANOR_RELEASES_REPO).", empty: 'None: each release in its own repository only', maxLength: 140, ...REPO, ...CASTELLAN },
 ];
 
 const str = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
@@ -375,6 +449,7 @@ function normalizeEmployee(e: any): Employee | null {
     repo: str(e.repo, known.repo),
     checkout: str(e.checkout, known.checkout),
     branch: str(e.branch, known.branch),
+    merges: typeof e.merges === 'boolean' ? e.merges : known.merges,
     usesKit: typeof e.usesKit === 'boolean' ? e.usesKit : known.usesKit,
     parts: Array.isArray(e.parts) ? PART_NAMES.filter((p) => e.parts.includes(p)) : known.parts,
     fill: typeof e.fill === 'string' ? e.fill.trim() : known.fill,
@@ -458,10 +533,46 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
       fileWork: typeof r.fileWork === 'boolean' ? r.fileWork : d.fileWork,
       tend: typeof r.tend === 'boolean' ? r.tend : d.tend,
+      releasesCastellan: typeof r.releasesCastellan === 'boolean' ? r.releasesCastellan : d.releasesCastellan,
+      releasesRepo: typeof r.releasesRepo === 'string' && (r.releasesRepo.trim() === '' || REPO_NAME.test(r.releasesRepo.trim())) ? r.releasesRepo.trim() : d.releasesRepo,
+      dotnetRoot: str(r.dotnetRoot, d.dotnetRoot),
+      // Never read from the file: whether the Wright is on this PC now.
+      wrightHere: wrightInstalled(),
     },
     problems,
   };
 }
+
+const REPO_NAME = new RegExp(`^${REPO.pattern}$`);
+
+/**
+ * The settings as the Steward works by them: on a PC that doesn't release Castellan itself (every PC but its makers'),
+ * nothing of Castellan's runs, whatever the file says: no kit rollout, no releases or PRs of the Steward's own, and no
+ * repository takes the kit; the releases repository isn't used. Where the Wright isn't installed, nothing is handed to
+ * it and its drafts aren't looked at. Pure.
+ */
+export function inEffect(s: Settings, wright = s.wrightHere): Settings {
+  let out = s;
+  if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
+  if (!s.releasesCastellan)
+    out = {
+      ...out,
+      rollout: false,
+      releaseSelf: false,
+      mergeSelf: false,
+      stewardRepo: '',
+      stewardCheckout: '',
+      releasesRepo: '',
+      employees: out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
+    };
+  return out;
+}
+
+/**
+ * The releases repository a release command is told of (MANOR_RELEASES_REPO, read by the kit's release.ts from kit
+ * 2.32.0): Settings' while this PC releases Castellan itself, else none, so a release goes to its own repository only.
+ */
+export const releasesRepoEnv = (s: Pick<Settings, 'releasesCastellan' | 'releasesRepo'>): Record<string, string> => ({ MANOR_RELEASES_REPO: s.releasesCastellan ? s.releasesRepo : '' });
 
 export const settingsFile = () => dataFile('settings.json');
 
@@ -482,5 +593,7 @@ export function loadSettings(): Settings {
   migrateSettings({ settingsFile: settingsFile(), staffFile: dataFile('staff.json') });
   // And until Settings are saved, what it couldn't fill in is looked for again, every few minutes.
   fillMigrationGaps({ settingsFile: settingsFile() });
-  return normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
+  // Once, for an install from before the Steward looked after anyone's repositories: today's behaviour, written out.
+  migrateToOwnRepos({ settingsFile: settingsFile(), dataDir });
+  return inEffect(normalizeSettings(readJson<unknown>(settingsFile(), {})).settings);
 }

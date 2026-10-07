@@ -210,7 +210,6 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.equal(row.main?.kit, '1.0.1');
   assert.deepEqual(row.main?.parts, ['spec']);
   assert.equal(row.main?.tool, null);
-  assert.deepEqual(row.main?.oldKitFiles, []);
   assert.deepEqual(row.release, { tag: 'v1.7.1', version: '1.7.1', published: '2026-10-03T00:00:00Z', kit: '1.0.1' });
   assert.equal(row.releaseNeeded, false);
   assert.deepEqual(row.notes, []);

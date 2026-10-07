@@ -31,9 +31,9 @@ function manorAt(name: string, settings: unknown, o: { installed?: boolean; art?
 
 test("Manor's name, page and theme from its settings; nothing without an installed Manor", () => {
   assert.deepEqual(manorLink(manorAt('named', { name: 'Weasel Manor', port: 18585, theme: 'onyx', developerOptions: true })), { name: 'Weasel Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'onyx', developerOptions: true, gpuWithNpu: true });
-  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults');
-  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Manor', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
-  assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Manor');
+  assert.deepEqual(manorLink(manorAt('defaults', {})), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true }, 'Manor\'s own defaults: no name is Castellan');
+  assert.deepEqual(manorLink(manorAt('odd', { name: '  ', port: 80, theme: 'paisley' })), { name: 'Castellan', port: 18585, url: 'http://manor.localhost:18585/', theme: 'system', developerOptions: null, gpuWithNpu: true });
+  assert.equal(manorLink(manorAt('unreadable', '{nope'))!.name, 'Castellan');
   assert.equal(manorLink(manorAt('not-an-object', 'null'))!.theme, 'system');
   assert.equal(manorLink(manorAt('bom', '﻿{"theme": "quest"}'))!.theme, 'quest');
   for (const theme of ['system', 'light', 'dark', 'arcade', 'onyx', 'carbon', 'tinsel', 'rosegold', 'quest']) assert.equal(manorLink(manorAt(`theme-${theme}`, { theme }))!.theme, theme);

@@ -10,11 +10,11 @@ const STEWARD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..',
 process.env.STEWARD_ESBUILD = STEWARD;
 const { bundleForNode, importPath } = await import('./react-render.ts');
 
-const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string, from?: string | null, needs?: unknown) => string; tourFrom: (hash: string) => string | null; tourStart: (hash: string) => string; onPage: (parts: unknown[], doc?: unknown) => { tour: string }[] }>(
+const m = await bundleForNode<{ form: (data: unknown, keys?: string[]) => string; tour: (o: unknown, start: string, from?: string | null, needs?: unknown, manorName?: string | null) => string; tourFrom: (hash: string) => string | null; tourStart: (hash: string) => string; onPage: (parts: unknown[], doc?: unknown) => { tour: string }[] }>(
   `import { renderToStaticMarkup as r } from 'react-dom/server';
    import { onPage, SettingsForm, Tour, tourFrom, tourStart } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
    export const form = (data, keys) => r(<SettingsForm initial={data} keys={keys} />);
-   export const tour = (o, start, from = null, needs = null) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} from={from} needs={needs} />);
+   export const tour = (o, start, from = null, needs = null, manorName = null) => r(<Tour onboarding={o} app={{ id: 'fixture', name: 'Fixture', role: 'r', version: '1' }} start={start} from={from} needs={needs} manorName={manorName} />);
    export { onPage, tourFrom, tourStart };`,
   { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
 );
@@ -126,13 +126,15 @@ test('a setting used only at the next start, install, or install as an administr
   assert.equal(h.match(/badge tone-caution/g)?.length, 3, "'now' isn't marked");
 });
 
-test('opened from Manor (#/tour?from=): its last step offers Back to Manor, and only to an address on this PC', () => {
+test('opened from Manor (#/tour?from=): its last step offers Back to <manor>, and only to an address on this PC', () => {
   const o = { intro: { title: 'Meet the fixture', text: 'It carries the kit.' }, settings: [], tour: [{ tour: 'status', text: 'On duty or off.' }] };
   const manor = 'http://manor.localhost:8888/#/roles/fixture';
-  assert.match(m.tour(o, 'tour', manor), />Done<.*>Back to Manor</, 'the last step: Done, and Back to Manor');
-  assert.doesNotMatch(m.tour(o, 'intro', manor), /Back to Manor/, 'not before the last step');
-  assert.doesNotMatch(m.tour(o, 'tour'), /Back to Manor/, 'not without a from');
-  assert.match(m.tour({ ...o, tour: [] }, 'settings', manor), /Back to Manor/, 'the settings step, when it is the last');
+  assert.match(m.tour(o, 'tour', manor, null, 'Weasel Manor'), />Done<.*>Back to Weasel Manor</, "the last step: Done, and Back to the manor's name");
+  assert.match(m.tour(o, 'tour', manor), />Done<.*>Back to Castellan</, 'with no name: Castellan');
+  assert.match(m.tour(o, 'tour', manor, null, '  '), />Back to Castellan</, 'a blank name: Castellan');
+  assert.doesNotMatch(m.tour(o, 'intro', manor), /Back to Castellan/, 'not before the last step');
+  assert.doesNotMatch(m.tour(o, 'tour'), /Back to Castellan/, 'not without a from');
+  assert.match(m.tour({ ...o, tour: [] }, 'settings', manor), /Back to Castellan/, 'the settings step, when it is the last');
   assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent(manor)), manor);
   assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://127.0.0.1:8888/')), 'http://127.0.0.1:8888/');
   assert.equal(m.tourFrom('#/tour?from=' + encodeURIComponent('http://[::1]:8888/')), 'http://[::1]:8888/');

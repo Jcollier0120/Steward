@@ -14,6 +14,8 @@ export const stewardEmployee = (s: Settings, checkout = s.stewardCheckout): Empl
   repo: s.stewardRepo,
   checkout,
   branch: 'main',
+  // Its own repository: the team's ready PRs to it are merged while Settings say it merges its own (mergeSelf).
+  merges: true,
   // Not "on the kit": a rollout passes it over, and the merge stage reads only its team's PRs.
   usesKit: false,
   parts: [],

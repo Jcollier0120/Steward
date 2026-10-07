@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { readAfter, type After } from '../after.ts';
-import { carriedOldKit, compareVersions, lf, oldKitFilesIn } from '../kitfiles.ts';
+import { compareVersions, lf } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile, trackedAt } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile } from '../git.ts';
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
@@ -12,7 +12,7 @@ import { bumpBranch, checkoutOf, glanceOf, mapLimit, NOT_ON_KIT, type Ctx } from
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
- * branch on origin (version, pinned kit, old kit files still tracked, whether its tools/kit.ts is the
+ * branch on origin (version, pinned kit, whether its tools/kit.ts is the
  * Steward's), its latest release and the kit that release carries, the open PRs of the Steward and the
  * team, and a bump prepared here but not pushed.
  */
@@ -75,17 +75,19 @@ export interface StaffRow {
     versionError: string | null;
     kit: string | null;
     parts: string[] | null;
-    oldKitFiles: string[];
     /** Its tools/kit.ts against the Steward's: the same, different, missing, or not asked (null). */
     tool: 'current' | 'differs' | 'missing' | null;
   } | null;
   release: (ReleaseInfo & { kit: string | null | 'unknown' }) | null;
   /** The version on its branch has no release yet. */
   releaseNeeded: boolean;
+  /** Settings merge its ready PRs (Employee.merges), and name a way to release it. */
+  merges?: boolean;
+  releases?: boolean;
   prs: PrInfo[];
   /** A bump to the kit made here (steward/kit-<kit>) and how far ahead of origin it is, if there is one. */
   prepared: { branch: string; ahead: number } | null;
-  /** Anything worth a word: not using the kit, old kit files, a version mismatch, a failed lookup. */
+  /** Anything worth a word: not using the kit, a version mismatch, a failed lookup. */
   notes: string[];
 }
 
@@ -207,6 +209,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     main: null,
     release: null,
     releaseNeeded: false,
+    merges: e.merges,
+    releases: !!e.release,
     prs: [],
     prepared: null,
     notes,
@@ -236,8 +240,6 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     const texts = await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, dir, remote, f)] as [string, string | null]));
     const v = agreedVersion(texts);
     const pin = readPin(await showFile(run, dir, remote, 'kit.json'));
-    // Only a hire that carried the old kit can still track it; Reeve's files at those paths are its own.
-    const oldKitFiles = e.usesKit && carriedOldKit(e.id) ? oldKitFilesIn(await trackedAt(run, dir, remote)) : [];
     let tool: 'current' | 'differs' | 'missing' | null = null;
     if (e.usesKit && pin && opts.tool && takesTool(e.fill)) {
       const theirs = await showFile(run, dir, remote, TOOL);
@@ -245,10 +247,9 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       if (tool === 'missing') notes.push(`no ${TOOL} on ${remote}`);
       if (tool === 'differs') notes.push(`${TOOL} on ${remote} isn't the Steward's: the next bump brings it`);
     }
-    row.main = { commit: commit.slice(0, 7), version: 'version' in v ? v.version : null, versionError: 'error' in v ? v.error : null, kit: pin?.kit ?? null, parts: pin?.parts ?? null, oldKitFiles, tool };
+    row.main = { commit: commit.slice(0, 7), version: 'version' in v ? v.version : null, versionError: 'error' in v ? v.error : null, kit: pin?.kit ?? null, parts: pin?.parts ?? null, tool };
     if ('error' in v) notes.push(v.error);
-    if (e.usesKit && oldKitFiles.length) notes.push(`still tracks ${oldKitFiles.length} old kit files at their old paths (${oldKitFiles.slice(0, 3).join(', ')}${oldKitFiles.length > 3 ? ', …' : ''}): convert it to the Steward's kit`);
-    else if (e.usesKit && !pin) notes.push(`no kit.json on ${remote}`);
+    if (e.usesKit && !pin) notes.push(`no kit.json on ${remote}`);
     if (pin?.parts && pin.parts.join(',') !== e.parts.join(',')) notes.push(`kit.json takes ${pin.parts.join(', ')}; Settings say ${e.parts.join(', ')}`);
     if (opts.kit) {
       const branch = bumpBranch(opts.kit);
@@ -283,7 +284,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       }
       row.release = { ...latest, kit };
     }
-    if (row.main?.version) row.releaseNeeded = !list.some((r) => r.version === row.main!.version);
+    // Only one the Steward releases (Settings' Release it) is waiting for a release.
+    if (row.main?.version && e.release) row.releaseNeeded = !list.some((r) => r.version === row.main!.version);
   }
   // Released here (releasedHere): what counts is the installed copy, which no GitHub release lists.
   if (here) row.releaseNeeded = !!row.main?.version && here.version !== row.main.version;

@@ -18,8 +18,9 @@ import { Button, LinkButton, Text } from './ui.tsx';
  * they're filled in and saved: the agent does nothing without them. Skip still leaves; the page then says what it's
  * waiting for, with a link back to this step (#/tour?step=settings).
  *
- * Opened as #/tour?from=<url> (the URL encoded), its last step also offers "Back to Manor": to that URL, which must be
- * this PC's (tourFrom()), so the hire flow that opened it gets its new employee back.
+ * Opened as #/tour?from=<url> (the URL encoded), its last step also offers "Back to <manor>" (the manor's name, as the
+ * title bar says it, else Castellan): to that URL, which must be this PC's (tourFrom()), so the hire flow that opened
+ * it gets its new employee back.
  */
 
 type Step = 'intro' | 'settings' | 'tour';
@@ -72,8 +73,11 @@ function finish(appId: string, to?: string | null) {
   else location.hash = '#/';
 }
 
-/** A step's card: where it is in the walkthrough, its words, and Back, Next or Done (and Back to Manor, when it came from there). */
-function TourCard({ docked, place, title, children, back, next, last, appId, wide, from }: { docked?: boolean; place: string; title: string; children: ReactNode; back?: () => void; next: () => void; last?: boolean; appId: string; wide?: boolean; from?: string | null }) {
+/** What the manor is called when its settings name none: node/manor.ts' MANOR_DEFAULT_NAME, which a page can't import. */
+const MANOR_DEFAULT_NAME = 'Castellan';
+
+/** A step's card: where it is in the walkthrough, its words, and Back, Next or Done (and Back to <manor>, when it came from there). */
+function TourCard({ docked, place, title, children, back, next, last, appId, wide, from, manorName }: { docked?: boolean; place: string; title: string; children: ReactNode; back?: () => void; next: () => void; last?: boolean; appId: string; wide?: boolean; from?: string | null; manorName?: string | null }) {
   return (
     <div className={['tour-card', docked ? 'tour-dock' : 'tour-center', wide && 'tour-wide'].filter(Boolean).join(' ')}>
       <Text variant="label" as="p">
@@ -90,7 +94,7 @@ function TourCard({ docked, place, title, children, back, next, last, appId, wid
         {last && from ? (
           <>
             <Button title="Done" variant="secondary" onPress={next} />
-            <Button title="Back to Manor" onPress={() => finish(appId, from)} />
+            <Button title={`Back to ${manorName?.trim() || MANOR_DEFAULT_NAME}`} onPress={() => finish(appId, from)} />
           </>
         ) : (
           <Button title={last ? 'Done' : 'Next'} onPress={next} />
@@ -107,7 +111,7 @@ export function tourStart(hash: string): Step {
   return step === 'settings' || step === 'tour' ? step : 'intro';
 }
 
-export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = tourStart(location.hash), from = tourFrom(location.hash) }: { onboarding: Onboarding; app: PageShell['app']; needs?: PageShell['needs']; onSettingsSaved?: () => void; start?: Step; from?: string | null }) {
+export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = tourStart(location.hash), from = tourFrom(location.hash), manorName = null }: { onboarding: Onboarding; app: PageShell['app']; needs?: PageShell['needs']; onSettingsSaved?: () => void; start?: Step; from?: string | null; manorName?: string | null }) {
   // The parts walked in step 3: those on the page as it starts, kept while it runs (null before then: those on it now).
   const [walked, setWalked] = useState<Onboarding['tour'] | null>(null);
   const parts = walked ?? onPage(onboarding.tour);
@@ -141,7 +145,7 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
   if (step === 'settings')
     return (
       <div className="tour-backdrop">
-        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : needs ? window.alert(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from}>
+        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : needs ? window.alert(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from} manorName={manorName}>
           <Text variant="muted" as="p">
             {onboarding.settings.length ? `Only what ${app.name} can't choose for you. Everything else has a default that works, and is in Settings.` : `${app.name} needs nothing from you to start.`}
           </Text>
@@ -156,7 +160,7 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
     );
   const last = at >= parts.length - 1;
   return (
-    <TourCard docked place={`${place} · ${at + 1} of ${parts.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id} from={from}>
+    <TourCard docked place={`${place} · ${at + 1} of ${parts.length}`} title={part?.title ?? app.name} back={() => (at ? setAt(at - 1) : go(-1))} next={() => (last ? go(1) : setAt(at + 1))} last={last} appId={app.id} from={from} manorName={manorName}>
       <Text as="p">{part?.text}</Text>
     </TourCard>
   );

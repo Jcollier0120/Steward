@@ -13,6 +13,13 @@ import { themeNamed } from './themes.ts';
  * loads images from itself only). Without Manor installed there's nothing to go back to: the title bar says nothing,
  * the agent's own Theme menu chooses its theme, and its own switch its developer features.
  */
+/**
+ * What the manor is called when its settings name none (or a blank name): Castellan, the product's name, on the title
+ * bar's "Back to <manor>" and wherever an agent names the manor. The tour's "Back to <manor>" (react/tour.tsx) says
+ * the same.
+ */
+export const MANOR_DEFAULT_NAME = 'Castellan';
+
 export const manorHome = () => process.env.MANOR_HOME || path.join(os.homedir(), '.manor');
 
 export interface ManorLink {
@@ -57,13 +64,13 @@ function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; no
   } catch {
     // Unreadable settings: Manor uses its defaults, and so does this link.
   }
-  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : 'Manor';
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : MANOR_DEFAULT_NAME;
   const port = Number.isInteger(raw.port) && (raw.port as number) >= 1024 && (raw.port as number) <= 65535 ? (raw.port as number) : DEFAULT_PORT;
   let theme = 'system';
   try {
     theme = themeNamed(raw.theme)?.name ?? 'system';
   } catch {
-    // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to Manor still works.
+    // An agent without the kit's web part has no themes: its page isn't the kit's, and Back to <manor> still works.
   }
   const developerOptions = typeof raw.developerOptions === 'boolean' ? raw.developerOptions : null;
   const saysGpuWithNpu = typeof raw.gpuWithNpu === 'boolean';
@@ -216,16 +223,13 @@ export const forgetGithubOwner = () => {
   owner = null;
 };
 
-/** What gh printed, or nothing when it isn't there or fails: on PATH, else where this PC keeps it. */
+/** What gh (on PATH) printed, or nothing when it isn't there or fails. */
 function ghText(args: string[]): string {
-  for (const gh of ['gh', 'C:\\tools\\gh\\bin\\gh.exe']) {
-    try {
-      return execFileSync(gh, args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return '';
-    }
+  try {
+    return execFileSync('gh', args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
   }
-  return '';
 }
 
 /**

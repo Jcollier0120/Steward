@@ -2,6 +2,33 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.19.0
+
+**The Steward looks after your own repositories: the ones Reeve finds, as you say.**
+
+### What's new
+
+- **Found on this PC.** Its page lists your repositories that Reeve finds here, on GitHub, that you can push to. **Look after** adds one to Settings (now called **Repositories**) with how to test it and the files that carry its version, read from your clone.
+- **Nothing happens without your yes.** For each repository you choose whether it merges your ready, green pull requests (**Merges your ready PRs**) and whether it releases new versions (**Release it**): with the repository's own `npm run release`, or as a GitHub release of the branch it makes itself, its notes your CHANGELOG.md entry. Both are off until you tick them, and so is **Merges and releases by itself**: until you switch that on, nothing is merged or released but by a button.
+- **Versions claimed for any repository.** `claim-version` takes any repository: one you look after, one Reeve found here, or the clone you run it in.
+- **Merge your ready PRs** and **Release** buttons for your repositories, and a page and Settings that speak of them only.
+
+### What changed
+
+- Every release goes to the repository's own GitHub repository (kit 2.32.0: the releases repository is a setting now, never built in).
+- Kit 2.32.0: an agent's **Back to …** link, and its tour's, says your manor's name as before, and **Back to Castellan** when it has none (it said Back to Manor).
+- The kit, its rollout and the Steward's own releases happen only on the PC that releases Castellan itself (**Releases Castellan itself**, in Settings' advanced part), with their settings shown only there.
+- The Wright's and the Bailiff's settings show, and their work runs, only where the Wright is installed. A pull request labelled `wright` is anyone's where it isn't.
+- No alarm that the Surveyor's page doesn't answer where the Surveyor isn't installed.
+- Keeping the staff's pages up and the manor-wide alarms are to move to Manor: once Manor says it does them, the Steward leaves them to it.
+- gh is found on PATH only; without it, you're told to install it and run `gh auth login`. A .NET SDK is taken from Settings (**.NET SDK**), DOTNET_ROOT or Program Files.
+- `allow-update` takes a version again (its check was broken).
+- The code that converted the first agents to the kit is out of the release.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A Steward that was already looking after repositories keeps doing all it did: on its first start it writes into its Settings what it used to assume (that this PC releases Castellan itself, where its releases go, that it merges and releases by itself, and that each repository's ready PRs are merged).
+
 ## 0.18.0
 
 **It hands out kit 2.31.0: local AI on every Copilot+ NPU (Qualcomm, Intel, AMD), installed by setup.**
@@ -436,7 +463,7 @@ Nothing: it updates itself as usual.
 
 ## 0.9.5
 
-**The Thatcher, the Reckoner, the Weigher and the Shepherd are employees.** They are the general agents of the developer offices. Each shares its office with the developer agent there, as the Herald shares the Herald's: the Thatcher (Jcollier0120/Thatcher) keeps your apps upgraded in Reeve's office, the Reckoner (Jcollier0120/Reckoner) checks your devices after updates in the Auditor's, the Weigher (Jcollier0120/Weigher) measures your internet against your plan in the Aletaster's, and the Shepherd (Jcollier0120/Shepherd) brings in background apps in the Pinder's. Like the Chamberlain, they are built on the kit, and Manor offers them from their releases' `manor-agent.json` (Manor 0.4.51). The Steward rolls the kit out to them, merges their PRs and publishes their releases.
+**The Thatcher, the Reckoner, the Weigher and the Shepherd are employees.** They are the general agents of the developer offices. Each shares its office with the developer agent there, as the Herald shares the Herald's: the Thatcher keeps your apps upgraded in Reeve's office, the Reckoner checks your devices after updates in the Auditor's, the Weigher measures your internet against your plan in the Aletaster's, and the Shepherd brings in background apps in the Pinder's. Like the Chamberlain, they are built on the kit, and Manor offers them from their releases' `manor-agent.json` (Manor 0.4.51). The Steward rolls the kit out to them, merges their PRs and publishes their releases.
 
 ## 0.9.4
 
@@ -547,7 +574,7 @@ Nothing: it updates itself as usual.
 
 ## 0.8.12
 
-**The Chamberlain is an employee.** The manor's new hire for its private papers (Jcollier0120/Chamberlain) is built on the kit as the other hires are, and the Steward now rolls the kit out to it, merges its PRs and publishes its releases. Manor offers it from its release's `manor-agent.json` (Manor 0.4.35), not from its own staff.json.
+**The Chamberlain is an employee.** The manor's new hire for its private papers is built on the kit as the other hires are, and the Steward now rolls the kit out to it, merges its PRs and publishes its releases. Manor offers it from its release's `manor-agent.json` (Manor 0.4.35), not from its own staff.json.
 
 ## 0.8.11
 
