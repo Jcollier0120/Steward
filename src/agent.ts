@@ -55,7 +55,7 @@ const STALE_MS = 10 * 60_000;
 export function askOf(body: any): StageAsk {
   const employees = Array.isArray(body?.employees) ? body.employees.map(String).filter(Boolean).slice(0, 100) : [];
   const kit = typeof body?.kit === 'string' && /^\d+\.\d+\.\d+$/.test(body.kit) ? body.kit : null;
-  return { employees, kit };
+  return { employees, kit, ...(body?.hire === true ? { hire: true } : {}) };
 }
 
 /** The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words. */
