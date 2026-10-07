@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { publisherKey } from './kit/exchequer.ts';
 import { manorHome, originRepo } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { RELEASE_HERE, type Employee } from './settings.ts';
@@ -431,8 +432,13 @@ const RAN_BEFORE = ['settings.json', 'staff.json', 'alarms.json', 'last-stage.js
  * it published to, byItself as it was, every repository's PRs merged as before, and the .NET SDK it found). A new
  * install starts with all of it off, waiting for the person's yes: `releasesCastellan: false` is written, so this never
  * runs again. Returns what it decided, or null when it was decided before. Never throws.
+ *
+ * Only where the Exchequer's publisher key is (the kit's exchequer.ts): that is the PC that releases Castellan. A Steward
+ * that ran before on another PC ('elsewhere') is updated with all of it off, and its rounds wait for the person's yes
+ * (byItself off), as a new install. On 2026-10-07 an old Steward on a second PC, signed in to the same GitHub account,
+ * merged and released Castellan's repositories beside the owner's; updated, it would have become a second release machine.
  */
-export function migrateToOwnRepos(o: { settingsFile: string; dataDir: string; dotnetHasSdk?: (dir: string) => boolean }): 'before' | 'new' | null {
+export function migrateToOwnRepos(o: { settingsFile: string; dataDir: string; dotnetHasSdk?: (dir: string) => boolean; hasPublisherKey?: () => boolean }): 'before' | 'elsewhere' | 'new' | null {
   try {
     const exists = existsSync(o.settingsFile);
     const raw = exists ? JSON.parse(readText(o.settingsFile) ?? '{}') : {};
@@ -441,6 +447,10 @@ export function migrateToOwnRepos(o: { settingsFile: string; dataDir: string; do
     if (!ranBefore) {
       writeJson(o.settingsFile, { ...raw, releasesCastellan: false });
       return 'new';
+    }
+    if (!(o.hasPublisherKey ?? (() => 'key' in publisherKey()))()) {
+      writeJson(o.settingsFile, { ...raw, releasesCastellan: false, byItself: false });
+      return 'elsewhere';
     }
     const out: Record<string, unknown> = { ...raw, releasesCastellan: true };
     if (typeof raw.releasesRepo !== 'string') out.releasesRepo = CASTELLAN_RELEASES_REPO;

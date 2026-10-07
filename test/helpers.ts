@@ -19,6 +19,10 @@ for (const [name, home] of [['WRIGHT_HOME', 'steward-test-wright'], ['SURVEYOR_H
   mkdirSync(path.join(process.env[name]!, 'app'), { recursive: true });
 }
 
+// The Exchequer's publisher key (the kit's exchequer.ts) marks the PC that releases Castellan, which settings from before
+// releasesCastellan are migrated to (migrate.ts): the tests see the owner's PC, with it, whatever this PC holds.
+process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
+
 export const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
 const PKG = (v: string) => `{\n  "name": "fake",\n  "version": "${v}",\n  "private": true,\n  "type": "module"\n}\n`;

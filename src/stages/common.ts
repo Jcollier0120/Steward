@@ -8,6 +8,7 @@ import type { Glance, RepoGlance } from '../glance.ts';
 import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
+import type { LeaseGuard } from '../lease.ts';
 import type { Runner } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 
@@ -68,6 +69,11 @@ export interface Ctx {
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
+  /**
+   * The turns this stage took with the licence's other PCs (lease.ts): asked before each merge and release whether this
+   * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
+   */
+  lease?: LeaseGuard | null;
 }
 
 /**
