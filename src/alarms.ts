@@ -37,6 +37,8 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
  * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
  * - an agent on duty whose page doesn't answer, which the round couldn't open again through Manor (tend.ts), at once;
+ * - on the PC that releases Castellan, the Steward's PRs merged or its employees released by something that isn't this
+ *   Steward, another Steward elsewhere most likely (strangers.ts), at once, for a day after the last one;
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
  *   of his own when Manor and the Steward are installed: these alarms raise it. One that covers a job the Surveyor
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
@@ -171,11 +173,14 @@ export function roundConditions(o: {
   failedRefreshes?: Record<string, { commit: string; message: string; after: string }>;
   /** The staff's pages as the round's look left them (tend.ts's tending.json); null while Settings switch it off. */
   tending?: TendState | null;
+  /** Merges and releases of this Steward's repositories that it didn't make (strangers.ts), as its alarm. */
+  strangers?: Condition[];
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
   const out: Condition[] = [];
   if (o.tending) out.push(...tendConditions(o.tending));
+  out.push(...(o.strangers ?? []));
   const wait = o.settings.alarms.waitingHours;
   for (const { employee: e, prs } of o.held) {
     for (const pr of prs) {
