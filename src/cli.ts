@@ -5,6 +5,7 @@ import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
 import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
+import { claimPort, clashes, portUses, releasePort } from './ports.ts';
 import { anyRepo } from './found.ts';
 import { addEmployee, employeeFor as employeeFromCheckout } from './employ.ts';
 import { loadSettings, settingsFile, type Employee, type Settings } from './settings.ts';
@@ -70,6 +71,15 @@ const USAGE = `${APP.id}: ${APP.role}
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
   claims [--json]  the versions claimed and not yet landed
+  claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]
+                   before giving a new agent its page's port: the next free one of the agents' series
+                   (above every port Manor's staff, this PC's own staff, the agents announced on GitHub,
+                   each employee's src/app.ts and every live claim use; its development twin, +10000,
+                   free too). An agent that has a port keeps it; asking again gets the same port. A new
+                   agent's id is enough: it needs no repository yet
+  release-port <agent id>
+                   give a claimed port back (the agent was dropped)
+  ports [--json]   every port in use or claimed, by whom and where it says so, and any two agents on one
   mine <employee> <#pr | v<version>> ...
                    mark a merge of one of the Steward's PRs, or a release, as yours, done by hand: on the PC
                    that releases Castellan, the alarm for merges and releases no round here made never
@@ -269,6 +279,44 @@ switch (cmd) {
     if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
     else if (!all.length) console.log('No versions are claimed.');
     else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}`);
+    break;
+  }
+  case 'claim-port': {
+    const id = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
+    const bad = rest.slice(1).filter((a, i, all) => a.startsWith('--') && !['--branch', '--for', '--by', '--json'].includes(a) && !['--branch', '--for', '--by'].includes(all[i - 1]));
+    if (!/^[a-z][a-z0-9-]*$/.test(id) || bad.length) {
+      console.error(`claim-port takes an agent's id (lowercase letters, digits and dashes; a new one is fine), then --branch <b> --for "<what>" --by <who> --json${bad.length ? `; not ${bad.join(' ')}` : ''}`);
+      process.exitCode = 2;
+      break;
+    }
+    const ctx = await context({ glance: false, team: false });
+    const a = await claimPort({ id, branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', uses: await portUses(ctx.run, ctx.settings.employees) });
+    if (rest.includes('--json')) console.log(JSON.stringify(a));
+    else if (a.already) console.log(`${id} has port ${a.port} already (${a.already.source}): keep it.`);
+    else console.log(`${id}: port ${a.port}${a.again ? ' (claimed already)' : ''}, yours (a checkout serves on ${a.port + 10000}). Set it in its src/app.ts (placeFor's port) and its Manor entry's home and ping.`);
+    break;
+  }
+  case 'release-port': {
+    if (!rest[0]) {
+      console.error('release-port takes an agent id: release-port crier');
+      process.exitCode = 2;
+      break;
+    }
+    console.log((await releasePort(rest[0])) ? `${rest[0]}'s port is free again.` : `${rest[0]} had no port claimed.`);
+    break;
+  }
+  case 'ports': {
+    const ctx = await context({ glance: false, team: false });
+    const uses = await portUses(ctx.run, ctx.settings.employees);
+    const clash = clashes(uses);
+    if (rest.includes('--json')) {
+      console.log(JSON.stringify({ uses, clashes: clash }, null, 2));
+      break;
+    }
+    const byPort = new Map<number, string[]>();
+    for (const u of uses) byPort.set(u.port, [...new Set([...(byPort.get(u.port) ?? []), `${u.id} (${u.source})`])]);
+    for (const [port, who] of [...byPort].sort((x, y) => x[0] - y[0])) console.log(`${port}  ${who.join(', ')}`);
+    console.log(clash.length ? `Two agents on one port: ${clash.map((c) => `${c.port} (${c.ids.join(', ')})`).join('; ')}.` : 'No two agents share a port.');
     break;
   }
   case 'mine': {

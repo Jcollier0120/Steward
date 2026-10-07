@@ -234,6 +234,19 @@ It takes a repository's id, name or `owner/repo`: one in Settings, one Reeve fou
 
 A claim lives until its version is on the branch or overtaken by a release (the work landed), until it is given back, or for three days with no open PR that names it (its branch, or its version in a title); each round prunes them. While it lives, the merge stage holds another PR that sets that version ("it sets v0.4.22, which wright claimed for #7 (wright/7-…): it needs a version of its own") and catches it up to a free one. The Wright claims for each job before its worker starts, and gives the version back when no PR comes of it.
 
+## Ports claimed up front
+
+Every agent's page has a port of its own (its `src/app.ts`, and its Manor entry's `home` and `ping`), and Manor never offers an agent whose port another already has. New agents used to be given one by whoever started them, looking only at the clones on their PC: the Assayer took the Shepherd's 20707, and its role sat in Manor with no one to hire. Now a new agent's port is asked for first, as its version is (`src/ports.ts`):
+
+```powershell
+node %USERPROFILE%\.steward\app\src\cli.ts claim-port tallyman --branch claude/tallyman --for "the Tallyman"
+# tallyman: port 21010, yours (a checkout serves on 31010). Set it in its src/app.ts (placeFor's port) and its Manor entry's home and ping.
+```
+
+It takes the agent's id, a new one included: no repository is needed yet. It knows every port in use: Manor's own (18585), Manor's staff, this PC's own staff (`staff.local.json`), the agents announced on GitHub, each employee's `src/app.ts` on its branch, and every live claim; and hands out the next free one of the agents' series (19090, 19191, … 20808, 20909, 21010, …) whose development twin (+10000) is free too. An agent that has a port keeps it; the same agent asking again gets the same port. `ports` lists them all, by whom and where it says so, and any two agents on one; `release-port <id>` gives a claim back. A claim lives until the agent's port shows in Manor's lists or its clone (it landed), until it is given back, or for 14 days.
+
+Each round raises an alarm for two agents on one port, as their own sources say it, before either is installed ("shepherd and assayer have the same port, 20707"): Manor's summary already says so for installed ones.
+
 ## Install
 
 The Steward installs itself, from a release, as every agent does. In a checkout of this repository:

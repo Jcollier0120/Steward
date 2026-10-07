@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.25.2
+
+**It hands out ports for new agents, as it hands out versions, and says when two agents share one.**
+
+### What's new
+
+- `claim-port <agent id>` gives a new agent its page's port before anyone writes one: the next free one after every port Manor's staff, this PC's own staff, the agents announced on GitHub, each repository's src/app.ts and every earlier claim use, with its development port (+10000) free too. A new agent needs no repository yet. Asking again for the same agent gives the same port; an agent that has one keeps it. `release-port` gives one back.
+- `ports` lists every port in use, by whom and where each says so.
+- When two agents have the same port, a round raises an alarm naming both, before either is installed. Manor offers only one of two such agents for hire, so the other's role used to sit empty with no word why: the Assayer and the Shepherd both had 20707.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.23.5
 
 **An old Steward on a second PC updates quietly: it no longer takes itself for the PC that releases Castellan.**
