@@ -9,6 +9,7 @@ import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
+import type { LeaseGuard } from '../lease.ts';
 import type { Runner } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 
@@ -71,6 +72,11 @@ export interface Ctx {
   online?: () => Promise<boolean>;
   /** How each repository is worked with (scm.ts): GitHub's way, or plain git. Not given: GitHub's, as before. */
   host?: (e: Employee) => Host;
+  /**
+   * The turns this stage took with the licence's other PCs (lease.ts): asked before each merge and release whether this
+   * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
+   */
+  lease?: LeaseGuard | null;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { TendState } from '../tend.ts';
+import type { TurnsView } from '../lease.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 
@@ -444,6 +445,39 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
   );
 }
 
+/**
+ * Turns with the licence's other PCs (lease.ts): each repository another PC merges and releases, with Do it here; and,
+ * while the Exchequer can't be reached, that this PC goes on only where it had its turn.
+ */
+export function TurnsCard({ t }: { t: TurnsView | null | undefined }) {
+  if (!t || (t.mode === 'on' && !t.elsewhere.length)) return null;
+  return (
+    <Section title="Your other PCs" count={t.elsewhere.length || undefined}>
+      <Card>
+        {t.mode === 'unreachable' && (
+          <Text variant="muted" as="p">
+            The Exchequer can't be reached just now, so this PC merges and releases only where it already had its turn, until that turn runs out.
+          </Text>
+        )}
+        {t.elsewhere.map((x) => (
+          <div className="row turn" key={x.id}>
+            <span>
+              Merging and releasing for {x.name}: done by <strong>{x.holder}</strong>
+            </span>
+            <PostButton
+              title="Do it here"
+              variant="secondary"
+              path="/api/turns/take"
+              body={{ repo: x.repo }}
+              confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next round.`}
+            />
+          </div>
+        ))}
+      </Card>
+    </Section>
+  );
+}
+
 /** The stages, for the ticked employees: one that doesn't take the kit starts unticked. */
 function Stages({ v }: { v: StewardView }) {
   const s = v.staff;
@@ -596,6 +630,7 @@ const STYLE = `
 .alarms { border-left: 3px solid var(--alert, #c0392b); }
 .alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }
 .alarm-head { justify-content: space-between; align-items: center; gap: 10px; }
+.turn { justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; }
 .alarm .notes { margin: 4px 0; }
 .pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
@@ -667,6 +702,7 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <AlarmsCard a={v.alarms} now={now} />
+      <TurnsCard t={v.turns} />
       {v.round.repos === false && (
         <Card>
           <Text variant="muted" as="p">

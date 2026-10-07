@@ -25,6 +25,7 @@ const githubReadyHere = (): boolean | undefined => {
   const look = loadScm();
   return look ? githubReady(look) : undefined;
 };
+import { coordHere, handOver, turnsView, type Coord } from './lease.ts';
 
 /**
  * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
@@ -60,7 +61,7 @@ export const staffView = (s: Staff | null): StaffView | null =>
   s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** `run` stands in for git, gh and the employees' commands in a test; `owner`, for the account gh is signed in as (team.ts). */
-export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson } = {}) {
+export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson; coord?: Coord | null } = {}) {
   let running: { stage: string; since: string } | null = null;
   let refreshing: Promise<unknown> | null = null;
   /** Jobs to approve once what's running ends (POST /api/jobs/approve while it ran): employee ids, none for all. */
@@ -182,7 +183,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s), castellan: s.releasesCastellan };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
-    const body: StewardView = { castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 
@@ -249,6 +251,15 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if ('error' in r) return { json: { error: r.error }, status: 409 };
         if (!running) void refresh();
         return { json: { ok: true, id: r.employee.id } };
+      },
+      // "Do it here": this PC takes its turn in a repository another PC of the licence has (lease.ts), then a round acts on it.
+      '/api/turns/take': async ({ body }) => {
+        const repo = typeof body?.repo === 'string' ? body.repo.trim().slice(0, 140) : '';
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { json: { error: 'Send { "repo": "owner/name" }, a repository the page says another PC looks after.' }, status: 400 };
+        const r = await handOver(repo, { coord: o.coord !== undefined ? o.coord : coordHere(), settings: loadSettings() });
+        if (!r.ok) return { json: { error: r.message }, status: 409 };
+        if (!running) void roundJob(true).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+        return { json: { ok: true, message: r.message } };
       },
       '/api/repos/refresh': () => {
         void find();

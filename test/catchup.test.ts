@@ -342,3 +342,59 @@ test("the round: a conflicting kit PR of the Steward's is one a catch-up may cle
   assert.ok(!behindItsBranch({ ...base, head: 'steward/other' }, 'main'));
   assert.ok(!behindItsBranch({ ...base, mergeable: 'MERGEABLE', mergeState: 'CLEAN' }, 'main'));
 });
+
+test("the Steward's own PR whose kit was overtaken too: both versions caught up, the kit's changelog, pin, entry and title following", async () => {
+  // The PR: Fake 0.4.1 with kit 2.1.1 (its claims). main: another PR's 0.4.1 with kit 2.2.0, claimed after and merged first.
+  const own = (v: string, k: string, what: string) => log([v, `It hands out the kit ${k}: ${what}.`], ['0.4.0', 'The first.']);
+  const { dir, checkout, pr } = moved(
+    'kit-overtaken',
+    { 'src/feature.ts': 'export const feature = 1;\n', 'kit/VERSION': '2.1.1\n', 'kit/CHANGELOG.md': log(['2.1.1', 'GenieX 0.8.0.'], ['2.1.0', 'The first kit.']), 'CHANGELOG.md': own('0.4.1', '2.1.1', 'GenieX 0.8.0'), 'kit.json': '{\n  "kit": "2.1.1",\n  "parts": ["node"]\n}\n' },
+    {
+      base: { 'kit/VERSION': '2.1.0\n', 'kit/CHANGELOG.md': log(['2.1.0', 'The first kit.']), 'CHANGELOG.md': log(['0.4.0', 'The first.']), 'kit.json': '{\n  "kit": "2.1.0",\n  "parts": ["node"]\n}\n' },
+      main: { 'kit/VERSION': '2.2.0\n', 'kit/CHANGELOG.md': log(['2.2.0', 'Sold agents.'], ['2.1.0', 'The first kit.']), 'CHANGELOG.md': own('0.4.1', '2.2.0', 'sold agents'), 'kit.json': '{\n  "kit": "2.2.0",\n  "parts": ["node"]\n}\n' },
+    },
+  );
+  pr.title = 'Fake 0.4.1, kit 2.1.1: GenieX 0.8.0';
+  const { run, gh } = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], kit: { released: ['2.1.0', '2.2.0'], taken: [] } });
+  assert.equal(c.done, true, c.note);
+  assert.deepEqual([c.version, c.kitVersion], ['0.4.2', '2.2.1']);
+  assert.match(c.note, /kit version and kit's changelog resolved; v0\.4\.2, since v0\.4\.1 is already released; kit 2\.2\.1, since the branch is at kit 2\.2\.0 already/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  const at = (f: string) => sh(checkout, 'show', `origin/claude/feature:${f}`);
+  assert.equal(at('kit/VERSION'), '2.2.1');
+  assert.equal(at('kit/CHANGELOG.md'), log(['2.2.1', 'GenieX 0.8.0.'], ['2.2.0', 'Sold agents.'], ['2.1.0', 'The first kit.']).trimEnd());
+  assert.equal(at('CHANGELOG.md'), log(['0.4.2', 'It hands out the kit 2.2.1: GenieX 0.8.0.'], ['0.4.1', 'It hands out the kit 2.2.0: sold agents.'], ['0.4.0', 'The first.']).trimEnd());
+  assert.match(at('kit.json'), /"kit": "2\.2\.1"/, "the Steward's pin of its own kit follows it");
+  assert.deepEqual(gh.find((a) => a[1] === 'edit')?.slice(-2), ['--title', 'Fake 0.4.2, kit 2.2.1: GenieX 0.8.0']);
+});
+
+test("a kit version still new is kept, and the kit's files left as the PR wrote them", async () => {
+  const { dir, checkout, pr } = moved(
+    'kit-still-new',
+    { 'src/feature.ts': 'export const feature = 1;\n', 'kit/VERSION': '2.1.1\n' },
+    { base: { 'kit/VERSION': '2.1.0\n' } },
+  );
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], kit: { released: ['2.1.0'], taken: [] } });
+  assert.equal(c.done, true, c.note);
+  assert.deepEqual([c.version, c.kitVersion], ['0.4.2', '2.1.1']);
+  assert.doesNotMatch(c.note, /kit 2/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'show', 'origin/claude/feature:kit/VERSION'), '2.1.1');
+});
+
+test('a PR that leaves the kit alone carries no kit version, so it claims none', async () => {
+  const { dir, checkout, pr } = moved('kit-untouched', { 'src/feature.ts': 'export const feature = 1;\n' }, { base: { 'kit/VERSION': '2.1.0\n' } });
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], kit: { released: ['2.1.0'], taken: [] } });
+  assert.equal(c.done, true, c.note);
+  assert.equal(c.version, '0.4.2');
+  assert.equal(c.kitVersion, undefined);
+});
