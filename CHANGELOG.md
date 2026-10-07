@@ -19,6 +19,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out. To publish to the Exchequer, the PC that releases needs the publisher's key in `%USERPROFILE%\.steward\exchequer-publisher.key` (or `EXCHEQUER_PUBLISHER_KEY`); without it, releases go to GitHub alone, as before.
 
+## 0.17.0
+
+**A new agent is taken on with one command: `employ`.**
+
+### What's new
+
+- **`employ <its clone>`** adds a new agent to the Steward's employees, so its page lists it and its rounds test, merge and release it, with no hand-editing of settings.json. Everything comes from the clone: its id and name (from manor-agent.json, or src/app.ts), its GitHub repository, its kit parts, and how to fill, test, version and release it. `--dry-run` shows what it would add.
+- An agent that announces itself to Manor is published, so every Manor offers Hire for it. Manor's internal staff, and an agent that doesn't announce itself yet, are built and installed on this PC only.
+- An agent the Steward looks after already, or a folder that isn't a clone with a GitHub origin, is refused, with why.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.16.1
 
 **It hands out kit 2.29.0: every agent's page fits a phone.**
