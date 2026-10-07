@@ -53,19 +53,25 @@ import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
 
+/** Where a Steward from before 0.19.0 published Castellan's releases, before it had a setting for it. */
+const LEGACY_RELEASES_REPO = 'Jcollier0120/Manor-releases';
+
 /**
  * The public repository Castellan's releases are published in, with no source, so any PC downloads them signed in or not;
  * or null, when a release goes to the agent's own repository alone (anyone else's agent built on the kit). Read when a
  * release is published, never built in: MANOR_RELEASES_REPO when it is set (the Steward sets it for every release it
  * runs: its Settings' releases repository on the PC that releases Castellan itself, else empty); for a release run by
  * hand, the Steward's settings on this PC (STEWARD_HOME, else %USERPROFILE%\.steward: settings.json's releasesCastellan
- * and releasesRepo), the same way; else none.
+ * and releasesRepo), the same way; else none. A Steward from before 0.19.0, whose settings have no releasesCastellan
+ * yet (its migration writes it once it updates), released Castellan into LEGACY_RELEASES_REPO: so does this, until then.
+ * A new Steward writes `releasesCastellan: false` on its first read, so a customer's PC never takes that path.
  */
 export function releasesRepo(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
   const name = (v: unknown) => (typeof v === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v.trim()) ? v.trim() : null);
   if (env.MANOR_RELEASES_REPO !== undefined) return name(env.MANOR_RELEASES_REPO);
   try {
     const s = JSON.parse(readFileSync(path.join(env.STEWARD_HOME || path.join(home, '.steward'), 'settings.json'), 'utf8').replace(/^﻿/, ''));
+    if (s && typeof s === 'object' && !Array.isArray(s) && typeof s.releasesCastellan !== 'boolean') return LEGACY_RELEASES_REPO;
     return s?.releasesCastellan === true ? name(s.releasesRepo) : null;
   } catch {
     return null;
