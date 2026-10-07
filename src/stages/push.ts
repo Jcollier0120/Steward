@@ -6,6 +6,7 @@ import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
 import { bumpBranch, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
 import { readPin } from './staff.ts';
+import { noteOpened } from '../strangers.ts';
 
 /**
  * Stage 2, `steward push`: each bump prepared here (the branch steward/kit-<version>) is pushed, never
@@ -49,6 +50,8 @@ export async function pushOne(ctx: Ctx, e: Employee, o: { kit: string; changelog
     if (r.code !== 0) return result(e, 'failed', `git push refused (never forced): ${(r.err || r.out).trim().split('\n').slice(-2).join(' ')}`);
     ctx.log(`[${e.id}] pushed ${branch} (${localSha.slice(0, 7)})`);
   }
+  // Watched from now on, so a merge that isn't this Steward's is seen (strangers.ts).
+  if (open.length) noteOpened(e, open[0].url, localSha);
   if (open.length) return result(e, 'done', `PR #${open[0].number} was already open${remoteSha !== localSha ? '; pushed the new commits to it' : ''}`, { url: open[0].url });
 
   const versionFile = e.versionFiles[0];
@@ -61,6 +64,7 @@ export async function pushOne(ctx: Ctx, e: Employee, o: { kit: string; changelog
   const out = await gh(run, ctx.neutralDir, 'pr', 'create', '--repo', e.repo, '--base', e.branch, '--head', branch, '--title', title, '--body', body);
   const url = out.trim().split('\n').pop() ?? '';
   ctx.log(`[${e.id}] opened ${url}`);
+  noteOpened(e, url, localSha);
   return result(e, 'done', `opened "${title}"`, { url, version });
 }
 

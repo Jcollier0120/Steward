@@ -14,6 +14,7 @@ import { open, shutdown, start, status, stop } from './kit/service.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
+import { markMine } from './strangers.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
@@ -70,6 +71,10 @@ const USAGE = `${APP.id}: ${APP.role}
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
   claims [--json]  the versions claimed and not yet landed
+  mine <employee> <#pr | v<version>> ...
+                   mark a merge of one of the Steward's PRs, or a release, as yours, done by hand: on the PC
+                   that releases Castellan, the alarm for merges and releases no round here made never
+                   counts it, before or after (Dismiss on the alarm does the same for all it names)
   allow-update <version>
                    allow a version the install rolled back to be installed again
   uninstall [--purge] [--dry-run]
@@ -270,6 +275,23 @@ switch (cmd) {
     if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
     else if (!all.length) console.log('No versions are claimed.');
     else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}`);
+    break;
+  }
+  case 'mine': {
+    const ctx = await context({ glance: false, team: false });
+    const e = rest[0] ? employeeFor(ctx.settings, rest[0]) : null;
+    if (!e || rest.length < 2) {
+      console.error(`mine takes an employee and what you did by hand: mine porter v0.5.14, or mine porter #65${e || !rest[0] ? '' : ` (no employee ${rest[0]})`}`);
+      process.exitCode = 2;
+      break;
+    }
+    for (const ref of rest.slice(1)) {
+      const r = markMine(e, ref);
+      if ('error' in r) {
+        console.error(r.error);
+        process.exitCode = 2;
+      } else console.log(`${e.name} ${ref}: yours, never counted as someone else's.`);
+    }
     break;
   }
   case 'allow-update': {
