@@ -132,6 +132,36 @@ export const WORK: Record<string, AgentWork> = {
     ],
     notes: ["The model servers run every other agent's model work, not the Smith's: it uses no model, it keeps them. A server it stops starts again by itself at the next request, in seconds."],
   },
+  thatcher: {
+    model: true,
+    lines: [
+      { what: 'Asking winget which installed apps have upgrades', where: 'the processor', when: 'every 6 hours, a few seconds' },
+      { what: 'One line on what each upgrade changes', where: MODEL, when: 'at most 10 a round' },
+      { what: 'Installing the upgrades you tick', where: 'the processor, the disk and the network', when: 'only when you tick them, one at a time' },
+    ],
+  },
+  reckoner: {
+    model: true,
+    lines: [
+      { what: 'Taking stock of the devices', where: 'the processor (PowerShell)', when: 'every hour and soon after an update, a few seconds' },
+      { what: 'A few plain words when something changed', where: MODEL, when: 'only when it did, at most 3 a round' },
+    ],
+  },
+  weigher: {
+    model: false,
+    lines: [
+      { what: 'A check that the line is up', where: 'the network', when: 'every minute, one small request' },
+      { what: 'A speed sample', where: 'the network', when: 'every 3 hours and when you press Sample now: 10 MB down and 5 MB up by default, never on a metered connection' },
+    ],
+    notes: ['It has no model work: weighing the line is measuring, and its own code does it.'],
+  },
+  shepherd: {
+    model: true,
+    lines: [
+      { what: "One look at every app's processor, memory and battery use, and what starts with Windows", where: 'the processor (PowerShell)', when: 'every 10 minutes, a few seconds' },
+      { what: 'A one-line note on each app it rounds up', where: MODEL, when: 'at most 10 new a round' },
+    ],
+  },
 };
 
 const esc = (s: unknown) =>
