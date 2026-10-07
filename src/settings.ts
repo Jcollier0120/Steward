@@ -64,6 +64,14 @@ export interface Employee {
   approve: string;
   /** Its installed copy (%USERPROFILE%\.<id>\app), laid out as its repository is: its jobs, and its release.json. Empty: none. */
   installed: string;
+  /**
+   * Run after a stage that released something, anything (stages/refresh.ts): in a fresh worktree of its branch, and when
+   * it changed tracked files, its tests run, then the change committed and pushed to its branch. A site's `npm run sync`,
+   * which lists every product's release notes and downloads. Empty: nothing is run.
+   */
+  refresh?: string;
+  /** A word on its row of the page: why its PRs are left to you, say. Empty or none: none. */
+  note?: string;
 }
 
 export interface Settings {
@@ -287,12 +295,22 @@ export const SETTINGS_SCHEMA: Field[] = [
       },
       { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the kit's stages pass over it (\"not using the kit yet\"), except merging the team's PRs.", ...CASTELLAN },
       { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })), ...CASTELLAN },
-      { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', ...command, ...CASTELLAN },
+      { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', empty: 'None: it has no kit to fill', ...command, ...CASTELLAN },
       { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass, in a worktree of the PR, before a PR with no checks on GitHub is merged. None: such a PR waits for you.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
-      { key: 'versionFiles', kind: 'list', label: 'Version files', help: "Where its version is, kept in step: package.json, package-lock.json, a .ts with version: 'x.y.z', a .csproj or .props with <VersionPrefix>. Versions are claimed from these, and a release is made of the version they carry. None: no versions, and no releases.", item: { label: 'File', maxLength: 200 }, maxItems: 10 },
+      { key: 'versionFiles', kind: 'list', label: 'Version files', help: "Where its version is, kept in step: package.json, package-lock.json, a .ts with version: 'x.y.z' or VERSION = 'x.y.z', a .csproj or .props with <VersionPrefix>. Versions are claimed from these, and a release is made of the version they carry. None: no versions, and no releases.", item: { label: 'File', maxLength: 200 }, maxItems: 10 },
       { key: 'release', kind: 'text', label: 'Release it', help: "Off until you say how. A command run in a fresh worktree of the branch, which must make the GitHub release v<version> (npm run release, say); or tag, for a GitHub release of the branch's commit that the Steward makes itself, its notes the version's CHANGELOG.md entry. Released whenever the branch carries a version with no release yet.", empty: 'Never released by the Steward', ...command },
       { key: 'install', kind: 'text', label: 'Install it', help: 'Run in its newest release, downloaded, checked and unpacked, when a merged PR asks for install.', empty: "Not installed by the Steward", ...command, ...CASTELLAN },
       { key: 'approve', kind: 'text', label: 'Approve a job', help: "Run with {job} a job's name, and {sha256} the hash of the script the Steward checked (so only that script is approved): for each job a merged PR names, after its install; and in each round, for a job whose installed script is exactly the one merged on its branch, so an update never leaves its jobs waiting. Merging counts as reading the script. %USERPROFILE% and the like are expanded.", empty: "Its jobs aren't approved by the Steward", pattern: '.*\\{job\\}.*', patternHint: 'a command with {job} in it', ...command, ...CASTELLAN },
+      {
+        key: 'refresh',
+        kind: 'text',
+        label: 'Refresh after releases',
+        help: "Run after the Steward released anything, any repository's (a site's npm run sync, say, that lists every release's notes and downloads): in a fresh worktree of its branch, with gh at hand. When it changed tracked files, the tests above run, then the change is committed and pushed to the branch, never forced. Nothing changed: nothing pushed. A failure is an alarm, and nothing failing is pushed; the next release tries again.",
+        empty: 'Nothing run after releases',
+        optional: true,
+        ...command,
+      },
+      { key: 'note', kind: 'text', label: 'Note', help: "A word on its row of the Steward's page: why its PRs are left to you, say.", empty: 'None', optional: true, maxLength: 200 },
       { key: 'installed', kind: 'text', label: 'Installed at', help: 'Its installed copy, laid out as its repository is (jobs\\jobs.json, release.json): where the rounds look for jobs to approve.', empty: 'Not looked at', maxLength: 260, path: { is: 'folder', missing: 'warn', env: true }, ...CASTELLAN },
     ],
   },
@@ -459,6 +477,9 @@ function normalizeEmployee(e: any): Employee | null {
     install: typeof e.install === 'string' ? e.install.trim() : known.install,
     approve: typeof e.approve === 'string' ? e.approve.trim() : known.approve,
     installed: typeof e.installed === 'string' ? e.installed.trim() : known.installed,
+    // Left out when empty, as the page keeps them (optional), so a record without them reads as it always did.
+    ...(typeof e.refresh === 'string' && e.refresh.trim() ? { refresh: e.refresh.trim() } : {}),
+    ...(typeof e.note === 'string' && e.note.trim() ? { note: e.note.trim() } : {}),
   };
 }
 

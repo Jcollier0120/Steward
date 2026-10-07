@@ -21,6 +21,7 @@ import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { pruneClaims } from './claims.ts';
 import { push } from './stages/push.ts';
+import { loadRefreshFailures, refreshAfterReleases } from './stages/refresh.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
@@ -416,6 +417,16 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         out.error = (e as Error).message;
         log(`${name}: ${out.error}`);
       }
+      // Something released: each repository with a refresh after releases runs it, and pushes what it changed once its
+      // tests pass (stages/refresh.ts). A stage that released nothing runs none.
+      const releasedNow = out.results.filter(releasedSomething);
+      if (releasedNow.length && !quiet) {
+        try {
+          out.results.push(...(await refreshAfterReleases(ctx, releasedNow)));
+        } catch (e) {
+          log(`refresh: ${(e as Error).message}`);
+        }
+      }
       // Every round, offline or not, with repositories or none: the agents on duty whose pages don't answer, opened again.
       if (name === 'round') {
         try {
@@ -437,7 +448,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (name === 'round') {
         try {
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

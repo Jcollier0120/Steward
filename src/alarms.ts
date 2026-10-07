@@ -167,6 +167,8 @@ export function roundConditions(o: {
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
   /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
   migrated?: Migration | null;
+  /** Refreshes after a release that failed (stages/refresh.ts's refresh-failed.json), by repository. */
+  failedRefreshes?: Record<string, { commit: string; message: string; after: string }>;
   /** The staff's pages as the round's look left them (tend.ts's tending.json); null while Settings switch it off. */
   tending?: TendState | null;
   employees: Employee[];
@@ -263,6 +265,18 @@ export function roundConditions(o: {
         `${u.kept ? `Its copy is kept in ${u.kept} for a look. ` : ''}A newer version installs as usual. Dismiss this once you've looked: that allows ${u.version} again (or node src\cli.ts allow-update ${u.version}), and Manor's next update installs it, behind the same fail-safe.`,
       ],
       since: u.at,
+      afterMs: 0,
+    });
+  }
+  for (const [id, f] of Object.entries(o.failedRefreshes ?? {})) {
+    const e = o.employees.find((x) => x.id === id);
+    // One no longer refreshed (Settings changed) has nothing to raise.
+    if (!e?.refresh) continue;
+    out.push({
+      id: `refresh:${id}:${f.commit || 'none'}`,
+      who: id,
+      title: `${e.name}'s refresh after ${f.after} failed, and nothing was pushed`,
+      detail: [f.message, `Run ${e.refresh} in a clone of ${e.branch} once it's fixed, then commit and push; or the next release tries again.`],
       afterMs: 0,
     });
   }

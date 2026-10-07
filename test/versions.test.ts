@@ -53,3 +53,10 @@ test("an employee's command line splits like a shell's, quotes keeping a word wh
   assert.deepEqual(splitCommand('  npm   run release -- --publish '), ['npm', 'run', 'release', '--', '--publish']);
   assert.deepEqual(splitCommand('node -e ""'), ['node', '-e', '']);
 });
+
+test("a site's VERSION = 'x.y.z' constant is a version too, changed in place", () => {
+  const VERSION_TS = "/** The Exchequer's version: package.json's (a test keeps them the same). */\nexport const VERSION = '0.5.1';\n";
+  assert.equal(readVersion('src/version.ts', VERSION_TS), '0.5.1');
+  assert.equal(setVersion('src/version.ts', VERSION_TS, '0.5.1', '0.6.0'), VERSION_TS.replace("'0.5.1'", "'0.6.0'"));
+  assert.deepEqual(agreedVersion([['package.json', PKG.replace('0.4.0', '0.5.1')], ['src/version.ts', VERSION_TS]]), { version: '0.5.1' });
+});

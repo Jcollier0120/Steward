@@ -215,6 +215,9 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     prepared: null,
     notes,
   };
+  // Settings' own word on it first (why its PRs are left to you, say).
+  if (e.note) notes.push(e.note);
+  if (e.refresh) notes.push(`after each release: ${e.refresh}, pushed to ${e.branch} when it changes anything`);
   if (!e.usesKit) notes.push(NOT_ON_KIT);
   const remote = `origin/${e.branch}`;
   const here = releasedHereRow(e, row);
