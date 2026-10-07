@@ -40,7 +40,9 @@ test("nobody's employees, repository or clone are built in: they start empty, an
 test('an employee named with nothing more is a Node agent on the kit, with no repository or clone; what a record says is kept', () => {
   const [porter] = normalizeSettings({ employees: [{ id: 'porter' }] }).settings.employees;
   assert.deepEqual([porter.name, porter.repo, porter.checkout, porter.branch, porter.usesKit], ['Porter', '', '', 'main', true]);
-  assert.deepEqual([porter.parts, porter.versionFiles, porter.install, porter.installed], [['node', 'web', 'spec'], ['package.json', 'package-lock.json', 'src/app.ts'], 'node src/cli.ts install', '%USERPROFILE%\\.porter\\app']);
+  assert.deepEqual([porter.versionFiles, porter.install, porter.installed], [['package.json', 'package-lock.json', 'src/app.ts'], 'node src/cli.ts install', '%USERPROFILE%\\.porter\\app']);
+  // An older settings.json's kit parts are read past: kit.json is their one source.
+  assert.equal('parts' in normalizeSettings({ employees: [{ id: 'porter', parts: ['node', 'react'] }] }).settings.employees[0], false);
   const saved = normalizeSettings({ employees: STAFF }).settings.employees;
   assert.deepEqual(saved, STAFF, 'a full list in settings.json is kept as it is');
   const off = normalizeSettings({ employees: [{ id: 'porter', usesKit: false, branch: 'master' }] }).settings.employees[0];
@@ -155,7 +157,7 @@ test("with no settings.json at all, the staff table and its clones are written t
     assert.deepEqual(s.employees.map((e) => e.id), ['porter', 'dotty'], 'one whose clone is gone is left out');
     const [porter, dotty] = s.employees;
     assert.deepEqual(porter, {
-      id: 'porter', name: 'Porter', repo: 'octocat/Porter', checkout: path.join(clones, 'Porter'), branch: 'main', merges: true, usesKit: true, parts: ['node', 'web', 'spec'],
+      id: 'porter', name: 'Porter', repo: 'octocat/Porter', checkout: path.join(clones, 'Porter'), branch: 'main', merges: true, usesKit: true,
       fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
       release: 'npm run release -- --publish', install: 'node src/cli.ts install',
       approve: 'node %USERPROFILE%\\.porter\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}', installed: '%USERPROFILE%\\.porter\\app',
@@ -277,7 +279,7 @@ test("what the migration couldn't fill in is looked for again until Settings are
 
 test('a migration from before it kept its gaps (0.11.7 to 0.11.9) has them read from its notes and Settings, and filled in the same way', () => {
   const dir = cloneOf('Mano', { ...nodeAgent('mano'), 'tools/kit.ts': '' });
-  const employee = { id: 'mano', name: 'Mano', repo: 'octocat/Mano', checkout: dir, branch: 'main', usesKit: true, parts: ['node'], fill: '', test: ['npm test'], versionFiles: ['package.json'], release: 'npm run release -- --publish', install: '', approve: '', installed: '' };
+  const employee = { id: 'mano', name: 'Mano', repo: 'octocat/Mano', checkout: dir, branch: 'main', usesKit: true, fill: '', test: ['npm test'], versionFiles: ['package.json'], release: 'npm run release -- --publish', install: '', approve: '', installed: '' };
   writeFileSync(settingsFile(), JSON.stringify({ employees: [employee] }));
   const mtimeMs = statSync(settingsFile()).mtimeMs;
   writeFileSync(migrationFile(), JSON.stringify({ at: '2026-10-06T13:35:12.219Z', mtimeMs, employees: ['mano'], notes: ["Mano: couldn't tell Fill its kit from its clone until you fill it in."] }));

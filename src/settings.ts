@@ -8,9 +8,6 @@ import { dataFile, readJson } from './kit/store.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
 
-/** The kit's parts an employee can take (node brings core, core brings spec, dotnet brings core: tools/kit.ts adds them). */
-export const PART_NAMES = ['node', 'web', 'spec', 'core', 'dotnet'];
-
 /**
  * One of Manor's employees, as the Steward deals with it: where its code is, which kit parts it takes,
  * and the commands that fill its kit, test it and release it. Commands run in the employee's folder;
@@ -42,7 +39,6 @@ export interface Employee {
   merges: boolean;
   /** Whether it takes the Steward's kit yet. The stages pass over one that doesn't, and say so. */
   usesKit: boolean;
-  parts: string[];
   /** Fills its kit at the version kit.json pins. */
   fill: string;
   /** Its checks, in order; every one must pass. */
@@ -176,7 +172,6 @@ export const blankEmployee = (id: string, name: string): Employee => ({
   branch: 'main',
   merges: false,
   usesKit: true,
-  parts: ['node', 'web', 'spec'],
   fill: 'node tools/kit.ts',
   test: ['npx tsc -p . --noEmit', 'npm test'],
   versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
@@ -280,7 +275,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Repositories',
     help: "Each repository of yours the Steward looks after: its GitHub repository (owner/name), your clone of it, how to test it, the files that carry its version, and how to release it. None to begin with: the Steward's page lists the ones Reeve finds that you can push to, each with Look after; or add one here.",
     maxItems: 50,
-    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', merges: false, usesKit: false, parts: [], fill: '', test: [], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '' },
+    blank: { id: '', name: '', repo: '', checkout: '', branch: 'main', merges: false, usesKit: false, fill: '', test: [], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '' },
     fields: [
       { key: 'id', kind: 'text', label: 'Id', maxLength: 40, pattern: '[a-z][a-z0-9-]*', patternHint: 'lowercase letters, digits and dashes, like my-app' },
       { key: 'name', kind: 'text', label: 'Name', maxLength: 60 },
@@ -294,7 +289,6 @@ export const SETTINGS_SCHEMA: Field[] = [
         help: "Off until you say yes. On: Merge, and the rounds while \"Merges and releases by itself\" is on, merge each PR to it that you (or the team) opened, that isn't a draft, merges cleanly and has no failing or running checks; one with no checks on GitHub is tested here first with the commands below. Off: its PRs are listed, and left to you.",
       },
       { key: 'usesKit', kind: 'switch', label: "Takes the Steward's kit", help: "Off: listed, but the kit's stages pass over it (\"not using the kit yet\"), except merging the team's PRs.", ...CASTELLAN },
-      { key: 'parts', kind: 'choices', label: 'Kit parts', options: PART_NAMES.map((p) => ({ value: p, label: p })), ...CASTELLAN },
       { key: 'fill', kind: 'text', label: 'Fill its kit', help: 'The command that fills its kit at the version kit.json pins.', empty: 'None: it has no kit to fill', ...command, ...CASTELLAN },
       { key: 'test', kind: 'list', label: 'Test it', help: 'Each command must pass, in a worktree of the PR, before a PR with no checks on GitHub is merged. None: such a PR waits for you.', item: { label: 'Command', ...command }, maxItems: 10, matchCase: true },
       { key: 'versionFiles', kind: 'list', label: 'Version files', help: "Where its version is, kept in step: package.json, package-lock.json, a .ts with version: 'x.y.z' or VERSION = 'x.y.z', a .csproj or .props with <VersionPrefix>. Versions are claimed from these, and a release is made of the version they carry. None: no versions, and no releases.", item: { label: 'File', maxLength: 200 }, maxItems: 10 },
@@ -469,7 +463,6 @@ function normalizeEmployee(e: any): Employee | null {
     branch: str(e.branch, known.branch),
     merges: typeof e.merges === 'boolean' ? e.merges : known.merges,
     usesKit: typeof e.usesKit === 'boolean' ? e.usesKit : known.usesKit,
-    parts: Array.isArray(e.parts) ? PART_NAMES.filter((p) => e.parts.includes(p)) : known.parts,
     fill: typeof e.fill === 'string' ? e.fill.trim() : known.fill,
     test: strings(e.test, known.test),
     versionFiles: strings(e.versionFiles, known.versionFiles),

@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.23.1
+
+**An employee's kit parts are read from its own kit.json, the one place they are kept.**
+
+### What changed
+
+- The Steward no longer keeps its own copy of each repository's kit parts. That copy didn't know the React part, so every agent with a React page carried a note on the Steward's page, "kit.json takes node, web, spec, react; Settings say node, web, spec", though nothing was wrong: an agent's kit has always been filled from its kit.json.
+- The page now shows each repository's parts as its kit.json says them, React included, and the note is gone.
+- Settings no longer has a Kit parts field for a repository. To change an agent's parts, change its kit.json.
+- Taking on a repository (Look after, or `employ`) lists the parts its kit.json takes.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
+
 ## 0.21.3
 
 **It hands out the kit 2.36.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**

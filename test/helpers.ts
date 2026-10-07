@@ -64,7 +64,6 @@ export function employee(checkout: string, more: Partial<Employee> = {}): Employ
     branch: 'main',
     merges: true,
     usesKit: true,
-    parts: ['node'],
     fill: 'node tools/kit.ts',
     test: ['node -e process.exit(0)'],
     versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],

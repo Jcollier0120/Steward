@@ -27,7 +27,6 @@ export interface StaffRowLike {
   repo?: unknown;
   branch?: unknown;
   usesKit?: unknown;
-  parts?: unknown;
   checkout?: { path?: unknown } | null;
 }
 
@@ -250,7 +249,6 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     merges: true,
     // Untested or unreleasable, it waits off the kit's stages until Settings say how.
     usesKit: row.usesKit !== false && !missing.includes('Test it') && !missing.includes('Release it'),
-    parts: Array.isArray(row.parts) ? row.parts.filter((p): p is string => typeof p === 'string') : [],
     fill,
     test,
     versionFiles,

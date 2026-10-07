@@ -218,7 +218,7 @@ switch (cmd) {
     const e = got.employee;
     const dry = rest.includes('--dry-run');
     console.log(`${dry ? 'Would take on' : 'Took on'} ${e.name} (${e.id}): ${e.repo}, its clone ${e.checkout} on ${e.branch}.`);
-    console.log(`  kit parts ${e.parts.join(', ') || 'none'}; fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
+    console.log(`  kit parts ${got.kitParts?.join(', ') || 'none'} (its kit.json); fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
     console.log(`  version in ${e.versionFiles.join(', ') || '-'}; release ${e.release || '-'}; install ${e.install || '-'}`);
     for (const n of got.notes) console.log(`  ${n}`);
     if (got.missing.length) console.log(`  Not found, so fill it in on the Settings page: ${got.missing.join(', ')}.`);

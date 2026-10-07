@@ -120,7 +120,7 @@ function StaffRow({ r, kit, castellan }: { r: StaffRowView; kit: string | null; 
           <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
         </strong>
         <br />
-        {castellan ? <Text variant="muted">{r.parts.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
+        {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
       </td>
       <td>
         {co.exists ? (
