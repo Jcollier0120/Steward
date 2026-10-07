@@ -118,9 +118,12 @@ test("after a round releases something, the site's refresh runs, its tests pass,
   assert.equal(sh(site.checkout, '--git-dir', site.origin, 'rev-parse', 'main^'), before, 'one commit on top of what was there, never forced');
   assert.equal(siteNotes(), 'Fake 0.4.1\nFake 0.4.0');
   assert.equal(existsSync(path.join(home, 'work', 'site-refresh')), false, 'its worktree is removed');
+  assert.ok(!sh(site.checkout, 'worktree', 'list').includes('site-refresh'), 'and git forgets it');
 });
 
-test("a refresh that changes nothing pushes nothing", async () => {
+test("a refresh that changes nothing pushes nothing; a worktree left from before is cleared first", async () => {
+  // Left by a refresh cut short (the PC turned off mid-run): registered with git, its folder still there.
+  sh(site.checkout, 'worktree', 'add', '--quiet', '--detach', path.join(home, 'work', 'site-refresh'), 'origin/main');
   raise('0.4.1', '0.4.2');
   const before = siteHead();
   const out = await round();
