@@ -12,6 +12,8 @@ process.env.STEWARD_HOME = home;
 // The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
+// The owner's PC, which holds the Exchequer's publisher key: settings from before releasesCastellan migrate to it (migrate.ts).
+process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, loadSettings, normalizeSettings, settingsFile } = await import('../src/settings.ts');
