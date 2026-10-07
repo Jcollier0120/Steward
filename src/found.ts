@@ -228,7 +228,6 @@ export function employeeFromFound(r: FoundRepo, o: { taken: string[]; merges: bo
     branch: r.branch,
     merges: o.merges,
     usesKit: false,
-    parts: [],
     fill: '',
     test: read.test,
     versionFiles: read.versionFiles,

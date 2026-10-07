@@ -39,10 +39,15 @@ test('identityOf takes the announcement first, then src/app.ts', () => {
   assert.deepEqual(identityOf(read({ 'manor-agent.json': '{not json', 'src/app.ts': "  id: 'assayer',\n  name: 'Assayer',\n" })), { id: 'assayer', name: 'Assayer', announces: false });
   assert.equal(identityOf(read({ 'manor-agent.json': JSON.stringify({ agent: { id: 'Bad Id' } }) })), null);
   assert.equal(identityOf(read({})), null);
+  // In whichever quotes app.ts uses (the Pinder's and the Crier's are double), its name as written.
+  assert.deepEqual(identityOf(read({ 'src/app.ts': '  id: "crier",\n  name: "Crier",\n' })), { id: 'crier', name: 'Crier', announces: false });
+  assert.deepEqual(identityOf(read({ 'src/app.ts': "  id: `fake`,\n  name: `Fake Agent`,\n" })), { id: 'fake', name: 'Fake Agent', announces: false });
+  assert.deepEqual(identityOf(read({ 'src/app.ts': '  id: "fake",\n  name: "The Crier\'s cousin",\n' })), { id: 'fake', name: "The Crier's cousin", announces: false });
+  assert.equal(identityOf(read({ 'src/app.ts': "  id: 'fake\",\n" })), null, 'quotes that don\'t match are no id');
 });
 
-test("partsOf keeps the parts the Steward knows, and is null with no kit.json", () => {
-  assert.deepEqual(partsOf('{"kit":"2.28.1","parts":["node","web","spec","react"]}'), ['node', 'web', 'spec']);
+test('partsOf reads kit.json as it is, react and all, and is null with no kit.json', () => {
+  assert.deepEqual(partsOf('{"kit":"2.28.1","parts":["node","web","spec","react"]}'), ['node', 'web', 'spec', 'react']);
   assert.deepEqual(partsOf('\uFEFF{"parts":["dotnet"]}'), ['dotnet']);
   assert.equal(partsOf(null), null);
   assert.equal(partsOf('nope'), null);
@@ -54,7 +59,8 @@ test('an agent that announces itself is published, and installed from its releas
   assert.ok(!('error' in got), 'error' in got ? got.error : '');
   const e = got.employee;
   assert.deepEqual([e.id, e.name, e.repo, e.checkout, e.branch], ['fake', 'Fake Agent', REPO, path.resolve(checkout), 'main']);
-  assert.deepEqual(e.parts, ['node', 'web', 'spec']);
+  assert.equal('parts' in e, false, 'the Steward keeps no copy of the kit parts: kit.json is their one source');
+  assert.deepEqual(got.kitParts, ['node', 'web', 'spec', 'react'], 'its kit.json, as it says them');
   assert.equal(e.usesKit, true);
   assert.equal(e.fill, 'node tools/kit.ts');
   assert.deepEqual(e.test, ['npx tsc -p . --noEmit', 'npm test']);
