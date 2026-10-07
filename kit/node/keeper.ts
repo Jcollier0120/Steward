@@ -9,7 +9,7 @@ import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
-import { powershell } from './ps.ts';
+import { powershell, psQuote } from './ps.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -421,9 +421,13 @@ export function servesBase(commandLine: string, base: string): boolean {
   return host === want;
 }
 
+/** WQL's `Name='<name>'`: in a WQL string, a backslash and a quote are each escaped with a backslash. */
+export const wqlName = (name: string) => `Name='${name.replace(/[\\']/g, (c) => `\\${c}`)}'`;
+
+/** Windows' processes that match a WQL filter, handed to PowerShell as a single-quoted literal, never as code. */
 const listProcesses = async (filter: string): Promise<SeenProcess[]> => {
   const out = await powershell(
-    `Get-CimInstance Win32_Process -Filter "${filter}" | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; path = [string]$_.ExecutablePath; line = [string]$_.CommandLine; started = $_.CreationDate.ToUniversalTime().ToString('o'); ws = [double]$_.WorkingSetSize } } | ConvertTo-Json -Compress`,
+    `Get-CimInstance Win32_Process -Filter ${psQuote(filter)} |ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; path = [string]$_.ExecutablePath; line = [string]$_.CommandLine; started = $_.CreationDate.ToUniversalTime().ToString('o'); ws = [double]$_.WorkingSetSize } } | ConvertTo-Json -Compress`,
     { timeoutMs: 30_000 },
   );
   const rows = out.trim() ? [JSON.parse(out)].flat() : [];
@@ -432,15 +436,14 @@ const listProcesses = async (filter: string): Promise<SeenProcess[]> => {
 
 /** The program's processes serving `base`, from Windows' process list. */
 export async function serverProcesses(program: string, base: string): Promise<ServerProcess[]> {
-  const name = path.win32.basename(program).replace(/'/g, "''");
-  const rows = await listProcesses(`Name='${name}'`);
+  const rows = await listProcesses(wqlName(path.win32.basename(program)));
   return rows.filter((r) => sameProgram(r.path, program) && servesBase(r.line, base)).map(({ pid, startedMs, workingSetBytes }) => ({ pid, startedMs, workingSetBytes }));
 }
 
 /** Every llama-server's and GenieX's process on this PC, and every other program the servers are started with. */
 export async function modelServerProcesses(programs: string[] = []): Promise<SeenProcess[]> {
   const names = [...new Set(['llama-server.exe', 'geniex.exe', ...programs.map((p) => path.win32.basename(p).toLowerCase())])].filter((n) => /\.exe$/i.test(n) && !/^python/i.test(n));
-  return listProcesses(names.map((n) => `Name='${n.replace(/'/g, "''")}'`).join(' OR '));
+  return listProcesses(names.map(wqlName).join(' OR '));
 }
 
 const mtimeMs = (p: string) => {
