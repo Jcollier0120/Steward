@@ -15,7 +15,7 @@ const PUBLISHED: Outcome = { ok: true, outcome: 'published', line: 'Published to
 const FAILED: Outcome = { ok: false, outcome: 'failed', line: 'Not published to the Exchequer: couldn\'t reach it. The GitHub release stands; npm run release -- --exchequer finishes it.' };
 
 /** gh and the Exchequer, faked: what is on GitHub already, what the Exchequer says, and everything asked of them. */
-function steps(o: { sale?: Sale; exchequer?: Outcome; there?: string[]; createFails?: string[] } = {}) {
+function steps(o: { sale?: Sale; exchequer?: Outcome; there?: string[]; createFails?: string[]; noKey?: boolean } = {}) {
   const there = new Set(o.there ?? []);
   const calls: string[] = [];
   const lines: string[] = [];
@@ -31,6 +31,7 @@ function steps(o: { sale?: Sale; exchequer?: Outcome; there?: string[]; createFa
         calls.push(`create ${repo} ${tag}${own ? ' at the commit' : ''}`);
         return o.createFails?.includes(`${repo} ${tag}`) ? 1 : 0;
       },
+      keyMissing: () => (o.noKey ? 'C:\\Users\\someone\\.steward\\exchequer-publisher.key' : null),
       sale: async (id: string) => {
         calls.push(`sale ${id}`);
         return o.sale ?? { forSale: null, line: 'unsure' };
@@ -111,6 +112,41 @@ test('not for sale, as before: refused when the releases repository has it; the 
 
 test('no releases repository (anyone else\'s agent): the Exchequer is not asked about sale; the own repository, then the Exchequer', async () => {
   const t = steps({ sale: FOR_SALE });
+  assert.equal(await publishTo({ ...porter, releasesRepo: null }, t.s), 0);
+  assert.deepEqual(t.calls, [`view ${OWN} v1.2.3`, `create ${OWN} v1.2.3 at the commit`, 'exchequer']);
+});
+
+// kit 2.36.0: on 2026-10-07, 12 staff releases reached the public releases repository and never the Exchequer. They
+// were published without the publisher key, by a release outside the PC that releases Castellan. A release of
+// Castellan's (with a releases repository) now publishes nothing on a PC without the key.
+
+test("no publisher key here: a staff release of Castellan's publishes nothing, whatever the Exchequer would say", async () => {
+  for (const sale of [FOR_SALE, NOT_FOR_SALE, UNSURE]) {
+    const t = steps({ sale, noKey: true });
+    assert.equal(await publishTo(porter, t.s), 1);
+    // Not GitHub, not the Exchequer: nothing is even asked.
+    assert.deepEqual(t.calls, []);
+    assert.equal(t.lines.length, 1);
+    assert.match(t.lines[0]!, /^error: Not published: porter-v1\.2\.3 is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key \(.*exchequer-publisher\.key, or EXCHEQUER_PUBLISHER_KEY\)\. Only the PC that releases Castellan publishes them\.$/);
+  }
+});
+
+test('no publisher key here: the legacy releases repository (a Steward from before 0.19.0) publishes nothing either', async () => {
+  const t = steps({ sale: UNSURE, noKey: true });
+  assert.equal(await publishTo({ ...porter, releasesRepo: 'Jcollier0120/Manor-releases' }, t.s), 1);
+  assert.deepEqual(t.calls, []);
+});
+
+test('no publisher key here: Manor and Heiward, never sold, publish to GitHub as before', async () => {
+  for (const id of ['manor', 'heiward']) {
+    const t = steps({ sale: NOT_FOR_SALE, noKey: true });
+    assert.equal(await publishTo({ ...porter, id }, t.s), 0);
+    assert.deepEqual(t.calls, [`sale ${id}`, `view ${RELEASES} ${id}-v1.2.3`, `view ${OWN} v1.2.3`, `create ${RELEASES} ${id}-v1.2.3`, `create ${OWN} v1.2.3 at the commit`, 'exchequer']);
+  }
+});
+
+test("no publisher key here, and no releases repository (anyone else's agent): its own repository as before", async () => {
+  const t = steps({ noKey: true });
   assert.equal(await publishTo({ ...porter, releasesRepo: null }, t.s), 0);
   assert.deepEqual(t.calls, [`view ${OWN} v1.2.3`, `create ${OWN} v1.2.3 at the commit`, 'exchequer']);
 });

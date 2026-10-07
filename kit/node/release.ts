@@ -22,7 +22,9 @@
  * the agent and this PC has the publisher's key. That step never fails the release: GitHub's stands, and the line it
  * prints says what happened (--exchequer finishes it). An agent the Exchequer sells (its agents list says `forSale`,
  * kit 2.35.0) goes to the Exchequer first and not to the public releases repository, unless the Exchequer doesn't
- * take it; one it doesn't sell, or when it can't say, goes to GitHub as before (publishTo).
+ * take it; one it doesn't sell, or when it can't say, goes to GitHub as before (publishTo). A release of Castellan's
+ * (one with a releases repository) is published only where the Exchequer's publisher key is (kit 2.36.0): on any other
+ * PC it publishes nothing, so a staff release never reaches GitHub without going through the Exchequer.
  *
  * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
  * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
@@ -51,7 +53,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
-import { publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome, type Sale } from './exchequer.ts';
+import { NEVER_SOLD, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome, type Sale } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
@@ -369,6 +371,10 @@ async function publish(b: Built): Promise<number> {
           const r = spawnSync(gh, ['release', 'create', t, ...assets, '--repo', where, ...target, '--title', `${APP.name} ${release.version}`, '--notes-file', notesFile], { stdio: 'inherit', windowsHide: true });
           return r.status ?? 1;
         },
+        keyMissing: () => {
+          const found = publisherKey();
+          return 'missing' in found ? found.missing : null;
+        },
         sale: (id) => saleOf(id),
         exchequer: () => publishToExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets }),
         log: (line) => console.log(line),
@@ -386,6 +392,8 @@ export interface PublishSteps {
   released(tag: string, repo: string): 'there' | 'none' | { error: string };
   /** gh release create with the release's files: in the agent's own repository (`own`) at the commit, else in the releases repository. Its exit code. */
   create(tag: string, repo: string, own: boolean): number;
+  /** Where the Exchequer's publisher key was looked for when this PC hasn't it, else null (exchequer.ts publisherKey). */
+  keyMissing(): string | null;
   /** Whether the Exchequer sells the agent (exchequer.ts saleOf). */
   sale(id: string): Promise<Sale>;
   /** The release's files published to the Exchequer (exchequer.ts publishToExchequer). */
@@ -402,18 +410,31 @@ export interface PublishSteps {
  *   refused when it has it already; then the Exchequer, which takes only an agent it sells.
  * - **An agent the Exchequer sells** (kit 2.35.0: saleOf's forSale true): the Exchequer first, from the files built,
  *   and not the public releases repository; then v<version> in the agent's own (the Steward knows a release by it).
- *   Refused when the agent's own has it already. When the Exchequer doesn't take it (down, refusing, no publisher's
- *   key here), it goes to the releases repository as before, so a release is never left out of every place Manor looks.
+ *   Refused when the agent's own has it already. When the Exchequer doesn't take it (down, or refusing), it goes to
+ *   the releases repository as before, so a release is never left out of every place Manor looks.
  * - **Any other** (not for sale, unknown to the Exchequer, or the Exchequer couldn't say): as before kit 2.35.0, the
  *   releases repository as <id>-v<version> (refused when it has it), then the agent's own (unless it has it from before
  *   the releases repository), then the Exchequer too, so one held back from sale is there already when it goes on sale.
  *
  * Whatever happens at the Exchequer, the exit code is GitHub's: it never fails a release that GitHub took.
+ *
+ * A release of Castellan's (a releases repository) of any agent but Manor and Heiward is published only on a PC with
+ * the Exchequer's publisher key (kit 2.36.0): without it, nothing is published and the exit code is 1. The PC that
+ * releases Castellan has the key. Anywhere else (another PC's Steward, one from before 0.19.0 that still releases to
+ * the releases repository, a release run by hand) a staff release would reach GitHub, the public releases repository
+ * among it, and never the Exchequer.
  */
 export async function publishTo(r: { id: string; version: string; repo: string; releasesRepo: string | null }, s: PublishSteps): Promise<number> {
   const tag = releaseTag(r.id, r.version);
   const ownTag = `v${r.version}`;
   const RAISE = 'Raise the version in package.json and src/app.ts first. (To publish that release to the Exchequer alone: npm run release -- --exchequer.)';
+  if (r.releasesRepo && !NEVER_SOLD.includes(r.id)) {
+    const missing = s.keyMissing();
+    if (missing) {
+      s.error(`Not published: ${tag} is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key (${missing}, or EXCHEQUER_PUBLISHER_KEY). Only the PC that releases Castellan publishes them.`);
+      return 1;
+    }
+  }
   const sale = r.releasesRepo ? await s.sale(r.id) : null;
   if (sale) s.log(sale.line);
   const sold = sale?.forSale === true;
