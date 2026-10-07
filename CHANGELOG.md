@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.4
+
+**An agent's release notes for a new kit never name a repository, and a kit is tried with the notes its rollout will write.**
+
+### What changed
+
+- When the Steward rolls out a kit whose changelog it couldn't read, each agent's release notes now say "the parts every agent of the manor shares". Before, they named the repository the kit came from, and those notes are published with each release.
+- When a kit change is tried on every agent before it merges, each agent's notes are now written from that kit's own changelog, as its real rollout will write them. An agent whose tests check its notes no longer fails the trial over a line it would never ship.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.0
 
 **Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**

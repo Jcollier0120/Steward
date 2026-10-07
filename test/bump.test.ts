@@ -43,7 +43,8 @@ test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json and t
   const log = sh(s.checkout, 'show', `${branch}:CHANGELOG.md`).replace(/\r\n/g, '\n');
   assert.match(log, /^# Fake's changelog\n/);
   assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.1: /);
-  assert.match(log, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: see its changelog/);
+  assert.match(log, /### What changed\n\n- The Steward's kit 1\.0\.1, after 1\.0\.0: the parts every agent of the manor shares\./);
+  assert.doesNotMatch(log, /Jcollier0120|Steward\.git|github\.com/i, "no repository's name in notes the agent ships");
   assert.match(log, /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.equal(sh(s.checkout, 'show', `${branch}:kit.json`), '{\n  "kit": "1.0.1",\n  "parts": ["node"]\n}');
   assert.match(sh(s.checkout, 'show', `${branch}:src/app.ts`), /version: '0\.4\.1'/);

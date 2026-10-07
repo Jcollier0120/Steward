@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { git, removeWorktree, showFile } from '../git.ts';
@@ -61,10 +61,13 @@ export function trialComment(t: KitTrial, sha: string): string {
 
 /** Each employee tried with the kit at the PR's head, its worktree and branch removed after. */
 async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string): Promise<EmployeeResult[]> {
+  // The PR's own kit changelog, so each trial bump writes the entry its real bump will (its tests read it too).
+  const changelogFile = path.join(dir, 'kit', 'CHANGELOG.md');
+  const changelog = existsSync(changelogFile) ? readFileSync(changelogFile, 'utf8') : null;
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     let r: EmployeeResult;
     try {
-      r = await bumpOne(ctx, e, { kit, kitFrom: path.join(dir, 'kit'), tool: path.join(dir, 'tools', 'kit.ts'), trial: true, changelog: null });
+      r = await bumpOne(ctx, e, { kit, kitFrom: path.join(dir, 'kit'), tool: path.join(dir, 'tools', 'kit.ts'), trial: true, changelog });
     } catch (err) {
       r = result(e, 'failed', (err as Error).message);
     }
