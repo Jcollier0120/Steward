@@ -14,7 +14,7 @@ process.env.MANOR_HOME = path.join(home, 'no-manor'); // never this PC's Manor a
 process.env.SMITH_HOME = path.join(home, 'no-smith');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { Reaper, reapedServers, servesBase, lastActivityMs, UNANSWERED_MS } = await import('./fixture/src/kit/keeper.ts');
+const { Reaper, reapedServers, servesBase, lastActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 type Deps = ConstructorParameters<typeof Reaper>[0];
 
@@ -75,6 +75,15 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
   };
   return { pc, deps };
 }
+
+test("a program's name reaches Windows' process list as text: quotes, curly quotes, $( ) and backticks stay in the name", async () => {
+  assert.equal(wqlName("a'b\\c.exe"), "Name='a\\'b\\\\c.exe'");
+  assert.equal(wqlName('llama-server.exe'), "Name='llama-server.exe'");
+  // Run for real: a name made to end the string early finds no process, and runs nothing.
+  for (const name of ["x\u2019; Write-Output INJECTED; \u2019y.exe", "x'; Write-Output INJECTED; 'y.exe", 'x$(Write-Output INJECTED)`n.exe', 'x" ; Write-Output INJECTED ; ".exe']) {
+    assert.deepEqual(await serverProcesses(`C:\\nowhere\\${name}`, BASE), [], name);
+  }
+});
 
 test('idle: GenieX is stopped once nobody has used the NPU for npuIdleStopMinutes, holding its lock', async () => {
   const { pc, deps } = fakePc({});
