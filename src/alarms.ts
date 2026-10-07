@@ -9,6 +9,7 @@ import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
 import type { Runner } from './run.ts';
+import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
@@ -175,10 +176,13 @@ export function roundConditions(o: {
   tending?: TendState | null;
   /** Merges and releases of this Steward's repositories that it didn't make (strangers.ts), as its alarm. */
   strangers?: Condition[];
+  /** Every agent's port, as Manor's lists, the clones and the claims say (ports.ts): two agents on one is an alarm. */
+  ports?: PortUse[];
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
   const out: Condition[] = [];
+  if (o.ports) out.push(...portClashConditions(o.ports));
   if (o.tending) out.push(...tendConditions(o.tending));
   out.push(...(o.strangers ?? []));
   const wait = o.settings.alarms.waitingHours;
