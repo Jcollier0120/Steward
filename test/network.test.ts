@@ -28,3 +28,22 @@ test('a release that failed on the network, online again by the time the round a
   assert.equal(await networkFailure(online, `npm run release -- --publish failed (exit 1)${networkNote(RELEASE_OUTPUT)}`), true);
   assert.equal(await networkFailure(online, 'npm run release -- --publish failed (exit 1)'), false, 'its exit code alone: held, as before');
 });
+
+test("GitHub's own failing (a 5xx, a dropped connection) passes like the network's: the next round pushes again, no alarm", async () => {
+  const online = { online: async () => true };
+  for (const said of [
+    "git push refused (never forced): ! [remote rejected] steward/kit-2.32.1 -> steward/kit-2.32.1 (Internal Server Error) error: failed to push some refs to 'https://github.com/Jcollier0120/Heiward.git'",
+    'error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502',
+    "fatal: unable to access 'https://github.com/x/y.git/': The requested URL returned error: 503",
+    'fatal: the remote end hung up unexpectedly',
+    'gh pr create failed: HTTP 504: Gateway Timeout (https://api.github.com/graphql)',
+    'HTTP 500: Something went wrong',
+  ]) assert.equal(await networkFailure(online, said), true, said);
+  assert.ok(networkLine('npm run release -- --publish failed\nHTTP 503: Service Unavailable'), "a release's output carries the line");
+  for (const said of [
+    "git push refused (never forced): ! [rejected] steward/kit-2.32.1 -> steward/kit-2.32.1 (non-fast-forward)",
+    'remote: Permission to Jcollier0120/Heiward.git denied to someone. fatal: ... returned error: 403',
+    'HTTP 422: Validation Failed',
+    'npm test failed (exit 1): 5003 tests',
+  ]) assert.equal(await networkFailure(online, said), false, `still held: ${said}`);
+});
