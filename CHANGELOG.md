@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.12.5
+
+**It hands out kit 2.30.0: each staff release is published to the Exchequer, Castellan's release service, as well as to GitHub.**
+
+### What's new
+
+- Kit 2.30.0: when an agent is released, the same files that go to GitHub also go to the Exchequer (https://api.castellan-software.com), where the PCs that subscribe will download the staff from. Only the agents it sells are published there (never Manor or Heiward), and only from a PC with the publisher's key. GitHub's releases stay where every Manor looks for now.
+- `npm run release -- --exchequer` in an agent's checkout publishes a release that is already on GitHub to the Exchequer, from GitHub's own files.
+
+### What changed
+
+- A release that reached GitHub but not the Exchequer (no publisher key on this PC, or the Exchequer down or refusing) is still released: the Steward's page shows it as done, with the reason as a note ("Not published to the Exchequer: …"). It is never a failure or an alarm, and never mistaken for the network failing a release.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out. To publish to the Exchequer, the PC that releases needs the publisher's key in `%USERPROFILE%\.steward\exchequer-publisher.key` (or `EXCHEQUER_PUBLISHER_KEY`); without it, releases go to GitHub alone, as before.
+
 ## 0.12.3
 
 **It hands out kit 2.28.0: an agent that needs a setting from you waits for it, and its tour asks for it.**

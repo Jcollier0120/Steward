@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.30.0
+
+**A release is published to the Exchequer, Castellan's release service, as well as to GitHub.** Castellan sells the staff by subscription, and the PCs whose licence covers an agent will download its releases from the Exchequer (https://api.castellan-software.com). GitHub's releases repository stays where every Manor looks for now; publishing there ends later, once Manor takes the staff's releases from the Exchequer.
+- **node/exchequer.ts is new: `publishToExchequer(release, { env?, home?, fetch? })`.** With the files a release published on GitHub (the zip, SHA256SUMS.txt, and manor-agent.json when the agent announces itself, which also goes as the draft's `announcement`), it asks the Exchequer which agents it sells (`GET /api/v1/agents`, public), makes a draft (`POST /api/v1/publish/<id>/<version>` with each file's name, size and SHA-256, the commit and the notes), PUTs each file to the signed upload URL it hands back, and asks it to check them and publish (`POST …/done`). Its answer is one line and `ok`; it never throws.
+  - **Only an agent the Exchequer sells:** Manor and Heiward never (`NEVER_SOLD`), nor an agent its list leaves out: "The Exchequer: heiward isn't sold there, so heiward-v1.7.2 is on GitHub alone."
+  - **Only with the publisher's key:** `EXCHEQUER_PUBLISHER_KEY`, else `%USERPROFILE%\.steward\exchequer-publisher.key`, trimmed (`publisherKey`). Without one: "Not published to the Exchequer: no publisher key at … (or EXCHEQUER_PUBLISHER_KEY).", and nothing is asked of the Exchequer. The key goes to the Exchequer alone, as a Bearer token: never to the agents list or the storage the upload URLs point at, and never into a line (`withoutKey` takes it out, even when the Exchequer says it back).
+  - **Where:** `EXCHEQUER_URL`, else https://api.castellan-software.com (`exchequerUrl`).
+  - **Done again, it finishes:** a draft is made afresh and an upload replaces the file, and a release published there already (`409 already-published`, or `alreadyPublished` from /done) counts as published: "The Exchequer has porter-v0.4.26 published already."
+- **node/release.ts:** `--publish`, once the release is in the releases repository (and the agent's own), publishes the same files to the Exchequer and prints its line. Whatever happens there, the exit code is GitHub's: an Exchequer that is down, refuses, or has no key on this PC never fails a release. Its failure says "Not published to the Exchequer: <why>. The GitHub release stands; npm run release -- --exchequer finishes it."
+- **`npm run release -- --exchequer` is new:** the release the releases repository already has at package.json's version, published to the Exchequer from GitHub's own files (so the bytes are the ones every Manor checked), with its notes and the commit its release.json names. It builds nothing, and exits 1 when it didn't go.
+- **spec/RELEASES.md** says so.
+- **What an agent must do:** nothing. Its next release publishes to the Exchequer too, from the PC that has the publisher's key.
+
+### Before you update
+
+Nothing: it updates itself as usual. A PC that releases without the publisher's key publishes to GitHub alone, as before, and says so in a line.
+
 ## 2.28.0
 
 **Required settings: an agent that can't work without something from you waits for it, and onboarding asks for it.** The user's call: "each agent has designated which of its settings fields are required for the agent to operate... get the user to fill those out during onboarding... before the agent can begin", as the Chamberlain can do nothing until a mail account is set up.
