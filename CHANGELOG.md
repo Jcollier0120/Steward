@@ -17,6 +17,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
+## 0.25.1
+
+**A Castellan release service that can't be reached never stops a Steward that works alone.**
+
+### What changed
+
+- On a PC with a Castellan licence, the Steward 0.24.0 stopped merging and releasing whenever it couldn't reach Castellan's release service, even though it had never taken turns with another PC. Now it goes on exactly as before. Only a PC that was already taking turns waits for the service, so it never merges beside another of your PCs.
+- An answer from the service that says nothing about turns counts as no turns, the same as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.24.1
 
 **Work merged out of order no longer gets stuck on its version: the Steward renumbers the kit too, and keeps the version claims in step.**
