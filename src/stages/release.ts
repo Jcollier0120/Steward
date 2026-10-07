@@ -10,6 +10,7 @@ import { agreedVersion } from '../versions.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
+import { noteReleased } from '../strangers.ts';
 import { checkoutOf, exchequerNote, forgetGlance, freshBranch, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 
 /**
@@ -159,6 +160,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     }
     // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit, stage: 'release', branch: e.branch, version });
+    // This Steward's release, not someone else's (strangers.ts).
+    noteReleased(e, version);
     // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
     return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/v${version}` });
@@ -210,6 +213,7 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
   }
   forgetGlance(ctx, e);
   recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
+  noteReleased(e, o.version);
   return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)})${o.noted}`, { version: o.version, commit: o.commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/${tag}` });
 }
 
