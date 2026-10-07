@@ -2,15 +2,43 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.20.2
+## 0.21.1
 
-**It hands out the kit 2.34.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**
+**It hands out the kit 2.35.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**
 
 ### What changed
 
 - A Snapdragon PC whose NPU is set up from now on gets GenieX 0.8.0 instead of 0.7.0. It has been run on a Snapdragon X2 Elite: it installs the same way, answers chat and pictures, and uses the same model files.
 - A PC already running 0.7.0 keeps it. The Smith offers 0.8.0 to try under New for your NPU, and puts 0.7.0 back if you remove it.
 - Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.21.0
+
+**It hands out the kit 2.35.0: a release of an agent Castellan sells goes to the Exchequer, not the public releases repository.**
+
+### What changed
+
+- The release of an agent that Castellan sells is published to the Exchequer, Castellan's release service, and no longer to the public releases repository. The Steward still sees it released, by the agent's own repository.
+- The agents not for sale go to the releases repository as before, and to the Exchequer too. That's Manor, Heiward, and the agents held back from sale.
+- If the Exchequer can't say which agents it sells, or doesn't take a release, the release goes to the releases repository as before. A release is never held back, and nothing becomes an alarm.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents for sale stop appearing in the public releases repository once the Exchequer says which ones are for sale (its 0.6.0).
+
+## 0.20.1
+
+**A refresh after releases cleans up after itself, however deep its packages go.**
+
+### What changed
+
+- A refresh's working copy is removed whatever the length of the paths in it. A site's packages go deeper than git on Windows deletes, so its copy could be left behind, and the next refresh would then have failed to start.
+- One left behind by a refresh cut short (the PC turned off mid-run) is cleared before the next refresh.
 
 ### Before you update
 

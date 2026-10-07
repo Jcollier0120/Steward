@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
-import { commitOf, fetchBranch, git, removeWorktree } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, unlinkModules } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
@@ -70,8 +70,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
   if (!commit) return done('refused', `no ${remote} in ${repo}`);
   const at = commit.slice(0, 7);
   const dir = refreshDirOf(ctx.settings, e);
-  await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  await dropWorktree(ctx, repo, dir);
   rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   say(`${command} in ${dir}, at ${remote} (${at}), after ${what}`);
@@ -106,11 +105,22 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
     return done('done', `pushed ${made.slice(0, 7)} to ${e.branch}: ${title} (${files.join(', ')})`, { commit: made.slice(0, 7), url: `https://github.com/${e.repo}/commit/${made}` });
   } finally {
     try {
-      await removeWorktree(run, repo, dir);
+      await dropWorktree(ctx, repo, dir);
     } catch (err) {
       ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
     }
   }
+}
+
+/**
+ * A refresh's worktree gone: its node_modules link first, alone (never what it points to: git.ts's unlinkModules), then
+ * the folder, by Node, which minds no path's length, then git's record of it. A site's own packages (a Next.js build's)
+ * go deeper than git for Windows deletes: its `worktree remove` stopped at "Filename too long".
+ */
+async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> {
+  unlinkModules(dir);
+  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  await gitMaybe(ctx.run, repo, 'worktree', 'prune');
 }
 
 /**
