@@ -88,14 +88,21 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
  * failed before to a person). Then the Aletaster tastes that commit (tasting.ts): a release it holds waits, with its
  * reason, and the next round asks again.
  */
-export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null }): Promise<EmployeeResult> {
+export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean }): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
   // Released only once the person said how (Settings' Release it), and only a repository with a version.
   if (!e.release) return result(e, 'skipped', NO_RELEASE);
   if (!e.versionFiles.length) return result(e, 'skipped', 'no version files in Settings, so no version to release');
-  // Released here, its release installs it: not for one that was removed from this PC.
-  const away = releasedHere(e) ? notHiredHere(e) : null;
+  // Hired: its first install on this PC (Manor's Hire for one of this PC's own agents, staff.local.json). Only one built
+  // here (its release installs it), only while it isn't installed, and at the version on its branch, released or not.
+  if (o.hire) {
+    if (!releasedHere(e)) return result(e, 'refused', `${e.name} is installed from its published release, not built here: hire it in Manor`);
+    if (!e.installed) return result(e, 'refused', `Settings name no install folder for ${e.name}, so the Steward can't tell whether it is installed`);
+    if (!notHiredHere(e)) return result(e, 'skipped', `${e.name} is installed here already (${e.installed})`);
+  }
+  // Released here, its release installs it: not for one that was removed from this PC, unless it is hired again.
+  const away = releasedHere(e) && !o.hire ? notHiredHere(e) : null;
   if (away) return result(e, 'skipped', away);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
@@ -105,7 +112,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])));
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
   const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
-  const decision = releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
+  // A hire installs the version on its branch, whatever has been released before: there is no install of it here.
+  const decision = o.hire ? releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released: [] }, null) : releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
   if (!decision.release) {
     const out = 'version' in v && released.includes(v.version);
     return result(e, 'skipped', 'error' in v ? v.error : decision.why, out ? { released: true, version: v.version } : {});
@@ -120,8 +128,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   }
   if (gate.note) ctx.log(`[${e.id}] ${gate.note}`);
   const noted = gate.note ? `; ${gate.note}` : '';
-  // Another PC took its turn here meanwhile (lease.ts): it releases this.
-  if (ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `v${version} is left to another PC, whose turn it is now`, { version, commit: commit.slice(0, 7) });
+  // Another PC took its turn here meanwhile (lease.ts): it releases this. A hire is this PC's own install.
+  if (!o.hire && ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `v${version} is left to another PC, whose turn it is now`, { version, commit: commit.slice(0, 7) });
 
   // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
   if (e.release === TAG_RELEASE) return tagRelease(ctx, e, { repo, commit, version, remote, noted });
@@ -269,7 +277,7 @@ export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; c
   return pushed.code === 0 ? null : `git push failed: ${said(pushed)}`;
 }
 
-export async function release(ctx: Ctx, employees: Employee[], o: { kit: string | null }): Promise<EmployeeResult[]> {
+export async function release(ctx: Ctx, employees: Employee[], o: { kit: string | null; hire?: boolean }): Promise<EmployeeResult[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
       return await releaseOne(ctx, e, o);

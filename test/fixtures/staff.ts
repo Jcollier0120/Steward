@@ -13,11 +13,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -41,11 +36,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -69,11 +59,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -97,11 +82,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -125,11 +105,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -153,11 +128,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -181,11 +151,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -209,11 +174,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -237,10 +197,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -264,9 +220,6 @@ export const STAFF: Employee[] = [
     "branch": "master",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "spec"
-    ],
     "fill": "powershell -NoProfile -File tools\\kit.ps1",
     "test": [
       "dotnet test HEI.Core.Tests"
@@ -287,11 +240,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -315,11 +263,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -343,11 +286,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -371,11 +309,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -399,11 +332,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -427,11 +355,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -455,11 +378,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -483,11 +401,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",
@@ -511,11 +424,6 @@ export const STAFF: Employee[] = [
     "branch": "main",
     "merges": true,
     "usesKit": true,
-    "parts": [
-      "node",
-      "web",
-      "spec"
-    ],
     "fill": "node tools/kit.ts",
     "test": [
       "npx tsc -p . --noEmit",

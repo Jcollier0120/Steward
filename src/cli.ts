@@ -37,8 +37,10 @@ const USAGE = `${APP.id}: ${APP.role}
                    PRs too (the GitHub accounts in Settings), to any employee; their branches stay.
                    Then what each merged PR's steward block asks for: release, install, and
                    approve-jobs (merging counts as reading the scripts it names)
-  release [--kit <version>] [--employees a,b]
-                   release each employee whose branch has the kit and an unreleased version, from its branch
+  release [--kit <version>] [--employees a,b] [--hire]
+                   release each employee whose branch has the kit and an unreleased version, from its branch.
+                   --hire, with --employees: the first install on this PC of an agent built here (this PC's
+                   own staff), at its branch's version: Manor's Hire for one of them asks for it
   round [--employees a,b]
                    one round, as the Steward runs by itself on duty (Settings): merge --yes --team, with
                    what each merged PR asks for after, then a release of every version not yet released
@@ -105,7 +107,7 @@ const STAGE_FLAGS: Record<string, string[]> = {
   bump: ['--kit', '--employees', '--hires', '--kit-from', '--base'],
   push: ['--kit', '--employees', '--hires'],
   merge: ['--yes', '--team', '--employees', '--hires', '--kit'],
-  release: ['--kit', '--employees', '--hires'],
+  release: ['--kit', '--employees', '--hires', '--hire'],
   round: ['--employees', '--hires'],
   staff: ['--json', '--no-fetch'],
 };
@@ -160,6 +162,7 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
     kitFrom: opt(rest, '--kit-from') ?? null,
     yes: rest.includes('--yes'),
     team: rest.includes('--team'),
+    hire: rest.includes('--hire'),
     // A round asked for in a terminal looks at every employee, as Run now does.
     ...(name === 'round' ? { full: true } : {}),
   };
@@ -235,7 +238,7 @@ switch (cmd) {
     const e = got.employee;
     const dry = rest.includes('--dry-run');
     console.log(`${dry ? 'Would take on' : 'Took on'} ${e.name} (${e.id}): ${e.repo}, its clone ${e.checkout} on ${e.branch}.`);
-    console.log(`  kit parts ${e.parts.join(', ') || 'none'}; fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
+    console.log(`  kit parts ${got.kitParts?.join(', ') || 'none'} (its kit.json); fill ${e.fill || '-'}; test ${e.test.join(' && ') || '-'}`);
     console.log(`  version in ${e.versionFiles.join(', ') || '-'}; release ${e.release || '-'}; install ${e.install || '-'}`);
     for (const n of got.notes) console.log(`  ${n}`);
     if (got.missing.length) console.log(`  Not found, so fill it in on the Settings page: ${got.missing.join(', ')}.`);

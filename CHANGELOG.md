@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.27.4
+## 0.27.7
 
 **An agent's release notes for a new kit never name a repository, and a kit is tried with the notes its rollout will write.**
 
@@ -14,6 +14,39 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.27.5
+
+**An employee's kit parts are read from its own kit.json, the one place they are kept.**
+
+### What changed
+
+- The Steward no longer keeps its own copy of each repository's kit parts. That copy didn't know the React part, so every agent with a React page carried a note on the Steward's page, "kit.json takes node, web, spec, react; Settings say node, web, spec", though nothing was wrong: an agent's kit has always been filled from its kit.json.
+- The page now shows each repository's parts as its kit.json says them, React included, and the note is gone.
+- Settings no longer has a Kit parts field for a repository. To change an agent's parts, change its kit.json.
+- Taking on a repository (Look after, or `employ`) lists the parts its kit.json takes.
+- Taking on an agent whose src/app.ts writes its id and name in double quotes (or backticks) now takes its name as written: the Crier was taken on as "crier".
+
+### Before you update
+
+- Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
+
+## 0.27.2
+
+**It installs one of your own agents the first time, when Manor's Hire asks.**
+
+### What's new
+
+- An agent that is yours alone (built here from its clone, never published) can now be hired the first time: Manor's Hire asks the Steward, which builds the version on its branch and installs it. Before, a release only kept such an agent up to date once it was installed, and the first install was a command run by hand in its clone.
+- In a terminal: `node src\cli.ts release --employees <id> --hire`.
+
+### What changed
+
+- A hire installs only an agent built here that isn't installed yet. One that is fired stays gone until it is hired again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor shows Hire for your own agents once it is updated too.
 
 ## 0.27.0
 

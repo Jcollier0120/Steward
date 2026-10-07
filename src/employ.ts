@@ -2,7 +2,7 @@ import path from 'node:path';
 import { manorHome, originRepo } from './kit/manor.ts';
 import { readJson, writeJson } from './kit/store.ts';
 import { branchTree, employeeFromClone, folderTree, internalStaff } from './migrate.ts';
-import { PART_NAMES, type Employee } from './settings.ts';
+import type { Employee } from './settings.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
 
 /** A clone's repository name from its origin: GitHub's owner/name, else host/path (scm.ts); null with no origin. */
@@ -29,6 +29,8 @@ export interface Employed {
   employee: Employee;
   missing: string[];
   notes: string[];
+  /** The kit parts its kit.json takes, as it says them (null: it has no kit.json). The Steward keeps no copy. */
+  kitParts: string[] | null;
 }
 
 /** The id and name a clone gives itself: its manor-agent.json's agent, else its src/app.ts's APP. */
@@ -40,16 +42,17 @@ export function identityOf(read: (rel: string) => string | null): { id: string; 
     // Not JSON: its app.ts may still say.
   }
   const app = read('src/app.ts') ?? '';
-  const id = /\bid:\s*'([a-z][a-z0-9-]*)'/.exec(app)?.[1];
+  // In whichever quotes the agent wrote them: 'Pinder', "Pinder" or `Pinder`.
+  const id = /\bid:\s*(['"`])([a-z][a-z0-9-]*)\1/.exec(app)?.[2];
   if (!id) return null;
-  return { id, name: /\bname:\s*'([^']+)'/.exec(app)?.[1]?.trim() || id, announces: false };
+  return { id, name: /\bname:\s*(['"`])((?:(?!\1)[^\r\n])+)\1/.exec(app)?.[2]?.trim() || id, announces: false };
 }
 
-/** The kit parts the Steward knows from a kit.json (the Steward has no "react" part: the kit's node part brings it). */
+/** The kit parts a kit.json takes, or null when it is no kit.json. kit.json is their one source: tools/kit.ts fills from it. */
 export function partsOf(kitJson: string | null): string[] | null {
   try {
     const parts = JSON.parse((kitJson ?? 'null').replace(/^﻿/, ''))?.parts;
-    return Array.isArray(parts) ? PART_NAMES.filter((p) => parts.includes(p)) : null;
+    return Array.isArray(parts) ? parts.filter((p): p is string => typeof p === 'string') : null;
   } catch {
     return null;
   }
@@ -85,7 +88,7 @@ export function employeeFor(
   const internal = (o.internal ?? internalStaff()).has(me.id);
   const published = !internal && (me.announces || (o.staff ?? manorStaff()).has(me.id));
   const parts = partsOf(tree.read('kit.json'));
-  const got = employeeFromClone({ id: me.id, name: me.name, repo, branch, checkout: { path: dir }, parts: parts ?? [], usesKit: parts !== null }, !published);
+  const got = employeeFromClone({ id: me.id, name: me.name, repo, branch, checkout: { path: dir }, usesKit: parts !== null }, !published);
   if (!got) return { error: `${dir} couldn't be read as a clone.` };
   const notes = [
     internal
@@ -95,7 +98,7 @@ export function employeeFor(
         : "It doesn't announce itself (no manor-agent.json) and Manor doesn't list it: it is built and installed here until it does. Change Release it in Settings to publish it.",
   ];
   if (parts === null) notes.push("It has no kit.json: listed, but the kit's stages pass over it until it takes the kit.");
-  return { employee: got.employee, missing: got.missing, notes };
+  return { employee: got.employee, missing: got.missing, notes, kitParts: parts };
 }
 
 /**

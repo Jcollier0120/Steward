@@ -68,13 +68,13 @@ export interface StaffRow {
   repo: string;
   branch: string;
   usesKit: boolean;
-  parts: string[];
   checkout: { path: string; exists: boolean; branch: string | null; changes: number };
   main: {
     commit: string;
     version: string | null;
     versionError: string | null;
     kit: string | null;
+    /** The parts its kit.json takes: the one place they're kept. */
     parts: string[] | null;
     /** Its tools/kit.ts against the Steward's: the same, different, missing, or not asked (null). */
     tool: 'current' | 'differs' | 'missing' | null;
@@ -205,7 +205,6 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     repo: e.repo,
     branch: e.branch,
     usesKit: e.usesKit,
-    parts: e.parts,
     checkout: { path: dir, exists: existsSync(dir), branch: null, changes: 0 },
     main: null,
     release: null,
@@ -257,7 +256,6 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     row.main = { commit: commit.slice(0, 7), version: 'version' in v ? v.version : null, versionError: 'error' in v ? v.error : null, kit: pin?.kit ?? null, parts: pin?.parts ?? null, tool };
     if ('error' in v) notes.push(v.error);
     if (e.usesKit && !pin) notes.push(`no kit.json on ${remote}`);
-    if (pin?.parts && pin.parts.join(',') !== e.parts.join(',')) notes.push(`kit.json takes ${pin.parts.join(', ')}; Settings say ${e.parts.join(', ')}`);
     if (opts.kit) {
       const branch = bumpBranch(opts.kit);
       if (await branchExists(run, dir, branch)) row.prepared = { branch, ahead: await aheadOf(run, dir, branch, remote) };
