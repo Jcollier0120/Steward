@@ -1,6 +1,7 @@
 import type { AlarmState } from '../alarms.ts';
 import type { FoundRepo, FoundState } from '../found.ts';
 import type { TendState } from '../tend.ts';
+import type { TurnsView } from '../lease.ts';
 import type { StageResult } from '../stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from '../stages/staff.ts';
 
@@ -41,6 +42,8 @@ export interface FoundView {
 }
 
 export interface StewardView {
+  /** Turns with the licence's other PCs (lease.ts): the repositories another PC looks after. Null or left out: no turns. */
+  turns?: TurnsView | null;
   /** This PC releases Castellan itself (Settings): the kit, its rollout and the Steward's own releases are shown. */
   castellan?: boolean;
   /** The repositories Reeve found, to look after. */

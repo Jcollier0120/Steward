@@ -138,7 +138,7 @@ export function gitProbe(ctx: Ctx): MergedProbe {
  * employees the glance still says how they are (one this round merged or released is looked at next round), and only
  * PRs watched before the glance was taken (one opened during this round isn't in it). Pure but for `merged`.
  */
-export async function judge(o: { acted: Acted; glance: Glance; employees: Employee[]; merged: MergedProbe; now: Date }): Promise<Acted> {
+export async function judge(o: { acted: Acted; glance: Glance; employees: Employee[]; merged: MergedProbe; now: Date; elsewhere?: Set<string> }): Promise<Acted> {
   const a: Acted = structuredClone(o.acted);
   const at = o.now.toISOString();
   const taken = Date.parse(o.glance.at);
@@ -146,6 +146,13 @@ export async function judge(o: { acted: Acted; glance: Glance; employees: Employ
   for (const e of o.employees) {
     const g = o.glance.repos[e.id];
     if (!g) continue;
+    // Another PC of the licence has its turn here (lease.ts): what it merges and releases is its own, never a stranger's.
+    // Only learnt, so the round that takes the turn back judges from then on.
+    if (o.elsewhere?.has(e.id)) {
+      for (const [k, w] of Object.entries(a.watching)) if (w.id === e.id) delete a.watching[k];
+      a.known[e.id] = g.releases.filter((r) => !r.isDraft && VERSION_TAG.test(r.tagName)).map((r) => r.tagName);
+      continue;
+    }
     // The Steward's PRs open now: watched, at their head.
     const open = new Set<string>();
     for (const p of g.prs) {
@@ -266,7 +273,7 @@ export async function lookForStrangers(o: { ctx: Ctx; glance: Glance | null | un
   const now = o.now ?? new Date();
   try {
     let a = withAck(loadActed(), o.alarms);
-    if (o.glance) a = await judge({ acted: a, glance: o.glance, employees: ctx.settings.employees, merged: o.merged ?? gitProbe(ctx), now });
+    if (o.glance) a = await judge({ acted: a, glance: o.glance, employees: ctx.settings.employees, merged: o.merged ?? gitProbe(ctx), now, elsewhere: ctx.lease?.skip });
     writeJson(actedFile(), a);
     return strangerConditions(a, now);
   } catch (e) {

@@ -20,7 +20,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { merge } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
-import { pruneClaims } from './claims.ts';
+import { pruneClaims, syncClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, refreshAfterReleases } from './stages/refresh.ts';
 import { release } from './stages/release.ts';
@@ -32,6 +32,7 @@ import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent } from './tend.ts';
+import { coordHere, takeTurns, type Coord } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 
 /**
@@ -203,6 +204,11 @@ export interface StageOptions {
    * node --test the staff are looked at only when this is given, so a test never opens a real agent.
    */
   tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+  /**
+   * The Exchequer for the turns with the licence's other PCs (lease.ts): null for none. Left out, this PC's licence
+   * decides; under node --test there is none unless given.
+   */
+  coord?: Coord | null;
 }
 
 /**
@@ -234,6 +240,31 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
   if (!ctx.settings.stewardRepo || !checkout) return null;
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
+}
+
+/**
+ * The turns a merge, release or round takes with the licence's other PCs (lease.ts), before it acts: on the employees
+ * asked about, the repositories refreshed after releases, and the Steward's own while it merges or releases itself.
+ * Sets ctx.lease; gives back the employees asked about that are this PC's to act in, and a line for each that isn't.
+ */
+async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; shared: Coord | null }> {
+  const refreshed = ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
+  const coord = o.coord !== undefined ? o.coord : coordHere();
+  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { coord, settings: ctx.settings, log: ctx.log });
+  ctx.lease = t.guard;
+  if (t.mode === 'unreachable') ctx.log('turns: the Exchequer could not be reached; only repositories whose turn this PC already held are looked after');
+  const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
+  for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), shared: t.mode === 'on' ? coord : null };
+}
+
+/** The Steward's own repository as an employee, for its turn: while Settings say it merges or releases itself, with a checkout. */
+function selfForTurns(ctx: Ctx, o: StageOptions, merging: boolean, releasing: boolean): Employee | null {
+  if (!(merging && ctx.settings.mergeSelf) && !(releasing && ctx.settings.releaseSelf)) return null;
+  if (process.env.NODE_TEST_CONTEXT && !o.self) return null;
+  const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
+  if (!ctx.settings.stewardRepo || !checkout || !existsSync(checkout)) return null;
+  return stewardEmployee(ctx.settings, checkout);
 }
 
 /** Whether this PC is online: the kit's look, or online under node --test (StageOptions.online). */
@@ -309,6 +340,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       const own = o.ownKit !== undefined ? o.ownKit : ownKit();
       /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
       let rolloutWaits: { kit: string; own: string } | null = null;
+      /** The Exchequer, when this round took turns through it (lease.ts): the licence's claims are copied from it. */
+      let shared: Coord | null = null;
       try {
         const picked = pick(ctx.settings.employees, ask.employees);
         if ('error' in picked) throw new Error(picked.error);
@@ -326,14 +359,18 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
-          let employees = picked.employees;
+          // Turns with the licence's other PCs first (lease.ts): a repository another PC has its turn in is left to it.
+          const whole = !ask.employees?.length;
+          const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
+          shared = turns.shared;
+          let employees = turns.acting;
           if (round) {
             plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
           const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
-          out.results = merged.map(({ merged: _m, held: _h, ...r }) => r);
+          out.results = [...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r)];
           held = merged.flatMap((r) => {
             const employee = employees.find((e) => e.id === r.id);
             return employee && r.held.length ? [{ employee, prs: r.held }] : [];
@@ -341,7 +378,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Those not looked at still have the PRs that waited when they last were: the alarms go on counting their hours.
           if (plan) held.push(...heldBefore(seen!, plan.quiet));
           // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts); not in a stage asked about some of them.
-          const self = (round || ask.team) && !ask.employees?.length ? selfEmployee(ctx, o) : null;
+          const self = (round || ask.team) && whole && turns.selfActs ? selfEmployee(ctx, o) : null;
           if (self) {
             const [r] = await merge(ctx, [self], { yes, team: true });
             const { merged: _m, held: prs, ...line } = r;
@@ -370,7 +407,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const released = await releaseUnreleased(ctx, employees.filter((e) => !releasedNow.has(e.id)));
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
             // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
-            if (!ask.employees?.length) out.results.push(...(await selfRound(ctx, o)));
+            if (whole && turns.selfActs) out.results.push(...(await selfRound(ctx, o)));
             // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
             // merged and released by later rounds.
             const newest = latestKit(ctx.kit);
@@ -397,7 +434,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         } else if (!ctx.settings.releasesCastellan) {
           // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
           if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
-          out.results = await release(ctx, picked.employees, { kit: null });
+          const turns = await takeTurnsFor(ctx, o, picked.employees, null);
+          out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: null }))];
         } else {
           const chosen = chooseKit(ctx.kit, ask.kit);
           if ('error' in chosen) throw new Error(chosen.error);
@@ -413,7 +451,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           } else if (name === 'push') {
             clearRolloutHolds(picked.employees.map((e) => e.id));
             out.results = await push(ctx, picked.employees, { kit: chosen.version, changelog: await changelogFor(ctx, chosen.version) });
-          } else out.results = await release(ctx, picked.employees, { kit: chosen.version });
+          } else {
+            const turns = await takeTurnsFor(ctx, o, picked.employees, null);
+            out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: chosen.version }))];
+          }
         }
       } catch (e) {
         out.error = (e as Error).message;
@@ -441,7 +482,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Claimed versions whose work landed, or went stale with no PR, are given back (claims.ts).
       if (name === 'round') {
         try {
-          await pruneClaims(loadStaff()?.rows ?? []);
+          // With a licence, every PC's claims are copied here first, and those dropped are given back there too.
+          await syncClaims(shared);
+          await pruneClaims(loadStaff()?.rows ?? [], Date.now(), { coord: shared });
         } catch (e) {
           log(`claims: ${(e as Error).message}`);
         }

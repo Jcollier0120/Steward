@@ -11,10 +11,56 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - `claim-port <agent id>` gives a new agent its page's port before anyone writes one: the next free one after every port Manor's staff, this PC's own staff, the agents announced on GitHub, each repository's src/app.ts and every earlier claim use, with its development port (+10000) free too. A new agent needs no repository yet. Asking again for the same agent gives the same port; an agent that has one keeps it. `release-port` gives one back.
 - `ports` lists every port in use, by whom and where each says so.
 - When two agents have the same port, a round raises an alarm naming both, before either is installed. Manor offers only one of two such agents for hire, so the other's role used to sit empty with no word why: the Assayer and the Shepherd both had 20707.
+## 0.25.1
+
+**A Castellan release service that can't be reached never stops a Steward that works alone.**
+
+### What changed
+
+- On a PC with a Castellan licence, the Steward 0.24.0 stopped merging and releasing whenever it couldn't reach Castellan's release service, even though it had never taken turns with another PC. Now it goes on exactly as before. Only a PC that was already taking turns waits for the service, so it never merges beside another of your PCs.
+- An answer from the service that says nothing about turns counts as no turns, the same as before.
 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.24.1
+
+**Work merged out of order no longer gets stuck on its version: the Steward renumbers the kit too, and keeps the version claims in step.**
+
+### What's new
+
+- **The kit's version can be claimed**, as every repository's can: `claim-version kit --branch <b> --for "<what>"`, and `release-version kit <version>`. It counts above kit/VERSION, every kit release, every kit version an open pull request names, and every live claim, apart from the Steward's own version.
+
+### What changed
+
+- When another change with a higher version merges first, catching a pull request up now settles the kit as well as the Steward's version: kit/VERSION, the kit's changelog (its entry above the one that merged first, under its new number), the Steward's pin of its own kit, the kit number its own changelog entry names, and its title. Before, a conflict there waited for a person.
+- A pull request caught up to a new version takes its branch's claim with it: the old version is free again, the new one is held, and the work's author asking again is handed the new one.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.24.0
+
+**Your PCs on one Castellan licence take turns: each repository is merged and released by one Steward, and versions are claimed once for all of them.**
+
+### What's new
+
+- On a PC with a Castellan licence, the Steward takes its turn at each repository before it merges or releases there, through the Exchequer. A repository another of your PCs is looking after is left alone, so two Stewards never merge and release the same pull requests.
+- The page says which repositories another PC looks after ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with a **Do it here** button that moves it to this PC at once.
+- A repository cloned on only one PC is always looked after there.
+- `claim-version` hands out versions for all your PCs at once, so work started on the desktop and the laptop side by side never takes the same version.
+
+### What changed
+
+- When the Exchequer can't be reached, the Steward keeps looking after the repositories it already had, until its turn runs out, and takes on no others: a round may be slower, but nothing is merged twice.
+- The alarm for another Steward (0.23.2) doesn't count what a PC does in a repository whose turn it has: only a Steward that doesn't take turns raises it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Without a licence on the PC, or until the Exchequer takes turns (its 0.7.0), everything works exactly as before.
+- For the turns to work, update the Steward on every PC: an older one doesn't take turns.
 
 ## 0.23.5
 
