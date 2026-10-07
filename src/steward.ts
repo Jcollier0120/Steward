@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './alarms.ts';
+import { portUses } from './ports.ts';
 import { dataDir } from './app.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
@@ -494,7 +495,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const failedReleases = readJson<Record<string, string>>(roundFailuresFile(), {});
           // Merged or released by something that isn't this Steward (strangers.ts): looked for only in a round that asked GitHub.
           const strangers = await lookForStrangers({ ctx, glance: quiet || out.error ? null : ctx.glance, alarms: loadAlarms(), now: o.now?.() });
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
+          // which has no Manor of its own to read.
+          const ports = process.env.NODE_TEST_CONTEXT ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
