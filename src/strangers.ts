@@ -146,7 +146,7 @@ export async function judge(o: { acted: Acted; glance: Glance; employees: Employ
   for (const e of o.employees) {
     const g = o.glance.repos[e.id];
     if (!g) continue;
-    // Another PC of the licence has its turn here (lease.ts): what it merges and releases is its own, never a stranger's.
+    // Another PC has its turn here (lease.ts): what it merges and releases is its own, never a stranger's.
     // Only learnt, so the round that takes the turn back judges from then on.
     if (o.elsewhere?.has(e.id)) {
       for (const [k, w] of Object.entries(a.watching)) if (w.id === e.id) delete a.watching[k];

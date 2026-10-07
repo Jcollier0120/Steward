@@ -73,7 +73,7 @@ export interface Ctx {
   /** How each repository is worked with (scm.ts): GitHub's way, or plain git. Not given: GitHub's, as before. */
   host?: (e: Employee) => Host;
   /**
-   * The turns this stage took with the licence's other PCs (lease.ts): asked before each merge and release whether this
+   * The turns this stage took with this PC's others (lease.ts): asked before each merge and release whether this
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
    */
   lease?: LeaseGuard | null;

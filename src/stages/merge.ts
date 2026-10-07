@@ -308,7 +308,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       held.push(heldOf(pr, trial));
       continue;
     }
-    // Another PC of the licence took its turn here meanwhile (lease.ts): it merges the rest.
+    // Another PC took its turn here meanwhile (lease.ts): it merges the rest.
     if (ctx.lease && !(await ctx.lease.ok(e))) {
       waits.push(`${describe(pr)} and the rest are left to another PC, whose turn it is now`);
       break;
