@@ -98,6 +98,8 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
     const title = refreshTitle(what);
     await git(run, dir, 'commit', '--quiet', '-m', title, '-m', `${command}, run by the Steward after it released ${what}, changed ${files.join(', ')}; ${e.test.length ? `${e.test.join(', ')} passed` : 'Settings name no tests'}. Made from ${remote} at ${at}.`);
     const made = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
+    // Another PC's turn here now (lease.ts): it refreshes after its own releases. The commit stays in this worktree only.
+    if (ctx.lease && !(await ctx.lease.ok(e))) return done('skipped', `${command} changed ${files.join(', ')}, but another PC publishes ${e.name} now, so nothing was pushed`, { commit: at });
     // A plain push: if the branch moved on meanwhile, git refuses, and so does the Steward. The next release tries again.
     const p = await run('git', ['push', '--quiet', 'origin', `HEAD:refs/heads/${e.branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (p.code !== 0) return done('failed', `git push to ${e.branch} refused (never forced): ${(p.err || p.out).trim().split('\n').slice(-2).join(' ')}${networkNote(`${p.out}\n${p.err}`)}`, { commit: at });
@@ -129,7 +131,7 @@ async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> 
  */
 export async function refreshAfterReleases(ctx: Ctx, released: EmployeeResult[]): Promise<EmployeeResult[]> {
   if (!released.length) return [];
-  // Not a repository another PC of the licence has its turn in (lease.ts): that PC refreshes it after its own releases.
+  // Not a repository another PC has its turn in (lease.ts): that PC refreshes it after its own releases.
   const which = ctx.settings.employees.filter((e) => e.refresh && !ctx.lease?.skip.has(e.id));
   if (!which.length) return [];
   const what = releasedWords(released);

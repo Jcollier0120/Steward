@@ -446,32 +446,61 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
 }
 
 /**
- * Turns with the licence's other PCs (lease.ts): each repository another PC merges and releases, with Do it here; and,
- * while the Exchequer can't be reached, that this PC goes on only where it had its turn.
+ * The release PC of each repository (lease.ts): who merges and releases it, whether it's kept on that PC, with Do it here
+ * and Keep it on this PC; what waits for a remote this PC can't reach; and claims another PC made too (claims.ts).
  */
-export function TurnsCard({ t }: { t: TurnsView | null | undefined }) {
-  if (!t || (t.mode === 'on' && !t.elsewhere.length)) return null;
+export function TurnsCard({ t, clashes }: { t: TurnsView | null | undefined; clashes?: string[] }) {
+  const rows = t?.rows ?? [];
+  if (!rows.length && !clashes?.length) return null;
+  const elsewhere = rows.filter((x) => x.status === 'elsewhere').length;
   return (
-    <Section title="Your other PCs" count={t.elsewhere.length || undefined}>
+    <Section title="Release PC" count={elsewhere || undefined}>
       <Card>
-        {t.mode === 'unreachable' && (
-          <Text variant="muted" as="p">
-            The Exchequer can't be reached just now, so this PC merges and releases only where it already had its turn, until that turn runs out.
-          </Text>
-        )}
-        {t.elsewhere.map((x) => (
+        {rows.map((x) => (
           <div className="row turn" key={x.id}>
             <span>
-              Merging and releasing for {x.name}: done by <strong>{x.holder}</strong>
+              {x.status === 'unreachable' || x.status === 'alone' ? (
+                <>
+                  {x.name}: <Text variant="muted">{x.note ? `${x.note[0].toUpperCase()}${x.note.slice(1)}.` : ''}</Text>
+                </>
+              ) : (
+                <>
+                  Merging and releasing for {x.name}: {x.status === 'here' ? 'this PC' : <>done by <strong>{x.holder}</strong></>}
+                  {x.pinned ? ' (kept there)' : ''}
+                  {x.quiet ? <Text variant="muted">{`. ${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text> : null}
+                </>
+              )}
             </span>
-            <PostButton
-              title="Do it here"
-              variant="secondary"
-              path="/api/turns/take"
-              body={{ repo: x.repo }}
-              confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next round.`}
-            />
+            {x.status === 'elsewhere' && (
+              <span className="row">
+                <PostButton
+                  title="Do it here"
+                  variant="secondary"
+                  path="/api/turns/take"
+                  body={{ repo: x.repo }}
+                  confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next look.`}
+                />
+                <PostButton
+                  title="Keep it on this PC"
+                  variant="secondary"
+                  path="/api/turns/take"
+                  body={{ repo: x.repo, pin: true }}
+                  confirm={`Merge and release ${x.name} on this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
+                />
+              </span>
+            )}
+            {x.status === 'here' &&
+              (x.pinned ? (
+                <PostButton title="Unpin" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: false }} />
+              ) : (
+                <PostButton title="Keep it on this PC" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: true }} confirm={`Keep ${x.name} on this PC? Other PCs leave it alone while this PC is around.`} />
+              ))}
           </div>
+        ))}
+        {(clashes ?? []).map((c) => (
+          <Text variant="muted" as="p" key={c}>
+            {c}.
+          </Text>
         ))}
       </Card>
     </Section>
@@ -702,7 +731,7 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <AlarmsCard a={v.alarms} now={now} />
-      <TurnsCard t={v.turns} />
+      <TurnsCard t={v.turns} clashes={v.claimClashes} />
       {v.round.repos === false && (
         <Card>
           <Text variant="muted" as="p">
