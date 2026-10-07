@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.20.1
+
+**A refresh after releases cleans up after itself, however deep its packages go.**
+
+### What changed
+
+- A refresh's working copy is removed whatever the length of the paths in it. A site's packages go deeper than git on Windows deletes, so its copy could be left behind, and the next refresh would then have failed to start.
+- One left behind by a refresh cut short (the PC turned off mid-run) is cleared before the next refresh.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.20.0
 
 **A repository can be refreshed after every release: a site that lists your release notes and downloads stays up to date by itself.**
