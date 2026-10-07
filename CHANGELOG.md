@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.23.0
+
+**Work merged out of order no longer gets stuck on its version: the Steward renumbers the kit too, and keeps the version claims in step.**
+
+### What's new
+
+- **The kit's version can be claimed**, as every repository's can: `claim-version kit --branch <b> --for "<what>"`, and `release-version kit <version>`. It counts above kit/VERSION, every kit release, every kit version an open pull request names, and every live claim, apart from the Steward's own version.
+
+### What changed
+
+- When another change with a higher version merges first, catching a pull request up now settles the kit as well as the Steward's version: kit/VERSION, the kit's changelog (its entry above the one that merged first, under its new number), the Steward's pin of its own kit, the kit number its own changelog entry names, and its title. Before, a conflict there waited for a person.
+- A pull request caught up to a new version takes its branch's claim with it: the old version is free again, the new one is held, and the work's author asking again is handed the new one.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.21.3
 
 **It hands out the kit 2.36.1: GenieX 0.8.0 is the NPU's server on a Snapdragon.**

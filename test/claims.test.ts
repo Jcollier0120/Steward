@@ -90,3 +90,36 @@ test("a PR that sets a version other work claimed waits for a version of its own
   writeFileSync(claimsFile(), JSON.stringify([{ repo: 'Jcollier0120/Fake', version: '0.4.11', branch: 'claude/late', by: 'claude', for: 'late', at: new Date().toISOString() }]));
   assert.equal((await teamHold(s.ctx, s.e, pr, lookup)).why, null);
 });
+
+test("the kit is claimed as a part of the Steward's repository: its own key, its own releases, the kit versions open PRs name", async () => {
+  rmSync(claimsFile(), { force: true });
+  const dir = path.join(home, 'kit-claims');
+  const { checkout } = fakeEmployee(dir, { version: '0.21.0', files: { 'kit/VERSION': '2.36.0\n' } });
+  const r = runner((a) => {
+    if (a[0] === 'release' && a[1] === 'list') return ok(['v0.21.0', 'kit-v2.35.0', 'kit-v2.36.0'].map((tagName) => ({ tagName, isDraft: false, publishedAt: '2026-10-07T00:00:00Z' })));
+    if (a[0] === 'pr' && a[1] === 'list') return ok([{ title: 'Fake 0.21.1, kit 2.36.1: GenieX 0.8.0', headRefName: 'claude/geniex' }]);
+  });
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  const kit = await claimVersion(ctx, e, { branch: 'claude/x', by: 'claude', for: 'a kit change', part: 'kit' });
+  assert.deepEqual([kit.claim.repo, kit.claim.version], [`${e.repo}#kit`, '2.36.2'], 'above the open PR that names kit 2.36.1');
+  const own = await claimVersion(ctx, e, { branch: 'claude/x', by: 'claude', for: 'a kit change' });
+  assert.deepEqual([own.claim.repo, own.claim.version], [e.repo, '0.21.2'], "the Steward's own, counted apart from the kit's");
+  const minor = await claimVersion(ctx, e, { branch: 'claude/y', by: 'claude', for: 'a big kit change', part: 'kit', minor: true });
+  assert.equal(minor.claim.version, '2.37.0');
+});
+
+test("a catch-up's new version moves its branch's claim: the old one is free, the new one held, its worker given it again", async () => {
+  rmSync(claimsFile(), { force: true });
+  const { reclaim } = await import('../src/claims.ts');
+  const s = setup('reclaim', { released: ['0.4.10'] });
+  const a = await claimVersion(s.ctx, s.e, { branch: 'claude/a', by: 'claude', for: 'a fix' });
+  assert.equal(a.claim.version, '0.4.11');
+  await reclaim(s.e.repo, 'claude/a', '0.4.13');
+  assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.by, c.for]), [['claude/a', '0.4.13', 'claude', 'a fix']], 'who and what kept');
+  const again = await claimVersion(s.ctx, s.e, { branch: 'claude/a', by: 'claude', for: 'a fix' });
+  assert.deepEqual([again.claim.version, again.again], ['0.4.13', true]);
+  // A branch with no claim gets one, as the Steward's.
+  await reclaim(s.e.repo, 'claude/b', '0.4.14');
+  assert.deepEqual(loadClaims().find((c) => c.branch === 'claude/b')?.by, 'steward');
+});

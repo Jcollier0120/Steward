@@ -9,6 +9,8 @@ import { stewardEmployee } from './stages/selfmerge.ts';
 import { checkoutOf, freshBranch, releasedOf, type Ctx } from './stages/common.ts';
 import { gh } from './git.ts';
 import { agreedVersion, bumpPatch } from './versions.ts';
+import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './stages/kitpart.ts';
+import { kitInfo } from './kitsource.ts';
 
 /**
  * Versions claimed up front. Two pieces of work started side by side on one repository each used to take "the next
@@ -21,7 +23,11 @@ import { agreedVersion, bumpPatch } from './versions.ts';
  *
  * A claim lives until its version is on the branch or released (the work landed), until it is given back
  * (`release-version`), or for CLAIM_DAYS with no open PR that names it. While it lives, the merge stage holds another
- * PR that sets that version and catches it up to a free one (stages/merge.ts, stages/catchup.ts).
+ * PR that sets that version and catches it up to a free one (stages/merge.ts, stages/catchup.ts). When a catch-up gives a
+ * PR a new version after all (another PR with a higher claim merged first), its branch's claim moves to it (reclaim).
+ *
+ * The kit is claimed the same way, as a part of the Steward's repository (`claim-version kit`): kit/VERSION, its
+ * kit-v<version> releases, the kit versions open PRs' titles name, and claims under `<repo>#kit` (stages/kitpart.ts).
  */
 
 export interface Claim {
@@ -84,32 +90,51 @@ export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filte
  * A version for new work on an employee, claimed: as the module's comment says. `now` and the facts it reads stand
  * in for tests through ctx.run.
  */
-export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number }): Promise<{ claim: Claim; again: boolean }> {
+export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit' }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
+  const kit = o.part === 'kit';
+  const key = kit ? kitClaimKey(e.repo) : e.repo;
+  const files = kit ? [KIT_VERSION_FILE] : e.versionFiles;
   // What GitHub and the branch say, read before the lock is taken: the lock is held only to choose and write.
   const repo = checkoutOf(e);
   await freshBranch(ctx, e, repo);
-  const read = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(ctx.run, repo, `origin/${e.branch}`, f)] as [string, string | null])));
+  const read = agreedVersion(await Promise.all(files.map(async (f) => [f, await showFile(ctx.run, repo, `origin/${e.branch}`, f)] as [string, string | null])));
   const branchVersion = 'version' in read ? read.version : null;
-  const released = (await releasedOf(ctx, e)).map((r) => r.version);
+  const released = kit ? (await kitInfo(ctx.run, ctx.neutralDir, e.repo)).released : (await releasedOf(ctx, e)).map((r) => r.version);
   const prs = JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[];
-  const openVersions = titleVersions(e.name, prs.map((p) => p.title));
+  const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
   return withLock(claimsLock(), async () => {
     const all = loadClaims();
     const facts = { branchVersion, released, openBranches, openVersions, now };
-    const live = all.filter((c) => !same(c.repo, e.repo) || stillHeld(c, facts));
-    const mine = live.filter((c) => same(c.repo, e.repo));
+    const live = all.filter((c) => !same(c.repo, key) || stillHeld(c, facts));
+    const mine = live.filter((c) => same(c.repo, key));
     const had = o.branch ? mine.find((c) => c.branch === o.branch) : undefined;
     if (had) {
       writeJson(claimsFile(), live);
       return { claim: had, again: true };
     }
     const top = highest([branchVersion, ...released, ...openVersions, ...mine.map((c) => c.version)]);
-    if (!top) throw new Error(`${e.name} has no version to count from (${e.versionFiles.join(', ')} on origin/${e.branch})`);
-    const claim: Claim = { repo: e.repo, version: after(top, o.minor), branch: o.branch ?? null, by: o.by, for: o.for, at: new Date(now).toISOString() };
+    if (!top) throw new Error(`${kit ? 'The kit' : e.name} has no version to count from (${files.join(', ')} on origin/${e.branch})`);
+    const claim: Claim = { repo: key, version: after(top, o.minor), branch: o.branch ?? null, by: o.by, for: o.for, at: new Date(now).toISOString() };
     writeJson(claimsFile(), [...live, claim]);
     return { claim, again: false };
+  });
+}
+
+/**
+ * A branch's claim moved to the version a catch-up gave its PR (stages/catchup.ts): the old one is free again and the
+ * new one held, so the next worker counts from it and the branch's worker, asking again, gets it. A branch with no
+ * claim gets one now, as the Steward's. `key` is the repository, or its kit's (kitClaimKey).
+ */
+export async function reclaim(key: string, branch: string, version: string, now = Date.now()): Promise<void> {
+  await withLock(claimsLock(), async () => {
+    const all = loadClaims();
+    const had = all.find((c) => same(c.repo, key) && c.branch === branch);
+    if (had?.version === version) return;
+    const rest = all.filter((c) => !(same(c.repo, key) && (c.branch === branch || c.version === version)));
+    const claim: Claim = { repo: key, version, branch, by: had?.by ?? 'steward', for: had?.for ?? 'caught up by the Steward', at: new Date(now).toISOString() };
+    writeJson(claimsFile(), [...rest, claim]);
   });
 }
 
@@ -133,6 +158,9 @@ export async function pruneClaims(rows: { repo: string; name: string; main: { ve
     const all = loadClaims();
     const kept = all.filter((c) => {
       const r = rows.find((x) => same(x.repo, c.repo));
+      // A kit's claim (`<repo>#kit`): kept while young, or while an open PR on its repository names it.
+      const k = c.repo.endsWith('#kit') ? rows.find((x) => same(kitClaimKey(x.repo), c.repo)) : undefined;
+      if (k) return now - Date.parse(c.at) < CLAIM_DAYS * DAY || (!!c.branch && k.prs.some((p) => p.head === c.branch)) || kitTitleVersions(k.prs.map((p) => p.title)).includes(c.version);
       if (!r) return true;
       return stillHeld(c, { branchVersion: r.main?.version ?? null, released: r.release ? [r.release.version] : [], openBranches: r.prs.map((p) => p.head), openVersions: titleVersions(r.name, r.prs.map((p) => p.title)), now });
     });
