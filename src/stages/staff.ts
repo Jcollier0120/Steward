@@ -8,7 +8,8 @@ import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile } 
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
-import { bumpBranch, checkoutOf, glanceOf, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
+import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
+import { gitGlance } from '../scm.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
@@ -221,7 +222,10 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
   const remote = `origin/${e.branch}`;
   const here = releasedHereRow(e, row);
   // GitHub's side, from the glance when there is one (glance.ts): its PRs, its releases, the commit each release tags.
-  const g = glanceOf(ctx, e);
+  // Worked with plain git (scm.ts): its origin's branch and tags, and no PRs; GitHub isn't asked.
+  const byGit = hostIs(ctx, e) === 'git';
+  let gitErr: string | null = null;
+  const g = glanceOf(ctx, e) ?? (byGit ? await gitGlance(run, { branch: e.branch, checkout: dir }).catch((err) => ((gitErr = (err as Error).message), null)) : null);
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
@@ -258,11 +262,11 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
   })().catch((err) => void notes.push((err as Error).message));
 
-  const prs = (g ? Promise.resolve(JSON.stringify(g.prs)) : gh(run, ctx.neutralDir, ...prListArgs(e.repo)))
+  const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : gh(run, ctx.neutralDir, ...prListArgs(e.repo)))
     .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
     .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
 
-  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))
+  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))
     .then((out) => appReleasesIn(out))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
@@ -278,8 +282,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       let kit: string | null | 'unknown' = 'unknown';
       try {
         const tagged = g?.releases.find((r) => r.tagName === latest.tag)?.commit;
-        const target = tagged ?? (JSON.parse(await gh(run, ctx.neutralDir, 'release', 'view', latest.tag, '--repo', e.repo, '--json', 'targetCommitish')).targetCommitish as string);
-        if (row.checkout.exists && /^[0-9a-f]{40}$/i.test(target ?? '') && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
+        const target = tagged ?? (byGit ? null : JSON.parse(await gh(run, ctx.neutralDir, 'release', 'view', latest.tag, '--repo', e.repo, '--json', 'targetCommitish')).targetCommitish as string);
+        if (target && row.checkout.exists && /^[0-9a-f]{40}$/i.test(target) && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
       } catch {
         // unknown
       }

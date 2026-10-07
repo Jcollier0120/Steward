@@ -3,6 +3,13 @@ import { manorHome, originRepo } from './kit/manor.ts';
 import { readJson, writeJson } from './kit/store.ts';
 import { branchTree, employeeFromClone, folderTree, internalStaff } from './migrate.ts';
 import type { Employee } from './settings.ts';
+import { originUrl, repoFromUrl } from './scm.ts';
+
+/** A clone's repository name from its origin: GitHub's owner/name, else host/path (scm.ts); null with no origin. */
+export const originName = (dir: string): string | null => {
+  const url = originUrl(dir);
+  return originRepo(dir) ?? (url ? repoFromUrl(url) : null);
+};
 
 /**
  * A new agent taken on: `employ <its clone>` adds it to Settings' employees, so the Steward's page lists it and its
@@ -72,8 +79,9 @@ export function employeeFor(
   if (!tree) return { error: `${dir} isn't a clone with a ${branch} branch${folderTree(dir).has('.git') ? '' : ' (no .git here)'}.` };
   const me = identityOf((rel) => tree.read(rel));
   if (!me) return { error: `${dir} doesn't say who it is: no manor-agent.json with an agent id, and no id in src/app.ts, on ${branch}.` };
-  const repo = (o.origin ?? originRepo)(dir);
-  if (!repo) return { error: `${dir}'s origin isn't a GitHub repository, so there is nowhere to open or merge its pull requests.` };
+  // Its name from its origin: owner/name on GitHub, host/path anywhere else (scm.ts); GitHub isn't required.
+  const repo = (o.origin ?? originName)(dir);
+  if (!repo) return { error: `${dir} has no origin, so there is nowhere to read its branch from or push its releases to.` };
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   const already = employees.find((e) => same(e.id, me.id) || same(e.repo, repo) || (e.checkout && same(path.resolve(e.checkout), dir)));
   if (already) return { error: `The Steward looks after ${already.name} (${already.id}, ${already.repo}, ${already.checkout}) already.` };

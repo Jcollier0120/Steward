@@ -7,7 +7,7 @@ import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
-import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, mapLimit, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { kitTrialHold } from './trial.ts';
@@ -199,6 +199,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const { run } = ctx;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
   if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [], held: [] };
+  // Worked with plain git (scm.ts): no pull requests anywhere to merge.
+  if (hostIs(ctx, e) === 'git') return { ...result(e, 'skipped', NO_PRS), merged: [], held: [] };
   // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
   const g = glanceOf(ctx, e);
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);

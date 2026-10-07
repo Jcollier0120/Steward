@@ -18,6 +18,13 @@ import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfter } from './found.ts';
+import { githubReady, loadScm } from './scm.ts';
+
+/** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
+const githubReadyHere = (): boolean | undefined => {
+  const look = loadScm();
+  return look ? githubReady(look) : undefined;
+};
 import { coordHere, handOver, turnsView, type Coord } from './lease.ts';
 
 /**
@@ -85,7 +92,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // Under node --test only with a stand-in for the pages: a test never reads this PC's Reeve.
     process.env.NODE_TEST_CONTEXT && !o.getJson
       ? Promise.resolve()
-      : (finding ??= findRepos({ run: o.run ?? realRun, cwd: dataDir, getJson: o.getJson ?? getJson, reeveUrl: loadSettings().alarms.reeveUrl })
+      : (finding ??= findRepos({ run: o.run ?? realRun, cwd: dataDir, getJson: o.getJson ?? getJson, reeveUrl: loadSettings().alarms.reeveUrl, githubReady: githubReadyHere() })
       .catch((e) => console.error(`${new Date().toISOString()} finding the repositories: ${(e as Error).message}`))
       .finally(() => {
         finding = null;

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { expandEnv } from './kit/settings-kit.ts';
 import type { Runner } from './run.ts';
+import { gitGlance, type Host } from './scm.ts';
 import type { Employee, Settings } from './settings.ts';
 
 /**
@@ -165,11 +168,23 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
  * Every employee's repository, and the Steward's releases, from GitHub: one query (one more for each 15 employees
  * past the first 15). Throws when GitHub can't be asked at all (gh signed out, no network); an employee GitHub
  * couldn't answer for is in `errors`.
+ *
+ * A repository worked with plain git (`host`, scm.ts) isn't asked of GitHub: its branch head and its v<x.y.z> tags come
+ * from one `git ls-remote` of its origin, in its clone, and it has no PRs. With none on GitHub (and no repository of
+ * the Steward's own), gh isn't run at all.
  */
-export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>): Promise<Glance> {
+export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>, host: (e: Employee) => Host = () => 'github'): Promise<Glance> {
   const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
-  const all = settings.employees;
-  // Nothing to ask about: no employee, and no repository of its own.
+  const byGit = settings.employees.filter((e) => host(e) === 'git');
+  for (const e of byGit) {
+    try {
+      glance.repos[e.id] = await gitGlance(run, { branch: e.branch, checkout: path.resolve(expandEnv(e.checkout)) });
+    } catch (err) {
+      glance.errors[e.id] = (err as Error).message;
+    }
+  }
+  const all = settings.employees.filter((e) => !byGit.includes(e));
+  // Nothing to ask GitHub about: no employee on it, and no repository of its own.
   if (!all.length && !settings.stewardRepo) return glance;
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {
     const chunk = all.slice(i, i + PER_QUERY);

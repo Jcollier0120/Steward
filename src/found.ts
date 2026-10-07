@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { originRepo } from './kit/manor.ts';
+import { originUrl, repoFromUrl } from './scm.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
 import { loadSettings, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
@@ -45,8 +46,13 @@ export interface FoundRepo {
   branch: string;
   /** Its lockfiles, as Reeve lists them. */
   lockfiles: string[];
-  /** Whether gh's account can push to it: null when GitHub couldn't say. */
+  /** Whether gh's account can push to it: null when GitHub couldn't say, or wasn't asked (byGit). */
   push: boolean | null;
+  /**
+   * Worked with plain git (scm.ts): its origin isn't on GitHub, or the GitHub CLI isn't signed in here. GitHub can't say
+   * whether it can be pushed to, so it is offered, and the first push of a release tag says.
+   */
+  byGit?: boolean;
 }
 
 export interface FoundState {
@@ -117,7 +123,7 @@ export async function pushable(run: Runner, cwd: string, repos: string[]): Promi
 }
 
 /** The repositories Reeve finds, with whether gh's account can push to each, kept in repos-found.json. */
-export async function findRepos(o: { run: Runner; cwd: string; getJson: GetJson; reeveUrl?: string; home?: string; now?: Date }): Promise<FoundState> {
+export async function findRepos(o: { run: Runner; cwd: string; getJson: GetJson; reeveUrl?: string; home?: string; now?: Date; githubReady?: boolean }): Promise<FoundState> {
   const at = (o.now ?? new Date()).toISOString();
   const listed = await reeveRepos(o);
   if ('error' in listed) {
@@ -128,15 +134,20 @@ export async function findRepos(o: { run: Runner; cwd: string; getJson: GetJson;
   const seen = new Set<string>();
   const repos: FoundRepo[] = [];
   for (const r of listed.repos) {
-    const repo = githubOf(r);
+    // On GitHub, owner/name; anywhere else, its origin's host/path (scm.ts): GitHub isn't required.
+    const onGithub = githubOf(r);
+    const url = !onGithub && typeof r.path === 'string' ? originUrl(r.path) : null;
+    const repo = onGithub ?? (url ? repoFromUrl(url) : null);
     if (!repo || r.ignored === true || typeof r.path !== 'string' || seen.has(repo.toLowerCase())) continue;
     seen.add(repo.toLowerCase());
     const branch = typeof r.defaultBranch === 'string' && r.defaultBranch ? r.defaultBranch : typeof r.branch === 'string' && r.branch ? r.branch : 'main';
     const lockfiles = Array.isArray(r.packages) ? r.packages.map((p: any) => (typeof p?.lockfile === 'string' ? `${p.dir ? `${p.dir}/` : ''}${p.lockfile}` : '')).filter(Boolean) : [];
-    repos.push({ repo, name: typeof r.name === 'string' ? r.name : repo.split('/')[1].toLowerCase(), path: r.path, branch, lockfiles, push: null });
+    const byGit = !onGithub || o.githubReady === false;
+    repos.push({ repo, name: typeof r.name === 'string' ? r.name : (repo.split('/').pop() ?? repo).toLowerCase(), path: r.path, branch, lockfiles, push: null, ...(byGit ? { byGit } : {}) });
   }
-  const { push, error } = repos.length ? await pushable(o.run, o.cwd, repos.map((r) => r.repo)) : { push: new Map<string, boolean>(), error: null };
-  for (const r of repos) r.push = push.get(r.repo.toLowerCase()) ?? null;
+  const asked = repos.filter((r) => !r.byGit);
+  const { push, error } = asked.length ? await pushable(o.run, o.cwd, asked.map((r) => r.repo)) : { push: new Map<string, boolean>(), error: null };
+  for (const r of asked) r.push = push.get(r.repo.toLowerCase()) ?? null;
   const state: FoundState = { at, from: listed.from, error: error ? `GitHub couldn't say which you can push to: ${error}` : null, repos };
   writeJson(foundFile(), state);
   return state;
@@ -150,7 +161,7 @@ const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === pat
 
 /** The repositories offered: ones gh's account can push to, that Settings don't already name (by repository or clone). */
 export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[]): FoundRepo[] {
-  return s.repos.filter((r) => r.push === true && !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))));
+  return s.repos.filter((r) => (r.push === true || (r.byGit === true && r.push === null)) && !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))));
 }
 
 /** The npm default test script, which only fails: not a test. */
@@ -195,7 +206,7 @@ export function readClone(checkout: string, branch: string): { test: string[]; v
 
 /** An id for a repository that no employee has yet: its name, lower case, letters, digits and dashes. */
 export function idFor(repo: string, taken: string[]): string {
-  const base = (repo.split('/')[1] ?? repo).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '') || 'repo';
+  const base = (repo.split('/').pop() ?? repo).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '') || 'repo';
   let id = base.slice(0, 40);
   for (let n = 2; taken.includes(id); n++) id = `${base.slice(0, 36)}-${n}`;
   return id;
@@ -204,13 +215,14 @@ export function idFor(repo: string, taken: string[]): string {
 /**
  * A repository as Settings would look after it: its clone and branch, what its clone says (tests, version files), no
  * kit, nothing installed; merging and releasing only as asked. Released with its own release script when it has one,
- * else by a GitHub release the Steward makes (tag).
+ * else by a release the Steward makes (tag): a GitHub release, or a v<version> tag pushed to origin when it is worked with
+ * plain git (scm.ts).
  */
 export function employeeFromFound(r: FoundRepo, o: { taken: string[]; merges: boolean; release: boolean }): Employee {
   const read = readClone(r.path, r.branch);
   return {
     id: idFor(r.repo, o.taken),
-    name: r.repo.split('/')[1],
+    name: r.repo.split('/').pop() ?? r.repo,
     repo: r.repo,
     checkout: r.path,
     branch: r.branch,
