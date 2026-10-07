@@ -3,7 +3,7 @@
   "routes": {
     "qualcomm": {
       "server": "GenieX",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "arch": "arm64",
       "generations": {
         "snapdragon-x": {
@@ -18,10 +18,10 @@
         }
       },
       "download": {
-        "file": "geniex-cli-setup-windows-arm64-v0.7.0.exe",
-        "url": "https://github.com/qualcomm/GenieX/releases/download/v0.7.0/geniex-cli-setup-windows-arm64-v0.7.0.exe",
-        "size": 65158801,
-        "sha256": "04e057ab6660ac3137c0722325d8034c78e4c0ad9e0b0b94fd90b0a7e9ab4c9d"
+        "file": "geniex-cli-setup-windows-arm64-v0.8.0.exe",
+        "url": "https://github.com/qualcomm/GenieX/releases/download/v0.8.0/geniex-cli-setup-windows-arm64-v0.8.0.exe",
+        "size": 65196910,
+        "sha256": "fcc4d932f371a9b3ad3d08a1b34912fe21a7fdf7c54d47c869250b50d81ec734"
       },
       "install": {
         "kind": "inno",

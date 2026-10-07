@@ -15,7 +15,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
-| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.7.0 | chat, vision (one model, Qwen3-VL-4B) | its Inno Setup installer, silent, per user, no administrator |
+| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model, Qwen3-VL-4B) | its Inno Setup installer, silent, per user, no administrator |
 | Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B INT4) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat (Qwen3-4B-Instruct-2507), vision (Qwen3-VL-4B) | a portable zip, unpacked into the accelerators' folder |
 
@@ -97,6 +97,7 @@ Each customer's PC downloads the servers and models from their makers (GitHub re
 - detection through the Neural processor class: maker, generation, driver;
 - the plan with GenieX 0.7.0 and the model already there (nothing to download);
 - the pinned SHA-256 of GenieX 0.7.0's installer (downloaded to a scratch folder) and of every Qwen3-VL-4B model file;
+- GenieX 0.8.0 (2026-10-07, the Smith's scout's first try): its installer's SHA-256 as GitHub publishes it, the silent per-user install over 0.7.0, the test request (chat and vision) on the route's own arguments and on the PC's configured entry, and every pinned Qwen3-VL-4B file unchanged under it;
 - the test request, chat and vision, through the kit, in the NPU's turn: answered in 14 s;
 - the keeper's GenieX handling (measured since kit 2.6.0).
 
