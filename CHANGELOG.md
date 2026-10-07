@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.19.3
+
+**When GitHub has a bad hour, the Steward waits it out by itself: no alarm, no Push to press.**
+
+### What changed
+
+- A push, pull request or release that GitHub answers with its own error ("Internal Server Error", a 502, 503 or 504, a connection it drops) counts like the network being down: the Steward tries it again on its next round, and raises no alarm. Before, each one was set aside until you pressed Push, with an alarm per agent.
+- Any agent still set aside for that reason is let go on the first round after this update, and pushed then.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.19.1
 
 **It hands out kit 2.32.1: the agents name Castellan, the app you bought.**
