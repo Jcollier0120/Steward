@@ -22,3 +22,18 @@ The agents' source stays in their private repositories. What a PC installs is a 
 **For now, also as `v<version>` in the agent's own repository**, as before: a Manor from before the releases repository looks there. A version already released there (before the releases repository) is published in the releases repository alone. A version the releases repository has already is refused.
 
 Manor looks for releases, and downloads them, in the releases repository over plain HTTPS, with no sign-in; a release it doesn't find there it looks for in the agent's own repository with `gh`, as before.
+
+## Sold: the Exchequer (`node/exchequer.ts`)
+
+Castellan sells the staff by subscription. The **Exchequer**, Castellan's release service at `https://api.castellan-software.com` (`EXCHEQUER_URL` overrides it), hands each PC the releases its licence covers. Since kit 2.30.0, `npm run release -- --publish`, once the release is on GitHub, publishes **the same files** there too:
+
+1. `GET /api/v1/agents` (public): the agents it sells. Manor and Heiward are never published there (`NEVER_SOLD`: Manor is free and updates from GitHub; Heiward is free and AGPL), nor an agent the list leaves out.
+2. `POST /api/v1/publish/<id>/<version>` with `Authorization: Bearer <the publisher's key>` and `{ commit, notes, assets: [{ name, size, sha256 }], announcement? }` (manor-agent.json's content, when the agent announces itself): a draft, and a signed upload URL for each file.
+3. Each file `PUT` to its URL, with the headers given and **without** the key.
+4. `POST /api/v1/publish/<id>/<version>/done`: the Exchequer checks each file's size and SHA-256, and publishes.
+
+**The publisher's key** is `EXCHEQUER_PUBLISHER_KEY`, else `%USERPROFILE%\.steward\exchequer-publisher.key` (trimmed), on the PC that releases. It is never printed or logged. Without it, the release says "Not published to the Exchequer: no publisher key at …" and is published to GitHub alone.
+
+**It never fails a release.** An Exchequer that is down or refuses is one line ("Not published to the Exchequer: <why>. The GitHub release stands; …"), and the exit code is GitHub's. The Steward's round shows that line as a note on a release that is done. **Every step can be done again**: a draft is made afresh, an upload replaces the file, and a version published already counts as published (`409 already-published`, `alreadyPublished`). `npm run release -- --exchequer` publishes the release the releases repository already has, at package.json's version, from GitHub's own files, and builds nothing.
+
+**For now GitHub stays where every Manor looks.** Once Manor takes the staff's releases from the Exchequer and every current release is loaded there, the staff stop publishing to the releases repository (release.ts' TODO), which keeps what isn't sold: Manor's own releases and setup, and Heiward's.
