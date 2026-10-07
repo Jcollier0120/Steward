@@ -230,7 +230,7 @@ export class Reaper {
     if (s.keptOut) {
       const pids = await this.inTurn(s, false);
       if (!pids) return taken;
-      d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: Manor keeps the graphics card out while the NPU serves (gpuWithNpu is off)`);
+      d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: Castellan's Settings keep the graphics card out while the NPU serves (gpuWithNpu is off)`);
       return { base: s.base, did: 'stopped-kept-out', pids };
     }
     const lastUse = Math.max(this.lastInUse.get(s.acc.id) ?? 0, d.lastActivityMs(s), ...procs.map((p) => p.startedMs));

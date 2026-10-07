@@ -145,7 +145,7 @@ export function ordered(list: Accelerator[], order: 'auto' | string[]): Accelera
  * ("No notes: …." or "Busy: notes deferred to a later round (…)") and end them as they need.
  */
 export const REEVE_NOT_SET_UP = core.REEVE_NOT_SET_UP;
-/** The same words by their new name (kit 2.31.0): they point to Manor's Set up local AI, not to Reeve. */
+/** The same words by their new name (kit 2.31.0): they point to Castellan's Set up local AI, not to Reeve. */
 export const NOT_SET_UP = core.NOT_SET_UP;
 
 /**

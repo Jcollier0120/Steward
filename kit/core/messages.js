@@ -35,10 +35,10 @@ export function noteLabel(a) {
 /**
  * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
  * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since
- * kit 2.31.0 it points to Manor's own setup (Set up local AI), which every PC has, not to Reeve, which a household
- * may never hire. The old name stays for the agents that import it.
+ * kit 2.31.0 it points to the app's own setup (Set up local AI), which every PC has, not to Reeve, which a household
+ * may never hire; since 2.32.1 it names the app as the person bought it, Castellan. The old name stays for the agents that import it.
  */
-export const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI";
+export const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI";
 export const REEVE_NOT_SET_UP = NOT_SET_UP;
 
 /**
@@ -98,7 +98,7 @@ export const say = Object.freeze({
   /** @param {string} id @param {string} work */
   notServing: (id, work) => `${id} isn't in the accelerators' config, or doesn't serve ${work}`,
   /** @param {AcceleratorRef} acc */
-  gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Manor's Settings: "Use the graphics card for models when there's an NPU" is off)`,
+  gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Castellan's Settings: "Use the graphics card for models when there's an NPU" is off)`,
   noVisionModel: () => 'no vision model in the accelerators\' config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
   /** @param {string} work */
   noneServes: (work) => `no accelerator in the accelerators' config.json serves ${work}`,

@@ -8,8 +8,8 @@ export const APP = {
   id: 'steward',
   name: 'Steward',
   /** One line: what it does. Manor shows it under the name. */
-  role: 'Looks after your repositories: claims versions, merges your ready pull requests and releases new versions, where you say yes',
-  version: '0.19.0',
+  role: 'Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes',
+  version: '0.19.1',
 };
 
 /** The folder above src/: the installed copy's app folder, or a checkout. */

@@ -2,7 +2,7 @@
 
 # Steward
 
-Looks after your repositories: claims versions, merges your ready pull requests and releases new versions, where you say yes.
+Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes.
 
 The *steward* ran the household for its lord: he kept the keys, saw that every servant had what the work needed, and carried the lord's orders to each of them. Its mark is a ring of keys.
 
