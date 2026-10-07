@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.17.0
+
+**A new agent is taken on with one command: `employ`.**
+
+### What's new
+
+- **`employ <its clone>`** adds a new agent to the Steward's employees, so its page lists it and its rounds test, merge and release it, with no hand-editing of settings.json. Everything comes from the clone: its id and name (from manor-agent.json, or src/app.ts), its GitHub repository, its kit parts, and how to fill, test, version and release it. `--dry-run` shows what it would add.
+- An agent that announces itself to Manor is published, so every Manor offers Hire for it. Manor's internal staff, and an agent that doesn't announce itself yet, are built and installed on this PC only.
+- An agent the Steward looks after already, or a folder that isn't a clone with a GitHub origin, is refused, with why.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.16.1
 
 **It hands out kit 2.29.0: every agent's page fits a phone.**
