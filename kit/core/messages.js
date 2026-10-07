@@ -33,11 +33,13 @@ export function noteLabel(a) {
 }
 
 /**
- * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a
- * PC without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
- * serves anything. The same words in each case.
+ * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
+ * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since
+ * kit 2.31.0 it points to Manor's own setup (Set up local AI), which every PC has, not to Reeve, which a household
+ * may never hire. The old name stays for the agents that import it.
  */
-export const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)";
+export const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI";
+export const REEVE_NOT_SET_UP = NOT_SET_UP;
 
 /**
  * What the lock's folder is called in a message: "the NPU" for the NPU's, else its name.
@@ -94,12 +96,12 @@ export const say = Object.freeze({
   failedNoOther: (first, reason, why) => `${theAccelerator(first)} failed (${reason}), and no other accelerator could take the request${why ? `: ${why}` : ''}`,
   noneCould: () => 'no accelerator could take the request',
   /** @param {string} id @param {string} work */
-  notServing: (id, work) => `${id} isn't in Reeve's config, or doesn't serve ${work}`,
+  notServing: (id, work) => `${id} isn't in the accelerators' config, or doesn't serve ${work}`,
   /** @param {AcceleratorRef} acc */
   gpuSetAside: (acc) => `${theAccelerator(acc)} isn't used for models beside the NPU (Manor's Settings: "Use the graphics card for models when there's an NPU" is off)`,
-  noVisionModel: () => 'no vision model in Reeve\'s config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
+  noVisionModel: () => 'no vision model in the accelerators\' config.json (an accelerator\'s "vision", or "visionModel" in an older config)',
   /** @param {string} work */
-  noneServes: (work) => `no accelerator in Reeve's config.json serves ${work}`,
+  noneServes: (work) => `no accelerator in the accelerators' config.json serves ${work}`,
   /** @param {number} promptTokens @param {number} maxTokens @param {number} cap @param {boolean} several */
   tooBig: (promptTokens, maxTokens, cap, several) => `refusing a request of ~${promptTokens}+${maxTokens} tokens (${several ? 'the largest cap is' : 'cap'} ${cap}); split the input`,
   /** @param {AcceleratorRef[]} accs @param {string} also */
@@ -127,7 +129,7 @@ export const say = Object.freeze({
   /** @param {string} baseUrl */
   serverNotRunning: (baseUrl) => `${baseUrl} isn't running`,
   /** @param {string} baseUrl */
-  noStartCommand: (baseUrl) => `its server ${baseUrl} isn't running, and Reeve's config has no startCommand for it`,
+  noStartCommand: (baseUrl) => `its server ${baseUrl} isn't running, and the accelerators' config has no startCommand for it`,
   /** @param {string} command @param {string} why */
   couldNotStart: (command, why) => `couldn't start "${command}": ${why}`,
   /** @param {string} program @param {string} baseUrl @param {number} seconds */

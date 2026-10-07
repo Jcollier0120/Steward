@@ -9,6 +9,21 @@ export type Endpoint = {
     baseUrl: string;
     model: string;
     startCommand?: string[];
+    /**
+     * What its server's environment needs besides this one's (OpenVINO Model Server's
+     * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+     */
+    env?: Record<string, string>;
+    /**
+     * This kind's own request cap, when it differs from its accelerator's (an NPU's
+     * vision model may take less than its chat model): capFor.
+     */
+    maxContextTokens?: number;
+};
+export type Timeouts = {
+    requestBaseMs?: number;
+    requestPerTokenMs?: number;
+    coldLoadMs?: number;
 };
 export type Accelerator = {
     /**
@@ -47,6 +62,10 @@ export type Accelerator = {
      * false: kept in the list, sent nothing.
      */
     enabled?: boolean;
+    /**
+     * Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
+     */
+    timeouts?: Timeouts;
 };
 export type AcceleratorConfig = {
     /**
@@ -109,6 +128,17 @@ export type Look = {
  * @property {string} baseUrl
  * @property {string} model
  * @property {string[]} [startCommand]
+ * @property {Record<string, string>} [env] What its server's environment needs besides this one's (OpenVINO Model Server's
+ * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
+ * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
+ * vision model may take less than its chat model): capFor.
+ */
+/**
+ * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
+ * server that loads its model slowly). Each left out is the rule's.
+ * @property {number} [requestBaseMs]
+ * @property {number} [requestPerTokenMs]
+ * @property {number} [coldLoadMs]
  */
 /**
  * @typedef {object} Accelerator
@@ -124,6 +154,7 @@ export type Look = {
  * @property {Endpoint} [embed]
  * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
+ * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
 /**
  * @typedef {object} AcceleratorConfig
@@ -199,7 +230,17 @@ export type Written = {
     baseUrl?: string;
     model: string;
     startCommand?: string[];
+    env?: Record<string, string>;
+    maxContextTokens?: number;
 };
+/**
+ * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
+ * when it has one, else the accelerator's.
+ * @param {Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {number}
+ */
+export declare function capFor(a: Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>, work: Work): number;
 export type Hardware = {
     npu: boolean;
     /**
@@ -502,24 +543,25 @@ export declare function chatTokens(rules: Rules, messages: {
  */
 export declare function visionTokens(rules: Rules, question: string): number;
 /**
- * Why a request is refused before anything is sent: over every candidate's cap (null when one fits).
- * @param {{ maxContextTokens: number }[]} serving
+ * Why a request is refused before anything is sent: over every candidate's cap (null when one fits). With `work`,
+ * each one's cap for that kind (capFor).
+ * @param {(Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[]} serving
  * @param {number} promptTokens
  * @param {number} maxTokens
+ * @param {Work} [work]
  * @returns {string | null}
  */
-export declare function tooBig(serving: {
-    maxContextTokens: number;
-}[], promptTokens: number, maxTokens: number): string | null;
+export declare function tooBig(serving: (Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>)[], promptTokens: number, maxTokens: number, work?: Work): string | null;
 /**
  * How long one request may take, in ms. A background chat or vision request gets requestBaseMs plus
  * requestPerTokenMs for each token it may answer (GenieX on the NPU writes about 34 a second, so that is
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
+ * the rules' place, each one it gives.
  * @param {Rules} rules
- * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean }} r
+ * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}
  */
 export declare function requestTimeoutMs(rules: Rules, r: {
@@ -528,6 +570,7 @@ export declare function requestTimeoutMs(rules: Rules, r: {
     maxTokens: number;
     ceilingMs: number;
     coldLoad?: boolean;
+    timeouts?: Timeouts;
 }): number;
 /**
  * Splits text into pieces whose estimated size fits `budgetTokens`, at line breaks where it can, so a long

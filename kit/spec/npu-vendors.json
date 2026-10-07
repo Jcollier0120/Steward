@@ -1,0 +1,309 @@
+{
+  "about": "The NPU's model server for each vendor, as data (NPU-VENDORS.md beside this file says why each was chosen and what is unverified): how detection tells the vendor and generation, the server's pinned download, how it installs, the models it pulls, its port, caps and timeouts. The node part's npu-vendors.ts reads it; setup installs from it. A server or model is changed here, with its pinned size and SHA-256, and released as a kit version. Sizes in bytes, times in milliseconds. %LOCALAPPDATA% and %USERPROFILE% are expanded; {tools} is the tools home (toolsHome), {port} the server's port, {model} a model's id.",
+  "routes": {
+    "qualcomm": {
+      "server": "GenieX",
+      "version": "0.7.0",
+      "arch": "arm64",
+      "generations": {
+        "snapdragon-x": {
+          "label": "Snapdragon X Elite / X Plus (Hexagon v73)",
+          "supported": true,
+          "verified": false
+        },
+        "snapdragon-x2": {
+          "label": "Snapdragon X2 Elite / X2 Plus (Hexagon v81)",
+          "supported": true,
+          "verified": true
+        }
+      },
+      "download": {
+        "file": "geniex-cli-setup-windows-arm64-v0.7.0.exe",
+        "url": "https://github.com/qualcomm/GenieX/releases/download/v0.7.0/geniex-cli-setup-windows-arm64-v0.7.0.exe",
+        "size": 65158801,
+        "sha256": "04e057ab6660ac3137c0722325d8034c78e4c0ad9e0b0b94fd90b0a7e9ab4c9d"
+      },
+      "install": {
+        "kind": "inno",
+        "args": [
+          "/VERYSILENT",
+          "/SUPPRESSMSGBOXES",
+          "/NORESTART",
+          "/SP-",
+          "/CURRENTUSER"
+        ],
+        "exe": "%LOCALAPPDATA%\\GenieX CLI\\geniex.exe"
+      },
+      "port": 18181,
+      "serve": [
+        "serve",
+        "--skip-update",
+        "--host",
+        "127.0.0.1:{port}",
+        "--keepalive",
+        "3600"
+      ],
+      "models": [
+        {
+          "id": "qualcomm/Qwen3-VL-4B-Instruct:W4A16",
+          "kinds": [
+            "chat",
+            "vision"
+          ],
+          "pull": [
+            "pull",
+            "qualcomm/Qwen3-VL-4B-Instruct:W4A16",
+            "--model-type",
+            "vlm",
+            "--skip-update"
+          ],
+          "list": [
+            "list",
+            "--skip-update"
+          ],
+          "listed": "qualcomm/Qwen3-VL-4B-Instruct",
+          "size": 4374952637,
+          "licence": "Qwen3-VL-4B-Instruct: Apache-2.0; Qualcomm AI Hub's compiled W4A16 build: the base model's licence plus AI Hub's usage limitations (review)",
+          "pinned": {
+            "snapdragon-x2": {
+              "dir": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct",
+              "files": {
+                "embedding_weights.raw": {
+                  "size": 1555824640,
+                  "sha256": "ef223ee4c21e85d8387871bdfc0164979abe34a6d30dcc7b43abbde05904d750"
+                },
+                "part1_of_4.bin": {
+                  "size": 491425792,
+                  "sha256": "5514e142d35de813420c2563053670438b2fa45862c2af116e6e30a9037f2fa3"
+                },
+                "part2_of_4.bin": {
+                  "size": 490844160,
+                  "sha256": "d021d7bcf00a8d17dce4c7037ab9979d0b190bdf6c1df7308e48d33e7b798a0a"
+                },
+                "part3_of_4.bin": {
+                  "size": 490848256,
+                  "sha256": "104a5c6ffeca528bdc60a5263f514d4a14f4969e0f3c80bef5132351ad6ee98a"
+                },
+                "part4_of_4.bin": {
+                  "size": 890478592,
+                  "sha256": "f67d5933b15a369896274783f11748c9047db7fe34bc36cb4c3b481d71b916d5"
+                },
+                "vision_encoder.bin": {
+                  "size": 429076480,
+                  "sha256": "390d254158c04eddad53c7bd1e9b29b6bca947f758888f46afb93b65ab12daf8"
+                }
+              }
+            }
+          },
+          "present": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json"
+        }
+      ],
+      "maxContextTokens": 2400,
+      "caps": {
+        "chat": 2400,
+        "vision": 2400
+      },
+      "timeouts": {},
+      "quirks": [
+        "prefix-leak",
+        "image-path"
+      ],
+      "recycle": true,
+      "embeddings": "none: GenieX serves no /v1/embeddings, so embeddings go to the graphics card or the processor",
+      "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime's terms aren't stated in its NOTICE (review)",
+      "notes": "Unsigned installer (SmartScreen, Smart App Control). Installs per user (HKCU, %LOCALAPPDATA%\\GenieX CLI), no administrator. Models are kept in %USERPROFILE%\\.cache\\geniex\\models. One model for chat and vision (Qwen3-VL-4B), measured on the X2 Elite 2026-10-04: no model swaps."
+    },
+    "intel": {
+      "server": "OpenVINO Model Server",
+      "version": "2026.4.1",
+      "arch": "x64",
+      "generations": {
+        "meteor-lake": {
+          "label": "Core Ultra Series 1, Meteor Lake (NPU 3720)",
+          "supported": true,
+          "verified": false
+        },
+        "arrow-lake": {
+          "label": "Core Ultra 200H/U, Arrow Lake (NPU 3720)",
+          "supported": true,
+          "verified": false
+        },
+        "lunar-lake": {
+          "label": "Core Ultra 200V, Lunar Lake (NPU 4)",
+          "supported": true,
+          "verified": false
+        },
+        "panther-lake": {
+          "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
+          "supported": true,
+          "verified": false
+        }
+      },
+      "driverMin": "32.0.100.3104",
+      "requires": [
+        "vcredist-x64"
+      ],
+      "download": {
+        "file": "ovms_windows_2026.4.1_python_on.zip",
+        "url": "https://github.com/openvinotoolkit/model_server/releases/download/v2026.4.1/ovms_windows_2026.4.1_python_on.zip",
+        "size": 139758672,
+        "sha256": "aa79a0ae3b858356ba550978e397a8e8876a9d2706ffe4041b1dfd3f32cb8ce4"
+      },
+      "install": {
+        "kind": "zip",
+        "into": "{tools}\\servers\\ovms-2026.4.1",
+        "exe": "{tools}\\servers\\ovms-2026.4.1\\ovms.exe"
+      },
+      "port": 18183,
+      "serve": [
+        "--rest_port",
+        "{port}",
+        "--rest_bind_address",
+        "127.0.0.1",
+        "--source_model",
+        "{model}",
+        "--model_repository_path",
+        "{tools}\\models\\openvino",
+        "--task",
+        "text_generation",
+        "--target_device",
+        "NPU",
+        "--max_prompt_len",
+        "1536",
+        "--cache_dir",
+        "{tools}\\models\\openvino\\.npu-cache"
+      ],
+      "env": {
+        "PYTHONHOME": "{tools}\\servers\\ovms-2026.4.1\\python",
+        "PATH": "{tools}\\servers\\ovms-2026.4.1;{tools}\\servers\\ovms-2026.4.1\\python;{tools}\\servers\\ovms-2026.4.1\\python\\Scripts;%PATH%"
+      },
+      "models": [
+        {
+          "id": "OpenVINO/Qwen3-4B-int4-ov",
+          "kinds": [
+            "chat"
+          ],
+          "pull": [
+            "--pull",
+            "--source_model",
+            "OpenVINO/Qwen3-4B-int4-ov",
+            "--model_repository_path",
+            "{tools}\\models\\openvino",
+            "--task",
+            "text_generation"
+          ],
+          "size": 2430000000,
+          "licence": "Qwen3-4B: Apache-2.0; OpenVINO's INT4 export carries the base model's licence"
+        }
+      ],
+      "maxContextTokens": 1536,
+      "caps": {
+        "chat": 1536
+      },
+      "timeouts": {
+        "requestBaseMs": 30000,
+        "requestPerTokenMs": 600,
+        "coldLoadMs": 180000
+      },
+      "quirks": [],
+      "recycle": false,
+      "embeddings": "none on the NPU yet (OpenVINO documents embeddings on the processor and graphics only): they go to the graphics card or the processor",
+      "vision": "none on the NPU yet: OpenVINO's Qwen3-VL-4B INT4 build is asymmetric, which the NPU doesn't take; vision goes to the graphics card or the processor",
+      "licence": "OpenVINO Model Server: Apache-2.0",
+      "notes": "A zip, unpacked into the tools home: no installer, no administrator. It needs the Microsoft Visual C++ Redistributable (x64), which an administrator installs once, and Intel's NPU driver 32.0.100.3104 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same)."
+    },
+    "amd": {
+      "server": "FastFlowLM",
+      "version": "1.0.7",
+      "arch": "x64",
+      "generations": {
+        "xdna": {
+          "label": "Ryzen 7040/8040, Phoenix and Hawk Point (XDNA)",
+          "supported": false,
+          "verified": false,
+          "why": "no NPU model server runs language models on the first XDNA NPU (Lemonade's FAQ: none plans to)"
+        },
+        "xdna2": {
+          "label": "Ryzen AI 300 and later: Strix Point, Krackan, Strix Halo, Gorgon Point (XDNA 2)",
+          "supported": true,
+          "verified": false
+        }
+      },
+      "driverMin": "32.0.203.311",
+      "download": {
+        "file": "fastflowlm_1.0.7_windows_amd64.zip",
+        "url": "https://github.com/ROCm/FastFlowLM/releases/download/v1.0.7/fastflowlm_1.0.7_windows_amd64.zip",
+        "size": 40181694,
+        "sha256": "0377e501afe3595d491cde1ff91923f225240053437d6e55b47c6e86fadc54d8"
+      },
+      "install": {
+        "kind": "zip",
+        "into": "{tools}\\servers\\fastflowlm-1.0.7",
+        "exe": "{tools}\\servers\\fastflowlm-1.0.7\\flm.exe"
+      },
+      "port": 18184,
+      "serve": [
+        "serve",
+        "{model}",
+        "--port",
+        "{port}"
+      ],
+      "env": {
+        "FLM_DISABLE_UPDATE_CHECK": "1"
+      },
+      "models": [
+        {
+          "id": "qwen3-it:4b",
+          "kinds": [
+            "chat"
+          ],
+          "pull": [
+            "pull",
+            "qwen3-it:4b"
+          ],
+          "size": 3300000000,
+          "licence": "Qwen3-4B-Instruct-2507: Apache-2.0 (FastFlowLM's NPU2 build)"
+        },
+        {
+          "id": "qwen3vl-it:4b",
+          "kinds": [
+            "vision"
+          ],
+          "pull": [
+            "pull",
+            "qwen3vl-it:4b"
+          ],
+          "size": 4100000000,
+          "licence": "Qwen3-VL-4B-Instruct: Apache-2.0 (FastFlowLM's NPU2 build)"
+        }
+      ],
+      "maxContextTokens": 4096,
+      "caps": {
+        "chat": 4096,
+        "vision": 4096
+      },
+      "timeouts": {
+        "requestBaseMs": 20000,
+        "requestPerTokenMs": 400,
+        "coldLoadMs": 120000
+      },
+      "quirks": [],
+      "recycle": false,
+      "embeddings": "not on the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms; embeddings go to the graphics card or the processor",
+      "licence": "FastFlowLM: MIT (orchestration and CLI), NPU kernels free for any use including commercial; asks for \"Powered by FastFlowLM\" in the product's notices",
+      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server switches between its models on demand, as GenieX does. Models are kept in %USERPROFILE%\\.flm\\models."
+    }
+  },
+  "devices": {
+    "intel": {
+      "7D1D": "meteor-lake",
+      "AD1D": "arrow-lake",
+      "643E": "lunar-lake",
+      "B03E": "panther-lake"
+    },
+    "amd": {
+      "1502": "xdna",
+      "17F0": "xdna2"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "private": true,
   "license": "UNLICENSED",
   "description": "Keeps the essentials every agent shares, and brings each update to all of them at once",

@@ -22,11 +22,13 @@ export declare function noteLabel(a: AcceleratorRef | {
     name: string;
 } | null | undefined): string;
 /**
- * What an agent says when Reeve has set up no model server here: no config.json (Reeve writes none on a
- * PC without an NPU), an empty list (its setup dropped the install's `npu` entry), or a list where nothing
- * serves anything. The same words in each case.
+ * What an agent says when no model server is set up here: no accelerators' config.json, an empty list (setup
+ * dropped the install's `npu` entry), or a list where nothing serves anything. The same words in each case. Since
+ * kit 2.31.0 it points to Manor's own setup (Set up local AI), which every PC has, not to Reeve, which a household
+ * may never hire. The old name stays for the agents that import it.
  */
-export declare const REEVE_NOT_SET_UP = "Reeve isn't set up here: open Reeve's page, Settings \u2192 Set up (or run `reeve accelerators setup`)";
+export declare const NOT_SET_UP = "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI";
+export declare const REEVE_NOT_SET_UP = "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI";
 /**
  * What the lock's folder is called in a message: "the NPU" for the NPU's, else its name.
  * @param {string} folder The lock's first folder name (`npu`, `gpu-…`).
@@ -80,7 +82,7 @@ export declare const say: Readonly<{
     notServing: (id: string, work: string) => string;
     /** @param {AcceleratorRef} acc */
     gpuSetAside: (acc: AcceleratorRef) => string;
-    noVisionModel: () => "no vision model in Reeve's config.json (an accelerator's \"vision\", or \"visionModel\" in an older config)";
+    noVisionModel: () => "no vision model in the accelerators' config.json (an accelerator's \"vision\", or \"visionModel\" in an older config)";
     /** @param {string} work */
     noneServes: (work: string) => string;
     /** @param {number} promptTokens @param {number} maxTokens @param {number} cap @param {boolean} several */
