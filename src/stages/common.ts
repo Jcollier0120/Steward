@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { NOT_PUBLISHED } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch, gh } from '../git.ts';
@@ -92,6 +93,8 @@ const MORE_NET_WORDS = /tls handshake timeout|net\/http: (?:request canceled|tim
 export function networkLine(output: string): string | null {
   for (const raw of output.split(/\r?\n/).reverse()) {
     const line = raw.trim();
+    // The Exchequer's line is never why a release failed (exchequer.ts): it runs after GitHub's, and fails nothing.
+    if (line.startsWith(NOT_PUBLISHED)) continue;
     if (line && (isNetworkError(line) || MORE_NET_WORDS.test(line))) return line.slice(0, 200);
   }
   return null;
@@ -102,6 +105,20 @@ export const networkNote = (output: string) => {
   const line = networkLine(output);
   return line ? `; the network: ${line}` : '';
 };
+
+/**
+ * "; Not published to the Exchequer: …" for a release's message, when the kit's release (kit 2.30.0, exchequer.ts)
+ * says it reached GitHub but not the Exchequer: no publisher key, or the Exchequer failed. Never a failure, nor an
+ * alarm: the release on GitHub stands, and `npm run release -- --exchequer` in the agent's checkout finishes it.
+ */
+export function exchequerNote(output: string): string {
+  const line = output
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .reverse()
+    .find((l) => l.startsWith(NOT_PUBLISHED));
+  return line ? `; ${line.slice(0, 300)}` : '';
+}
 
 /** An employee's repository from the stage's glance at GitHub, while it still says how things are. */
 export const glanceOf = (ctx: Ctx, e: Employee): RepoGlance | null => ctx.glance?.repos[e.id] ?? null;

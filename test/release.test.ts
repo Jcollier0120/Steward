@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import type { Runner } from '../src/run.ts';
 import type { Employee } from '../src/settings.ts';
 import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
+import { exchequerNote, networkLine } from '../src/stages/common.ts';
 import { releaseNeedsPackages, releaseOne } from '../src/stages/release.ts';
 import { ctxFor, ok, runner, sh } from './helpers.ts';
 
@@ -129,4 +130,38 @@ test("a hire's release worktree gets no npm ci: its release only packs files wit
   const done = await releaseOne(ctx, e, { kit: '2.9.0' });
   assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
   assert.deepEqual(npm, [['run', 'release', '--', '--publish']], 'its release, and no npm ci before it');
+});
+
+test("a release that reached GitHub but not the Exchequer is done, with the kit's line as a note; never a failure", async () => {
+  const origin = path.join(tmp, 'exchequer-origin.git');
+  const checkout = path.join(tmp, 'Clerk');
+  sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
+  sh(tmp, 'clone', '--quiet', origin, checkout);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(checkout, 'config', k, v);
+  const files: Record<string, string> = {
+    'package.json': '{\n  "name": "clerk",\n  "version": "0.3.4",\n  "scripts": { "release": "node tools/kit.ts && node src/kit/release.ts" }\n}\n',
+    'kit.json': '{\n  "kit": "2.30.0",\n  "parts": ["node", "web", "spec"]\n}\n',
+  };
+  for (const [f, t] of Object.entries(files)) writeFileSync(path.join(checkout, f), t);
+  sh(checkout, 'add', '-A');
+  sh(checkout, 'commit', '--quiet', '-m', 'Clerk 0.3.4');
+  sh(checkout, 'push', '--quiet', 'origin', 'main');
+  const clerk = DEFAULT_EMPLOYEES.find((x) => x.id === 'clerk')!;
+  const e: Employee = { ...clerk, checkout, versionFiles: ['package.json'] };
+  const said = "Not published to the Exchequer: couldn't reach https://api.castellan-software.com: fetch failed (ECONNREFUSED). The GitHub release stands; npm run release -- --exchequer finishes it.";
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.3.3', isDraft: false }]) : undefined));
+  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? { code: 0, out: 'Clerk 0.3.4 (abc1234, kit 2.30.0): artifacts\\clerk\\Clerk-0.3.4.zip\n', err: `${said}\n` } : r.run(cmd, args, opts));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-exchequer'), run, neutralDir: tmp });
+  const done = await releaseOne(ctx, e, { kit: '2.30.0' });
+  assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
+  assert.ok(done.message.endsWith(`, with kit 2.30.0; ${said}`), done.message);
+});
+
+test("the Exchequer's line: a note when it says the release didn't get there, and never the network's reason a release failed", () => {
+  assert.equal(exchequerNote('Published to the Exchequer: porter-v0.4.26 (Porter-0.4.26.zip).'), '');
+  assert.equal(exchequerNote("The Exchequer: heiward isn't sold there, so heiward-v1.7.2 is on GitHub alone."), '');
+  const noKey = 'Not published to the Exchequer: no publisher key at C:\\Users\\someone\\.steward\\exchequer-publisher.key (or EXCHEQUER_PUBLISHER_KEY).';
+  assert.equal(exchequerNote(`built\r\n  ${noKey}\r\n`), `; ${noKey}`);
+  const failedOwn = 'HTTP 422: Validation Failed\nNot published to the Exchequer: couldn\'t reach https://api.castellan-software.com: fetch failed (ENOTFOUND).';
+  assert.equal(networkLine(failedOwn), null, "GitHub's own refusal was why, not the Exchequer's network");
 });
