@@ -10,7 +10,7 @@ const dataDir = path.join(home, 'data');
 process.env.FIXTURE_HOME = dataDir;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { every, roundFile, roundError } = await import('./fixture/src/kit/schedule.ts');
+const { every, roundFile, roundError, roundTimeLimit } = await import('./fixture/src/kit/schedule.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 
@@ -161,4 +161,47 @@ test("a data folder that can't be written doesn't break the round", async () => 
     job.stop();
     rmSync(dataDir, { force: true });
   }
+});
+
+test('a round that runs past its time limit is let go: recorded as timed out, its signal aborted, and the next round runs', async () => {
+  setDuty(true);
+  let calls = 0;
+  let firstSignal: AbortSignal | null = null;
+  let finishFirst!: () => void;
+  const job = every(
+    60_000,
+    async ({ signal }) => {
+      calls++;
+      if (calls === 1) {
+        firstSignal = signal;
+        await new Promise<void>((r) => (finishFirst = r)); // hangs until the test lets it end
+      }
+    },
+    { firstDelayMs: 50_000, name: 'limited', timeoutMs: 40 },
+  );
+  try {
+    await oneRound(job);
+    const r = file().rounds?.limited as Entry & { timedOut?: boolean };
+    assert.deepEqual([r.ok, r.timedOut], [false, true]);
+    assert.match(r.error!, /ran past its time limit \(0 s\): let go, and the next round tries again/);
+    assert.equal(firstSignal!.aborted, true, 'a job that can stop is asked to');
+    assert.ok(job.state.nextRunAt, 'the next round is scheduled');
+
+    await oneRound(job);
+    assert.equal(calls, 2, 'the next round runs, though the first never ended');
+    const second = file().rounds?.limited as Entry & { timedOut?: boolean };
+    assert.deepEqual([second.ok, second.timedOut], [true, undefined]);
+
+    finishFirst();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(file().rounds?.limited, second, 'the one let go, ending late, changes nothing');
+    assert.equal(job.running, false);
+  } finally {
+    job.stop();
+  }
+});
+
+test('the time limit, unless an agent gives its own: three intervals, and at least two hours', () => {
+  assert.equal(roundTimeLimit(30 * 60_000), 2 * 3_600_000);
+  assert.equal(roundTimeLimit(6 * 3_600_000), 18 * 3_600_000);
 });

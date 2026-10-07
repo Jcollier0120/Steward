@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.34.0
+
+**An agent's rounds never stop silently.** On 2026-10-07 the Chamberlain finished no round for 18 hours. Nothing had hung: it declared a mail source `required`, so `every()` skipped each round, documents too, and a skipped round wrote nothing, so it looked like an agent that had stopped.
+- **node/schedule.ts: a held round is recorded.** A scheduled round held for the agent's required settings still runs nothing, but writes its round.json entry each interval with `"ok": null` and `"waiting": "<what>"` (needsSettings' text), and `RoundState.waiting` (in /api/ping's `rounds`) says the same. Run now is still refused while it waits.
+- **node/schedule.ts: a time limit on every round.** A round that runs past `timeoutMs` (new in `every()`'s options, a number or a function; else `roundTimeLimit(everyMs)`, three intervals and at least two hours) is let go. Its job's signal is aborted, it is recorded with `"ok": false`, `"timedOut": true` and an error saying so, and the next round is scheduled, which tries again. A hung await can no longer stop every round after it. If the job let go ends later, the log says so and nothing else changes. `RoundTimeout` is new.
+- **The job is handed `{ signal }`** (`every(everyMs, ({ signal }) => …)`): a job that can stop when asked passes it on (fetch, child processes). One that ignores it simply isn't waited for after the limit.
+- **`required` is only for an agent that can do nothing at all without the setting** (node/onboarding.ts, required.ts). A setting that only part of the work needs goes in `settings` alone, and the page says what it adds: one missing setting must not stop the work that doesn't need it.
+- **spec/ROUND.md** documents `waiting` and `timedOut`.
+- **What an agent must do:** nothing. A job that takes no arguments works as before. An agent whose rounds can rightly run longer than three intervals and two hours passes its own `timeoutMs`. An agent with `required` checks that it can truly do nothing without it; only the Developer Herald has one (its feeds), and it can't.
+
+### Before you update
+
+- Nothing: it updates itself as usual. This kit comes after 2.33.0 (Steward 0.19.4); if 2.33.0 isn't released yet, release it first.
+
 ## 2.32.1
 
 **The kit names the app the person bought: Castellan.** Where the kit tells a person to open or use the app, it says Castellan, not Manor. Only words change.

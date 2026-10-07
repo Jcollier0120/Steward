@@ -12,7 +12,8 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { filled, onboardingProblems, requiredText, unmetRequired } = await import('./fixture/src/kit/onboarding.ts');
 const { needsSettings, watchRequired } = await import('./fixture/src/kit/required.ts');
-const { every } = await import('./fixture/src/kit/schedule.ts');
+const { every, roundFile } = await import('./fixture/src/kit/schedule.ts');
+const { readJson } = await import('./fixture/src/kit/store.ts');
 const { pillOf } = await import('./fixture/src/kit/page.ts');
 type Onboarding = import('./fixture/src/kit/onboarding.ts').Onboarding;
 type Field = import('./fixture/src/kit/settings-kit.ts').Field;
@@ -86,6 +87,24 @@ test('its rounds wait for its required settings: Run now too, and no next round 
     assert.equal(job.runNow(), true);
     while (job.running) await new Promise((r) => setTimeout(r, 5));
     assert.equal(ran, 1);
+  } finally {
+    job.stop();
+    watchRequired(null);
+  }
+});
+
+test('a round held for its required settings is never silent: round.json and its state say what it waits for', async () => {
+  const spec = specOn(null);
+  watchRequired(spec, mail);
+  let ran = 0;
+  const job = every(60_000, async () => void ran++, { firstDelayMs: 0, name: 'held' });
+  try {
+    while (!readJson<any>(roundFile(), {}).rounds?.held) await new Promise((r) => setTimeout(r, 5));
+    const r = readJson<any>(roundFile(), {}).rounds.held;
+    assert.equal(ran, 0, 'the job had nothing to work with');
+    assert.deepEqual([r.ok, r.waiting, r.error, r.next], [null, 'Thunderbird or Mail accounts', null, null]);
+    assert.equal(job.state.waiting, 'Thunderbird or Mail accounts');
+    assert.equal(job.state.nextRunAt, null);
   } finally {
     job.stop();
     watchRequired(null);
