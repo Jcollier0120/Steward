@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.19.1
+
+**It hands out kit 2.32.1: the agents name Castellan, the app you bought.**
+
+### What changed
+
+- Kit 2.32.1: an agent with no local AI set up says "open Castellan and choose Set up local AI" (it said Manor), and the agents' other words that send you to the app name Castellan too.
+- The Steward's card in Castellan shows again: its one-line role is shorter ("Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes"), within the 120 characters a card takes.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.19.0
 
 **The Steward looks after your own repositories: the ones Reeve finds, as you say.**

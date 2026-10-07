@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.32.1
+
+**The kit names the app the person bought: Castellan.** Where the kit tells a person to open or use the app, it says Castellan, not Manor. Only words change.
+- **core/messages: `NOT_SET_UP`** (and `REEVE_NOT_SET_UP`, the same) is "Local AI isn't set up on this PC yet: open Castellan and choose Set up local AI". `say.gpuSetAside` says "Castellan's Settings: …". spec/accelerator-vectors.json carries the new words.
+- **node:** the on-duty badge's tooltip says "Castellan's Stop pauses them" (page.ts); a hire's release notes say "Castellan installs and updates it by itself" (release.ts); the keeper's log says Castellan's Settings keep the graphics card out (keeper.ts); the Aletaster's and the Surveyor's work lines name Castellan (work.ts).
+- **Unchanged:** "Back to <manor>" says the manor's name, and Castellan when it has none, as 2.32.0 made it; identifiers, paths, environment variables and the in-story "manor" stay as they were.
+- **What an agent must do:** nothing. No agent's tests compare the kit's old words through the kit (checked on every agent's main): the Auditor's test/auditor.test.ts (lines 698 and 700) writes the old sentence out itself, as its own input, so it still passes; its README says "open Manor and choose Set up local AI" too, which it may want to update.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.32.0
 
 **A release goes to the agent's own repository, and to a releases repository only where one is named.** `npm run release -- --publish` used to publish every agent to one built-in releases repository as well as its own, so an agent built on the kit by anyone else failed its first release. The releases repository is now read when a release is published, never built in.

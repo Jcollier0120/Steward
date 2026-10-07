@@ -111,7 +111,7 @@ export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: num
   if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
   if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
   const next = until(o.nextAt, o.now);
-  return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Manor's Stop pauses them." };
+  return { kind: 'on', text: `On duty${next ? ` · next round ${next}` : ''}`, title: "On duty: its rounds run on their schedule. Castellan's Stop pauses them." };
 }
 
 /**

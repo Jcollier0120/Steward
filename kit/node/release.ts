@@ -226,9 +226,9 @@ interface Built {
   notes: Notes;
 }
 
-/** The notes' last section: how to install a hire's release by hand (Manor installs and updates it by itself). */
+/** The notes' last section: how to install a hire's release by hand (Castellan installs and updates it by itself). */
 export const INSTALL_NOTE =
-  'Manor installs and updates it by itself. To install it by hand, unpack the zip anywhere and run `node src\\cli.ts install` (Node 22.18 or later). `SHA256SUMS.txt` lists its SHA-256 (PowerShell: `Get-FileHash`).';
+  'Castellan installs and updates it by itself. To install it by hand, unpack the zip anywhere and run `node src\\cli.ts install` (Node 22.18 or later). `SHA256SUMS.txt` lists its SHA-256 (PowerShell: `Get-FileHash`).';
 
 /** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
 async function build(readable = false): Promise<Built> {
