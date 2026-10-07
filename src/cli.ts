@@ -5,6 +5,7 @@ import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
 import { claimVersion, employeeFor, loadClaims, releaseClaim } from './claims.ts';
+import { anyRepo } from './found.ts';
 import type { Employee, Settings } from './settings.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { open, shutdown, start, status, stop } from './kit/service.ts';
@@ -14,7 +15,9 @@ import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
-  The kit's rollout, a stage at a time (each reports for every employee):
+  Each stage reports for every repository it looks after (Settings). bump and push are Castellan's kit
+  rollout, only on the PC that releases Castellan itself; elsewhere release takes each repository's
+  own version, and merge merges only where Settings say yes (Merges your ready PRs).
   bump [--kit <version>] [--employees a,b]
                    for each employee: a worktree of its branch on origin, on steward/kit-<version>, with
                    kit.json pinned to the kit and its patch version up; its kit filled, its checks run,
@@ -50,10 +53,11 @@ const USAGE = `${APP.id}: ${APP.role}
                    ${TASK_NAME} that brings its page up, and start it. An update keeps the version
                    before it, and goes back to it when the new one doesn't hold up for its probation;
                    that version is then flagged, and refused until allowed again
-  claim-version <employee or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
+  claim-version <repository: id, name or owner/repo> [--branch <b>] [--for "<what>"] [--by <who>] [--minor] [--json]
                    before starting work on a repository: the next version no one has (above its branch,
                    its releases, its open PRs and every live claim), claimed for that work. The same
-                   branch asking again gets the same version
+                   branch asking again gets the same version. Any repository works: one in Settings, one
+                   Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
   claims [--json]  the versions claimed and not yet landed
@@ -103,7 +107,7 @@ function printStage(r: StageResult): number {
 function printStaff(s: Staff): void {
   console.log(`The kit the Steward hands out: ${s.kit ?? 'none'}${s.kitNote ? ` (${s.kitNote})` : ''}`);
   for (const r of s.rows) {
-    const main = r.main ? `${r.branch} ${r.main.version ?? '?'} (${r.main.commit}), ${r.main.oldKitFiles.length ? `old kit (${r.main.oldKitFiles.length} files)` : r.main.kit ? `kit ${r.main.kit}` : 'no kit.json'}` : `${r.branch} unknown`;
+    const main = r.main ? `${r.branch} ${r.main.version ?? '?'} (${r.main.commit}), ${r.main.kit ? `kit ${r.main.kit}` : r.usesKit ? 'no kit.json' : 'no kit'}` : `${r.branch} unknown`;
     const rel = r.release ? `${r.release.tag}${r.release.kit === 'unknown' ? '' : r.release.kit ? ` with kit ${r.release.kit}` : ' with no kit'}` : 'no release';
     const prs = r.prs.length ? `; PRs ${r.prs.map((p) => `#${p.number} ${p.checks}/${p.mergeable.toLowerCase()}${p.whose === 'team' ? ` (${p.author}'s)` : ''}`).join(', ')}` : '';
     console.log(`\n${r.name} (${r.repo})`);
@@ -198,9 +202,9 @@ switch (cmd) {
       break;
     }
     const ctx = await context({ glance: false, team: false });
-    const e = employeeFor(ctx.settings, who);
+    const e = employeeFor(ctx.settings, who) ?? anyRepo(who);
     if (!e) {
-      console.error(`No employee ${who}: an id, a name or owner/repo from Settings, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
+      console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, the clone this runs in, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
       process.exitCode = 2;
       break;
     }
@@ -211,7 +215,7 @@ switch (cmd) {
   }
   case 'release-version': {
     const ctx = await context({ glance: false, team: false });
-    const e = rest[0] ? employeeFor(ctx.settings, rest[0]) : null;
+    const e = rest[0] ? (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0])) : null;
     if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
       console.error('release-version takes an employee and a version: release-version porter 0.4.12');
       process.exitCode = 2;
@@ -229,7 +233,7 @@ switch (cmd) {
   }
   case 'allow-update': {
     const v = rest[0] ?? '';
-    if (!/^d+.d+.d+$/.test(v) || rest.length > 1) {
+    if (!/^\d+\.\d+\.\d+$/.test(v) || rest.length > 1) {
       console.error('allow-update takes one version: allow-update 0.8.14');
       process.exitCode = 2;
     } else if (allowUpdate(v)) console.log(`${APP.name} ${v} may be installed again: Manor's next update installs it, behind the same fail-safe.`);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Turns a hire that carries its own copy of the kit into one that takes the Steward's (src/convert.ts):
+ * Turns a hire that carries its own copy of the kit into one that takes the Steward's (tools/lib/convert.ts):
  *
  *   node tools/convert.ts <hire folder> --version <new version> [--kit <version>] [--parts node,web,spec]
  *
@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { convert } from '../src/convert.ts';
+import { convert } from './lib/convert.ts';
 import { kitVersionOf } from '../src/kitfiles.ts';
 import { run } from '../src/run.ts';
 

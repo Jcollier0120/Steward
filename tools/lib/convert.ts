@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { git } from './git.ts';
-import { carriedOldKit, newPathOfOld, OLD_KIT_HIRES, oldKitFilesIn, OLD_KIT_PATHS, pinText } from './kitfiles.ts';
+import { git } from '../../src/git.ts';
+import { pinText } from '../../src/kitfiles.ts';
+import { carriedOldKit, newPathOfOld, OLD_KIT_HIRES, oldKitFilesIn, OLD_KIT_PATHS } from './oldkit.ts';
 import { relocate } from './relocate.ts';
-import type { Runner } from './run.ts';
-import { agreedVersion, setVersion } from './versions.ts';
+import type { Runner } from '../../src/run.ts';
+import { agreedVersion, setVersion } from '../../src/versions.ts';
 
 /**
  * Turns a hire that carries its own copy of the kit into one that takes the Steward's (tools/convert.ts):

@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { dismiss, loadAlarms } from './alarms.ts';
-import { APP, port } from './app.ts';
+import { dismiss, getJson, loadAlarms, type GetJson } from './alarms.ts';
+import { APP, dataDir, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { afterWords } from './after.ts';
-import type { Runner } from './run.ts';
+import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff } from './stages/staff.ts';
@@ -17,6 +17,7 @@ import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
+import { findRepos, foundStale, foundView, loadFound, lookAfter } from './found.ts';
 
 /**
  * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
@@ -52,7 +53,7 @@ export const staffView = (s: Staff | null): StaffView | null =>
   s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** `run` stands in for git, gh and the employees' commands in a test; `owner`, for the account gh is signed in as (team.ts). */
-export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
+export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson } = {}) {
   let running: { stage: string; since: string } | null = null;
   let refreshing: Promise<unknown> | null = null;
   /** Jobs to approve once what's running ends (POST /api/jobs/approve while it ran): employee ids, none for all. */
@@ -76,6 +77,18 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
     approveAfter = null;
     approveNow(ids);
   };
+
+  /** The repositories Reeve finds (found.ts): looked at again in the background, at most one look at a time. */
+  let finding: Promise<unknown> | null = null;
+  const find = () =>
+    // Under node --test only with a stand-in for the pages: a test never reads this PC's Reeve.
+    process.env.NODE_TEST_CONTEXT && !o.getJson
+      ? Promise.resolve()
+      : (finding ??= findRepos({ run: o.run ?? realRun, cwd: dataDir, getJson: o.getJson ?? getJson, reeveUrl: loadSettings().alarms.reeveUrl })
+      .catch((e) => console.error(`${new Date().toISOString()} finding the repositories: ${(e as Error).message}`))
+      .finally(() => {
+        finding = null;
+      }));
 
   const refresh = () => {
     if (refreshing) return refreshing;
@@ -159,10 +172,10 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
   const pageData = () => {
     const s = loadSettings();
     const busy = running !== null || refreshing !== null;
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s) };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s), castellan: s.releasesCastellan };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
-    const body: StewardView = { staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    const body: StewardView = { castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 
@@ -175,6 +188,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
       // /api/page again every few seconds while a stage runs, and after each button.
       '/': ({ token }) => {
         if (!running && !roundsKeepIt() && staleTable()) void refresh();
+        if (foundStale(loadFound())) void find();
         return { html: reactPage({ token, data: pageData() }) };
       },
       '/api/page': () => ({ json: pageData() }),
@@ -219,6 +233,19 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner } = {}) {
         // An update the install rolled back: dismissing its alarm is looking at it, and allows that version again.
         if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
+      },
+      // Look after a repository Reeve found (found.ts): added to Settings, merging and releasing only as ticked.
+      '/api/repos/look-after': ({ body }) => {
+        const repo = typeof body?.repo === 'string' ? body.repo.trim().slice(0, 140) : '';
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { json: { error: 'Send { "repo": "owner/name" }, one of the repositories the page offers.' }, status: 400 };
+        const r = lookAfter(repo, { merges: body?.merges === true, release: body?.release === true });
+        if ('error' in r) return { json: { error: r.error }, status: 409 };
+        if (!running) void refresh();
+        return { json: { ok: true, id: r.employee.id } };
+      },
+      '/api/repos/refresh': () => {
+        void find();
+        return { json: { started: true } };
       },
       '/api/staff/refresh': () => {
         if (running) return { json: { started: false, message: `${running.stage} is running; the table is refreshed when it's done.` } };

@@ -2,6 +2,7 @@ import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
+import { releasesRepoEnv } from '../settings.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
@@ -135,7 +136,8 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         const dirty = (await git(run, dir, 'status', '--porcelain', '--untracked-files=all')).trim();
         if (dirty) return selfResult('failed', `the worktree at ${at} isn't clean (${dirty.split('\n').slice(0, 3).join(', ')}), so ${step.tag} wasn't released`, { version: step.version, commit: at });
       }
-      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000 });
+      // Its release goes to the releases repository too, as Settings say (MANOR_RELEASES_REPO, the kit's release.ts).
+      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
     }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compareTrees, withoutName, type Tree } from '../src/compare.ts';
-import { relocate, specifier } from '../src/relocate.ts';
+import { compareTrees, withoutName, type Tree } from '../tools/lib/compare.ts';
+import { relocate, specifier } from '../tools/lib/relocate.ts';
 
 // Working out the kit: which files every hire has the same, and moving them without breaking imports.
 

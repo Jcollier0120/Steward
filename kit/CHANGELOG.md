@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.32.0
+
+**A release goes to the agent's own repository, and to a releases repository only where one is named.** `npm run release -- --publish` used to publish every agent to one built-in releases repository as well as its own, so an agent built on the kit by anyone else failed its first release. The releases repository is now read when a release is published, never built in.
+- **node/release.ts: `releasesRepo(env?, home?)`**, new, replaces the `RELEASES_REPO` constant: `MANOR_RELEASES_REPO` when it is set (the Steward sets it for every release it runs, from Steward 0.16.0: its Settings' releases repository on the PC that releases Castellan itself, else empty); for a release run by hand, the Steward's settings on this PC (`STEWARD_HOME`, else `%USERPROFILE%\.steward\settings.json`: `releasesCastellan` and `releasesRepo`); else none.
+- **With none**, `--publish` publishes `v<version>` in the agent's own repository only, and refuses a version that is already released there. With one, it publishes there as `<id>-v<version>` and in the agent's own as before.
+- **gh is found on PATH only.** node/release.ts and node/manor.ts no longer look in a folder of one particular PC. Without gh on PATH, `--publish` says: gh isn't installed: install GitHub CLI, then run gh auth login.
+- **What an agent must do:** nothing. On the PC that releases Castellan, the Steward's settings name the releases repository it always published to, so every release, by the Steward or by hand, goes where it went before. An agent that imported `RELEASES_REPO` calls `releasesRepo()` instead.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.28.1
 
 **Security fix: a value with curly quotes in it could break out of a PowerShell string.** Windows PowerShell ends a single-quoted string at the curly quotes ‘ ’ ‚ ‛ as well as at `'`, and `psQuote` doubled only `'`. A file name, folder or other text that an agent hands to PowerShell could end the string early and be read as code.

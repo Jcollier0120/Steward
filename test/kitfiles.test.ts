@@ -5,20 +5,16 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
 import {
-  carriedOldKit,
   changelogBetween,
   compareVersions,
   filesUnder,
   hirePathOf,
   kitPathOfHire,
   kitVersionOf,
-  newPathOfOld,
-  OLD_KIT_HIRES,
-  oldKitFilesIn,
-  OLD_KIT_PATHS,
   partFiles,
   pinText,
 } from '../src/kitfiles.ts';
+import { carriedOldKit, newPathOfOld, OLD_KIT_HIRES, oldKitFilesIn, OLD_KIT_PATHS } from '../tools/lib/oldkit.ts';
 import { entryFor, KIT_RELEASE_PATHS } from '../tools/kit-release.ts';
 
 // The kit's layout, and the Steward's kit\ itself: the parts, the version and changelog, and the Steward

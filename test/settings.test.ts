@@ -30,7 +30,8 @@ test("nobody's employees, repository or clone are built in: they start empty, an
   const text = JSON.stringify([DEFAULT_SETTINGS, SETTINGS_SPEC.schema]);
   assert.doesNotMatch(text, /jcollier|C:\\\\Projects/i, "no one's account or folders in the defaults or the page's hints");
   assert.equal(DEFAULT_SETTINGS.releaseAfterMerge, false, 'release is a stage of its own, unless Settings say otherwise');
-  assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [true, 10], 'it merges and releases by itself, a round every 10 minutes on duty');
+  assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [false, 10], 'it merges and releases by itself only once the person says yes; then a round every 10 minutes on duty');
+  assert.equal(DEFAULT_SETTINGS.releasesCastellan, false, "a new install releases nothing of Castellan's");
   assert.deepEqual([normalizeSettings({ roundMinutes: 1 }).settings.roundMinutes, normalizeSettings({ byItself: false }).settings.byItself], [2, false]);
   assert.deepEqual(DEFAULT_SETTINGS.team, [], 'none named: the account gh is signed in as (team.ts)');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
@@ -52,7 +53,7 @@ test("an older settings.json keeps its repository and clone; only missing ones t
   assert.deepEqual([normalizeSettings({ parallel: 3 }).settings.stewardRepo, normalizeSettings({ parallel: 3 }).settings.stewardCheckout], ['', '']);
 });
 
-test('a repository not owner/name, an id twice, or an employee with no version file is refused field by field, and nothing is written', async () => {
+test('a repository not owner/name, or an id twice, is refused field by field, and nothing is written; a repository with no version files is fine', async () => {
   const bad = structuredClone(STAFF);
   bad[0].repo = 'Porter';
   bad[1].id = 'porter';
@@ -61,7 +62,7 @@ test('a repository not owner/name, an id twice, or an employee with no version f
   assert.equal(r.status, 400);
   assert.match(r.json.errors['employees.0.repo'], /owner\/name, like octocat\/hello-world/);
   assert.match(r.json.errors['employees.1.id'], /Already listed/);
-  assert.match(r.json.errors['employees.2.versionFiles'], /at least one/);
+  assert.equal(r.json.errors['employees.2.versionFiles'], undefined, 'no version files: no versions, and no releases');
   assert.throws(() => readFileSync(SETTINGS_SPEC.file()), /ENOENT/);
 });
 
@@ -154,7 +155,7 @@ test("with no settings.json at all, the staff table and its clones are written t
     assert.deepEqual(s.employees.map((e) => e.id), ['porter', 'dotty'], 'one whose clone is gone is left out');
     const [porter, dotty] = s.employees;
     assert.deepEqual(porter, {
-      id: 'porter', name: 'Porter', repo: 'octocat/Porter', checkout: path.join(clones, 'Porter'), branch: 'main', usesKit: true, parts: ['node', 'web', 'spec'],
+      id: 'porter', name: 'Porter', repo: 'octocat/Porter', checkout: path.join(clones, 'Porter'), branch: 'main', merges: true, usesKit: true, parts: ['node', 'web', 'spec'],
       fill: 'node tools/kit.ts', test: ['npx tsc -p . --noEmit', 'npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'],
       release: 'npm run release -- --publish', install: 'node src/cli.ts install',
       approve: 'node %USERPROFILE%\\.porter\\app\\src\\cli.ts jobs approve {job} --sha256 {sha256}', installed: '%USERPROFILE%\\.porter\\app',
@@ -332,10 +333,10 @@ test('a settings.json that names its employees, even none, is never migrated; no
   writeFileSync(settingsFile(), JSON.stringify({ employees: [] }));
   try {
     assert.deepEqual(loadSettings().employees, []);
-    assert.equal(readFileSync(settingsFile(), 'utf8'), JSON.stringify({ employees: [] }));
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile(), 'utf8')).employees, [], 'its employees as they were (it ran before this version, so it releases Castellan as before)');
     clean();
     assert.deepEqual(loadSettings().employees, []);
-    assert.throws(() => readFileSync(settingsFile()), /ENOENT/, 'nothing written');
+    assert.deepEqual(JSON.parse(readFileSync(settingsFile(), 'utf8')), { releasesCastellan: false }, 'a new install: only that it releases nothing of Castellan');
   } finally {
     clean();
   }

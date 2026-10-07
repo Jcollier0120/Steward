@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { convert, convertReadme, kitScripts } from '../src/convert.ts';
+import { convert, convertReadme, kitScripts } from '../tools/lib/convert.ts';
 import { run } from '../src/run.ts';
 import { fakeEmployee, sh } from './helpers.ts';
 

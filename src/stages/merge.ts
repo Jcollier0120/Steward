@@ -141,6 +141,9 @@ export const behindItsBranch = (pr: PrInfo, branch: string) =>
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
+/** Why a repository's ready PRs aren't merged: the person hasn't said yes for it. */
+export const NOT_MERGING = "left to you: the Steward merges PRs to it only once you say yes (Merges your ready PRs, in Settings)";
+
 /** Why a draft of the Wright's waits where the Bailiff isn't installed. */
 export const NO_BAILIFF = "the Bailiff isn't on this PC to review it: review it yourself and mark it ready, or hire the Bailiff";
 
@@ -197,6 +200,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
   const none = !o.team ? 'no open Steward PRs' : ctx.settings.team.length ? "no open PRs of the Steward's or the team's" : `no open Steward PRs (${NO_TEAM})`;
   if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
+  // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
+  if (o.yes && !e.merges) return { ...result(e, 'skipped', `${prs.length} open PR${prs.length === 1 ? '' : 's'} (${prs.map((p) => `#${p.number}`).join(', ')}) ${NOT_MERGING}`, { url: prs[0].url }), merged: [], held: [] };
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);

@@ -1,6 +1,6 @@
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
-import type { Employee } from '../settings.ts';
+import { wrightInstalled, type Employee } from '../settings.ts';
 import type { Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 
@@ -22,8 +22,8 @@ export const kickbacksFile = () => dataFile('kickbacks.json');
 
 export type Author = 'wright' | 'claude' | 'person';
 
-/** Whose work a PR is, by its label and branch. */
-export const authorOf = (pr: PrInfo): Author => (pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/') ? 'wright' : pr.head.startsWith('claude/') ? 'claude' : 'person');
+/** Whose work a PR is, by its label and branch. The Wright's only where the Wright is installed: elsewhere a wright label is anyone's. */
+export const authorOf = (pr: PrInfo, wright = wrightInstalled()): Author => (wright && (pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/')) ? 'wright' : pr.head.startsWith('claude/') ? 'claude' : 'person');
 
 /** The issue the Wright's PR was its work for: the one its description closes, else its branch's number (wright/42-…). */
 export function wrightIssueOf(pr: PrInfo): number | null {

@@ -9,7 +9,7 @@
  * it (src/kitfiles.ts): src\<f> in the node part, kit\node\<f> (a hire's src\kit\<f>), and tools\release.ts
  * as kit\node\release.ts; settings-panel.js in the web part; the queue's vectors in the spec part; and the
  * kit's tests as kit\test\<f>, which run against the fixture agent in kit\test\fixture. Their relative
- * imports are written again for their new places (src/relocate.ts). Options:
+ * imports are written again for their new places (tools/lib/relocate.ts). Options:
  *
  *   --overlay <path>=<file>,...   take that file's text for a kit file (a newer copy kept elsewhere)
  *   --promote <path>,...          files the same in every hire but for the agent's name: written with the
@@ -22,9 +22,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compareTrees, withoutName, type Tree } from '../src/compare.ts';
-import { filesUnder, FIXTURE_DIR, kitPathOfHire, lf, newPathOfOld } from '../src/kitfiles.ts';
-import { norm, relocate } from '../src/relocate.ts';
+import { compareTrees, withoutName, type Tree } from './lib/compare.ts';
+import { filesUnder, FIXTURE_DIR, kitPathOfHire, lf } from '../src/kitfiles.ts';
+import { norm, relocate } from './lib/relocate.ts';
+import { newPathOfOld } from './lib/oldkit.ts';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const FIXTURE_ID = 'fixture';

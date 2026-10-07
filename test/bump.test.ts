@@ -146,22 +146,19 @@ test("a failure's message names the failed tests and their errors; a test that f
   assert.ok(!existsSync(`${s.work}.log`));
 });
 
-test('already on the kit: skipped; not taking the kit: skipped; still carrying the old kit: refused', async () => {
+test('already on the kit: skipped; not taking the kit: skipped; no kit.json: refused', async () => {
   const on = setup({ kit: '1.0.1' });
   assert.deepEqual([(await bumpOne(on.ctx, on.e, { kit: '1.0.1' })).outcome], ['skipped']);
   const reeve = setup({}, { usesKit: false });
   const r = await bumpOne(reeve.ctx, reeve.e, { kit: '1.0.1' });
   assert.equal(r.outcome, 'skipped');
   assert.equal(r.message, 'not using the kit yet');
-  const old = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } }, { id: 'porter', name: 'Porter' });
-  const o = await bumpOne(old.ctx, old.e, { kit: '1.0.1' });
-  assert.equal(o.outcome, 'refused');
-  assert.match(o.message, /still carries the old kit \(2 files, src\/npu\.ts …\): convert it/);
   const none = setup({ kit: null });
   assert.match((await bumpOne(none.ctx, none.e, { kit: '1.0.1' })).message, /has no kit\.json/);
-  // The same files in an agent that never carried the old kit are its own: it isn't told to convert.
-  const own = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } }, { id: 'reeve', name: 'Reeve' });
-  assert.equal((await bumpOne(own.ctx, own.e, { kit: '1.0.1' })).message, 'origin/main has no kit.json');
+  // Every hire took the kit long ago: the old kit's files are never looked for, in a hire or anyone else.
+  const own = setup({ kit: null, files: { 'src/npu.ts': 'export {}', 'tools/release.ts': '' } }, { id: 'porter', name: 'Porter' });
+  const o = await bumpOne(own.ctx, own.e, { kit: '1.0.1' });
+  assert.deepEqual([o.outcome, o.message], ['refused', 'origin/main has no kit.json']);
 });
 
 test("Reeve's own files at the old kit's paths don't stop its bump", async () => {

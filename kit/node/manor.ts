@@ -216,16 +216,13 @@ export const forgetGithubOwner = () => {
   owner = null;
 };
 
-/** What gh printed, or nothing when it isn't there or fails: on PATH, else where this PC keeps it. */
+/** What gh (on PATH) printed, or nothing when it isn't there or fails. */
 function ghText(args: string[]): string {
-  for (const gh of ['gh', 'C:\\tools\\gh\\bin\\gh.exe']) {
-    try {
-      return execFileSync(gh, args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return '';
-    }
+  try {
+    return execFileSync('gh', args, { windowsHide: true, timeout: 15_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
   }
-  return '';
 }
 
 /**

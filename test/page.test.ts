@@ -77,7 +77,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   // No repositories here: the kit is the one it keeps to run on, its rounds keep the staff's pages up, and no stages.
   assert.equal(body.round.repos, false);
   assert.match(html, /The kit the Steward manages: <strong>1\.0\.0<\/strong>/);
-  assert.match(html, /No employees yet\. Add one in Settings, under Employees/, 'no employees: how to add one');
+  assert.match(html, /No repositories yet\. Pick the ones to look after from those Reeve found/, 'no repositories: how to add one');
   assert.match(html, /No repositories to look after on this PC, so a round every 10 minutes while on duty opens again, through Manor, the page of any agent/);
   assert.doesNotMatch(html, /data-post="\/api\/stage\//, 'no stages, with no one to run them for');
   // With an employee: the kit it hands out, the stages and the whole round (the same data, drawn as if it had one).

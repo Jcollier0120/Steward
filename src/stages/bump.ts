@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { carriedOldKit, changelogBetween, compareVersions, lf, oldKitFilesIn, pinText } from '../kitfiles.ts';
+import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
-import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile, trackedAt } from '../git.ts';
+import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
@@ -152,10 +152,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
 
   const pinRaw = await showFile(run, repo, base, 'kit.json');
   const pin = readPin(pinRaw);
-  if (!pin) {
-    const old = carriedOldKit(e.id) ? oldKitFilesIn(await trackedAt(run, repo, base)) : [];
-    return result(e, 'refused', old.length ? `${base} still carries the old kit (${old.length} files, ${old[0]} …): convert it to the Steward's kit first` : `${base} has no kit.json`);
-  }
+  if (!pin) return result(e, 'refused', `${base} has no kit.json`);
   if (pin.kit === o.kit) return result(e, 'skipped', `already on kit ${o.kit}`);
 
   // The tools/kit.ts it gets: the Steward's, read before anything is made.

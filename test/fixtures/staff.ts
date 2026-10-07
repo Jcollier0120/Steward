@@ -11,6 +11,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Porter",
     "checkout": "C:\\Projects\\Porter",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -38,6 +39,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Auditor",
     "checkout": "C:\\Projects\\Auditor",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -65,6 +67,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Clerk",
     "checkout": "C:\\Projects\\Clerk",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -92,6 +95,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Herald",
     "checkout": "C:\\Projects\\Herald",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -119,6 +123,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Warrener",
     "checkout": "C:\\Projects\\Warrener",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -146,6 +151,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Aletaster",
     "checkout": "C:\\Projects\\Aletaster",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -173,6 +179,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Miller",
     "checkout": "C:\\Projects\\Miller",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -200,6 +207,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Pinder",
     "checkout": "C:\\Projects\\Pinder",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -227,6 +235,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Reeve",
     "checkout": "C:\\Projects\\Reeve",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -253,6 +262,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Heiward",
     "checkout": "C:\\Projects\\Heiward",
     "branch": "master",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "spec"
@@ -275,6 +285,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Surveyor",
     "checkout": "C:\\Projects\\Surveyor",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -302,6 +313,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Lamplighter",
     "checkout": "C:\\Projects\\Lamplighter",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -329,6 +341,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Smith",
     "checkout": "C:\\Projects\\Smith",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -356,6 +369,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/DeveloperHerald",
     "checkout": "C:\\Projects\\DeveloperHerald",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -383,6 +397,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Chamberlain",
     "checkout": "C:\\Projects\\Chamberlain",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -410,6 +425,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Thatcher",
     "checkout": "C:\\Projects\\Thatcher",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -437,6 +453,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Reckoner",
     "checkout": "C:\\Projects\\Reckoner",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -464,6 +481,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Weigher",
     "checkout": "C:\\Projects\\Weigher",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",
@@ -491,6 +509,7 @@ export const STAFF: Employee[] = [
     "repo": "Jcollier0120/Shepherd",
     "checkout": "C:\\Projects\\Shepherd",
     "branch": "main",
+    "merges": true,
     "usesKit": true,
     "parts": [
       "node",

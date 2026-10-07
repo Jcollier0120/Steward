@@ -122,7 +122,7 @@ export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise
  * Settings release after merging (`releaseKit`, the kit that release must carry). Each step is a line of the
  * stage's results ("release: …", "install: …", "approve-jobs: …").
  */
-export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: string; merged: PrInfo[] }[], o: { releaseKit: string | null }): Promise<EmployeeResult[]> {
+export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: string; merged: PrInfo[] }[], o: { releaseKit: string | null; releaseAny?: boolean }): Promise<EmployeeResult[]> {
   const out: EmployeeResult[] = [];
   for (const m of merged) {
     const e = employees.find((x) => x.id === m.id);
@@ -144,8 +144,9 @@ export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: 
     if (asking('release').length) {
       ctx.log(`[${e.id}] release, as ${by(asking('release'))} asks`);
       release = await step('release', () => releaseOne(ctx, e, { kit: null }));
-    } else if (o.releaseKit) {
-      await step('release', () => releaseOne(ctx, e, { kit: o.releaseKit! }));
+    } else if (o.releaseKit || o.releaseAny) {
+      // Settings release after merging: at the kit handed out, or (a PC with no kit to hand out) whatever its branch carries.
+      await step('release', () => releaseOne(ctx, e, { kit: o.releaseKit ?? null }));
     }
     let install: EmployeeResult | null = null;
     if (asking('install').length) {

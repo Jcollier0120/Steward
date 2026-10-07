@@ -246,6 +246,8 @@ export function employeeFromClone(row: StaffRowLike, internal = false): { employ
     repo: typeof row.repo === 'string' ? row.repo : '',
     checkout,
     branch,
+    // An install that ran on the old built-in employees merged their ready PRs by itself: it still does.
+    merges: true,
     // Untested or unreleasable, it waits off the kit's stages until Settings say how.
     usesKit: row.usesKit !== false && !missing.includes('Test it') && !missing.includes('Release it'),
     parts: Array.isArray(row.parts) ? row.parts.filter((p): p is string => typeof p === 'string') : [],
@@ -405,6 +407,54 @@ export function fillMigrationGaps(o: { settingsFile: string; now?: Date }): Migr
     };
     writeJson(migrationFile(), next);
     return changed || JSON.stringify(gaps) !== before ? next : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where Castellan's releases were published for every Manor before the releases repository was a setting (the kit's
+ * release.ts named it until kit 2.32.0): an install from before keeps publishing there.
+ */
+export const CASTELLAN_RELEASES_REPO = 'Jcollier0120/Manor-releases';
+
+/** Where the Steward looked for a .NET SDK before 0.14.0, after DOTNET_ROOT: an install from before that found one there keeps it. */
+const LEGACY_DOTNET = 'C:\\tools\\dotnet10';
+
+/** The files only a Steward that has run before leaves in its data folder. */
+const RAN_BEFORE = ['settings.json', 'staff.json', 'alarms.json', 'last-stage.json', 'round.json', 'stages.log'];
+
+/**
+ * Once, the first time the settings are read without `releasesCastellan`. A Steward that ran before this version (its
+ * data folder has its settings or what its rounds leave) worked as Castellan's own release machinery and merged by
+ * itself: that is written into settings.json, so nothing changes for it (releasesCastellan on, the releases repository
+ * it published to, byItself as it was, every repository's PRs merged as before, and the .NET SDK it found). A new
+ * install starts with all of it off, waiting for the person's yes: `releasesCastellan: false` is written, so this never
+ * runs again. Returns what it decided, or null when it was decided before. Never throws.
+ */
+export function migrateToOwnRepos(o: { settingsFile: string; dataDir: string; dotnetHasSdk?: (dir: string) => boolean }): 'before' | 'new' | null {
+  try {
+    const exists = existsSync(o.settingsFile);
+    const raw = exists ? JSON.parse(readText(o.settingsFile) ?? '{}') : {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.releasesCastellan === 'boolean') return null;
+    const ranBefore = exists || RAN_BEFORE.some((f) => existsSync(path.join(o.dataDir, f)));
+    if (!ranBefore) {
+      writeJson(o.settingsFile, { ...raw, releasesCastellan: false });
+      return 'new';
+    }
+    const out: Record<string, unknown> = { ...raw, releasesCastellan: true };
+    if (typeof raw.releasesRepo !== 'string') out.releasesRepo = CASTELLAN_RELEASES_REPO;
+    // It merged and released by itself unless Settings said not: the default was on.
+    if (typeof raw.byItself !== 'boolean') out.byItself = true;
+    // Every repository's ready PRs were merged: each says so now.
+    if (Array.isArray(raw.employees)) out.employees = raw.employees.map((e: unknown) => (e && typeof e === 'object' && !Array.isArray(e) && typeof (e as any).merges !== 'boolean' ? { ...(e as object), merges: true } : e));
+    const sdk = o.dotnetHasSdk ?? ((dir: string) => existsSync(path.join(dir, 'dotnet.exe')) && list(path.join(dir, 'sdk')).length > 0);
+    if (typeof raw.dotnetRoot !== 'string' && !process.env.DOTNET_ROOT && sdk(LEGACY_DOTNET)) out.dotnetRoot = LEGACY_DOTNET;
+    // An earlier migration's alarm lasts until a person saves Settings (pendingMigration, by the file's time): this write isn't one.
+    const pending = pendingMigration(o.settingsFile);
+    writeJson(o.settingsFile, out);
+    if (pending) writeJson(migrationFile(), { ...pending, mtimeMs: statSync(o.settingsFile).mtimeMs });
+    return 'before';
   } catch {
     return null;
   }
