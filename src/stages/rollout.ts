@@ -4,7 +4,7 @@ import { compareVersions } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
-import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, result, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult } from './common.ts';
 import { push } from './push.ts';
 import { parsePrs, prListArgs, readPin } from './staff.ts';
 
@@ -131,6 +131,8 @@ export function clearRolloutHolds(ids: string[]): void {
 export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string | null; ownKit: string | null; changelog: (kit: string) => Promise<string | null> }): Promise<{ results: EmployeeResult[]; plan: RolloutPlan }> {
   const failed = loadRolloutFailures();
   const before = JSON.stringify(failed);
+  // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx) is let go.
+  for (const [id, h] of Object.entries(failed)) if (passingFailure(h.message)) delete failed[id];
   const gate = rolloutGate({ on: ctx.settings.rollout, kit: o.kit, ownKit: o.ownKit });
   const facts: Record<string, RolloutFacts> = {};
   if (!('why' in gate)) {
@@ -145,6 +147,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   const plan = planRollout({ on: ctx.settings.rollout, kit: o.kit, ownKit: o.ownKit, employees, facts, failed });
   if (plan.why) {
     if (plan.waitsForSteward) ctx.log(`rollout: ${plan.why}`);
+    if (JSON.stringify(failed) !== before) writeJson(rolloutFailedFile(), failed);
     return { results: [], plan };
   }
   const kit = plan.kit!;

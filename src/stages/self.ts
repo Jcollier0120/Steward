@@ -8,7 +8,7 @@ import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } fr
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { exchequerNote, networkFailure, networkNote, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { exchequerNote, networkFailure, networkNote, passingFailure, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
 
@@ -163,6 +163,8 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
   const failed = loadSelfFailures();
   const before = JSON.stringify(failed);
   for (const tag of Object.keys(failed)) if (o.tags?.includes(tag)) delete failed[tag];
+  // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx) is let go.
+  for (const [tag, f] of Object.entries(failed)) if (passingFailure(f.message)) delete failed[tag];
   const plan = planSelf({ on: ctx.settings.releaseSelf, main: o.main, tags: o.tags, failed });
   for (const n of plan.notes) ctx.log(`[${APP.id}] ${n}`);
   const results: EmployeeResult[] = [];

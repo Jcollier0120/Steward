@@ -77,13 +77,26 @@ export interface Ctx {
  * failed (exit 1)"), so being offline right now counts too.
  */
 export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string): Promise<boolean> {
-  if (isNetworkError(message) || MORE_NET_WORDS.test(message)) return true;
+  if (passingFailure(message)) return true;
   const look = ctx.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : online);
   return !(await look().catch(() => true));
 }
 
+/**
+ * Whether a failure's words say it was the network's, or GitHub's own (a 5xx, a dropped connection): it passes, and
+ * the next round tries again. On 2026-10-07 GitHub answered every push with "Internal Server Error" for a while, and
+ * nine kit bumps were held for a person to press Push, an alarm each.
+ */
+export const passingFailure = (message: string) => isNetworkError(message) || MORE_NET_WORDS.test(message) || SERVER_WORDS.test(message);
+
 /** Network failures the kit's words miss: Go's (gh's) TLS and HTTP client timeouts, and Windows' connect failure. */
 const MORE_NET_WORDS = /tls handshake timeout|net\/http: (?:request canceled|timeout)|client\.timeout exceeded|connection attempt failed|could not establish (?:a )?connection/i;
+
+/**
+ * GitHub's side failing, in git's words ("[remote rejected] … (Internal Server Error)", "RPC failed; HTTP 502", "The
+ * requested URL returned error: 503", "the remote end hung up unexpectedly") and gh's ("HTTP 500", "HTTP 504").
+ */
+const SERVER_WORDS = /internal server error|bad gateway|service unavailable|gateway time-?out|\bHTTP[ /]?(?:\d(?:\.\d)? )?5\d\d\b|returned error: 5\d\d\b|rpc failed|the remote end hung up unexpectedly|unexpected disconnect while reading sideband|early EOF/i;
 
 /**
  * The line of a command's output that says the network failed, if one does: a command's failure message carries it
@@ -95,7 +108,7 @@ export function networkLine(output: string): string | null {
     const line = raw.trim();
     // The Exchequer's line is never why a release failed (exchequer.ts): it runs after GitHub's, and fails nothing.
     if (line.startsWith(NOT_PUBLISHED)) continue;
-    if (line && (isNetworkError(line) || MORE_NET_WORDS.test(line))) return line.slice(0, 200);
+    if (line && passingFailure(line)) return line.slice(0, 200);
   }
   return null;
 }
