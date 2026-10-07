@@ -387,3 +387,14 @@ test("a kit version still new is kept, and the kit's files left as the PR wrote 
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'show', 'origin/claude/feature:kit/VERSION'), '2.1.1');
 });
+
+test('a PR that leaves the kit alone carries no kit version, so it claims none', async () => {
+  const { dir, checkout, pr } = moved('kit-untouched', { 'src/feature.ts': 'export const feature = 1;\n' }, { base: { 'kit/VERSION': '2.1.0\n' } });
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], kit: { released: ['2.1.0'], taken: [] } });
+  assert.equal(c.done, true, c.note);
+  assert.equal(c.version, '0.4.2');
+  assert.equal(c.kitVersion, undefined);
+});

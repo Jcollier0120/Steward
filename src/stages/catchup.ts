@@ -392,7 +392,8 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (kit?.why && kHead) title = title.replace(new RegExp(`\\b(kit )${kHead.replace(/\./g, '\\.')}\\b`, 'i'), `$1${kit.version}`);
     if (title !== pr.title) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', title).catch(() => '');
     await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${kitPr ? 'The next round merges it.' : 'It merges once its checks pass at the new head.'}`).catch(() => '');
-    return { done: true, note, version: choice.version, ...(kit ? { kitVersion: kit.version } : {}) };
+    // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
+    return { done: true, note, version: choice.version, ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) };
   } finally {
     try {
       await removeWorktree(run, repo, dir);
