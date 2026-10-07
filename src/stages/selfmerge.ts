@@ -18,7 +18,6 @@ export const stewardEmployee = (s: Settings, checkout = s.stewardCheckout): Empl
   merges: true,
   // Not "on the kit": a rollout passes it over, and the merge stage reads only its team's PRs.
   usesKit: false,
-  parts: [],
   // Its kit and the kit tests' fixture, from its own kit\ (npm run kit), then the checks a person runs before a PR.
   fill: 'npm run kit',
   test: ['npm run typecheck', 'npm test'],

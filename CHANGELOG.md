@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.5
+
+**An employee's kit parts are read from its own kit.json, the one place they are kept.**
+
+### What changed
+
+- The Steward no longer keeps its own copy of each repository's kit parts. That copy didn't know the React part, so every agent with a React page carried a note on the Steward's page, "kit.json takes node, web, spec, react; Settings say node, web, spec", though nothing was wrong: an agent's kit has always been filled from its kit.json.
+- The page now shows each repository's parts as its kit.json says them, React included, and the note is gone.
+- Settings no longer has a Kit parts field for a repository. To change an agent's parts, change its kit.json.
+- Taking on a repository (Look after, or `employ`) lists the parts its kit.json takes.
+- Taking on an agent whose src/app.ts writes its id and name in double quotes (or backticks) now takes its name as written: the Crier was taken on as "crier".
+
+### Before you update
+
+- Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
 ## 0.27.2
 
 **It installs one of your own agents the first time, when Manor's Hire asks.**

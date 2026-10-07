@@ -85,10 +85,9 @@ function fakeDotnetEmployee(dir: string): { origin: string; checkout: string } {
   return { origin, checkout };
 }
 
-test("Heiward's defaults take the kit: the spec part, its own fill, dotnet test, a .csproj, its release script, on master", () => {
+test("Heiward's defaults take the kit: its own fill, dotnet test, a .csproj, its release script, on master", () => {
   assert.equal(heiward.usesKit, true);
   assert.equal(heiward.branch, 'master');
-  assert.deepEqual(heiward.parts, ['spec']);
   assert.equal(heiward.fill, 'powershell -NoProfile -File tools\\kit.ps1');
   assert.deepEqual(heiward.test, ['dotnet test HEI.Core.Tests']);
   assert.deepEqual(heiward.versionFiles, ['HEI.Agent/HEI.Agent.csproj']);

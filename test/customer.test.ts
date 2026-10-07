@@ -64,7 +64,7 @@ test("Reeve's repositories: those on GitHub the person can push to are offered, 
   const e = loadSettings().employees[0];
   assert.deepEqual(
     { ...e, checkout: path.basename(e.checkout) },
-    { id: 'app', name: 'app', repo: 'me/app', checkout: 'Fake', branch: 'main', merges: true, usesKit: false, parts: [], fill: '', test: ['npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: '', install: '', approve: '', installed: '' },
+    { id: 'app', name: 'app', repo: 'me/app', checkout: 'Fake', branch: 'main', merges: true, usesKit: false, fill: '', test: ['npm test'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: '', install: '', approve: '', installed: '' },
   );
   assert.deepEqual(candidates(loadFound(), loadSettings().employees), [], 'looked after: no longer offered');
   assert.match((lookAfter('me/app', { merges: false, release: false }) as { error: string }).error, /looked after already/);
@@ -128,7 +128,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   for (const key of ['stewardRepo', 'stewardCheckout', 'rollout', 'releaseSelf', 'mergeSelf', 'releasesRepo']) assert.deepEqual(shown(key), { key: 'releasesCastellan', is: ['true'] }, key);
   for (const key of ['fileWork', 'wrightReview', 'wrightHere']) assert.deepEqual(shown(key), { key: 'wrightHere', is: ['true'] }, key);
   const employees = fields.find((f) => f.key === 'employees') as any;
-  for (const key of ['usesKit', 'parts', 'fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
+  for (const key of ['usesKit', 'fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
   assert.equal(employees.blank.merges, false, 'a repository added by hand merges nothing until the person says yes');
   assert.match(employees.fields.find((f: any) => f.key === 'merges').help, /^Off until you say yes/);
   assert.doesNotMatch(JSON.stringify(ONBOARDING), /kit|Wright|Bailiff|Castellan|employee/i, 'the onboarding is about their repositories');
@@ -139,7 +139,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
      export const render = (v) => renderToStaticMarkup(<StewardBody v={v} />);`,
   );
   const s = loadSettings();
-  const row = { id: 'app', name: 'app', repo: 'me/app', parts: [], usesKit: false, merges: false, releases: false, branch: 'main', checkout: { path: app.checkout, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: ['not using the kit yet'] };
+  const row = { id: 'app', name: 'app', repo: 'me/app', usesKit: false, merges: false, releases: false, branch: 'main', checkout: { path: app.checkout, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: ['not using the kit yet'] };
   const offered = { repo: 'me/new', name: 'new', path: path.join(home, 'clones', 'new'), branch: 'main', lockfiles: [], push: true };
   const html = m.render({
     castellan: false,

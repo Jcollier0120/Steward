@@ -38,9 +38,9 @@ writeFileSync(
   path.join(home, 'settings.json'),
   JSON.stringify({
     employees: [
-      { id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: fake.checkout, branch: 'main', merges: true, usesKit: false, parts: [], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '', installed: '' },
-      { id: 'site', name: 'Site', repo: 'Jcollier0120/Site', checkout: site.checkout, branch: 'main', merges: true, usesKit: false, parts: [], fill: '', test: [siteTest], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', refresh: sync },
-      { id: 'exchequer', name: 'Exchequer', repo: 'Jcollier0120/Exchequer', checkout: exchequer.checkout, branch: 'main', merges: false, usesKit: false, parts: [], fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'src/version.ts'], release: '', install: '', approve: '', installed: '', note: NOTE },
+      { id: 'fake', name: 'Fake', repo: 'Jcollier0120/Fake', checkout: fake.checkout, branch: 'main', merges: true, usesKit: false, fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], release: releaseCmd, install: '', approve: '', installed: '' },
+      { id: 'site', name: 'Site', repo: 'Jcollier0120/Site', checkout: site.checkout, branch: 'main', merges: true, usesKit: false, fill: '', test: [siteTest], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', refresh: sync },
+      { id: 'exchequer', name: 'Exchequer', repo: 'Jcollier0120/Exchequer', checkout: exchequer.checkout, branch: 'main', merges: false, usesKit: false, fill: '', test: ['node -e process.exit(0)'], versionFiles: ['package.json', 'src/version.ts'], release: '', install: '', approve: '', installed: '', note: NOTE },
     ],
     team: ['Jcollier0120'],
     workRoot: path.join(home, 'work'),
@@ -73,8 +73,8 @@ test('Settings keep a repository\'s refresh and note as the page saves them, and
   const { normalizeSettings, SETTINGS_SPEC } = await import('../src/settings.ts');
   const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
   const records = [
-    { id: 'site', name: 'Site', repo: 'Jcollier0120/Site', checkout: site.checkout, branch: 'main', merges: true, usesKit: false, parts: [], fill: '', test: ['npm test', 'npm run build'], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', refresh: 'npm run sync' },
-    { id: 'exchequer', name: 'Exchequer', repo: 'Jcollier0120/Exchequer', checkout: exchequer.checkout, branch: 'main', merges: false, usesKit: false, parts: [], fill: '', test: ['npm test'], versionFiles: ['package.json', 'src/version.ts'], release: '', install: '', approve: '', installed: '', note: NOTE, refresh: '' },
+    { id: 'site', name: 'Site', repo: 'Jcollier0120/Site', checkout: site.checkout, branch: 'main', merges: true, usesKit: false, fill: '', test: ['npm test', 'npm run build'], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', refresh: 'npm run sync' },
+    { id: 'exchequer', name: 'Exchequer', repo: 'Jcollier0120/Exchequer', checkout: exchequer.checkout, branch: 'main', merges: false, usesKit: false, fill: '', test: ['npm test'], versionFiles: ['package.json', 'src/version.ts'], release: '', install: '', approve: '', installed: '', note: NOTE, refresh: '' },
   ];
   // Saved as the page saves them (POST /api/settings), into a file of its own; a repository with no kit to fill is fine.
   const file = path.join(home, 'saved-settings.json');
