@@ -595,8 +595,10 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
   .brand { flex: 1 1 0; }
   .brand .role { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .scene { width: 52px; height: 33px; }
-  .tools { flex-basis: 100%; margin-left: 0; }
-  .status-pill { margin-right: auto; }
+  /* The tools wrap rather than run off the side: the title bar's action goes under the pill when they don't fit, and a
+     long pill is cut with an ellipsis (its title says it all). */
+  .tools { flex-basis: 100%; margin-left: 0; flex-wrap: wrap; row-gap: 6px; }
+  .status-pill { margin-right: auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .tool-link { width: 32px; padding: 0; justify-content: center; }
   .tool-link span { display: none; }
   .theme-picker { position: static; }
@@ -605,6 +607,8 @@ body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-v
   main.view { padding: 10px 14px 22px; }
   footer { margin: 0 8px; }
   th, td { padding: 6px 6px; }
+  /* A table wider than the phone scrolls inside itself, never the page: GitHub's way, as a block that holds the table. */
+  main.view table { display: block; max-width: 100%; overflow-x: auto; }
 }
 `;
 /* The Settings panel's own styles are the kit's web part: web/settings-panel.css, linked as /settings.css. */
