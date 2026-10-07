@@ -174,10 +174,10 @@ export function readClone(checkout: string, branch: string): { test: string[]; v
     if (typeof pkg.version === 'string') {
       versionFiles.push('package.json');
       if (t.has('package-lock.json')) versionFiles.push('package-lock.json');
-      // A .ts beside it that carries the same version (version: 'x.y.z'), kept in step.
+      // A .ts beside it that carries the same version (version: 'x.y.z', or VERSION = 'x.y.z'), kept in step.
       const v = pkg.version.replaceAll('.', '\\.');
       const ts = t.list('src').filter((f) => f.endsWith('.ts')).sort();
-      const at = ts.find((f) => new RegExp(`version:\\s*['"]${v}['"]`).test(t.read(`src/${f}`) ?? ''));
+      const at = ts.find((f) => new RegExp(`(?:\\bversion\\s*:|\\bVERSION\\s*=)\\s*['"]${v}['"]`).test(t.read(`src/${f}`) ?? ''));
       if (at) versionFiles.push(`src/${at}`);
     }
   } else {
