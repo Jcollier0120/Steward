@@ -119,6 +119,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   }
   if (gate.note) ctx.log(`[${e.id}] ${gate.note}`);
   const noted = gate.note ? `; ${gate.note}` : '';
+  // Another PC of the licence took its turn here meanwhile (lease.ts): it releases this.
+  if (ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `v${version} is left to another PC, whose turn it is now`, { version, commit: commit.slice(0, 7) });
 
   // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
   if (e.release === TAG_RELEASE) return tagRelease(ctx, e, { repo, commit, version, remote, noted });

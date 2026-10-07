@@ -13,8 +13,9 @@ export function bumpPatch(v: string): string {
 }
 
 const base = (file: string) => file.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
-const kindOf = (file: string): 'package' | 'lock' | 'csproj' | 'code' => {
+const kindOf = (file: string): 'package' | 'lock' | 'csproj' | 'plain' | 'code' => {
   const b = base(file);
+  if (b === 'version') return 'plain';
   if (b === 'package.json') return 'package';
   if (b === 'package-lock.json') return 'lock';
   if (/\.(csproj|props)$/.test(b)) return 'csproj';
@@ -36,6 +37,8 @@ export function readVersion(file: string, text: string): string | null {
       return null;
     }
   }
+  // A VERSION file (the kit's) is the version and nothing else.
+  if (kind === 'plain') return /^\s*(\d+\.\d+\.\d+)\s*$/.exec(text.replace(/^﻿/, ''))?.[1] ?? null;
   return (kind === 'csproj' ? CSPROJ.exec(text)?.[3] : CODE.exec(text)?.[3]) ?? null;
 }
 
@@ -69,6 +72,10 @@ export function setVersion(file: string, text: string, from: string, to: string)
     const json = JSON.parse(text.replace(/^﻿/, ''));
     if (json.packages?.['']?.version !== from) throw new Error(`${file}'s own package says ${json.packages?.['']?.version}, not ${from}`);
     return setJson(file, text, from, to, true);
+  }
+  if (kind === 'plain') {
+    if (readVersion(file, text) !== from) throw new Error(`${file} says ${text.trim()}, not ${from}`);
+    return text.replace(from, to);
   }
   const re = kind === 'csproj' ? CSPROJ : CODE;
   const m = re.exec(text);

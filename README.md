@@ -234,6 +234,16 @@ It takes a repository's id, name or `owner/repo`: one in Settings, one Reeve fou
 
 A claim lives until its version is on the branch or overtaken by a release (the work landed), until it is given back, or for three days with no open PR that names it (its branch, or its version in a title); each round prunes them. While it lives, the merge stage holds another PR that sets that version ("it sets v0.4.22, which wright claimed for #7 (wright/7-…): it needs a version of its own") and catches it up to a free one. The Wright claims for each job before its worker starts, and gives the version back when no PR comes of it.
 
+On a PC that holds a Castellan licence (Manor's `licence.json`), a claim is made through the Exchequer, for every PC of the licence at once: the Steward sends what it knows of the repository, and keeps a copy here, so its merge stage sees it. Each round copies the licence's claims here, and gives back on the Exchequer the ones whose work landed. With no licence, or no Exchequer to reach, claims are this PC's alone, as above.
+
+## Several PCs on one licence
+
+A licence's PCs may each run a Steward signed in to the same GitHub account. They take turns (`src/lease.ts`; the Exchequer's `docs/MULTI-PC.md`): before a round, Merge or Release acts, it takes the Exchequer's lease `steward-round` on each repository it would act in that has a checkout on this PC, for three rounds' time, all in one call, and renews it each round. A repository another PC holds is left alone there: nothing merged, released, refreshed or rolled out. The page says so ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with **Do it here**, which takes the turn now. Before each merge and release the turn is checked again, so a long round never outlives it.
+
+- A repository cloned on one PC only is always looked after there; one cloned on none is looked after by none.
+- With no `licence.json`, or an Exchequer that answers 404 (it doesn't take turns yet) or 401 (this PC's place was given back), there are no turns: everything is as before.
+- When the Exchequer can't be reached, a turn this PC held is kept until it nearly runs out, and no new one is taken: the worst case is a slow round, never a double merge.
+
 ## Install
 
 The Steward installs itself, from a release, as every agent does. In a checkout of this repository:
@@ -399,7 +409,8 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `work-filed.json` | Each issue filed for the Wright (by its marker's id): its URL, repository and when. Forgotten a month after its failure is gone. |
 | `tested.json` | Each employee's last 20 commits whose checks passed here, newest first, by stage: `GET /api/tested`, for the Surveyor. |
 | `repos-found.json` | The repositories Reeve found, with whether gh's account can push to each, and when it looked (`src/found.ts`). |
-| `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when. |
+| `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when; `source: exchequer` for one claimed for every PC of the licence. |
+| `leases.json` | The turns with the licence's other PCs as the Exchequer last said: each repository's, held here or by which PC and until when; and whether turns are taken (`on`), not (`off`), or out of reach. |
 | `kickbacks.json` | Each conflicting team PR sent back to its author, by its head and its branch's: sent once, and again only when either moves. |
 | `unsafe-updates.json` | Each version of the Steward its install rolled back: what failed, the version it went back to, and where the failed copy is kept. Refused until allowed again. |
 | `app.prev`, `app.unsafe-<version>` | The version before the last update, to go back to; a rolled-back version's copy, for a look. |

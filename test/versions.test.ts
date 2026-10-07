@@ -60,3 +60,12 @@ test("a site's VERSION = 'x.y.z' constant is a version too, changed in place", (
   assert.equal(setVersion('src/version.ts', VERSION_TS, '0.5.1', '0.6.0'), VERSION_TS.replace("'0.5.1'", "'0.6.0'"));
   assert.deepEqual(agreedVersion([['package.json', PKG.replace('0.4.0', '0.5.1')], ['src/version.ts', VERSION_TS]]), { version: '0.5.1' });
 });
+
+test("a VERSION file (the kit's) is its version and nothing else", async () => {
+  const { readVersion, setVersion } = await import('../src/versions.ts');
+  assert.equal(readVersion('kit/VERSION', '2.36.1\n'), '2.36.1');
+  assert.equal(readVersion('kit\\VERSION','2.36.1\r\n'), '2.36.1');
+  assert.equal(readVersion('kit/VERSION', 'kit 2.36.1\n'), null);
+  assert.equal(setVersion('kit/VERSION', '2.36.1\r\n', '2.36.1', '2.36.2'), '2.36.2\r\n');
+  assert.throws(() => setVersion('kit/VERSION', '2.36.0\n', '2.36.1', '2.36.2'), /says 2\.36\.0, not 2\.36\.1/);
+});

@@ -129,7 +129,8 @@ async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> 
  */
 export async function refreshAfterReleases(ctx: Ctx, released: EmployeeResult[]): Promise<EmployeeResult[]> {
   if (!released.length) return [];
-  const which = ctx.settings.employees.filter((e) => e.refresh);
+  // Not a repository another PC of the licence has its turn in (lease.ts): that PC refreshes it after its own releases.
+  const which = ctx.settings.employees.filter((e) => e.refresh && !ctx.lease?.skip.has(e.id));
   if (!which.length) return [];
   const what = releasedWords(released);
   ctx.log(`after ${what}: ${which.map((e) => `${e.name}'s ${e.refresh}`).join(', ')}`);

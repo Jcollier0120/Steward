@@ -252,3 +252,18 @@ test('whole rounds: no alarm for what the rounds merged and released; one when s
   assert.equal(open[0].detail[1], 'Released without it: Porter v0.5.14.');
   assert.match(seen.log.join('\n'), /alarm: Another Steward or person seems to be merging and releasing Porter/);
 });
+
+test("what the PC whose turn it is merges and releases is never a stranger's; taken back, judged from then on", async () => {
+  let a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-07T18:51:00Z', { porter: { head: 'a', prs: [kitPr(porter.repo, 65, H65)], releases: rel('v0.5.12') } }), employees: [porter], merged: probe([]).fn, now: t('18:51:05') });
+  writeFileSync(S.actedFile(), JSON.stringify(a));
+  // Another PC of the licence has Porter's turn (lease.ts): it merges #65 and releases v0.5.13.
+  const p = probe([H65]);
+  a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-07T19:14:00Z', { porter: { head: 'c', prs: [], releases: rel('v0.5.13', 'v0.5.12') } }), employees: [porter], merged: p.fn, now: t('19:14:30'), elsewhere: new Set(['porter']) });
+  assert.deepEqual(a.strangers, []);
+  assert.deepEqual(p.asked, [], 'nothing asked of a repository another PC looks after');
+  assert.deepEqual(a.known.porter, ['v0.5.13', 'v0.5.12'], 'its releases learnt');
+  writeFileSync(S.actedFile(), JSON.stringify(a));
+  // The turn back here: a release no one here made counts again.
+  a = await S.judge({ acted: S.loadActed(), glance: glance('2026-10-07T20:00:00Z', { porter: { head: 'd', prs: [], releases: rel('v0.5.14', 'v0.5.13', 'v0.5.12') } }), employees: [porter], merged: probe([]).fn, now: t('20:00:30') });
+  assert.deepEqual(a.strangers.map((s) => `${s.kind} ${s.ref}`), ['release v0.5.14']);
+});

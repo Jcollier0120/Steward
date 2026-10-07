@@ -9,6 +9,7 @@ import { runChecks } from './bump.ts';
 import { bumpDirOf, checkoutOf, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, renameKitInTopEntry, repinKit } from './kitpart.ts';
 
 /**
  * Catching a team PR up, so it doesn't wait on its branch moving under it: the Steward merges the branch into it
@@ -21,6 +22,9 @@ import { recordTested } from '../tested.ts';
  * at its top (mergeChangelogs); or in kit.json, where the newer kit of the two is pinned with every part either takes,
  * and nothing else in it changed on both sides (mergeKitPins). Any other conflict is left untouched, and goes back to
  * the PR's author (kickback.ts).
+ * In the Steward's own repository the kit is a second version (stages/kitpart.ts): kit/VERSION and kit/CHANGELOG.md are
+ * settled by the same rules, against the kit's releases and the kit versions other PRs and claims hold, and the PR's own
+ * changelog entry, its kit.json pin of its own kit and its title follow the kit's new version.
  * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
  * (steward/kit-…).
  *
@@ -195,6 +199,8 @@ export interface CaughtUp {
   /** The files it conflicts in that need judgement, when that's why it wasn't caught up: they go back to its author (kickback.ts). */
   conflicts?: string[];
   version?: string;
+  /** The kit's version it carries, in the Steward's own repository (stages/kitpart.ts). */
+  kitVersion?: string;
 }
 
 /** Each version file in a folder set to `version` where it says otherwise; the files changed. */
@@ -238,7 +244,7 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
  * One team PR (or kit PR of the Steward's) caught up with its branch, as the module's comment says: `released` are the employee's released
  * versions, `taken` the versions other open PRs set (which keep theirs).
  */
-export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[] }): Promise<CaughtUp> {
+export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] } }): Promise<CaughtUp> {
   const { run } = ctx;
   const kitPr = isKitPr(pr);
   if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
@@ -266,8 +272,13 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
   const [headV, fromV, baseV] = [await read(head), start ? await read(start) : null, await read(branch)];
   if (!headV || !baseV) return { done: false, note: `its version can't be read (${e.versionFiles.join(', ')})` };
   const choice = catchUpVersion({ head: headV, from: fromV, base: baseV, released: o.released, taken: o.taken, asksRelease: !!pr.after?.steps.includes('release') });
+  // The kit, where the repository carries one (the Steward's own): its version settled the same way.
+  const kitAt = async (ref: string) => (/^\s*(\d+\.\d+\.\d+)\s*$/.exec((await showFile(run, repo, ref, KIT_VERSION_FILE)) ?? '')?.[1] ?? null);
+  const [kHead, kBase] = [await kitAt(head), await kitAt(branch)];
+  const kFrom = start && kHead ? await kitAt(start) : null;
+  const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: o.kit?.taken ?? [], asksRelease: false }) : null;
   const behind = await aheadOf(run, repo, branch, head);
-  if (!behind && !choice.why) return { done: false, note: 'nothing to catch up' };
+  if (!behind && !choice.why && !kit?.why) return { done: false, note: 'nothing to catch up' };
 
   const dir = catchUpDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
@@ -280,7 +291,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       if (m.code !== 0) {
         const conflicted = (await gitMaybe(run, dir, 'diff', '--name-only', '--diff-filter=U'))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
         const versionFiles = new Set(e.versionFiles.map((f) => f.replace(/\\/g, '/').toLowerCase()));
-        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f) && !isKitPin(f));
+        const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f) && !isKitPin(f) && !(kit && (isKitVersionFile(f) || isKitChangelog(f))));
         const why = !conflicted.length
           ? `merging ${e.branch} into it failed: ${(m.err || m.out).trim().split('\n').pop()}`
           : others.length
@@ -295,11 +306,15 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
             // kit.json: the newer kit, and every part either side takes.
             const fixed = isChangelog(f)
               ? mergeChangelogs(await side(1), await side(2), await side(3), choice.version)
-              : isKitPin(f)
+              : kit && isKitVersionFile(f)
+                ? kitVersionText(kit.version, await side(3))
+                : kit && isKitChangelog(f)
+                  ? mergeChangelogs(await side(1), await side(2), await side(3), kit.version)
+                  : isKitPin(f)
                 ? mergeKitPins(await side(1), await side(2), await side(3))
                 : resolveVersionConflicts(readFileSync(path.join(dir, f), 'utf8'));
             if (fixed === null) {
-              unresolved = `it conflicts with ${e.branch} in ${f} beyond ${isChangelog(f) ? 'a new entry at its top' : isKitPin(f) ? 'its kit and parts' : 'its version'}: that needs a person`;
+              unresolved = `it conflicts with ${e.branch} in ${f} beyond ${isChangelog(f) || isKitChangelog(f) ? 'a new entry at its top' : isKitPin(f) ? 'its kit and parts' : 'its version'}: that needs a person`;
               stuck = [f];
               break;
             }
@@ -314,7 +329,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         settleVersion(dir, e.versionFiles, choice.version);
         await git(run, dir, 'add', '--', ...conflicted, ...e.versionFiles);
         await git(run, dir, 'commit', '--quiet', '--no-edit');
-        const what = ['version lines', ...(conflicted.some(isKitPin) ? ['kit pin'] : []), ...(conflicted.some(isChangelog) ? ['changelog'] : [])];
+        const what = ['version lines', ...(conflicted.some(isKitPin) ? ['kit pin'] : []), ...(conflicted.some(isChangelog) ? ['changelog'] : []), ...(conflicted.some(isKitVersionFile) ? ['kit version'] : []), ...(conflicted.some(isKitChangelog) ? ["kit's changelog"] : [])];
         did.push(`merged ${e.branch} into it, its ${what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]} resolved`);
       } else did.push(`merged ${e.branch} into it`);
     }
@@ -328,11 +343,39 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         changed.push('CHANGELOG.md');
       }
     }
+    // The kit's: kit/VERSION, its changelog's top entry, the Steward's pin of its own kit, and the Steward's entry that
+    // names it, all at the kit's version once caught up.
+    if (kit && kHead) {
+      const at = (f: string) => path.join(dir, f);
+      const was = readFileSync(at(KIT_VERSION_FILE), 'utf8');
+      if (was.trim() !== kit.version) {
+        writeFileSync(at(KIT_VERSION_FILE), kitVersionText(kit.version, was));
+        changed.push(KIT_VERSION_FILE);
+      }
+      // The Steward pins its own kit: where the PR pinned the kit it raised, the pin follows the kit's version, whichever
+      // pin a conflict in kit.json kept.
+      if (readPin(await showFile(run, repo, head, 'kit.json'))?.kit === kHead && existsSync(at('kit.json'))) {
+        const pin = repinKit(readFileSync(at('kit.json'), 'utf8'), kit.version);
+        if (pin !== null) writeFileSync(at('kit.json'), pin), changed.push('kit.json');
+      }
+      if (kit.version !== kHead && kHead !== kBase) {
+        const kLog = existsSync(at(KIT_CHANGELOG)) ? renumberChangelog(readFileSync(at(KIT_CHANGELOG), 'utf8'), kHead, kit.version) : null;
+        if (kLog !== null) writeFileSync(at(KIT_CHANGELOG), kLog), changed.push(KIT_CHANGELOG);
+        // Only the PR's own entry: the top one, under the version it carries now, which the branch's never is.
+        const text = existsSync(log) ? readFileSync(log, 'utf8') : '';
+        const topIsOwn = choice.version !== baseV && /^## [^\n]*?(\d+\.\d+\.\d+)/m.exec(text)?.[1] === choice.version;
+        const own = topIsOwn ? renameKitInTopEntry(text, kHead, kit.version) : null;
+        if (own !== null) writeFileSync(log, own), changed.includes('CHANGELOG.md') || changed.push('CHANGELOG.md');
+      }
+    }
     if (changed.length) {
       await git(run, dir, 'add', '--', ...changed);
-      await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}: a version of its own (${choice.why ?? `the branch's, after the merge`})`);
+      const kitWords = kit && kit.version !== kHead ? `, kit ${kit.version}` : '';
+      await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}${kitWords}: a version of its own (${choice.why ?? kit?.why ?? `the branch's, after the merge`})`);
     }
     if (choice.why) did.push(`v${choice.version}, since ${choice.why}`);
+    // Its reason in the kit's words: "kit 2.36.0", never "v2.36.0", which is a Steward's tag.
+    if (kit?.why) did.push(`kit ${kit.version}, since ${kit.why.replace(/\bv(\d)/g, 'kit $1')}`);
     if (kitPr) {
       // No one tests the Steward's own PRs on their way in: its bump did, and so does its catch-up, here.
       const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`) });
@@ -345,9 +388,12 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     const note = did.join('; ');
     ctx.log(`[${e.id}] #${pr.number}: caught up (${note})`);
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
-    if (choice.why && pr.title.includes(headV)) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', pr.title.split(headV).join(choice.version)).catch(() => '');
+    let title = choice.why && pr.title.includes(headV) ? pr.title.split(headV).join(choice.version) : pr.title;
+    if (kit?.why && kHead) title = title.replace(new RegExp(`\\b(kit )${kHead.replace(/\./g, '\\.')}\\b`, 'i'), `$1${kit.version}`);
+    if (title !== pr.title) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', title).catch(() => '');
     await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${kitPr ? 'The next round merges it.' : 'It merges once its checks pass at the new head.'}`).catch(() => '');
-    return { done: true, note, version: choice.version };
+    // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
+    return { done: true, note, version: choice.version, ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) };
   } finally {
     try {
       await removeWorktree(run, repo, dir);
