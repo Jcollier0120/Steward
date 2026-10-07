@@ -17,6 +17,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
+## 0.23.5
+
+**An old Steward on a second PC updates quietly: it no longer takes itself for the PC that releases Castellan.**
+
+### What changed
+
+- A Steward from before 0.19 that updates on a PC without the Exchequer's publisher key now comes up with Castellan's work off: no kit rollout, no releases of its own, nothing merged or released by itself. It waits for your yes in its Settings. Before, any Steward that had run before was taken as Castellan's release machine. On a second PC that made it a second Steward, merging and releasing the same repositories as the first.
+- The PC that holds the key updates exactly as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A Steward already on 0.19 or later keeps its Settings as they are.
+
 ## 0.23.2
 
 **It raises an alarm when another Steward, or someone else, merges its PRs or releases its agents.**
