@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.23.3
 
-**It hands out kit 2.33.0: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
+**It hands out kit 2.36.2: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
 
 ### What's new
 
