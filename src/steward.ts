@@ -34,6 +34,7 @@ import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent } from './tend.ts';
 import { coordHere, takeTurns, type Coord } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
+import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -70,10 +71,13 @@ export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(),
 export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
 
 /** One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way. */
-export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}): Promise<Glance | null> {
+export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host): Promise<Glance | null> {
   try {
-    const g = await takeGlance(run, dataDir, settings);
-    for (const [id, why] of Object.entries(g.errors)) log(`[${id}] GitHub said nothing of ${settings.employees.find((e) => e.id === id)?.repo ?? id} at a glance (${why}): it is asked on its own`);
+    const g = await takeGlance(run, dataDir, settings, host);
+    for (const [id, why] of Object.entries(g.errors)) {
+      const e = settings.employees.find((x) => x.id === id);
+      log(e && host?.(e) === 'git' ? `[${id}] git couldn't read ${e.repo}'s origin (${why}): it is asked on its own` : `[${id}] GitHub said nothing of ${e?.repo ?? id} at a glance (${why}): it is asked on its own`);
+    }
     return g;
   } catch (e) {
     log(`couldn't ask GitHub about everyone at once (${(e as Error).message}): each is asked on its own`);
@@ -96,21 +100,28 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
  * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
  * `owner` stands in for the account gh is signed in as (tests).
  */
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner } = {}): Promise<Ctx> {
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner; scm?: ScmLook | null } = {}): Promise<Ctx> {
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
   const given = o.settings ?? loadSettings();
+  // How each repository is worked with (scm.ts), from what this PC has: looked at once an hour. Under node --test, only
+  // what a test says (else GitHub's way, as before), so a test never depends on this PC's tools.
+  const look = o.scm !== undefined ? o.scm : process.env.NODE_TEST_CONTEXT ? null : await scmNow(realRun);
+  const host = (e: Employee) => hostOf(e, given, look);
   // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
   const own = { ...given, stewardRepo: selfRepoOf(given) };
-  const settings = o.team === false ? own : withTeam(own, log, o.owner);
+  // The team is GitHub's: when every repository is worked with plain git, or (with none) the GitHub CLI isn't signed in
+  // here, gh isn't asked who it is.
+  const noGithub = own.employees.length ? !own.employees.some((e) => host(e) === 'github') : look !== null && !githubReady(look);
+  const settings = o.team === false || noGithub ? own : withTeam(own, log, o.owner);
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
-  const glance = o.glance === false ? null : await tryGlance(run, settings, log);
+  const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);
   // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
   const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
   const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(kitRun, dataDir, settings.stewardRepo);
-  return { settings, run, kit, log, neutralDir: dataDir, glance };
+  return { settings, run, kit, log, neutralDir: dataDir, glance, host };
 }
 
 /** The kit's changelog for a PR's body: this checkout's, or the kit release's notes. */
@@ -204,6 +215,8 @@ export interface StageOptions {
    * node --test the staff are looked at only when this is given, so a test never opens a real agent.
    */
   tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+  /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
+  scm?: ScmLook | null;
   /**
    * The Exchequer for the turns with the licence's other PCs (lease.ts): null for none. Left out, this PC's licence
    * decides; under node --test there is none unless given.
@@ -327,7 +340,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
       const offline = name === 'round' && !tendOnly && !(await (o.online ?? onlineNow)());
       const quiet = offline || tendOnly;
-      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined });
+      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm });
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
@@ -531,7 +544,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (tendOnly) return out;
       try {
         // The stage changed things on GitHub: a fresh glance for the table.
-        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings) });
+        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings, undefined, ctx.host) });
       } catch (e) {
         log(`couldn't refresh the staff's table: ${(e as Error).message}`);
       }

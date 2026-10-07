@@ -5,6 +5,7 @@ import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch, gh } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
+import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
 import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
@@ -69,12 +70,20 @@ export interface Ctx {
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
+  /** How each repository is worked with (scm.ts): GitHub's way, or plain git. Not given: GitHub's, as before. */
+  host?: (e: Employee) => Host;
   /**
    * The turns this stage took with the licence's other PCs (lease.ts): asked before each merge and release whether this
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
    */
   lease?: LeaseGuard | null;
 }
+
+/** How a repository is worked with in this stage (scm.ts). */
+export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? 'github';
+
+/** Said where a repository worked with plain git meets what only GitHub has: pull requests. */
+export const NO_PRS = 'worked with plain git (Source control, in Settings): there are no pull requests to merge, and what lands on its branch is released';
 
 /**
  * Whether a failure is only the network's: its words say so, or this PC is offline now (the kit's net.ts). Such a
@@ -149,7 +158,7 @@ export const forgetGlance = (ctx: Ctx, e: Employee) => {
 
 /** An employee's released versions: from the glance while it says how things are, else asked of GitHub. */
 export async function releasedOf(ctx: Ctx, e: Employee): Promise<ReleaseInfo[]> {
-  const g = glanceOf(ctx, e);
+  const g = glanceOf(ctx, e) ?? (hostIs(ctx, e) === 'git' ? await gitGlance(ctx.run, { branch: e.branch, checkout: checkoutOf(e) }) : null);
   return appReleasesIn(g ? JSON.stringify(g.releases) : await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'));
 }
 
