@@ -68,7 +68,9 @@ export function kitBumpEntry(o: { version: string; from: string; kit: string; ch
     const c = sectionOf(body, HEADINGS.care);
     if (c && !/^nothing\b/i.test(c)) care.push(c);
   }
-  if (!changed.length) changed.push(back ? `- A step back to the Steward's kit ${o.kit}, from ${o.from}.` : `- The Steward's kit ${o.kit}, after ${o.from}: see its changelog, kit/CHANGELOG.md in Jcollier0120/Steward.`);
+  // Without the kit's changelog, a line of its own: never a repository's name, which the agent's notes would ship
+  // (they're published, and an agent's tests refuse the owner's account in what it ships).
+  if (!changed.length) changed.push(back ? `- A step back to the Steward's kit ${o.kit}, from ${o.from}.` : `- The Steward's kit ${o.kit}, after ${o.from}: the parts every agent of the manor shares.`);
   return [
     `## ${o.version}`,
     '',
