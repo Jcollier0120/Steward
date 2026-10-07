@@ -303,6 +303,11 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       held.push(heldOf(pr, trial));
       continue;
     }
+    // Another PC of the licence took its turn here meanwhile (lease.ts): it merges the rest.
+    if (ctx.lease && !(await ctx.lease.ok(e))) {
+      waits.push(`${describe(pr)} and the rest are left to another PC, whose turn it is now`);
+      break;
+    }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });

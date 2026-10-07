@@ -268,7 +268,7 @@ switch (cmd) {
     const all = loadClaims();
     if (rest.includes('--json')) console.log(JSON.stringify(all, null, 2));
     else if (!all.length) console.log('No versions are claimed.');
-    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}`);
+    else for (const c of all) console.log(`${c.repo} ${c.version}: ${c.by}${c.for ? `, for ${c.for}` : ''}${c.branch ? ` (${c.branch})` : ''}, since ${c.at}${c.source === 'exchequer' ? ', for every PC of the licence' : ''}`);
     break;
   }
   case 'mine': {

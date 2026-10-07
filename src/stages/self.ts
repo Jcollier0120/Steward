@@ -184,6 +184,11 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
           results.push(selfResult('skipped', `${step.tag} waits for the kit's release, which failed`));
           continue;
         }
+        // Another PC of the licence took its turn here meanwhile (lease.ts): it releases this.
+        if (ctx.lease && !(await ctx.lease.ok({ id: APP.id, repo: ctx.settings.stewardRepo }))) {
+          results.push(selfResult('skipped', `${step.tag} is left to another PC, whose turn it is now`));
+          break;
+        }
         let r: EmployeeResult;
         try {
           r = await releaseStep(ctx, repo, step);
