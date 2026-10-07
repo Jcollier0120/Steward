@@ -39,6 +39,11 @@ test('identityOf takes the announcement first, then src/app.ts', () => {
   assert.deepEqual(identityOf(read({ 'manor-agent.json': '{not json', 'src/app.ts': "  id: 'assayer',\n  name: 'Assayer',\n" })), { id: 'assayer', name: 'Assayer', announces: false });
   assert.equal(identityOf(read({ 'manor-agent.json': JSON.stringify({ agent: { id: 'Bad Id' } }) })), null);
   assert.equal(identityOf(read({})), null);
+  // In whichever quotes app.ts uses (the Pinder's and the Crier's are double), its name as written.
+  assert.deepEqual(identityOf(read({ 'src/app.ts': '  id: "crier",\n  name: "Crier",\n' })), { id: 'crier', name: 'Crier', announces: false });
+  assert.deepEqual(identityOf(read({ 'src/app.ts': "  id: `fake`,\n  name: `Fake Agent`,\n" })), { id: 'fake', name: 'Fake Agent', announces: false });
+  assert.deepEqual(identityOf(read({ 'src/app.ts': '  id: "fake",\n  name: "The Crier\'s cousin",\n' })), { id: 'fake', name: "The Crier's cousin", announces: false });
+  assert.equal(identityOf(read({ 'src/app.ts': "  id: 'fake\",\n" })), null, 'quotes that don\'t match are no id');
 });
 
 test('partsOf reads kit.json as it is, react and all, and is null with no kit.json', () => {

@@ -35,9 +35,10 @@ export function identityOf(read: (rel: string) => string | null): { id: string; 
     // Not JSON: its app.ts may still say.
   }
   const app = read('src/app.ts') ?? '';
-  const id = /\bid:\s*'([a-z][a-z0-9-]*)'/.exec(app)?.[1];
+  // In whichever quotes the agent wrote them: 'Pinder', "Pinder" or `Pinder`.
+  const id = /\bid:\s*(['"`])([a-z][a-z0-9-]*)\1/.exec(app)?.[2];
   if (!id) return null;
-  return { id, name: /\bname:\s*'([^']+)'/.exec(app)?.[1]?.trim() || id, announces: false };
+  return { id, name: /\bname:\s*(['"`])((?:(?!\1)[^\r\n])+)\1/.exec(app)?.[2]?.trim() || id, announces: false };
 }
 
 /** The kit parts a kit.json takes, or null when it is no kit.json. kit.json is their one source: tools/kit.ts fills from it. */

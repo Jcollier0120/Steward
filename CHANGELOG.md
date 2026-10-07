@@ -12,6 +12,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The page now shows each repository's parts as its kit.json says them, React included, and the note is gone.
 - Settings no longer has a Kit parts field for a repository. To change an agent's parts, change its kit.json.
 - Taking on a repository (Look after, or `employ`) lists the parts its kit.json takes.
+- Taking on an agent whose src/app.ts writes its id and name in double quotes (or backticks) now takes its name as written: the Crier was taken on as "crier".
 
 ### Before you update
 
