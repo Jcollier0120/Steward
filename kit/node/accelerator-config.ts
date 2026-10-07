@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { acceleratorId, type Hardware, readHardware, reeveHome, slug } from './accelerators.ts';
+import { acceleratorConfigFile, acceleratorId, acceleratorsHome, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
 import * as core from './core/index.js';
 import { RULES } from './rules.ts';
 
@@ -48,7 +48,19 @@ export interface Endpoint {
   model: string;
   /** Starts the server when it isn't running (detached, hidden). `%NAME%` is expanded from the environment. */
   startCommand?: string[];
+  /** This kind's own request cap, when it differs from its accelerator's (the core's capFor). */
+  maxContextTokens?: number;
+  /** What its server's environment needs besides the starter's (OpenVINO Model Server's PYTHONHOME and PATH); `%NAME%` is expanded. */
+  env?: Record<string, string>;
 }
+
+/** An accelerator's own request timings, over rules.json's (the core's requestTimeoutMs): a slower NPU's. */
+export interface Timeouts {
+  requestBaseMs?: number;
+  requestPerTokenMs?: number;
+  coldLoadMs?: number;
+}
+export const TIMEOUT_KEYS = ['requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'] as const;
 
 export interface Accelerator {
   /** `npu`, `cpu`, or `gpu-` and the card's name (acceleratorId). */
@@ -73,6 +85,8 @@ export interface Accelerator {
   quirks: Quirk[];
   /** false keeps it in the list but sends it nothing. */
   enabled?: boolean;
+  /** Its own request timings, when its server needs other than the rules' (setup writes an NPU's from npu-vendors.json). */
+  timeouts?: Timeouts;
 }
 
 /** An accelerator as config.json keeps it: everything but its name, which comes from the PC. */
@@ -116,15 +130,15 @@ export function serves(a: Accelerator, kind: ServeKind): boolean {
 }
 
 /** The endpoint a request of this kind goes to; a vision endpoint without a server of its own is on its chat endpoint's. */
-export function endpointFor(a: Accelerator, kind: ServeKind): Required<Pick<Endpoint, 'baseUrl' | 'model'>> & Pick<Endpoint, 'startCommand'> {
+export function endpointFor(a: Accelerator, kind: ServeKind): Required<Pick<Endpoint, 'baseUrl' | 'model'>> & Pick<Endpoint, 'startCommand' | 'env'> {
   const ep = a[kind];
   if (!ep) throw new Error(`${a.id} serves no ${kind}`);
   if (kind === 'vision' && !ep.baseUrl) {
     if (!a.chat?.baseUrl) throw new Error(`${a.id}: vision has no server`);
-    return { baseUrl: a.chat.baseUrl, model: ep.model, startCommand: a.chat.startCommand };
+    return { baseUrl: a.chat.baseUrl, model: ep.model, startCommand: a.chat.startCommand, ...(a.chat.env ? { env: a.chat.env } : {}) };
   }
   if (!ep.baseUrl) throw new Error(`${a.id}: ${kind} has no baseUrl`);
-  return { baseUrl: ep.baseUrl, model: ep.model, startCommand: ep.startCommand };
+  return { baseUrl: ep.baseUrl, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -205,6 +219,12 @@ function readEndpoint(v: any): Endpoint | undefined {
   const ep: Endpoint = { model: v.model };
   if (typeof v.baseUrl === 'string' && v.baseUrl) ep.baseUrl = serverBase(v.baseUrl);
   if (Array.isArray(v.startCommand)) ep.startCommand = v.startCommand.map(String);
+  if (v.env && typeof v.env === 'object' && !Array.isArray(v.env)) {
+    const env = Object.fromEntries(Object.entries(v.env).filter(([k, x]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof x === 'string')) as Record<string, string>;
+    if (Object.keys(env).length) ep.env = env;
+  }
+  const cap = positiveInt(v.maxContextTokens);
+  if (cap) ep.maxContextTokens = cap;
   return ep;
 }
 
@@ -231,6 +251,11 @@ export function readAccelerator(v: any, hw: Hardware | null = null): Accelerator
     if (ep) a[k] = ep;
   }
   if (v.enabled === false) a.enabled = false;
+  if (v.timeouts && typeof v.timeouts === 'object' && !Array.isArray(v.timeouts)) {
+    const t: Timeouts = {};
+    for (const k of TIMEOUT_KEYS) if (Number.isInteger(v.timeouts[k]) && v.timeouts[k] >= 0) t[k] = v.timeouts[k];
+    if (Object.keys(t).length) a.timeouts = t;
+  }
   return a;
 }
 
@@ -371,6 +396,13 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
       if (v.enabled !== undefined && typeof v.enabled !== 'boolean') problems.push(`${at}: enabled must be true or false`);
       if (v.quirks !== undefined && (!Array.isArray(v.quirks) || v.quirks.some((q: unknown) => !(QUIRKS as readonly unknown[]).includes(q))))
         problems.push(`${at}: quirks may only be ${QUIRKS.join(', ')}`);
+      if (v.timeouts !== undefined) {
+        const t = v.timeouts;
+        if (!t || typeof t !== 'object' || Array.isArray(t)) problems.push(`${at}: timeouts must be an object (${TIMEOUT_KEYS.join(', ')})`);
+        else
+          for (const k of Object.keys(t))
+            if (!(TIMEOUT_KEYS as readonly string[]).includes(k) || !(Number.isInteger(t[k]) && t[k] >= 0 && t[k] <= 3_600_000)) problems.push(`${at}: timeouts.${k} must be one of ${TIMEOUT_KEYS.join(', ')}, a whole number of ms up to an hour`);
+      }
       for (const k of SERVE_KINDS) {
         const ep = v[k];
         if (ep === undefined || ep === null) continue;
@@ -385,6 +417,10 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
         if (ep.baseUrl === undefined && k === 'vision' && !v.chat?.baseUrl) problems.push(`${where}: needs a baseUrl, or a chat endpoint whose server it shares`);
         if (ep.startCommand !== undefined && (!Array.isArray(ep.startCommand) || ep.startCommand.some((s: unknown) => typeof s !== 'string' || !s)))
           problems.push(`${where}: startCommand must be a list of words (the program, then its arguments)`);
+        if (ep.env !== undefined && (!ep.env || typeof ep.env !== 'object' || Array.isArray(ep.env) || Object.entries(ep.env).some(([k, x]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || typeof x !== 'string')))
+          problems.push(`${where}: env must be an object of names to text (its server's environment)`);
+        if (ep.maxContextTokens !== undefined && !(Number.isInteger(ep.maxContextTokens) && ep.maxContextTokens >= 512 && ep.maxContextTokens <= 1_048_576))
+          problems.push(`${where}: maxContextTokens must be a whole number from 512 to 1048576`);
         if (typeof ep.baseUrl === 'string' && isHttpUrl(ep.baseUrl)) {
           const base = serverBase(ep.baseUrl);
           const other = servers.get(base);
@@ -409,18 +445,96 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
 // ------------------------------------------------------------------------------------------------
 // The file
 
-/** config.json: REEVE_CONFIG, else Reeve's data folder's (REEVE_HOME, else %USERPROFILE%\.reeve), as every agent reads it. */
-export const acceleratorConfigFile = (env: NodeJS.ProcessEnv = process.env) => env.REEVE_CONFIG || path.join(env.REEVE_HOME || reeveHome, 'config.json');
+export { acceleratorConfigFile, acceleratorsHome, legacyConfigFile, readableConfigFile };
 
 /**
- * Where setup puts llama.cpp's servers and the GGUF models, and the keeper its servers' logs: %USERPROFILE%\.reeve
- * (servers\, models\), one per PC whoever keeps them. A scratch REEVE_HOME gets its own.
+ * Where setup puts the model servers (llama.cpp's builds, and an NPU's server where it is installed into a folder of
+ * ours) and the models, and the keeper its servers' logs: the accelerators' folder (acceleratorsHome,
+ * %USERPROFILE%\.manor\accelerators) since kit 2.31.0, servers\ and models\ in it. A PC set up before keeps
+ * %USERPROFILE%\.reeve, where its builds and models already are, so nothing is downloaded twice and its config's
+ * startCommands stay right. A scratch REEVE_HOME gets its own, as before.
  */
-export const toolsHome = (env: NodeJS.ProcessEnv = process.env) => env.REEVE_HOME || path.join(os.homedir(), '.reeve');
+export function toolsHome(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  if (env.REEVE_HOME) return env.REEVE_HOME;
+  if (env.ACCELERATORS_HOME || env.MANOR_HOME) return acceleratorsHome(env);
+  const reeve = path.join(home, '.reeve');
+  if (existsSync(path.join(reeve, 'servers')) || existsSync(path.join(reeve, 'models'))) return reeve;
+  return acceleratorsHome(env);
+}
 
-/** config.json's content: {} when there is none, an error when it isn't readable JSON. */
+/**
+ * The keys that are the accelerators' and move with them to their own config.json: the keeper's (KEEPER_KEYS), an
+ * older config's single endpoint and its cap, and the request timeout every agent reads.
+ */
+export const ACCELERATOR_KEYS = ['accelerators', 'acceleratorOrder', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'chatEndpoint', 'visionModel', 'embedEndpoint', 'npuMaxContextTokens', 'requestTimeoutMs'] as const;
+
+/**
+ * Moves the accelerators to their own config.json (kit 2.31.0), once: when it doesn't exist yet and Reeve's older
+ * config.json has any of their keys (ACCELERATOR_KEYS), it is written with a copy of them, and `movedFrom` saying
+ * where from. Reeve's file is never changed, so nothing that works today stops working: an agent with an older kit
+ * still reads its accelerators there, and the keeper mirrors each later change back (writeConfigFile). Null when
+ * there was nothing to move.
+ */
+export function migrateAcceleratorConfig(env: NodeJS.ProcessEnv = process.env, home = os.homedir(), now = new Date()): { file: string; from: string; keys: string[] } | null {
+  const file = acceleratorConfigFile(env);
+  if (existsSync(file)) return null;
+  const from = legacyConfigFile(env, home);
+  if (!from) return null;
+  const old = readJsonObject(from);
+  if (!old.raw) return null;
+  const keys = ACCELERATOR_KEYS.filter((k) => old.raw![k] !== undefined);
+  if (!keys.length) return null;
+  const moved: Record<string, any> = Object.fromEntries(keys.map((k) => [k, old.raw![k]]));
+  writeJsonWhole(file, withoutNames({ ...moved, movedFrom: from, movedAt: now.toISOString() }));
+  return { file, from, keys };
+}
+
+/**
+ * The keeper's keys written back into Reeve's older config.json, when it is there beside the accelerators' own: an
+ * agent with a kit before 2.31.0 (and Reeve before it moves) reads its accelerators there until it updates. Every other
+ * key in Reeve's file stays as it is; nothing is written when nothing changed. False when there was nothing to mirror.
+ */
+export function mirrorToLegacy(raw: Record<string, any>, env: NodeJS.ProcessEnv = process.env, home = os.homedir()): boolean {
+  const legacy = legacyConfigFile(env, home);
+  if (!legacy) return false;
+  const old = readJsonObject(legacy);
+  if (!old.raw) return false;
+  const next: Record<string, any> = { ...old.raw };
+  for (const k of KEEPER_KEYS) {
+    if (raw[k] === undefined) delete next[k];
+    else next[k] = raw[k];
+  }
+  const out = withoutNames(next);
+  if (JSON.stringify(out) === JSON.stringify(old.raw)) return false;
+  writeJsonWhole(legacy, out);
+  return true;
+}
+
+function readJsonObject(file: string): { raw?: Record<string, any> } {
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? { raw } : {};
+  } catch {
+    return {};
+  }
+}
+
+const isOwnFile = (file: string, env: NodeJS.ProcessEnv = process.env) => path.resolve(file).toLowerCase() === path.resolve(acceleratorConfigFile(env)).toLowerCase();
+
+/**
+ * config.json's content: {} when there is none, an error when it isn't readable JSON. The accelerators' own file is
+ * first moved from Reeve's older one when it isn't there yet (migrateAcceleratorConfig), so the keeper and its
+ * Settings page always read and write the same file.
+ */
 export function readConfigFile(file = acceleratorConfigFile()): { raw: Record<string, any>; exists: boolean; error?: string } {
   let text: string;
+  if (!existsSync(file) && isOwnFile(file)) {
+    try {
+      migrateAcceleratorConfig();
+    } catch {
+      // Not moved this time: read as none, and the next read tries again.
+    }
+  }
   try {
     text = readFileSync(file, 'utf8');
   } catch {
@@ -531,12 +645,21 @@ export function writeJsonWhole(file: string, value: unknown): void {
 
 /**
  * Writes config.json whole when `validate` finds nothing wrong; says what's wrong otherwise and writes nothing. No
- * accelerator's `name` is written (withoutNames): an older file's go at its next write.
+ * accelerator's `name` is written (withoutNames): an older file's go at its next write. The accelerators' own file's
+ * keeper keys are mirrored into Reeve's older config.json when it is there (mirrorToLegacy), for the agents that
+ * still read them there.
  */
 export function writeConfigFile(file: string, raw: Record<string, any>, validate: (raw: unknown) => string[] = validateKeeperConfig): { problems: string[] } {
   const problems = validate(raw);
   if (problems.length) return { problems };
   writeJsonWhole(file, withoutNames(raw));
+  if (isOwnFile(file)) {
+    try {
+      mirrorToLegacy(raw);
+    } catch {
+      // A courtesy to older agents: the accelerators' own file is written either way.
+    }
+  }
   return { problems: [] };
 }
 

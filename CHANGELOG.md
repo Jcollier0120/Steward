@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.15.0
+
+**It hands out kit 2.31.0: local AI on every Copilot+ NPU (Qualcomm, Intel, AMD), installed by setup.**
+
+### What's new
+
+- Kit 2.31.0: setup finds the NPU whatever its maker, installs that maker's model server and models (checked against pinned checksums, for your user, without an administrator), and uses it only once it has answered a test question. Snapdragon gets GenieX, Intel Core Ultra gets OpenVINO Model Server, and AMD Ryzen AI 300 and later get FastFlowLM. An NPU the manor can't use (AMD's Ryzen 7040 and 8040, or an old driver) is named, with the reason, and the graphics card or the processor does its work.
+- The model setup now lives in a folder Manor owns, so the household agents work without Reeve.
+
+### What changed
+
+- Kit 2.31.0: the model keeper stops a leftover model server only when the manor started it or it is in the manor's own folders, never because of the port it uses. Your own GenieX or another program's server is left alone.
+- The "isn't set up" message now sends you to Manor's Set up local AI instead of Reeve.
+
+### Before you update
+
+- Your model setup is copied from Reeve's settings to Manor's folder the first time it is read after the update, word for word; Reeve's file is left as it was. Nothing to do.
+- This release brings kit 2.31.0 only; kit 2.29.0 and 2.30.0 are in other changes.
+
 ## 0.14.1
 
 **It names no folders of one particular PC.**

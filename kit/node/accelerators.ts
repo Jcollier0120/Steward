@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as core from './core/index.js';
@@ -60,16 +60,61 @@ export const noteLabel = (a: AcceleratorRef | null | undefined) => core.noteLabe
 /** Whether it serves this kind of request. */
 export const serves = (a: Accelerator, work: Work) => core.serves(a, work);
 
-// ---------------------------------------------------------------- Reeve's config
+// ---------------------------------------------------------------- the accelerators' config
 
 /**
  * Reeve's data folder: %USERPROFILE%\.reeve, or REEVE_HOME; the npu-agent folder on a PC where
- * `reeve migrate` hasn't run yet.
+ * `reeve migrate` hasn't run yet. The accelerators were kept in its config.json until kit 2.31.0.
  */
 export const reeveHome =
   process.env.REEVE_HOME ??
   [path.join(os.homedir(), '.reeve'), path.join(os.homedir(), '.npu-agent')].find((d) => existsSync(path.join(d, 'config.json'))) ??
   path.join(os.homedir(), '.reeve');
+
+/**
+ * The accelerators' own folder, which Manor owns (kit 2.31.0): %USERPROFILE%\.manor\accelerators, or MANOR_HOME's
+ * `accelerators`; ACCELERATORS_HOME names another. It holds their config.json, and on a PC set up since, the model
+ * servers and models (servers\, models\), so a household gets working models without hiring Reeve. A scratch
+ * REEVE_HOME (tests, trials) keeps everything in itself, as before.
+ */
+export function acceleratorsHome(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.ACCELERATORS_HOME) return env.ACCELERATORS_HOME;
+  if (env.REEVE_HOME) return env.REEVE_HOME;
+  return path.join(env.MANOR_HOME || path.join(os.homedir(), '.manor'), 'accelerators');
+}
+
+/**
+ * The accelerators' config.json, where their keeper writes: ACCELERATORS_CONFIG, else REEVE_CONFIG (a scratch Reeve's),
+ * else REEVE_HOME's (a scratch home keeps one file, as before), else the accelerators' folder's (acceleratorsHome).
+ * Agents read readableConfigFile().
+ */
+export function acceleratorConfigFile(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.ACCELERATORS_CONFIG) return env.ACCELERATORS_CONFIG;
+  if (env.REEVE_CONFIG) return env.REEVE_CONFIG;
+  if (env.REEVE_HOME) return path.join(env.REEVE_HOME, 'config.json');
+  return path.join(acceleratorsHome(env), 'config.json');
+}
+
+/**
+ * Reeve's config.json, where the accelerators were kept before kit 2.31.0, when it's another file than theirs and
+ * exists: null with a scratch home or an explicit file (then the two are one), and on a PC that never had one.
+ * `home` is the profile folder (tests give one).
+ */
+export function legacyConfigFile(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
+  if (env.ACCELERATORS_CONFIG || env.REEVE_CONFIG || env.REEVE_HOME) return null;
+  const found = [path.join(home, '.reeve'), path.join(home, '.npu-agent')].map((d) => path.join(d, 'config.json')).find((f) => existsSync(f));
+  return found && path.resolve(found) !== path.resolve(acceleratorConfigFile(env)) ? found : null;
+}
+
+/**
+ * The file agents read the accelerators from: theirs when it exists, else Reeve's older one (a PC whose keeper hasn't
+ * moved them yet: accelerator-config.ts' migrateAcceleratorConfig), else theirs (none: not set up).
+ */
+export function readableConfigFile(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  const own = acceleratorConfigFile(env);
+  if (existsSync(own)) return own;
+  return legacyConfigFile(env, home) ?? own;
+}
 
 /** A card's id part: its name in lowercase, each run of other characters one dash, none at either end (as Reeve). */
 export const slug = (name: string) => core.slug(name);
@@ -100,6 +145,8 @@ export function ordered(list: Accelerator[], order: 'auto' | string[]): Accelera
  * ("No notes: …." or "Busy: notes deferred to a later round (…)") and end them as they need.
  */
 export const REEVE_NOT_SET_UP = core.REEVE_NOT_SET_UP;
+/** The same words by their new name (kit 2.31.0): they point to Manor's Set up local AI, not to Reeve. */
+export const NOT_SET_UP = core.NOT_SET_UP;
 
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
@@ -109,8 +156,8 @@ export function parseAccelerators(raw: any, hw: Hardware | null = readHardware()
   return core.parseAccelerators(RULES, raw, hw);
 }
 
-/** Reeve's config.json (REEVE_HOME, else %USERPROFILE%\.reeve), or why its accelerators can't be used. */
-export function loadAccelerators(file = path.join(reeveHome, 'config.json'), hw: Hardware | null = readHardware()): AcceleratorConfig | { error: string } {
+/** The accelerators' config.json (readableConfigFile: theirs, else Reeve's older one), or why they can't be used. */
+export function loadAccelerators(file = readableConfigFile(), hw: Hardware | null = readHardware()): AcceleratorConfig | { error: string } {
   let text: string | null;
   try {
     text = readFileSync(file, 'utf8');
@@ -463,6 +510,66 @@ export function expandEnv(s: string, env: Record<string, string | undefined> = p
   });
 }
 
+/** A model server the manor started: which process, its program, where it serves, and when (ms). */
+export interface StartedServer {
+  pid: number;
+  program: string;
+  base: string;
+  atMs: number;
+}
+
+/** Where a started server's record is kept: `started.<pid>.json` in the accelerators' shared folder. */
+export const startedFile = (pid: number) => path.join(acceleratorsDir, `started.${pid}.json`);
+
+/**
+ * Records a server the manor started, so the keeper knows it for the manor's own (keeper.ts' manorOwns) wherever its
+ * program is, and never mistakes someone else's for it. A courtesy: a record that can't be written costs nothing but
+ * the keeper's leave to stop it as an orphan.
+ */
+export function noteStarted(r: StartedServer): void {
+  try {
+    writeWhole(startedFile(r.pid), r);
+  } catch {}
+}
+
+/** The servers the manor started, as recorded; records older than 30 days are dropped (their processes are long gone, or their pids reused). */
+export function readStarted(now = Date.now()): StartedServer[] {
+  let names: string[];
+  try {
+    names = readdirSync(acceleratorsDir);
+  } catch {
+    return [];
+  }
+  const out: StartedServer[] = [];
+  for (const n of names.filter((x) => /^started\.\d+\.json$/.test(x))) {
+    const f = path.join(acceleratorsDir, n);
+    try {
+      const r = JSON.parse(readFileSync(f, 'utf8'));
+      if (typeof r?.pid !== 'number' || typeof r.program !== 'string' || typeof r.atMs !== 'number') continue;
+      if (now - r.atMs > 30 * 86_400_000) {
+        rmSync(f, { force: true });
+        continue;
+      }
+      out.push({ pid: r.pid, program: r.program, base: String(r.base ?? ''), atMs: r.atMs });
+    } catch {}
+  }
+  return out;
+}
+
+/**
+ * A server's environment: the starter's, with the endpoint's own `env` over it, each value's `%NAME%` expanded from the
+ * starter's (so `%PATH%` keeps the PATH it had). A name is matched in any case, as Windows does.
+ */
+export function serverEnv(ep: Pick<Endpoint, 'env'>, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!ep.env) return base;
+  const out: NodeJS.ProcessEnv = { ...base };
+  for (const [k, v] of Object.entries(ep.env)) {
+    for (const old of Object.keys(out)) if (old.toLowerCase() === k.toLowerCase()) delete out[old];
+    out[k] = expandEnv(v, base);
+  }
+  return out;
+}
+
 const starting = new Map<string, Promise<ServerReady>>();
 
 /** Kept for callers from before 2.6.0: servers are looked at afresh on every turn, so there is nothing to forget. */
@@ -524,10 +631,11 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
       mkdirSync(path.dirname(o.logFile), { recursive: true });
       log = openSync(o.logFile, 'a');
     }
-    const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env: o.env ?? process.env });
+    const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env: serverEnv(ep, o.env ?? process.env) });
     child.on('error', (e) => (spawnError = e));
     child.on('exit', (code) => (exited = code));
     child.unref();
+    if (child.pid) noteStarted({ pid: child.pid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
   } catch (e) {
     spawnError = e as Error;
   } finally {

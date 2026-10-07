@@ -908,14 +908,14 @@
     "accelerators": []
    },
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
    "case": "nothing at all is Reeve not set up",
    "raw": {},
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
@@ -937,7 +937,7 @@
     ]
    },
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
@@ -946,7 +946,7 @@
     "npuMaxContextTokens": 2400
    },
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
@@ -1248,7 +1248,7 @@
    "file": "C:\\Users\\me\\.reeve\\config.json",
    "text": null,
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
@@ -1272,7 +1272,7 @@
    "file": "C:\\Users\\me\\.reeve\\config.json",
    "text": "{\"accelerators\":[]}",
    "expect": {
-    "error": "Reeve isn't set up here: open Reeve's page, Settings → Set up (or run `reeve accelerators setup`)"
+    "error": "Local AI isn't set up on this PC yet: open Manor and choose Set up local AI"
    }
   },
   {
