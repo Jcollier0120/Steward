@@ -17,8 +17,10 @@ import { checkoutOf, result, type EmployeeResult } from './stages/common.ts';
  *
  * - No licence.json (development setups, older installs), or the Exchequer answering 404 (it doesn't coordinate yet)
  *   or 401 (this PC's place was given back): no turns at all; everything is exactly as before.
- * - The Exchequer unreachable (the network, a 5xx, a 429): a lease this PC held is kept until it runs out, less a
- *   margin; no new one is taken. The worst case is a slow round, never a double merge.
+ * - The Exchequer unreachable (the network, a 5xx, a 429) on a PC whose turns were on: a lease this PC held is kept
+ *   until it runs out, less a margin; no new one is taken. The worst case is a slow round, never a double merge.
+ * - Unreachable on a PC that has never taken turns, or an answer with no leases in it: no turns, as before. An outage
+ *   never stops a PC that was working alone.
  *
  * What the last answer said is kept in leases.json, for that and for the page.
  */
@@ -173,6 +175,11 @@ export async function takeTurns(employees: Employee[], o: { coord: Coord | null;
     } else if (r.kind === 'off') {
       mode = 'off';
       note = r.why;
+    } else if (r.kind === 'ok' || (state.mode !== 'on' && state.mode !== 'unreachable')) {
+      // An answer with no leases in it, or no answer on a PC that has never taken turns: no turns, as before. Only a PC
+      // whose turns were on waits for the Exchequer, so an outage never stops one that was working alone.
+      mode = 'off';
+      note = null;
     } else {
       mode = 'unreachable';
       note = r.kind === 'unreachable' ? r.why : `the Exchequer refused the turns (${refusal(r)})`;

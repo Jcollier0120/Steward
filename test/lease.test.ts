@@ -19,7 +19,7 @@ const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpe
 type Lease = { device: string; name: string; until: number; since: number };
 
 /** The Exchequer, stood in for: leases and claims of one licence, this PC being `me`. */
-function exchequer(o: { mode?: 'on' | '404' | '401' | 'down' } = {}) {
+function exchequer(o: { mode?: 'on' | '404' | '401' | 'down' | 'no-leases' } = {}) {
   let clock = Date.parse('2026-10-08T12:00:00Z');
   const leases = new Map<string, Lease>();
   const claims: any[] = [];
@@ -54,6 +54,7 @@ function exchequer(o: { mode?: 'on' | '404' | '401' | 'down' } = {}) {
     calls.push({ method: String(init.method), route, body });
     assert.equal((init.headers as Record<string, string>).authorization, 'Bearer token-for-tests');
     if (x.mode === 'down') throw new TypeError('fetch failed');
+    if (x.mode === 'no-leases') return answer(200, { ok: true });
     if (x.mode === '404') return answer(404, { error: 'not-available', message: '…' });
     if (x.mode === '401') return answer(401, { error: 'unauthorized', message: '…' });
     if (init.method === 'POST' && route === '/lease') {
@@ -162,6 +163,32 @@ test('out of reach: a turn already held is used until it nearly runs out; none i
   x.advance(19 * 60_000);
   t = await takeTurns([clerk, porter], { coord: x.coord, settings });
   assert.deepEqual(t.acting, []);
+  // Still out of reach a round later: still waiting, never back to acting alone while another PC may hold the turns.
+  x.advance(10 * 60_000);
+  t = await takeTurns([clerk, porter], { coord: x.coord, settings });
+  assert.deepEqual([t.acting, t.mode], [[], 'unreachable']);
+  // Back: turns as before.
+  x.mode = 'on';
+  t = await takeTurns([clerk, porter], { coord: x.coord, settings });
+  assert.deepEqual(t.acting.map((e) => e.id), ['clerk', 'porter']);
+});
+
+test('out of reach on a PC that never took turns, or an answer with no leases: no turns, every repository acts as before', async () => {
+  for (const mode of ['down', 'no-leases'] as const) {
+    rmSync(leasesFile(), { force: true });
+    const x = exchequer({ mode });
+    const t = await takeTurns([clerk, porter, away], { coord: x.coord, settings });
+    assert.deepEqual([t.acting.map((e) => e.id), t.elsewhere, t.guard, t.mode], [['clerk', 'porter', 'away'], [], null, 'off'], mode);
+    assert.equal(turnsView([clerk, porter]), null, 'nothing on the page');
+    // And again the next round: still alone.
+    assert.equal((await takeTurns([clerk], { coord: x.coord, settings })).mode, 'off');
+  }
+  // After a 404 too: turns had never been on.
+  rmSync(leasesFile(), { force: true });
+  const x = exchequer({ mode: '404' });
+  await takeTurns([clerk], { coord: x.coord, settings });
+  x.mode = 'down';
+  assert.equal((await takeTurns([clerk], { coord: x.coord, settings })).mode, 'off');
 });
 
 test('before each merge or release the turn is checked: renewed near its end, or found taken', async () => {
@@ -218,16 +245,31 @@ test('a round leaves a repository another PC holds alone, and merges as before w
     if (args[0] === 'pr' && args[1] === 'merge') return ok('');
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
   });
+  const merges = () => r.gh.filter((a) => a[1] === 'merge');
+  const MERGE7 = ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'];
+  // The Exchequer out of reach on a PC that has never taken turns: the round merges as it always did.
+  rmSync(leasesFile(), { force: true });
+  const down = exchequer({ mode: 'down' });
+  const blind = await runStage('round', { full: true }, { run: r.run, coord: down.coord });
+  assert.equal(blind.error, undefined);
+  assert.deepEqual(merges(), [MERGE7], 'merged as before');
+  assert.ok(blind.results.some((y) => y.id === 'fake' && y.outcome === 'done'), JSON.stringify(blind.results));
+  // (#7 stays open in this stand-in, so the rounds below can merge it again.)
   const x = exchequer();
   x.holdElsewhere('jcollier0120/fake');
   const held = await runStage('round', { full: true }, { run: r.run, coord: x.coord });
   assert.equal(held.error, undefined);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [], 'nothing merged where another PC has its turn');
+  assert.deepEqual(merges(), [MERGE7], 'nothing more merged where another PC has its turn');
   assert.ok(held.results.some((y) => y.id === 'fake' && y.message === 'merging and releasing for Fake: done by DESKTOP-ABC'), JSON.stringify(held.results));
-  // The Exchequer doesn't coordinate yet (404): the round is as it always was.
+  // Turns were on: out of reach now, and this PC never held Fake's turn, so it waits rather than merge beside the desktop.
+  x.mode = 'down';
+  const waiting = await runStage('round', { full: true }, { run: r.run, coord: x.coord });
+  assert.deepEqual(merges(), [MERGE7], 'nothing merged while it cannot tell whose turn it is');
+  assert.ok(waiting.results.some((y) => y.id === 'fake' && y.outcome === 'skipped' && /^merging and releasing for Fake: done by DESKTOP-ABC/.test(y.message)), JSON.stringify(waiting.results));
+  // The Exchequer doesn't coordinate (404): the round is as it always was.
   x.mode = '404';
   const alone = await runStage('round', { full: true }, { run: r.run, coord: x.coord });
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
+  assert.deepEqual(merges(), [MERGE7, MERGE7]);
   assert.ok(alone.results.some((y) => y.id === 'fake' && y.outcome === 'done'));
 });
 
