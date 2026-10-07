@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.35.0
+
+**A release of an agent Castellan sells goes to the Exchequer, and no longer to the public releases repository.** Castellan's paid agents are served by the Exchequer alone. Their releases were also going to GitHub's public releases repository, where anyone could download them.
+- **node/exchequer.ts: `saleOf(id)`** is new. It reads the Exchequer's public agents list, where each agent has `forSale` (Exchequer 0.6.0):
+  - `true`: for sale.
+  - `false`: not for sale (Manor, Heiward, the agents held back from sale), or not listed at all.
+  - `null`: the Exchequer couldn't say. It didn't answer, or its answer has no `forSale` (an Exchequer from before 0.6.0, or one whose database isn't migrated yet).
+  - It never throws. `reachedExchequer(outcome)` is new too: published, or there already.
+- **node/release.ts: `publishTo(release, steps)`** now decides where `--publish` goes. With a releases repository (Castellan's own agents):
+  - **For sale:** the Exchequer first, from the files just built, then `v<version>` in the agent's own repository, and never the releases repository. It's refused when the agent's own repository already has the version. If the Exchequer doesn't take it (it's down or refuses, or this PC has no publisher's key), the release goes to the releases repository as before, so it's never missing everywhere. The Exchequer's line stays a note.
+  - **Not for sale, unknown, or the Exchequer can't say:** exactly as before. The releases repository, then the agent's own, then the Exchequer too, so an agent held back from sale is already there when it goes on sale.
+  - Without a releases repository (anyone else's agent), nothing changes. The exit code is still GitHub's.
+- **`npm run release -- --exchequer`** takes the release from the releases repository, else from the agent's own `v<version>` (where an agent for sale has it).
+- **spec/RELEASES.md** says so.
+- **What an agent must do:** nothing. Its next release follows the Exchequer's list. Until the Exchequer says `forSale`, every release goes to GitHub as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents for sale stop appearing in the public releases repository once the Exchequer 0.6.0 is deployed with its migration applied. Until then, releases go there as before.
+
 ## 2.34.0
 
 **An agent's rounds never stop silently.** On 2026-10-07 the Chamberlain finished no round for 18 hours. Nothing had hung: it declared a mail source `required`, so `every()` skipped each round, documents too, and a skipped round wrote nothing, so it looked like an agent that had stopped.

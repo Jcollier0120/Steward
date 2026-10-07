@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.21.0
+
+**It hands out the kit 2.35.0: a release of an agent Castellan sells goes to the Exchequer, not the public releases repository.**
+
+### What changed
+
+- The release of an agent that Castellan sells is published to the Exchequer, Castellan's release service, and no longer to the public releases repository. The Steward still sees it released, by the agent's own repository.
+- The agents not for sale go to the releases repository as before, and to the Exchequer too. That's Manor, Heiward, and the agents held back from sale.
+- If the Exchequer can't say which agents it sells, or doesn't take a release, the release goes to the releases repository as before. A release is never held back, and nothing becomes an alarm.
+- Each agent gets this with its next kit update, through the Steward as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents for sale stop appearing in the public releases repository once the Exchequer says which ones are for sale (its 0.6.0).
+
 ## 0.20.1
 
 **A refresh after releases cleans up after itself, however deep its packages go.**
