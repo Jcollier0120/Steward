@@ -42,8 +42,10 @@ export interface FoundView {
 }
 
 export interface StewardView {
-  /** Turns with the licence's other PCs (lease.ts): the repositories another PC looks after. Null or left out: no turns. */
+  /** Turns with this PC's others (lease.ts): the repositories another PC looks after. Null or left out: no turns. */
   turns?: TurnsView | null;
+  /** This PC's version claims that another PC claimed too while this one couldn't reach the remote (claims.ts). */
+  claimClashes?: string[];
   /** This PC releases Castellan itself (Settings): the kit, its rollout and the Steward's own releases are shown. */
   castellan?: boolean;
   /** The repositories Reeve found, to look after. */

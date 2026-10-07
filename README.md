@@ -234,15 +234,15 @@ It takes a repository's id, name or `owner/repo`: one in Settings, one Reeve fou
 
 A claim lives until its version is on the branch or overtaken by a release (the work landed), until it is given back, or for three days with no open PR that names it (its branch, or its version in a title); each round prunes them. While it lives, the merge stage holds another PR that sets that version ("it sets v0.4.22, which wright claimed for #7 (wright/7-…): it needs a version of its own") and catches it up to a free one. The Wright claims for each job before its worker starts, and gives the version back when no PR comes of it.
 
-On a PC that holds a Castellan licence (Manor's `licence.json`), a claim is made through the Exchequer, for every PC of the licence at once: the Steward sends what it knows of the repository, and keeps a copy here, so its merge stage sees it. Each round copies the licence's claims here, and gives back on the Exchequer the ones whose work landed. With no licence, or no Exchequer to reach, claims are this PC's alone, as above.
+Claims are shared by every PC that looks after a repository through `refs/manor/claims` in its remote, written by compare-and-swap, with a copy kept here so the merge stage sees them. With the remote out of reach, a claim is made here alone, as before, and shared on the next round that reaches it; one another PC claimed meanwhile is marked on the page, and its work gets a new version when it merges.
 
-## Several PCs on one licence
+## Several PCs
 
-A licence's PCs may each run a Steward signed in to the same GitHub account. They take turns (`src/lease.ts`; the Exchequer's `docs/MULTI-PC.md`): before a round, Merge or Release acts, it takes the Exchequer's lease `steward-round` on each repository it would act in that has a checkout on this PC, for three rounds' time, all in one call, and renews it each round. A repository another PC holds is left alone there: nothing merged, released, refreshed or rolled out. The page says so ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with **Do it here**, which takes the turn now. Before each merge and release the turn is checked again, so a long round never outlives it.
+Each PC may run a Steward signed in to the same GitHub account. They elect one release PC per repository among themselves, through a ref in the repository's own remote, `refs/manor/release-pc`, with plain git on any host: no licence, no Exchequer ([docs/MULTI-PC.md](docs/MULTI-PC.md), `src/lease.ts`). Only publishing waits for the turn (merging, releasing, the pushes of a refresh, a kit rollout and a catch-up); builds, tests, bumps and claims never do.
 
-- A repository cloned on one PC only is always looked after there; one cloned on none is looked after by none.
-- With no `licence.json`, or an Exchequer that answers 404 (it doesn't take turns yet) or 401 (this PC's place was given back), there are no turns: everything is as before.
-- When the Exchequer can't be reached, a turn this PC held is kept until it nearly runs out, and no new one is taken: the worst case is a slow round, never a double merge.
+- A repository another PC has is left alone there, and the page says so ("Merging and releasing for Clerk: done by DESKTOP-ABC"), with **Do it here** and **Keep it on this PC** (a pin, which other PCs leave alone unless it goes quiet for a day).
+- Before each publishing act, one `ls-remote`: it acts only while the turn is still its own.
+- A remote out of reach: the stage goes on as before there, and the page says releasing waits until this PC can reach it. A host that refuses the ref: this PC works alone there.
 
 ## Ports claimed up front
 
@@ -424,14 +424,16 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 | `work-filed.json` | Each issue filed for the Wright (by its marker's id): its URL, repository and when. Forgotten a month after its failure is gone. |
 | `tested.json` | Each employee's last 20 commits whose checks passed here, newest first, by stage: `GET /api/tested`, for the Surveyor. |
 | `repos-found.json` | The repositories Reeve found, with whether gh's account can push to each, and when it looked (`src/found.ts`). |
-| `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when; `source: exchequer` for one claimed for every PC of the licence. |
-| `leases.json` | The turns with the licence's other PCs as the Exchequer last said: each repository's, held here or by which PC and until when; and whether turns are taken (`on`), not (`off`), or out of reach. |
+| `version-claims.json` | The versions claimed up front and not yet landed: the repository, the version, the branch, who and what for, and when; `source: shared` for a copy of one in the repository's claims ref, and `clash` when another PC claimed the same version while this one couldn't reach the remote. |
+| `claims-seen.json` | Each repository's claims ref as last copied here, by its commit: a round reads it again only when it moved. |
+| `turns.json` | Each repository's release PC as last seen: this PC's, another's (its name, until when, pinned), the remote out of reach, or a host that refuses the ref. For the checks before each publishing act, and for the page. |
+| `device.json` | This PC's id for the turns, when Manor has made none (Manor's own `device.json` is used first). |
 | `kickbacks.json` | Each conflicting team PR sent back to its author, by its head and its branch's: sent once, and again only when either moves. |
 | `unsafe-updates.json` | Each version of the Steward its install rolled back: what failed, the version it went back to, and where the failed copy is kept. Refused until allowed again. |
 | `app.prev`, `app.unsafe-<version>` | The version before the last update, to go back to; a rolled-back version's copy, for a look. |
 | `pr-checks.json` | What testing each team PR here said, by its head commit: tested once, and a new push afresh. |
 | `jobs-approved.json` | Each employee's job scripts the Steward approved (or turned down) as merged, by sha256: each is looked at once. |
-| `work\` | The worktrees of the employees' bumps and releases, and `_modules\`, the packages they share (one set per lockfile). |
+| `work\` | The worktrees of the employees' bumps and releases; `_modules\`, the packages they share (one set per lockfile); and `_turns.git`, the scratch repository the turns and shared claims are read and written in. |
 | `kits\` | The kit releases tools/kit.ts downloaded, by version, for every agent on this PC. Always `%USERPROFILE%\.steward\kits`, for a checkout too (`STEWARD_KITS` overrides it). Once a day the versions no one pins (an employee's branch or latest release, the Steward's own kit.json, the kit it hands out) are let go, beyond the newest three and any touched in the last day (`kits-pruned.json` says when, and which); tools/kit.ts fetches one again if it is asked for. |
 | `duty.json`, `server.json`, `serve.log` | On duty or not; the running page's pid, port and token; its output. |
 
