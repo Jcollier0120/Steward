@@ -9,9 +9,12 @@ import type { Field } from './settings-kit.ts';
  *      has a default that works, and is in Settings. With none, the step says so.
  *   3. `tour`: what its page shows, part by part, each by its data-tour name (the kit's frame names titlebar, status,
  *      settings, theme, action, settings-panel and work; the agent names its own sections).
- * `required` names the settings among `settings` the agent can't work without (the Chamberlain without a mail
- * account): each entry a key that must be filled, or a list of keys of which one must be. Until they are, its rounds
- * wait (required.ts), its page and /api/ping say so, and the tour's settings step holds until they're filled.
+ * `required` names the settings among `settings` the agent can do nothing at all without (the Developer Herald with no
+ * feed to follow): each entry a key that must be filled, or a list of keys of which one must be. Until they are, its
+ * rounds wait (required.ts), recorded in round.json as waiting (schedule.ts), its page and /api/ping say so, and the
+ * tour's settings step holds until they're filled. Never for a setting only part of its work needs: one missing
+ * setting must not stop the work that doesn't need it (the Chamberlain read no documents for want of a mail account,
+ * 0.2.2 to 0.2.7). Ask for that one in `settings` alone, and have the page say what it adds.
  * An agent keeps it in src/onboarding.ts as ONBOARDING, and passes it to pageShell(); agent-checks.ts checks it.
  */
 export interface Onboarding {

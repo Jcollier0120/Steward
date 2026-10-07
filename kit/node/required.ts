@@ -31,7 +31,8 @@ export interface NeedsSettings {
 
 /**
  * The required settings (its onboarding's `required`) not filled in yet, or null when it can work: its rounds wait
- * (schedule.ts), /api/ping says `needsSettings`, its page says so, and the tour's settings step holds. Read from the
+ * (schedule.ts, which records each held round in round.json as waiting), /api/ping says `needsSettings`, its page says
+ * so, and the tour's settings step holds. Read from the
  * settings file each time, so a save lets the rounds go at once; with no onboarding or settings, nothing is needed.
  */
 export function needsSettings(o: Onboarding | null = naming, spec: SettingsSpec | null = watched): NeedsSettings | null {
