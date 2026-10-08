@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, SERVE_KINDS, type ServeKind, serves, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
 import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
@@ -29,7 +29,7 @@ import { RULES } from './rules.ts';
  * Reloading one from the disk cache takes seconds.
  *
  * So, once a minute, for each model server the keeper can start again (an NPU's chat and vision servers, npu-embed
- * exiting by itself when idle; a graphics card's or the processor's chat, vision and embedding servers), with "in
+ * exiting by itself when idle; a graphics card's or the processor's chat, vision, embedding and reranking servers), with "in
  * use" meaning someone holds or waits on its accelerator's lock:
  * - **Idle**: when nobody has used its accelerator for `npuIdleStopMinutes` (the NPU) or `gpuIdleStopMinutes` (a
  *   graphics card, or the processor), both 10 by default (rules.json's keeper), it is stopped. The next request
@@ -382,8 +382,8 @@ export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): strin
 
 /**
  * The model servers the keeper can start again, each with its accelerator's idle time: an NPU's chat and vision
- * endpoints (npu-embed exits by itself), and a graphics card's or the processor's chat, vision and embedding
- * endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
+ * endpoints (npu-embed exits by itself), and a graphics card's or the processor's chat, vision, embedding and
+ * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
  * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out.
  */
 export function reapedServers(
@@ -396,7 +396,7 @@ export function reapedServers(
   const out = new Map<string, ReapedServer>();
   for (const a of accelerators) {
     if (a.enabled === false) continue;
-    const kinds: ServeKind[] = a.kind === 'npu' ? ['chat', 'vision'] : ['chat', 'vision', 'embed'];
+    const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision'] : ['chat', 'vision', 'embed', 'rerank'];
     const idleMs = a.kind === 'npu' ? idle.npuMs : idle.otherMs;
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;
@@ -572,7 +572,7 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
       },
       start: (spec) => ensureServer({ baseUrl: spec.base, model: '', startCommand: spec.startCommand, ...(spec.serverEnv ? { env: spec.serverEnv } : {}) }, { logFile: spec.logFile, env: spec.env }),
       log: (line) => logLine(logFile, line),
-      allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => SERVE_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
+      allProcesses: () => modelServerProcesses(configuredAccelerators(config()).flatMap((a) => ENDPOINT_KINDS.map((k) => a[k]?.startCommand?.[0] ?? '')).filter(Boolean).map((p) => expandEnv(p))),
       owned: (p) => manorOwns(p, { dirs: manorServerDirs(), started: readStarted() }),
     },
     o.options,
@@ -660,10 +660,10 @@ export interface AcceleratorStatus {
   name: string;
   kind: string;
   enabled: boolean;
-  serves: ServeKind[];
+  serves: EndpointKind[];
   slots: number;
   maxContextTokens: number;
-  servers: { kind: ServeKind; baseUrl: string; model: string; state: ServerState }[];
+  servers: { kind: EndpointKind; baseUrl: string; model: string; state: ServerState }[];
   failed: { since: string; reason: string; by: string } | null;
   game: { busy: boolean; percent: number; by: string[] } | null;
   holders: ({ pid: number; since: number } | null)[];
@@ -679,7 +679,7 @@ export async function acceleratorStatus(accs: Accelerator[], o: { probe?: (base:
   });
   return Promise.all(
     accs.map(async (a) => {
-      const kinds = SERVE_KINDS.filter((k) => a[k]?.model);
+      const kinds = ENDPOINT_KINDS.filter((k) => a[k]?.model);
       const bases = new Map<string, ServerState>();
       const servers = await Promise.all(
         kinds.map(async (k) => {
@@ -700,7 +700,7 @@ export async function acceleratorStatus(accs: Accelerator[], o: { probe?: (base:
         name: a.name,
         kind: a.kind,
         enabled: a.enabled !== false,
-        serves: SERVE_KINDS.filter((k) => serves(a, k)),
+        serves: ENDPOINT_KINDS.filter((k) => serves(a, k)),
         slots: a.kind === 'npu' ? 1 : a.slots,
         maxContextTokens: a.maxContextTokens,
         servers: servers.filter((s): s is NonNullable<typeof s> => !!s),

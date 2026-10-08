@@ -15,6 +15,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.27.18
+
+**The kit it hands out, 2.41.0, can set up and keep a reranker, for Reeve's search.**
+
+### What changed
+
+- The Steward hands out kit 2.41.0: the accelerators can serve a reranker, a small model that judges how well a passage answers a question. Reeve's search uses one to put the right file first more often. It is set up only when asked for, beside what a graphics card or the processor already serves, and the keeper keeps it running as it does the other model servers.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.17
 
 **A draft near the front of the merge line gets a heads-up, so it can be ready before it holds anyone up.**

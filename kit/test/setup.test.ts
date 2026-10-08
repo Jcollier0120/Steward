@@ -447,3 +447,45 @@ test('a processor entry: the CPU build, no device, no offload', () => {
   assert.deepEqual(e.chat!.startCommand, ['C:\\s\\llama-server.exe', '--host', '127.0.0.1', '--port', '18199', '-ngl', '0', '-m', 'C:\\m\\q.gguf', '-c', '4096', '--parallel', '1', '--jinja', '--alias', 'qwen3-4b-instruct-2507']);
   assert.equal(e.vision, undefined);
 });
+
+test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {
+  const { keepingAddOns, keptKinds } = await import('./fixture/src/kit/setup.ts');
+  const { reapedServers } = await import('./fixture/src/kit/keeper.ts');
+  const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'rerank-'));
+  const hfr = async (repo: string) =>
+    repo === 'ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF' ? parseHfFiles({ siblings: [{ rfilename: 'qwen3-reranker-0.6b-q8_0.gguf', size: 639153184, lfs: { sha256: '0b' } }] }) : hf(repo);
+  const card = 'gpu-qualcomm-r-adreno-tm-x2-90-gpu';
+  const embed = { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-embedding-0.6b-gguf', startCommand: ['C:\l\llama-server.exe', '--port', '18191', '--embeddings'] };
+  const raw = { accelerators: [{ id: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'g' } }, { id: card, kind: 'gpu', slots: 1, maxContextTokens: 8192, quirks: [], embed }] };
+  // Not among the defaults: a plain setup sets up no reranker.
+  const plain = await planSetup({ detection: parseDetection(LAPTOP), ids: [card], raw, releases: RELEASES, hfFiles: hfr, home });
+  assert.ok(!plain.targets[0].kinds.includes('rerank'));
+  // Asked for alone: the card's embed server keeps its port, the reranker takes the next, and the NPU isn't set up for it.
+  const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: [], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: hfr, home });
+  assert.equal(plan.npu, null);
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.kinds, t.ports]), [[card, ['rerank'], { rerank: 18192 }]]);
+  assert.deepEqual(plan.models.map((m) => m.file), ['qwen3-reranker-0.6b-q8_0.gguf']);
+  const r = await runSetup(plan, raw, { log: () => {}, download: async (d) => (mkdirSync(path.dirname(d.dest), { recursive: true }), writeFileSync(d.dest, 'x')), unpack: () => {}, listDevices: async () => ADRENO_BENCH });
+  assert.deepEqual(r.problems, []);
+  const e = r.raw.accelerators.find((a: any) => a.id === card);
+  assert.deepEqual(e.embed, embed, 'what the card served is kept');
+  assert.equal(e.rerank.baseUrl, 'http://127.0.0.1:18192');
+  assert.equal(e.rerank.model, 'qwen3-reranker-0.6b');
+  assert.deepEqual(e.rerank.startCommand.slice(-11), ['--reranking', '-c', '8192', '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', 'qwen3-reranker-0.6b']);
+  assert.ok(e.rerank.startCommand.includes('--device') && e.rerank.startCommand.includes('GPUOpenCL'));
+  assert.deepEqual(validateAccelerators(r.raw), []);
+  const read = readAccelerators(r.raw).accelerators.find((a) => a.id === card)!;
+  assert.deepEqual(read.rerank, e.rerank, 'read back as written');
+  // Setting the card's others up again keeps its reranker, and its port.
+  const made = { id: card, kind: 'gpu' as const, slots: 1, maxContextTokens: 8192, quirks: [], chat: { baseUrl: 'http://127.0.0.1:18193', model: 'c' } };
+  assert.deepEqual(keepingAddOns(made, read, ['chat']).rerank, read.rerank);
+  assert.deepEqual(keptKinds(read, ['chat']), ['rerank']);
+  assert.deepEqual(keptKinds(read, ['rerank']), ['embed']);
+  assert.equal(keepingAddOns(made, read, ['chat', 'rerank']).rerank, undefined, 'asked for again, it is set up afresh');
+  // The processor reranks when asked.
+  const cpu = await planSetup({ detection: parseDetection(LAPTOP), ids: ['cpu'], kinds: ['rerank'], raw, releases: RELEASES, hfFiles: hfr, home });
+  assert.deepEqual(cpu.targets.map((t) => t.kinds), [['rerank']]);
+  // The keeper keeps it: a configured server, so never an orphan, and stopped when idle like the card's others.
+  const kept = reapedServers(readAccelerators(r.raw).accelerators, 'C:\logs', { otherMs: 600_000 }, () => ['C:\locks\gpu']);
+  assert.ok(kept.some((s) => s.base === 'http://127.0.0.1:18192' && s.idleMs === 600_000 && s.spec.logFile === path.join('C:\logs', `${card}.rerank.log`)));
+});
