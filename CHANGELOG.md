@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.16
+
+**Draft pull requests hold their place in the merge order.**
+
+### What changed
+
+- A draft that raises the version now keeps its place in line. Ready pull requests with a higher version wait until it merges, so it never ends up below main's version and needs renumbering. Before, drafts were passed over.
+- If a draft is closed instead, its version is simply skipped. The next pull request in line merges at its own version, and nothing is renumbered.
+- The version queues Manor shows now include drafts, marked as waiting.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A draft that raises the version now holds back the pull requests above it until it merges or is closed.
+
 ## 0.27.15
 
 **The Steward tells Manor where each repository's version stands, and which versions are lined up to merge next.**

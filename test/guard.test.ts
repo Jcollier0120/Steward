@@ -173,7 +173,7 @@ test('a version a team PR sets must be new: not released, above its branch, and 
   assert.deepEqual(next.merged.map((p) => p.number), [12]);
 });
 
-test('a lower version holds the ones above it even while it waits itself; a draft holds nothing; a PR that sets no version goes first', async () => {
+test('a lower version holds the ones above it even while it waits itself, a draft too; a PR that sets no version goes first; a closed draft gives up its place', async () => {
   const f = employeeWithPrs('order');
   const shas: Record<number, string> = {
     15: f.make(15, { version: '0.4.7' }),
@@ -184,14 +184,21 @@ test('a lower version holds the ones above it even while it waits itself; a draf
   };
   const e = employee(f.checkout, { fill: '' });
   const red = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }];
-  const prs = [listed(15, shas[15], { statusCheckRollup: red }), listed(16, shas[16]), listed(17, shas[17], { isDraft: true }), listed(18, shas[18]), listed(19, shas[19])];
+  let prs = [listed(15, shas[15], { statusCheckRollup: red }), listed(16, shas[16]), listed(17, shas[17], { isDraft: true }), listed(18, shas[18]), listed(19, shas[19])];
   const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : args[1] === 'merge' ? ok('') : undefined));
-  const m = await mergeOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-order'), run: r.run, neutralDir: tmp }), e, { yes: true, team: true });
+  const round = () => mergeOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-order'), run: r.run, neutralDir: tmp }), e, { yes: true, team: true });
+  const m = await round();
   assert.deepEqual(m.merged.map((p) => p.number), [18], m.message);
-  assert.match(m.message, /#15 .* waits: checks failing/);
-  assert.match(m.message, /#16 .* waits: its turn comes after #15 \(v0\.4\.7\): the lowest version merges first/);
-  assert.match(m.message, /#19 .* waits: its turn comes after #15 \(v0\.4\.7\)/);
   assert.match(m.message, /#17 .* waits: a draft/);
+  assert.match(m.message, /#15 .* waits: checks failing/);
+  assert.match(m.message, /#16 .* waits: its turn comes after #17 \(v0\.4\.6\): the lowest version merges first/, 'the draft holds its place');
+  assert.match(m.message, /#19 .* waits: its turn comes after #17 \(v0\.4\.6\)/);
+
+  // The draft closed, and #15 fixed: 0.4.6 is skipped, and #15 merges at its own version, renumbering nothing.
+  prs = [listed(15, shas[15]), listed(16, shas[16]), listed(19, shas[19])];
+  const next = await round();
+  assert.deepEqual(next.merged.map((p) => p.number), [15], next.message);
+  assert.match(next.message, /#16 .* waits: its turn comes after #15 \(v0\.4\.7\)/);
 });
 
 test('drafts wait, whatever their checks', async () => {

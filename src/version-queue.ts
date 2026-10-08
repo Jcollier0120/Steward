@@ -46,7 +46,7 @@ export interface VersionQueue {
   head: string | null;
   /** The files its version was read from (a project's guessed when it names none). */
   files: string[];
-  /** The open PRs that set a version above the branch's, lowest first. */
+  /** The open PRs that set a version above the branch's, lowest first, drafts too: a draft holds its place in line. */
   queue: QueuedPr[];
   /** The version it works on next: the lowest in its queue, or null when the queue is empty. */
   working: string | null;
@@ -141,7 +141,7 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   const known = new Map((before?.queue ?? []).map((q) => [q.head, q.version]));
   const queue: QueuedPr[] = [];
   for (const pr of prs) {
-    if (pr.draft || pr.base !== t.branch || !pr.headOid) continue;
+    if (pr.base !== t.branch || !pr.headOid) continue;
     let sets = known.get(pr.headOid) ?? null;
     if (!sets) {
       try {
