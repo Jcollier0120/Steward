@@ -29,7 +29,7 @@ import { RULES } from './rules.ts';
  * Reloading one from the disk cache takes seconds.
  *
  * So, once a minute, for each model server the keeper can start again (an NPU's chat and vision servers, npu-embed
- * exiting by itself when idle; a graphics card's or the processor's chat, vision and embedding servers), with "in
+ * exiting by itself when idle; a graphics card's or the processor's chat, vision, embedding and reranking servers), with "in
  * use" meaning someone holds or waits on its accelerator's lock:
  * - **Idle**: when nobody has used its accelerator for `npuIdleStopMinutes` (the NPU) or `gpuIdleStopMinutes` (a
  *   graphics card, or the processor), both 10 by default (rules.json's keeper), it is stopped. The next request
@@ -382,8 +382,8 @@ export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): strin
 
 /**
  * The model servers the keeper can start again, each with its accelerator's idle time: an NPU's chat and vision
- * endpoints (npu-embed exits by itself), and a graphics card's or the processor's chat, vision and embedding
- * endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
+ * endpoints (npu-embed exits by itself), and a graphics card's or the processor's chat, vision, embedding and
+ * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
  * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out.
  */
 export function reapedServers(
@@ -396,7 +396,7 @@ export function reapedServers(
   const out = new Map<string, ReapedServer>();
   for (const a of accelerators) {
     if (a.enabled === false) continue;
-    const kinds: ServeKind[] = a.kind === 'npu' ? ['chat', 'vision'] : ['chat', 'vision', 'embed'];
+    const kinds: ServeKind[] = a.kind === 'npu' ? ['chat', 'vision'] : ['chat', 'vision', 'embed', 'rerank'];
     const idleMs = a.kind === 'npu' ? idle.npuMs : idle.otherMs;
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;

@@ -29,9 +29,12 @@ import { RULES } from './rules.ts';
 export { acceleratorId, slug };
 
 export type AcceleratorKind = 'npu' | 'gpu' | 'cpu';
-/** What a request asks of a model server. */
-export type ServeKind = 'chat' | 'vision' | 'embed';
-export const SERVE_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed'];
+/**
+ * What a request asks of a model server. `rerank` (kit 2.41.0) is a reranker's /v1/rerank (llama.cpp's --reranking): an
+ * add-on only the agents that ask for it use (Reeve's search), outside the core's routed work (chat, vision, embed).
+ */
+export type ServeKind = 'chat' | 'vision' | 'embed' | 'rerank';
+export const SERVE_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed', 'rerank'];
 
 /**
  * Per server: `prefix-leak` (GenieX v0.7.0 leaks state between requests that share a prompt prefix,
@@ -41,7 +44,7 @@ export const SERVE_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed'];
 export const QUIRKS = ['prefix-leak', 'image-path'] as const;
 export type Quirk = (typeof QUIRKS)[number];
 
-/** One OpenAI-compatible endpoint: /v1/chat/completions or /v1/embeddings. */
+/** One OpenAI-compatible endpoint: /v1/chat/completions, /v1/embeddings, or a reranker's /v1/rerank. */
 export interface Endpoint {
   /** e.g. http://127.0.0.1:18191. A vision endpoint without one uses its chat endpoint's server. */
   baseUrl?: string;
@@ -82,6 +85,8 @@ export interface Accelerator {
   chat?: Endpoint;
   vision?: Endpoint;
   embed?: Endpoint;
+  /** A reranker (kit 2.41.0), set up only when asked for (accelerators setup --serve rerank). */
+  rerank?: Endpoint;
   quirks: Quirk[];
   /** false keeps it in the list but sends it nothing. */
   enabled?: boolean;

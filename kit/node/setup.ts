@@ -123,7 +123,19 @@ export const MODEL_SPECS: Record<ServeKind, { model: string; repos: string[]; fi
     repos: ['Qwen/Qwen3-Embedding-0.6B-GGUF'],
     file: /(^|\/)Qwen3-Embedding-0\.6B-Q8_0\.gguf$/i,
   },
+  rerank: {
+    // llama.cpp's own conversion (ggml-org), which its --reranking reads: Qwen publishes no GGUF of it.
+    model: 'qwen3-reranker-0.6b',
+    repos: ['ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF'],
+    file: /(^|\/)qwen3-reranker-0\.6b-q8_0\.gguf$/i,
+  },
 };
+
+/**
+ * The kinds every graphics card serves unless others are asked for. A reranker isn't one of them: it is an add-on, set
+ * up only when asked for (`--serve rerank`), beside whatever its accelerator already serves (runSetup).
+ */
+export const DEFAULT_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed'];
 
 export interface ModelFile {
   kind: ServeKind;
@@ -223,15 +235,33 @@ export function serverContext(kind: ServeKind, s: { slots: number; maxContextTok
   return kind === 'chat' ? s.maxContextTokens * s.slots : kind === 'vision' ? Math.max(8192, s.maxContextTokens) : 8192;
 }
 
+/** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
+function kindFlags(kind: ServeKind, e: { slots: number; maxContextTokens: number }, mmproj: string | undefined, model: string): string[] {
+  switch (kind) {
+    case 'chat':
+      return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
+    case 'vision':
+      return ['--mmproj', portablePath(mmproj ?? ''), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
+    case 'embed':
+      // Each input must fit one micro-batch, and Reeve's are under ~650 tokens (a 1,500-char chunk
+      // and its path). At 8192 the compute buffer was one 4.7 GB allocation, which the Adreno X2-90's
+      // OpenCL refused ("failed to allocate compute pp buffers"); at 2048 it loads.
+      return ['--embeddings', '--pooling', 'last', '-c', String(serverContext('embed', e)), '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', model];
+    case 'rerank':
+      // A question and one document a pass, each well under a micro-batch (Reeve sends 1,600 chars of a file): as embed.
+      return ['--reranking', '-c', String(serverContext('rerank', e)), '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', model];
+  }
+}
+
 /**
  * What each server takes on a card besides its context, in GB: the model and its compute buffers.
  * Qwen3-4B Q4_K_M is 2.5, Qwen3-VL-4B Q4_K_M and its projector 2.95, Qwen3-Embedding-0.6B Q8_0 0.64
  * with a compute buffer of about 1.2 at -ub 2048 (4.7 at 8192 on the Adreno). Estimates from the files
  * and llama.cpp's buffers, not measured on a card of its own.
  */
-export const SERVER_GB: Record<ServeKind, number> = { chat: 2.9, vision: 3.45, embed: 1.85 };
-/** The KV cache at f16, a token: 36 layers × 8 KV heads × 128 × K and V × 2 bytes for the 4B models, 28 layers for the 0.6B. */
-const KV_BYTES: Record<ServeKind, number> = { chat: 147_456, vision: 147_456, embed: 114_688 };
+export const SERVER_GB: Record<ServeKind, number> = { chat: 2.9, vision: 3.45, embed: 1.85, rerank: 1.85 };
+/** The KV cache at f16, a token: 36 layers × 8 KV heads × 128 × K and V × 2 bytes for the 4B models, 28 layers for the 0.6B ones. */
+const KV_BYTES: Record<ServeKind, number> = { chat: 147_456, vision: 147_456, embed: 114_688, rerank: 114_688 };
 /** What a card keeps for the desktop and the programs on it. A game gets the rest back from the reaper, which stops the card's servers while it plays. */
 export const DESKTOP_GB = 1.5;
 /** The sizes tried on a card of its own, largest first. */
@@ -264,7 +294,7 @@ export interface Sizing {
  * the PC's, and the processor only chats.
  */
 export function sizing(t: { kind: 'gpu' | 'cpu'; memoryGb?: number; ramGb?: number; kinds?: ServeKind[]; keepKinds?: boolean }): Sizing {
-  const kinds = t.kinds ?? (['chat', 'vision', 'embed'] as ServeKind[]);
+  const kinds = t.kinds ?? [...DEFAULT_KINDS];
   if (t.kind === 'cpu') return { slots: 1, maxContextTokens: 4096, kinds };
   const own = t.memoryGb ?? 0;
   if (own < OWN_MEMORY_GB) return { ...((t.ramGb ?? 0) >= 32 ? { slots: 1, maxContextTokens: 8192 } : { slots: 1, maxContextTokens: 4096 }), kinds };
@@ -305,31 +335,40 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
   if (e.memoryGb !== undefined) a.memoryGb = e.memoryGb;
   const server = portablePath(e.server);
   const pin = e.device ? ['--device', e.device, '-ngl', '99'] : ['-ngl', '0'];
-  for (const kind of ['chat', 'vision', 'embed'] as const) {
+  for (const kind of SERVE_KINDS) {
     const m = e.models[kind];
     const port = e.ports[kind];
     if (!m || !port) continue;
     const model = MODEL_SPECS[kind].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
-    const startCommand =
-      kind === 'chat'
-        ? [server, ...common, '-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model]
-        : kind === 'vision'
-          ? [server, ...common, '--mmproj', portablePath(m.mmproj ?? ''), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model]
-          : // Each input must fit one micro-batch, and Reeve's are under ~650 tokens (a 1,500-char chunk
-            // and its path). At 8192 the compute buffer was one 4.7 GB allocation, which the Adreno X2-90's
-            // OpenCL refused ("failed to allocate compute pp buffers"); at 2048 it loads.
-            [server, ...common, '--embeddings', '--pooling', 'last', '-c', String(serverContext('embed', e)), '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', model];
-    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand };
+    a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)] };
   }
   return a;
+}
+
+/**
+ * An entry just set up, with what its accelerator had that this setup didn't set up kept: a reranker is an add-on, so
+ * setting one up keeps the rest of the accelerator's entry (its servers, slots and cap), and setting the others up again
+ * keeps its reranker. Anything else is set up afresh, as before.
+ */
+export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | AcceleratorEntry | undefined, kinds: readonly ServeKind[]): AcceleratorEntry {
+  if (!had) return made;
+  if (kinds.every((k) => k === 'rerank')) return { ...entryOf(had), ...(made.rerank ? { rerank: made.rerank } : {}) };
+  return had.rerank && !made.rerank && !kinds.includes('rerank') ? { ...made, rerank: had.rerank } : made;
+}
+
+/** The kinds of an accelerator's entry that a setup of `kinds` keeps (keepingAddOns): their ports stay theirs. */
+export function keptKinds(had: Accelerator | undefined, kinds: readonly ServeKind[]): ServeKind[] {
+  if (!had) return [];
+  if (kinds.every((k) => k === 'rerank')) return SERVE_KINDS.filter((k) => k !== 'rerank' && had[k]?.baseUrl);
+  return had.rerank?.baseUrl && !kinds.includes('rerank') ? ['rerank'] : [];
 }
 
 /** Ports already taken by configured endpoints. */
 export function usedPorts(list: Accelerator[]): Set<number> {
   const out = new Set<number>();
   for (const a of list) {
-    for (const ep of [a.chat, a.vision, a.embed]) {
+    for (const ep of SERVE_KINDS.map((k) => a[k])) {
       if (!ep?.baseUrl) continue;
       try {
         const p = Number(new URL(ep.baseUrl).port);
@@ -454,7 +493,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const problems: string[] = [...o.detection.problems];
   const arch = o.detection.cpu?.arch ?? (process.arch === 'arm64' ? 'arm64' : 'x64');
   const ramGb = o.detection.ramBytes / 1024 ** 3;
-  const kinds = o.kinds?.length ? o.kinds : (['chat', 'vision', 'embed'] as ServeKind[]);
+  const kinds = o.kinds?.length ? o.kinds : [...DEFAULT_KINDS];
   const localAppData = o.localAppData ?? process.env.LOCALAPPDATA ?? path.join(homedir(), 'AppData', 'Local');
   const det = o.detection.npu;
   const installDefault = isInstallDefaultNpu(o.raw, localAppData);
@@ -467,7 +506,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   let npu: NpuPlan | null = null;
   let npuNote: string | undefined;
   if (det && !det.supported) npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
-  else if (det && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault)))) {
+  // A reranker alone is no reason to set the NPU up: none of its servers reranks.
+  else if (det && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
     npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists });
     if (npu?.missing.length) {
       npuNote = `${det.label} (npu): not set up: ${npu.route.server} needs ${npu.missing.join('; and ')}. Until then the graphics card or the processor takes its work.`;
@@ -493,7 +533,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       continue;
     }
     const kind = card ? 'gpu' : 'cpu';
-    const cpuKinds = o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat') : cpuDefault;
+    // The processor chats (and reranks, when asked): a 0.6B reranker runs well enough on it, a vision model doesn't.
+    const cpuKinds = o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'rerank') : cpuDefault;
     const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : kinds, keepKinds: !!o.kinds?.length });
     const v = variantFor({ kind, vendor: card?.vendor, arch });
     const t: SetupTarget = {
@@ -548,6 +589,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // Ports: an accelerator keeps its own; a new one takes the next free from 18191.
   const current = readAccelerators(dropNpu ? withoutNpu(o.raw, localAppData) : o.raw).accelerators;
   const taken = usedPorts(current.filter((a) => !targets.some((t) => t.id === a.id)));
+  // What a target keeps (a reranker set up alone keeps the rest; the rest set up again keep the reranker) keeps its ports.
+  for (const t of targets) {
+    const mine = current.find((a) => a.id === t.id);
+    for (const k of keptKinds(mine, t.kinds)) taken.add(Number(new URL(serverBase(mine![k]!.baseUrl!)).port));
+  }
   let next = FIRST_PORT;
   for (const t of targets.filter((t) => t.variant)) {
     const mine = current.find((a) => a.id === t.id);
@@ -726,7 +772,9 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(k, 'mmproj') : undefined };
     }
     // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
-    entries.push({ ...acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens }), name: core.deviceName(t.name) });
+    const made = acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens });
+    const had = readAccelerators(raw).accelerators.find((a) => a.id === t.id);
+    entries.push({ ...keepingAddOns(made, had, t.kinds), name: core.deviceName(t.name) });
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
   return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems };
