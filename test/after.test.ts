@@ -18,7 +18,7 @@ const { afterMerge, approveJobs, installOne, listedSum } = await import('../src/
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { releaseDecision, releaseOne } = await import('../src/stages/release.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 
 const block = (json: string) => `Adds a job.\r\n\r\n## After merging (for the Steward)\r\n\r\n\`\`\`steward\r\n${json}\r\n\`\`\`\r\n\r\nMore words.`;
 const REEVE13 = '{"after": ["release", "install", "approve-jobs"], "jobs": ["aletaster-orders"]}';
@@ -162,7 +162,7 @@ test('merge --yes --team, then what the PR asks for: its release from the branch
   const m = await mergeOne(ctx, e, { yes: true, team: true });
   assert.equal(m.outcome, 'done', m.message);
   assert.ok(merged);
-  assert.deepEqual(r.gh.find((a) => a[1] === 'merge'), ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'], "a team member's branch stays");
+  assert.deepEqual(mergesOf(r.gh)[0], ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'], "a team member's branch stays");
 
   const steps = await afterMerge(ctx, [e], [{ id: e.id, merged: m.merged }], { releaseKit: null });
   assert.deepEqual(steps.map((s) => [s.outcome, s.message.split(':')[0]]), [['done', 'release'], ['done', 'install'], ['done', 'approve-jobs']]);
