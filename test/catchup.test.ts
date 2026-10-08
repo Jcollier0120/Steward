@@ -241,7 +241,7 @@ test('the round: a caught-up PR the Steward tests itself is tested at its new he
   assert.deepEqual(m.merged.map((p) => p.number), [21]);
   assert.match(m.message, new RegExp(`^#21 caught up: merged main into it, its version lines resolved; v0\\.4\\.2[^;]*; merged #21 \\(checks passed here at ${now.slice(0, 7)}\\)$`));
   assert.deepEqual(m.held, []);
-  assert.match(ctx.lines.join('\n'), /looking at its PRs again this round \(look 2 of at most 5\)/);
+  assert.match(ctx.lines.join('\n'), /looking at them again this round \(look 2; 0 merged so far\)/);
   // Merged at the head tested here, the caught-up one.
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '21', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
 
@@ -259,7 +259,7 @@ test('the round: a caught-up PR the Steward tests itself is tested at its new he
   const [m2] = await merge(ctx2, [e2], { yes: true, team: true });
   assert.match(m2.message, /#21 caught up/);
   assert.deepEqual(m2.merged, []);
-  assert.doesNotMatch(ctx2.lines.join('\n'), /looking at its PRs again/);
+  assert.doesNotMatch(ctx2.lines.join('\n'), /looking at them again/);
 });
 
 // The Steward's own kit PRs are caught up by the same rules, with their checks run here before the push; one that
@@ -442,4 +442,15 @@ test('a PR that leaves the kit alone carries no kit version, so it claims none',
   assert.equal(c.done, true, c.note);
   assert.equal(c.version, '0.4.2');
   assert.equal(c.kitVersion, undefined);
+});
+
+test('the round looks at a repository again while a look can merge more: a PR caught up to test here, or one waiting on a merge just made', async () => {
+  const { lookAgainAfter, WORKING_OUT } = await import('../src/stages/merge.ts');
+  const held = (why: string, draft = false) => [{ number: 2, url: '', title: 't', why, draft }];
+  assert.equal(lookAgainAfter({ merged: 0, held: [], testedHere: true }), true, 'caught up a PR it tests itself');
+  assert.equal(lookAgainAfter({ merged: 1, held: held(WORKING_OUT), testedHere: false }), true, 'GitHub working one out after the merge');
+  assert.equal(lookAgainAfter({ merged: 1, held: held('stacked on #1 (claude/a): once #1 has merged, it is pointed at main and joins the line'), testedHere: false }), true);
+  assert.equal(lookAgainAfter({ merged: 0, held: held(WORKING_OUT), testedHere: false }), false, 'nothing merged: nothing changed for it');
+  assert.equal(lookAgainAfter({ merged: 1, held: held('checks failing'), testedHere: false }), false);
+  assert.equal(lookAgainAfter({ merged: 1, held: held(WORKING_OUT, true), testedHere: false }), false, 'a draft waits anyway');
 });

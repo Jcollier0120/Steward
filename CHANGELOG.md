@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.31
+
+**A round keeps merging a repository's pull requests until its queue runs out.**
+
+### What changed
+
+- When several pull requests wait in line on one repository, a round used to merge at most five of them and leave the rest for later rounds. It now keeps going until none is left that it can merge: each one merges, the next is caught up with the branch, tested and merged, and so on down the line. A round with a long line takes longer, but the line is cleared in one go.
+- After a merge, a pull request that was stacked on the merged one, or that GitHub was still working out, is looked at again in the same round instead of the next.
+- A pull request that fails its checks here doesn't keep the round going round in circles: once two looks in a row merge nothing, the round moves on.
+- A pull request with checks on GitHub still merges once those pass, at a round that comes sooner.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.29
 
 **Pull requests that pile up on one repository merge in one round, and the next round comes sooner when one is nearly ready.**
