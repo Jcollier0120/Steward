@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.12
+
+**Each repository's release PC is shown in the staff table now, so it no longer needs a section of its own.**
+
+### What changed
+
+- The Release PC section is gone. Each repository's row in the Staff (or Your repositories) table has a Release PC column. It says which PC merges and releases the repository and whether it's kept there, and it holds the Do it here, Keep it on this PC and Unpin buttons.
+- Claims another PC made too, and turns for repositories still being looked at, are listed under the table.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.27.10
 
 **It hands out kit 2.38.0: Reeve, the Chamberlain and Heiward get their own title-bar scenes, and so do the Thatcher, the Reckoner, the Weigher and the Shepherd.**

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { TendState } from '../tend.ts';
-import type { TurnsView } from '../lease.ts';
+import type { TurnRow, TurnsView } from '../lease.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 
@@ -111,7 +111,7 @@ function Allowed({ r }: { r: StaffRowView }) {
 }
 
 /** One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, open PRs and notes. */
-function StaffRow({ r, kit, castellan }: { r: StaffRowView; kit: string | null; castellan: boolean }) {
+function StaffRow({ r, kit, castellan, turn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null }) {
   const co = r.checkout;
   const notes = r.notes.filter((n) => n !== 'not using the kit yet');
   return (
@@ -156,6 +156,7 @@ function StaffRow({ r, kit, castellan }: { r: StaffRowView; kit: string | null; 
       <td>
         <ReleaseCell r={r} />
       </td>
+      {turn !== undefined && <td>{turn && <TurnCell x={turn} />}</td>}
       <td>
         {r.prs.map((p) => (
           <Pr key={p.number} p={p} branch={r.branch} />
@@ -173,12 +174,40 @@ function StaffRow({ r, kit, castellan }: { r: StaffRowView; kit: string | null; 
   );
 }
 
-function StaffTable({ s, castellan }: { s: StaffView; castellan: boolean }) {
-  if (!s.rows.length)
+/**
+ * The staff's table, with each repository's release PC (lease.ts) in it once a turn was taken: who merges and releases
+ * it, with Do it here and Keep it on this PC. Turns for no row here, and claims another PC made too (claims.ts), under it.
+ */
+function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[] }) {
+  const rows = s?.rows ?? [];
+  const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
+  const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
+  const showTurns = rows.some((r) => turnOf.has(r.id));
+  const under = (loose.length > 0 || (clashes?.length ?? 0) > 0) && (
+    <div className="turns">
+      {loose.map((x) => (
+        <TurnLine key={x.id} x={x} />
+      ))}
+      {(clashes ?? []).map((c) => (
+        <Text variant="muted" as="p" key={c}>
+          {c}.
+        </Text>
+      ))}
+    </div>
+  );
+  if (!s)
+    return (
+      <Card className="empty">
+        Looking at each repository…
+        {under}
+      </Card>
+    );
+  if (!rows.length)
     return (
       <Card className="empty" tour="staff">
         No repositories yet. Pick the ones to look after from those Reeve found, above, or add one in Settings, under
         Repositories: its GitHub repository (owner/name), your clone of it, and how to test and release it.
+        {under}
       </Card>
     );
   return (
@@ -186,17 +215,18 @@ function StaffTable({ s, castellan }: { s: StaffView; castellan: boolean }) {
       <table>
         <thead>
           <tr>
-            {[castellan ? 'Employee' : 'Repository', 'Checkout', 'Branch on origin', ...(castellan ? ['Kit'] : []), 'Latest release', 'Open PRs', 'Notes'].map((h) => (
+            {[castellan ? 'Employee' : 'Repository', 'Checkout', 'Branch on origin', ...(castellan ? ['Kit'] : []), 'Latest release', ...(showTurns ? ['Release PC'] : []), 'Open PRs', 'Notes'].map((h) => (
               <th key={h}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {s.rows.map((r) => (
-            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} />
+          {rows.map((r) => (
+            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} />
           ))}
         </tbody>
       </table>
+      {under}
     </Card>
   );
 }
@@ -445,65 +475,77 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
   );
 }
 
-/**
- * The release PC of each repository (lease.ts): who merges and releases it, whether it's kept on that PC, with Do it here
- * and Keep it on this PC; what waits for a remote this PC can't reach; and claims another PC made too (claims.ts).
- */
-export function TurnsCard({ t, clashes }: { t: TurnsView | null | undefined; clashes?: string[] }) {
-  const rows = t?.rows ?? [];
-  if (!rows.length && !clashes?.length) return null;
-  const elsewhere = rows.filter((x) => x.status === 'elsewhere').length;
+/** A turn's buttons (lease.ts): on another PC, Do it here and Keep it on this PC; on this one, Keep it on this PC or Unpin. */
+function TurnButtons({ x }: { x: TurnRow }) {
+  if (x.status === 'elsewhere')
+    return (
+      <span className="row turn-buttons">
+        <PostButton
+          title="Do it here"
+          variant="secondary"
+          path="/api/turns/take"
+          body={{ repo: x.repo }}
+          confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next look.`}
+        />
+        <PostButton
+          title="Keep it on this PC"
+          variant="secondary"
+          path="/api/turns/take"
+          body={{ repo: x.repo, pin: true }}
+          confirm={`Merge and release ${x.name} on this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
+        />
+      </span>
+    );
+  if (x.status === 'here')
+    return x.pinned ? (
+      <PostButton title="Unpin" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: false }} />
+    ) : (
+      <PostButton title="Keep it on this PC" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: true }} confirm={`Keep ${x.name} on this PC? Other PCs leave it alone while this PC is around.`} />
+    );
+  return null;
+}
+
+const sentence = (s: string | null) => (s ? `${s[0].toUpperCase()}${s.slice(1)}.` : '');
+
+/** A repository's release PC, in its row of the staff's table: who merges and releases it, kept there or not, and the buttons. */
+function TurnCell({ x }: { x: TurnRow }) {
+  if (x.status === 'unreachable' || x.status === 'alone') return <Text variant="muted">{sentence(x.note)}</Text>;
   return (
-    <Section title="Release PC" count={elsewhere || undefined}>
-      <Card>
-        {rows.map((x) => (
-          <div className="row turn" key={x.id}>
-            <span>
-              {x.status === 'unreachable' || x.status === 'alone' ? (
-                <>
-                  {x.name}: <Text variant="muted">{x.note ? `${x.note[0].toUpperCase()}${x.note.slice(1)}.` : ''}</Text>
-                </>
-              ) : (
-                <>
-                  Merging and releasing for {x.name}: {x.status === 'here' ? 'this PC' : <>done by <strong>{x.holder}</strong></>}
-                  {x.pinned ? ' (kept there)' : ''}
-                  {x.quiet ? <Text variant="muted">{`. ${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text> : null}
-                </>
-              )}
-            </span>
-            {x.status === 'elsewhere' && (
-              <span className="row">
-                <PostButton
-                  title="Do it here"
-                  variant="secondary"
-                  path="/api/turns/take"
-                  body={{ repo: x.repo }}
-                  confirm={`Merge and release ${x.name} on this PC from now on? ${x.holder} leaves it alone from its next look.`}
-                />
-                <PostButton
-                  title="Keep it on this PC"
-                  variant="secondary"
-                  path="/api/turns/take"
-                  body={{ repo: x.repo, pin: true }}
-                  confirm={`Merge and release ${x.name} on this PC, and keep it here? Other PCs leave it alone while this PC is around.`}
-                />
-              </span>
-            )}
-            {x.status === 'here' &&
-              (x.pinned ? (
-                <PostButton title="Unpin" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: false }} />
-              ) : (
-                <PostButton title="Keep it on this PC" variant="secondary" path="/api/turns/take" body={{ repo: x.repo, pin: true }} confirm={`Keep ${x.name} on this PC? Other PCs leave it alone while this PC is around.`} />
-              ))}
-          </div>
-        ))}
-        {(clashes ?? []).map((c) => (
-          <Text variant="muted" as="p" key={c}>
-            {c}.
-          </Text>
-        ))}
-      </Card>
-    </Section>
+    <>
+      {x.status === 'here' ? 'this PC' : <strong>{x.holder}</strong>}
+      {x.pinned ? <Text variant="muted"> (kept there)</Text> : null}
+      {x.quiet ? (
+        <>
+          <br />
+          <Text variant="muted">{`${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text>
+        </>
+      ) : null}
+      <div className="turn-cell">
+        <TurnButtons x={x} />
+      </div>
+    </>
+  );
+}
+
+/** A turn with no row in the staff's table (it is still being looked at), on its own line under it. */
+function TurnLine({ x }: { x: TurnRow }) {
+  return (
+    <div className="row turn">
+      <span>
+        {x.status === 'unreachable' || x.status === 'alone' ? (
+          <>
+            {x.name}: <Text variant="muted">{sentence(x.note)}</Text>
+          </>
+        ) : (
+          <>
+            Merging and releasing for {x.name}: {x.status === 'here' ? 'this PC' : <>done by <strong>{x.holder}</strong></>}
+            {x.pinned ? ' (kept there)' : ''}
+            {x.quiet ? <Text variant="muted">{`. ${x.holder} has gone quiet: after a day without it, another PC may take it`}</Text> : null}
+          </>
+        )}
+      </span>
+      <TurnButtons x={x} />
+    </div>
   );
 }
 
@@ -660,6 +702,9 @@ const STYLE = `
 .alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }
 .alarm-head { justify-content: space-between; align-items: center; gap: 10px; }
 .turn { justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; }
+.turns { margin-top: 10px; }
+.turn-cell { margin-top: 4px; }
+.turn-buttons { gap: 6px; flex-wrap: wrap; }
 .alarm .notes { margin: 4px 0; }
 .pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
@@ -731,7 +776,6 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <AlarmsCard a={v.alarms} now={now} />
-      <TurnsCard t={v.turns} clashes={v.claimClashes} />
       {v.round.repos === false && (
         <Card>
           <Text variant="muted" as="p">
@@ -744,7 +788,7 @@ export function StewardBody({ v }: { v: StewardView }) {
       {castellan && <KitCard s={s} now={now} handsOut={!(v.round.repos === false && !s?.rows.length)} />}
       <FoundCard f={v.found} finding={!!v.finding} now={now} />
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
-        {s ? <StaffTable s={s} castellan={castellan} /> : <Card className="empty">Looking at each repository…</Card>}
+        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} />
       </Section>
       {(s?.rows.length ?? 0) > 0 && (
         <Section title={castellan ? 'Roll out the kit' : 'Merge and release'}>

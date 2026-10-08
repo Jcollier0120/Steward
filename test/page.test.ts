@@ -107,6 +107,14 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withTurns, />Unpin</);
   assert.match(withTurns, /Releasing Away waits until this PC can reach its remote\./);
   assert.match(withTurns, /octocat\/clerk 0\.4\.13 was claimed on another PC too\./);
+  // With the staff's rows, each one's release PC is a column of the table, not a section of its own.
+  const clerk = { ...rows[0], id: 'clerk', name: 'Clerk', repo: 'octocat/clerk' };
+  const inTable = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [clerk] }, round: { ...body.round, repos: true }, turns });
+  assert.match(inTable, /<th>Release PC<\/th>/);
+  assert.match(inTable, /<td><strong>DESKTOP-ABC<\/strong><div class="turn-cell">.*>Do it here</);
+  assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
+  assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
+  assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
