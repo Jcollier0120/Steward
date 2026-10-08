@@ -14,6 +14,7 @@ import { expandEnv } from './kit/settings-kit.ts';
 import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
+import { headsUp } from './heads-up.ts';
 import { keepVersionQueues } from './version-queue.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
@@ -561,7 +562,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Not in a test, which has no Manor and no projects of its own.
       if ((name === 'round' || name === 'merge') && !out.error && !process.env.NODE_TEST_CONTEXT) {
         try {
-          await keepVersionQueues(ctx);
+          const queues = await keepVersionQueues(ctx);
+          // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
+          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: ctx.settings.alarms.bailiffUrl })) log(line);
         } catch (e) {
           log(`couldn't keep the version queues: ${(e as Error).message}`);
         }
