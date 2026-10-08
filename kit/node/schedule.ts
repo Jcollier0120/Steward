@@ -1,6 +1,9 @@
+import { APP } from '../app.ts';
 import { duty } from './duty.ts';
 import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
+import { LockTimeout, QueueFull } from './npu-queue.ts';
+import { FIRST_ROUND_WAITING, inFirstRoundTurn, pace, setPriorityFor } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
@@ -18,6 +21,11 @@ export interface RoundState {
   runningSince: string | null;
   /** What its rounds wait for from the person (required.ts's needsSettings, in words); null when they wait for nothing. */
   waiting: string | null;
+  /**
+   * Its first round (kit 2.43.0): `waiting` in the first-round line (pace.ts), `running` while it runs, null once a
+   * round has gone through. The page shows the agent settling into the manor.
+   */
+  firstRound: 'waiting' | 'running' | null;
 }
 
 /**
@@ -80,12 +88,30 @@ function recordRound(name: string, record: RoundRecord): void {
     const was = readJson<unknown>(file, {});
     const doc = isObject(was) ? was : {};
     const kept = isObject(doc.rounds) ? doc.rounds : {};
-    writeJson(file, { ...doc, rounds: { ...kept, [name]: record } });
+    const through = { ...wentThroughIn(doc), ...(record.ok === true ? { [name]: record.finished } : {}) };
+    writeJson(file, { ...doc, rounds: { ...kept, [name]: record }, wentThrough: through });
   } catch (e) {
     if (roundFileWarned) return;
     roundFileWarned = true;
     console.error(`${new Date().toISOString()} couldn't keep the round in round.json (said once; the rounds go on): ${roundError(e)}`);
   }
+}
+
+/**
+ * round.json's `wentThrough`: each schedule's first round that went through, when (kit 2.43.0). A round.json from before
+ * it, with rounds but no `wentThrough`, counts every schedule it names as through: an agent that already ran is never
+ * taken for a new one, so updating never puts it in the first-round line.
+ */
+function wentThroughIn(doc: Record<string, unknown>): Record<string, unknown> {
+  if (isObject(doc.wentThrough)) return doc.wentThrough;
+  const before = isObject(doc.rounds) ? doc.rounds : {};
+  return Object.fromEntries(Object.entries(before).map(([n, r]) => [n, isObject(r) && typeof r.finished === 'string' ? r.finished : true]));
+}
+
+/** Whether schedule `name` has had a round that went through, on this PC, ever (round.json's wentThrough). */
+export function firstRoundDone(name: string): boolean {
+  const was = readJson<unknown>(roundFile(), {});
+  return isObject(was) && wentThroughIn(was)[name] !== undefined;
 }
 
 /** Every schedule this process runs, each read when asked. */
@@ -102,6 +128,12 @@ const earliest = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).s
  * The agent's rounds at a glance, as every agent's /api/ping gives them for Manor's employee cards: the last
  * round to end and whether it went through, the next one due, and since when one has been running.
  */
+/** The agent's first round now, over all its schedules: waiting in line while any is, else running while any is. */
+export function firstRoundNow(): RoundState['firstRound'] {
+  const all = rounds().map((r) => r.firstRound);
+  return all.includes('waiting') ? 'waiting' : all.includes('running') ? 'running' : null;
+}
+
 export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'lastRunOffline' | 'nextRunAt' | 'runningSince'> {
   const all = rounds();
   const lastRunAt = latest(all.map((r) => r.lastRunAt));
@@ -121,6 +153,11 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * Staggered: Manor may start every agent at once, so the first round comes 30 s to 3 min after start
  * (random), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
+ *
+ * At the manor's pace (pace.ts, kit 2.43.0; gentle unless Manor's Settings say full), a scheduled round runs at
+ * below-normal priority, and a schedule's first round (none has gone through: round.json's wentThrough) waits its
+ * turn in one line with the other agents' first rounds, one at a time. While it waits, its state says so (waiting,
+ * firstRound), and the page shows the agent settling into the manor. A round the person asks for never waits.
  *
  * Off duty (duty.ts), scheduled rounds are skipped; runNow() still runs one.
  *
@@ -170,6 +207,8 @@ export function every(
   let waiting: string | null = null;
   /** When the wait under way ends. */
   let dueAt: number | null = null;
+  /** Its first round now: waiting in line, running, or none (RoundState's firstRound). */
+  let firstNow: RoundState['firstRound'] = null;
   let jitter = 1;
   const interval = () => (typeof everyMs === 'function' ? everyMs() : everyMs);
   const waitFor = (ms: number) => {
@@ -200,40 +239,68 @@ export function every(
       return;
     }
     running = true;
-    const started = Date.now();
-    startedAt = started;
+    let started = Date.now();
     let error: string | null = null;
     let offline = false;
     let timedOut = false;
+    /** It waited its turn in the first-round line until its next round was due (pace.ts): no failure. */
+    let waitedTurn = false;
     const controller = new AbortController();
     const limit = typeof opts.timeoutMs === 'function' ? opts.timeoutMs() : opts.timeoutMs ?? roundTimeLimit(interval());
     let limitTimer: NodeJS.Timeout | undefined;
+    // The manor's pace (pace.ts): a scheduled round at below-normal priority, and an agent's first in its turn.
+    const p = pace();
+    setPriorityFor(p, asked);
+    const name = opts.name ?? 'round';
+    // The heavy first round, asked for or not; only a scheduled one waits its turn.
+    const isFirst = !firstRoundDone(name);
     try {
-      const work = job({ signal: controller.signal });
-      const late = new Promise<never>((_, reject) => {
-        limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
+      const run = async () => {
+        started = Date.now();
+        startedAt = started;
+        firstNow = isFirst ? 'running' : null;
+        const work = job({ signal: controller.signal });
+        const late = new Promise<never>((_, reject) => {
+          limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
+        });
+        try {
+          await Promise.race([work, late]);
+        } catch (e) {
+          if (!(e instanceof RoundTimeout)) throw e;
+          timedOut = true;
+          controller.abort(e);
+          // The job let go may still end: said in the log, and nothing else changes.
+          const ended = () => console.log(`${new Date().toISOString()} a round that was let go at its time limit has ended, after ${span(Date.now() - started)}`);
+          work.then(ended, ended);
+          throw e;
+        }
+      };
+      await inFirstRoundTurn(p, !asked && isFirst, run, {
+        who: APP.id,
+        limitMs: limit,
+        onWait: (inLine) => {
+          waiting = inLine ? FIRST_ROUND_WAITING : null;
+          if (inLine) firstNow = 'waiting';
+        },
       });
-      try {
-        await Promise.race([work, late]);
-      } catch (e) {
-        if (!(e instanceof RoundTimeout)) throw e;
-        timedOut = true;
-        controller.abort(e);
-        // The job let go may still end: said in the log, and nothing else changes.
-        const ended = () => console.log(`${new Date().toISOString()} a round that was let go at its time limit has ended, after ${span(Date.now() - started)}`);
-        work.then(ended, ended);
-        throw e;
-      }
       lastError = null;
       lastOk = true;
     } catch (e) {
-      lastError = (e as Error).message;
-      error = roundError(e);
-      offline = await offlineFailure(e).catch(() => false);
-      lastOk = offline ? null : false;
-      if (offline) console.log(`${new Date().toISOString()} this PC is offline, so the round waits for the network: ${error}`);
-      else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
+      if (e instanceof LockTimeout || e instanceof QueueFull) {
+        // Its turn didn't come before its next round was due: it joins the line again then.
+        waitedTurn = true;
+        lastOk = null;
+        console.log(`${new Date().toISOString()} its first round waited its turn behind the other agents' first rounds; it waits again at its next round`);
+      } else {
+        lastError = (e as Error).message;
+        error = roundError(e);
+        offline = await offlineFailure(e).catch(() => false);
+        lastOk = offline ? null : false;
+        if (offline) console.log(`${new Date().toISOString()} this PC is offline, so the round waits for the network: ${error}`);
+        else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
+      }
     } finally {
+      firstNow = null;
       clearTimeout(limitTimer);
       lastOffline = offline;
       running = false;
@@ -242,11 +309,12 @@ export function every(
       lastEnded = ended;
       // A round still running when stop() was called must not set up the next one.
       if (!stopped) wait();
-      recordRound(opts.name ?? 'round', {
+      recordRound(name, {
         started: new Date(started).toISOString(),
         finished: new Date(ended).toISOString(),
-        ok: offline ? null : error === null,
+        ok: offline || waitedTurn ? null : error === null,
         ...(offline ? { offline: true } : {}),
+        ...(waitedTurn ? { waiting: FIRST_ROUND_WAITING } : {}),
         ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
@@ -266,6 +334,7 @@ export function every(
     nextRunAt: stopped || running || !duty().onDuty || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
     waiting,
+    firstRound: firstNow,
   });
   schedules.add(state);
 

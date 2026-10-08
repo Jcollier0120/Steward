@@ -282,6 +282,16 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
             </div>
           </div>
         )}
+        {s.settling && (
+          <div className="banners">
+            <div className="banner-note settling" role="status">
+              <Markup html={s.settling.svg} />
+              <span>
+                <strong>Settling into the manor</strong>: {s.settling.text}
+              </span>
+            </div>
+          </div>
+        )}
         {s.offDutySince && (
           <div className="banners">
             <div className="banner-note offduty" role="status">

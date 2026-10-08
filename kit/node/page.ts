@@ -4,7 +4,7 @@ import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
 import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
-import { roundTimes } from './schedule.ts';
+import { firstRoundNow, roundTimes, type RoundState } from './schedule.ts';
 import { groupLabel, themes, themesCss, type Theme } from './themes.ts';
 import { workSection } from './work.ts';
 
@@ -100,13 +100,16 @@ ${items.join('\n')}
  * The status pill, from what the page knows: a round under way (the agent's own words for it: "Tasting"),
  * on duty (with its next round, when the agent says when that is), or off duty.
  */
-export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number }): string {
+export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; first?: RoundState['firstRound'] }): string {
   const p = pillOf(o);
   return `<span class="status-pill ${p.kind}" title="${esc(p.title)}">${esc(p.text)}</span>`;
 }
 
 /** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
-export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null; first?: RoundState['firstRound'] }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+  // Settling into the manor (kit 2.43.0): its first round waits its turn, or a long one runs (the look's firstRound).
+  if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: agents new to the manor do their first rounds one at a time, so this PC is never swamped.' };
+  if (o.first === 'running' && o.look.firstRound) return { kind: 'busy', text: 'Settling in', title: `Its first round: ${o.look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.` };
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
   // Its required settings not filled in yet (required.ts): nothing runs until they are.
   if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
@@ -184,13 +187,13 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
-    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt })}
+    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow() })}
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
     ${themeMenu(manor)}
     <span class="titlebar-action" id="titlebar-action"></span>
   </div>
 </header>
-${offDuty(d)}<main class="view">
+${settling(look, firstRoundNow())}${offDuty(d)}<main class="view">
 ${o.body}
 ${workSection({ developer: dev })}
 </main>
@@ -391,6 +394,25 @@ export function developerOptionsNote(setBy: ManorLink | null): string {
 }
 
 /** A notice under the title bar while the agent is off duty: its scheduled rounds are paused (Manor's Stop, or `stop`). */
+/** The manor's door, footsteps leading in, in the role's colour: the settling-in banner's drawing (CSS settles it in step). */
+export const SETTLING_SVG = `<svg class="settling-mark" viewBox="0 0 44 28" width="44" height="28" aria-hidden="true"><path class="st-house" d="M24 26V11l9-7 9 7v15z"/><path class="st-door" d="M30 26v-7.5a3 3 0 0 1 6 0V26"/><circle class="st-step st-s1" cx="4" cy="23.5" r="1.4"/><circle class="st-step st-s2" cx="10" cy="21.5" r="1.4"/><circle class="st-step st-s3" cx="16" cy="23.5" r="1.4"/><circle class="st-step st-s4" cx="22" cy="21.5" r="1.4"/><path class="st-ground" d="M1 26.5h42"/></svg>`;
+
+/**
+ * The settling-in banner's words (kit 2.43.0), or null when there's none: while its first round waits its turn, and
+ * while a first round runs that takes longer (the look's firstRound). A first round like any other gets none.
+ */
+export function settlingText(name: string, look: Look, first: RoundState['firstRound']): string | null {
+  if (first === 'waiting') return `${name} is new to the manor and waits its turn: agents settling in do their first rounds one at a time, so this PC is never swamped. It starts as soon as the one before it has finished.`;
+  if (first === 'running' && look.firstRound) return `${name}'s first round is under way: ${look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.`;
+  return null;
+}
+
+function settling(look: Look, first: RoundState['firstRound']): string {
+  const text = settlingText(APP.name, look, first);
+  return text ? `<div class="banners"><div class="banner-note settling" role="status">${SETTLING_SVG}<span><strong>Settling into the manor</strong>: ${esc(text)}</span></div></div>
+` : '';
+}
+
 function offDuty(d: Duty): string {
   if (d.onDuty) return '';
   return `<div class="banners"><div class="banner-note offduty" role="status"><span><strong>Off duty</strong> since ${esc(ago(d.since))}: its scheduled rounds are paused. Run now still works.</span>
@@ -529,13 +551,19 @@ p { margin: 8px 0; }
 .scene .sc-flour { fill: #f8f3e6; stroke: var(--ink); stroke-width: 1.1; }
 .scene .sc-grain { fill: var(--role); stroke: var(--ink); stroke-width: .5; }
 .scene .sc-grain, .scene .sc-wave, .scene .sc-lock, .scene .sc-sight { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .scene, .scene *, .status-pill::before { animation: none !important; } .titlebar { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .scene, .scene *, .status-pill::before, .settling-mark * { animation: none !important; } .titlebar { transition: none; } }
 
 /* ---- Notices under the title bar, and the page's one panel ---- */
 .banners { margin: 0 12px; }
 .banner-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 8px; padding: 8px 12px; border-radius: 6px; }
 .banner-note > span { flex: 1 1 260px; }
 .banner-note.offduty { background: var(--warn-bg); color: var(--warn); }
+/* Settling into the manor (kit 2.43.0): the role's colour, footsteps walking up to the door in turn. */
+.banner-note.settling { background: var(--role-soft); color: var(--fg); }
+.settling-mark { flex: none; color: var(--role); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.settling-mark .st-step { fill: currentColor; stroke: none; opacity: .2; animation: kit-step 3s linear infinite; }
+.settling-mark .st-s2 { animation-delay: .5s; } .settling-mark .st-s3 { animation-delay: 1s; } .settling-mark .st-s4 { animation-delay: 1.5s; }
+@keyframes kit-step { 0%, 60%, 100% { opacity: .2; } 10%, 40% { opacity: 1; } }
 .banner-note button { padding: 3px 12px; }
 /* The panel's content runs the width of the window, its padding aside: no column of its own for text, panels or
    Settings, which would break lines short and leave the rest of a wide window empty. */

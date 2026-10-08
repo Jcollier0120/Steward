@@ -28,6 +28,12 @@ export interface Look {
   scene: string;
   /** The scene's motion: CSS rules and keyframes, each rule under `.titlebar.busy .scene`. */
   motion: string;
+  /**
+   * What its first round does, for a role whose first round takes much longer than the rest (kit 2.43.0): the page
+   * says, while it runs, that the agent is settling into the manor and this round takes longer. None: its first round
+   * is like any other, and the page says only that it waits its turn.
+   */
+  firstRound?: string;
 }
 
 const B = '.titlebar.busy .scene';
@@ -380,6 +386,7 @@ const TALLY = [29, 46].flatMap((x) => [
 const reeve: Look = {
   accent: { light: '#9a5b00', dark: '#f5b84b' },
   busy: 'Reading the logs',
+  firstRound: 'finding every repository on this PC and reading each one for the first time',
   scene: `<clipPath id="kit-sc-reeve-log"><rect x="4" y="7" width="20" height="26"/></clipPath>
 <rect class="sc-paper" x="3" y="5.5" width="22" height="29" rx="1"/><rect class="sc-halo" x="3.6" y="18" width="20.8" height="4.2"/>
 <g clip-path="url(#kit-sc-reeve-log)"><path class="sc-line sc-log" d="${logLines}"/></g>
@@ -424,6 +431,7 @@ const blade = `<path class="sc-steel" d="M1.2 0-8 -2-8.4-.6 0 .9z"/><path class=
 const heiward: Look = {
   accent: { light: '#0f7b3f', dark: '#6ccb8f' },
   busy: 'Trimming the hedges',
+  firstRound: 'scanning every drive for the first time',
   scene: `${GROUND}<path class="sc-line" d="M50 25h13.5M50 31h13.5"/>${[51, 56, 61].map((x) => `<path class="sc-wood" d="M${x - 1.3} 35.5V21.6l1.3-1.8 1.3 1.8v13.9z"/>`).join('')}
 <path class="sc-soft" d="M3 35.5V21${'a3.2 3.2 0 0 1 6 0'.repeat(7)}V35.5z"/>
 ${[[8, 27], [16, 31], [23, 25.5], [31, 30], [38, 25.5]].map(([x, y]) => `<path class="sc-role" d="M${x} ${y}c-.2-2 1-3.4 3-3.5.2 2-1.1 3.4-3 3.5z"/>`).join('')}
