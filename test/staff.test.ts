@@ -7,7 +7,7 @@ import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
 import { holdReason, mergeOne, mergeSelection } from '../src/stages/merge.ts';
 import { releaseDecision } from '../src/stages/release.ts';
 import { appReleasesIn, checksOf, parsePrs, readPin, staffRow, type PrInfo } from '../src/stages/staff.ts';
-import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
+import { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } from './helpers.ts';
 
 // The staff's table from gh's JSON (a stand-in runner) and a fake employee's git; which PRs merge;
 // which employees release.
@@ -231,7 +231,7 @@ test("merge --team takes the team's PRs as well, to any employee, and leaves the
   const goCtx = ctx(go.run);
   const merged = await mergeOne(goCtx, e, { yes: true, team: true });
   assert.equal(merged.outcome, 'done');
-  assert.deepEqual(go.gh.filter((a) => a[1] === 'merge'), [
+  assert.deepEqual(mergesOf(go.gh), [
     ['pr', 'merge', '11', '--repo', 'Jcollier0120/Miller', '--merge'],
     ['pr', 'merge', '30', '--repo', 'Jcollier0120/Miller', '--merge', '--delete-branch'],
   ]);
@@ -278,15 +278,44 @@ test("a team PR stacked on a branch whose PR has merged is pointed at the employ
   assert.deepEqual(comments.map((a) => a[2]), ['41']);
   assert.match(comments[0].at(-1)!, /pointed this pull request at `main`: it was stacked on `claude\/first`, whose #40 has merged into `main`/);
   assert.match(ctx.lines.join('\n'), /#41: pointed at main: it was stacked on claude\/first, whose #40 has merged/);
-  // Pointed at main, it waits a round while GitHub works out whether it merges: never merged in the same round.
+  // Pointed at main, GitHub is asked again whether it merges; while it hasn't worked that out, it waits a round.
+  assert.equal(go.gh.filter((a) => a[1] === 'view' && a[2] === '41').length, 3);
   assert.ok(!go.gh.some((a) => a[1] === 'merge' && a[2] === '41'));
   assert.match(r.message, /#41 .* waits: GitHub is still working out whether it merges/);
   assert.match(r.message, /#43 .* waits: stacked on #42 \(claude\/third\)/);
   assert.match(r.message, /#44 .* waits: it merges into claude\/elsewhere, not main/);
-  // Looking, not acting: nothing is retargeted.
+  // Looking, not acting: nothing is retargeted, and GitHub isn't asked again.
   const look = runner(script);
   await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: look.run, neutralDir: tmp }), e, { yes: false, team: true });
-  assert.ok(!look.gh.some((a) => a[1] === 'edit'));
+  assert.ok(!look.gh.some((a) => a[1] === 'edit' || a[1] === 'view'));
+  // Once GitHub has worked it out (here at the second asking), it goes on in the same round, to the team's checks.
+  let asked = 0;
+  const answers = runner((args) => (args[1] === 'view' ? ok(++asked < 2 ? { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' } : { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' }) : script(args)));
+  const actx = ctxFor({ employees: [e], workRoot: tmp, run: answers.run, neutralDir: tmp });
+  const waited: number[] = [];
+  actx.pause = async (ms) => void waited.push(ms);
+  const a = await mergeOne(actx, e, { yes: true, team: true });
+  assert.deepEqual(waited, [3_000, 7_000]);
+  assert.match(actx.lines.join('\n'), /#41: asked GitHub again whether it merges: mergeable/);
+  assert.doesNotMatch(a.message, /#41 [^;]* waits: GitHub is still working out/);
+  assert.match(a.message, /#41 \([^)]*mergeable\)/);
+});
+
+test('GitHub is asked again only about a PR that waits on nothing but its working out', async () => {
+  const f = fakeEmployee(path.join(tmp, 'ask-again'));
+  const e = employee(f.checkout, { repo: 'Jcollier0120/Reeve' });
+  const unknown = { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
+  const prs = [
+    pr({ number: 50, headRefName: 'claude/a', ...unknown }),
+    // Checks failing, or a draft: it would wait anyway.
+    pr({ number: 51, headRefName: 'claude/b', ...unknown, statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE', name: 'test' }] }),
+    pr({ number: 52, headRefName: 'claude/c', ...unknown, isDraft: true }),
+  ];
+  const go = runner((args) => (args[1] === 'list' ? ok(prs) : args[1] === 'view' ? ok(unknown) : args[1] === 'merge' ? ok('') : undefined));
+  const r = await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: go.run, neutralDir: tmp }), e, { yes: true, team: true });
+  assert.deepEqual([...new Set(go.gh.filter((a) => a[1] === 'view').map((a) => a[2]))], ['50']);
+  assert.match(r.message, /#50 .* waits: GitHub is still working out whether it merges/);
+  assert.ok(!go.gh.some((a) => a[1] === 'merge'));
 });
 
 test('release takes an employee whose branch has the kit and an unreleased version, and says why for the others', () => {

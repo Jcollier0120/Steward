@@ -2,13 +2,55 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.27.23
+## 0.27.36
 
 **The kit it hands out, 2.43.0, keeps the agents from all doing their heavy first work at once.**
 
 ### What changed
 
 - The Steward hands out kit 2.43.0. Agents new to the manor do their first rounds one at a time, and their pages say they're settling in. Every agent's scheduled rounds run at low priority, so they give way to whatever you are doing. Manor's Settings will have the switch for it; until then it is on.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.31
+
+**A round keeps merging a repository's pull requests until its queue runs out.**
+
+### What changed
+
+- When several pull requests wait in line on one repository, a round used to merge at most five of them and leave the rest for later rounds. It now keeps going until none is left that it can merge: each one merges, the next is caught up with the branch, tested and merged, and so on down the line. A round with a long line takes longer, but the line is cleared in one go.
+- After a merge, a pull request that was stacked on the merged one, or that GitHub was still working out, is looked at again in the same round instead of the next.
+- A pull request that fails its checks here doesn't keep the round going round in circles: once two looks in a row merge nothing, the round moves on.
+- A pull request with checks on GitHub still merges once those pass, at a round that comes sooner.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.29
+
+**Pull requests that pile up on one repository merge in one round, and the next round comes sooner when one is nearly ready.**
+
+### What changed
+
+- Several pull requests to one repository, each raising its version, used to merge one per round: once the lowest merged, the next was caught up with the branch and waited a whole round before merging. Where GitHub runs no checks on them, the Steward now tests the caught-up pull request at its new head and merges it in the same round, and does the same for the next one, up to five in a round.
+- A round that leaves a pull request waiting only on something that settles itself in a few minutes (its checks still running, a head just caught up, or GitHub still working out whether it merges) now has the next round come 2 minutes later instead of 10. This happens at most three times in a row.
+- Each merge now names the exact commit the Steward looked at and tested, so a pull request pushed to in the meantime waits instead of merging untested.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.26
+
+**A pull request waits less for GitHub to work out whether it merges.**
+
+### What changed
+
+- When GitHub hadn't yet worked out whether a ready pull request merges ("GitHub is still working out whether it merges"), the Steward left it for the next round, ten minutes or more later. It now asks GitHub again a few times over about 25 seconds and, once GitHub has said, merges it in the same round. This is often the case for a pull request just caught up with its branch, or just pointed at the main branch after the one it was stacked on merged.
+- A pull request whose checks are failing or still running, or that is a draft, isn't asked about again: it would wait anyway.
 
 ### Before you update
 
