@@ -1,5 +1,6 @@
 import { memo, StrictMode, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
+import { DeveloperProvider } from './developer.tsx';
 import type { PageData, PageShell, ShellTheme } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
 import { UI_CSS } from './styles.ts';
@@ -254,61 +255,73 @@ export function useRoute(): Route {
  * names its own sections the same way.
  *
  * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves.
+ *
+ * It hands the manor's Developer options down (developer.tsx: useDeveloper(), <DeveloperOnly>), from the shell's
+ * `developer`; the footer names the data folder only while they're on, and the Settings form is read again when they flip.
  */
 export function Page<Body>({ data, reload, action, settings, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
   const route = useRoute();
   const onSettings = route === 'settings';
   const [settingsDrawn, setSettingsDrawn] = useState(0);
+  const dev = s.developer === true;
   // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
   const walkthrough = tour ?? (s.onboarding && <Tour onboarding={s.onboarding} app={s.app} needs={s.needs ?? null} manorName={s.manor?.name ?? null} onSettingsSaved={() => { setSettingsDrawn((n) => n + 1); void reload(); }} />);
   return (
-    <ReloadProvider value={reload}>
-      <style>{UI_CSS}</style>
-      <TitleBar shell={s} settings={onSettings} action={action} />
-      {s.needs && route !== 'tour' && (
-        <div className="banners">
-          <div className="banner-note offduty" role="status">
-            <span>
-              <strong>Waiting for its settings</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
-            </span>
-            <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
+    <DeveloperProvider on={dev}>
+      <ReloadProvider value={reload}>
+        <style>{UI_CSS}</style>
+        <TitleBar shell={s} settings={onSettings} action={action} />
+        {s.needs && route !== 'tour' && (
+          <div className="banners">
+            <div className="banner-note offduty" role="status">
+              <span>
+                <strong>Waiting for its settings</strong>: {s.app.name} can't start until you fill in {s.needs.text}.
+              </span>
+              <Button title="Fill them in" variant="secondary" onPress={() => { location.hash = '#/tour?step=settings'; }} />
+            </div>
           </div>
-        </div>
-      )}
-      {s.offDutySince && (
-        <div className="banners">
-          <div className="banner-note offduty" role="status">
-            <span>
-              <strong>Off duty</strong> since {s.offDutySince}: its scheduled rounds are paused. Run now still works.
-            </span>
-            <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
+        )}
+        {s.offDutySince && (
+          <div className="banners">
+            <div className="banner-note offduty" role="status">
+              <span>
+                <strong>Off duty</strong> since {s.offDutySince}: its scheduled rounds are paused. Run now still works.
+              </span>
+              <PostButton title="Back on duty" variant="secondary" path="/api/duty" body={{ onDuty: true }} />
+            </div>
           </div>
-        </div>
-      )}
-      <main className="view">
-        {children}
-        <section id="settings-view">
-          <a className="back-link" href="#/">
-            Back to {s.app.name}
-          </a>
-          <h2>Settings</h2>
-          {settings}
-          <SettingsForm key={settingsDrawn} />
-          <div data-tour="work" style={{ display: 'contents' }}>
-            <Markup html={s.work} />
+        )}
+        <main className="view">
+          {children}
+          <section id="settings-view">
+            <a className="back-link" href="#/">
+              Back to {s.app.name}
+            </a>
+            <h2>Settings</h2>
+            {settings}
+            <SettingsForm key={`${settingsDrawn} ${dev}`} />
+            <div data-tour="work" style={{ display: 'contents' }}>
+              <Markup html={s.work} />
+            </div>
+          </section>
+        </main>
+        {route === 'tour' && walkthrough && (
+          <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
+            {walkthrough}
           </div>
-        </section>
-      </main>
-      {route === 'tour' && walkthrough && (
-        <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>
-          {walkthrough}
-        </div>
-      )}
-      <footer>
-        {s.app.name} {s.app.version} · this PC only · its files are in <code>{s.dataDir}</code>
-      </footer>
-    </ReloadProvider>
+        )}
+        <footer>
+          {s.app.name} {s.app.version} · this PC only
+          {dev && s.dataDir && (
+            <>
+              {' · its files are in '}
+              <code>{s.dataDir}</code>
+            </>
+          )}
+        </footer>
+      </ReloadProvider>
+    </DeveloperProvider>
   );
 }
 

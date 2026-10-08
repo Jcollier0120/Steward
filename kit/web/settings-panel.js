@@ -543,9 +543,12 @@
     }
   }
 
+  // The file's path and its problems' own words are a developer's: the server sends them only while the manor's
+  // Developer options are on (settings-kit.ts), and an empty `file` says they're off.
   function showProblems() {
+    const label = data.file ? 'settings.json' : 'Settings';
     problems.replaceChildren(
-      ...(data.problems || []).map((p) => h('p', { class: 'sf-msg warning' }, h('span', { class: 'badge warn', text: 'settings.json' }), ' ', p)),
+      ...(data.problems || []).map((p) => h('p', { class: 'sf-msg warning' }, h('span', { class: 'badge warn', text: label }), ' ', p)),
     );
   }
 
@@ -565,8 +568,7 @@
     const later = [...new Set(data.schema.map((f) => APPLIES_NOTE[f.applies]).filter(Boolean))];
     const usedFrom = data.usedFrom || 'from the next round on';
     intro.replaceChildren(
-      'Changes are checked and saved here, into ',
-      h('code', { text: data.file }),
+      ...(data.file ? ['Changes are checked and saved here, into ', h('code', { text: data.file })] : ['Changes are checked and saved here']),
       later.length ? `. They are used ${usedFrom}, except those marked ${later.map((n) => `"${n}"`).join(' or ')}.` : `. They are used ${usedFrom}.`,
     );
     root.replaceChildren(intro, problems, general, form, actions);

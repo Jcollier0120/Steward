@@ -19,6 +19,7 @@
  */
 export { BUSY_LOOK_MS, initialData, pageToken, PING_LOOK_MS, post, roundState, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
+export { DeveloperOnly, DeveloperProvider, useDeveloper } from './developer.tsx';
 export { ago, useNow } from './time.ts';
 export { Icon, Spinner, type IconName } from './icons.tsx';
 export { Badge, Button, Card, CardFooter, DetailRow, IconButton, LinkButton, Notes, PostButton, ReloadProvider, Section, Text, type BadgeTone, type ButtonProps, type ButtonSize, type ButtonVariant, type TextVariant } from './ui.tsx';

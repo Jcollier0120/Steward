@@ -474,19 +474,24 @@ function useSettings(initial: SettingsData | undefined, onSaved?: () => void) {
   return { data, failed, load, draft, setDraft, saved, msgs, setMsgs, status, setStatus, busy, save };
 }
 
-/** Above the fields: where they're saved and when they're used, what's wrong with the file, and the form's own message. */
+/**
+ * Above the fields: where they're saved and when they're used, what's wrong with the file, and the form's own message.
+ * The file's path and its problems' own words are a developer's: the server sends them only while the manor's
+ * Developer options are on (settings-kit.ts), and an empty `file` says they're off.
+ */
 function FormHead({ data, later, general }: { data: SettingsData; later: string[]; general?: Msgs[string] }) {
   const usedFrom = data.usedFrom || 'from the next round on';
+  const dev = !!data.file;
   return (
     <>
       <p className="sf-intro muted">
-        Changes are checked and saved here, into <code>{data.file}</code>
+        Changes are checked and saved here{dev && <>, into <code>{data.file}</code></>}
         {later.length ? `. They are used ${usedFrom}, except those marked ${later.map((n) => `"${n}"`).join(' or ')}.` : `. They are used ${usedFrom}.`}
       </p>
       <div className="sf-problems">
         {data.problems.map((p, i) => (
           <p key={i} className="sf-msg warning">
-            <Badge tone="caution" label="settings.json" /> {p}
+            <Badge tone="caution" label={dev ? 'settings.json' : 'Settings'} /> {p}
           </p>
         ))}
       </div>
