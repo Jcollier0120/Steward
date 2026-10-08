@@ -30,6 +30,13 @@ export type Pace = 'gentle' | 'full';
 /** How long an agent waits in the first-round line before it lets its place go (and joins again at its next round). */
 export const FIRST_ROUND_WAIT_MS = 6 * 3_600_000;
 
+/**
+ * How long a first round keeps its turn before a waiter takes it over, at the least: a first scan of every drive
+ * (Heiward's) or a first index takes hours, and a holder whose process has gone gives the turn up at once anyway.
+ * Heiward's .NET line allows as long (NpuLock.FirstRoundHold).
+ */
+export const FIRST_ROUND_HOLD_MS = 12 * 3_600_000;
+
 /** What a round waiting in the first-round line says it waits for (RoundState's waiting). */
 export const FIRST_ROUND_WAITING = "its first round: the agents before it are doing theirs, one at a time";
 
@@ -69,7 +76,8 @@ export function setPriorityFor(p: Pace, asked = false, set: (priority: number) =
 
 /**
  * Runs a scheduled round: an agent's first (`first`, none has gone through yet) at a gentle pace in its turn in the
- * first-round line, else at once. `limitMs` is the round's own time limit: the holder keeps its place that long, and
+ * first-round line, else at once. `limitMs` is the round's own time limit: the holder keeps its place that long (and
+ * FIRST_ROUND_HOLD_MS at the least, as Heiward's first scan needs), and
  * one whose process has gone gives it up at once (the kit's lock rules). `onWait` is told when it starts and stops
  * waiting in line. After FIRST_ROUND_WAIT_MS in line it throws the line's LockTimeout, which every() takes as a round
  * that waited: it joins the line again at its next round.
@@ -86,7 +94,7 @@ export async function inFirstRoundTurn<T>(p: Pace, first: boolean, fn: () => Pro
         o.onWait?.(false);
         return fn();
       },
-      { lane: 'background', who: o.who, waitMs: o.waitMs ?? FIRST_ROUND_WAIT_MS, staleMs: o.limitMs },
+      { lane: 'background', who: o.who, waitMs: o.waitMs ?? FIRST_ROUND_WAIT_MS, staleMs: Math.max(o.limitMs, FIRST_ROUND_HOLD_MS) },
     );
   } finally {
     if (inLine) o.onWait?.(false);
