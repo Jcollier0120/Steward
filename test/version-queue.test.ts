@@ -63,7 +63,7 @@ test("each repository's version, and the PR versions above it lowest first: an e
     if (args[0] === 'pr' && args[1] === 'list') return ok(args[3] === 'someone/Side' ? [listed('someone/Side', 3, three)] : agentPrs);
   });
   const e = employee(a.checkout, { id: 'fake', name: 'Fake' });
-  const project = { name: 'Side Car', checkout: p.checkout, repo: 'someone/Side', branch: 'main', test: null, versionFiles: [], cleanBranches: true };
+  const project = { name: 'Side Car', checkout: p.checkout, repo: 'someone/Side', branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: false, release: '' };
   const ctx = () => ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
 
   const q = await keepVersionQueues(ctx(), { projects: [project] });
@@ -97,8 +97,8 @@ test('a repository that can\'t be read says why, and a project that is one of th
   const a = repoWithPrs('agent2');
   const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok([]) : undefined));
   const e = employee(a.checkout, { id: 'fake2', name: 'Fake2' });
-  const gone = { name: 'Gone', checkout: path.join(tmp, 'nowhere'), repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true };
-  const twin = { name: 'Twin', checkout: a.checkout, repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true };
+  const gone = { name: 'Gone', checkout: path.join(tmp, 'nowhere'), repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: false, release: '' };
+  const twin = { name: 'Twin', checkout: a.checkout, repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: false, release: '' };
   const q = await keepVersionQueues(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work2'), run: r.run, neutralDir: tmp }), { projects: [gone, twin] });
   assert.deepEqual(q.repos.map((x) => x.id), ['fake2', 'project:gone']);
   assert.equal(q.repos[0].version, '0.4.0');

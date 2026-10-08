@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.42.0
+
+**One list of tracked repositories, in Manor.** The repositories the manor looks after on a PC were set in five places: the Steward's employees, Manor's non-employee projects, Reeve's found repositories, the Wright's and the Aletaster's own lists. From this version Manor's list (settings.json's `"projects"`) is the one place, and each agent derives its own from it. The rule is the new spec/REPOSITORIES.md.
+
+### What's new
+
+- **node/manor.ts:** a project has `merges` (the Steward merges the team's ready pull requests into its branch; needs `repo`) and `release` (`tag` or a command; needs `repo` and `versionFiles`). Both are off unless it says, as the person's yes. `projectsFrom()` checks them, and says why it leaves out an entry that gets them wrong.
+- **spec/REPOSITORIES.md:** staff (Castellan's own agents, only where Castellan is released) and tracked repositories (the person's own, on every PC), an entry's keys, which agent uses which, and the move to one list.
+
+### What changed
+
+- **`manorOwn()`** counts one of the Steward's employees as the manor's own only when it is staff: on the kit, where the Steward releases Castellan (`releasesCastellan` not false). On any other PC the repositories a person gave the Steward are theirs, and may be tracked as projects. A Steward settings.json from before `releasesCastellan` reads as before.
+- **What an agent must do:** nothing to keep working: a project read before has `merges` false and `release` empty. An agent that keeps its own list of repositories should derive it from `manorProjects()` where Manor is installed, as spec/REPOSITORIES.md says. Manor, the Steward and the Wright follow in their own PRs.
+- **Its tests:** kit/test/manor.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.40.0
 
 **Settings obey the Developer options switch from the schema alone, and the kit's own parts leak nothing more with it off.** What the agents had to work around when they took 2.39.0 is now the kit's.

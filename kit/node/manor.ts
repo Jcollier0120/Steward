@@ -233,10 +233,11 @@ function ghText(args: string[]): string {
 }
 
 /**
- * A non-employee project (settings.json's "projects", the Non-employee projects section of Manor's Settings): another
- * repository on this PC that rides along with the manor. The agents that clean up and fix repositories look after it
- * too (Reeve's rounds, the Surveyor's test runs, the Wright's and the Bailiff's fixes), but it is never staff: it takes
- * no kit, the Steward never touches it, it holds no role, and the manor never merges or releases it. Each PC has its own.
+ * A tracked repository (settings.json's "projects", the Repositories section of Manor's Settings): one of the person's
+ * own repositories on this PC, which the manor looks after (spec/REPOSITORIES.md). This list is the one place they are
+ * set: every agent that works on repositories derives its own from it (Reeve's rounds, the Surveyor's test runs, the
+ * Wright's and the Bailiff's fixes, and, since kit 2.42.0, the Steward's merges and releases where it says so). It is
+ * never staff: it takes no kit and holds no role. Each PC has its own.
  */
 export interface ManorProject {
   /** What the page calls it: 1 to 60 characters, one name to a project. */
@@ -256,6 +257,18 @@ export interface ManorProject {
   versionFiles: string[];
   /** Whether Reeve's rounds delete branches already merged into `branch`, in the clone and on GitHub (true unless it says false). */
   cleanBranches: boolean;
+  /**
+   * Whether the Steward merges the team's ready pull requests into `branch` (kit 2.42.0): false unless it says true, as
+   * the person's yes, repository by repository. Needs `repo`.
+   */
+  merges?: boolean;
+  /**
+   * How the Steward releases the version on `branch` (kit 2.42.0): `tag` (a GitHub release of the branch's commit, which
+   * the Steward makes itself), or a command run in a worktree of it. Empty, as it is unless it says: never released.
+   * Needs `repo` and `versionFiles`. Optional in the type, so code that builds a project by hand needs no change: projectsFrom always gives
+   * both, and a reader takes one missing as off.
+   */
+  release?: string;
 }
 
 /** What a project may not be: the manor's own repositories (owner/name) and the checkouts the Steward works from. */
@@ -332,6 +345,10 @@ const textAt = (o: unknown, ...keys: string[]): string | null => {
  * settings.json (or, when that names none, the staff table it keeps, staff.json), with the Steward's own checkout when
  * its settings name one. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward. Nothing here names anyone's
  * account or folder: what runs on someone else's PC knows only what that PC says.
+ *
+ * Since kit 2.42.0 an employee is the manor's own only when it is staff: it takes the kit (`usesKit` not false), on a PC
+ * whose Steward releases Castellan (`releasesCastellan` not false; a settings.json from before that key counts as one).
+ * Anywhere else the person's own repositories are tracked as projects (spec/REPOSITORIES.md), the Steward's included.
  */
 export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: string } = {}): ManorOwn {
   const home = o.home ?? manorHome();
@@ -343,8 +360,10 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
     if (repo) repos.add(repo);
   }
   const settings = jsonAt(path.join(steward, 'settings.json'));
+  const castellan = !(settings && typeof settings === 'object' && (settings as Record<string, unknown>).releasesCastellan === false);
   const employees = listOf(settings, 'employees');
-  for (const e of employees.length ? employees : listOf(jsonAt(path.join(steward, 'staff.json')), 'rows')) {
+  const staff = castellan ? employees.filter((e) => e.usesKit !== false) : [];
+  for (const e of employees.length ? staff : listOf(jsonAt(path.join(steward, 'staff.json')), 'rows')) {
     const repo = textAt(e, 'repo');
     if (repo) repos.add(repo);
     const checkout = textAt(e, 'checkout') ?? textAt(e, 'checkout', 'path');
@@ -359,14 +378,14 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
  * settings.json's "projects" as the manor uses them: each entry checked, a wrong one left out and said in `problems`
  * (Manor shows them with its other settings' problems). Manor's own settings and every agent read them with this, so
  * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?,
- * "cleanBranches"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
+ * "cleanBranches"?, "merges"?, "release"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
  * checkout inside one of the Steward's or holding one: an employee is looked after as staff, never as a project.
  * Whether the checkout is there isn't checked here: a project whose clone has gone stays listed, and the page says so.
  */
 export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = []): ManorProject[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
-    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "branch", "test", "versionFiles", "cleanBranches" }.');
+    problems.push('settings.json: "projects" should be a list of { "name", "checkout", "repo", "branch", "test", "versionFiles", "cleanBranches", "merges", "release" }.');
     return [];
   }
   const ownRepos = new Set(own.repos.map((r) => r.toLowerCase()));
@@ -412,6 +431,18 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
       if (typeof e.cleanBranches !== 'boolean') return wrong('should give "cleanBranches" as true or false');
       cleanBranches = e.cleanBranches;
     }
+    let merges = false;
+    if (e.merges !== undefined && e.merges !== null) {
+      if (typeof e.merges !== 'boolean') return wrong('should give "merges" as true or false');
+      if (e.merges && !repo) return wrong('says "merges", but has no "repo" on GitHub to merge in');
+      merges = e.merges;
+    }
+    let release = '';
+    if (given(e.release)) {
+      if (typeof e.release !== 'string' || !e.release.trim() || e.release.trim().length > 300 || /[\u0000-\u001f]/.test(e.release)) return wrong('should give its "release" as "tag" or one command of up to 300 characters, or none');
+      if (!repo || !versionFiles.length) return wrong('says how to "release", but needs a "repo" and its "versionFiles" for that');
+      release = e.release.trim();
+    }
     const place = samePlace(checkout);
     if (projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) return wrong('has the name of one listed before it');
     if (projects.some((p) => samePlace(p.checkout) === place)) return wrong('has the checkout of one listed before it');
@@ -422,7 +453,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     }
     const theirs = [repo, originRepo(checkout)].find((r) => r && ownRepos.has(r.toLowerCase()));
     if (theirs) return wrong(`is ${theirs}, one of the manor's own: an employee is looked after as staff, never as a project`);
-    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches });
+    projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release });
   });
   return projects;
 }

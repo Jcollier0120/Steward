@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.20
+
+**The kit it hands out, 2.42.0, keeps your repositories in one list, in Manor.**
+
+### What changed
+
+- The Steward hands out kit 2.42.0. The repositories the manor looks after are set in one place, Manor's Settings, and each one says whether the Steward may merge its pull requests and how it is released. The Steward reads that list in a coming version.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.17
 
 **A draft near the front of the merge line gets a heads-up, so it can be ready before it holds anyone up.**
