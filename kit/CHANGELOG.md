@@ -2,6 +2,17 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.38.0
+
+**Reeve, the Chamberlain and Heiward have their own title-bar scenes too.**
+- **node/look.ts:** a scene and an accent for each, in its icon's colour, moving while it works (`LOOK`): Reeve's log scrolls up through an amber reading line while the count is kept beside it in gate tallies, four bars and a strike ("Reading the logs"); the Chamberlain presses its keyhole seal into the red wax on a letter and files the letter in its pigeonhole ("Filing your papers"); Heiward's shears go along the hedge snipping each sprig that has grown out of it, by a picket fence ("Trimming the hedges"). They have no lines in `WORK`: an agent's page shows its look whether or not it has them.
+- **This kit brings 2.36.2**, never released on its own: the Thatcher's, the Reckoner's, the Weigher's and the Shepherd's scenes and their lines in `WORK`.
+- **What an agent must do:** nothing. Each takes its scene with this kit.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.36.2
 
 **The Thatcher, the Reckoner, the Weigher and the Shepherd have their own title-bar scenes, and say where their work runs.**

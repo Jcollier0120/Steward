@@ -368,6 +368,77 @@ ${B} .sc-crook { ${run('sc-follow', 6, 0, 'ease-in-out')} }
 ${B} .sc-nudge { transform-origin: 57px 35.5px; ${run('sc-nudge', 1.5, 0, 'ease-in-out')} }`,
 };
 
+/* ---- Reeve: the log scrolls up through the amber reading line, and the day's count is kept in gate tallies, four bars and a strike. */
+const LOG_LINES = [14, 9, 16, 11, 7, 15];
+/** The log's lines, 4.5 px apart and twice over, so that scrolling one pattern's height up comes back to where it began. */
+const logLines = [...LOG_LINES, ...LOG_LINES, ...LOG_LINES.slice(0, 3)].map((w, i) => `M6.5 ${r1(9 + i * 4.5)}h${w}`).join('');
+/** The two gates' strokes, in the order they are cut: four bars, then the strike across them. */
+const TALLY = [29, 46].flatMap((x) => [
+  ...[0, 3.5, 7, 10.5].map((dx) => `M${x + dx} 13v16`),
+  `M${x - 2.5} 26.5L${x + 13} 15.5`,
+]);
+const reeve: Look = {
+  accent: { light: '#9a5b00', dark: '#f5b84b' },
+  busy: 'Reading the logs',
+  scene: `<clipPath id="kit-sc-reeve-log"><rect x="4" y="7" width="20" height="26"/></clipPath>
+<rect class="sc-paper" x="3" y="5.5" width="22" height="29" rx="1"/><rect class="sc-halo" x="3.6" y="18" width="20.8" height="4.2"/>
+<g clip-path="url(#kit-sc-reeve-log)"><path class="sc-line sc-log" d="${logLines}"/></g>
+<g class="sc-tally">${TALLY.map((d, i) => `<path class="sc-role-line sc-cut sc-u${i + 1}" pathLength="1" d="${d}"/>`).join('')}</g>`,
+  motion: `@keyframes sc-scroll { to { transform: translateY(-27px); } }
+@keyframes sc-tally { 0%, 90% { opacity: 1; } 96%, 100% { opacity: 0; } }
+${TALLY.map((d, i) => `@keyframes sc-cut${i + 1} { 0%, ${4 + i * 8}% { stroke-dashoffset: 1.03; } ${9 + i * 8}%, 100% { stroke-dashoffset: 0; } }
+${B} .sc-u${i + 1} { stroke-dasharray: 1 1.05; ${run(`sc-cut${i + 1}`, 6, 0, 'ease-out')} }`).join('\n')}
+${B} .sc-log { ${run('sc-scroll', 6)} }
+${B} .sc-tally { ${run('sc-tally', 6)} }`,
+};
+
+/* ---- The Chamberlain: a letter is sealed in red wax, the keyhole pressed in it, and filed in its pigeonhole; the next one comes. */
+const HOLES: [number, number][] = [[39.5, 8.5], [50, 8.5], [39.5, 17.5], [50, 17.5], [39.5, 26.5], [50, 26.5]];
+/** The papers already filed, peeking out of their holes, by hole; the last is the one the letter goes into. */
+const FILED = [0, 3, 4, 5];
+const chamberlain: Look = {
+  accent: { light: '#7a1d2c', dark: '#eea4ae' },
+  busy: 'Filing your papers',
+  scene: `${GROUND}<rect class="sc-wood" x="37" y="6" width="24" height="29.5" rx="1"/>
+${HOLES.map(([x, y]) => `<rect class="sc-hole" x="${x}" y="${y}" width="9" height="7" rx=".6"/>`).join('')}
+${FILED.map((h, i) => `<rect class="sc-paper${i === FILED.length - 1 ? ' sc-filed' : ''}" x="${HOLES[h][0] + 1}" y="${HOLES[h][1] + 2.6}" width="7" height="4.4" rx=".3"/>`).join('')}
+<g class="sc-letter"><rect class="sc-paper" x="5" y="22" width="22" height="13.5" rx="1"/><path class="sc-line" d="M5.8 23 16 30.2 26.2 23"/>
+<g class="sc-seal"><circle class="sc-role" cx="16" cy="30" r="3.3"/><circle class="sc-motif" cx="16" cy="29.3" r=".9"/><path class="sc-motif" d="M15.55 29.8h.9l.35 2.1h-1.6z"/></g></g>
+<g class="sc-stamp"><rect class="sc-wood" x="13.5" y="5" width="5" height="7.5" rx="2.5"/><rect class="sc-front" x="15" y="12.5" width="2" height="3"/><rect class="sc-front" x="12.8" y="15.5" width="6.4" height="2.2" rx=".6"/></g>`,
+  motion: `@keyframes sc-stamp { 0%, 4% { transform: translateY(0); } 11%, 15% { transform: translateY(9.5px); } 22%, 100% { transform: translateY(0); } }
+@keyframes sc-seal { 0%, 12% { opacity: 0; } 13%, 60% { opacity: 1; } 61%, 100% { opacity: 0; } }
+@keyframes sc-file { 0%, 26% { transform: translate(0, 0) scale(1); opacity: 1; } 54% { transform: translate(38.5px, 1.25px) scale(.32); opacity: 1; } 58%, 80% { transform: translate(38.5px, 1.25px) scale(.32); opacity: 0; } 81% { transform: translate(0, -4px) scale(1); opacity: 0; } 90%, 100% { transform: translate(0, 0) scale(1); opacity: 1; } }
+@keyframes sc-filed { 0%, 54% { opacity: 0; } 57%, 92% { opacity: 1; } 98%, 100% { opacity: 0; } }
+${B} .sc-stamp { ${run('sc-stamp', 6, 0, 'ease-in-out')} }
+${B} .sc-seal { ${run('sc-seal', 6, 0, 'steps(1, end)')} }
+${B} .sc-letter { transform-origin: 16px 28.75px; ${run('sc-file', 6, 0, 'ease-in-out')} }
+${B} .sc-filed { ${run('sc-filed', 6)} }`,
+};
+
+/* ---- Heiward: the shears go along the hedge, snipping each sprig that has grown out of it; they fall, and the hedge stands trim. */
+const SPRIGS = [37, 28, 19, 10];
+/** When the shears reach each sprig, in % of the cycle, right to left; each snip comes 4% after. */
+const SNIP = [8, 26, 44, 62];
+const SHEARS: [number, number] = [50, 12];
+const blade = `<path class="sc-steel" d="M1.2 0-8 -2-8.4-.6 0 .9z"/><path class="sc-line" d="M0 0 4.6-2.4"/><circle class="sc-back" cx="6" cy="-3.2" r="1.6"/>`;
+const heiward: Look = {
+  accent: { light: '#0f7b3f', dark: '#6ccb8f' },
+  busy: 'Trimming the hedges',
+  scene: `${GROUND}<path class="sc-line" d="M50 25h13.5M50 31h13.5"/>${[51, 56, 61].map((x) => `<path class="sc-wood" d="M${x - 1.3} 35.5V21.6l1.3-1.8 1.3 1.8v13.9z"/>`).join('')}
+<path class="sc-soft" d="M3 35.5V21${'a3.2 3.2 0 0 1 6 0'.repeat(7)}V35.5z"/>
+${[[8, 27], [16, 31], [23, 25.5], [31, 30], [38, 25.5]].map(([x, y]) => `<path class="sc-role" d="M${x} ${y}c-.2-2 1-3.4 3-3.5.2 2-1.1 3.4-3 3.5z"/>`).join('')}
+${SPRIGS.map((x, i) => `<g class="sc-sprig sc-p${i + 1}"><path class="sc-role-line" d="M${x} 20q-.6-3 .8-6.4"/><path class="sc-role" d="M${x + 0.8} 14.4c-.3-2.4 1.1-4 3.4-4.2.2 2.4-1.2 4-3.4 4.2z"/><path class="sc-role" d="M${x - 0.1} 17.6c-2-.1-3.2-1.4-3.2-3.3 2 .1 3.2 1.4 3.2 3.3z"/></g>`).join('')}
+<g class="sc-shears" transform="translate(${SHEARS[0]} ${SHEARS[1]})"><g class="sc-blade sc-bl1">${blade}</g><g class="sc-blade sc-bl2"><g transform="scale(1 -1)">${blade}</g></g><circle class="sc-front" cx="0" cy="0" r=".9"/></g>`,
+  motion: `@keyframes sc-shears { 0% { transform: translate(${SHEARS[0]}px, ${SHEARS[1]}px); } ${SPRIGS.map((x, i) => `${SNIP[i]}%, ${SNIP[i] + 8}% { transform: translate(${x + 6}px, 15.5px); }`).join(' ')} 84%, 100% { transform: translate(${SHEARS[0]}px, ${SHEARS[1]}px); } }
+@keyframes sc-open1 { 0% { transform: rotate(0deg); } ${SNIP.map((s) => `${s - 3}%, ${s + 1}% { transform: rotate(-16deg); } ${s + 4}% { transform: rotate(0deg); } ${s + 7}% { transform: rotate(-16deg); }`).join(' ')} 80%, 100% { transform: rotate(0deg); } }
+@keyframes sc-open2 { 0% { transform: rotate(0deg); } ${SNIP.map((s) => `${s - 3}%, ${s + 1}% { transform: rotate(16deg); } ${s + 4}% { transform: rotate(0deg); } ${s + 7}% { transform: rotate(16deg); }`).join(' ')} 80%, 100% { transform: rotate(0deg); } }
+${SPRIGS.map((x, i) => `@keyframes sc-fall${i + 1} { 0%, ${SNIP[i] + 4}% { transform: translate(0, 0) rotate(0deg); opacity: 1; } ${SNIP[i] + 12}% { transform: translate(-2px, 14px) rotate(-50deg); opacity: 1; } ${SNIP[i] + 16}%, 92% { transform: translate(-2px, 14px) rotate(-50deg); opacity: 0; } 93% { transform: translate(0, 0) rotate(0deg); opacity: 0; } 100% { transform: translate(0, 0) rotate(0deg); opacity: 1; } }
+${B} .sc-p${i + 1} { transform-origin: ${x}px 20px; ${run(`sc-fall${i + 1}`, 6, 0, 'ease-in')} }`).join('\n')}
+${B} .sc-shears { ${run('sc-shears', 6, 0, 'ease-in-out')} }
+${B} .sc-bl1 { transform-origin: 0 0; ${run('sc-open1', 6)} }
+${B} .sc-bl2 { transform-origin: 0 0; ${run('sc-open2', 6)} }`,
+};
+
 /** Any other agent: a cog, turning while it works. */
 export const DEFAULT_LOOK: Look = {
   accent: { light: '#66717c', dark: '#a7b1bc' },
@@ -379,7 +450,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd, reeve, chamberlain, heiward };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);
