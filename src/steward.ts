@@ -14,6 +14,7 @@ import { expandEnv } from './kit/settings-kit.ts';
 import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
 import { bump } from './stages/bump.ts';
+import { keepVersionQueues } from './version-queue.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
@@ -554,6 +555,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           saveSeen(afterRound(seen, { plan, results: out.results, held, error: out.error, now: o.now?.() }));
         } catch (e) {
           log(`couldn't keep what this round saw: ${(e as Error).message}`);
+        }
+      }
+      // Each repository's version queue, for Manor (version-queue.ts): after the merges, so it says where each one is now.
+      // Not in a test, which has no Manor and no projects of its own.
+      if ((name === 'round' || name === 'merge') && !out.error && !process.env.NODE_TEST_CONTEXT) {
+        try {
+          await keepVersionQueues(ctx);
+        } catch (e) {
+          log(`couldn't keep the version queues: ${(e as Error).message}`);
         }
       }
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
