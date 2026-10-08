@@ -115,6 +115,22 @@ test("(a) no gate where the Aletaster isn't installed, or is off duty for Develo
   assert.match(vacant.go ? vacant.note! : '', /^released without a tasting: the Aletaster isn't here \(its role is vacant while Manor's Developer options are off\)$/);
 });
 
+test("no gate when the Aletaster's own Developer options are off (no Manor to decide): it tastes nothing, as when vacant; on, it is asked as ever", async () => {
+  /** An Aletaster whose /api/ping says its switch; it refuses a tasting while off, as Aletaster 0.8.7 does. */
+  const own = (on: boolean) => {
+    const a = aletasterHttp({ post: on ? { status: 200, body: tasting() } : { status: 403, body: { ok: false, verdict: 'not checked', release: false, reason: 'its Developer options are off, so it tastes nothing' } } });
+    const http: HttpRequest = async (url, r) => (url.pathname === '/api/ping' ? { status: 200, body: JSON.stringify({ app: 'aletaster', developer: on }) } : a.http(url, r));
+    return { http, asked: a.asked };
+  };
+  const off = own(false);
+  assert.deepEqual(await ask(porter, deps(off.http)), { go: true, note: "released without a tasting: the Aletaster's Developer options are off, so it tastes nothing" });
+  assert.deepEqual(off.asked.filter((x) => x.method === 'POST'), [], 'no tasting asked for');
+  assert.deepEqual(loadTastingHolds(), {}, 'nothing held');
+  const on = own(true);
+  assert.deepEqual(await ask(porter, deps(on.http)), { go: true, note: 'tasted by the Aletaster: pass' });
+  assert.equal(on.asked.filter((x) => x.method === 'POST').length, 1);
+});
+
 test("Developer options off leave the Aletaster's role vacant, as Manor's staff.json says it is a developer role", () => {
   const manor = path.join(home, 'manor');
   mkdirSync(path.join(manor, 'app'), { recursive: true });

@@ -14,12 +14,12 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');
-const { planRollout, rolloutGate, loadRolloutFailures } = await import('../src/stages/rollout.ts');
+const { planRollout, rolloutFacts, rolloutGate, loadRolloutFailures } = await import('../src/stages/rollout.ts');
 const { planRound } = await import('../src/stages/changes.ts');
 const { roundSig } = await import('../src/glance.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
-const { employee, fakeEmployee, ok, sh } = await import('./helpers.ts');
+const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { run: realRun } = await import('../src/run.ts');
 
 const porter = employee('C:\\nowhere\\Porter', { id: 'porter', name: 'Porter', repo: 'Jcollier0120/Porter' });
@@ -60,6 +60,36 @@ test('a bump that failed is held for that kit until a new commit lands on its br
   assert.match(held.skip[0].why, /^its bump to kit 2\.9\.1 failed at aaaaaaa \(npm test failed \(exit 1\)\), so the rounds leave it until a new commit lands on main, or you press Bump$/);
   assert.deepEqual(planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter], facts: { porter: facts('2.9.0', { head: H2 }) }, failed }).bump.map((b) => b.head), [H2], 'a new commit');
   assert.equal(planRollout({ on: true, kit: '2.9.2', ownKit: null, employees: [porter], facts: { porter: facts('2.9.0') }, failed }).bump.length, 1, 'a newer kit');
+});
+
+test("an employee whose own open PR pins the kit already gets no kit-only PR beside it, which would take that PR's version", async () => {
+  const plan = planRollout({ on: true, kit: '2.39.0', ownKit: null, employees: [porter, clerk], facts: { porter: facts('2.38.0', { pinPrs: ['#68 (claude/developer-options, kit 2.39.0)'] }), clerk: facts('2.38.0') }, failed: {} });
+  assert.deepEqual(plan.bump.map((b) => b.employee.id), ['clerk']);
+  assert.deepEqual(plan.skip.map((s) => s.why), ['its open PR #68 (claude/developer-options, kit 2.39.0) already brings kit 2.39.0, so it gets no kit PR of its own beside it']);
+
+  // Read from the PR's branch on origin: one that pins the kit (or a newer one) counts; one that pins an older kit, or
+  // doesn't change kit.json, doesn't.
+  const dir = mkdtempSync(path.join(home, 'pins-'));
+  const fk = fakeEmployee(dir, { kit: '1.0.0' });
+  const branch = (name: string, kit: string | null) => {
+    sh(fk.checkout, 'checkout', '--quiet', '-b', name, 'origin/main');
+    if (kit) writeFileSync(path.join(fk.checkout, 'kit.json'), `{\n  "kit": "${kit}",\n  "parts": ["node"]\n}\n`);
+    writeFileSync(path.join(fk.checkout, `${name.replace(/\//g, '-')}.md`), name);
+    sh(fk.checkout, 'add', '-A');
+    sh(fk.checkout, 'commit', '--quiet', '-m', name);
+    sh(fk.checkout, 'push', '--quiet', 'origin', name);
+    sh(fk.checkout, 'checkout', '--quiet', 'main');
+  };
+  branch('claude/developer-options', '1.0.1');
+  branch('claude/older', '1.0.0');
+  branch('claude/notes', null);
+  const pr = (number: number, head: string, files: string[]) => ({ number, title: `Fake 0.4.${number}: work`, url: `u${number}`, body: '', headRefName: head, headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: files.map((p) => ({ path: p })) });
+  let open = [pr(20, 'claude/developer-options', ['kit.json', 'src/a.ts']), pr(21, 'claude/older', ['kit.json']), pr(22, 'claude/notes', ['claude-notes.md'])];
+  const e = employee(fk.checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(open) : undefined)).run, neutralDir: dir });
+  assert.deepEqual((await rolloutFacts(ctx, e, '1.0.1')).pinPrs, ['#20 (claude/developer-options, kit 1.0.1)']);
+  open = open.slice(1);
+  assert.deepEqual((await rolloutFacts(ctx, e, '1.0.1')).pinPrs, [], 'with that PR merged or closed, the kit is rolled out as ever');
 });
 
 test('nothing is rolled out with the setting off, with no kit release, or while this Steward carries an older kit', () => {

@@ -164,3 +164,14 @@ test("only the parts on the page are walked: a page that differs by variant keep
     delete d.querySelector;
   }
 });
+
+test("Developer options off: a developer's whole form is left out, and a record's handle is carried, never drawn", () => {
+  assert.equal(m.form({ developerOnly: true, schema: [], values: {}, defaults: {}, problems: [], warnings: {}, file: '' }), '', 'no empty form, no card');
+  const kept = { key: '~kept', kind: 'text', label: 'Kept', readOnly: true, optional: true, kept: true };
+  const devices = { key: 'devices', kind: 'records', label: 'Comes and goes', noun: 'device', fields: [{ key: 'name', kind: 'text', label: 'Name', optional: true }, kept] };
+  const h = m.form({ schema: [devices], values: { devices: [{ name: 'Phone', '~kept': 'abc123' }] }, defaults: { devices: [] }, problems: [], warnings: {}, file: '' });
+  assert.match(h, /<table class="sf-table"><thead><tr><th scope="col">Name<\/th><th><\/th><\/tr><\/thead>/, 'its own fields only');
+  assert.doesNotMatch(h, /Kept|abc123/);
+  // With the switch on the same form is drawn whole, as ever.
+  assert.match(m.form(data()), /<div class="card sf-panel" data-tour="settings-panel">/);
+});

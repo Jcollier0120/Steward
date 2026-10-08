@@ -20,6 +20,8 @@ export const laterNotes = (fields: SettingsField[]): string[] => [...new Set(fie
 export interface SettingsOption {
   value: string;
   label: string;
+  /** A developer's choice: sent only while Developer options are on (the server leaves it out otherwise). */
+  developerOnly?: boolean;
 }
 export interface TextRules {
   maxLength?: number;
@@ -42,6 +44,10 @@ interface Common {
   advanced?: boolean;
   /** Shown only while the top-level `key` holds one of `is` (as text). */
   shownWhen?: { key: string; is: string[] };
+  /** Developer content: sent only while Developer options are on (the server leaves it out otherwise). */
+  developerOnly?: boolean;
+  /** A record's handle (settings-kit.ts's KEPT), in place of its developer-only fields: carried through a save, never drawn. */
+  kept?: boolean;
 }
 export type SettingsField =
   | (Common & { kind: 'switch' })
@@ -59,6 +65,8 @@ export type Messages = Record<string, string>;
 
 /** GET /api/settings's answer. */
 export interface SettingsData {
+  /** The whole form is a developer's, and Developer options are off: no field is sent, and the form is left out. */
+  developerOnly?: boolean;
   schema: SettingsField[];
   values: Record<string, unknown>;
   defaults: Record<string, unknown>;
@@ -199,7 +207,7 @@ export function tidy(f: SettingsField, v: unknown): unknown {
 }
 
 /** Whether a field shows, by its `shownWhen`, given the form's top-level values now. */
-export const shownNow = (f: SettingsField, top: Record<string, unknown>) => !f.shownWhen || f.shownWhen.is.includes(String(top[f.shownWhen.key] ?? ''));
+export const shownNow = (f: SettingsField, top: Record<string, unknown>) => !f.kept && (!f.shownWhen || f.shownWhen.is.includes(String(top[f.shownWhen.key] ?? '')));
 
 /** A time (an ISO string) as its day, for a read-only field; nothing as a dash. */
 export const shown = (v: unknown) => (v === undefined || v === null || v === '' ? '—' : String(v).replace(/^(\d{4}-\d\d-\d\d)T[\d:.]+Z$/, '$1'));

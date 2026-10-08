@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile } from '../git.ts';
@@ -16,7 +17,9 @@ import { recordTested } from '../tested.ts';
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
  * branch on origin (never the person's own checkout), on the branch steward/kit-<version>, in the work
  * folder. There kit.json's pin goes to the new kit, tools/kit.ts becomes the Steward's (for an agent that
- * fills its kit with it), and the employee's patch version goes up in every version file; then its kit is
+ * fills its kit with it), and the employee's version goes up in every version file to the one claimed for the bump's
+ * branch (claims.ts: above every open PR's and every live claim, so a bump never takes the version of work open
+ * beside it; the same again for the same branch, so a bump made again keeps it); then its kit is
  * filled, with the new tools/kit.ts, its checks run, and, when every one passes, the changes are
  * committed. Checks that fail are run once more; failing again leaves the worktree as it was, for a look, with the
  * failed step's whole output beside it (<worktree>.log) and the failed tests named in its message. An employee that isn't a Node agent
@@ -183,7 +186,16 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const texts = e.versionFiles.map((f) => [f, existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), 'utf8') : null] as [string, string | null]);
   const agreed = agreedVersion(texts);
   if ('error' in agreed) return result(e, 'failed', agreed.error);
-  const next = bumpPatch(agreed.version);
+  // A trial's branch is never pushed, so it claims nothing. A version that can't be claimed (GitHub out of reach) is no
+  // bump: the next patch could be another PR's, and the rounds try again.
+  let next = bumpPatch(agreed.version);
+  if (!o.trial) {
+    try {
+      next = (await claimVersion(ctx, e, { branch, by: 'steward', for: `the Steward's kit ${o.kit}` })).claim.version;
+    } catch (err) {
+      return result(e, 'failed', `couldn't claim a version for the bump: ${(err as Error).message}`);
+    }
+  }
   try {
     for (const [f, t] of texts) writeFileSync(path.join(dir, f), setVersion(f, t!, agreed.version, next));
   } catch (err) {
