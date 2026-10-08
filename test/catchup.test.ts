@@ -12,7 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { catchUp, catchUpVersion, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
-const { mergeOne } = await import('../src/stages/merge.ts');
+const { merge, mergeOne } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
@@ -217,6 +217,51 @@ test("the round: a conflicting team PR is caught up after the merges, and its ho
   assert.equal(r2.held[0].why, 'conflicts with its branch');
 });
 
+test('the round: a caught-up PR the Steward tests itself is tested at its new head and merged in the same round; one with checks on GitHub waits for them', async () => {
+  const { dir, checkout, pr } = moved('looks');
+  const origin = path.join(dir, 'origin.git');
+  // GitHub as it would be: the PR's head is its branch's, and it merges cleanly once caught up.
+  const listed = (checks: unknown[]) => () => {
+    const at = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+    sh(origin, 'update-ref', 'refs/pull/21/head', at);
+    const caught = at !== pr.headOid;
+    return [{ number: 21, title: pr.title, url: pr.url, body: '', headRefName: pr.head, headRefOid: at, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: caught ? 'MERGEABLE' : 'CONFLICTING', mergeStateStatus: caught ? 'CLEAN' : 'DIRTY', isDraft: false, statusCheckRollup: checks, labels: [], additions: 5, deletions: 5, files: [] }];
+  };
+  const releases = [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }, { tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
+  const fake = (prs: () => unknown[]) => runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(prs()) : a[0] === 'release' && a[1] === 'list' ? ok(releases) : ok('')));
+  const e = employee(checkout, { fill: '' });
+
+  const r = fake(listed([]));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  ctx.settings.catchUp = true;
+  const [m] = await merge(ctx, [e], { yes: true, team: true });
+  const now = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+  assert.notEqual(now, pr.headOid, 'caught up');
+  assert.equal(m.outcome, 'done', m.message);
+  assert.deepEqual(m.merged.map((p) => p.number), [21]);
+  assert.match(m.message, new RegExp(`^#21 caught up: merged main into it, its version lines resolved; v0\\.4\\.2[^;]*; merged #21 \\(checks passed here at ${now.slice(0, 7)}\\)$`));
+  assert.deepEqual(m.held, []);
+  assert.match(ctx.lines.join('\n'), /looking at them again this round \(look 2; 0 merged so far\)/);
+  // Merged at the head tested here, the caught-up one.
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '21', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
+
+  // With checks on GitHub, it waits for them at the next round: no second look.
+  const ci = moved('looks-ci');
+  const ciOrigin = path.join(ci.dir, 'origin.git');
+  const green = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }];
+  const r2 = fake(() => {
+    const at = sh(ciOrigin, 'rev-parse', 'refs/heads/claude/feature');
+    return [{ ...listed(green)()[0], headRefOid: at, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }];
+  });
+  const e2 = employee(ci.checkout, { fill: '' });
+  const ctx2 = ctxFor({ employees: [e2], workRoot: path.join(ci.dir, 'work'), run: r2.run, neutralDir: ci.dir });
+  ctx2.settings.catchUp = true;
+  const [m2] = await merge(ctx2, [e2], { yes: true, team: true });
+  assert.match(m2.message, /#21 caught up/);
+  assert.deepEqual(m2.merged, []);
+  assert.doesNotMatch(ctx2.lines.join('\n'), /looking at them again/);
+});
+
 // The Steward's own kit PRs are caught up by the same rules, with their checks run here before the push; one that
 // conflicts beyond its versions is closed, and the next round's rollout bumps again from the branch's head.
 /** moved()'s PR, as a kit PR of the Steward's (Reeve#39's case: a team PR took its version on main). */
@@ -397,4 +442,15 @@ test('a PR that leaves the kit alone carries no kit version, so it claims none',
   assert.equal(c.done, true, c.note);
   assert.equal(c.version, '0.4.2');
   assert.equal(c.kitVersion, undefined);
+});
+
+test('the round looks at a repository again while a look can merge more: a PR caught up to test here, or one waiting on a merge just made', async () => {
+  const { lookAgainAfter, WORKING_OUT } = await import('../src/stages/merge.ts');
+  const held = (why: string, draft = false) => [{ number: 2, url: '', title: 't', why, draft }];
+  assert.equal(lookAgainAfter({ merged: 0, held: [], testedHere: true }), true, 'caught up a PR it tests itself');
+  assert.equal(lookAgainAfter({ merged: 1, held: held(WORKING_OUT), testedHere: false }), true, 'GitHub working one out after the merge');
+  assert.equal(lookAgainAfter({ merged: 1, held: held('stacked on #1 (claude/a): once #1 has merged, it is pointed at main and joins the line'), testedHere: false }), true);
+  assert.equal(lookAgainAfter({ merged: 0, held: held(WORKING_OUT), testedHere: false }), false, 'nothing merged: nothing changed for it');
+  assert.equal(lookAgainAfter({ merged: 1, held: held('checks failing'), testedHere: false }), false);
+  assert.equal(lookAgainAfter({ merged: 1, held: held(WORKING_OUT, true), testedHere: false }), false, 'a draft waits anyway');
 });
