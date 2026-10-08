@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.19
+
+**A pull request built on another one no longer gets stuck once that one has merged.**
+
+### What changed
+
+- When a pull request is built on another one's branch (stacked), it waits for that one, and the day's report now says so: "stacked on #N". Once #N has merged, the Steward points the stacked pull request at the main branch itself, leaves a comment on it saying so, and merges it in its turn like any other. Before, it waited for ever: the Steward keeps your branch after merging your pull request, so GitHub never moved what was stacked on it.
+- This happens only in repositories whose pull requests you've let the Steward merge, and never to a pull request from someone outside your team.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.17
 
 **A draft near the front of the merge line gets a heads-up, so it can be ready before it holds anyone up.**

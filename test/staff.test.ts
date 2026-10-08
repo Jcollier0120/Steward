@@ -224,7 +224,7 @@ test("merge --team takes the team's PRs as well, to any employee, and leaves the
 
   const look = runner(script);
   const listed = await mergeOne(ctx(look.run), e, { yes: false, team: true });
-  assert.match(listed.message, /^#11 \(claude\/infallible-tesla-96fcf9, Jcollier0120's; .*\) would be merged; #30 \(steward\/kit-1\.0\.1; .*\) would be merged; #12 .* waits: it merges into claude\/infallible-tesla-96fcf9, not main \(merge --yes --team merges them\)$/);
+  assert.match(listed.message, /^#11 \(claude\/infallible-tesla-96fcf9, Jcollier0120's; .*\) would be merged; #30 \(steward\/kit-1\.0\.1; .*\) would be merged; #12 .* waits: stacked on #11 \(claude\/infallible-tesla-96fcf9\): once #11 has merged, it is pointed at main and joins the line \(merge --yes --team merges them\)$/);
   assert.doesNotMatch(listed.message, /#13/, "a stranger's PR isn't even listed");
 
   const go = runner(script);
@@ -248,6 +248,45 @@ test("merge --team takes the team's PRs as well, to any employee, and leaves the
   const none = runner(script);
   await mergeOne(ctx(none.run, []), e, { yes: true, team: true });
   assert.deepEqual(none.gh.filter((a) => a[1] === 'merge').map((a) => a[2]), ['30']);
+});
+
+test("a team PR stacked on a branch whose PR has merged is pointed at the employee's branch, with a comment, and joins the line; one stacked on an open PR, or on a branch that never merged, waits", async () => {
+  const f = fakeEmployee(path.join(tmp, 'stacked-prs'));
+  const prs = [
+    // Its base's PR (#40, head claude/first) merged into main without the branch being deleted: Reeve#105's case.
+    pr({ number: 41, headRefName: 'claude/second', baseRefName: 'claude/first' }),
+    // Stacked on #42, still open.
+    pr({ number: 42, headRefName: 'claude/third', baseRefName: 'main', isDraft: true }),
+    pr({ number: 43, headRefName: 'claude/fourth', baseRefName: 'claude/third' }),
+    // On a branch whose PR merged elsewhere, not into main: left alone.
+    pr({ number: 44, headRefName: 'claude/fifth', baseRefName: 'claude/elsewhere' }),
+    // A stranger's from a fork is never touched.
+    pr({ number: 45, headRefName: 'patch-2', baseRefName: 'claude/first', author: stranger, isCrossRepository: true }),
+  ];
+  const merged: Record<string, unknown[]> = { 'claude/first': [{ number: 40, baseRefName: 'main' }], 'claude/elsewhere': [{ number: 39, baseRefName: 'claude/other' }] };
+  const script = (args: string[]) => {
+    if (args[1] === 'list') return args.includes('merged') ? ok(merged[args[args.indexOf('--head') + 1]] ?? []) : ok(prs);
+    if (args[1] === 'edit' || args[1] === 'comment' || args[1] === 'merge') return ok('');
+    return undefined;
+  };
+  const e = employee(f.checkout, { repo: 'Jcollier0120/Reeve' });
+  const go = runner(script);
+  const ctx = ctxFor({ employees: [e], workRoot: tmp, run: go.run, neutralDir: tmp });
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.deepEqual(go.gh.filter((a) => a[1] === 'edit'), [['pr', 'edit', '41', '--repo', 'Jcollier0120/Reeve', '--base', 'main']]);
+  const comments = go.gh.filter((a) => a[1] === 'comment');
+  assert.deepEqual(comments.map((a) => a[2]), ['41']);
+  assert.match(comments[0].at(-1)!, /pointed this pull request at `main`: it was stacked on `claude\/first`, whose #40 has merged into `main`/);
+  assert.match(ctx.lines.join('\n'), /#41: pointed at main: it was stacked on claude\/first, whose #40 has merged/);
+  // Pointed at main, it waits a round while GitHub works out whether it merges: never merged in the same round.
+  assert.ok(!go.gh.some((a) => a[1] === 'merge' && a[2] === '41'));
+  assert.match(r.message, /#41 .* waits: GitHub is still working out whether it merges/);
+  assert.match(r.message, /#43 .* waits: stacked on #42 \(claude\/third\)/);
+  assert.match(r.message, /#44 .* waits: it merges into claude\/elsewhere, not main/);
+  // Looking, not acting: nothing is retargeted.
+  const look = runner(script);
+  await mergeOne(ctxFor({ employees: [e], workRoot: tmp, run: look.run, neutralDir: tmp }), e, { yes: false, team: true });
+  assert.ok(!look.gh.some((a) => a[1] === 'edit'));
 });
 
 test('release takes an employee whose branch has the kit and an unreleased version, and says why for the others', () => {
