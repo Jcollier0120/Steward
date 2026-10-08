@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.17
+
+**A draft near the front of the merge line gets a heads-up, so it can be ready before it holds anyone up.**
+
+### What's new
+
+- After each round, the Steward looks for drafts near the front of a repository's line (within the first three) or already holding back pull requests that are ready. It leaves one comment on each, saying where it stands and what waits on it, and a second only if it then starts holding ready pull requests back.
+- When the draft is one of the Wright's, the Bailiff is woken to review it now instead of at its next round. The Steward's version queues list these drafts first for the Bailiff, which reviews them ahead of the rest once it is updated too.
+- Other drafts are their author's: the comment asks to mark it ready when done, or close it, in which case its version is skipped and the next in line goes on.
+- This happens only in repositories whose pull requests you've let the Steward merge.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Bailiff reviews the coming drafts first once it is updated as well; until then it is still woken for them.
+
 ## 0.27.16
 
 **Draft pull requests hold their place in the merge order.**

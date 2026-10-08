@@ -31,6 +31,49 @@ export interface QueuedPr {
   why: string | null;
   /** The commit its version was read at. */
   head: string;
+  /** A draft, which holds its place in line: the PRs above it wait until it is marked ready and merges. */
+  draft?: boolean;
+  /** One of the Wright's drafts (labelled wright), which the Bailiff reviews. */
+  wright?: boolean;
+}
+
+/**
+ * A draft coming up in a version queue: near the front of the line, or already holding ready PRs back. Its reviewer
+ * (the Bailiff, for one of the Wright's) or its author is told early, so it is ready before its turn comes.
+ */
+export interface UpcomingDraft {
+  /** The queue's id (an employee's, or project:<name>). */
+  id: string;
+  name: string;
+  repo: string;
+  number: number;
+  url: string;
+  title: string;
+  version: string;
+  /** Its place in line: 0 is next. */
+  position: number;
+  /** The ready PRs above it, waiting on it. */
+  holds: number[];
+  wright: boolean;
+  head: string;
+}
+
+/** How near the front a draft is told it is coming up: within the first three. */
+export const UPCOMING_WITHIN = 3;
+
+/** The drafts coming up in the queues: within UPCOMING_WITHIN of the front, or holding a ready PR back. Front first. Pure. */
+export function upcomingDrafts(repos: VersionQueue[]): UpcomingDraft[] {
+  const out: UpcomingDraft[] = [];
+  for (const r of repos) {
+    if (!r.repo) continue;
+    r.queue.forEach((q, position) => {
+      if (!q.draft) return;
+      const holds = r.queue.slice(position + 1).filter((x) => x.ready).map((x) => x.number);
+      if (position >= UPCOMING_WITHIN && !holds.length) return;
+      out.push({ id: r.id, name: r.name, repo: r.repo!, number: q.number, url: q.url, title: q.title, version: q.version, position, holds, wright: !!q.wright, head: q.head });
+    });
+  }
+  return out.sort((a, b) => a.position - b.position || b.holds.length - a.holds.length || a.repo.localeCompare(b.repo) || a.number - b.number);
 }
 
 export interface VersionQueue {
@@ -59,6 +102,8 @@ export interface VersionQueue {
 export interface VersionQueues {
   at: string;
   repos: VersionQueue[];
+  /** The drafts coming up (upcomingDrafts), front first: the Bailiff reviews these before the rest. */
+  upcoming?: UpcomingDraft[];
 }
 
 export const versionQueuesFile = () => dataFile('version-queues.json');
@@ -153,7 +198,7 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
     }
     if (!sets || compareVersions(sets, v.version) <= 0) continue;
     const why = holdReason(pr, t.branch);
-    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid });
+    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid, draft: pr.draft, wright: pr.labels.includes('wright') });
   }
   queue.sort((a, b) => compareVersions(a.version, b.version) || a.number - b.number);
   const ready = queue.filter((q) => q.ready);
@@ -183,7 +228,7 @@ export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]
       if (kept) repos.push(kept);
     }
   }
-  const out = { at, repos };
+  const out: VersionQueues = { at, repos, upcoming: upcomingDrafts(repos) };
   writeJson(versionQueuesFile(), out);
   return out;
 }
