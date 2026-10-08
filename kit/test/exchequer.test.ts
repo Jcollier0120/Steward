@@ -194,16 +194,14 @@ test('no publisher key: a plain note, and nothing asked of the Exchequer', async
   }
 });
 
-test('Heiward and Manor are never published there, nor an agent the Exchequer does not list', async () => {
+test('Heiward is never published there, nor an agent the Exchequer does not list (since kit 2.37.0 Manor is)', async () => {
   const x = await fakeExchequer();
   try {
-    assert.deepEqual(NEVER_SOLD, ['manor', 'heiward']);
-    for (const id of ['heiward', 'manor']) {
-      const out = await run(release(id, '1.7.2'), { env: { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY }, home: homeWith(KEY) });
-      assert.deepEqual([out.ok, out.outcome], [true, 'not-sold']);
-      assert.equal(out.line, `The Exchequer: ${id} isn't sold there, so ${id}-v1.7.2 is on GitHub alone.`);
-    }
-    assert.equal(x.seen.length, 0, 'not even asked: Heiward is free, and Manor updates from GitHub');
+    assert.deepEqual(NEVER_SOLD, ['heiward']);
+    const out0 = await run(release('heiward', '1.7.2'), { env: { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY }, home: homeWith(KEY) });
+    assert.deepEqual([out0.ok, out0.outcome], [true, 'not-sold']);
+    assert.equal(out0.line, "The Exchequer: heiward isn't sold there, so heiward-v1.7.2 is on GitHub alone.");
+    assert.equal(x.seen.length, 0, 'not even asked: Heiward is free, AGPL and public');
 
     const out = await run(release('stranger', '0.1.0'), { env: { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY }, home: homeWith(KEY) });
     assert.deepEqual([out.ok, out.outcome], [true, 'not-sold']);

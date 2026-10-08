@@ -15,6 +15,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
 
+## 0.27.9
+
+**The kit it hands out publishes nothing of Castellan's on GitHub but Heiward.**
+
+### What changed
+
+- This brings kit 2.37.0. Every agent's release now goes to Castellan's release service and to its own repository, never to the public releases repository. Agents held back from sale are included. Heiward is the exception and is still published on GitHub. A release the release service doesn't take now fails, with a line saying how to finish it, instead of going to GitHub.
+- Manor can now be published to the release service.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 ## 0.27.8
 
 **It hands out kit 2.36.2: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**

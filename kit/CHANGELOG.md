@@ -13,6 +13,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 Nothing: it updates itself as usual.
 
+## 2.37.0
+
+**Nothing of Castellan's but Heiward is published on GitHub.** Castellan now comes only from castellan-software.com (Manor 0.16.0; Manor's docs/SELLING.md, "Getting Castellan"), and Manor updates itself, and the staff held back from sale, from the Exchequer.
+- **node/release.ts: `publishTo`**: an agent of Castellan's (one with a releases repository) other than Heiward goes to the Exchequer, then to its own repository as `v<version>`, never to the public releases repository. That holds whether the Exchequer sells it or it's held back from sale: `forSale` no longer decides where a release goes. When the Exchequer doesn't take it, the release now fails (exit 1), with a line saying `npm run release -- --exchequer` finishes it from the agent's own repository. Before, it fell back to the public releases repository.
+- **Heiward**, free, AGPL and public, still goes to the releases repository and its own, as before. Anyone else's agent (no releases repository) goes to its own repository and then the Exchequer, as before.
+- **node/exchequer.ts: `NEVER_SOLD`** is `['heiward']`: Manor is published to the Exchequer now. Manor's own release tool calls `publishToExchequer` for it.
+- **What an agent must do:** nothing. Its next release goes to the Exchequer and its own repository.
+- **Its tests:** kit/test/release-for-sale.test.ts (where each release goes) and kit/test/exchequer.test.ts (`NEVER_SOLD`).
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor 0.16.0 needs this kit to publish itself to the Exchequer.
 ## 2.36.2
 
 **The Thatcher, the Reckoner, the Weigher and the Shepherd have their own title-bar scenes, and say where their work runs.**
