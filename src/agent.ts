@@ -22,6 +22,7 @@ import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { githubReady, loadScm } from './scm.ts';
+import { loadVersionQueues } from './version-queue.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -207,6 +208,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       // The versions claimed up front and not yet landed (claims.ts): claim one with cli.ts claim-version.
       '/api/versions': () => ({ json: { claims: loadClaims(), claim: 'node %USERPROFILE%\\.steward\\app\\src\\cli.ts claim-version <employee> --branch <b> --for "<what>"' } }),
       '/api/last-stage': () => ({ json: loadLastStage() }),
+      // Each repository's version on its branch and the PR versions queued above it, lowest first (version-queue.ts): Manor's.
+      '/api/version-queues': () => ({ json: loadVersionQueues() }),
       // The commits whose tests passed here, the last 20 of each employee's (tested.ts): the Surveyor's, for its daily runs.
       '/api/tested': () => ({ json: testedView(loadSettings()) }),
       // What needs the person (alarms.ts): Manor shows the open ones that aren't dismissed.

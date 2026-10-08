@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.15
+
+**The Steward tells Manor where each repository's version stands, and which versions are lined up to merge next.**
+
+### What's new
+
+- After each round, the Steward notes the version on each repository's main branch and the versions its open pull requests bring, lowest first: the order it merges them in. It notes the version it is working on next (the lowest in line) and the latest one that is ready to merge, and updates both as each pull request merges. Manor shows them.
+- This covers Manor's non-employee projects too, not just the agents. The Steward only reads them: it still never merges, releases or changes one. A project that names no version files has its version read from its package.json or VERSION file when it has one.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.14
 
 **Pull requests merge in version order, and a new kit held back by one agent goes ahead on its own once that agent is fixed.**
