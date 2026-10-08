@@ -4,9 +4,9 @@
  *
  *   npm run release                  artifacts\<id>\<Name, no spaces>-<version>.zip and artifacts\<id>\SHA256SUMS.txt
  *   npm run release -- --install     builds it, then installs it on this PC (node <unpacked>\src\cli.ts install)
- *   npm run release -- --publish     builds it, then publishes it: v<version> in the agent's own repository, and
- *                                    <id>-v<version> in the releases repository too when there is one (releasesRepo)
- *                                    and the Exchequer doesn't sell the agent (publishTo)
+ *   npm run release -- --publish     builds it, then publishes it: v<version> in the agent's own repository, and for
+ *                                    Castellan's own agents (a releases repository) the Exchequer; Heiward alone
+ *                                    goes to the public releases repository (publishTo)
  *   npm run release -- --readable    builds it without minifying, to look into on this PC; it can't be published
  *   npm run release -- --exchequer   publishes the release already on GitHub (the releases repository's, else the
  *                                    agent's own), at package.json's version, to the Exchequer from GitHub's own
@@ -18,13 +18,11 @@
  * README stays out: it's for the repository. The public repository holds the releases alone, so any PC downloads
  * them with no sign-in; the agent's own repository keeps them too, while Manors that look there are about.
  *
- * --publish also publishes the same files to the Exchequer, Castellan's release service (exchequer.ts), when it serves
- * the agent and this PC has the publisher's key. That step never fails the release: GitHub's stands, and the line it
- * prints says what happened (--exchequer finishes it). An agent the Exchequer sells (its agents list says `forSale`,
- * kit 2.35.0) goes to the Exchequer first and not to the public releases repository, unless the Exchequer doesn't
- * take it; one it doesn't sell, or when it can't say, goes to GitHub as before (publishTo). A release of Castellan's
- * (one with a releases repository) is published only where the Exchequer's publisher key is (kit 2.36.0): on any other
- * PC it publishes nothing, so a staff release never reaches GitHub without going through the Exchequer.
+ * --publish also publishes the same files to the Exchequer, Castellan's release service (exchequer.ts). Since kit
+ * 2.37.0 every agent of Castellan's (one with a releases repository) but Heiward goes to the Exchequer and its own
+ * repository, never the public releases repository, whether it's for sale or held back from sale; when the Exchequer
+ * doesn't take it, the release fails, and --exchequer finishes it from the agent's own repository. Such a release is
+ * published only where the Exchequer's publisher key is (kit 2.36.0): on any other PC it publishes nothing.
  *
  * An agent that announces itself to every Manor (Manor's src/announced.ts) has manor-agent.json at its root: its
  * entry as Manor's staff.json has it, and the roles it brings. The release copies it beside the zip, lists it in
@@ -53,7 +51,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
-import { NEVER_SOLD, publisherKey, publishToExchequer, reachedExchequer, saleOf, type ExchequerOutcome, type Sale } from './exchequer.ts';
+import { NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
@@ -326,9 +324,8 @@ function released(gh: string, tag: string, repo: string): 'there' | 'none' | { e
 
 /**
  * Publishes a built release from a clean, pushed HEAD, with the zip and SHA256SUMS.txt (and manor-agent.json, when
- * there is one): as v<version> in the agent's own repository; as <id>-v<version> in the releases repository too, when
- * there is one (releasesRepo: Castellan's own agents) and the Exchequer doesn't sell the agent; and to the Exchequer.
- * publishTo says where, and in what order.
+ * there is one): as v<version> in the agent's own repository, and to the Exchequer; Heiward as <id>-v<version> in the
+ * releases repository too. publishTo says where, and in what order.
  */
 async function publish(b: Built): Promise<number> {
   const { release } = b;
@@ -375,7 +372,6 @@ async function publish(b: Built): Promise<number> {
           const found = publisherKey();
           return 'missing' in found ? found.missing : null;
         },
-        sale: (id) => saleOf(id),
         exchequer: () => publishToExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets }),
         log: (line) => console.log(line),
         error: (line) => console.error(line),
@@ -394,8 +390,6 @@ export interface PublishSteps {
   create(tag: string, repo: string, own: boolean): number;
   /** Where the Exchequer's publisher key was looked for when this PC hasn't it, else null (exchequer.ts publisherKey). */
   keyMissing(): string | null;
-  /** Whether the Exchequer sells the agent (exchequer.ts saleOf). */
-  sale(id: string): Promise<Sale>;
   /** The release's files published to the Exchequer (exchequer.ts publishToExchequer). */
   exchequer(): Promise<ExchequerOutcome>;
   log(line: string): void;
@@ -403,42 +397,56 @@ export interface PublishSteps {
 }
 
 /**
- * Where a built release is published, and the exit code (GitHub's). `repo` is the agent's own repository (origin);
+ * Where a built release is published, and the exit code. `repo` is the agent's own repository (origin);
  * `releasesRepo` the public releases repository, or null (releasesRepo()).
  *
+ * - **Castellan's own agents** (a releases repository), but Heiward: since kit 2.37.0, nothing of Castellan's but
+ *   Heiward is public (Manor's docs/SELLING.md, "Getting Castellan"). Only where the Exchequer's publisher key is (kit
+ *   2.36.0: without it, nothing is published and the exit code is 1). Refused when the agent's own repository has the
+ *   version already. Then the Exchequer, from the files built, whether the agent is for sale or held back from sale;
+ *   then v<version> in the agent's own repository (the Steward knows a release by it, and `--exchequer` finishes a
+ *   publish from its files). Never the public releases repository. When the Exchequer didn't take it, the exit code is
+ *   1: Manor looks for it nowhere else, so the line says how to finish it.
+ * - **Heiward** (free, AGPL, public), with a releases repository: <id>-v<version> there (refused when it has it), then
+ *   its own repository (unless it has it from before the releases repository).
  * - **With no releases repository** (anyone else's agent built on the kit): v<version> in the agent's own repository,
- *   refused when it has it already; then the Exchequer, which takes only an agent it sells.
- * - **An agent the Exchequer sells** (kit 2.35.0: saleOf's forSale true): the Exchequer first, from the files built,
- *   and not the public releases repository; then v<version> in the agent's own (the Steward knows a release by it).
- *   Refused when the agent's own has it already. When the Exchequer doesn't take it (down, or refusing), it goes to
- *   the releases repository as before, so a release is never left out of every place Manor looks.
- * - **Any other** (not for sale, unknown to the Exchequer, or the Exchequer couldn't say): as before kit 2.35.0, the
- *   releases repository as <id>-v<version> (refused when it has it), then the agent's own (unless it has it from before
- *   the releases repository), then the Exchequer too, so one held back from sale is there already when it goes on sale.
- *
- * Whatever happens at the Exchequer, the exit code is GitHub's: it never fails a release that GitHub took.
- *
- * A release of Castellan's (a releases repository) of any agent but Manor and Heiward is published only on a PC with
- * the Exchequer's publisher key (kit 2.36.0): without it, nothing is published and the exit code is 1. The PC that
- * releases Castellan has the key. Anywhere else (another PC's Steward, one from before 0.19.0 that still releases to
- * the releases repository, a release run by hand) a staff release would reach GitHub, the public releases repository
- * among it, and never the Exchequer.
+ *   refused when it has it already; then the Exchequer, which takes only an agent it lists. The exit code is GitHub's.
  */
 export async function publishTo(r: { id: string; version: string; repo: string; releasesRepo: string | null }, s: PublishSteps): Promise<number> {
   const tag = releaseTag(r.id, r.version);
   const ownTag = `v${r.version}`;
   const RAISE = 'Raise the version in package.json and src/app.ts first. (To publish that release to the Exchequer alone: npm run release -- --exchequer.)';
-  if (r.releasesRepo && !NEVER_SOLD.includes(r.id)) {
+  const say = (out: ExchequerOutcome) => (out.ok ? s.log : s.error)(out.line);
+  const castellans = !!r.releasesRepo && !NEVER_SOLD.includes(r.id);
+  if (castellans) {
     const missing = s.keyMissing();
     if (missing) {
       s.error(`Not published: ${tag} is Castellan's, and its releases go through the Exchequer, but this PC has no publisher key (${missing}, or EXCHEQUER_PUBLISHER_KEY). Only the PC that releases Castellan publishes them.`);
       return 1;
     }
   }
-  const sale = r.releasesRepo ? await s.sale(r.id) : null;
-  if (sale) s.log(sale.line);
-  const sold = sale?.forSale === true;
-  let toReleases = r.releasesRepo && !sold ? r.releasesRepo : null;
+  const own = s.released(ownTag, r.repo);
+  if (typeof own === 'object') {
+    s.error(`Not published: couldn't ask GitHub about ${ownTag} in ${r.repo}: ${own.error}`);
+    return 1;
+  }
+  if (castellans) {
+    if (own === 'there') {
+      s.error(`Not published: ${r.repo} already has ${ownTag}. ${RAISE}`);
+      return 1;
+    }
+    const out = await s.exchequer();
+    say(out);
+    const code = s.create(ownTag, r.repo, true);
+    if (!reachedExchequer(out)) {
+      s.error(`${NOT_PUBLISHED} ${tag} is in ${r.repo} only, and Manor looks for it at the Exchequer alone: npm run release -- --exchequer finishes it.`);
+      return 1;
+    }
+    s.log(`${tag} isn't published to ${r.releasesRepo}: the Exchequer serves it, and nothing of Castellan's but Heiward is public.`);
+    return code;
+  }
+  // Heiward, public: the releases repository, then its own. Anyone else's agent: its own repository.
+  const toReleases = r.releasesRepo;
   if (toReleases) {
     const there = s.released(tag, toReleases);
     if (there === 'there') {
@@ -449,40 +457,20 @@ export async function publishTo(r: { id: string; version: string; repo: string; 
       s.error(`Not published: couldn't ask GitHub about ${tag} in ${toReleases}: ${there.error}`);
       return 1;
     }
-  }
-  const own = s.released(ownTag, r.repo);
-  if (typeof own === 'object') {
-    s.error(`Not published: couldn't ask GitHub about ${ownTag} in ${r.repo}: ${own.error}`);
-    return 1;
-  }
-  if (!toReleases && own === 'there') {
-    s.error(`Not published: ${r.repo} already has ${ownTag}. ${RAISE}`);
-    return 1;
-  }
-  const say = (out: ExchequerOutcome) => (out.ok ? s.log : s.error)(out.line);
-  let exchequerAsked = false;
-  if (sold && r.releasesRepo) {
-    const out = await s.exchequer();
-    say(out);
-    exchequerAsked = true;
-    if (reachedExchequer(out)) s.log(`${tag} isn't published to ${r.releasesRepo}: the Exchequer serves it.`);
-    else {
-      toReleases = r.releasesRepo;
-      s.log(`So ${tag} goes to ${toReleases} as before, where every Manor finds it.`);
-    }
-  }
-  if (toReleases) {
     const pub = s.create(tag, toReleases, false);
     if (pub !== 0) return pub;
+  } else if (own === 'there') {
+    s.error(`Not published: ${r.repo} already has ${ownTag}. ${RAISE}`);
+    return 1;
   }
   let code: number;
   if (toReleases && own === 'there') {
     s.log(`${r.repo} has ${ownTag} already (released before the releases repository): published in ${toReleases} alone.`);
     code = 0;
   } else code = s.create(ownTag, r.repo, true);
-  // The Exchequer too, with the same files, once GitHub has them: the releases repository did (or it returned above),
-  // or with none, the agent's own. Whatever happens there, GitHub's release stands and the exit code is GitHub's.
-  if (!exchequerAsked && (toReleases || code === 0)) say(await s.exchequer());
+  // The Exchequer too, once GitHub has the release: it takes only an agent it lists (never Heiward). Whatever happens
+  // there, GitHub's release stands and the exit code is GitHub's.
+  if (toReleases || code === 0) say(await s.exchequer());
   return code;
 }
 

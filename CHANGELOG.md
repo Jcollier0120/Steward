@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.9
+
+**The kit it hands out publishes nothing of Castellan's on GitHub but Heiward.**
+
+### What changed
+
+- This brings kit 2.37.0. Every agent's release now goes to Castellan's release service and to its own repository, never to the public releases repository. Agents held back from sale are included. Heiward is the exception and is still published on GitHub. A release the release service doesn't take now fails, with a line saying how to finish it, instead of going to GitHub.
+- Manor can now be published to the release service.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.7
 
 **An agent's release notes for a new kit never name a repository, and a kit is tried with the notes its rollout will write.**
