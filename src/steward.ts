@@ -19,7 +19,7 @@ import { keepVersionQueues } from './version-queue.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
-import { merge } from './stages/merge.ts';
+import { merge, waitsBriefly } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { pruneClaims, shareClaims } from './claims.ts';
@@ -424,6 +424,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const { merged: _m, held: prs, ...line } = r;
             out.results.push(line);
             if (prs.length) held.push({ employee: self, prs });
+          }
+          // A PR that waits only on something settling within minutes: the next round comes sooner (agent.ts).
+          const brief = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why)).map((p) => `${h.employee.name} #${p.number}`));
+          if (round && brief.length) {
+            out.soon = true;
+            log(`the next round comes sooner: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} only on checks running, a head just caught up, or GitHub working out whether it merges`);
           }
           const done = merged.filter((r) => r.merged.length).map((r) => r.id);
           if (yes && done.length) {

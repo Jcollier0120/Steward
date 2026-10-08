@@ -50,6 +50,11 @@ export interface StageResult {
   offline?: boolean;
   /** A round that asked GitHub nothing and only kept the staff's pages up (tend.ts): no repositories here, or Settings said so. */
   tendOnly?: boolean;
+  /**
+   * A round that left a PR waiting only on something that settles itself within minutes (merge.ts's waitsBriefly): its
+   * checks running, at a head just caught up, or GitHub working out whether it merges. The next round comes sooner (agent.ts).
+   */
+  soon?: boolean;
   results: EmployeeResult[];
   log: string[];
 }
