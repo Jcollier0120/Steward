@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
+import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
@@ -125,7 +126,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // Its rounds too (schedule.ts), for Manor's employee cards: the last to end, the next due, one under way. `tour`:
     // whether its page has a tour at #/tour (react-page.ts's hasTour()), so Manor's hire flow offers it only where it works. `needsSettings`:
     // the required settings not filled in yet (required.ts), so Manor can say the new hire waits for them; null when none.
-    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), ...opts.ping?.() } }),
+    // `developer`: the manor's Developer options as this agent reads them now (developer.ts), so an open page that sees
+    // it change draws itself again, with or without its developer content.
+    '/api/ping': () => ({ json: { app: APP.id, name: APP.name, version: APP.version, pid: process.pid, ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer: isDeveloper(), ...opts.ping?.() } }),
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
     '/manor-icon.svg': async () => ({ body: await manorIcon(), type: 'image/svg+xml' }),

@@ -128,7 +128,9 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<section id="settings-view"><a class="back-link" href="#\/">Back to /);
   assert.match(html, /<div class="card sf-panel" data-tour="settings-panel"><p class="muted">Loading the settings…<\/p><\/div>/, "the kit's React Settings form, loading");
   assert.match(html, /Where its work runs/);
-  assert.match(html, /<footer>[^<]+ · this PC only · its files are in <code>/);
+  assert.match(html, /<footer>[^<]+ · this PC only<\/footer>/, 'Developer options off (no Manor, no switch of its own): no data folder');
+  const dev = render({ shell: { ...shell, developer: true, dataDir: 'D:\\agent-data' }, body: {} });
+  assert.match(dev, /<footer>[^<]+ · this PC only · its files are in <code>D:\\agent-data<\/code><\/footer>/);
   // Room for the onboarding tour: every part of the frame named, and the tour drawn over the page only at #/tour.
   for (const name of ['titlebar', 'status', 'settings', 'theme', 'action', 'settings-panel', 'work']) assert.match(html, new RegExp(`data-tour="${name}"`), name);
   assert.doesNotMatch(html, /tour-layer/);
@@ -150,4 +152,49 @@ test("/api/ping's tour: a React page with an onboarding, in a checkout or a rele
   assert.equal(hasTour(agentRoot({ [PAGE_BUNDLE]: '' }), o), true, 'a release');
   assert.equal(hasTour(agentRoot({ [PAGE_ENTRY]: '' }), null), false, 'no onboarding');
   assert.equal(hasTour(agentRoot({ 'src/app.ts': '' }), o), false, 'a page built in strings: no #/tour');
+});
+
+test("the shell carries the manor's Developer options: off, no data folder and the work section in plain words; Manor's on, both", () => {
+  const off = pageShell();
+  assert.equal(off.developer, false, 'no Manor and no switch of its own: off');
+  assert.equal(off.dataDir, '', 'a path is developer content: not even sent');
+  assert.doesNotMatch(off.work, /Reeve/);
+  const manor = path.join(home, 'manor-dev');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ developerOptions: true }));
+  const was = process.env.MANOR_HOME;
+  process.env.MANOR_HOME = manor;
+  try {
+    const on = pageShell();
+    assert.equal(on.developer, true);
+    assert.ok(on.dataDir.length > 0, 'the data folder, for the footer');
+    writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ developerOptions: false }));
+    assert.equal(pageShell().developer, false, 'flipped in Manor: the next page has it, with no restart');
+  } finally {
+    process.env.MANOR_HOME = was;
+  }
+});
+
+test('useDeveloper() and <DeveloperOnly>: what the page hides follows the shell, off unless it says on', async () => {
+  const shell = pageShell();
+  const { render, bare } = await bundleForNode<{ render: (d: unknown) => string; bare: () => string }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { Page, DeveloperOnly, useDeveloper } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+     const Says = () => <p className="says">{useDeveloper() ? 'developer' : 'everyone'}</p>;
+     const body = <><Says /><DeveloperOnly fallback={<p className="plain">It tries again at the next round.</p>}><pre className="log">exit code 1</pre></DeveloperOnly></>;
+     export const render = (data) => renderToStaticMarkup(<Page data={data} reload={() => {}}>{body}</Page>);
+     export const bare = () => renderToStaticMarkup(body);`,
+    { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
+  );
+  const off = render({ shell: { ...shell, developer: false }, body: {} });
+  assert.match(off, /<p class="says">everyone<\/p>/);
+  assert.match(off, /<p class="plain">It tries again at the next round\.<\/p>/);
+  assert.doesNotMatch(off, /exit code/);
+  const on = render({ shell: { ...shell, developer: true }, body: {} });
+  assert.match(on, /<p class="says">developer<\/p>/);
+  assert.match(on, /<pre class="log">exit code 1<\/pre>/);
+  assert.doesNotMatch(on, /class="plain"/);
+  const { developer: _, ...older } = shell;
+  assert.doesNotMatch(render({ shell: older, body: {} }), /exit code/, "a shell that doesn't say: off");
+  assert.doesNotMatch(bare(), /exit code/, 'outside a <Page>: off');
 });

@@ -26,6 +26,11 @@ export interface PageShell {
   manor: { name: string; url: string; theme: string; settingsUrl: string } | null;
   themes: ShellTheme[];
   themeKey: string;
+  /**
+   * The manor's Developer options (the node part's developer.ts): whether the page may show developer content
+   * (useDeveloper(), <DeveloperOnly>). Off, `work` is in plain words and `dataDir` is empty. Missing: off.
+   */
+  developer?: boolean;
   work: string;
   dataDir: string;
   /** Its onboarding, drawn as the page's tour at #/tour (tour.tsx); null for none. */
@@ -104,14 +109,15 @@ export function usePageData<Body>(): { data: PageData<Body>; reload: () => Promi
     return () => clearInterval(t);
   }, [every, reload]);
   // A round that starts or ends by itself: news, whatever the page is doing (nothing here reloads it, so typing,
-  // Settings and the Theme menu are safe).
+  // Settings and the Theme menu are safe). So is the manor's Developer options flipped in Manor (ping's `developer`).
   useEffect(() => {
     let seen: string | null = null;
     const look = async () => {
       try {
         const r = await fetch('/api/ping', { cache: 'no-store' });
         if (!r.ok) return;
-        const now = roundState(await r.json());
+        const p = await r.json();
+        const now = `${roundState(p)}${p.developer === undefined ? '' : ` ${!!p.developer}`}`;
         if (seen !== null && now !== seen) void reload();
         seen = now;
       } catch {

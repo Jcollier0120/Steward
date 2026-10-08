@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
+import { isDeveloper } from './developer.ts';
 import { readJson, writeJson } from './store.ts';
 
 /**
@@ -413,8 +414,20 @@ export function readSettings<S extends object>(spec: SettingsSpec<S>): S {
 
 const brokenNote = (file: string) => `${file} isn't a JSON object, so the defaults are in use. Saving here replaces it; the old file is kept as settings.json.broken.`;
 
-/** GET /api/settings: the schema, the values in use, the defaults, and anything worth a word. */
-export async function settingsReply<S extends object>(spec: SettingsSpec<S>) {
+/**
+ * What someone without the manor's Developer options (developer.ts) is told in place of settings.json's problems:
+ * the problems themselves name the file, its keys and their JSON, which are a developer's.
+ */
+export const PLAIN_PROBLEM = "Some of the saved settings couldn't be used as they were, so their defaults are in use. Saving here puts that right.";
+/** And in place of the agent's own rules' words when a save is refused for them. */
+export const PLAIN_REFUSAL = "These settings can't be used together as they are. Check the ones you changed.";
+
+/**
+ * GET /api/settings: the schema, the values in use, the defaults, and anything worth a word. With the manor's Developer
+ * options off (`developer`, read now unless given), `file` is empty and `problems` says them in one plain line
+ * (PLAIN_PROBLEM): a path and settings.json's own words are developer content (spec/DEVELOPER-OPTIONS.md).
+ */
+export async function settingsReply<S extends object>(spec: SettingsSpec<S>, developer = isDeveloper()) {
   const file = spec.file();
   const { raw, broken } = readRaw(file);
   const { settings, problems } = spec.normalize(raw ?? {});
@@ -422,14 +435,15 @@ export async function settingsReply<S extends object>(spec: SettingsSpec<S>) {
   const out: Out = { errors: {}, warnings: {} };
   for (const f of spec.schema) if (!f.readOnly) cleanValue(f, (settings as any)[f.key], f.key, out);
   const extra = await spec.check?.(settings, [], raw ?? {});
-  return { schema: spec.schema, values: settings, defaults: spec.defaults, problems, warnings: { ...out.warnings, ...extra?.warnings }, file, ...(spec.usedFrom ? { usedFrom: spec.usedFrom } : {}) };
+  const said = developer ? problems : problems.length ? [PLAIN_PROBLEM] : [];
+  return { schema: spec.schema, values: settings, defaults: spec.defaults, problems: said, warnings: { ...out.warnings, ...extra?.warnings }, file: developer ? file : '', ...(spec.usedFrom ? { usedFrom: spec.usedFrom } : {}) };
 }
 
 /**
  * POST /api/settings {values}: the changed settings, checked, then written. A refusal is 400 with
  * {error, errors}, where `errors` has a message per field path, and the file is left as it was.
  */
-export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown): Promise<{ json: unknown; status?: number }> {
+export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown, developer?: boolean): Promise<{ json: unknown; status?: number }> {
   const changes = isObject(body) ? body.values : undefined;
   if (!isObject(changes)) return { json: { ok: false, error: 'Send {"values": {...}} with the settings to change.', errors: {} }, status: 400 };
   const out: Out = { errors: {}, warnings: {} };
@@ -463,9 +477,10 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   Object.assign(out.errors, extra?.errors);
   Object.assign(out.warnings, extra?.warnings);
   // The agent's own rules: whatever its normalizeSettings would have to fix is refused, not fixed
-  // quietly (said for the whole form, unless the agent's check already said it beside a field).
+  // quietly (said for the whole form, unless the agent's check already said it beside a field). Its words name
+  // settings.json and its keys: only a developer reads them (developer.ts), everyone else PLAIN_REFUSAL.
   const fresh = after.problems.filter((p) => !before.problems.includes(p));
-  if (fresh.length && !Object.keys(out.errors).length) out.errors[''] = fresh.join(' ');
+  if (fresh.length && !Object.keys(out.errors).length) out.errors[''] = (developer ?? isDeveloper()) ? fresh.join(' ') : PLAIN_REFUSAL;
   if (Object.keys(out.errors).length) return refuse();
 
   // Each changed setting is written as the agent reads it; the rest of the file stays as it was.
