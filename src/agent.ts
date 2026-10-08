@@ -52,6 +52,21 @@ const ICON = readFileSync(new URL('../art/icon.svg', import.meta.url), 'utf8');
  */
 const STALE_MS = 10 * 60_000;
 
+/** The wait before a round that comes sooner: after one that left a PR waiting only on something brief (StageResult's soon). */
+export const SOON_MS = 2 * 60_000;
+/** At most this many rounds in a row come sooner; then one at Settings' interval, so checks that never end don't keep the rounds quick. */
+export const SOON_IN_A_ROW = 3;
+
+/**
+ * The wait before the next round, after one that did (`soon`) or didn't ask for it sooner, with `run` rounds in a row
+ * already sooner: SOON_MS, or null for Settings' interval (`everyMs`, when it is that short already, or after
+ * SOON_IN_A_ROW). And the rounds in a row sooner, counting this one. Pure.
+ */
+export function soonAfter(soon: boolean, run: number, everyMs: number): { sooner: number | null; run: number } {
+  if (!soon || run >= SOON_IN_A_ROW || everyMs <= SOON_MS) return { sooner: null, run: 0 };
+  return { sooner: SOON_MS, run: run + 1 };
+}
+
 /** What a stage's POST asks: the ticked employees, the kit shown on the page. */
 export function askOf(body: any): StageAsk {
   const employees = Array.isArray(body?.employees) ? body.employees.map(String).filter(Boolean).slice(0, 100) : [];
@@ -148,16 +163,22 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     return !!rounds && s.byItself && duty().onDuty && !!last && Date.now() - Date.parse(last) < 2 * s.roundMinutes * 60_000 + STALE_MS && reposHere(s);
   };
 
+  /** The wait before the next round, when the last asked for it sooner (soonAfter); null: Settings' interval. */
+  let sooner: number | null = null;
+  /** The rounds in a row that came sooner: after SOON_IN_A_ROW, one at Settings' interval (soonAfter). */
+  let soonRun = 0;
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
   // release what isn't. It passes while a stage runs here or in a terminal (the stage lock).
   const roundJob = async (full = false) => {
     if (running) return;
     running = { stage: 'round', since: new Date().toISOString() };
+    sooner = null;
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
       // doesn't merge and release by itself (it keeps the staff's pages up), it asks GitHub nothing.
       const ask: StageAsk = full ? { full } : loadSettings().byItself ? {} : { tendOnly: true };
-      await runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      const out = await runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
@@ -171,7 +192,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   const arrange = () => {
     const s = loadSettings();
     const scheduled = s.byItself || s.tend;
-    if (scheduled && !rounds) rounds = every(() => loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round' });
+    if (scheduled && !rounds) rounds = every(() => sooner ?? loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round' });
     else if (!scheduled && rounds) {
       rounds.stop();
       rounds = null;

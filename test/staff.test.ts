@@ -7,7 +7,7 @@ import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
 import { holdReason, mergeOne, mergeSelection } from '../src/stages/merge.ts';
 import { releaseDecision } from '../src/stages/release.ts';
 import { appReleasesIn, checksOf, parsePrs, readPin, staffRow, type PrInfo } from '../src/stages/staff.ts';
-import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
+import { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } from './helpers.ts';
 
 // The staff's table from gh's JSON (a stand-in runner) and a fake employee's git; which PRs merge;
 // which employees release.
@@ -231,7 +231,7 @@ test("merge --team takes the team's PRs as well, to any employee, and leaves the
   const goCtx = ctx(go.run);
   const merged = await mergeOne(goCtx, e, { yes: true, team: true });
   assert.equal(merged.outcome, 'done');
-  assert.deepEqual(go.gh.filter((a) => a[1] === 'merge'), [
+  assert.deepEqual(mergesOf(go.gh), [
     ['pr', 'merge', '11', '--repo', 'Jcollier0120/Miller', '--merge'],
     ['pr', 'merge', '30', '--repo', 'Jcollier0120/Miller', '--merge', '--delete-branch'],
   ]);

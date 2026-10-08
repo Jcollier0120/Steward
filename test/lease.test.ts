@@ -15,7 +15,7 @@ const R = await import('../src/remote-ref.ts');
 const C = await import('../src/claims.ts');
 const { runStage } = await import('../src/steward.ts');
 const { run: realRun } = await import('../src/run.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 type Settings = import('../src/settings.ts').Settings;
 type RemoteRepo = import('../src/remote-ref.ts').RemoteRepo;
 type Employee = import('../src/settings.ts').Employee;
@@ -221,7 +221,7 @@ function roundSetup(name: string) {
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
   });
   const remoteRepo: RemoteRepo = { key: 'jcollier0120/fake', url: f.origin, scratch };
-  return { f, r, sha, remoteRepo, merges: () => r.gh.filter((a) => a[1] === 'merge') };
+  return { f, r, sha, remoteRepo, merges: () => mergesOf(r.gh) };
 }
 const MERGE7 = ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'];
 

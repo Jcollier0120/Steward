@@ -42,7 +42,8 @@ import { noteMerged } from '../strangers.ts';
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
- * checks failed here before the branch moved on. The next round tests it at its new head, and merges it.
+ * checks failed here before the branch moved on. One GitHub runs no checks on is tested here at its new head and merged
+ * in the same round (mergeLooks); one with checks on GitHub, at a round once they pass.
  *
  * A team PR stacked on another's branch (its base is that PR's head, not the employee's branch) waits for that PR. Once
  * that PR has merged into the employee's branch, the stacked one is pointed at the branch itself (retargetStacked), with a
@@ -93,6 +94,18 @@ export async function askAgainWhetherMerges(ctx: Ctx, e: Employee, prs: PrInfo[]
   return answered;
 }
 
+/** Why a PR waits while its checks run. */
+export const CHECKS_RUNNING = 'checks still running';
+
+/** How a caught-up PR's hold begins (catchUpAll): it waits for its checks at its new head. */
+export const CAUGHT_UP = 'caught up by the Steward';
+
+/**
+ * Whether a PR waits only on something that settles itself within minutes, so a round soon after can merge it: its checks
+ * running, its head just caught up (checks starting there), or GitHub working out whether it merges.
+ */
+export const waitsBriefly = (why: string) => why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`);
+
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
@@ -101,7 +114,7 @@ export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return WORKING_OUT;
   if (pr.checks === 'failing') return 'checks failing';
-  if (pr.checks === 'pending') return 'checks still running';
+  if (pr.checks === 'pending') return CHECKS_RUNNING;
   if (pr.mergeState === 'BLOCKED') return 'blocked: a required review or check';
   if (pr.mergeState === 'BEHIND') return 'behind its branch, which must be up to date to merge';
   return null;
@@ -282,7 +295,15 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], b
   }
 }
 
-export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<EmployeeResult & { merged: PrInfo[]; held: Held[] }> {
+/**
+ * One look at an employee's PRs (mergeOne): what it merged and what waits, and, apart, the lines of what it did (merged,
+ * didn't merge, caught up) and of what waits, so that several looks in one round (merge) say each thing once. `again`:
+ * it caught up a PR that GitHub runs no checks on, which the Steward tests itself, so another look this round can test
+ * it at its new head and merge it, without waiting a round for checks that would never come.
+ */
+export type MergeLook = EmployeeResult & { merged: PrInfo[]; held: Held[]; did?: string[]; waits?: string[]; again?: boolean };
+
+export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
   const { run } = ctx;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
   if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [], held: [] };
@@ -427,7 +448,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
-    const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+    // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
+    const at = pr.headOid ? ['--match-head-commit', pr.headOid] : [];
+    const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...at, ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);
@@ -456,27 +479,54 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     const pr = prs.find((p) => p.number === n)!;
     if (mergedNow.has(below) && !pr.fork && (pr.whose === 'team' || isKitPr(pr))) catchable.set(n, pr);
   }
-  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : [];
+  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false };
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
-  const parts = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`), ...waits, ...caught];
+  const did = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
+  const parts = [...did, ...waits, ...caught.lines];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
-  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held };
+  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, again: caught.testedHere };
+}
+
+/** At most this many looks at one employee's PRs in a round (MergeLook's `again`): one busy repository can't hold the round for ever. */
+export const MAX_LOOKS = 5;
+
+/**
+ * An employee's PRs, looked at again in the same round while the last look caught up a PR the Steward tests itself
+ * (MergeLook's `again`): that PR is tested at its new head and merged, and the next one in the version queue, caught up
+ * in turn, goes the same way. So a repository's queue of PRs with no checks on GitHub drains in one round, where it took
+ * a round each. A PR with checks on GitHub waits for them, at the next round. At most MAX_LOOKS looks; every hold and
+ * rule of mergeOne's applies at each. One result: everything merged, done and caught up, then what waits after the last look.
+ */
+export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
+  const looks: MergeLook[] = [await mergeOne(ctx, e, o)];
+  while (o.yes && looks.at(-1)!.again && looks.length < MAX_LOOKS) {
+    ctx.log(`[${e.id}] caught up a PR it tests itself: looking at its PRs again this round (look ${looks.length + 1} of at most ${MAX_LOOKS})`);
+    looks.push(await mergeOne(ctx, e, o));
+  }
+  if (looks.length === 1) return looks[0];
+  const last = looks.at(-1)!;
+  const merged = looks.flatMap((l) => l.merged);
+  const parts = [...looks.flatMap((l) => l.did ?? []), ...(last.waits ?? [])];
+  const outcome = looks.some((l) => l.outcome === 'failed') ? 'failed' : merged.length ? 'done' : last.outcome;
+  return { ...last, outcome, message: parts.join('; ') || last.message, url: merged[0]?.url ?? last.url, merged, did: looks.flatMap((l) => l.did ?? []) };
 }
 
 /**
  * After the merges: each PR that waits only on its branch, caught up (stages/catchup.ts), lowest number first, each
  * new version then taken; a PR whose checks failed here only when its branch has moved since. Each one's hold then
- * says what happened. One line each, for the stage's result.
+ * says what happened. One line each, for the stage's result; and whether it caught up a PR GitHub runs no checks on
+ * (the Steward tests it itself, so it can be merged this round: mergeLooks).
  */
-async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<string[]> {
+async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean }> {
   for (const { pr, t } of o.failedHere) if (pr.whose === 'team' && !pr.fork) o.catchable.set(pr.number, pr);
-  if (!o.catchable.size) return [];
+  if (!o.catchable.size) return { lines: [], testedHere: false };
   const { released } = await o.lookup();
   const now = await commitOf(ctx.run, checkoutOf(e), `origin/${e.branch}`);
   for (const { pr, t } of o.failedHere) if (t.branch && t.branch === now) o.catchable.delete(pr.number);
   const merged = new Set(o.merged.map((p) => p.number));
   const taken = o.ready.filter((r) => r.sets && !merged.has(r.pr.number) && !o.catchable.has(r.pr.number)).map((r) => r.sets!);
   const lines: string[] = [];
+  let testedHere = false;
   const kitTaken: string[] = [];
   let kitReleases: string[] | null = null;
   const kitReleased = async () => (kitReleases ??= (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released);
@@ -499,6 +549,11 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     // Its branch's claims follow the versions it now carries, so no one is handed them, and its worker asking again gets them.
     if (c.done && c.version) await reclaim(e.repo, pr.head, c.version).catch(() => {});
     if (c.done && c.kitVersion) await reclaim(kitClaimKey(e.repo), pr.head, c.kitVersion).catch(() => {});
+    if (c.done) {
+      // Its branch has moved: from here on it is read afresh, not from the glance.
+      forgetGlance(ctx, e);
+      if (pr.checks === 'none') testedHere = true;
+    }
     // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
     if (c.conflicts?.length && pr.whose === 'team') {
       try {
@@ -509,12 +564,12 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       }
     }
     const h = o.held.find((x) => x.number === pr.number);
-    if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
+    if (h) h.why = c.done ? `${CAUGHT_UP} (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.
     if (h && c.closed) o.held.splice(o.held.indexOf(h), 1);
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
-  return lines;
+  return { lines, testedHere };
 }
 
 /**
@@ -548,11 +603,11 @@ export async function retargetStacked(ctx: Ctx, e: Employee, prs: PrInfo[]): Pro
   return done;
 }
 
-/** Each employee's merges, a few employees at a time (Settings' parallel), each one's PRs in order. */
-export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<(EmployeeResult & { merged: PrInfo[]; held: Held[] })[]> {
+/** Each employee's merges, a few employees at a time (Settings' parallel), each one's PRs in order, looked at again while that drains its queue (mergeLooks). */
+export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<MergeLook[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      return await mergeOne(ctx, e, o);
+      return await mergeLooks(ctx, e, o);
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       return { ...result(e, 'failed', (err as Error).message), merged: [], held: [] };

@@ -94,6 +94,9 @@ export function runner(script: GhScript = () => undefined): { run: Runner; gh: s
   return { run, gh };
 }
 
+/** The gh pr merge commands run, without the head commit each names (--match-head-commit <sha>: the fixtures' commits differ each run). */
+export const mergesOf = (gh: string[][]) => gh.filter((a) => a[1] === 'merge').map((a) => a.filter((x, i) => x !== '--match-head-commit' && a[i - 1] !== '--match-head-commit'));
+
 export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string' ? out : JSON.stringify(out), err: '' });
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
