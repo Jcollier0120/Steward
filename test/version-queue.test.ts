@@ -71,7 +71,7 @@ test("each repository's version, and the PR versions above it lowest first: an e
   assert.equal(agent.id, 'fake');
   assert.equal(agent.kind, 'agent');
   assert.equal(agent.version, '0.4.0');
-  assert.deepEqual(agent.queue.map((x) => [x.number, x.version, x.ready]), [[8, '0.4.1', false], [7, '0.4.2', true]], 'lowest first; a draft, one that sets no version and one below the branch are left out');
+  assert.deepEqual(agent.queue.map((x) => [x.number, x.version, x.ready]), [[8, '0.4.1', false], [7, '0.4.2', true], [9, '0.4.3', false]], 'lowest first, a draft holding its place; one that sets no version and one below the branch are left out');
   assert.equal(agent.queue[0].why, 'checks failing');
   assert.equal(agent.working, '0.4.1');
   assert.equal(agent.latest, '0.4.2');
@@ -87,7 +87,7 @@ test("each repository's version, and the PR versions above it lowest first: an e
   agentPrs.splice(1, 1);
   const next = await keepVersionQueues(ctx(), { projects: [project] });
   assert.equal(next.repos[0].version, '0.4.1');
-  assert.deepEqual(next.repos[0].queue.map((x) => x.number), [7]);
+  assert.deepEqual(next.repos[0].queue.map((x) => x.number), [7, 9]);
   assert.equal(next.repos[0].working, '0.4.2');
 });
 

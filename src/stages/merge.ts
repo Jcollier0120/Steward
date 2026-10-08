@@ -93,7 +93,7 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
 
 /**
  * The open PRs to the employee's branch that set a new version (above the branch's, not released, not another branch's
- * claim), by number: the queue the merges take lowest first. Drafts aren't in it: they don't ask to merge. A ready
+ * claim), by number: the queue the merges take lowest first. Drafts hold their place in it too (the owner's rule). A ready
  * team PR's version is the one its check read; every other one's is read from its head.
  */
 export async function pendingVersions(ctx: Ctx, e: Employee, prs: PrInfo[], ready: { pr: PrInfo; sets: string | null }[], lookup: Lookup): Promise<Map<number, string>> {
@@ -102,7 +102,7 @@ export async function pendingVersions(ctx: Ctx, e: Employee, prs: PrInfo[], read
   const claims = claimsOn(e.repo);
   const out = new Map<number, string>();
   for (const pr of prs) {
-    if (pr.draft || pr.base !== e.branch) continue;
+    if (pr.base !== e.branch) continue;
     let v = known.get(pr.number);
     if (v === undefined) {
       try {
@@ -288,7 +288,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // Lowest version first: of the open PRs that set a new version, only the lowest merges; each above it waits its turn.
   // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up.
   // Only where two or more could merge; where the versions can't be read, the order is the PRs' as before.
-  const queued = prs.filter((p) => !p.draft && p.base === e.branch).length > 1 && merge.length && existsSync(checkoutOf(e));
+  const queued = prs.filter((p) => p.base === e.branch).length > 1 && merge.length && existsSync(checkoutOf(e));
   const pending = queued
     ? await pendingVersions(ctx, e, prs, ready, lookup).catch((err) => {
         ctx.log(`[${e.id}] couldn't read the versions its PRs set, so they merge in their own order: ${(err as Error).message}`);
