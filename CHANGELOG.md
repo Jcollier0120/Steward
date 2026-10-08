@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.11
+
+**It hands out kit 2.39.0, which hands every agent Manor's Developer options switch.**
+
+### What's new
+
+- Every agent can now follow the Developer options switch on Manor's Settings page. If you don't develop software, Castellan's pages leave the technical detail out. Turning the switch on or off applies to every agent within seconds, with nothing restarted.
+
+### What changed
+
+- When Developer options are off, each agent's **Where its work runs** says "the local AI" and describes its work in plain words, without the names of tools or model servers. The agent's page doesn't show where its files are kept. Its settings don't show the settings file's path or that file's own error messages.
+- Turn Developer options on to see all of it, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you want the technical detail on your agents' pages, turn on Developer options on Manor's Settings page.
+
 ## 0.27.10
 
 **It hands out kit 2.38.0: Reeve, the Chamberlain and Heiward get their own title-bar scenes, and so do the Thatcher, the Reckoner, the Weigher and the Shepherd.**

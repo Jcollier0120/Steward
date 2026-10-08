@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.39.0
+
+**Every agent gets Manor's Developer options switch, and the kit's own parts of every page obey it.** Castellan is sold to general users, gamers and developers, and only developers see developer content. With the switch off, the kit's parts no longer show repositories, tools, model servers or file paths, and an agent can keep its own developer content out of its page and its API. The rule is the new spec/DEVELOPER-OPTIONS.md.
+
+### What's new
+
+- **node/developer.ts**, the switch for every agent. Under Manor, Manor's settings.json `"developerOptions"` decides. Without Manor, or with a Manor that hasn't said, the agent's own `"developerOptions": true` in its settings.json decides, and it's off by default. It's read afresh on every call, so a flip in Manor applies at the next request with no restart.
+  - `developer()` returns `{ on, setBy }`, and `isDeveloper()` returns `on`.
+  - `developerOnly(value, fallback?)` gives `value` only when on. A function is called only then.
+  - `withoutDeveloper(payload, keys)` removes those fields from a payload at any depth when off.
+  - `failureFor(error, plain)` gives the error's message to a developer and the agent's plain words to everyone else.
+- **react/developer.tsx**: `useDeveloper()` and `<DeveloperOnly fallback>`, exported from react/index.ts. `<Page>` passes the switch down from the page's data.
+- **node/react-page.ts: `PageShell.developer`**, read for every page and every /api/page.
+- **/api/ping says `developer`.** An open page, React or string-built, draws itself again within seconds when the switch flips.
+- **spec/DEVELOPER-OPTIONS.md**: the three audiences, everything a non-developer never sees, plain words in its place, and how an agent gates its data first and its page second.
+
+### What changed
+
+- **node/work.ts:** with the switch off, "Where its work runs" talks about "the local AI" instead of Reeve. Each line gives its `plain` wording, with no PowerShell, WMI, pnputil, winget, FFmpeg, GenieX, llama.cpp, SHA-256 or listening ports. Developer work (`dev: true`) is left out: the Aletaster's, the Developer Herald's and the Steward's lines. Notes have `plainNotes`. With the switch on, everything is said as before. `workSection` takes `developer`, `thisPc` takes a second argument, and `workLine()` is new.
+- **The footer** names the data folder only when on, on both page kinds. `PageShell.dataDir` is empty when off.
+- **node/settings-kit.ts:** with the switch off, `/api/settings` sends an empty `file` and gives its problems as one plain line (`PLAIN_PROBLEM`). A save refused by the agent's own rules says `PLAIN_REFUSAL`. `settingsReply` and `saveSettingsReply` take an optional `developer`. Both settings panels say "Changes are checked and saved here" without a path, and the problem badge says "Settings".
+- **What an agent must do:** nothing to keep working. To obey the switch, gate its developer content as spec/DEVELOPER-OPTIONS.md says.
+- **Its tests:** kit/test/developer.test.ts, plus both-ways tests in work.test.ts, settings-kit.test.ts and react-page.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a PC where Manor's Developer options are off, or with no Manor, each agent's Settings page stops showing the settings file's path and the technical lines in Where its work runs. Turn Developer options on in Manor to see them again.
+
 ## 2.38.0
 
 **Reeve, the Chamberlain and Heiward have their own title-bar scenes too.**

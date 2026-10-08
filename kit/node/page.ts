@@ -1,5 +1,6 @@
 import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.ts';
 import { APP, dataDir } from '../app.ts';
+import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
 import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
@@ -151,6 +152,8 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   const d = duty();
   const themeKey = JSON.stringify(`${APP.id}:theme`);
   const manor = manorLink();
+  // The manor's Developer options (developer.ts): off, no path in the footer and the work section in plain words.
+  const dev = isDeveloper();
   // With Manor, the manor's theme, and the marks that say it's Manor's (as Heiward's and Reeve's pages have them).
   const htmlTheme = manor
     ? `${manor.theme === 'system' ? '' : ` data-theme="${esc(manor.theme)}"`} data-manor="${esc(manor.name)}" data-manor-url="${esc(manor.url)}"`
@@ -189,9 +192,9 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
 </header>
 ${offDuty(d)}<main class="view">
 ${o.body}
-${workSection()}
+${workSection({ developer: dev })}
 </main>
-<footer>${esc(APP.name)} ${esc(APP.version)} · this PC only · its files are in <code>${esc(dataDir)}</code></footer>
+<footer>${esc(APP.name)} ${esc(APP.version)} · this PC only${dev ? ` · its files are in <code>${esc(dataDir)}</code>` : ''}</footer>
 <script>
 const TOKEN = ${JSON.stringify(o.token)};
 const REFRESH = ${refresh};
@@ -343,7 +346,8 @@ if (REFRESH) setInterval(() => {
 }, REFRESH * 1000);
 // A round that starts or ends after the page was drawn, by the schedule, Run now or another program: the ping
 // says so (busy, its last and current run), and the page is drawn again with what it found. Without this, a page
-// drawn between rounds never showed the next one's work until someone reloaded it.
+// drawn between rounds never showed the next one's work until someone reloaded it. The manor's Developer options
+// too (developer.ts): flipped in Manor, the page is drawn again with or without its developer content.
 (() => {
   let seen = null;
   let due = false;
@@ -352,7 +356,7 @@ if (REFRESH) setInterval(() => {
       const r = await fetch('/api/ping', { cache: 'no-store' });
       if (!r.ok) return;
       const p = await r.json();
-      const now = JSON.stringify([!!p.busy, p.lastRunAt ?? null, p.runningSince ?? null]);
+      const now = JSON.stringify([!!p.busy, p.lastRunAt ?? null, p.runningSince ?? null, p.developer ?? null]);
       if (seen === null) seen = now;
       else if (now !== seen) due = true;
       if (due && !engaged()) location.reload();

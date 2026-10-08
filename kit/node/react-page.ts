@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP, appRoot, dataDir } from '../app.ts';
+import { developer } from './developer.ts';
 import { duty } from './duty.ts';
 import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
@@ -58,8 +59,15 @@ export interface PageShell {
   themes: ShellTheme[];
   /** Where this browser keeps the agent's theme, without Manor. */
   themeKey: string;
-  /** "Where its work runs" (work.ts), the kit's own markup, for the Settings view. */
+  /**
+   * The manor's Developer options (developer.ts): whether the page may show developer content. Off, the server has
+   * already left it out of what it sends (dataDir, the work section's technical lines), and the page hides its own
+   * with the react part's useDeveloper() and <DeveloperOnly>. Read afresh for each page and each /api/page.
+   */
+  developer: boolean;
+  /** "Where its work runs" (work.ts), the kit's own markup, for the Settings view: in plain words when developer is off. */
   work: string;
+  /** The agent's data folder, for the footer: empty when developer is off (a path is developer content). */
   dataDir: string;
   /** Its onboarding (onboarding.ts), drawn as the page's tour at #/tour; null for none. */
   onboarding: Onboarding | null;
@@ -76,6 +84,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
   const m = manorLink();
   const onboarding = o.onboarding === undefined ? AGENT_ONBOARDING : o.onboarding;
   const needs = needsSettings(onboarding);
+  const dev = developer().on;
   return {
     app: { id: APP.id, name: APP.name, role: APP.role, version: APP.version },
     title: o.title ?? APP.name,
@@ -87,8 +96,9 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     manor: m ? { name: m.name, url: m.url, theme: m.theme, settingsUrl: manorSettingsUrl(m) } : null,
     themes: themes().map((t) => ({ name: t.name, label: t.label, description: t.description, swatch: t.swatch, group: t.group, groupLabel: groupLabel(t.group) })),
     themeKey: `${APP.id}:theme`,
-    work: workSection(),
-    dataDir,
+    developer: dev,
+    work: workSection({ developer: dev }),
+    dataDir: dev ? dataDir : '',
     onboarding,
     needs,
   };

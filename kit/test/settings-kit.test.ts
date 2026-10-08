@@ -17,7 +17,7 @@ process.env.REEVE_HOME = path.join(home, 'reeve'); // the page names this PC's a
 
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
-const { SETTINGS_BODY_LIMIT } = await import('./fixture/src/kit/settings-kit.ts');
+const { PLAIN_PROBLEM, SETTINGS_BODY_LIMIT } = await import('./fixture/src/kit/settings-kit.ts');
 type Field = import('./fixture/src/kit/settings-kit.ts').Field;
 const { SETTINGS_SPEC: spec } = await import('./fixture/src/settings.ts');
 const { page, settingsPanel } = await import('./fixture/src/kit/page.ts');
@@ -75,8 +75,22 @@ test('GET /api/settings returns the schema, the values in use and the defaults',
   assert.deepEqual(j.schema, json(spec.schema));
   assert.deepEqual(j.defaults, json(spec.defaults));
   assert.deepEqual(j.values, json(spec.normalize({}).settings));
-  assert.equal(j.file, file);
+  assert.equal(j.file, '', "Developer options off (no Manor, no switch of its own): the file's path isn't sent");
   assert.ok(Array.isArray(j.problems) && typeof j.warnings === 'object');
+});
+
+test("with the agent's own Developer options on (no Manor to say), the file's path and its problems' own words are sent", async () => {
+  const ping = async () => (await (await fetch(`${base}/api/ping`)).json()).developer;
+  assert.equal(await ping(), false, "the ping says the switch, so an open page sees it flip");
+  writeFileSync(file, JSON.stringify({ developerOptions: true }));
+  try {
+    assert.equal(await ping(), true);
+    assert.equal((await getSettings()).file, file);
+    writeFileSync(file, JSON.stringify({ developerOptions: 'yes' }));
+    assert.equal((await getSettings()).file, '', 'only true turns it on');
+  } finally {
+    rmSync(file, { force: true });
+  }
 });
 
 test('a POST without the token, or from another site, is refused and writes nothing', async () => {
@@ -140,7 +154,7 @@ test('a setting set back to its default is saved as the default', async () => {
 
 test('an unreadable settings.json is kept aside when the panel saves over it', async () => {
   writeFileSync(file, '{ not json');
-  assert.match((await getSettings()).problems.join(' '), /isn't a JSON object/);
+  assert.deepEqual((await getSettings()).problems, [PLAIN_PROBLEM], 'Developer options off: one plain line, no path and no JSON');
   const r = await post({ values: { [whole.key]: whole.min } });
   assert.equal(r.status, 200);
   assert.equal(readFileSync(`${file}.broken`, 'utf8'), '{ not json');
