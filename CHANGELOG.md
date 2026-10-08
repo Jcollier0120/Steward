@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.22
+
+**Look after several of the repositories found on this PC in one go.**
+
+### What's new
+
+- Under Found on this PC, each repository has a box to pick it, and All picks every one. Look after N then adds all the picked ones at once, each with its own Merge my ready PRs and Release each new version ticks. If some can't be added, the page says which and why, and adds the rest.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.18
 
 **The kit it hands out, 2.41.0, can set up and keep a reranker, for Reeve's search.**

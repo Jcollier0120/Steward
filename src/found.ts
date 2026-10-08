@@ -260,6 +260,28 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   return { employee };
 }
 
+/** A repository picked on the page, with what it may do. */
+export interface Picked {
+  repo: string;
+  merges: boolean;
+  release: boolean;
+}
+
+/**
+ * Look after, for several at once (the page's ticked ones): each added in turn as lookAfter adds one, so each takes an
+ * id the ones before left free. The ones it couldn't add, each in words.
+ */
+export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: string } = {}): { employees: Employee[]; errors: string[] } {
+  const employees: Employee[] = [];
+  const errors: string[] = [];
+  for (const p of picks) {
+    const r = lookAfter(p.repo, { ...o, merges: p.merges, release: p.release });
+    if ('error' in r) errors.push(r.error);
+    else employees.push(r.employee);
+  }
+  return { employees, errors };
+}
+
 /**
  * A repository for a version claim that Settings don't name (claim-version works for any repository): owner/repo, or a
  * name, among the ones Reeve found, else the clone the command runs in when its origin is that repository. Null when
