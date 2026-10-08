@@ -21,6 +21,25 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: it updates itself as usual.
 
+## 2.41.0
+
+**A reranker the keeper sets up and keeps: a fourth serve kind, `rerank`.** Reeve's search gives its ten best files a second look by a reranker (Qwen3-Reranker-0.6B through llama.cpp's `/v1/rerank`), which on its 24 test questions put the right file first 16 times instead of 13. A reranker started by hand on a manor port was stopped as an orphan after 5 minutes, since no configured server was it. Now it is one.
+
+### What's new
+
+- **node/accelerator-config.ts:** a new `EndpointKind` (`ENDPOINT_KINDS`): the routed `ServeKind` (chat, vision, embed; unchanged) and `rerank`. An accelerator has its `rerank` endpoint, read, checked and written as the others, and `serves()` and `endpointFor()` take an `EndpointKind`, so `endpointFor(a, 'rerank')` gives it. It is an add-on, not routed work: `ServeKind` and the core's `Work` don't change, and no agent's requests go to it unless it asks for it.
+- **node/setup.ts:** `--serve rerank` (`kinds: ['rerank']`) downloads ggml-org's Qwen3-Reranker-0.6B Q8_0 GGUF (639 MB) and starts llama-server with `--reranking`, on a graphics card or the processor (`setup cpu --serve rerank`). It is set up only when asked for (`DEFAULT_KINDS` stays chat, vision and embed), beside what the accelerator already serves: its other servers, slots and cap stay, with their ports, and setting them up again keeps the reranker (`keepingAddOns`, `keptKinds`). A reranker alone never sets the NPU up.
+- **node/keeper.ts:** a graphics card's or the processor's reranker is kept like its other servers: stopped when idle, restarted when it stops answering, never an orphan. Its log is `<id>.rerank.log`.
+
+### What changed
+
+- **What an agent must do:** nothing: its code that handles each `ServeKind` is unchanged. An agent that sets up or shows every endpoint (the Smith) lists `ENDPOINT_KINDS`; one that asks the reranker (Reeve) takes `endpointFor(a, 'rerank')`. (A first draft added `rerank` to `ServeKind` itself, and the Steward's trial caught Reeve's router, which hands a `ServeKind` to the core's request timings, failing to compile.)
+- **Its tests:** kit/test/setup.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.40.0
 
 **Settings obey the Developer options switch from the schema alone, and the kit's own parts leak nothing more with it off.** What the agents had to work around when they took 2.39.0 is now the kit's.
