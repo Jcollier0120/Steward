@@ -25,6 +25,7 @@ Nothing: it updates itself as usual.
 ### Before you update
 
 - Nothing: it updates itself as usual. Manor 0.16.0 needs this kit to publish itself to the Exchequer.
+
 ## 2.36.2
 
 **The Thatcher, the Reckoner, the Weigher and the Shepherd have their own title-bar scenes, and say where their work runs.**

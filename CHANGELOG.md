@@ -27,6 +27,7 @@ Nothing: it updates itself as usual. Each agent takes the new kit as the Steward
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.27.8
 
 **It hands out kit 2.36.2: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
