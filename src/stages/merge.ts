@@ -43,6 +43,11 @@ import { noteMerged } from '../strangers.ts';
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
  * checks failed here before the branch moved on. The next round tests it at its new head, and merges it.
+ *
+ * A team PR stacked on another's branch (its base is that PR's head, not the employee's branch) waits for that PR. Once
+ * that PR has merged into the employee's branch, the stacked one is pointed at the branch itself (retargetStacked), with a
+ * comment saying so, and joins the line: the Steward leaves a team member's branch in place after merging its PR, so
+ * GitHub never retargets what was stacked on it, and it would wait for ever (Reeve#105, 2026-10-08).
  */
 
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
@@ -59,12 +64,17 @@ export function holdReason(pr: PrInfo, branch?: string): string | null {
   return null;
 }
 
+/** The open PR whose branch this one is stacked on (its base is that PR's head), if any. */
+export const stackedOn = (pr: PrInfo, prs: PrInfo[], branch?: string): PrInfo | undefined =>
+  pr.base && pr.base !== branch ? prs.find((p) => p !== pr && p.head === pr.base) : undefined;
+
 /** The PRs to merge, and the ones that wait with their reasons. */
 export function mergeSelection(prs: PrInfo[], branch?: string): { merge: PrInfo[]; hold: { pr: PrInfo; why: string }[] } {
   const merge: PrInfo[] = [];
   const hold: { pr: PrInfo; why: string }[] = [];
   for (const pr of prs) {
-    const why = holdReason(pr, branch);
+    const under = stackedOn(pr, prs, branch);
+    const why = under ? `stacked on #${under.number} (${pr.base}): once #${under.number} has merged, it is pointed at ${branch} and joins the line` : holdReason(pr, branch);
     if (why) hold.push({ pr, why });
     else merge.push(pr);
   }
@@ -242,6 +252,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
   // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
   if (o.yes && !e.merges) return { ...result(e, 'skipped', `${prs.length} open PR${prs.length === 1 ? '' : 's'} (${prs.map((p) => `#${p.number}`).join(', ')}) ${NOT_MERGING}`, { url: prs[0].url }), merged: [], held: [] };
+  // Stacked on a branch whose PR has merged: pointed at the employee's branch, so it joins the line below.
+  if (o.yes && o.team) await retargetStacked(ctx, e, prs);
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
@@ -458,6 +470,36 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
   return lines;
+}
+
+/**
+ * Each team PR stacked on another branch (its base isn't the employee's branch, nor an open PR's head) whose own PR has
+ * merged into the employee's branch, pointed at the branch instead (gh pr edit --base), with one comment on it saying
+ * why. Its `base` is then the branch, and GitHub works out afresh whether it merges, so it waits a round for that. A
+ * base still open, or one whose PR merged elsewhere or never was one, is left as it is. Never throws: a PR it couldn't
+ * retarget is logged and waits as before. Returns the numbers retargeted.
+ */
+export async function retargetStacked(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<number[]> {
+  const done: number[] = [];
+  for (const pr of prs) {
+    if (pr.whose !== 'team' || pr.fork || !pr.base || pr.base === e.branch || stackedOn(pr, prs, e.branch)) continue;
+    try {
+      const out = await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'merged', '--head', pr.base, '--limit', '5', '--json', 'number,baseRefName');
+      const under = (JSON.parse(out || '[]') as { number: number; baseRefName: string }[]).find((m) => m.baseRefName === e.branch);
+      if (!under) continue;
+      await gh(ctx.run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--base', e.branch);
+      const was = pr.base;
+      pr.base = e.branch;
+      pr.mergeable = 'UNKNOWN';
+      done.push(pr.number);
+      ctx.log(`[${e.id}] #${pr.number}: pointed at ${e.branch}: it was stacked on ${was}, whose #${under.number} has merged`);
+      const body = `The Steward pointed this pull request at \`${e.branch}\`: it was stacked on \`${was}\`, whose #${under.number} has merged into \`${e.branch}\`. It now waits in ${e.branch}'s line like any other.`;
+      await gh(ctx.run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', body).catch(() => '');
+    } catch (err) {
+      ctx.log(`[${e.id}] #${pr.number}: couldn't point it at ${e.branch} (stacked on ${pr.base}): ${(err as Error).message}`);
+    }
+  }
+  return done;
 }
 
 /** Each employee's merges, a few employees at a time (Settings' parallel), each one's PRs in order. */
