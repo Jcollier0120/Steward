@@ -61,3 +61,41 @@ test("a round merges the team's ready PR to the Steward once its checks pass her
   assert.deepEqual(merge.slice(0, 5), ['pr', 'merge', '47', '--repo', 'Jcollier0120/Steward']);
   assert.ok(!merge.includes('--delete-branch'), "a team member's branch stays");
 });
+
+test("a PR that raises the kit merges first, ahead of a lower version that doesn't", async () => {
+  const dir = path.join(home, 'steward-kit-first');
+  const { checkout } = fakeEmployee(dir, { version: '0.8.13', kit: null });
+  // Two PRs: #48 sets 0.8.14 and leaves the kit alone; #49 sets 0.8.15 and raises the kit.
+  const pr = (n: number, branch: string, version: string, kit: boolean) => {
+    sh(checkout, 'switch', '--quiet', '-c', branch, 'main');
+    for (const f of ['package.json', 'package-lock.json', 'src/app.ts']) writeFileSync(path.join(checkout, f), readFileSync(path.join(checkout, f), 'utf8').split('0.8.13').join(version));
+    if (kit) {
+      mkdirSync(path.join(checkout, 'kit'), { recursive: true });
+      writeFileSync(path.join(checkout, 'kit', 'VERSION'), '2.14.0\n');
+      sh(checkout, 'add', 'kit/VERSION');
+    }
+    sh(checkout, 'commit', '--quiet', '-am', `Steward ${version}`);
+    sh(checkout, 'push', '--quiet', 'origin', branch, `HEAD:refs/pull/${n}/head`);
+    const headOid = sh(checkout, 'rev-parse', 'HEAD');
+    sh(checkout, 'switch', '--quiet', 'main');
+    const files = ['package.json', 'package-lock.json', 'src/app.ts', ...(kit ? ['kit/VERSION'] : [])];
+    return { number: n, title: `Steward ${version}${kit ? ', kit 2.14.0' : ''}: a change`, url: `https://github.com/Jcollier0120/Steward/pull/${n}`, body: '', headRefName: branch, headRefOid: headOid, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], labels: [], additions: 3, deletions: 3, files: files.map((path) => ({ path })) };
+  };
+  const listed = [pr(48, 'claude/plain', '0.8.14', false), pr(49, 'claude/kit', '0.8.15', true)];
+  const r = runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'list') return ok(listed);
+    if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.8.13', isDraft: false, publishedAt: '2026-10-05T00:00:00Z' }, { tagName: 'kit-v2.13.0', isDraft: false, publishedAt: '2026-10-05T00:00:00Z' }]);
+    return ok('');
+  });
+  const run: import('../src/run.ts').Runner = async (cmd, args, opts) => {
+    if (cmd === 'npm') {
+      mkdirSync(path.join(opts!.cwd!, 'node_modules'), { recursive: true });
+      return ok('');
+    }
+    return r.run(cmd, args, opts);
+  };
+  const ctx = ctxFor({ employees: [], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
+  const out = await mergeOne(ctx, stewardEmployee(ctx.settings, checkout), { yes: true, team: true });
+  assert.equal(out.outcome, 'done', `${out.message}\n${ctx.lines.join('\n')}`);
+  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge').map((a) => a[2]), ['49', '48'], 'the kit first, though its version is the higher');
+});
