@@ -5,9 +5,9 @@
  *   npm run kit-release                artifacts\kit\kit-<version>.zip and artifacts\kit\SHA256SUMS.txt
  *   npm run kit-release -- --publish   builds it, then makes the GitHub release kit-v<version> with both files
  *
- * The zip holds VERSION, CHANGELOG.md and the parts (node\, web\, spec\, core\ and dotnet\), as kit\ has them at HEAD (git
- * archive), never the kit's tests. Every agent's tools/kit.ts downloads it, checks it against
- * SHA256SUMS.txt, and fills its src\kit\ with the parts its kit.json names. The Steward's own releases
+ * The zip holds VERSION, CHANGELOG.md, LICENSE (the kit's MIT license) and the parts (node\, web\, spec\, core\ and
+ * dotnet\), as kit\ has them at HEAD (git archive), never the kit's tests. Every agent's tools/kit.ts downloads it, checks
+ * it against SHA256SUMS.txt, and fills its src\kit\ with the parts its kit.json names, and LICENSE beside VERSION. The Steward's own releases
  * (v<version>, src/kit/release.ts) are separate: a kit release needs no Steward release.
  */
 import { execFileSync, spawnSync } from 'node:child_process';

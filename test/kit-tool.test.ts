@@ -17,8 +17,13 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-kit-tool-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 let n = 0;
-/** A kit tree at `version`: VERSION and a file in each part; from 2.0.0 the core and dotnet parts too. */
+/** A kit tree at `version`: VERSION and a file in each part; from 2.0.0 the core and dotnet parts too; from 2.43.1 its LICENSE. */
 function kitTree(dir: string, version: string): string {
+  const [major, minor, patch] = version.split('.').map(Number);
+  if (major * 1e6 + minor * 1e3 + patch >= 2_043_001) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'LICENSE'), 'MIT License\n');
+  }
   const parts = [['node', 'a.ts', `export const v = '${version}';\n`], ['web', 'b.js', '// web\n'], ['spec', 'c.md', '# spec\n']];
   if (Number(version.split('.')[0]) >= 2) parts.push(['core', 'd.js', 'export const d = 1;\n'], ['dotnet', 'E.cs', '// dotnet\n']);
   for (const [p, f, t] of parts) {
@@ -56,6 +61,15 @@ test('--from fills the parts kit.json names: node in src/kit, web and spec besid
   assert.equal(read(root, 'VERSION').trim(), '1.0.0');
   assert.equal(read(root, 'PARTS').trim(), 'node web spec', 'the parts kit.json pins');
   assert.ok(!has(root, 'core'), 'the node part needs the core, but a kit from before 2.0.0 has none');
+  assert.ok(!has(root, 'LICENSE'), 'a kit tree without a LICENSE fills as before');
+});
+
+test("the kit's MIT license comes beside its VERSION, as src/kit/LICENSE, so an agent's release carries it", async () => {
+  const { root } = hire('2.43.1');
+  const r = await tool(root, ['--from', kitTree(path.join(tmp, 'tree-license'), '2.43.1')]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(read(root, 'LICENSE'), 'MIT License\n');
+  assert.equal(read(root, 'VERSION').trim(), '2.43.1');
 });
 
 test('a part brings the parts it needs: node the core, the core the spec, dotnet the core; none brings web', async () => {
@@ -121,7 +135,8 @@ async function releases(version: string, o: { badSum?: boolean } = {}) {
   const tree = kitTree(path.join(tmp, `release-${version}-${++n}`), version);
   const zip = path.join(tmp, `kit-${version}-${n}.zip`);
   const parts = ['node', 'web', 'spec', 'core', 'dotnet'].filter((p) => existsSync(path.join(tree, p)));
-  execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', tree, 'VERSION', 'CHANGELOG.md', ...parts]);
+  const meta = ['VERSION', 'CHANGELOG.md', 'LICENSE'].filter((f) => existsSync(path.join(tree, f)));
+  execFileSync(TAR, ['-a', '-c', '-f', zip, '-C', tree, ...meta, ...parts]);
   const bytes = readFileSync(zip);
   const sum = o.badSum ? '0'.repeat(64) : createHash('sha256').update(bytes).digest('hex');
   const served: string[] = [];
@@ -146,6 +161,7 @@ test('a kit release is downloaded, checked against SHA256SUMS.txt, unpacked, cac
     assert.match(r.out, /kit release kit-v3\.1\.4/);
     assert.equal(read(root, 'VERSION').trim(), '3.1.4');
     assert.match(read(root, 'a.ts'), /3\.1\.4/);
+    assert.equal(read(root, 'LICENSE'), 'MIT License\n', "the release's LICENSE, beside VERSION");
     assert.ok(existsSync(path.join(cache, '3.1.4', 'node', 'a.ts')), 'kept in the cache');
   } finally {
     await rel.close();

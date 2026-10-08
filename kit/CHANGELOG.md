@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.43.1
+
+**The kit's MIT license comes with the kit, as `src/kit/LICENSE`.** An agent's own LICENSE now points to the kit's license instead of pasting the MIT text, so the kit brings its license itself, and every agent's release carries it beside the kit.
+
+### What changed
+
+- **tools/kit.ts:** filling `src/kit` copies the kit's `LICENSE` beside its `VERSION`, as `src/kit/LICENSE`. A kit release has held `LICENSE` all along (tools/kit-release.ts); only the fill left it out. A kit tree or release without one (as a test's may be) fills as before, with no `LICENSE`.
+- **What an agent must do:** nothing: the Steward's bump brings the new tools/kit.ts and fills `src/kit` again. An agent's release takes everything under `src/`, so `src/kit/LICENSE` goes into its zip with the kit.
+- **Its tests:** test/kit-tool.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.41.0
 
 **A reranker the keeper sets up and keeps: a fourth serve kind, `rerank`.** Reeve's search gives its ten best files a second look by a reranker (Qwen3-Reranker-0.6B through llama.cpp's `/v1/rerank`), which on its 24 test questions put the right file first 16 times instead of 13. A reranker started by hand on a manor port was stopped as an orphan after 5 minutes, since no configured server was it. Now it is one.

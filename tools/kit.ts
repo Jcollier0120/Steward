@@ -6,7 +6,8 @@
  * react in src\kit\react\. A part brings the parts it needs, so a pin needn't name them: node runs the core, and
  * the core (and dotnet's C#, which runs it too) takes its timings from the spec's rules.json; react, a page drawn
  * in the browser, is served by node with web's Settings panel. A kit from before 2.0.0
- * has no core, and then none is filled. src\kit\ is git-ignored: never edit it here.
+ * has no core, and then none is filled. The kit's MIT license comes beside its VERSION, as src\kit\LICENSE (a kit
+ * from before 2.43.1 may have none). src\kit\ is git-ignored: never edit it here.
  *
  *   node tools/kit.ts                  the pinned kit; nothing to do when src\kit\VERSION already says it
  *   node tools/kit.ts --from <dir>     a kit tree on this PC (a Steward checkout's kit\), copied every time;
@@ -65,6 +66,8 @@ function fill(tree: string, how: string): void {
   // PARTS says what kit.json pins, as it always has (an agent's tests may compare them); the log says what came.
   writeFileSync(path.join(into, 'PARTS'), `${pinned.join(' ')}\n`);
   writeFileSync(path.join(into, 'VERSION'), `${version}\n`);
+  // The kit's own license (MIT), so an agent's release carries it with the kit; a kit tree without one fills as before.
+  if (existsSync(path.join(tree, 'LICENSE'))) cpSync(path.join(tree, 'LICENSE'), path.join(into, 'LICENSE'));
   console.log(`src\\kit: the Steward's kit ${version} (${filled.join(', ')}), from ${how}`);
   if (pin.kit && version !== pin.kit) console.warn(`  kit.json pins ${pin.kit}: this is for development, and a release refuses it`);
 }
