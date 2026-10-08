@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.26
+
+**A pull request waits less for GitHub to work out whether it merges.**
+
+### What changed
+
+- When GitHub hadn't yet worked out whether a ready pull request merges ("GitHub is still working out whether it merges"), the Steward left it for the next round, ten minutes or more later. It now asks GitHub again a few times over about 25 seconds and, once GitHub has said, merges it in the same round. This is often the case for a pull request just caught up with its branch, or just pointed at the main branch after the one it was stacked on merged.
+- A pull request whose checks are failing or still running, or that is a draft, isn't asked about again: it would wait anyway.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.19
 
 **A pull request built on another one no longer gets stuck once that one has merged.**

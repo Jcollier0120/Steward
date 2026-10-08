@@ -50,13 +50,56 @@ import { noteMerged } from '../strangers.ts';
  * GitHub never retargets what was stacked on it, and it would wait for ever (Reeve#105, 2026-10-08).
  */
 
+/** Why a PR waits while GitHub hasn't yet said whether it merges. */
+export const WORKING_OUT = 'GitHub is still working out whether it merges: try again in a minute';
+
+/**
+ * How long the Steward waits before each time it asks GitHub again whether a PR merges, while GitHub is still working
+ * it out: about 25 s in all. GitHub works it out lazily, once asked, and usually within seconds; without asking again, a
+ * PR waited a whole round for it (every one just caught up or retargeted did).
+ */
+export const WORKING_OUT_WAITS_MS = [3_000, 7_000, 15_000];
+
+/**
+ * Each PR that waits only on GitHub working out whether it merges, asked about again a few times (WORKING_OUT_WAITS_MS)
+ * until GitHub says: its mergeable and merge state are then GitHub's answer, so it joins the merges this round. One whose
+ * checks are failing or running would wait anyway, and isn't asked about. Never throws: one GitHub still hasn't worked
+ * out, or that couldn't be asked about, waits as before. Returns the numbers GitHub has now answered for.
+ */
+export async function askAgainWhetherMerges(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<number[]> {
+  const pause = ctx.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const unknown = prs.filter((pr) => !stackedOn(pr, prs, e.branch) && holdReason(pr, e.branch) === WORKING_OUT && pr.checks !== 'failing' && pr.checks !== 'pending');
+  const answered: number[] = [];
+  for (const ms of WORKING_OUT_WAITS_MS) {
+    const left = unknown.filter((pr) => !answered.includes(pr.number));
+    if (!left.length) break;
+    await pause(ms);
+    for (const pr of left) {
+      const r = await ctx.run('gh', ['pr', 'view', String(pr.number), '--repo', e.repo, '--json', 'mergeable,mergeStateStatus'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+      if (r.code !== 0) continue;
+      let now: { mergeable?: unknown; mergeStateStatus?: unknown };
+      try {
+        now = JSON.parse(r.out);
+      } catch {
+        continue;
+      }
+      if (!now.mergeable || now.mergeable === 'UNKNOWN') continue;
+      pr.mergeable = String(now.mergeable);
+      pr.mergeState = String(now.mergeStateStatus ?? 'UNKNOWN');
+      answered.push(pr.number);
+      ctx.log(`[${e.id}] #${pr.number}: asked GitHub again whether it merges: ${pr.mergeable.toLowerCase()}`);
+    }
+  }
+  return answered;
+}
+
 /** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
 export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
   if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `${BAILIFF_WAIT}${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
-  if (pr.mergeable !== 'MERGEABLE') return 'GitHub is still working out whether it merges: try again in a minute';
+  if (pr.mergeable !== 'MERGEABLE') return WORKING_OUT;
   if (pr.checks === 'failing') return 'checks failing';
   if (pr.checks === 'pending') return 'checks still running';
   if (pr.mergeState === 'BLOCKED') return 'blocked: a required review or check';
@@ -256,6 +299,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (o.yes && o.team) await retargetStacked(ctx, e, prs);
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
+  // GitHub still working out whether one merges (just retargeted, or pushed to): asked again, so it needn't wait a round.
+  if (o.yes) await askAgainWhetherMerges(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
@@ -475,7 +520,8 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
 /**
  * Each team PR stacked on another branch (its base isn't the employee's branch, nor an open PR's head) whose own PR has
  * merged into the employee's branch, pointed at the branch instead (gh pr edit --base), with one comment on it saying
- * why. Its `base` is then the branch, and GitHub works out afresh whether it merges, so it waits a round for that. A
+ * why. Its `base` is then the branch, and GitHub works out afresh whether it merges: asked again (askAgainWhetherMerges),
+ * it merges in the same round once GitHub has said, and waits a round only when GitHub hasn't by then. A
  * base still open, or one whose PR merged elsewhere or never was one, is left as it is. Never throws: a PR it couldn't
  * retarget is logged and waits as before. Returns the numbers retargeted.
  */

@@ -79,6 +79,8 @@ export interface Ctx {
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
    */
   lease?: LeaseGuard | null;
+  /** Waits this long before asking GitHub something again (merge.ts); tests stand in for it. Not given: the clock's. */
+  pause?: (ms: number) => Promise<void>;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */
