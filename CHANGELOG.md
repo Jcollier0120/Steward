@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.10
+
+**It hands out kit 2.38.0: Reeve, the Chamberlain and Heiward get their own title-bar scenes, and so do the Thatcher, the Reckoner, the Weigher and the Shepherd.**
+
+### What's new
+
+- Three more agents have their own picture in the title bar, moving while they work, in the colours of their icons: Reeve reads a log scrolling past an amber line and keeps count in tally marks; the Chamberlain seals a letter in red wax and files it in its pigeonhole; Heiward's shears trim the sprigs growing out of a hedge.
+- This release brings 0.27.8 too, which was never released on its own: the Thatcher's, the Reckoner's, the Weigher's and the Shepherd's scenes.
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
+
 ## 0.27.9
 
 **The kit it hands out publishes nothing of Castellan's on GitHub but Heiward.**
@@ -14,6 +27,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.27.8
+
+**It hands out kit 2.36.2: the Thatcher, the Reckoner, the Weigher and the Shepherd get their own title-bar scenes.**
+
+### What's new
+
+- Each of the four newest agents has its own picture in its title bar, moving while it works, in its own colour: a roof thatched course by course, counters slid across a counting board, a balance that tips and settles, and a sheep walked into its fold. Until now they showed the turning cogs of an agent without one. Their Settings' **Where its work runs** now says what each round does too.
+
+### Before you update
+
+Nothing: it updates itself as usual. Each agent takes the new kit as the Steward rolls it out.
 
 ## 0.27.7
 
@@ -43,7 +68,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
-
 ## 0.27.2
 
 **It installs one of your own agents the first time, when Manor's Hire asks.**
@@ -60,7 +84,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Manor shows Hire for your own agents once it is updated too.
-
 ## 0.27.0
 
 **Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**

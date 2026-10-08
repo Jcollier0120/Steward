@@ -2,6 +2,17 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.38.0
+
+**Reeve, the Chamberlain and Heiward have their own title-bar scenes too.**
+- **node/look.ts:** a scene and an accent for each, in its icon's colour, moving while it works (`LOOK`): Reeve's log scrolls up through an amber reading line while the count is kept beside it in gate tallies, four bars and a strike ("Reading the logs"); the Chamberlain presses its keyhole seal into the red wax on a letter and files the letter in its pigeonhole ("Filing your papers"); Heiward's shears go along the hedge snipping each sprig that has grown out of it, by a picket fence ("Trimming the hedges"). They have no lines in `WORK`: an agent's page shows its look whether or not it has them.
+- **This kit brings 2.36.2**, never released on its own: the Thatcher's, the Reckoner's, the Weigher's and the Shepherd's scenes and their lines in `WORK`.
+- **What an agent must do:** nothing. Each takes its scene with this kit.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 2.37.0
 
 **Nothing of Castellan's but Heiward is published on GitHub.** Castellan now comes only from castellan-software.com (Manor 0.16.0; Manor's docs/SELLING.md, "Getting Castellan"), and Manor updates itself, and the staff held back from sale, from the Exchequer.
@@ -14,6 +25,17 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: it updates itself as usual. Manor 0.16.0 needs this kit to publish itself to the Exchequer.
+
+## 2.36.2
+
+**The Thatcher, the Reckoner, the Weigher and the Shepherd have their own title-bar scenes, and say where their work runs.**
+- **node/look.ts:** a scene and an accent for each, moving while it works (`LOOK`): the Thatcher thatches a roof course by course from the eaves up, patting each down with the leggett ("Mending the roof"); the Reckoner slides counters across a counting board ("Taking stock"); the Weigher's balance tips as a load drops into one pan, swings and settles level ("Weighing"); the Shepherd's crook walks a sheep the other way from the Pinder's, into a stone fold where another waits ("Bringing them in"). The sheep is now one drawing (`sheep`) the Pinder's and the Shepherd's share. Until now each showed the cog every agent without a look has.
+- **node/work.ts:** their lines in Where its work runs (`WORK`): what each round does, on what, and how often. The Weigher has no model work, and says so.
+- **What an agent must do:** nothing. The four take theirs with this kit.
+
+### Before you update
+
+Nothing: it updates itself as usual.
 
 ## 2.36.1
 

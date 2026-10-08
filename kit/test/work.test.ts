@@ -20,7 +20,7 @@ const { page } = await import('./fixture/src/kit/page.ts');
 const legacyNpu = parseAccelerators({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181', model: 'qualcomm/Qwen3-4B-Instruct-2507:W4A16', device: 'Npu' }, visionModel: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16' });
 
 test('every kit agent has its lines, each with what, where and when', () => {
-  for (const id of ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith']) {
+  for (const id of ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd']) {
     const w = WORK[id];
     assert.ok(w && w.lines.length, `${id} has lines`);
     for (const l of w.lines) for (const k of ['what', 'where', 'when'] as const) assert.ok(l[k].trim(), `${id}: "${l.what}" has its ${k}`);

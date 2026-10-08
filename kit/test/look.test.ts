@@ -20,7 +20,7 @@ const { page, statusPill, until } = await import('./fixture/src/kit/page.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 type Look = import('./fixture/src/kit/look.ts').Look;
 
-const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith'];
+const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd', 'reeve', 'chamberlain', 'heiward'];
 const HEX = /^#[0-9a-f]{6}$/;
 
 /** A scene's motion without its @keyframes blocks: the rules left, as [selector, declarations]. */
@@ -51,7 +51,7 @@ test('every kit agent has its look: a colour for Light and Dark, its words while
     assert.match(l.scene, /<(path|rect|circle|ellipse|g)\b/, `${id}: a scene`);
     assert.match(l.motion, /@keyframes /, `${id}: its motion`);
   }
-  assert.deepEqual(Object.keys(LOOK).sort(), [...KIT_AGENTS].sort(), 'no look for an agent the kit has no work for');
+  assert.deepEqual(Object.keys(LOOK).sort(), [...KIT_AGENTS].sort(), 'a look for each of these agents, and no other');
   for (const id of Object.keys(WORK)) assert.ok(LOOK[id], `${id}, which has its work in work.ts, has a look`);
   const colours = KIT_AGENTS.map((id) => LOOK[id].accent.light);
   assert.equal(new Set(colours).size, colours.length, 'each role its own colour');
