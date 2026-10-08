@@ -8,13 +8,13 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What's new
 
-- **node/accelerator-config.ts:** `ServeKind` and `SERVE_KINDS` have `rerank`, and an accelerator its `rerank` endpoint, read, checked and written as the others. `endpointFor(a, 'rerank')` gives it. It is an add-on, not routed work: the core's `Work` (chat, vision, embed) doesn't change, and no agent's requests go to it unless it asks for it.
+- **node/accelerator-config.ts:** a new `EndpointKind` (`ENDPOINT_KINDS`): the routed `ServeKind` (chat, vision, embed; unchanged) and `rerank`. An accelerator has its `rerank` endpoint, read, checked and written as the others, and `serves()` and `endpointFor()` take an `EndpointKind`, so `endpointFor(a, 'rerank')` gives it. It is an add-on, not routed work: `ServeKind` and the core's `Work` don't change, and no agent's requests go to it unless it asks for it.
 - **node/setup.ts:** `--serve rerank` (`kinds: ['rerank']`) downloads ggml-org's Qwen3-Reranker-0.6B Q8_0 GGUF (639 MB) and starts llama-server with `--reranking`, on a graphics card or the processor (`setup cpu --serve rerank`). It is set up only when asked for (`DEFAULT_KINDS` stays chat, vision and embed), beside what the accelerator already serves: its other servers, slots and cap stay, with their ports, and setting them up again keeps the reranker (`keepingAddOns`, `keptKinds`). A reranker alone never sets the NPU up.
 - **node/keeper.ts:** a graphics card's or the processor's reranker is kept like its other servers: stopped when idle, restarted when it stops answering, never an orphan. Its log is `<id>.rerank.log`.
 
 ### What changed
 
-- **What an agent must do:** nothing. An agent that lists `SERVE_KINDS` sees `rerank` among them; one that keeps its own record of kinds (`Record<ServeKind, ...>`) needs an entry for it. The Smith takes `rerank` in its setup; Reeve reads the endpoint for its search.
+- **What an agent must do:** nothing: its code that handles each `ServeKind` is unchanged. An agent that sets up or shows every endpoint (the Smith) lists `ENDPOINT_KINDS`; one that asks the reranker (Reeve) takes `endpointFor(a, 'rerank')`. (A first draft added `rerank` to `ServeKind` itself, and the Steward's trial caught Reeve's router, which hands a `ServeKind` to the core's request timings, failing to compile.)
 - **Its tests:** kit/test/setup.test.ts.
 
 ### Before you update

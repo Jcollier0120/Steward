@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { chatBody, ensureServer, expandEnv, lockDirsOf, postJson, rememberHardware, serverEnv, visionBody } from './accelerators.ts';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, SERVE_KINDS, type ServeKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { withAcceleratorTurn } from './npu-queue.ts';
@@ -105,7 +105,7 @@ export function pickRelease(releases: Release[], variants: Variant[]): { release
 // Which models
 
 /** The models, the same as on the NPU so answers stay comparable: Qwen's own GGUF repos first, then well-known quantizers. */
-export const MODEL_SPECS: Record<ServeKind, { model: string; repos: string[]; file: RegExp; mmproj?: RegExp[] }> = {
+export const MODEL_SPECS: Record<EndpointKind, { model: string; repos: string[]; file: RegExp; mmproj?: RegExp[] }> = {
   chat: {
     model: 'qwen3-4b-instruct-2507',
     repos: ['Qwen/Qwen3-4B-Instruct-2507-GGUF', 'unsloth/Qwen3-4B-Instruct-2507-GGUF', 'bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF', 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF'],
@@ -135,10 +135,10 @@ export const MODEL_SPECS: Record<ServeKind, { model: string; repos: string[]; fi
  * The kinds every graphics card serves unless others are asked for. A reranker isn't one of them: it is an add-on, set
  * up only when asked for (`--serve rerank`), beside whatever its accelerator already serves (runSetup).
  */
-export const DEFAULT_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed'];
+export const DEFAULT_KINDS: readonly EndpointKind[] = ['chat', 'vision', 'embed'];
 
 export interface ModelFile {
-  kind: ServeKind;
+  kind: EndpointKind;
   role: 'model' | 'mmproj';
   repo: string;
   file: string;
@@ -153,7 +153,7 @@ export function parseHfFiles(json: any): { file: string; size: number; sha256?: 
 }
 
 /** The first repo that has the file (and, for vision, a projector): what to download. */
-export async function findModels(kinds: ServeKind[], files: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
+export async function findModels(kinds: EndpointKind[], files: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
   const models: ModelFile[] = [];
   const problems: string[] = [];
   for (const kind of kinds) {
@@ -231,12 +231,12 @@ export function matchDevice(card: Pick<GpuCard, 'name'>, devices: LlamaDevice[],
 // The entries
 
 /** Each server's context, in tokens, as its startCommand sets it (acceleratorEntry): chat's is cap × slots. */
-export function serverContext(kind: ServeKind, s: { slots: number; maxContextTokens: number }): number {
+export function serverContext(kind: EndpointKind, s: { slots: number; maxContextTokens: number }): number {
   return kind === 'chat' ? s.maxContextTokens * s.slots : kind === 'vision' ? Math.max(8192, s.maxContextTokens) : 8192;
 }
 
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
-function kindFlags(kind: ServeKind, e: { slots: number; maxContextTokens: number }, mmproj: string | undefined, model: string): string[] {
+function kindFlags(kind: EndpointKind, e: { slots: number; maxContextTokens: number }, mmproj: string | undefined, model: string): string[] {
   switch (kind) {
     case 'chat':
       return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
@@ -259,9 +259,9 @@ function kindFlags(kind: ServeKind, e: { slots: number; maxContextTokens: number
  * with a compute buffer of about 1.2 at -ub 2048 (4.7 at 8192 on the Adreno). Estimates from the files
  * and llama.cpp's buffers, not measured on a card of its own.
  */
-export const SERVER_GB: Record<ServeKind, number> = { chat: 2.9, vision: 3.45, embed: 1.85, rerank: 1.85 };
+export const SERVER_GB: Record<EndpointKind, number> = { chat: 2.9, vision: 3.45, embed: 1.85, rerank: 1.85 };
 /** The KV cache at f16, a token: 36 layers × 8 KV heads × 128 × K and V × 2 bytes for the 4B models, 28 layers for the 0.6B ones. */
-const KV_BYTES: Record<ServeKind, number> = { chat: 147_456, vision: 147_456, embed: 114_688, rerank: 114_688 };
+const KV_BYTES: Record<EndpointKind, number> = { chat: 147_456, vision: 147_456, embed: 114_688, rerank: 114_688 };
 /** What a card keeps for the desktop and the programs on it. A game gets the rest back from the reaper, which stops the card's servers while it plays. */
 export const DESKTOP_GB = 1.5;
 /** The sizes tried on a card of its own, largest first. */
@@ -273,7 +273,7 @@ const CARD_SIZES = [
 ];
 
 /** The memory a card's servers take at once, by those estimates, in GB. */
-export function cardNeedGb(kinds: ServeKind[], s: { slots: number; maxContextTokens: number }): number {
+export function cardNeedGb(kinds: EndpointKind[], s: { slots: number; maxContextTokens: number }): number {
   return kinds.reduce((sum, k) => sum + SERVER_GB[k] + (serverContext(k, s) * KV_BYTES[k]) / 1024 ** 3, 0);
 }
 
@@ -281,9 +281,9 @@ export interface Sizing {
   slots: number;
   maxContextTokens: number;
   /** What it serves: those asked for, less any left off. */
-  kinds: ServeKind[];
+  kinds: EndpointKind[];
   /** Asked for, but left off: they wouldn't fit on the card beside the others. */
-  left?: ServeKind[];
+  left?: EndpointKind[];
 }
 
 /**
@@ -293,14 +293,14 @@ export interface Sizing {
  * by name (`keepKinds`); when still none does, the smallest. A card that shares the PC's memory goes by
  * the PC's, and the processor only chats.
  */
-export function sizing(t: { kind: 'gpu' | 'cpu'; memoryGb?: number; ramGb?: number; kinds?: ServeKind[]; keepKinds?: boolean }): Sizing {
+export function sizing(t: { kind: 'gpu' | 'cpu'; memoryGb?: number; ramGb?: number; kinds?: EndpointKind[]; keepKinds?: boolean }): Sizing {
   const kinds = t.kinds ?? [...DEFAULT_KINDS];
   if (t.kind === 'cpu') return { slots: 1, maxContextTokens: 4096, kinds };
   const own = t.memoryGb ?? 0;
   if (own < OWN_MEMORY_GB) return { ...((t.ramGb ?? 0) >= 32 ? { slots: 1, maxContextTokens: 8192 } : { slots: 1, maxContextTokens: 4096 }), kinds };
   const room = own - DESKTOP_GB;
   const tries = t.keepKinds || !kinds.includes('vision') || kinds.length === 1 ? [kinds] : [kinds, kinds.filter((k) => k !== 'vision')];
-  const withLeft = (ks: ServeKind[]) => (ks.length < kinds.length ? { kinds: ks, left: kinds.filter((k) => !ks.includes(k)) } : { kinds: ks });
+  const withLeft = (ks: EndpointKind[]) => (ks.length < kinds.length ? { kinds: ks, left: kinds.filter((k) => !ks.includes(k)) } : { kinds: ks });
   for (const ks of tries) {
     const fits = CARD_SIZES.find((s) => cardNeedGb(ks, s) <= room);
     if (fits) return { ...fits, ...withLeft(ks) };
@@ -320,8 +320,8 @@ export interface EntryInput {
   /** --device's name (none for the processor). */
   device: string | null;
   server: string;
-  models: Partial<Record<ServeKind, { path: string; mmproj?: string }>>;
-  ports: Partial<Record<ServeKind, number>>;
+  models: Partial<Record<EndpointKind, { path: string; mmproj?: string }>>;
+  ports: Partial<Record<EndpointKind, number>>;
   slots: number;
   maxContextTokens: number;
 }
@@ -335,7 +335,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
   if (e.memoryGb !== undefined) a.memoryGb = e.memoryGb;
   const server = portablePath(e.server);
   const pin = e.device ? ['--device', e.device, '-ngl', '99'] : ['-ngl', '0'];
-  for (const kind of SERVE_KINDS) {
+  for (const kind of ENDPOINT_KINDS) {
     const m = e.models[kind];
     const port = e.ports[kind];
     if (!m || !port) continue;
@@ -351,16 +351,16 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
  * setting one up keeps the rest of the accelerator's entry (its servers, slots and cap), and setting the others up again
  * keeps its reranker. Anything else is set up afresh, as before.
  */
-export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | AcceleratorEntry | undefined, kinds: readonly ServeKind[]): AcceleratorEntry {
+export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | AcceleratorEntry | undefined, kinds: readonly EndpointKind[]): AcceleratorEntry {
   if (!had) return made;
   if (kinds.every((k) => k === 'rerank')) return { ...entryOf(had), ...(made.rerank ? { rerank: made.rerank } : {}) };
   return had.rerank && !made.rerank && !kinds.includes('rerank') ? { ...made, rerank: had.rerank } : made;
 }
 
 /** The kinds of an accelerator's entry that a setup of `kinds` keeps (keepingAddOns): their ports stay theirs. */
-export function keptKinds(had: Accelerator | undefined, kinds: readonly ServeKind[]): ServeKind[] {
+export function keptKinds(had: Accelerator | undefined, kinds: readonly EndpointKind[]): EndpointKind[] {
   if (!had) return [];
-  if (kinds.every((k) => k === 'rerank')) return SERVE_KINDS.filter((k) => k !== 'rerank' && had[k]?.baseUrl);
+  if (kinds.every((k) => k === 'rerank')) return ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had[k]?.baseUrl);
   return had.rerank?.baseUrl && !kinds.includes('rerank') ? ['rerank'] : [];
 }
 
@@ -368,7 +368,7 @@ export function keptKinds(had: Accelerator | undefined, kinds: readonly ServeKin
 export function usedPorts(list: Accelerator[]): Set<number> {
   const out = new Set<number>();
   for (const a of list) {
-    for (const ep of SERVE_KINDS.map((k) => a[k])) {
+    for (const ep of ENDPOINT_KINDS.map((k) => a[k])) {
       if (!ep?.baseUrl) continue;
       try {
         const p = Number(new URL(ep.baseUrl).port);
@@ -435,10 +435,10 @@ export interface SetupTarget {
   folder?: string;
   slots: number;
   maxContextTokens: number;
-  ports: Partial<Record<ServeKind, number>>;
-  kinds: ServeKind[];
+  ports: Partial<Record<EndpointKind, number>>;
+  kinds: EndpointKind[];
   /** Asked for, but left off: they wouldn't fit on the card beside the others (sizing). */
-  left?: ServeKind[];
+  left?: EndpointKind[];
   /** Filled in once its build is here (llama-server --list-devices). */
   device?: string | null;
   problem?: string;
@@ -469,7 +469,7 @@ export interface PlanInput {
   /** Ids asked for; none: every graphics card (the processor too when there's no card and no NPU). */
   ids: string[];
   /** What each card serves (default all three; the processor only chats). */
-  kinds?: ServeKind[];
+  kinds?: EndpointKind[];
   /** config.json's content now. */
   raw: Record<string, any>;
   releases: Release[];
@@ -516,14 +516,14 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   } else if (det && configuredNpu) npuNote = `${det.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
   if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
   // What the NPU will serve (set up now, or configured before).
-  const npuServes = new Set<ServeKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? SERVE_KINDS.filter((k) => serves(configuredNpu, k)) : []);
+  const npuServes = new Set<EndpointKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? ENDPOINT_KINDS.filter((k) => serves(configuredNpu, k)) : []);
 
   // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
   // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats when the NPU
   // doesn't, and makes the embeddings when the NPU chats but serves none (every NPU route but a configured one).
   const cards = o.detection.cards;
   let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
-  const cpuDefault: ServeKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
+  const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
   if (!o.ids.length && !cards.length && o.detection.cpu && cpuDefault.length) wanted = ['cpu'];
   const targets: SetupTarget[] = [];
   for (const id of wanted) {
@@ -746,7 +746,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       rmSync(d.dest, { force: true });
     }
   }
-  const modelPath = (kind: ServeKind, role: 'model' | 'mmproj') => {
+  const modelPath = (kind: EndpointKind, role: 'model' | 'mmproj') => {
     const m = plan.models.find((x) => x.kind === kind && x.role === role);
     return m ? path.join(plan.modelsDir, path.basename(m.file)) : undefined;
   };
@@ -966,7 +966,7 @@ export async function hfFiles(repo: string): Promise<{ file: string; size: numbe
 
 export interface SetupOptions {
   ids: string[];
-  kinds?: ServeKind[];
+  kinds?: EndpointKind[];
   yes?: boolean;
   dryRun?: boolean;
   /** Asked before downloading (unless yes or dry-run); false stops. */
@@ -1094,7 +1094,7 @@ export function printReport(r: AcceleratorReport, out: (s: string) => void = con
   const byId = new Map(r.configured.map((a) => [a.id, a]));
   for (const id of r.order) {
     const a = byId.get(id)!;
-    const what = SERVE_KINDS.filter((k) => serves(a, k)).map((k) => `${k} ${a[k]!.model}`);
+    const what = ENDPOINT_KINDS.filter((k) => serves(a, k)).map((k) => `${k} ${a[k]!.model}`);
     out(`  ${a.name} (${a.id})${a.enabled === false ? ' [disabled]' : ''}: ${what.join(', ') || 'serves nothing yet'}; ${a.slots} slot${a.slots === 1 ? '' : 's'}, cap ${a.maxContextTokens} tokens${a.quirks.length ? `, quirks ${a.quirks.join(', ')}` : ''}`);
   }
   out(`Order: ${r.acceleratorOrder === 'auto' ? 'auto' : r.acceleratorOrder.join(', ')}${r.order.length ? ` (${r.order.join(' > ')})` : ''}`);

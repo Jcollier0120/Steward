@@ -29,12 +29,17 @@ import { RULES } from './rules.ts';
 export { acceleratorId, slug };
 
 export type AcceleratorKind = 'npu' | 'gpu' | 'cpu';
+/** What a request asks of a model server: the work the core routes. */
+export type ServeKind = 'chat' | 'vision' | 'embed';
+export const SERVE_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed'];
+
 /**
- * What a request asks of a model server. `rerank` (kit 2.41.0) is a reranker's /v1/rerank (llama.cpp's --reranking): an
- * add-on only the agents that ask for it use (Reeve's search), outside the core's routed work (chat, vision, embed).
+ * Every endpoint an accelerator may have: the routed work, and `rerank` (kit 2.41.0), a reranker's /v1/rerank (llama.cpp's
+ * --reranking), an add-on only the agents that ask for it use (Reeve's search). Kept apart from ServeKind so an agent's
+ * code that handles each routed kind needs no change for it.
  */
-export type ServeKind = 'chat' | 'vision' | 'embed' | 'rerank';
-export const SERVE_KINDS: readonly ServeKind[] = ['chat', 'vision', 'embed', 'rerank'];
+export type EndpointKind = ServeKind | 'rerank';
+export const ENDPOINT_KINDS: readonly EndpointKind[] = [...SERVE_KINDS, 'rerank'];
 
 /**
  * Per server: `prefix-leak` (GenieX v0.7.0 leaks state between requests that share a prompt prefix,
@@ -127,7 +132,7 @@ export function kindOfId(id: string): AcceleratorKind | null {
 }
 
 /** Whether it serves this kind of request: a vision endpoint needs a server, its own or its chat endpoint's. */
-export function serves(a: Accelerator, kind: ServeKind): boolean {
+export function serves(a: Accelerator, kind: EndpointKind): boolean {
   if (a.enabled === false) return false;
   if (kind === 'vision') return !!a.vision?.model && !!(a.vision.baseUrl ?? a.chat?.baseUrl);
   const ep = a[kind];
@@ -135,7 +140,7 @@ export function serves(a: Accelerator, kind: ServeKind): boolean {
 }
 
 /** The endpoint a request of this kind goes to; a vision endpoint without a server of its own is on its chat endpoint's. */
-export function endpointFor(a: Accelerator, kind: ServeKind): Required<Pick<Endpoint, 'baseUrl' | 'model'>> & Pick<Endpoint, 'startCommand' | 'env'> {
+export function endpointFor(a: Accelerator, kind: EndpointKind): Required<Pick<Endpoint, 'baseUrl' | 'model'>> & Pick<Endpoint, 'startCommand' | 'env'> {
   const ep = a[kind];
   if (!ep) throw new Error(`${a.id} serves no ${kind}`);
   if (kind === 'vision' && !ep.baseUrl) {
@@ -251,7 +256,7 @@ export function readAccelerator(v: any, hw: Hardware | null = null): Accelerator
     quirks: Array.isArray(v.quirks) ? v.quirks.filter((q: unknown): q is Quirk => (QUIRKS as readonly unknown[]).includes(q)) : [],
   };
   if (typeof v.memoryGb === 'number' && v.memoryGb >= 0) a.memoryGb = v.memoryGb;
-  for (const k of SERVE_KINDS) {
+  for (const k of ENDPOINT_KINDS) {
     const ep = readEndpoint(v[k]);
     if (ep) a[k] = ep;
   }
@@ -305,7 +310,7 @@ function onThisPc(list: Accelerator[], order: AcceleratorOrder, hw: Hardware | n
     const memoryGb = a.memoryGb ?? other.memoryGb ?? undefined;
     const moved: Accelerator = { ...a, id, kind: other.kind, name, ...(memoryGb !== undefined ? { memoryGb } : {}), ...(legacy ? { quirks: [] } : {}) };
     const same = kept.find((x) => x.id === id);
-    if (same) for (const w of SERVE_KINDS) same[w] ??= moved[w];
+    if (same) for (const w of ENDPOINT_KINDS) same[w] ??= moved[w];
     else kept.push(moved);
   }
   return { accelerators: kept, order: order === 'auto' ? order : order.map((id) => renamed.get(id) ?? id) };
@@ -408,7 +413,7 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
           for (const k of Object.keys(t))
             if (!(TIMEOUT_KEYS as readonly string[]).includes(k) || !(Number.isInteger(t[k]) && t[k] >= 0 && t[k] <= 3_600_000)) problems.push(`${at}: timeouts.${k} must be one of ${TIMEOUT_KEYS.join(', ')}, a whole number of ms up to an hour`);
       }
-      for (const k of SERVE_KINDS) {
+      for (const k of ENDPOINT_KINDS) {
         const ep = v[k];
         if (ep === undefined || ep === null) continue;
         const where = `${at}.${k}`;
