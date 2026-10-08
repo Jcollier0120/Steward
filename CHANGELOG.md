@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.21
+
+**A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**
+
+### What changed
+
+- A repository's open pull requests are no longer a column of their own. They are a small table on a line under its row, below the Employee, Checkout and Branch columns: each one's number, title and branch, its checks and whether it can merge.
+- The Notes column shows only when some repository has a note, such as a fetch that failed or a missing kit.json. When none do, the room goes to the other columns.
+- "Keep it on this PC" and "Do it here" stay on one line instead of wrapping in a narrow Release PC column.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.18
 
 **The kit it hands out, 2.41.0, can set up and keep a reranker, for Reeve's search.**
