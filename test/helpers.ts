@@ -105,6 +105,8 @@ export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner
     kit: { released: o.released ?? [], releasesError: null, local: null, localDir: null },
     log: (l) => lines.push(l),
     neutralDir: o.neutralDir,
+    // Asking GitHub again (merge.ts) waits for nothing here.
+    pause: async () => {},
     lines,
   };
 }
