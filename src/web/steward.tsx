@@ -549,11 +549,14 @@ function TurnLine({ x }: { x: TurnRow }) {
   );
 }
 
-/** The stages, for the ticked employees: one that doesn't take the kit starts unticked. */
+/**
+ * The stages, for the ticked employees: one that doesn't take the kit starts unticked. The Steward's own row isn't one:
+ * its rounds merge and release it (stages/selfmerge.ts, stages/self.ts).
+ */
 function Stages({ v }: { v: StewardView }) {
   const s = v.staff;
   const kit = s?.kit ?? null;
-  const rows = s?.rows ?? [];
+  const rows = (s?.rows ?? []).filter((r) => !r.self);
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
   const castellan = v.castellan !== false;
   const isTicked = (r: StaffRowView) => ticked[r.id] ?? (castellan ? r.usesKit : true);
@@ -790,7 +793,7 @@ export function StewardBody({ v }: { v: StewardView }) {
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
         <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} />
       </Section>
-      {(s?.rows.length ?? 0) > 0 && (
+      {(s?.rows.some((r) => !r.self) ?? false) && (
         <Section title={castellan ? 'Roll out the kit' : 'Merge and release'}>
           <Stages v={v} />
         </Section>

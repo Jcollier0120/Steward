@@ -593,10 +593,13 @@ const REPO_NAME = new RegExp(`^${REPO.pattern}$`);
  * The settings as the Steward works by them: on a PC that doesn't release Castellan itself (every PC but its makers'),
  * nothing of Castellan's runs, whatever the file says: no kit rollout, no releases or PRs of the Steward's own, and no
  * repository takes the kit; the releases repository isn't used. Where the Wright isn't installed, nothing is handed to
- * it and its drafts aren't looked at. Pure.
+ * it and its drafts aren't looked at. On the PC that does, the Steward's own repository is never an employee as well
+ * (one looked after by mistake): it is looked after as itself (stages/selfmerge.ts), and twice would merge it twice.
+ * Pure.
  */
 export function inEffect(s: Settings, wright = s.wrightHere): Settings {
   let out = s;
+  if (s.releasesCastellan && s.employees.some((e) => isSelf(s, e))) out = { ...out, employees: out.employees.filter((e) => !isSelf(s, e)) };
   if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
   if (!s.releasesCastellan)
     out = {
@@ -619,6 +622,13 @@ export function inEffect(s: Settings, wright = s.wrightHere): Settings {
 export const releasesRepoEnv = (s: Pick<Settings, 'releasesCastellan' | 'releasesRepo'>): Record<string, string> => ({ MANOR_RELEASES_REPO: s.releasesCastellan ? s.releasesRepo : '' });
 
 export const settingsFile = () => dataFile('settings.json');
+
+/** Whether a repository is the Steward's own, as Settings name it: its repository, or its clone. */
+export function isSelf(s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>, e: { repo?: string; checkout?: string; path?: string }): boolean {
+  const dir = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+  const clone = e.checkout ?? e.path;
+  return (!!s.stewardRepo && !!e.repo && e.repo.toLowerCase() === s.stewardRepo.toLowerCase()) || (!!s.stewardCheckout && !!clone && dir(clone) === dir(s.stewardCheckout));
+}
 
 /** The Steward's own repository: Settings' when they name it, else the origin of the clone they name, else none. */
 export const selfRepoOf = (s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): string => s.stewardRepo || (s.stewardCheckout ? (originRepo(s.stewardCheckout) ?? '') : '');

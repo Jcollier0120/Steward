@@ -8,7 +8,7 @@ import { originRepo } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
-import { loadSettings, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
+import { inEffect, isSelf, loadSettings, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
  * The person's own repositories, as Reeve finds them. Reeve lists every git repository on this PC (his GET /api/repos,
@@ -160,8 +160,8 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
 /** The repositories offered: ones gh's account can push to, that Settings don't already name (by repository or clone). */
-export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[]): FoundRepo[] {
-  return s.repos.filter((r) => (r.push === true || (r.byGit === true && r.push === null)) && !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))));
+export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[], self?: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): FoundRepo[] {
+  return s.repos.filter((r) => (r.push === true || (r.byGit === true && r.push === null)) && !(self && isSelf(self, r)) && !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))));
 }
 
 /** The npm default test script, which only fails: not a test. */
@@ -247,11 +247,14 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   if (!o.file) loadSettings();
   const file = o.file ?? settingsFile();
   const raw = readJson<Record<string, unknown>>(file, {});
-  const current = normalizeSettings(raw).settings.employees;
+  const settings = normalizeSettings(raw).settings;
+  const current = settings.employees;
+  // The Steward's own, on the PC that releases it: looked after as itself already (settings.ts's inEffect).
+  const self = inEffect(settings);
   const found = o.found ?? loadFound();
-  const r = candidates(found, current).find((x) => same(x.repo, repo));
+  const r = candidates(found, current, self).find((x) => same(x.repo, repo));
   if (!r) {
-    if (current.some((e) => same(e.repo, repo))) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
+    if (current.some((e) => same(e.repo, repo)) || isSelf(self, { repo })) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
   }
   const employee = employeeFromFound(r, { taken: current.map((e) => e.id), merges: o.merges, release: o.release });
@@ -286,6 +289,6 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
 }
 
 /** The page's view of it: what Reeve found that could be looked after, and why nothing can when nothing can. */
-export function foundView(s: FoundState, settings: Pick<Settings, 'employees'>): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number } {
-  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees), found: s.repos.length };
+export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'stewardRepo' | 'stewardCheckout'>): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number } {
+  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees, settings), found: s.repos.length };
 }

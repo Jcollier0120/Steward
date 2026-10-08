@@ -63,6 +63,8 @@ export interface ReleaseInfo {
 }
 
 export interface StaffRow {
+  /** The Steward's own repository (stages/selfmerge.ts), shown beside the employees: no stage is run on it from the table. */
+  self?: boolean;
   id: string;
   name: string;
   repo: string;
@@ -309,9 +311,13 @@ function releasedHereRow(e: Employee, row: StaffRow): { version: string | null }
   }
 }
 
-/** Every employee's row, a few at a time; with what GitHub said of each (glance.ts's repoSig), so a round can tell when the table is out of date. */
-export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null }): Promise<Staff> {
+/**
+ * Every employee's row, a few at a time, then the Steward's own (`self`) when it has one; with what GitHub said of each
+ * employee (glance.ts's repoSig), so a round can tell when the table is out of date.
+ */
+export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null; self?: Employee | null }): Promise<Staff> {
   const rows = await mapLimit(ctx.settings.employees, 5, (e) => staffRow(ctx, e, opts));
+  if (opts.self) rows.push({ ...(await staffRow(ctx, opts.self, { ...opts, kit: null, tool: null })), self: true });
   const at = new Date().toISOString();
   const seen = ctx.glance ? Object.fromEntries(Object.entries(ctx.glance.repos).map(([id, g]) => [id, repoSig(g)])) : undefined;
   return { at, checked: at, kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows, ...(seen ? { seen } : {}) };

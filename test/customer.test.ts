@@ -155,6 +155,7 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   const words = html.replace(/<style>[\s\S]*?<\/style>/, '').replace(/<[^>]+>/g, ' ');
   assert.doesNotMatch(words, /\bkit\b|Wright|Bailiff|Castellan|employee/i, 'nothing of Castellan on their page');
   assert.doesNotMatch(html, /\/api\/stage\/(bump|push)/, "no kit rollout's buttons");
+  assert.doesNotMatch(html, /Roll out the kit/, 'no kit rollout to show');
   assert.match(html, /Found on this PC/);
   assert.match(html, /only if you tick that/);
   assert.match(html, /PRs left to you/);
@@ -182,4 +183,16 @@ test("the kit's release publishes to the releases repository only where the Stew
   assert.equal(releasesRepo(env({ MANOR_RELEASES_REPO: '' })), null, 'the Steward says none');
   assert.equal(releasesRepo(env({ MANOR_RELEASES_REPO: 'me/other' })), 'me/other', 'the Steward names it');
   assert.equal(inEffect({ ...DEFAULT_SETTINGS, releasesRepo: 'me/releases' }).releasesRepo, '', 'off: never used');
+});
+
+test("the Steward's own repository is never an employee as well on the PC that releases it, nor offered by Found", () => {
+  const own = { ...DEFAULT_SETTINGS, releasesCastellan: true, stewardRepo: 'me/steward', stewardCheckout: path.join(home, 'clones', 'steward') };
+  const mine = { id: 'steward', branch: 'main', merges: false, usesKit: false, fill: '', test: [], versionFiles: ['package.json'], release: '', install: '', approve: '', installed: '', name: 'Steward', repo: 'Me/Steward', checkout: path.join(home, 'elsewhere') };
+  const byClone = { ...mine, id: 'stew', repo: 'me/fork', checkout: `${own.stewardCheckout}${path.sep}` };
+  const other = { ...mine, id: 'app', name: 'app', repo: 'me/app', checkout: app.checkout };
+  assert.deepEqual(inEffect({ ...own, employees: [mine, byClone, other] }).employees.map((e) => e.id), ['app'], 'by its repository or its clone');
+  // Elsewhere a repository of the same name is anyone's.
+  assert.deepEqual(inEffect({ ...DEFAULT_SETTINGS, stewardRepo: 'me/steward', employees: [mine, other] }).employees.map((e) => e.id), ['steward', 'app']);
+  const found = { at: null, from: 'reeve' as const, error: null, repos: [{ repo: 'me/steward', name: 'steward', path: own.stewardCheckout, branch: 'main', lockfiles: [], push: true }, { repo: 'me/new', name: 'new', path: path.join(home, 'clones', 'new'), branch: 'main', lockfiles: [], push: true }] };
+  assert.deepEqual(candidates(found, [], inEffect(own)).map((r) => r.repo), ['me/new']);
 });

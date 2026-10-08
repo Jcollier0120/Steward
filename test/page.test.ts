@@ -115,6 +115,14 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
   assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
+  // The Steward's own repository: a row of the table, with its release PC in it, and no stage ticks it.
+  const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
+  const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
+  const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
+  assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
+  assert.doesNotMatch(withSelf, /Merging and releasing for Steward/, 'said in its row, not under the table');
+  assert.match(withSelf, /name="employees"[^>]*value="fake"/);
+  assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
