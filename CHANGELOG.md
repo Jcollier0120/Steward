@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.24
+
+**See what the Steward does with pull requests that conflict with their branch.**
+
+### What's new
+
+- A new **Merge conflicts** section on the Steward's page, under your repositories. It lists each pull request that conflicted with its branch in the last two weeks, and what the Steward did with it:
+  - **caught up**: only version lines, a changelog's new entry or a kit pin conflicted, so it resolved them and pushed a merge commit;
+  - **sent back**: something needed judgement, so it left a comment for whoever wrote it (a Claude Code session or a person);
+  - **closed**: one of the Wright's, queued for the Wright to do again, or a kit update of its own, to be bumped again;
+  - **couldn't**: it tried and something went wrong, with why.
+- Each one says which files conflicted and which of them needed a person, when the Steward did it, when it last looked again, and whether the pull request is still open.
+- In your repositories' table, a pull request it has dealt with carries the same badge on its line. Hover over it for what was done.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The section fills from the next round on; conflicts handled before this version aren't listed.
+
 ## 0.27.21
 
 **A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**

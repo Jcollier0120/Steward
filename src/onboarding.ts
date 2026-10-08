@@ -15,6 +15,7 @@ export const ONBOARDING: Onboarding = {
     { tour: 'alarms', title: 'Needs you', text: 'What it could not settle by itself: a pull request that has waited, a release it gave up on. Each clears by itself once it is fixed.' },
     { tour: 'found', title: 'Found on this PC', text: 'Your repositories on GitHub that Reeve found here and you can push to. Look after one, and tick whether it may merge your ready pull requests and release new versions.' },
     { tour: 'staff', title: 'Your repositories', text: 'Each one it looks after: its version on its branch, its newest release, its open pull requests, and what you let it do.' },
+    { tour: 'conflicts', title: 'Merge conflicts', text: "Each pull request that conflicted with its branch, and what it did: caught it up where only its version lines or a changelog's new entry conflict, or sent it back to whoever wrote it." },
     { tour: 'stages', title: 'Merge and release', text: 'Merge your ready pull requests, or release new versions, when you want them by hand.' },
     { tour: 'last-stage', title: 'The last stage', text: 'What the last stage or round did, repository by repository, with the output of anything that failed.' },
   ],

@@ -18,6 +18,7 @@ import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
+import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -443,14 +444,17 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     if (c.done && c.version) await reclaim(e.repo, pr.head, c.version).catch(() => {});
     if (c.done && c.kitVersion) await reclaim(kitClaimKey(e.repo), pr.head, c.kitVersion).catch(() => {});
     // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
+    let sent = false;
     if (c.conflicts?.length && pr.whose === 'team') {
       try {
         const k = await kickBack(ctx, e, pr, c.conflicts, now);
-        c = { done: false, closed: k.closed, note: k.note };
+        c = { ...c, done: false, closed: k.closed, note: k.note };
+        sent = k.sent;
       } catch (err) {
         c = { ...c, note: `${c.note} (couldn't send it back to its author: ${(err as Error).message})` };
       }
     }
+    lookedAtConflict(e, pr, c, sent);
     const h = o.held.find((x) => x.number === pr.number);
     if (h) h.why = c.done ? `caught up by the Steward (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.
@@ -458,6 +462,25 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
   return lines;
+}
+
+/** Why a catch-up didn't try: nothing the page's conflicts need to show. */
+const NOT_TRIED = new Set(['nothing to catch up', 'its branch moved since this round listed it']);
+
+/**
+ * A PR that conflicts with its branch, as the round left it, for the page (conflicts.ts): one GitHub says conflicts,
+ * or whose merge here conflicted. One that was only behind isn't one.
+ */
+function lookedAtConflict(e: Employee, pr: PrInfo, c: CaughtUp, sent: boolean): void {
+  const files = c.conflicted ?? [];
+  if (!files.length && pr.mergeable !== 'CONFLICTING' && pr.mergeState !== 'DIRTY') return;
+  if (!files.length && NOT_TRIED.has(c.note)) return;
+  const outcome: ConflictOutcome = c.done ? 'caught-up' : c.closed ? 'closed' : sent ? 'sent-back' : 'couldnt';
+  try {
+    noteConflict({ id: e.id, name: e.name, repo: e.repo, number: pr.number, url: pr.url, title: pr.title, head: pr.head, author: pr.author, headOid: pr.headOid, outcome, note: c.note, files, needs: c.conflicts ?? [] });
+  } catch {
+    // The page's record only: the round goes on without it.
+  }
 }
 
 /** Each employee's merges, a few employees at a time (Settings' parallel), each one's PRs in order. */
