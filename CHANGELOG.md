@@ -4,9 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.27.14
 
-**A new kit held back by one agent goes ahead on its own once that agent is fixed.**
+**Pull requests merge in version order, and a new kit held back by one agent goes ahead on its own once that agent is fixed.**
 
 ### What changed
+
+- When several pull requests to the same repository each raise its version, the Steward now merges them lowest version first, whichever was opened first. Each one above waits its turn, and the hold says which one it is waiting for. Once the one below has merged, the Steward catches it up: it settles the version lines and changelog itself, and the PR merges at the next round. Pull requests that don't change the version merge first, as before. Drafts are never in the queue.
 
 - Before releasing a new kit, the Steward tries it on every agent. Until now, if one agent failed, the kit stayed held until the kit itself changed, even after that agent had been fixed. Now the Steward checks each round whether a failing agent has changed since its trial. If it has, the Steward tries that agent again with the same kit, and only that agent. Once every agent passes, the kit is released as usual, with a note on its pull request saying so.
 - A kit held from before this update is tried again on its failing agents once, at the next round.

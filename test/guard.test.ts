@@ -149,22 +149,49 @@ test('a version a team PR sets must be new: not released, above its branch, and 
   const m = await mergeOne(ctx(), e, { yes: true, team: true });
   assert.deepEqual(m.merged.map((p) => p.number), [11]);
 
-  // #12 sets 0.4.6 and #13 0.4.5, both new; once #12 is merged, main is at 0.4.6, and #13 is no longer above it.
+  // #12 sets 0.4.6 and #13 0.4.5, both new: the lowest version merges first, whatever the PR numbers, so #13 goes and
+  // #12 waits its turn; at the next round, main at 0.4.5, #12 is still above it and merges.
   const g = employeeWithPrs('after-a-merge');
   const twelve = g.make(12, { version: '0.4.6' });
   const thirteen = g.make(13, { version: '0.4.5' });
+  let open = [listed(12, twelve), listed(13, thirteen)];
   const s = runner((args) => {
-    if (args[0] === 'pr' && args[1] === 'list') return ok([listed(12, twelve), listed(13, thirteen)]);
+    if (args[0] === 'pr' && args[1] === 'list') return ok(open);
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
     if (args[0] === 'pr' && args[1] === 'merge') {
-      sh(g.checkout, 'push', '--quiet', 'origin', `${args[2] === '12' ? twelve : thirteen}:refs/heads/main`);
+      if (args[2] === '13') sh(g.checkout, 'push', '--quiet', 'origin', `${thirteen}:refs/heads/main`);
       return ok('');
     }
   });
   const h = employee(g.checkout, { fill: '' });
-  const both = await mergeOne(ctxFor({ employees: [h], workRoot: path.join(tmp, 'work-after'), run: s.run, neutralDir: tmp }), h, { yes: true, team: true });
-  assert.deepEqual(both.merged.map((p) => p.number), [12]);
-  assert.match(both.message, /^merged #12; #13 .* waits: it sets v0\.4\.5, but main is at v0\.4\.6 already: raise it above$/);
+  const ctxAfter = () => ctxFor({ employees: [h], workRoot: path.join(tmp, 'work-after'), run: s.run, neutralDir: tmp });
+  const both = await mergeOne(ctxAfter(), h, { yes: true, team: true });
+  assert.deepEqual(both.merged.map((p) => p.number), [13]);
+  assert.match(both.message, /^merged #13; #12 .* waits: its turn comes after #13 \(v0\.4\.5\): the lowest version merges first$/);
+  open = [listed(12, twelve)];
+  const next = await mergeOne(ctxAfter(), h, { yes: true, team: true });
+  assert.deepEqual(next.merged.map((p) => p.number), [12]);
+});
+
+test('a lower version holds the ones above it even while it waits itself; a draft holds nothing; a PR that sets no version goes first', async () => {
+  const f = employeeWithPrs('order');
+  const shas: Record<number, string> = {
+    15: f.make(15, { version: '0.4.7' }),
+    16: f.make(16, { version: '0.4.8' }),
+    17: f.make(17, { version: '0.4.6' }),
+    18: f.make(18),
+    19: f.make(19, { version: '0.4.9' }),
+  };
+  const e = employee(f.checkout, { fill: '' });
+  const red = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }];
+  const prs = [listed(15, shas[15], { statusCheckRollup: red }), listed(16, shas[16]), listed(17, shas[17], { isDraft: true }), listed(18, shas[18]), listed(19, shas[19])];
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : args[1] === 'merge' ? ok('') : undefined));
+  const m = await mergeOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-order'), run: r.run, neutralDir: tmp }), e, { yes: true, team: true });
+  assert.deepEqual(m.merged.map((p) => p.number), [18], m.message);
+  assert.match(m.message, /#15 .* waits: checks failing/);
+  assert.match(m.message, /#16 .* waits: its turn comes after #15 \(v0\.4\.7\): the lowest version merges first/);
+  assert.match(m.message, /#19 .* waits: its turn comes after #15 \(v0\.4\.7\)/);
+  assert.match(m.message, /#17 .* waits: a draft/);
 });
 
 test('drafts wait, whatever their checks', async () => {
