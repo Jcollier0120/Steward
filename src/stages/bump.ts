@@ -182,12 +182,12 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   }
   const texts = e.versionFiles.map((f) => [f, existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), 'utf8') : null] as [string, string | null]);
   const agreed = agreedVersion(texts);
-  if ('error' in agreed) return result(e, 'failed', agreed.error);
+  if ('error' in agreed) return result(e, 'failed', agreed.error, { base: baseCommit });
   const next = bumpPatch(agreed.version);
   try {
     for (const [f, t] of texts) writeFileSync(path.join(dir, f), setVersion(f, t!, agreed.version, next));
   } catch (err) {
-    return result(e, 'failed', (err as Error).message);
+    return result(e, 'failed', (err as Error).message, { base: baseCommit });
   }
   say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
   // The new version's entry, so its release's notes say what it brings.
@@ -203,9 +203,9 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say });
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
-  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${first ? ` on a second try (the first: ${first})` : ''}`, { version: next });
+  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit });
   const secondTry = first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -11,6 +11,7 @@ process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit } = await import('../src/stages/trial.ts');
+const { writeJson } = await import('../src/kit/store.ts');
 const { trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
@@ -85,4 +86,64 @@ test('a kit every agent passes merges; a PR that leaves the kit as it is, or to 
   assert.equal(await kitTrialHold(quiet.c, me, pr({ files: ['src/app.ts'] })), null);
   assert.equal(await kitTrialHold(quiet.c, good, pr()), null, "an agent's own PR with a kit/VERSION is no kit release");
   assert.equal(quiet.c.lines.length, 0);
+});
+
+test('an agent the kit failed is tried again, alone, once its main moves: fixed on its side, the PR merges', async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const kept = () => JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`];
+  const push = (file: string, text: string) => {
+    writeFileSync(path.join(bad.checkout, file), text);
+    sh(bad.checkout, 'add', '-A');
+    sh(bad.checkout, 'commit', '--quiet', '-m', `Change ${file}`);
+    sh(bad.checkout, 'push', '--quiet', 'origin', 'main');
+    return sh(bad.checkout, 'rev-parse', 'HEAD');
+  };
+  const first = ctx();
+  assert.match((await kitTrialHold(first.c, me, pr())) ?? '', /fails 1 agent's checks here \(Bad\)/);
+  assert.equal(kept().failed[0].main, sh(bad.checkout, 'rev-parse', 'HEAD'), 'the commit it was tried from is kept');
+
+  // Its main as it was: nothing is tried again.
+  const same = ctx();
+  assert.match((await kitTrialHold(same.c, me, pr())) ?? '', /\(Bad\)/);
+  assert.ok(!same.c.lines.some((l) => l.includes('trial:')), same.c.lines.join('\n'));
+
+  // Moved, but still failing the same way: tried again, held, and nothing more said.
+  const moved = push('README.md', 'Bad\n');
+  const still = ctx();
+  assert.match((await kitTrialHold(still.c, me, pr())) ?? '', /\(Bad\)/);
+  assert.ok(still.c.lines.some((l) => l.startsWith('[bad] kit 1.0.1 trial: failed')), still.c.lines.join('\n'));
+  assert.equal(still.comments().length, 0);
+  assert.equal(kept().failed[0].main, moved);
+
+  // Fixed on its side: only it is tried, the PR merges, and a comment says so.
+  push('check.mjs', 'process.exit(0);\n');
+  const fixed = ctx();
+  assert.equal(await kitTrialHold(fixed.c, me, pr()), null, fixed.c.lines.join('\n'));
+  assert.ok(fixed.c.lines.some((l) => l.startsWith('[bad] kit 1.0.1 trial: done')));
+  assert.ok(!fixed.c.lines.some((l) => l.startsWith('[good]')), 'one that passed is not tried again');
+  const said = fixed.comments();
+  assert.equal(said.length, 1);
+  assert.match(said[0][said[0].indexOf('--body') + 1], /tried kit 1\.0\.1 again, .* on Bad, whose main moved on since: every agent passes with it now/);
+  assert.deepEqual(kept().failed, []);
+  assert.equal(kept().passed, 2);
+  for (const e of [good, bad]) assert.ok(!existsSync(trialDirOf(fixed.c.settings, e)));
+  assert.ok(!existsSync(kitTrialDirOf(fixed.c)));
+
+  // Then nothing more: no failures left to try again.
+  const after = ctx();
+  assert.equal(await kitTrialHold(after.c, me, pr()), null);
+  assert.equal(after.c.lines.length, 0);
+});
+
+test('a failure kept before its commit was is tried again once; one whose commit is unknown waits for a new push', async () => {
+  const at = new Date().toISOString();
+  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'an old failure' }], passed: 1, at, commented: true } });
+  const old = ctx();
+  assert.equal(await kitTrialHold(old.c, me, pr()), null, old.c.lines.join('\n'));
+  assert.ok(old.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')));
+
+  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'failed', main: null }], passed: 1, at, commented: true } });
+  const unknown = ctx();
+  assert.match((await kitTrialHold(unknown.c, me, pr())) ?? '', /\(Good\)/);
+  assert.equal(unknown.c.lines.length, 0);
 });

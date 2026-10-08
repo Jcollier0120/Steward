@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.14
+
+**A new kit held back by one agent goes ahead on its own once that agent is fixed.**
+
+### What changed
+
+- Before releasing a new kit, the Steward tries it on every agent. Until now, if one agent failed, the kit stayed held until the kit itself changed, even after that agent had been fixed. Now the Steward checks each round whether a failing agent has changed since its trial. If it has, the Steward tries that agent again with the same kit, and only that agent. Once every agent passes, the kit is released as usual, with a note on its pull request saying so.
+- A kit held from before this update is tried again on its failing agents once, at the next round.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.12
 
 **Each repository's release PC is shown in the staff table now, so it no longer needs a section of its own.**
