@@ -326,10 +326,10 @@ test("the manor's own: its staff's and announced agents' repositories, the Stewa
   });
   // Nothing installed: nothing, never a name or folder of the kit's own.
   assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere'), stewardHome: path.join(tmp, 'nowhere') }), { repos: [], checkouts: [] });
-  // Kit 2.42.0: an employee is the manor's own only as staff, on the kit, where the Steward releases Castellan.
+  // Kit 2.42.0: the Steward's employees are the manor's own only where it releases Castellan, those off the kit too.
   const noStaff = path.join(tmp, 'no-staff.json');
-  writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ releasesCastellan: true, employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk', usesKit: true }, { id: 'game', repo: 'me/Game', checkout: 'E:\\src\\Game', usesKit: false }] }));
-  assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: noStaff }).repos, ['Jcollier0120/Chamberlain', 'me/Clerk'], 'a repository off the kit is the person\'s own, even here');
+  writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ releasesCastellan: true, employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk', usesKit: true }, { id: 'site', repo: 'me/Site', checkout: 'E:\\src\\Site', usesKit: false }] }));
+  assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: noStaff }).repos, ['Jcollier0120/Chamberlain', 'me/Clerk', 'me/Site'], "Castellan's site, off the kit, is still Castellan's");
   writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ releasesCastellan: false, employees: [{ id: 'mine', repo: 'me/Mine', checkout: 'E:\\src\\Mine', usesKit: true }] }));
   assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: noStaff }), { repos: ['Jcollier0120/Chamberlain'], checkouts: [] }, "on anyone else's PC the Steward's repositories are the person's, to track as projects");
 });

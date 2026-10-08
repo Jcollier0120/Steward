@@ -346,9 +346,10 @@ const textAt = (o: unknown, ...keys: string[]): string | null => {
  * its settings name one. The Steward's folder is STEWARD_HOME, else %USERPROFILE%\.steward. Nothing here names anyone's
  * account or folder: what runs on someone else's PC knows only what that PC says.
  *
- * Since kit 2.42.0 an employee is the manor's own only when it is staff: it takes the kit (`usesKit` not false), on a PC
- * whose Steward releases Castellan (`releasesCastellan` not false; a settings.json from before that key counts as one).
- * Anywhere else the person's own repositories are tracked as projects (spec/REPOSITORIES.md), the Steward's included.
+ * Since kit 2.42.0 the Steward's employees are the manor's own only on a PC whose Steward releases Castellan
+ * (`releasesCastellan` not false; a settings.json from before that key counts as one): there they are Castellan's, its
+ * site and its sales off the kit included. Anywhere else the repositories a person gave the Steward are theirs, and
+ * tracked as projects (spec/REPOSITORIES.md).
  */
 export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: string } = {}): ManorOwn {
   const home = o.home ?? manorHome();
@@ -362,7 +363,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
   const settings = jsonAt(path.join(steward, 'settings.json'));
   const castellan = !(settings && typeof settings === 'object' && (settings as Record<string, unknown>).releasesCastellan === false);
   const employees = listOf(settings, 'employees');
-  const staff = castellan ? employees.filter((e) => e.usesKit !== false) : [];
+  const staff = castellan ? employees : [];
   for (const e of employees.length ? staff : listOf(jsonAt(path.join(steward, 'staff.json')), 'rows')) {
     const repo = textAt(e, 'repo');
     if (repo) repos.add(repo);

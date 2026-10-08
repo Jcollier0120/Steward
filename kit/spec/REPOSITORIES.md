@@ -4,7 +4,7 @@ Since kit 2.42.0, the repositories the manor looks after on a PC are set in one 
 
 ## Two kinds of repository
 
-- **Staff:** Castellan's own agents. They take the kit, hold roles, and are released as Castellan. Only the PC that releases Castellan has staff to look after: there the Steward's employees on the kit are staff, and its Settings keep them. A tracked repository may never be one of them (`manorOwn()`).
+- **Staff:** Castellan's own: its agents, which take the kit and hold roles, and what else is released as Castellan (its site, its sales). Only the PC that releases Castellan has staff to look after: there the Steward's employees are staff, and its Settings keep them. A tracked repository may never be one of them (`manorOwn()`).
 - **Tracked repositories:** the person's own, on every PC, the makers' included. Manor's list holds them. They take no kit and hold no role.
 
 On any other PC there is no staff: everything the person develops is a tracked repository.
