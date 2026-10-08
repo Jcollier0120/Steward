@@ -8,9 +8,9 @@ import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
-import { testAtHead, testedBefore, type Tested } from './prtest.ts';
+import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
-import { kitTrialHold } from './trial.ts';
+import { kitTrialHold, raisesKit } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -383,16 +383,20 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       })
     : new Map<number, string>();
   const turnAfter = new Map<number, number>();
+  // The kit's PRs (in the Steward's own repository) come first: one waits only for a lower one of the kit's, and the rest,
+  // merged after it, are caught up to versions above it. The agents' PRs that take the new kit wait for it (prtest.ts).
+  const kitQueue = new Map([...pending].filter(([n]) => prs.some((p) => p.number === n && raisesKit(p))));
   merge = merge.filter((pr) => {
     const v = pending.get(pr.number);
-    const below = v ? lowestBelow(pending, v) : null;
+    const below = v ? lowestBelow(raisesKit(pr) ? kitQueue : pending, v) : null;
     if (!below) return true;
     hold.push({ pr, why: `its turn comes after #${below[0]} (v${below[1]}): the lowest version merges first` });
     turnAfter.set(pr.number, below[0]);
     return false;
   });
-  // Those that change no version first, then by version.
-  merge.sort((a, b) => (pending.has(a.number) ? 1 : 0) - (pending.has(b.number) ? 1 : 0) || (pending.has(a.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
+  // The kit's first, then those that change no version, then by version.
+  const rank = (pr: PrInfo) => (raisesKit(pr) ? 0 : pending.has(pr.number) ? 2 : 1);
+  merge.sort((a, b) => rank(a) - rank(b) || (pending.has(a.number) && pending.has(b.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
   // The same, for the alarms (alarms.ts): each PR that waits, and why.
@@ -422,6 +426,13 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
     }
     if (untested(pr)) {
+      // Its kit not released yet: not tested, nor held against its commit, until it is (prtest.ts).
+      const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
+      if (kitWaits) {
+        waits.push(`${describe(pr)} waits: ${kitWaits}`);
+        held.push(heldOf(pr, kitWaits));
+        continue;
+      }
       const before = testedBefore(e, pr);
       let t: Tested;
       try {

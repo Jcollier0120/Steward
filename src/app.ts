@@ -9,7 +9,7 @@ export const APP = {
   name: 'Steward',
   /** One line: what it does. Manor shows it under the name. */
   role: 'Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes',
-  version: '0.27.35',
+  version: '0.27.42',
 };
 
 /** The folder above src/: the installed copy's app folder, or a checkout. */
