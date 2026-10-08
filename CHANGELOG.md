@@ -17,6 +17,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.27.13
+
+**Kit roll-outs no longer clash with your own open work, and a release isn't held by an Aletaster that has Developer options off.**
+
+### What's new
+
+- It hands out kit 2.40.0. With Developer options off, every agent's settings leave out what's for developers and keep it as it was when you save. A developer role's agent (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward) has no "Where its work runs" then, and can leave its settings form out altogether. The plain "Where its work runs" talks about the AI chip, not the NPU or its maker's name.
+
+### What changed
+
+- A new kit is no longer rolled out to an agent whose own open pull request already brings that kit. Before, the Steward opened a kit-only pull request beside it at the same version, which then had to be closed or caused a conflict.
+- A kit bump claims its version, as other work does. It never takes the version of a pull request that's open or of work that has claimed one. If GitHub can't be reached to claim it, the bump waits for the next round.
+- Without Manor, an Aletaster with its own Developer options off tastes nothing. Releases now go without a tasting then, as they do when the Aletaster's role is vacant, and say so, instead of waiting for good.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.12
 
 **Each repository's release PC is shown in the staff table now, so it no longer needs a section of its own.**

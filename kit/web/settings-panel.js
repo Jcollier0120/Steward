@@ -258,15 +258,17 @@
 
   function records(f, v) {
     const noun = (f.noun || 'entry').toLowerCase();
-    const flat = f.fields.every((g) => SCALAR.includes(g.kind));
+    // A record's handle (settings-kit.ts's KEPT, in place of its developer-only fields) goes with it, never drawn.
+    const drawn = f.fields.filter((g) => !g.kept);
+    const flat = drawn.every((g) => SCALAR.includes(g.kind));
     const add = h('button', { type: 'button', class: 'quiet small', text: `Add ${noun}` });
     const tbody = h('tbody');
     const stack = h('div');
     const node = flat
-      ? h('div', {}, h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, f.fields.map((g) => h('th', { scope: 'col', text: g.label })), h('th', {}))), tbody)), add)
+      ? h('div', {}, h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, drawn.map((g) => h('th', { scope: 'col', text: g.label })), h('th', {}))), tbody)), add)
       : h('div', {}, stack, add);
     let rows = [];
-    const values = () => rows.map((r) => Object.fromEntries(f.fields.map((g) => [g.key, r.parts[g.key].ed.get()])));
+    const values = () => rows.map((r) => Object.fromEntries(f.fields.map((g) => [g.key, g.kept ? r.rec[g.key] : r.parts[g.key].ed.get()]).filter(([, x]) => x !== undefined)));
     const title = (rec, i) => (f.title && rec[f.title] ? String(rec[f.title]) : `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1}`);
     // A record of many fields is folded to its title; which are open survives adding and removing.
     const opened = () => rows.map((r) => !!r.node.open);
@@ -285,7 +287,7 @@
         const rowMsg = msgEl();
         if (flat) {
           const tr = h('tr');
-          for (const g of f.fields) {
+          for (const g of drawn) {
             const ed = scalar(g, rec[g.key], `${g.label}, ${noun} ${i + 1}`);
             const msg = msgEl();
             describedBy(ed.control, msg);
@@ -293,13 +295,13 @@
             tr.append(h('td', { 'data-label': g.label }, ed.node, msg));
           }
           tr.append(h('td', {}, removeButton(noun, i, remove), rowMsg));
-          return { node: tr, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
+          return { node: tr, rec, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
         }
         const summary = h('summary', { text: title(rec, i) });
         const box = h('details', { class: 'sf-record' }, summary);
         box.open = !!open[i];
         const fields = h('div', { role: 'group', 'aria-label': title(rec, i) });
-        for (const g of f.fields) {
+        for (const g of drawn) {
           const b = block(g, rec[g.key], undefined, {});
           parts[g.key] = { ed: b.ed, slot: b.slot };
           fields.append(b.node);
@@ -307,12 +309,12 @@
         const titleEd = f.title && parts[f.title]?.ed;
         titleEd?.control?.addEventListener('input', () => (summary.textContent = title({ [f.title]: titleEd.get() }, i)));
         box.append(fields, h('div', { class: 'row' }, removeButton(noun, i, remove)), rowMsg);
-        return { node: box, summary, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
+        return { node: box, rec, summary, parts, rowMsg, first: Object.values(parts).find((p) => p.ed.control)?.ed.control };
       });
       (flat ? tbody : stack).replaceChildren(...rows.map((r) => r.node));
     }
     add.addEventListener('click', () => {
-      const fresh = clone(f.blank) || Object.fromEntries(f.fields.map((g) => [g.key, blank(g)]));
+      const fresh = clone(f.blank) || Object.fromEntries(drawn.map((g) => [g.key, blank(g)]));
       draw([...values(), fresh], [...opened(), true]);
       rows.at(-1).first?.focus();
       changed();
@@ -564,6 +566,9 @@
       root.replaceChildren(h('p', { class: 'sf-msg error', text: `The settings couldn't be loaded: ${e.message}.` }), retry);
       return;
     }
+    // A developer's whole form, with the manor's Developer options off (settings-kit.ts): none of it, not even the card.
+    root.hidden = !!data.developerOnly;
+    if (data.developerOnly) return root.replaceChildren();
     saved = clone(data.values);
     const later = [...new Set(data.schema.map((f) => APPLIES_NOTE[f.applies]).filter(Boolean))];
     const usedFrom = data.usedFrom || 'from the next round on';

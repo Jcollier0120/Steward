@@ -11,8 +11,9 @@ import { isDeveloper } from './developer.ts';
  * glance, and Reeve's and Heiward's Settings pages their own.
  *
  * With the manor's Developer options off (developer.ts, spec/DEVELOPER-OPTIONS.md), the section is said in plain
- * words: "the local AI" for Reeve's model and its servers, each line's `plain` wording, no developer-only line, and
- * no tool, command or model server by name.
+ * words: "the local AI" for Reeve's model and its servers, "the AI chip" for the NPU, each line's `plain` wording, no
+ * developer-only line, and no tool, command, model server, chip maker or Task Manager graph by name. A developer
+ * role (`developerRole`), whose work doesn't run while the switch is off, has no section then at all.
  */
 export interface WorkLine {
   /** The work, as a person would name it. */
@@ -40,12 +41,19 @@ export interface AgentWork {
   notes?: string[];
   /** The notes in plain words, for when Developer options are off; `notes` when left out. */
   plainNotes?: string[];
+  /**
+   * One of the manor's developer roles (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward):
+   * its work runs only while Developer options are on, so with them off its page has no "Where its work runs".
+   */
+  developerRole?: boolean;
 }
 
 const MODEL = "Reeve's model (below)";
 const VISION = "Reeve's vision model (below)";
 /** MODEL and VISION in plain words. */
-const PLAIN_WHERE: Record<string, string> = { [MODEL]: 'the local AI (below)', [VISION]: "the local AI's vision model (below)" };
+const PLAIN_WHERE: Record<string, string> = { [MODEL]: 'the local AI (below)', [VISION]: 'the local AI (below)' };
+/** The NPU in plain words. */
+const AI_CHIP = 'the AI chip';
 
 export const WORK: Record<string, AgentWork> = {
   porter: {
@@ -58,9 +66,10 @@ export const WORK: Record<string, AgentWork> = {
   },
   auditor: {
     model: true,
+    developerRole: true,
     lines: [
       { what: "Reading each accelerator's toolchain: its driver, model server and runtime", where: 'the processor (WMI)', when: 'every hour, about 2 seconds', plain: { what: "Reading each accelerator's driver and software", where: 'the processor' } },
-      { what: 'An audit: asking each model questions whose answers code checks', where: 'each accelerator Reeve lists, in turn: the NPU, a graphics card, the processor. This is on purpose', when: 'weekly, and when you press Audit now after a change', plain: { what: 'An audit: asking the local AI questions whose answers it checks', where: 'each accelerator this PC has, in turn: the NPU, a graphics card, the processor. This is on purpose' } },
+      { what: 'An audit: asking each model questions whose answers code checks', where: 'each accelerator Reeve lists, in turn: the NPU, a graphics card, the processor. This is on purpose', when: 'weekly, and when you press Audit now after a change', plain: { what: 'An audit: asking the local AI questions whose answers it checks', where: 'each part of this PC that can run the local AI, in turn: the AI chip, a graphics card, the processor. This is on purpose' } },
     ],
     notes: ['An audit is the one time an agent sends work to every accelerator, not just the first free one, so a graphics card or the processor working hard during an audit is expected.'],
   },
@@ -72,7 +81,7 @@ export const WORK: Record<string, AgentWork> = {
       { what: 'Re-ranking a search by meaning, when that is on', where: "Reeve's embedding model, only when its server is already running", when: 'when you search', plain: { where: 'the local AI, only when it is already running' } },
     ],
     notes: ["The NPU's own text recognizer would be faster, but Windows offers it only to packaged apps, so OCR runs on the processor for now."],
-    plainNotes: ["The NPU's own text recognition would be faster, but Windows doesn't offer it to the Clerk yet, so reading text runs on the processor for now."],
+    plainNotes: ["The AI chip's own text recognition would be faster, but Windows doesn't offer it to the Clerk yet, so reading text runs on the processor for now."],
   },
   herald: {
     model: true,
@@ -83,6 +92,7 @@ export const WORK: Record<string, AgentWork> = {
   },
   'developer-herald': {
     model: true,
+    developerRole: true,
     lines: [
       { what: 'Checking the upstream projects for new releases and issue changes', where: 'the network, and a little of the processor', when: 'every 6 hours; about 5 seconds when nothing is new', dev: true },
       { what: 'A short summary of each new release', where: MODEL, when: 'in the same round, once per release', dev: true },
@@ -98,6 +108,7 @@ export const WORK: Record<string, AgentWork> = {
   },
   aletaster: {
     model: true,
+    developerRole: true,
     lines: [
       { what: "Comparing each project's versions, tags, changelog and release files, and the checksums of its local build", where: 'the network, and the processor and disk for the checksums', when: 'every 6 hours, or Run now', dev: true },
       { what: 'Asking Castellan and the Steward who works at the manor, so each agent is tasted too', where: "Castellan's and the Steward's pages, on this PC (a request to each)", when: 'at the start of the same round, a moment; about 14 projects a round in all', dev: true },
@@ -110,13 +121,15 @@ export const WORK: Record<string, AgentWork> = {
     model: true,
     lines: [
       { what: 'Looking in the hopper', where: 'the disk', when: 'every minute, a folder listing' },
-      { what: 'Grinding a video or photo down to size (FFmpeg)', where: "the first encoder that works here: the Snapdragon's own video encoder, else a graphics card's, else the processor (x265, x264, SVT-AV1)", when: 'one file at a time, at below-normal priority, for as long as that file takes', plain: { what: 'Grinding a video or photo down to size', where: "the first video encoder that works here: the Snapdragon's own, else a graphics card's, else the processor" } },
+      { what: 'Grinding a video or photo down to size (FFmpeg)', where: "the first encoder that works here: the Snapdragon's own video encoder, else a graphics card's, else the processor (x265, x264, SVT-AV1)", when: 'one file at a time, at below-normal priority, for as long as that file takes', plain: { what: 'Grinding a video or photo down to size', where: "the first video encoder that works here: the one built into this PC's processor chip, else a graphics card's, else the processor" } },
       { what: 'A name for each kept video, from one frame', where: VISION, when: 'every 5 minutes, at most 10 a round' },
     ],
     notes: ["Task Manager may count the video encoder's work as graphics use (Video Encode). It is the Miller grinding, and stops when the hopper is empty."],
+    plainNotes: ['Windows may count the video encoding as graphics use. It is the Miller grinding, and stops when the hopper is empty.'],
   },
   pinder: {
     model: true,
+    developerRole: true,
     lines: [
       { what: 'One look at every process and listening port', where: 'the processor (PowerShell)', when: 'every 10 minutes, a few seconds', plain: { what: 'One look at every program running', where: 'the processor' } },
       { what: 'A one-line note on each stray', where: MODEL, when: 'at most 10 new a round' },
@@ -124,6 +137,7 @@ export const WORK: Record<string, AgentWork> = {
   },
   steward: {
     model: false,
+    developerRole: true,
     lines: [
       { what: "Rolling out a kit version: a worktree of each agent, its packages, its typecheck and tests, its release build", where: 'the processor, the disk and the network', when: 'only when a stage is started, two agents at a time (Settings), for a few minutes', dev: true },
     ],
@@ -143,7 +157,7 @@ export const WORK: Record<string, AgentWork> = {
       { what: "Its guard: reading the graphics cards, the event log and who signed in, and archiving a new driver (pnputil /export-driver) with each file's SHA-256", where: 'the processor and the disk, as SYSTEM (Windows PowerShell); never the graphics card', when: 'at start-up and sign-in, when a driver is installed or the display resets, and every 5 minutes, about a second; an export takes longer (a driver can be 500 MB)', plain: { what: "Its guard: reading the graphics cards, Windows' record of what happened and who signed in, and keeping a copy of each new graphics driver", where: 'the processor and the disk, as an administrator; never the graphics card', when: 'at start-up and sign-in, when a driver is installed or the screen resets, and every 5 minutes, about a second; keeping a copy takes longer (a driver can be 500 MB)' } },
       { what: 'Rolling a driver back: removing the new one, and installing the last good one from the archive (pnputil)', where: 'the processor and the disk, as SYSTEM', when: 'only after a new graphics driver nobody kept at sign-in, or that left the screen dark', plain: { what: 'Rolling a driver back: removing the new one, and putting back the last good one it kept', where: 'the processor and the disk, as an administrator' } },
       { what: 'Its page: reading what the guard did, and the graphics cards', where: 'the processor (PowerShell)', when: 'every 5 minutes (Settings), a moment', plain: { where: 'the processor' } },
-      { what: 'A few plain sentences on a rollback', where: "Reeve's model on the NPU only (below)", when: 'after a rollback, only when no other agent holds or waits for the NPU', plain: { where: 'the local AI, on the NPU only (below)' } },
+      { what: 'A few plain sentences on a rollback', where: "Reeve's model on the NPU only (below)", when: 'after a rollback, only when no other agent holds or waits for the NPU', plain: { where: 'the local AI, on the AI chip only (below)', when: 'after a rollback, only when no other agent is using the AI chip' } },
     ],
     notes: ['The guard is the one part of the manor that runs as an administrator (SYSTEM), and it uses no model: detecting a dark screen and rolling back are code.'],
     plainNotes: ['The guard is the one part of the manor that runs as an administrator, and it uses no AI: noticing a dark screen and rolling back are its own work.'],
@@ -152,7 +166,7 @@ export const WORK: Record<string, AgentWork> = {
     model: false,
     lines: [
       { what: 'A look at every model server: who uses each accelerator, whether each answers, how much memory GenieX holds, whether a game wants a graphics card, and any model server nobody configured', where: 'the processor (one PowerShell process list) and the model servers on this PC', when: 'every minute, a moment', plain: { what: 'A look at the local AI: who uses each accelerator, whether it answers, how much memory it holds, and whether a game wants a graphics card', where: 'the processor' } },
-      { what: 'Stopping a server nobody has used for 10 minutes (Settings), one a game needs the card back from, or an orphan; restarting one that stopped answering or holds too much', where: 'the model servers it keeps: GenieX on the NPU, llama-server on a graphics card or the processor', when: 'only when nobody holds or waits for that accelerator', plain: { what: 'Resting the local AI when nobody has used it for 10 minutes (Settings) or a game needs the graphics card back; starting it again when it stops answering or holds too much memory', where: 'the NPU, a graphics card or the processor, wherever the local AI runs' } },
+      { what: 'Stopping a server nobody has used for 10 minutes (Settings), one a game needs the card back from, or an orphan; restarting one that stopped answering or holds too much', where: 'the model servers it keeps: GenieX on the NPU, llama-server on a graphics card or the processor', when: 'only when nobody holds or waits for that accelerator', plain: { what: 'Resting the local AI when nobody has used it for 10 minutes (Settings) or a game needs the graphics card back; starting it again when it stops answering or holds too much memory', where: 'the AI chip, a graphics card or the processor, wherever the local AI runs' } },
       { what: 'Setting up a graphics card or the processor: llama.cpp and the models, downloaded and checked', where: 'the network and the disk (some 6 GB), and a moment of the graphics card to list its devices', when: 'only when you press Set up', plain: { what: 'Setting up a graphics card or the processor for the local AI: its software and models, downloaded and checked', where: 'the network and the disk (some 6 GB), and a moment of the graphics card' } },
     ],
     notes: ["The model servers run every other agent's model work, not the Smith's: it uses no model, it keeps them. A server it stops starts again by itself at the next request, in seconds."],
@@ -200,15 +214,22 @@ const WORK_NAMES: Record<string, string> = { chat: 'chat', vision: 'vision', emb
 const named = (a: Accelerator) => `${theAccelerator(a)} (${(['chat', 'vision', 'embed'] as const).filter((w) => serves(a, w)).map((w) => WORK_NAMES[w]).join(', ')})`;
 
 /**
+ * One accelerator in plain words: the AI chip and the processor (not their maker's names), and a graphics card as
+ * the person knows it ("the NVIDIA GeForce RTX 4090").
+ */
+const plainNamed = (a: Accelerator) => (a.kind === 'npu' ? AI_CHIP : a.kind === 'cpu' ? 'the processor' : theAccelerator(a));
+
+/**
  * What this PC has for the model, in the order requests try them, in words. `developer` (the manor's Developer
- * options) names Reeve, which keeps the list; without, it's "the local AI".
+ * options) names Reeve, which keeps the list, and each accelerator with the work it serves; without, it's "the local
+ * AI", the NPU is the AI chip, and the work isn't named.
  */
 export function thisPc(cfg: AcceleratorConfig | { error: string }, developer = true): string {
   if ('error' in cfg) return developer ? `${cfg.error}, so there is no model work here.` : "The local AI isn't set up on this PC, so there is no AI work here.";
   const on = cfg.accelerators.filter((a) => a.enabled !== false && (['chat', 'vision', 'embed'] as const).some((w) => serves(a, w)));
-  const list = on.map(named).join(', then ');
   const onlyNpu = on.length > 0 && on.every((a) => a.kind === 'npu');
-  return `On this PC, ${developer ? 'Reeve lists' : 'the local AI uses'} ${list}.${onlyNpu ? ` So its ${developer ? 'model' : 'AI'} work runs on the NPU only, never on the processor or a graphics card.` : ''}`;
+  if (!developer) return `On this PC, the local AI uses ${[...new Set(on.map(plainNamed))].join(', then ')}.${onlyNpu ? ' So its AI work runs on the AI chip only, never on the processor or a graphics card.' : ''}`;
+  return `On this PC, Reeve lists ${on.map(named).join(', then ')}.${onlyNpu ? ' So its model work runs on the NPU only, never on the processor or a graphics card.' : ''}`;
 }
 
 /** A line as the section says it: as written for a developer, else in its plain words; null for a developer-only line. */
@@ -221,13 +242,15 @@ export function workLine(l: WorkLine, developer: boolean): Pick<WorkLine, 'what'
 /**
  * The section, as page.ts puts it in the Settings page. `developer` is the manor's Developer options (developer.ts),
  * read now unless given. `o` is for tests too: an agent and an accelerator config of their own; by default this
- * agent, and Reeve's config.json as the kit reads it for every request.
+ * agent, and Reeve's config.json as the kit reads it for every request. Empty for a developer role with the switch
+ * off: none of its work runs then.
  */
 export function workSection(o: { id?: string; name?: string; config?: AcceleratorConfig | { error: string }; developer?: boolean } = {}): string {
   const id = o.id ?? APP.id;
   const name = o.name ?? APP.name;
   const dev = o.developer ?? isDeveloper();
   const w = WORK[id];
+  if (!dev && w?.developerRole) return '';
   const rows = (w?.lines ?? [])
     .map((l) => workLine(l, dev))
     .filter((l) => l !== null)
@@ -240,20 +263,23 @@ export function workSection(o: { id?: string; name?: string; config?: Accelerato
     const c = cfg();
     return !('error' in c) && c.accelerators.some((a) => a.kind === 'npu' && a.enabled !== false && serves(a, 'chat'));
   };
-  // Who runs the model work, and whose order it follows: Reeve's servers for a developer, the local AI for everyone else.
-  const servers = dev ? 'the model servers Reeve runs' : 'the local AI';
-  const order = dev ? "Reeve's order" : 'its settings';
-  const work = dev ? 'model work' : 'AI work';
   const model = w && !w.model
     ? `<p>${esc(name)} uses no ${dev ? 'model' : 'AI'}.</p>`
-    : w?.npuOnly
-      ? `<p><strong>Its ${work}</strong> goes to the NPU only, through ${dev ? 'the model server Reeve runs there' : 'the local AI there'}, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever ${order} say${dev ? 's' : ''}. ${hasNpu() ? 'This PC has one.' : `This PC has none, so it asks no ${dev ? 'model' : 'AI'}, and its words are its own${dev ? " code's" : ''}.`}</p>
+    : dev
+      ? w?.npuOnly
+        ? `<p><strong>Its model work</strong> goes to the NPU only, through the model server Reeve runs there, taking its turn in the NPU's line with every other agent's requests, and only when no other agent holds or waits for it. Never to a graphics card or the processor, whatever Reeve's order says. ${hasNpu() ? 'This PC has one.' : "This PC has none, so it asks no model, and its words are its own code's."}</p>
 <p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
-      : hasNpu()
-        ? `<p><strong>Its ${work}</strong> goes to ${servers}, as requests that take turns with every other agent's: one at a time on the NPU, and as many as ${dev ? "a graphics card's server has slots" : 'a graphics card can take'}. The NPU comes first (by default; ${order} can say otherwise): it does ${work} without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg(), dev))}</p>
+        : hasNpu()
+          ? `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: one at a time on the NPU, and as many as a graphics card's server has slots. The NPU comes first (by default; Reeve's order can say otherwise): it does model work without the processor or a graphics card, so every request it can do waits its turn there, even when another is free. A graphics card or the processor takes a request only when the NPU can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Then the order is graphics cards with 2 GB or more of their own memory, then graphics that share the PC's memory, then the processor. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg(), true))}</p>
 <p class="muted small">Task Manager shows the NPU's work on a graph of its own (Performance, then NPU), not as processor or graphics use.</p>`
-        : `<p><strong>Its ${work}</strong> goes to ${servers}, as requests that take turns with every other agent's: as many at once as ${dev ? 'a server has slots' : 'each accelerator can take'}. Graphics cards with 2 GB or more of their own memory come first, the most memory first, then graphics that share the PC's memory, then the processor (by default; ${order} can say otherwise). The next one takes a request only when the one before can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg(), dev))}</p>
-<p class="muted small">Task Manager shows the ${dev ? "model's" : "AI's"} work as the graphics card's (Performance, then GPU) or the processor's.</p>`;
+          : `<p><strong>Its model work</strong> goes to the model servers Reeve runs, as requests that take turns with every other agent's: as many at once as a server has slots. Graphics cards with 2 GB or more of their own memory come first, the most memory first, then graphics that share the PC's memory, then the processor (by default; Reeve's order can say otherwise). The next one takes a request only when the one before can't: it doesn't serve that work, the request is too big for it, or it failed in the last 10 minutes. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg(), true))}</p>
+<p class="muted small">Task Manager shows the model's work as the graphics card's (Performance, then GPU) or the processor's.</p>`
+      // In plain words: the local AI, the AI chip, and no Task Manager graph.
+      : w?.npuOnly
+        ? `<p><strong>Its AI work</strong> goes to the local AI on the AI chip only, taking its turn with every other agent's, and only when no other agent is using it. Never to a graphics card or the processor. ${hasNpu() ? 'This PC has one.' : 'This PC has none, so it asks no AI, and its words are its own.'}</p>`
+        : hasNpu()
+          ? `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's. The AI chip comes first: it does AI work without the processor or a graphics card. A graphics card or the processor takes a request only when the AI chip can't, or when it's too big for it. Background work keeps off a graphics card a game is using. ${esc(thisPc(cfg(), false))}</p>`
+          : `<p><strong>Its AI work</strong> goes to the local AI, taking turns with every other agent's: on a graphics card first, the one with the most memory, then the processor. Background work keeps off a graphics card a game is using, and waits for it rather than slow the game. ${esc(thisPc(cfg(), false))}</p>`;
   return `<section class="work-runs" data-settings-extra>
 <h2>Where its work runs</h2>
 <div class="card">

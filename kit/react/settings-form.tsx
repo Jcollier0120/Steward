@@ -223,7 +223,9 @@ function Records({ f, value, onChange, path }: EdProps) {
   const recs = Array.isArray(value) ? value.map(asObj) : [];
   const noun = (f.noun || 'entry').toLowerCase();
   // A table row only while it reads as one: a few plain fields, none advanced. Anything more folds to a line of its own.
-  const flat = f.fields.length <= TABLE_FIELDS && f.fields.every((g) => SCALAR.includes(g.kind) && !g.advanced && !g.shownWhen);
+  // A record's handle (kept) goes with it, never drawn.
+  const drawn = f.fields.filter((g) => !g.kept);
+  const flat = drawn.length <= TABLE_FIELDS && drawn.every((g) => SCALAR.includes(g.kind) && !g.advanced && !g.shownWhen);
   const set = (i: number, r: Obj) => onChange(recs.map((x, j) => (j === i ? r : x)));
   const remove = (i: number) => (
     <Button title="Remove" variant="secondary" size="sm" accessibilityLabel={`Remove ${noun} ${i + 1}`} onPress={() => onChange(recs.filter((_, j) => j !== i))} />
@@ -232,10 +234,10 @@ function Records({ f, value, onChange, path }: EdProps) {
   if (flat)
     return (
       <div>
-        <EditTable headings={f.fields.map((g) => g.label)}>
+        <EditTable headings={drawn.map((g) => g.label)}>
           {recs.map((r, i) => (
             <tr key={i}>
-              {f.fields.map((g) => (
+              {drawn.map((g) => (
                 <td key={g.key} data-label={g.label}>
                   <Scalar f={g} value={r[g.key]} path={`${path}.${i}.${g.key}`} aria={`${g.label}, ${noun} ${i + 1}`} onChange={(v) => set(i, { ...r, [g.key]: v })} />
                   <Msg path={`${path}.${i}.${g.key}`} />
@@ -561,6 +563,8 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
     </PanelNote>
   );
   if (!data) return note('Loading the settings…');
+  // A developer's whole form, with Developer options off: none of it, not even an empty form.
+  if (data.developerOnly) return null;
   const visible = fields.filter((f) => shownNow(f, draft) || under(msgs, f.key));
   if (keys && !visible.length) return note('Nothing to set: the defaults just work.');
   const ordinary = visible.filter((f) => !f.advanced);

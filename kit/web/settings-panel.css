@@ -6,6 +6,7 @@
  * --warn, --alert, and where it has them --surface, --hover and --accent-text.
  */
 .card.sf-panel { overflow: visible; padding-bottom: 0; }
+.sf-panel[hidden] { display: none; }
 .sf-intro, .sf-problems { margin: 0 0 6px; }
 .sf-intro code { overflow-wrap: anywhere; }
 .sf { padding: 12px 0; border-bottom: 1px solid var(--line); }

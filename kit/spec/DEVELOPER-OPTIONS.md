@@ -51,13 +51,20 @@ json: {
 
 A string-built page reads `isDeveloper()` as it draws.
 
+**Settings** (`node/settings-kit.ts`, kit 2.40.0) take the switch from the schema itself, written once, in full: no getter, and no fix-up around a save. The kit serves `/api/settings` for whoever is looking at each request (`schemaFor`, `valuesFor`).
+
+- `developerOnly: true` on a field: left out of the schema and the values with the switch off, at the top level, in a group, or in a list of records. A save then keeps its stored value as it was, so turning the switch on again finds it unchanged. Each record with a field left out carries a handle (`KEPT`) in its place, by which the save finds the record's hidden values; a new record whose hidden fields are needed can't be added then.
+- `developerOnly: true` on a choice's option (`choice` or `choices`): not offered with the switch off, not among the values sent, and kept through a save as settings.json had it.
+- `plain: { label, help, patternHint, placeholder }` on a field: its words while the switch is off.
+- `developerOnly: true` on the whole `SettingsSpec` (a developer role's form, all about its work), or every field `developerOnly`: with the switch off, `/api/settings` says `developerOnly` with no field, both panels leave the form out (no empty form, no card), and a save is refused (`DEVELOPER_ONLY_FORM`).
+
 **Developer-only features** (a repository's checks, a code review, tools for an agent's own makers) are off and out of sight while the switch is off: not shown, not run on a schedule, not on by default.
 
 ## What the kit does already
 
-- **Where its work runs** (`node/work.ts`) is in plain words when off: the local AI for Reeve, each line's `plain` wording, no developer-only line (`dev: true`), and no tool or server by name.
+- **Where its work runs** (`node/work.ts`) is in plain words when off: the local AI for Reeve, the AI chip for the NPU, each line's `plain` wording, no developer-only line (`dev: true`), and no tool, server, chip maker or Task Manager graph by name. A developer role's agent (`developerRole`: the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward), whose work doesn't run while the switch is off, has no section then at all.
 - **The footer** names the agent's data folder only when on; `PageShell.dataDir` is empty when off.
 - **Settings** (`/api/settings`): the settings.json path (`file`) is empty when off, and its problems are one plain line (`PLAIN_PROBLEM`); a save refused by the agent's own rules says `PLAIN_REFUSAL`. Both settings panels say "Changes are checked and saved here" without a path.
-- **`/api/ping`** says `developer`, so an open page draws itself again when it flips.
+- **`/api/ping`** says `developer`, so an open page draws itself again when it flips. It sends the page's process id (`pid`) only while on (kit 2.40.0): the Pinder, a developer role, knows an agent by the port it listens on first.
 
-Tests: `kit/test/developer.test.ts`, and both ways in `work.test.ts`, `settings-kit.test.ts` and `react-page.test.ts`.
+Tests: `kit/test/developer.test.ts`, and both ways in `work.test.ts`, `settings-kit.test.ts`, `settings-developer.test.ts`, `react-settings.test.ts` and `react-page.test.ts`.

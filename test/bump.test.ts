@@ -3,16 +3,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { bumpBranch } from '../src/stages/common.ts';
-import { bumpOne, kitBumpEntry, repin } from '../src/stages/bump.ts';
-import { prBody, pushOne } from '../src/stages/push.ts';
-import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // The bump stage on a fake employee made with git in a temporary folder: a worktree of origin's main,
 // kit.json and the version changed there, its kit filled and its checks run, then a commit; and push,
-// with gh standing in.
+// with gh standing in. The version a bump sets is claimed (claims.ts), in a Steward home of the test's own.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-bump-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
+process.env.STEWARD_HOME = path.join(tmp, 'home');
+
+const { bumpBranch } = await import('../src/stages/common.ts');
+const { bumpOne, kitBumpEntry, repin } = await import('../src/stages/bump.ts');
+const { prBody, pushOne } = await import('../src/stages/push.ts');
+const { claimsFile, loadClaims } = await import('../src/claims.ts');
+const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+type GhScript = Parameters<typeof runner>[0];
+
+/** GitHub as a bump's claim reads it: no release of the agent's yet, and the open PRs `titles` (none by default). */
+const claimGh = (titles: { title: string; headRefName: string }[] = []): NonNullable<GhScript> => (a) => {
+  if (a[0] === 'release' && a[1] === 'list') return ok([]);
+  if (a[0] === 'pr' && a[1] === 'list') return ok(titles);
+};
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 
 /** A kit tree at 1.0.1, as a kit release would hold it. */
@@ -24,8 +34,9 @@ writeFileSync(path.join(kitFrom, 'VERSION'), '1.0.1\n');
 let n = 0;
 function setup(o: Parameters<typeof fakeEmployee>[1] = {}, more: Parameters<typeof employee>[1] = {}) {
   const dir = path.join(tmp, `case-${++n}`);
+  rmSync(claimsFile(), { force: true }); // each case's Fake is a repository of its own
   const f = fakeEmployee(dir, { ...o, files: { 'tools/kit.ts': kitTool, ...o.files } });
-  const r = runner();
+  const r = runner(claimGh());
   const e = employee(f.checkout, more);
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, released: ['1.0.1'], neutralDir: dir });
   return { ...f, e, ctx, r, dir, work: path.join(dir, 'work', 'fake') };
@@ -259,4 +270,23 @@ test("a bump's changelog entry: each kit version's headline since the one it pin
   // A kit entry whose Before you update is "Nothing" adds nothing to it.
   assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.2', kit: '1.0.3', changelog: kitLog.replace('**Pages use the whole window.** More.', '**Pages.**\n\n### Before you update\n\nNothing: it updates itself as usual.') }), /### Before you update\n\nNothing: it updates itself as usual\.$/);
   assert.match(kitBumpEntry({ version: '0.4.7', from: '1.0.3', kit: '1.0.1', changelog: kitLog }), /a step back[\s\S]*- A step back to the Steward's kit 1\.0\.1, from 1\.0\.3\./);
+});
+
+test("a bump's version is claimed: above an open PR's (an agent's own work beside it) and every live claim, the same again when made again", async () => {
+  rmSync(claimsFile(), { force: true });
+  const s = setup();
+  const titles = [{ title: 'Fake 0.4.1: Developer options', headRefName: 'claude/developer-options' }];
+  const ctx = { ...s.ctx, run: runner(claimGh(titles)).run };
+  const res = await bumpOne(ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(res.outcome, 'done', res.message);
+  assert.equal(res.version, '0.4.2', 'not the open PR\'s 0.4.1');
+  assert.match(sh(s.checkout, 'show', 'steward/kit-1.0.1:package.json'), /"version": "0\.4\.2"/);
+  assert.deepEqual(loadClaims().map((c) => [c.version, c.branch, c.by]), [['0.4.2', 'steward/kit-1.0.1', 'steward']]);
+  const again = await bumpOne(ctx, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(again.version, '0.4.2', 'its own claim again');
+  // GitHub out of reach: no version can be claimed, so no bump (the next patch could be another PR's).
+  rmSync(claimsFile(), { force: true });
+  const offline = await bumpOne({ ...s.ctx, run: runner().run }, s.e, { kit: '1.0.1', kitFrom });
+  assert.equal(offline.outcome, 'failed');
+  assert.match(offline.message, /^couldn't claim a version for the bump: /);
 });

@@ -17,6 +17,8 @@ import { pageToken, request, tokenHeaders, type HttpRequest } from './upkeep.ts'
  * - the Aletaster isn't installed here (its home has no app folder), or is off duty for Developer options (Manor's
  *   Developer options off, and the Aletaster one of its developer roles): "released without a tasting: the Aletaster
  *   isn't here";
+ * - the Aletaster's own Developer options are off (no Manor to decide, and its own switch off, as it is unless set):
+ *   it tastes nothing then, as with its role vacant, and its /api/ping says `developer: false`;
  * - the Aletaster installed here predates the tasting (POST /api/taste answers 404 for the route itself, which carries
  *   no verdict, as against the 404 for a repository it doesn't know, which does), or its page doesn't answer at all;
  * - the release is the Aletaster's own, so a broken Aletaster can always be fixed.
@@ -124,6 +126,12 @@ export async function tasteFirst(e: Employee, a: { commit: string; version: stri
   const short = a.commit.slice(0, 7);
   const hold = (why: string, id?: string | null): Gate => ({ go: false, why: `v${a.version} at ${short} waits for the Aletaster's tasting: ${why}`, url: id ? `${ALETASTER_PAGE}api/taste?id=${encodeURIComponent(id)}` : ALETASTER_PAGE });
   const down = (why: string) => decided(without(`the Aletaster's page doesn't answer (${why})`));
+
+  // Its own Developer options off (no Manor to decide, and its own switch, which is off unless set): it tastes nothing,
+  // as with its role vacant, so the release goes without a tasting rather than waiting for one that never comes. Its
+  // /api/ping says so (kit 2.39.0); an older Aletaster's says nothing, and is asked as ever.
+  const pinged = await http(new URL('/api/ping', base), { method: 'GET', timeoutMs });
+  if (!('error' in pinged) && pinged.status === 200 && parse(pinged.body)?.developer === false) return decided(without("the Aletaster's Developer options are off, so it tastes nothing"));
 
   const t = await pageToken(base, { timeoutMs, http });
   if ('error' in t) return down(t.error);
