@@ -80,11 +80,14 @@ test('GET /api/settings returns the schema, the values in use and the defaults',
 });
 
 test("with the agent's own Developer options on (no Manor to say), the file's path and its problems' own words are sent", async () => {
-  const ping = async () => (await (await fetch(`${base}/api/ping`)).json()).developer;
+  const pingJson = async () => (await fetch(`${base}/api/ping`)).json();
+  const ping = async () => (await pingJson()).developer;
   assert.equal(await ping(), false, "the ping says the switch, so an open page sees it flip");
+  assert.ok(!('pid' in (await pingJson())), 'no process id with the switch off');
   writeFileSync(file, JSON.stringify({ developerOptions: true }));
   try {
     assert.equal(await ping(), true);
+    assert.equal((await pingJson()).pid, process.pid, 'its process id with it on (the Pinder knows an agent by it)');
     assert.equal((await getSettings()).file, file);
     writeFileSync(file, JSON.stringify({ developerOptions: 'yes' }));
     assert.equal((await getSettings()).file, '', 'only true turns it on');

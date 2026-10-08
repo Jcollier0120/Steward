@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { gh, showFile } from '../git.ts';
+import { fetchBranch, gh, showFile } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
@@ -11,10 +11,12 @@ import { parsePrs, prListArgs, readPin } from './staff.ts';
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
  * When the newest kit release (from the round's glance at GitHub: no call of its own) is newer than the kit an
- * employee's branch pins, and it has no kit PR of the Steward's open (steward/kit-…) and no bump to that kit that
- * failed at its branch's head, the round bumps it (a worktree of its branch, the new pin and the next patch version,
- * its checks run, committed) and pushes the PR, a few employees at a time (Settings' parallel). Later rounds merge
- * the PR and release it, as any PR of the Steward's.
+ * employee's branch pins, and it has no kit PR of the Steward's open (steward/kit-…), no other open PR that pins that
+ * kit already (an agent's own work, which brings the kit with it: a kit-only PR beside it took the same version, and
+ * was closed or conflicted, 0.27.13), and no bump to that kit that failed at its branch's head, the round bumps it (a
+ * worktree of its branch, the new pin and a version claimed for it (claims.ts), its checks run, committed) and pushes
+ * the PR, a few employees at a time (Settings' parallel). Later rounds merge the PR and release it, as any PR of the
+ * Steward's.
  *
  * A bump or a push that fails is kept in rollout-failed.json, with the kit and the branch's head it failed at: an
  * alarm at once, and the rounds don't try that kit again until a new commit lands on the employee's branch, or a
@@ -48,6 +50,8 @@ export interface RolloutFacts {
   pin: string | null;
   /** Its open kit PRs of the Steward's (#12 steward/kit-2.9.0). */
   kitPrs: string[];
+  /** Its other open PRs that pin the kit rolled out already, or a newer one (#20 (claude/developer-options, kit 2.39.0)). */
+  pinPrs?: string[];
 }
 
 export interface RolloutPlan {
@@ -89,6 +93,7 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
     else if (!f.pin) skip(`no kit.json on origin/${e.branch}`);
     else if (compareVersions(f.pin, kit) >= 0) skip(`on kit ${f.pin} already`);
     else if (f.kitPrs.length) skip(`its kit PR ${f.kitPrs.join(', ')} is open: the rounds merge it once it is ready`);
+    else if (f.pinPrs?.length) skip(`its open PR ${f.pinPrs.join(', ')} already brings kit ${kit}, so it gets no kit PR of its own beside it`);
     else {
       const h = o.failed[e.id];
       if (h && h.kit === kit && h.head === f.head) skip(`its ${h.stage} to kit ${kit} failed at ${f.head.slice(0, 7)} (${h.message}), so the rounds leave it until a new commit lands on ${e.branch}, or you press ${h.stage === 'bump' ? 'Bump' : 'Push'}`, true);
@@ -110,9 +115,19 @@ export async function rolloutFacts(ctx: Ctx, e: Employee, kit: string): Promise<
   const pin = head ? (readPin(await showFile(ctx.run, repo, `origin/${e.branch}`, 'kit.json'))?.kit ?? null) : null;
   if (!pin || compareVersions(pin, kit) >= 0) return { checkout: true, head, pin, kitPrs: [] };
   const g = glanceOf(ctx, e);
-  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), []);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), ctx.settings.team);
   const kitPrs = prs.filter((p) => p.whose === 'steward' && p.head.startsWith('steward/kit-')).map((p) => `#${p.number} (${p.head})`);
-  return { checkout: true, head, pin, kitPrs };
+  if (kitPrs.length) return { checkout: true, head, pin, kitPrs };
+  // Its other open PRs that change kit.json (or say nothing of their files): one that pins this kit, or a newer one, at
+  // its head brings the kit with it. Read from origin's branch; a fork's isn't there, and is left out.
+  const pinPrs: string[] = [];
+  for (const p of prs.filter((x) => !x.files.length || x.files.includes('kit.json'))) {
+    const at = await fetchBranch(ctx.run, repo, p.head)
+      .then(async () => readPin(await showFile(ctx.run, repo, `origin/${p.head}`, 'kit.json'))?.kit ?? null)
+      .catch(() => null);
+    if (at && compareVersions(at, kit) >= 0) pinPrs.push(`#${p.number} (${p.head}, kit ${at})`);
+  }
+  return { checkout: true, head, pin, kitPrs, pinPrs };
 }
 
 /** A manual Bump or Push (the page's button, or the command) lets the rounds try those employees again. */

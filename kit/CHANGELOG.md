@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.40.0
+
+**Settings obey the Developer options switch from the schema alone, and the kit's own parts leak nothing more with it off.** What the agents had to work around when they took 2.39.0 is now the kit's.
+
+### What's new
+
+- **node/settings-kit.ts:** `developerOnly` on a field (at the top level, in a group, or in a list of records) and on a choice's option leaves it out of what `/api/settings` sends while the switch is off, and a save then keeps its stored value as settings.json had it. A record with a field left out carries a handle (`KEPT`) instead, by which the save finds its hidden values. `plain` on a field gives its label, help, pattern hint and placeholder in plain words. The schema is served per request (`schemaFor`, `valuesFor`), so an agent writes its schema once, in full, with no getter, and no check-and-fix-up around a save.
+- **A developer's whole form:** `developerOnly: true` on the `SettingsSpec` (or every field `developerOnly`) makes `/api/settings` say `developerOnly` with the switch off, with no field; both Settings panels leave the form out, and a save is refused (`DEVELOPER_ONLY_FORM`).
+- **node/work.ts:** `AgentWork.developerRole`, set for the Auditor, the Developer Herald, the Aletaster, the Pinder and the Steward: with the switch off their page has no "Where its work runs", since none of their work runs then.
+
+### What changed
+
+- **/api/ping** sends `pid` only with the switch on. Its one reader, the Pinder, finds an agent by the port it listens on first.
+- **"Where its work runs"** in plain words no longer names the NPU, its maker (Qualcomm Hexagon, Snapdragon), the vision model or Task Manager: the NPU is "the AI chip", the processor is "the processor", and a graphics card keeps its name. The Miller's and the Lamplighter's lines and the Clerk's note say it so too.
+- **What an agent must do:** nothing to keep working; a getter or a save workaround it has still works. To drop them, mark its developer fields and choices `developerOnly` (and give `plain` words where its labels need them), or the whole spec for a developer role's form, as spec/DEVELOPER-OPTIONS.md says.
+- **Its tests:** kit/test/settings-developer.test.ts, and both ways in work.test.ts, settings-kit.test.ts and react-settings.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.39.0
 
 **Every agent gets Manor's Developer options switch, and the kit's own parts of every page obey it.** Castellan is sold to general users, gamers and developers, and only developers see developer content. With the switch off, the kit's parts no longer show repositories, tools, model servers or file paths, and an agent can keep its own developer content out of its page and its API. The rule is the new spec/DEVELOPER-OPTIONS.md.

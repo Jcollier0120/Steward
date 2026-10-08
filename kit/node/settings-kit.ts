@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import { isDeveloper } from './developer.ts';
@@ -38,6 +39,11 @@ export const APPLIES_NOTE: Record<Exclude<Applies, 'now'>, string> = {
 export interface Option {
   value: string;
   label: string;
+  /**
+   * A developer's choice (spec/DEVELOPER-OPTIONS.md): with the switch off it isn't offered, isn't sent among the values,
+   * and a save keeps it as settings.json had it (the Porter's listening ports, among What to watch).
+   */
+  developerOnly?: boolean;
 }
 
 /** What a path must be. */
@@ -94,6 +100,17 @@ interface Common {
    * switching back restores it; onboarding follows the same rule, and a message about it shows it anyway.
    */
   shownWhen?: { key: string; is: string[] };
+  /**
+   * Developer content (spec/DEVELOPER-OPTIONS.md): with the manor's Developer options off it isn't in the schema
+   * /api/settings sends, nor its value, and a save keeps its stored value as it was, so turning the switch on again
+   * finds it unchanged. At the top level, in a group (the Surveyor's code checks), or in a list of records (the
+   * Reckoner's device ids): each record then carries a handle (KEPT) instead, by which a save finds its hidden values.
+   */
+  developerOnly?: boolean;
+  /** Plain words for it, used in place of these while Developer options are off ("Which device" for "Which"). */
+  plain?: { label?: string; help?: string; patternHint?: string; placeholder?: string };
+  /** Set by the kit on a record's handle (KEPT): carried through the panel, never drawn. */
+  kept?: boolean;
 }
 
 export type Field =
@@ -151,6 +168,12 @@ export interface SettingsSpec<S extends object = any> {
   onSaved?: (next: S, before: S) => void;
   /** When a saved change is used, for the panel's first line (default "from the next round on"). */
   usedFrom?: string;
+  /**
+   * The whole form is a developer's (the Auditor's, the Developer Herald's): with the switch off, /api/settings says
+   * `developerOnly` and sends no field, both panels leave the form out, and a save is refused. Said by itself, too,
+   * when every field is `developerOnly`.
+   */
+  developerOnly?: boolean;
 }
 
 /** The largest POST /api/settings body the server reads (an allowlist of long command lines fits). */
@@ -421,35 +444,165 @@ const brokenNote = (file: string) => `${file} isn't a JSON object, so the defaul
 export const PLAIN_PROBLEM = "Some of the saved settings couldn't be used as they were, so their defaults are in use. Saving here puts that right.";
 /** And in place of the agent's own rules' words when a save is refused for them. */
 export const PLAIN_REFUSAL = "These settings can't be used together as they are. Check the ones you changed.";
+/** A save of a developer's form (SettingsSpec.developerOnly) with the switch off. */
+export const DEVELOPER_ONLY_FORM = 'These settings can be changed only while Developer options are on.';
+
+// ---------------------------------------------------------------- the switch, per request
 
 /**
- * GET /api/settings: the schema, the values in use, the defaults, and anything worth a word. With the manor's Developer
- * options off (`developer`, read now unless given), `file` is empty and `problems` says them in one plain line
- * (PLAIN_PROBLEM): a path and settings.json's own words are developer content (spec/DEVELOPER-OPTIONS.md).
+ * The key of a record's handle, sent in place of its developer-only fields while Developer options are off: a hash of
+ * their values, by which a save finds them in settings.json again. Never drawn, never written.
  */
-export async function settingsReply<S extends object>(spec: SettingsSpec<S>, developer = isDeveloper()) {
+export const KEPT = '~kept';
+const KEPT_FIELD: Field = { key: KEPT, kind: 'text', label: 'Kept', readOnly: true, optional: true, kept: true };
+
+const hiddenOptions = (f: Field) => ('options' in f ? f.options.filter((o) => o.developerOnly).map((o) => o.value) : []);
+const handle = (fields: Field[], rec: Record<string, unknown>) =>
+  createHash('sha256').update(JSON.stringify(fields.filter((g) => g.developerOnly).map((g) => rec[g.key] ?? null))).digest('hex').slice(0, 16);
+
+/**
+ * The schema as whoever is looking sees it (developer.ts, read now unless given): all of it for a developer; for
+ * everyone else without its developer-only fields and choices at any depth, in its plain words, and with a handle
+ * (KEPT) in a list of records that has a field left out. The kit serves /api/settings from it on every request, so an
+ * agent's schema is written once, in full, with no getter.
+ */
+export function schemaFor(schema: Field[], developer = isDeveloper()): Field[] {
+  if (developer) return schema;
+  return schema
+    .filter((f) => !f.developerOnly)
+    .map((f) => {
+      const { plain, ...rest } = f;
+      let g = { ...rest, ...plain } as Field;
+      if ('options' in g && hiddenOptions(g).length) g = { ...g, options: g.options.filter((o) => !o.developerOnly) };
+      if (g.kind === 'group') g = { ...g, fields: schemaFor(g.fields, false) };
+      if (g.kind === 'records' && g.fields.some((x) => x.developerOnly)) {
+        const fields = g.fields;
+        g = { ...g, fields: [...schemaFor(fields, false), KEPT_FIELD], ...(g.blank ? { blank: valuesFor(fields, g.blank, false) } : {}) };
+      }
+      return g;
+    });
+}
+
+/**
+ * Settings (values or defaults) as whoever is looking may see them: for a developer, as they are; for everyone else,
+ * without the developer-only fields and choices (schemaFor), each record that had any with its handle (KEPT) instead.
+ */
+export function valuesFor<T>(schema: Field[], values: T, developer = isDeveloper()): T {
+  if (developer || !isObject(values)) return values;
+  const out: Record<string, unknown> = { ...values };
+  for (const f of schema) {
+    if (!(f.key in out)) continue;
+    if (f.developerOnly) {
+      delete out[f.key];
+      continue;
+    }
+    const v = out[f.key];
+    const hidden = hiddenOptions(f);
+    if (f.kind === 'choices' && hidden.length && Array.isArray(v)) out[f.key] = v.filter((x) => !hidden.includes(x as string));
+    else if (f.kind === 'choice' && hidden.includes(v as string)) out[f.key] = '';
+    else if (f.kind === 'group') out[f.key] = valuesFor(f.fields, v, false);
+    else if (f.kind === 'records' && Array.isArray(v)) {
+      const keep = f.fields.some((g) => g.developerOnly);
+      out[f.key] = v.map((r) => (isObject(r) ? { ...valuesFor(f.fields, r, false), ...(keep ? { [KEPT]: handle(f.fields, r) } : {}) } : r));
+    }
+  }
+  return out as T;
+}
+
+/**
+ * A value as saved from a panel that didn't show all of it (the switch off), with what it didn't show put back as
+ * `stored` (settings.json) has it: a group's developer-only fields, a list's developer-only choices, and each record's
+ * developer-only fields, found by its handle. `fresh` collects the records that came without one and needed one: a
+ * new record whose developer-only fields can't be filled in here.
+ */
+function keepHidden(f: Field, posted: unknown, stored: unknown, fresh?: number[]): unknown {
+  if (f.kind === 'choices') {
+    const hidden = hiddenOptions(f);
+    if (!hidden.length || !Array.isArray(posted)) return posted;
+    const kept = Array.isArray(stored) ? stored.filter((x) => hidden.includes(x as string)) : [];
+    return f.options.map((o) => o.value).filter((o) => posted.includes(o) || kept.includes(o));
+  }
+  if (f.kind === 'group') return isObject(posted) ? keepFields(f.fields, posted, isObject(stored) ? stored : {}) : posted;
+  if (f.kind === 'records' && Array.isArray(posted) && f.fields.some((g) => g.developerOnly)) {
+    const was = Array.isArray(stored) ? stored.filter(isObject) : [];
+    return posted.map((r, i) => {
+      if (!isObject(r)) return r;
+      const { [KEPT]: h, ...rest } = r;
+      const from = h === undefined ? undefined : was.find((s) => handle(f.fields, s) === h);
+      if (!from && f.fields.some((g) => g.developerOnly && !g.optional && !g.readOnly && !(g.key in rest))) fresh?.push(i);
+      return keepFields(f.fields, rest, from ?? {});
+    });
+  }
+  return posted;
+}
+
+function keepFields(fields: Field[], posted: Record<string, unknown>, stored: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...posted };
+  for (const g of fields) {
+    if (g.developerOnly) {
+      if (!(g.key in out) && g.key in stored) out[g.key] = stored[g.key];
+    } else if (g.key in out) out[g.key] = keepHidden(g, out[g.key], stored[g.key]);
+  }
+  return out;
+}
+
+/** Whether the switch leaves this agent's whole form out: said so (SettingsSpec.developerOnly), or every field is. */
+const formLeftOut = (spec: SettingsSpec, developer: boolean) => !developer && (!!spec.developerOnly || (spec.schema.length > 0 && spec.schema.every((f) => f.developerOnly)));
+
+/**
+ * GET /api/settings: the schema, the values in use, the defaults, and anything worth a word, as whoever is looking may
+ * see them. With the manor's Developer options off (`developer`, read now unless given), `file` is empty, `problems`
+ * says them in one plain line (PLAIN_PROBLEM): a path and settings.json's own words are developer content
+ * (spec/DEVELOPER-OPTIONS.md), and the schema, values and defaults leave out what is a developer's (schemaFor,
+ * valuesFor). A developer's whole form says `developerOnly`, with no field, and the panels leave it out.
+ */
+export interface SettingsReply {
+  /** A developer's whole form, with Developer options off: no field is sent, and the panels leave it out. */
+  developerOnly?: true;
+  schema: Field[];
+  values: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  problems: string[];
+  warnings: Messages;
+  file: string;
+  usedFrom?: string;
+}
+
+export async function settingsReply<S extends object>(spec: SettingsSpec<S>, developer = isDeveloper()): Promise<SettingsReply> {
+  const usedFrom = spec.usedFrom ? { usedFrom: spec.usedFrom } : {};
+  if (formLeftOut(spec, developer)) return { developerOnly: true, schema: [], values: {}, defaults: {}, problems: [], warnings: {}, file: '', ...usedFrom };
   const file = spec.file();
   const { raw, broken } = readRaw(file);
   const { settings, problems } = spec.normalize(raw ?? {});
   if (broken) problems.unshift(brokenNote(file));
+  const schema = schemaFor(spec.schema, developer);
+  const values = valuesFor(spec.schema, settings, developer);
   const out: Out = { errors: {}, warnings: {} };
-  for (const f of spec.schema) if (!f.readOnly) cleanValue(f, (settings as any)[f.key], f.key, out);
+  for (const f of schema) if (!f.readOnly) cleanValue(f, (values as any)[f.key], f.key, out);
   const extra = await spec.check?.(settings, [], raw ?? {});
+  // A warning about a field that isn't shown has nowhere to be said.
+  const shown = (path: string) => developer || path === '' || schema.some((f) => f.key === path.split('.')[0]);
+  const warnings = Object.fromEntries(Object.entries({ ...out.warnings, ...extra?.warnings }).filter(([k]) => shown(k)));
   const said = developer ? problems : problems.length ? [PLAIN_PROBLEM] : [];
-  return { schema: spec.schema, values: settings, defaults: spec.defaults, problems: said, warnings: { ...out.warnings, ...extra?.warnings }, file: developer ? file : '', ...(spec.usedFrom ? { usedFrom: spec.usedFrom } : {}) };
+  return { schema, values: values as Record<string, unknown>, defaults: valuesFor(spec.schema, spec.defaults, developer) as Record<string, unknown>, problems: said, warnings, file: developer ? file : '', ...usedFrom };
 }
 
 /**
  * POST /api/settings {values}: the changed settings, checked, then written. A refusal is 400 with
- * {error, errors}, where `errors` has a message per field path, and the file is left as it was.
+ * {error, errors}, where `errors` has a message per field path, and the file is left as it was. With the manor's
+ * Developer options off (`developer`, read now unless given), the values are checked against the schema as it was
+ * shown (schemaFor), and what it left out is kept as settings.json has it: a developer-only setting, a group's
+ * developer-only fields, a list's developer-only choices, and each record's developer-only fields (by its handle).
  */
-export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown, developer?: boolean): Promise<{ json: unknown; status?: number }> {
+export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>, body: unknown, developer = isDeveloper()): Promise<{ json: unknown; status?: number }> {
   const changes = isObject(body) ? body.values : undefined;
   if (!isObject(changes)) return { json: { ok: false, error: 'Send {"values": {...}} with the settings to change.', errors: {} }, status: 400 };
+  if (formLeftOut(spec, developer)) return { json: { ok: false, error: `Not saved: ${DEVELOPER_ONLY_FORM}`, errors: { '': DEVELOPER_ONLY_FORM } }, status: 400 };
+  const schema = schemaFor(spec.schema, developer);
   const out: Out = { errors: {}, warnings: {} };
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(changes)) {
-    const f = spec.schema.find((x) => x.key === k);
+    const f = schema.find((x) => x.key === k);
     if (!f) out.errors[k] = `There's no setting called "${k}".`;
     else if (f.readOnly) out.errors[k] = "This one can't be changed here.";
     else {
@@ -470,6 +623,17 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   const file = spec.file();
   const { raw, broken } = readRaw(file);
   const base: Record<string, unknown> = raw ?? structuredClone(spec.defaults as Record<string, unknown>);
+  // What the panel didn't show, put back as the file has it (nothing to put back for a developer, who saw it all).
+  const full = (k: string) => spec.schema.find((x) => x.key === k)!;
+  if (!developer) {
+    for (const k of Object.keys(clean)) {
+      const fresh: number[] = [];
+      clean[k] = keepHidden(full(k), clean[k], base[k], fresh);
+      const noun = ((full(k) as { noun?: string }).noun || 'entry').toLowerCase();
+      for (const i of fresh) out.errors[`${k}.${i}`] = `A new ${noun} can't be added here.`;
+    }
+    if (Object.keys(out.errors).length) return refuse();
+  }
   const before = spec.normalize(base);
   const next = { ...base, ...clean };
   const after = spec.normalize(next);
@@ -480,19 +644,23 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   // quietly (said for the whole form, unless the agent's check already said it beside a field). Its words name
   // settings.json and its keys: only a developer reads them (developer.ts), everyone else PLAIN_REFUSAL.
   const fresh = after.problems.filter((p) => !before.problems.includes(p));
-  if (fresh.length && !Object.keys(out.errors).length) out.errors[''] = (developer ?? isDeveloper()) ? fresh.join(' ') : PLAIN_REFUSAL;
+  if (fresh.length && !Object.keys(out.errors).length) out.errors[''] = developer ? fresh.join(' ') : PLAIN_REFUSAL;
   if (Object.keys(out.errors).length) return refuse();
 
-  // Each changed setting is written as the agent reads it; the rest of the file stays as it was.
+  // Each changed setting is written as the agent reads it; the rest of the file stays as it was. An agent that reads
+  // for whoever is looking may leave a developer's part out (the Porter's listening ports): it's kept all the same.
   const stored: Record<string, unknown> = { ...base };
-  for (const k of Object.keys(clean)) stored[k] = (after.settings as Record<string, unknown>)[k];
+  for (const k of Object.keys(clean)) {
+    const v = (after.settings as Record<string, unknown>)[k];
+    stored[k] = developer ? v : keepHidden(full(k), v, base[k]);
+  }
   if (broken) copyFileSync(file, `${file}.broken`);
   writeJson(file, stored);
 
   const saved = spec.normalize(stored).settings;
   const changed = Object.keys(clean).filter((k) => JSON.stringify((saved as any)[k]) !== JSON.stringify((before.settings as any)[k]));
   const notes = changed
-    .map((k) => spec.schema.find((f) => f.key === k)!)
+    .map((k) => schema.find((f) => f.key === k)!)
     .filter((f) => f.applies && f.applies !== 'now')
     .map((f) => `${f.label}: ${APPLIES_NOTE[f.applies as Exclude<Applies, 'now'>]}.`);
   try {
@@ -500,5 +668,5 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
   } catch (e) {
     console.error(`${new Date().toISOString()} after saving the settings: ${(e as Error).message}`);
   }
-  return { json: { ok: true, message: changed.length ? 'Saved.' : 'Nothing changed.', values: saved, warnings: out.warnings, notes, changed } };
+  return { json: { ok: true, message: changed.length ? 'Saved.' : 'Nothing changed.', values: valuesFor(spec.schema, saved, developer), warnings: out.warnings, notes, changed } };
 }

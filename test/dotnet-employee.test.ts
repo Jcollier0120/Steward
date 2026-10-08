@@ -5,19 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { Employee } from '../src/settings.ts';
-import { STAFF as DEFAULT_EMPLOYEES } from './fixtures/staff.ts';
-import { bumpOne, needsNpmCi } from '../src/stages/bump.ts';
-import { mergeOne } from '../src/stages/merge.ts';
-import { pushOne } from '../src/stages/push.ts';
-import { releaseOne } from '../src/stages/release.ts';
-import { staffRow } from '../src/stages/staff.ts';
-import { ctxFor, ok, runner, sh } from './helpers.ts';
 
 // A .NET employee, as Heiward is: C#, its branch master, its version a .csproj's <VersionPrefix>, no package.json,
 // and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push, merge, release,
-// staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts.
+// staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts. A bump's
+// version is claimed (claims.ts), in a Steward home of the test's own.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
+process.env.STEWARD_HOME = path.join(tmp, 'home');
+const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
+const { bumpOne, needsNpmCi } = await import('../src/stages/bump.ts');
+const { mergeOne } = await import('../src/stages/merge.ts');
+const { pushOne } = await import('../src/stages/push.ts');
+const { releaseOne } = await import('../src/stages/release.ts');
+const { staffRow } = await import('../src/stages/staff.ts');
+const { ctxFor, ok, runner, sh } = await import('./helpers.ts');
 
 const heiward = DEFAULT_EMPLOYEES.find((e) => e.id === 'heiward')!;
 const CSPROJ = (v: string) => `<Project Sdk="Microsoft.NET.Sdk.Web">\r\n  <PropertyGroup>\r\n    <AssemblyName>hei</AssemblyName>\r\n    <VersionPrefix>${v}</VersionPrefix>\r\n  </PropertyGroup>\r\n</Project>\r\n`;
@@ -128,7 +130,7 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   const branch = 'steward/kit-1.0.1';
 
   // bump: a worktree of origin/master, kit.json and the .csproj changed, the kit filled by its PowerShell, checked, committed.
-  const b = runner();
+  const b = runner((a) => (a[1] === 'list' ? ok([]) : undefined));
   const ctx = ctxFor({ employees: [e], workRoot: work, run: b.run, released: ['1.0.0', '1.0.1'], neutralDir: dir });
   // A tools/kit.ts the Steward would hand a Node agent: Heiward must not get it.
   const nodeTool = path.join(dir, 'kit.ts');
