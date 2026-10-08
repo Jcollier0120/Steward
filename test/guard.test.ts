@@ -92,7 +92,8 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
   const fixed = await round();
   assert.equal(fixed.m.outcome, 'done');
   assert.equal(fixed.m.message, `merged #7 (checks passed here at ${head.slice(0, 7)})`);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
+  // The head tested here, and only that one: one pushed since is refused by GitHub.
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', head]]);
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(prChecksFile(), 'utf8'))), [`fake#7@${broken}`, `fake#7@${head}`], 'kept by commit');
 });
 

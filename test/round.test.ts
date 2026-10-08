@@ -13,7 +13,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage, lastStageFile } = await import('../src/steward.ts');
 const { roundFailuresFile } = await import('../src/stages/round.ts');
-const { fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { fakeEmployee, mergesOf, ok, runner, sh } = await import('./helpers.ts');
 
 const f = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0' });
 /** A version, raised in every version file on the branch `on`, committed; its commit. */
@@ -63,7 +63,7 @@ const last = () => JSON.parse(readFileSync(lastStageFile(), 'utf8'));
 test("a round merges the team's ready PR and does what it asks: its release", async () => {
   const out = await round();
   assert.equal(out.error, undefined);
-  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
+  assert.deepEqual(mergesOf(r.gh), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge']]);
   assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
     ['done', `merged #7 (checks passed here at ${prSha.slice(0, 7)})`],
     ['done', 'release: released v0.4.1 from origin/main (…), with kit 1.0.0'],
@@ -135,4 +135,35 @@ test("a release that fails while this PC is offline isn't held against its commi
   await round();
   assert.equal(tries(), before + 2, 'tried again, online');
   assert.equal(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')).fake, sha.slice(0, 7), 'online, a failure is held as before');
+});
+
+test('a round that leaves a PR waiting only on its checks running asks for the next round sooner; one that leaves none waiting so, not', async () => {
+  const running = [{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: null }];
+  const listing = (checks: unknown[]) =>
+    runner((args) => {
+      if (args[0] === 'pr' && args[1] === 'list') return ok(args.includes('Jcollier0120/Fake') ? [{ number: 8, title: 'Fake 0.4.9: more', url: 'https://github.com/Jcollier0120/Fake/pull/8', headRefName: 'fix/more', headRefOid: prSha, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: checks, body: '' }] : []);
+      if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
+      if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: prSha });
+    });
+  const lines: string[] = [];
+  const soon = await runStage('round', { full: true }, { run: listing(running).run, log: (l) => lines.push(l) });
+  assert.equal(soon.soon, true);
+  assert.match(lines.join('\n'), /the next round comes sooner: Fake #8 waits only on checks running/);
+  const failing = await runStage('round', { full: true }, { run: listing([{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }]).run });
+  assert.equal(failing.soon, undefined, 'failing checks wait for a person, not a few minutes');
+});
+
+test('the next round comes sooner at most a few times in a row, and never later than Settings say', async () => {
+  const { soonAfter, SOON_MS, SOON_IN_A_ROW } = await import('../src/agent.ts');
+  const every = 10 * 60_000;
+  let run = 0;
+  const waits: (number | null)[] = [];
+  for (let i = 0; i < SOON_IN_A_ROW + 2; i++) {
+    const next = soonAfter(true, run, every);
+    waits.push(next.sooner);
+    run = next.run;
+  }
+  assert.deepEqual(waits, [...Array(SOON_IN_A_ROW).fill(SOON_MS), null, SOON_MS], 'then one at the interval, and sooner again after it');
+  assert.deepEqual(soonAfter(false, 2, every), { sooner: null, run: 0 }, 'a round that asks for nothing sooner resets the count');
+  assert.deepEqual(soonAfter(true, 0, SOON_MS), { sooner: null, run: 0 }, 'an interval as short already stays');
 });

@@ -2,13 +2,68 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.27.22
+## 0.27.34
 
 **Look after several of the repositories found on this PC in one go.**
 
 ### What's new
 
 - Under Found on this PC, each repository has a box to pick it, and All picks every one. Look after N then adds all the picked ones at once, each with its own Merge my ready PRs and Release each new version ticks. If some can't be added, the page says which and why, and adds the rest.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.31
+
+**A round keeps merging a repository's pull requests until its queue runs out.**
+
+### What changed
+
+- When several pull requests wait in line on one repository, a round used to merge at most five of them and leave the rest for later rounds. It now keeps going until none is left that it can merge: each one merges, the next is caught up with the branch, tested and merged, and so on down the line. A round with a long line takes longer, but the line is cleared in one go.
+- After a merge, a pull request that was stacked on the merged one, or that GitHub was still working out, is looked at again in the same round instead of the next.
+- A pull request that fails its checks here doesn't keep the round going round in circles: once two looks in a row merge nothing, the round moves on.
+- A pull request with checks on GitHub still merges once those pass, at a round that comes sooner.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.29
+
+**Pull requests that pile up on one repository merge in one round, and the next round comes sooner when one is nearly ready.**
+
+### What changed
+
+- Several pull requests to one repository, each raising its version, used to merge one per round: once the lowest merged, the next was caught up with the branch and waited a whole round before merging. Where GitHub runs no checks on them, the Steward now tests the caught-up pull request at its new head and merges it in the same round, and does the same for the next one, up to five in a round.
+- A round that leaves a pull request waiting only on something that settles itself in a few minutes (its checks still running, a head just caught up, or GitHub still working out whether it merges) now has the next round come 2 minutes later instead of 10. This happens at most three times in a row.
+- Each merge now names the exact commit the Steward looked at and tested, so a pull request pushed to in the meantime waits instead of merging untested.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.26
+
+**A pull request waits less for GitHub to work out whether it merges.**
+
+### What changed
+
+- When GitHub hadn't yet worked out whether a ready pull request merges ("GitHub is still working out whether it merges"), the Steward left it for the next round, ten minutes or more later. It now asks GitHub again a few times over about 25 seconds and, once GitHub has said, merges it in the same round. This is often the case for a pull request just caught up with its branch, or just pointed at the main branch after the one it was stacked on merged.
+- A pull request whose checks are failing or still running, or that is a draft, isn't asked about again: it would wait anyway.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.19
+
+**A pull request built on another one no longer gets stuck once that one has merged.**
+
+### What changed
+
+- When a pull request is built on another one's branch (stacked), it waits for that one, and the day's report now says so: "stacked on #N". Once #N has merged, the Steward points the stacked pull request at the main branch itself, leaves a comment on it saying so, and merges it in its turn like any other. Before, it waited for ever: the Steward keeps your branch after merging your pull request, so GitHub never moved what was stacked on it.
+- This happens only in repositories whose pull requests you've let the Steward merge, and never to a pull request from someone outside your team.
 
 ### Before you update
 
