@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.38
+
+**A new kit is merged and released first in a round, so the agents' pull requests that need it aren't held up.**
+
+### What changed
+
+- In a round, the Steward's own pull requests are now merged before the agents', and one that raises the kit goes first of all, ahead of the version line. The new kit is released right after, before any agent's pull request is tested. An agent's pull request made for that kit is then tested with it in the same round, instead of failing because the kit isn't out yet.
+- After a new kit is released, the round looks at every agent's pull requests again, including ones it would otherwise skip because nothing changed on GitHub.
+- A pull request whose checks failed here while filling its kit is tested again once a newer kit is released. Before, it waited for ever, and so did every pull request queued behind it.
+- A pull request that takes a kit with no release yet now says so ("waits for the kit it takes: kit 2.42.0 isn't released yet") and isn't tested until the kit is out, instead of failing its checks.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.31
 
 **A round keeps merging a repository's pull requests until its queue runs out.**
