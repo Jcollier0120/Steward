@@ -10,6 +10,7 @@ import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
+import { vouchedBy } from './vouch.ts';
 import { kitTrialHold } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
@@ -411,7 +412,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
     }
-    if (untested(pr)) {
+    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
+    const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
+    if (vouched) notes.set(pr.number, `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
+    else if (untested(pr)) {
       const before = testedBefore(e, pr);
       let t: Tested;
       try {

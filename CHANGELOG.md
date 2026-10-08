@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.30
+
+**A pull request whose author already ran its tests merges without the Steward running them again.**
+
+### What's new
+
+- `steward vouch`: run it in the clone you pushed a pull request from. It runs the repository's checks there, and once they pass it records that on the pull request's commit on GitHub. The Steward then merges that pull request without testing it again, saving a full test run per pull request.
+- It trusts the record only from your team's GitHub accounts, only for the exact commit that was tested, and never for the Wright's pull requests or a fork's. Anything pushed afterwards, including the Steward's own catch-ups, is tested by the Steward as before.
+
+### What changed
+
+- A passing commit status no longer counts as one of a pull request's GitHub checks when it is this record, so it can never skip the Steward's testing by itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use it, have whoever opens pull requests run `steward vouch` after pushing.
+
 ## 0.27.29
 
 **Pull requests that pile up on one repository merge in one round, and the next round comes sooner when one is nearly ready.**
