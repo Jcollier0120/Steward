@@ -91,6 +91,40 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
   return { head: await read(at), from: start ? await read(start) : null };
 }
 
+/**
+ * The open PRs to the employee's branch that set a new version (above the branch's, not released, not another branch's
+ * claim), by number: the queue the merges take lowest first. Drafts aren't in it: they don't ask to merge. A ready
+ * team PR's version is the one its check read; every other one's is read from its head.
+ */
+export async function pendingVersions(ctx: Ctx, e: Employee, prs: PrInfo[], ready: { pr: PrInfo; sets: string | null }[], lookup: Lookup): Promise<Map<number, string>> {
+  const { released, base } = await lookup();
+  const known = new Map(ready.filter((r) => r.pr.whose === 'team').map((r) => [r.pr.number, r.sets]));
+  const claims = claimsOn(e.repo);
+  const out = new Map<number, string>();
+  for (const pr of prs) {
+    if (pr.draft || pr.base !== e.branch) continue;
+    let v = known.get(pr.number);
+    if (v === undefined) {
+      try {
+        const p = await prVersions(ctx, e, pr);
+        v = p.head && p.head !== p.from ? p.head : null;
+      } catch {
+        v = null;
+      }
+    }
+    if (!v || released.includes(v) || (base && compareVersions(v, base) <= 0)) continue;
+    if (claims.some((c) => c.version === v && c.branch && c.branch !== pr.head)) continue;
+    out.set(pr.number, v);
+  }
+  return out;
+}
+
+/** The PR in the queue with the lowest version below `v`, as [number, version], or null when none is below it. */
+export function lowestBelow(pending: Map<number, string>, v: string): [number, string] | null {
+  const below = [...pending].filter(([, w]) => compareVersions(w, v) < 0).sort((a, b) => compareVersions(a[1], b[1]) || a[0] - b[0]);
+  return below[0] ?? null;
+}
+
 /** How a hold that a new version would clear ends: such a PR can be caught up. */
 export const RAISE = 'raise the version in the PR';
 
@@ -242,7 +276,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     } else ready.push({ pr, sets: c.sets });
   }
   // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version.
-  const merge: PrInfo[] = [];
+  let merge: PrInfo[] = [];
   for (const r of ready) {
     const same = r.sets ? ready.filter((x) => x.sets === r.sets) : [];
     if (same.length > 1) {
@@ -251,6 +285,27 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (r.pr.whose === 'team' && r.pr.number !== Math.min(...same.map((x) => x.pr.number))) catchable.set(r.pr.number, r.pr);
     } else merge.push(r.pr);
   }
+  // Lowest version first: of the open PRs that set a new version, only the lowest merges; each above it waits its turn.
+  // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up.
+  // Only where two or more could merge; where the versions can't be read, the order is the PRs' as before.
+  const queued = prs.filter((p) => !p.draft && p.base === e.branch).length > 1 && merge.length && existsSync(checkoutOf(e));
+  const pending = queued
+    ? await pendingVersions(ctx, e, prs, ready, lookup).catch((err) => {
+        ctx.log(`[${e.id}] couldn't read the versions its PRs set, so they merge in their own order: ${(err as Error).message}`);
+        return new Map<number, string>();
+      })
+    : new Map<number, string>();
+  const turnAfter = new Map<number, number>();
+  merge = merge.filter((pr) => {
+    const v = pending.get(pr.number);
+    const below = v ? lowestBelow(pending, v) : null;
+    if (!below) return true;
+    hold.push({ pr, why: `its turn comes after #${below[0]} (v${below[1]}): the lowest version merges first` });
+    turnAfter.set(pr.number, below[0]);
+    return false;
+  });
+  // Those that change no version first, then by version.
+  merge.sort((a, b) => (pending.has(a.number) ? 1 : 0) - (pending.has(b.number) ? 1 : 0) || (pending.has(a.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
   // The same, for the alarms (alarms.ts): each PR that waits, and why.
@@ -337,6 +392,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         ctx.log(`[${e.id}] couldn't tidy up after #${pr.number}: ${(err as Error).message}`);
       }
     }
+  }
+  // One whose turn came this round (the PR below it merged) is caught up now, and merges at the next round.
+  const mergedNow = new Set(merged.map((p) => p.number));
+  for (const [n, below] of turnAfter) {
+    const pr = prs.find((p) => p.number === n)!;
+    if (mergedNow.has(below) && !pr.fork && (pr.whose === 'team' || isKitPr(pr))) catchable.set(n, pr);
   }
   const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : [];
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);

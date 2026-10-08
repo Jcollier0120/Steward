@@ -26,6 +26,8 @@ export interface EmployeeResult {
   url?: string;
   version?: string;
   commit?: string;
+  /** The commit a bump started from (its branch on origin), so a kit's trial knows when the agent has moved on. */
+  base?: string;
   /** The next round looks at it again, whatever GitHub says (a release the Aletaster's tasting holds). */
   again?: boolean;
   /** Its branch's version is released already (by this stage or another way): no failed release of it stands. */
