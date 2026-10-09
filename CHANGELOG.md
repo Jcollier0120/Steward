@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.27.39
+
+**Your repositories in one list, in Manor: the Steward looks after the ones there.**
+
+### What changed
+
+- On your PC (unless it releases Castellan), the repositories the Steward looks after are the ones in Manor's Settings, under Repositories: the one list every agent reads. Each says whether the Steward merges its ready pull requests and how it is released. Manor 0.16.24 brings in the repositories you gave the Steward before, with your choices as they were, once.
+- **Look after** on the Steward's page now adds a repository to Manor's Repositories; you change or remove it there.
+- Without Manor, or with a Manor older than 0.16.24, the Steward keeps the repositories it had, as before.
+- It hands out kit 2.42.0, which describes the one list.
+
+### Before you update
+
+- Update Manor to 0.16.24 first, so your repositories are in its list before the Steward reads it. If you update the Steward first, nothing changes until Manor is updated.
+
 ## 0.27.38
 
 **A new kit is merged and released first in a round, so the agents' pull requests that need it aren't held up.**
