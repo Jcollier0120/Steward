@@ -198,6 +198,8 @@ export interface CaughtUp {
   note: string;
   /** The files it conflicts in that need judgement, when that's why it wasn't caught up: they go back to its author (kickback.ts). */
   conflicts?: string[];
+  /** Every file merging the branch into it conflicted in, the ones it resolved too: none when it was only behind. */
+  conflicted?: string[];
   version?: string;
   /** The kit's version it carries, in the Steward's own repository (stages/kitpart.ts). */
   kitVersion?: string;
@@ -284,12 +286,16 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
   await removeWorktree(run, repo, dir);
   if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
+  let conflictedFiles: string[] = [];
+  // What it says once the merge has been tried: with the files it conflicted in, when it did.
+  const said = (c: CaughtUp): CaughtUp => (conflictedFiles.length ? { ...c, conflicted: conflictedFiles } : c);
   try {
     const did: string[] = [];
     if (behind) {
       const m = await run('git', ['-c', 'merge.conflictStyle=diff3', 'merge', '--no-ff', '--no-edit', '-m', `Merge ${e.branch} into ${pr.head}: caught up by the Steward`, branch], { cwd: dir, timeoutMs: 5 * 60_000 });
       if (m.code !== 0) {
         const conflicted = (await gitMaybe(run, dir, 'diff', '--name-only', '--diff-filter=U'))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
+        conflictedFiles = conflicted;
         const versionFiles = new Set(e.versionFiles.map((f) => f.replace(/\\/g, '/').toLowerCase()));
         const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f) && !isKitPin(f) && !(kit && (isKitVersionFile(f) || isKitChangelog(f))));
         const why = !conflicted.length
@@ -323,8 +329,8 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
         }
         if (unresolved) {
           await gitMaybe(run, dir, 'merge', '--abort');
-          if (kitPr && conflicted.length) return await closeKitPr(ctx, e, pr, repo, unresolved.replace(/: that needs a person$/, ''));
-          return { done: false, note: unresolved, ...(conflicted.length ? { conflicts: stuck } : {}) };
+          if (kitPr && conflicted.length) return said({ ...(await closeKitPr(ctx, e, pr, repo, unresolved.replace(/: that needs a person$/, ''))), conflicts: stuck });
+          return said({ done: false, note: unresolved, ...(conflicted.length ? { conflicts: stuck } : {}) });
         }
         settleVersion(dir, e.versionFiles, choice.version);
         await git(run, dir, 'add', '--', ...conflicted, ...e.versionFiles);
@@ -379,11 +385,11 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (kitPr) {
       // No one tests the Steward's own PRs on their way in: its bump did, and so does its catch-up, here.
       const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`) });
-      if (failed) return { done: false, note: `${did.join('; ')}, but then ${failed}, so it wasn't pushed` };
+      if (failed) return said({ done: false, note: `${did.join('; ')}, but then ${failed}, so it wasn't pushed` });
       did.push('its checks passed');
     }
     // Another PC's turn here now (lease.ts): it catches this PR up.
-    if (ctx.lease && !(await ctx.lease.ok(e))) return { done: false, note: `${did.join('; ')}, but another PC publishes ${e.name} now, so it wasn't pushed` };
+    if (ctx.lease && !(await ctx.lease.ok(e))) return said({ done: false, note: `${did.join('; ')}, but another PC publishes ${e.name} now, so it wasn't pushed` });
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
     // A kit PR's new head, whose checks passed here: the Surveyor's GET /api/tested (tested.ts).
     if (kitPr) recordTested(e.id, { commit: (await git(run, dir, 'rev-parse', 'HEAD')).trim(), stage: 'catch-up', branch: pr.head, pr: pr.number, version: choice.version });
@@ -395,7 +401,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (title !== pr.title) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', title).catch(() => '');
     await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${kitPr ? 'The next round merges it.' : 'It merges once its checks pass at the new head.'}`).catch(() => '');
     // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
-    return { done: true, note, version: choice.version, ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) };
+    return said({ done: true, note, version: choice.version, ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

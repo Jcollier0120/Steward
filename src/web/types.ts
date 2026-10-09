@@ -1,4 +1,5 @@
 import type { AlarmState } from '../alarms.ts';
+import type { ConflictLook } from '../conflicts.ts';
 import type { FoundRepo, FoundState } from '../found.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnsView } from '../lease.ts';
@@ -60,6 +61,8 @@ export interface StewardView {
   /** A look at them is under way. */
   finding?: boolean;
   staff: StaffView | null;
+  /** The PRs that conflict with their branch the rounds looked at in the last two weeks, and what each did (conflicts.ts). */
+  conflicts?: ConflictLook[];
   last: StageResult | null;
   running: { stage: string; since: string } | null;
   refreshing: boolean;

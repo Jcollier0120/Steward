@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
+import type { ConflictLook, ConflictOutcome } from '../conflicts.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
@@ -48,7 +49,7 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
 }
 
 /** One of the Steward's PRs or the team's, as a line of its repository's PR table: a team member's says whose. */
-function Pr({ p, branch }: { p: PrView; branch: string }) {
+function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLook }) {
   const team = p.whose === 'team';
   return (
     <tr>
@@ -96,18 +97,24 @@ function Pr({ p, branch }: { p: PrView; branch: string }) {
             <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
           </>
         )}
+        {look && (
+          <>
+            {' '}
+            <LookBadge l={look} />
+          </>
+        )}
       </td>
     </tr>
   );
 }
 
 /** A repository's open PRs, and a branch prepared here and not pushed, as a small table under its row. */
-function PrTable({ r }: { r: StaffRowView }) {
+function PrTable({ r, looks }: { r: StaffRowView; looks: Map<string, ConflictLook> }) {
   return (
     <table className="pr-table">
       <tbody>
         {r.prs.map((p) => (
-          <Pr key={p.number} p={p} branch={r.branch} />
+          <Pr key={p.number} p={p} branch={r.branch} look={looks.get(lookKey(r.repo, p.number))} />
         ))}
         {r.prepared && (
           <tr>
@@ -138,7 +145,7 @@ const shownNotes = (r: StaffRowView) => r.notes.filter((n) => n !== 'not using t
  * One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, release PC and notes
  * (`notes` false: no row has any, so no column). Its open PRs, when it has some, in a small table on a line under it.
  */
-function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean }) {
+function StaffRow({ r, kit, castellan, turn, notes: notesColumn, looks }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean; looks: Map<string, ConflictLook> }) {
   const co = r.checkout;
   const notes = shownNotes(r);
   const hasPrs = r.prs.length > 0 || !!r.prepared;
@@ -192,7 +199,7 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
       {hasPrs && (
         <tr className="prs-row">
           <td colSpan={3}>
-            <PrTable r={r} />
+            <PrTable r={r} looks={looks} />
           </td>
           <td colSpan={rest} />
         </tr>
@@ -201,11 +208,98 @@ function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRow
   );
 }
 
+const lookKey = (repo: string, n: number) => `${repo}#${n}`;
+
+const LOOK: Record<ConflictOutcome, { tone: BadgeTone; label: string }> = {
+  'caught-up': { tone: 'success', label: 'caught up' },
+  'sent-back': { tone: 'caution', label: 'sent back' },
+  closed: { tone: 'neutral', label: 'closed' },
+  couldnt: { tone: 'danger', label: "couldn't" },
+};
+
+/** What the rounds last did with a PR that conflicts with its branch: a badge, with its words on hover. */
+function LookBadge({ l }: { l: ConflictLook }) {
+  return <Badge tone={LOOK[l.outcome].tone} title={l.note} label={LOOK[l.outcome].label} />;
+}
+
+/**
+ * Each PR that conflicted with its branch that the rounds looked at in the last two weeks (conflicts.ts), and what
+ * they did: caught it up (its version lines, changelog or kit pin resolved, and a merge commit pushed), sent it back to
+ * its author, closed it, or couldn't. The newest first; one no longer open says so.
+ */
+function ConflictsCard({ looks, s, now }: { looks: ConflictLook[]; s: StaffView | null; now: number }) {
+  if (!looks.length)
+    return (
+      <Card className="empty" tour="conflicts">
+        No PR the rounds looked at has conflicted with its branch in the last two weeks. When one does, it's here with
+        what the Steward did: caught it up, where only version lines or a changelog's new entry conflict, or
+        sent it back to whoever wrote it.
+      </Card>
+    );
+  const open = s ? new Set(s.rows.flatMap((r) => r.prs.map((p) => lookKey(r.repo, p.number)))) : null;
+  return (
+    <Card tour="conflicts">
+      <table className="conflicts">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>What the Steward did</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {looks.map((l) => (
+            <tr key={lookKey(l.repo, l.number)}>
+              <td>
+                <strong>{l.name}</strong> <Link url={l.url}>#{l.number}</Link>
+                <br />
+                {l.title}
+                <br />
+                <Text variant="muted">
+                  {l.head}, {l.author}'s
+                </Text>
+              </td>
+              <td>
+                <LookBadge l={l} /> {l.note}
+                {l.files.length > 0 && (
+                  <>
+                    <br />
+                    <Text variant="muted">
+                      Conflicted in {l.files.join(', ')}
+                      {l.needs.length > 0 && l.needs.length < l.files.length ? `; ${l.needs.join(', ')} needed a person` : ''}
+                    </Text>
+                  </>
+                )}
+              </td>
+              <td className="when">
+                {ago(l.at, now)}
+                {l.lookedAt !== l.at && (
+                  <>
+                    <br />
+                    <Text variant="muted">looked again {ago(l.lookedAt, now)}</Text>
+                  </>
+                )}
+                {open && !open.has(lookKey(l.repo, l.number)) && (
+                  <>
+                    <br />
+                    <Text variant="muted">no longer open</Text>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
 /**
  * The staff's table, with each repository's release PC (lease.ts) in it once a turn was taken: who merges and releases
  * it, with Do it here and Keep it on this PC. Turns for no row here, and claims another PC made too (claims.ts), under it.
  */
-function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[] }) {
+function StaffTable({ s, castellan, turns, clashes, looks }: { s: StaffView | null; castellan: boolean; turns: TurnsView | null | undefined; clashes?: string[]; looks: ConflictLook[] }) {
+  const lookOf = new Map(looks.map((l) => [lookKey(l.repo, l.number), l]));
   const rows = s?.rows ?? [];
   const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
   const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
@@ -250,7 +344,7 @@ function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; cas
         </thead>
         <tbody>
           {rows.map((r) => (
-            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} />
+            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} looks={lookOf} />
           ))}
         </tbody>
       </table>
@@ -730,6 +824,7 @@ const STYLE = `
 .staff tr.prs-row > td { padding-top: 0; }
 .pr-table { font-size: 13px; }
 .pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
+.conflicts .when { white-space: nowrap; }
 .pr-table .pr-num, .pr-table .pr-state { white-space: nowrap; }
 .turn-cell button { white-space: nowrap; }
 .alarms { border-left: 3px solid var(--alert, #c0392b); }
@@ -828,8 +923,13 @@ export function StewardBody({ v }: { v: StewardView }) {
       {castellan && <KitCard s={s} now={now} handsOut={!(v.round.repos === false && !s?.rows.length)} />}
       <FoundCard f={v.found} finding={!!v.finding} now={now} />
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
-        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} />
+        <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} looks={v.conflicts ?? []} />
       </Section>
+      {(s?.rows.length ?? 0) > 0 && (
+        <Section title="Merge conflicts" count={v.conflicts?.length}>
+          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} />
+        </Section>
+      )}
       {(s?.rows.length ?? 0) > 0 && (
         <Section title={castellan ? 'Roll out the kit' : 'Merge and release'}>
           <Stages v={v} />
