@@ -10,7 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-catchup-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { catchUp, catchUpVersion, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
+const { catchUp, catchUpVersion, lockBeside, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts, settledFiles } = await import('../src/stages/catchup.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
 const { merge, mergeOne } = await import('../src/stages/merge.ts');
@@ -122,8 +122,18 @@ test("the changelog: the PR's new entry goes above the branch's, under the versi
   const theirs = log(['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']);
   assert.equal(mergeChangelogs(base, ours, theirs, '0.4.2'), log(['0.4.2', 'A feature.\n- and its detail'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']));
   assert.ok(mergeChangelogs(base.replace(/\n/g, '\r\n'), ours, theirs.replace(/\n/g, '\r\n'), '0.4.2')!.includes('\r\n## 0.4.2\r\n'), "the branch's line endings");
-  // An older entry changed on either side, two entries from the PR, or a heading with no version: a person's call.
-  assert.equal(mergeChangelogs(base, ours, log(['0.4.1', 'Theirs.'], ['0.4.0', 'The first, reworded.']), '0.4.2'), null);
+  // An older entry changed on one side only (a spelling swept through the old notes): that side's wording is kept.
+  assert.equal(mergeChangelogs(base, ours, log(['0.4.1', 'Theirs.'], ['0.4.0', 'The first, reworded.']), '0.4.2'), log(['0.4.2', 'A feature.\n- and its detail'], ['0.4.1', 'Theirs.'], ['0.4.0', 'The first, reworded.']));
+  assert.equal(
+    mergeChangelogs(base, log(['0.4.1', 'A license.'], ['0.4.0', 'The first license.']), theirs, '0.4.2'),
+    log(['0.4.2', 'A license.'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first license.']),
+  );
+  // An older entry changed differently on both sides, gone, or under a new heading; two entries from the PR, or a
+  // heading with no version: a person's call.
+  assert.equal(mergeChangelogs(base, log(['0.4.1', 'a'], ['0.4.0', 'Ours.']), log(['0.4.1', 'b'], ['0.4.0', 'Theirs.']), '0.4.2'), null);
+  const two = log(['0.4.1', 'b'], ['0.4.0', 'The first.']);
+  assert.equal(mergeChangelogs(log(['0.4.0', 'The first.'], ['0.3.0', 'Older.']), log(['0.4.1', 'a'], ['0.4.0', 'The first.']), two, '0.4.2'), null, 'an entry gone');
+  assert.equal(mergeChangelogs(base, log(['0.4.1', 'a'], ['0.4.0 (renamed)', 'The first.']), theirs, '0.4.2'), null, 'a heading changed');
   assert.equal(mergeChangelogs(base, log(['0.4.2', 'b'], ['0.4.1', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.3'), null);
   assert.equal(mergeChangelogs(base, log(['Unreleased', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.2'), null);
   // The text above the entries changed on one side only: that side's is kept.
@@ -147,6 +157,50 @@ test('a PR whose changelog conflicts only in a new top entry is caught up: both 
   assert.match(c.note, /its version lines and changelog resolved; v0\.4\.2/);
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'show', 'origin/claude/feature:CHANGELOG.md'), log(['0.4.2', 'A feature.'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']).trimEnd());
+});
+
+test("package-lock.json beside package.json is caught up as a version file, though the employee's settings name package.json alone", async () => {
+  // CastellanSite's: its settings name package.json, and the lock's version lines conflicted.
+  const { dir, checkout, pr } = moved('lock-beside');
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout, { versionFiles: ['package.json', 'src/app.ts'] });
+  const c = await catchUp(ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir }), e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, c.note);
+  assert.equal(c.version, '0.4.2');
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  const lock = JSON.parse(sh(checkout, 'show', 'origin/claude/feature:package-lock.json'));
+  assert.deepEqual([lock.version, lock.packages[''].version, lock.packages[''].license], ['0.4.2', '0.4.2', 'UNLICENSED'], 'in step with package.json, and main\'s license kept');
+  assert.equal(JSON.parse(sh(checkout, 'show', 'origin/claude/feature:package.json')).version, '0.4.2');
+});
+
+test('a lock is settled with package.json only while it says the same version: one left behind by hand stays', () => {
+  const dir = mkdtempSync(path.join(home, 'settled-'));
+  writeFileSync(path.join(dir, 'package.json'), '{\n  "name": "fake",\n  "version": "0.4.1"\n}\n');
+  const lockAt = (v: string, own = v) => writeFileSync(path.join(dir, 'package-lock.json'), `{\n  "name": "fake",\n  "version": "${v}",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "fake",\n      "version": "${own}"\n    }\n  }\n}\n`);
+  lockAt('0.4.1');
+  assert.deepEqual(settledFiles(dir, ['package.json']), ['package.json', 'package-lock.json']);
+  assert.deepEqual(settledFiles(dir, ['package.json', 'package-lock.json']), ['package.json', 'package-lock.json'], 'named already: not twice');
+  lockAt('0.3.9');
+  assert.deepEqual(settledFiles(dir, ['package.json']), ['package.json'], 'left behind: as it is');
+  lockAt('0.4.1', '0.3.9');
+  assert.deepEqual(settledFiles(dir, ['package.json']), ['package.json'], 'its root package says otherwise');
+  assert.deepEqual(settledFiles(dir, ['src/version.ts']), ['src/version.ts'], 'no package.json among them');
+  assert.deepEqual(lockBeside(['Package.json']), ['package-lock.json']);
+});
+
+test('a PR that swept a spelling through older changelog entries, beside a new entry on main, is caught up', async () => {
+  // Manor#136's: its own entry at the top, and "licence" made "license" in an older one, while main added 0.4.1.
+  const { dir, checkout, pr } = moved(
+    'old-entries',
+    { 'src/feature.ts': 'export const feature = 1;\n', 'CHANGELOG.md': log(['0.4.1', 'License, not licence.'], ['0.4.0', 'The first license.']) },
+    { base: { 'CHANGELOG.md': log(['0.4.0', 'The first licence.']) }, main: { 'CHANGELOG.md': log(['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first licence.']) } },
+  );
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const c = await catchUp(ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir }), e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, c.note);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'show', 'origin/claude/feature:CHANGELOG.md'), log(['0.4.2', 'License, not licence.'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first license.']).trimEnd());
 });
 
 test('a conflict that needs judgement says which files, for its author', async () => {

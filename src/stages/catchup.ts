@@ -17,11 +17,12 @@ import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitV
  * next free one. It pushes that to the PR's branch, says so on the PR, and the next round tests it at its new head
  * and merges it as any team PR.
  *
- * Only what needs no judgement: a conflict is resolved only in a version file, and only where one side changed
- * nothing but versions (diff3's common ancestor says which); in the changelog, where each side only added an entry
- * at its top (mergeChangelogs); or in kit.json, where the newer kit of the two is pinned with every part either takes,
- * and nothing else in it changed on both sides (mergeKitPins). Any other conflict is left untouched, and goes back to
- * the PR's author (kickback.ts).
+ * Only what needs no judgement: a conflict is resolved only in a version file (package-lock.json beside a package.json
+ * among them too: npm keeps its version lines with package.json's), and only where one side changed nothing but
+ * versions (diff3's common ancestor says which); in the changelog, where the PR added one entry at its top and each
+ * older entry changed on one side at most (mergeChangelogs); or in kit.json, where the newer kit of the two is pinned
+ * with every part either takes, and nothing else in it changed on both sides (mergeKitPins). Any other conflict is
+ * left untouched, and goes back to the PR's author (kickback.ts).
  * In the Steward's own repository the kit is a second version (stages/kitpart.ts): kit/VERSION and kit/CHANGELOG.md are
  * settled by the same rules, against the kit's releases and the kit versions other PRs and claims hold, and the PR's own
  * changelog entry, its kit.json pin of its own kit and its title follow the kit's new version.
@@ -126,9 +127,10 @@ const spaced = (s: string) => `${s.trimEnd()}\n`;
 
 /**
  * The changelog both sides added a new top entry to, as two PRs written side by side do: the branch's new entries
- * kept, the PR's entry put above them under `to` (its version once caught up), everything older as it was. Null when
- * it needs judgement: the text above the entries changed on both sides, an older entry changed, or the PR added more
- * than one entry, or one whose heading names no version.
+ * kept, the PR's entry put above them under `to` (its version once caught up), and each older entry as the side that
+ * changed it left it (a spelling swept through the old notes, say). Null when it needs judgement: the text above the
+ * entries, or an older entry, changed differently on both sides; an older entry gone or its heading changed; or the PR
+ * added more than one entry, or one whose heading names no version.
  */
 export function mergeChangelogs(base: string, ours: string, theirs: string, to: string): string | null {
   const eol = theirs.includes('\r\n') ? '\r\n' : '\n';
@@ -136,8 +138,17 @@ export function mergeChangelogs(base: string, ours: string, theirs: string, to: 
   if (o.head !== b.head && t.head !== b.head && o.head !== t.head) return null;
   const head = o.head === b.head ? t.head : o.head;
   const n = b.parts.length;
-  const keeps = (x: { parts: string[] }) => x.parts.length >= n && x.parts.slice(x.parts.length - n).every((p, i) => sameSection(p, b.parts[i]));
-  if (!keeps(o) || !keeps(t)) return null;
+  // The older entries, the ancestor's, at the bottom of each side under the same headings: none gone, none moved.
+  const heading = (p: string) => p.split('\n', 1)[0].trimEnd();
+  const olderOf = (x: { parts: string[] }) => (x.parts.length >= n ? x.parts.slice(x.parts.length - n) : null);
+  const [oOld, tOld] = [olderOf(o), olderOf(t)];
+  if (!oOld || !tOld || ![oOld, tOld].every((x) => x.every((p, i) => heading(p) === heading(b.parts[i])))) return null;
+  const older: string[] = [];
+  for (let i = 0; i < n; i++) {
+    if (sameSection(oOld[i], b.parts[i])) older.push(tOld[i]);
+    else if (sameSection(tOld[i], b.parts[i]) || sameSection(oOld[i], tOld[i])) older.push(oOld[i]);
+    else return null;
+  }
   const mine = o.parts.slice(0, o.parts.length - n);
   const theirsNew = t.parts.slice(0, t.parts.length - n);
   if (mine.length > 1) return null;
@@ -148,7 +159,7 @@ export function mergeChangelogs(base: string, ours: string, theirs: string, to: 
   if (renamed.includes(null)) return null;
   const moved = [...(renamed as string[]), ...theirsNew];
   // Each section is its lines, joined again with the line breaks between them; one moved above another ends with a blank line.
-  const parts = [...moved.map((p, i) => (i < moved.length - 1 || n ? spaced(p) : p)), ...b.parts];
+  const parts = [...moved.map((p, i) => (i < moved.length - 1 || n ? spaced(p) : p)), ...older];
   const text = (head === '' && parts.length ? parts : [head, ...parts]).join('\n');
   return eol === '\n' ? text : text.replace(/\n/g, '\r\n');
 }
@@ -203,6 +214,30 @@ export interface CaughtUp {
   version?: string;
   /** The kit's version it carries, in the Steward's own repository (stages/kitpart.ts). */
   kitVersion?: string;
+}
+
+/** npm's lockfile, which carries package.json's version twice (its own, and its root package's). */
+const LOCKFILE = 'package-lock.json';
+const named = (files: string[], f: string) => files.some((x) => x.replace(/\\/g, '/').toLowerCase() === f);
+
+/** package-lock.json, when an employee's version files name package.json but not it: npm keeps it in step all the same. */
+export const lockBeside = (files: string[]) => (named(files, 'package.json') && !named(files, LOCKFILE) ? [LOCKFILE] : []);
+
+/**
+ * The files a catch-up settles the version in: the employee's version files, and package-lock.json beside them
+ * (lockBeside) when it says, in both its places, the version package.json does in `dir`. A lock left at another
+ * version by hand stays as it is.
+ */
+export function settledFiles(dir: string, files: string[]): string[] {
+  const lock = lockBeside(files);
+  if (!lock.length || !existsSync(path.join(dir, LOCKFILE)) || !existsSync(path.join(dir, 'package.json'))) return files;
+  try {
+    const own = readVersion('package.json', readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    const j = JSON.parse(readFileSync(path.join(dir, LOCKFILE), 'utf8').replace(/^﻿/, ''));
+    return own && j.version === own && j.packages?.['']?.version === own ? [...files, ...lock] : files;
+  } catch {
+    return files;
+  }
 }
 
 /** Each version file in a folder set to `version` where it says otherwise; the files changed. */
@@ -296,7 +331,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       if (m.code !== 0) {
         const conflicted = (await gitMaybe(run, dir, 'diff', '--name-only', '--diff-filter=U'))?.split('\n').map((l) => l.trim()).filter(Boolean) ?? [];
         conflictedFiles = conflicted;
-        const versionFiles = new Set(e.versionFiles.map((f) => f.replace(/\\/g, '/').toLowerCase()));
+        const versionFiles = new Set([...e.versionFiles, ...lockBeside(e.versionFiles)].map((f) => f.replace(/\\/g, '/').toLowerCase()));
         const others = conflicted.filter((f) => !versionFiles.has(f.toLowerCase()) && !isChangelog(f) && !isKitPin(f) && !(kit && (isKitVersionFile(f) || isKitChangelog(f))));
         const why = !conflicted.length
           ? `merging ${e.branch} into it failed: ${(m.err || m.out).trim().split('\n').pop()}`
@@ -332,14 +367,16 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
           if (kitPr && conflicted.length) return said({ ...(await closeKitPr(ctx, e, pr, repo, unresolved.replace(/: that needs a person$/, ''))), conflicts: stuck });
           return said({ done: false, note: unresolved, ...(conflicted.length ? { conflicts: stuck } : {}) });
         }
-        settleVersion(dir, e.versionFiles, choice.version);
+        // A lock resolved here had its version lines changed on both sides: it is kept in step, as npm keeps it.
+        const lockToo = lockBeside(e.versionFiles).filter((f) => named(conflicted, f));
+        settleVersion(dir, [...e.versionFiles, ...lockToo], choice.version);
         await git(run, dir, 'add', '--', ...conflicted, ...e.versionFiles);
         await git(run, dir, 'commit', '--quiet', '--no-edit');
         const what = ['version lines', ...(conflicted.some(isKitPin) ? ['kit pin'] : []), ...(conflicted.some(isChangelog) ? ['changelog'] : []), ...(conflicted.some(isKitVersionFile) ? ['kit version'] : []), ...(conflicted.some(isKitChangelog) ? ["kit's changelog"] : [])];
         did.push(`merged ${e.branch} into it, its ${what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what.at(-1)}` : what[0]} resolved`);
       } else did.push(`merged ${e.branch} into it`);
     }
-    const changed = settleVersion(dir, e.versionFiles, choice.version);
+    const changed = settleVersion(dir, settledFiles(dir, e.versionFiles), choice.version);
     // A new version of its own: the changelog's entry the PR wrote under its old one says the new one too.
     const log = path.join(dir, 'CHANGELOG.md');
     if (choice.version !== headV && existsSync(log)) {
