@@ -35,7 +35,7 @@ Every release says what it brings. A release's notes come from its repository's 
 The kit's `release.ts` (and Manor's and Reeve's own, with `notes.ts`) publishes these notes:
 
 1. A first line, `<Name> <version>, built from <commit>, with the Steward's kit <kit>.`: Manor reads the commit from it (a release in the releases repository is tagged on that repository's own branch).
-2. The entry, as written, without its `## ` heading.
+2. The entry, as written, without its `## ` heading. Where versions were merged since the release before and never released on their own (the Steward releases once for all it merged in a round), their entries follow, each under its own `## <version>`, after a line that names them (`combinedEntry`).
 3. **Installing**: how to install the release by hand.
 
 `npm run release` says where the notes came from, and warns when the entry lacks **Before you update**, or has neither **What's new** nor **What changed**. A version with **no entry** still gets notes: a **What changed** that says no entry was written and lists its commits since the release before (each pull request's title, on the branch's first-parent line), with a warning at build time. A release never goes out saying nothing.
@@ -49,3 +49,13 @@ So a kit entry in `kit/CHANGELOG.md` that needs something of the people updating
 ## Merging
 
 Two changes side by side each add an entry at the top. The Steward's catch-up keeps both, the newer under the version it ends up with (`mergeChangelogs`), and renames a PR's top entry when it gives the PR another version.
+
+## Entries in changes/
+
+A repository with `changes/README.md` on its branch writes its entries as files of their own, so two pieces of work side by side never touch the same lines:
+
+1. Claim a version from the Steward (`claim-version`): it answers with the file to write, `changes/<version>.md`.
+2. Write the entry there, as above, with or without its `## <version>` heading. Leave the version files (`package.json`, `package-lock.json`, `src/app.ts`) and `CHANGELOG.md` as they are.
+3. Just before it merges the pull request, the Steward stamps it on the pull request's own branch: it merges the branch in, sets the version in the version files, moves the entry into `CHANGELOG.md` under `## <version>`, and deletes the file. A version taken meanwhile is replaced by the next free one (a minor step stays a minor step), and the pull request's title follows. What passed at the pull request's head (its vouch, or its checks passing on the Steward's PC) holds at the stamped head, since only versions and entries changed.
+
+An entry that says nothing, or whose heading names another version, waits for its author. In the Steward's own repository the kit has the same, in `kit/changes/<kit version>.md`. A repository without `changes/README.md` keeps the way above, and the catch-up merges its entries as before.

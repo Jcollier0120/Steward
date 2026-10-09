@@ -161,3 +161,44 @@ test("a repository without changes/README.md isn't on the new format", async () 
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(await usesChanges(ctx, e), false);
 });
+
+test("a PR's version is read from the changes file it adds, where it leaves its version files alone", async () => {
+  const { prVersions, teamHold } = await import('../src/stages/merge.ts');
+  const p = pending('read-version');
+  sh(p.origin, 'update-ref', 'refs/pull/30/head', p.pr.headOid);
+  const { e, ctx } = ctxOf(p);
+  sh(p.checkout, 'fetch', '--quiet', 'origin');
+  assert.deepEqual(await prVersions(ctx, e, p.pr), { head: '0.4.2', from: '0.4.0', entries: ['changes/0.4.2.md'] });
+  // Even a version released, claimed or below its branch's: the stamp gives it a free one, so it never waits.
+  const lookup = async () => ({ released: ['0.4.0', '0.4.1', '0.4.2'], base: '0.4.1' });
+  assert.deepEqual(await teamHold(ctx, e, p.pr, lookup), { why: null, sets: '0.4.2', stamps: true });
+});
+
+test('the round: a vouched PR written as changes/<version>.md is stamped on its branch and merged at the stamped head, untested', async () => {
+  const { merge } = await import('../src/stages/merge.ts');
+  const p = pending('round');
+  const listed = () => {
+    const at = sh(p.origin, 'rev-parse', 'refs/heads/claude/feature');
+    sh(p.origin, 'update-ref', 'refs/pull/30/head', at);
+    return [{ number: 30, title: p.pr.title, url: p.pr.url, body: '', headRefName: p.pr.head, headRefOid: at, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], labels: [], additions: 5, deletions: 0, files: [] }];
+  };
+  const releases = [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }, { tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
+  const vouch = [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }];
+  const r = runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'list') return ok(listed());
+    if (a[0] === 'release' && a[1] === 'list') return ok(releases);
+    if (a[0] === 'api' && a[1].includes('/statuses')) return ok(a[1].includes(p.pr.headOid) ? vouch : []);
+    return ok('');
+  });
+  // Checks that would fail, were they run.
+  const e = employee(p.checkout, { fill: '', test: ['node -e process.exit(1)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(p.dir, 'work'), run: r.run, neutralDir: p.dir });
+  const [m] = await merge(ctx, [e], { yes: true, team: true });
+  const now = sh(p.origin, 'rev-parse', 'refs/heads/claude/feature');
+  assert.notEqual(now, p.pr.headOid, `stamped: ${m.message}\n${ctx.lines.join('\n')}`);
+  assert.equal(m.outcome, 'done', m.message);
+  assert.ok(m.message.includes(`merged #30 (checks passed at ${p.pr.headOid.slice(0, 7)} in Jcollier0120's clone, vouched for; stamped v0.4.2)`), m.message);
+  assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/, 'no checks run');
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '30', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
+  assert.equal(sh(p.origin, 'rev-parse', 'refs/heads/main'), p.main, 'never a push to main');
+});
