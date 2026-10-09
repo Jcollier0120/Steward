@@ -23,6 +23,8 @@ export interface PageShell {
   pill: { kind: 'busy' | 'off' | 'on'; text: string; title: string };
   scene: string;
   offDutySince: string | null;
+  /** The trial has ended (the node part's license-check.ts, kit 2.45.0): the banner's words, in place of the off-duty one. Missing: it hasn't. */
+  trialEnded?: string | null;
   /** Settling into the manor (kit 2.43.0): the banner's words and drawing; null when there's none. */
   settling?: { text: string; svg: string } | null;
   manor: { name: string; url: string; theme: string; settingsUrl: string } | null;

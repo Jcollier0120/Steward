@@ -1,5 +1,6 @@
 import { APP } from '../app.ts';
 import { duty } from './duty.ts';
+import { trialEnded } from './license-check.ts';
 import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
@@ -19,7 +20,7 @@ export interface RoundState {
   nextRunAt: string | null;
   /** When the round under way began; null when none is. */
   runningSince: string | null;
-  /** What its rounds wait for from the person (required.ts's needsSettings, in words); null when they wait for nothing. */
+  /** What its rounds wait for (required.ts's needsSettings, or license-check.ts's trial's end, in words); null when they wait for nothing. */
   waiting: string | null;
   /**
    * Its first round (kit 2.43.3): `waiting` in the first-round line (pace.ts), `running` while it runs, null once a
@@ -45,7 +46,7 @@ export interface RoundRecord {
   everyMs: number;
   /** When the next scheduled round is due; null off duty, or once stopped (as /api/ping's nextRunAt). */
   next: string | null;
-  /** A round held for the agent's required settings (required.ts): what it waits for, in words. `ok` is null then. */
+  /** A round held for the agent's required settings (required.ts), or because the trial has ended (license-check.ts): what it waits for, in words. `ok` is null then. */
   waiting?: string;
   /** true when the round ran past its time limit and was let go (every()'s timeoutMs): `ok` is false then. */
   timedOut?: boolean;
@@ -228,14 +229,15 @@ export function every(
       if (!stopped) wait();
       return;
     }
-    // Waiting for its required settings (required.ts), none do: it can't work yet. Said in round.json, never silent.
-    const needs = needsSettings();
-    waiting = needs?.text ?? null;
-    if (needs) {
+    // The trial has ended (license-check.ts), or its required settings (required.ts) aren't filled in yet: none run,
+    // asked for or not, since it can't work. Said in round.json, never silent, and never a failure.
+    const held = trialEnded() ?? needsSettings()?.text ?? null;
+    waiting = held;
+    if (held) {
       if (stopped) return;
       wait();
       const now = new Date().toISOString();
-      recordRound(opts.name ?? 'round', { started: now, finished: now, ok: null, waiting: needs.text, error: null, everyMs: interval(), next: null });
+      recordRound(opts.name ?? 'round', { started: now, finished: now, ok: null, waiting: held, error: null, everyMs: interval(), next: null });
       return;
     }
     running = true;
@@ -331,7 +333,7 @@ export function every(
     lastRunOffline: lastOffline,
     lastError,
     // A wait is kept off duty too, but no round comes of it until the agent is back on duty.
-    nextRunAt: stopped || running || !duty().onDuty || needsSettings() ? null : iso(dueAt),
+    nextRunAt: stopped || running || !duty().onDuty || trialEnded() || needsSettings() ? null : iso(dueAt),
     runningSince: iso(startedAt),
     waiting,
     firstRound: firstNow,
@@ -339,9 +341,9 @@ export function every(
   schedules.add(state);
 
   return {
-    /** Starts a run now; false when one is already under way, or its required settings are still to be filled in (required.ts). */
+    /** Starts a run now; false when one is already under way, the trial has ended (license-check.ts), or its required settings are still to be filled in (required.ts). */
     runNow(): boolean {
-      if (running || needsSettings()) return false;
+      if (running || trialEnded() || needsSettings()) return false;
       void tick(true);
       return true;
     },

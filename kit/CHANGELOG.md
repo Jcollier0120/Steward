@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.45.0
+
+**Each agent Castellan sells checks the trial's end itself, from the license Manor holds.**
+
+### What's new
+
+- **node/license.ts:** the license a PC holds, shared by Manor and the agents: `LICENSE_KEYS` (the Exchequer's public key), `trustedKeys`, `verifyLicense` (EdDSA, offline), `LicensePayload`, and `readHeld` / `readHeldFile` for Manor's licence.json. It imports nothing of the agent's, so Manor can take it in place of its own license-keys.ts and the same functions in its license.ts.
+- **node/license-check.ts:** an agent the Exchequer sells (its id in Manor's exchequer.json `agents` as `household` or `workshop`, and not held back or internal in Manor's staff.json) reads Manor's licence.json as it starts, every hour, and as soon as the file changes. Only a verified trial whose `runsUntil` has passed holds it:
+  - its scheduled rounds wait, and Run now with them (schedule.ts), recorded in round.json as `"ok": null, "waiting": "The trial ended: a license brings it back"`, never a failure;
+  - its page says "The trial ended: a license brings it back", that its settings and data are kept, and its pill says "Trial ended" (string-built and React pages alike; the React shell's `trialEnded`);
+  - /api/ping and the status command say `running: false` with that line as `summary`, and `license: { state, ended, runsUntil, problem }`.
+  duty.json isn't touched: once a license is here the hold lifts by itself.
+- Everything else runs as before: a paid license, one that lapsed (the Freehold license), one of another tier, one awaiting its first payment. No licence.json, one that can't be read, or one that doesn't verify: it runs, and `license.problem` in its ping says why. Never an alarm.
+- The time is the latest of this PC's clock, the license's `iat` and the latest time the agent has seen (license-check.json in its data folder, kept for a trial only), so setting the clock back doesn't bring an ended trial back.
+- Manor and Heiward never check, nor does an agent the Exchequer doesn't list (the Wright, the Bailiff), nor any agent while Manor's exchequer.json can't say.
+- **Under node --test** an agent checks only with `MANOR_LICENSE_CHECK=on`, so no agent's tests read the PC's own license.
+
+### What changed
+
+- **node/service.ts:** `dutyStatus(duty, up, trialEnded?)`: a third argument, false unless given.
+- **node/page.ts:** `pillOf` and `statusPill` take `ended`.
+- **What an agent must do:** nothing. An agent whose Run now doesn't go through the kit's `every()` should check `trialEnded()` (license-check.ts) before it works.
+- **Its tests:** kit/test/license-check.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor's own copy of the keys and the license check (its license-keys.ts and license.ts) can move to this kit's license.ts in a later Manor change.
+
 ## 2.44.0
 
 **A release's notes bring every version merged since the release before; entries can wait in changes/.**

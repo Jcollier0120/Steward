@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.1
+
+**Castellan's 7-day trial now ends in each agent too, not only in Manor.**
+
+### What changed
+
+- The Steward carries kit 2.45.0 and hands it to every agent. With it, an agent Castellan sells checks the license Manor holds, as it starts and every hour, without going online. Once a trial has ended, its rounds wait and its page says "The trial ended: a license brings it back". Its settings and data are kept, and a license brings it straight back.
+- A paid license, even one whose paid time has passed, never stops an agent. Nor does a missing or unreadable license: the agent keeps running, and says so in its status.
+- Free agents (Manor, Heiward) and the manor's own internal agents never check.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.0
 
 **Repositories worked with plain git: you say what the Steward does when a branch is ready, and after a release.**

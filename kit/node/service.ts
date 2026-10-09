@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, openSync, renameSync, statSync } from 'node:fs';
 import { APP, dataDir, pageUrl, port } from '../app.ts';
 import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
+import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
 import { dataFile, readJson } from './store.ts';
 
 /**
@@ -128,22 +129,26 @@ export async function shutdown(): Promise<number> {
 /**
  * Whether it's running, since when it's stopped, and a line saying so, as Manor reads them: from its status command,
  * and from /api/ping (where the page is up, so running is on duty), so Manor needs no status command for an agent
- * whose page answers.
+ * whose page answers. Once the trial has ended (`trialEnded`, license-check.ts) it isn't running, whatever its duty,
+ * and the line says why.
  */
-export function dutyStatus(d: Duty, up: boolean): { running: boolean; stoppedSince: string | null; summary: string } {
-  const running = d.onDuty && up;
-  const summary = running
-    ? 'On duty.'
-    : !d.onDuty
-      ? `Off duty since ${ago(d.since)}: its scheduled rounds are paused.`
-      : "On duty, but its page isn't running, so no rounds run. Start runs it.";
+export function dutyStatus(d: Duty, up: boolean, trialEnded = false): { running: boolean; stoppedSince: string | null; summary: string } {
+  const running = d.onDuty && up && !trialEnded;
+  const summary = trialEnded
+    ? `${TRIAL_ENDED_TEXT}. Its rounds wait; its settings and data are kept.`
+    : running
+      ? 'On duty.'
+      : !d.onDuty
+        ? `Off duty since ${ago(d.since)}: its scheduled rounds are paused.`
+        : "On duty, but its page isn't running, so no rounds run. Start runs it.";
   return { running, stoppedSince: d.onDuty ? null : d.since, summary };
 }
 
 /** Manor's status JSON: running means on duty with its rounds actually running (its page is up). */
-export async function statusJson(): Promise<{ app: string; running: boolean; stoppedSince: string | null; summary: string; page: { url: string; up: boolean } }> {
+export async function statusJson(): Promise<{ app: string; running: boolean; stoppedSince: string | null; summary: string; page: { url: string; up: boolean }; license?: unknown }> {
   const up = !!(await ping());
-  return { app: APP.id, ...dutyStatus(duty(), up), page: { url: pageUrl, up } };
+  const license = licenseNow();
+  return { app: APP.id, ...dutyStatus(duty(), up, license.ended), page: { url: pageUrl, up }, ...licensePing(license) };
 }
 
 /** One line, exit 0 when on duty and running and 3 when not; or with --json, Manor's JSON and exit 0. */
