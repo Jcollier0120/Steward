@@ -6,7 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // A release's notes, from the repository's CHANGELOG.md (notes.ts, spec/RELEASE-NOTES.md).
-const { commitLine, commitsSince, entryOf, entryWarnings, headingVersion, headlineOf, releaseNotes, sectionOf, withEntry, NOTHING_TO_DO } = await import('./fixture/src/kit/notes.ts');
+const { combinedEntry, commitLine, commitsSince, entriesBetween, entryOf, entryWarnings, headingVersion, headlineOf, releaseNotes, sectionOf, withEntry, NOTHING_TO_DO } = await import('./fixture/src/kit/notes.ts');
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'notes-test-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
@@ -138,4 +138,21 @@ test('an entry goes at the top of the changelog, or starts one; never twice', ()
   assert.match(started, /^# Fake's changelog\n\nEach version of Fake, newest first\..*\n\n## 0\.4\.3\n\n\*\*A fix\.\*\*\n/s);
   assert.ok(started.endsWith(`${NOTHING_TO_DO}\n`));
   assert.equal(entryOf(started, '0.4.3'), `**A fix.**\n\n### Before you update\n\n${NOTHING_TO_DO}`);
+});
+
+test('a release brings the entries of the versions merged since the release before and never released on their own', () => {
+  const e = (line: string) => `**${line}**\n\n### What changed\n\n- ${line}\n\n### Before you update\n\n- ${NOTHING_TO_DO}`;
+  const log = `# Fake's changelog\n\n## 0.4.4\n\n${e('Four.')}\n\n## 0.4.3\n\n${e('Three.')}\n\n## 0.4.2\n\n${e('Two.')}\n\n## 0.4.1\n\n${e('One.')}\n`;
+  assert.deepEqual(entriesBetween(log, 'v0.4.1', '0.4.4').map((x) => x.version), ['0.4.3', '0.4.2']);
+  assert.deepEqual(entriesBetween(log, null, '0.4.4'), [], 'no release before known: never the whole history');
+  assert.equal(combinedEntry(log, '0.4.4', '0.4.3'), e('Four.'), 'released one by one: its own entry alone');
+  const both = combinedEntry(log, '0.4.4', '0.4.1')!;
+  assert.match(both, /^\*\*Four\.\*\*[\s\S]*This release brings v0\.4\.3 and v0\.4\.2 too, never released on their own:\n\n## 0\.4\.3\n\n\*\*Three\.\*\*[\s\S]*## 0\.4\.2\n\n\*\*Two\.\*\*/);
+  assert.doesNotMatch(both, /One\./);
+  assert.match(combinedEntry(log, '0.4.3', '0.4.1')!, /brings v0\.4\.2 too, never released on its own:/);
+  assert.equal(combinedEntry(log, '0.4.9', '0.4.1'), null);
+  const n = releaseNotes({ root: '.', name: 'Fake', version: '0.4.4', commit: 'abc1234', install: 'Run it.', changelog: log, since: 'v0.4.2' });
+  assert.equal(n.from, 'changelog');
+  assert.match(n.notes, /^Fake 0\.4\.4, built from abc1234\.\n\n\*\*Four\.\*\*[\s\S]*brings v0\.4\.3 too[\s\S]*\*\*Three\.\*\*[\s\S]*### Installing\n\nRun it\.\n$/);
+  assert.deepEqual(n.warnings, []);
 });

@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.44.0
+
+**A release's notes bring every version merged since the release before; entries can wait in changes/.**
+
+### What's new
+
+- **node/notes.ts:** `releaseNotes` now adds, after the version's own entry, the entries of the versions merged since the release before and never released on their own (the Steward releases once for all it merged in a round), each under its own `## <version>`, after a line that names them. `combinedEntry`, `entriesBetween` and `tagBefore` do it; `NotesInput.since` names the release before instead of asking git. A repository with no tags, or one released version by version, gets the same notes as before.
+- **spec/RELEASE-NOTES.md:** "Entries in changes/": in a repository with `changes/README.md` on its branch, a piece of work writes its entry as `changes/<version>.md` and leaves the version files and `CHANGELOG.md` alone; the Steward sets the version and moves the entry in as it merges.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.43.5
 
 **A queue ticket can say what the request is for, and an agent can say it is setting up.**

@@ -158,6 +158,10 @@ test('which PRs ride: the queue from its lowest version up, while each can; a dr
   assert.equal(canRide(pr(31, { labels: ['wright'] }), 'main'), false, "the Wright's is reviewed on its own");
   assert.equal(canRide(pr(31, { files: ['kit/VERSION'] }), 'main'), false, 'one that raises the kit waits for its trial');
   assert.equal(canRide(pr(31, { whose: 'steward' }), 'main'), false);
+  // Written as changes/<version>.md: stamped just before it merges (stages/stamp.ts), and merged alone, untested again.
+  assert.equal(canRide(pr(31, { files: ['src/a.ts', 'changes/0.4.1.md'] }), 'main'), false, "a stamped PR doesn't ride: it merges alone after its stamp");
+  assert.equal(canRide(pr(31, { files: ['kit/changes/2.44.1.md'] }), 'main'), false);
+  assert.equal(canRide(pr(31, { files: ['changes/README.md'] }), 'main'), true, 'the folder alone is no entry');
 });
 
 test("a PR that needs the owner first (labelled owner-first, or changing a migration) is never merged by the Steward, nor put on a train", async () => {

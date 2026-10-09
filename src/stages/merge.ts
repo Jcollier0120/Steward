@@ -6,6 +6,8 @@ import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
+import { changeFiles, changeVersion, CHANGES_DIR } from '../entries.ts';
+import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
@@ -150,8 +152,12 @@ const describe = (pr: PrInfo) => `#${pr.number} (${pr.head}${pr.whose === 'team'
 /** What the checks before a merge need from origin, looked up once per employee (and again after a merge): its released versions, and its branch's version. */
 type Lookup = () => Promise<{ released: string[]; base: string | null }>;
 
-/** A PR's version at its head, and where it started (at its merge base with the branch); null where none can be read. */
-export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null }> {
+/**
+ * A PR's version at its head, and where it started (at its merge base with the branch); null where none can be read.
+ * One that leaves its version files alone and adds changes/<version>.md instead (entries.ts) sets the highest of those,
+ * and `entries` lists them: the stamp (stages/stamp.ts) gives it its version as it merges.
+ */
+export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null; entries?: string[] }> {
   const { run } = ctx;
   const repo = checkoutOf(e);
   // The PR's head, fetched by its number (a fork's too), read at the commit GitHub named.
@@ -162,7 +168,15 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
     return 'version' in v ? v.version : null;
   };
   const start = (await gitMaybe(run, repo, 'merge-base', `origin/${e.branch}`, at))?.trim();
-  return { head: await read(at), from: start ? await read(start) : null };
+  const head = await read(at);
+  const from = start ? await read(start) : null;
+  if (start && head === from) {
+    const entries = async (ref: string) => changeFiles(((await gitMaybe(run, repo, 'ls-tree', '--name-only', ref, `${CHANGES_DIR}/`)) ?? '').split('\n').map((l) => l.trim()));
+    const had = new Set(await entries(start));
+    const added = (await entries(at)).filter((f) => !had.has(f));
+    if (added.length) return { head: changeVersion(added.at(-1)!), from, entries: added };
+  }
+  return { head, from };
 }
 
 /**
@@ -215,6 +229,8 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
   if (!existsSync(repo)) return `it asks for a release, but there's no checkout at ${repo} to read its version from`;
   const { released, base } = await lookup();
   const v = await prVersions(ctx, e, pr);
+  // Its version is stamped as it merges: always a new one.
+  if (v.entries) return null;
   if (!v.head) return `it asks for a release, but its branch has no version the Steward can read (${e.versionFiles.join(', ')})`;
   const version = v.head !== v.from ? v.head : (base ?? v.head);
   if (released.includes(version)) return `it asks for a release, but v${version}, its version once merged, is already released: ${RAISE}`;
@@ -226,13 +242,15 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
  * it). A version it sets must be new: not released, and above its branch's, so that two changes never share one
  * version and a merge never leaves a version conflict behind. (The Steward's own bumps raise the patch by one.)
  */
-export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<{ why: string | null; sets: string | null; raise?: boolean }> {
+export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup): Promise<{ why: string | null; sets: string | null; raise?: boolean; stamps?: boolean }> {
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return { why: `there's no checkout at ${repo} to read its version from, or test it in`, sets: null };
   const { released, base } = await lookup();
   const v = await prVersions(ctx, e, pr);
   if (!v.head) return { why: `its branch has no version the Steward can read (${e.versionFiles.join(', ')})`, sets: null };
   if (v.head === v.from) return { why: null, sets: null };
+  // Written as changes/<version>.md: the stamp gives it a free version as it merges, so it never waits for one.
+  if (v.entries) return { why: null, sets: v.head, stamps: true };
   if (released.includes(v.head)) return { why: `it sets v${v.head}, which is already released: raise it`, sets: v.head, raise: true };
   // Claimed up front by other work (claims.ts): that work keeps it, and this one gets a version of its own.
   const claimed = claimsOn(e.repo).find((c) => c.version === v.head && c.branch && c.branch !== pr.head);
@@ -349,7 +367,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       return { released, base: 'version' in base ? base.version : null };
     })());
   /** Why it waits, after its steps and, for a team PR, its version; and the version it sets. */
-  const check = async (pr: PrInfo): Promise<{ why: string | null; sets: string | null; raise?: boolean }> => {
+  const check = async (pr: PrInfo): Promise<{ why: string | null; sets: string | null; raise?: boolean; stamps?: boolean }> => {
     try {
       const why = await afterHold(ctx, e, pr, lookup);
       if (why) return { why, sets: null, raise: why.endsWith(RAISE) };
@@ -361,18 +379,19 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // The ones a catch-up (stages/catchup.ts) could clear, after the merges.
   const catchable = new Map<number, PrInfo>(hold.filter((h) => behindItsBranch(h.pr, e.branch)).map((h) => [h.pr.number, h.pr]));
   const failedHere: { pr: PrInfo; t: Tested }[] = [];
-  const ready: { pr: PrInfo; sets: string | null }[] = [];
+  const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
   for (const pr of mergeable) {
     const c = await check(pr);
     if (c.why) {
       hold.push({ pr, why: c.why });
       if (c.raise && pr.whose === 'team') catchable.set(pr.number, pr);
-    } else ready.push({ pr, sets: c.sets });
+    } else ready.push({ pr, sets: c.sets, stamps: c.stamps });
   }
-  // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version.
+  // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version. One
+  // stamped as it merges (changes/<version>.md) is given a free version then, so it never clashes.
   let merge: PrInfo[] = [];
   for (const r of ready) {
-    const same = r.sets ? ready.filter((x) => x.sets === r.sets) : [];
+    const same = r.sets && !r.stamps ? ready.filter((x) => x.sets === r.sets && !x.stamps) : [];
     if (same.length > 1) {
       hold.push({ pr: r.pr, why: `${same.map((x) => `#${x.pr.number}`).join(' and ')} ${same.length === 2 ? 'both' : 'all'} set v${r.sets}: each needs a version of its own` });
       // The first keeps its version; each after it gets one of its own.
@@ -502,10 +521,31 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       leftToAnother = true;
       break;
     }
+    // Written as changes/<version>.md (entries.ts): stamped on its own branch now, and merged at the stamped head.
+    let head = pr.headOid;
+    if (!pr.fork && (await usesChanges(ctx, e).catch(() => false))) {
+      const s = await stampBefore(ctx, e, pr, { ready, merged, carry: untested(pr) ? (notes.get(pr.number) ?? null) : null, lookup });
+      if (!s.done && !s.nothing) {
+        waits.push(`${describe(pr)} waits: ${s.note}`);
+        held.push(heldOf(pr, s.note));
+        continue;
+      }
+      if (s.done) {
+        notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${s.note}` : s.note);
+        // Checks on GitHub run again at the stamped head: it merges once they pass, with nothing more to stamp.
+        if (!untested(pr) && pr.checks !== 'none') {
+          const why = `${s.note}; its checks on GitHub run again at the stamped head`;
+          waits.push(`${describe(pr)} waits: ${why}`);
+          held.push(heldOf(pr, why));
+          continue;
+        }
+        head = s.head!;
+      }
+    }
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
-    const at = pr.headOid ? ['--match-head-commit', pr.headOid] : [];
+    const at = head ? ['--match-head-commit', head] : [];
     const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...at, ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
@@ -590,6 +630,32 @@ export async function standingOf(ctx: Ctx, e: Employee, pr: PrInfo): Promise<str
   const t = testedBefore(e, pr);
   // One carried already says where it came from once: caught up again, it is carried on from there.
   return t?.ok ? t.note.split('; carried to ')[0] : null;
+}
+
+/**
+ * A PR stamped just before it merges (stages/stamp.ts), with the versions it can't have: those released, those the other
+ * PRs still to merge set, and those other work has claimed (claims.ts); the kit's too, in the Steward's own repository.
+ * Its claim then follows the version it was given. Never throws.
+ */
+async function stampBefore(ctx: Ctx, e: Employee, pr: PrInfo, o: { ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; carry: string | null; lookup: Lookup }): Promise<StampResult> {
+  try {
+    const { released } = await o.lookup();
+    const gone = new Set([pr.number, ...o.merged.map((p) => p.number)]);
+    const others = o.ready.filter((r) => !gone.has(r.pr.number));
+    const taken = [...others.flatMap((r) => (r.sets ? [r.sets] : [])), ...claimsOn(e.repo).filter((c) => c.branch !== pr.head).map((c) => c.version)];
+    const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
+      ? { released: (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released, taken: [...kitTitleVersions(others.map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((c) => c.branch !== pr.head).map((c) => c.version)] }
+      : undefined;
+    const s = await stamp(ctx, e, pr, { released, taken, carry: o.carry, ...(kit ? { kit } : {}) });
+    if (s.done) {
+      // Its branch has moved: from here on it is read afresh, not from the glance.
+      forgetGlance(ctx, e);
+      if (s.version) await reclaim(e.repo, pr.head, s.version).catch(() => {});
+    }
+    return s;
+  } catch (err) {
+    return { done: false, note: `couldn't stamp its version: ${(err as Error).message}` };
+  }
 }
 
 /**

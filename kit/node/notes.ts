@@ -91,20 +91,58 @@ export function commitLine(subject: string, body: string): string | null {
   return s || null;
 }
 
+const gitAt = (root: string) => (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+
+/** The release before `version`: the newest tag v<x.y.z> below it that HEAD carries, or null when it carries none. */
+export function tagBefore(root: string, version: string): string | null {
+  try {
+    const tags = gitAt(root)('tag', '--merged', 'HEAD', '--list', 'v[0-9]*').split('\n').map((t) => t.trim()).filter((t) => /^v\d+\.\d+\.\d+$/.test(t));
+    return tags.filter((t) => compare(t.slice(1), version) < 0).sort((a, b) => compare(b.slice(1), a.slice(1)))[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The entries for the versions after `since` (the release before) and below `version`, newest first: versions merged
+ * but never released on their own, which this release brings too (the Steward releases once for all it merged in a
+ * round). None when `since` is unknown, so a first release never repeats the whole history.
+ */
+export function entriesBetween(changelog: string, since: string | null, version: string): { version: string; entry: string }[] {
+  if (!since) return [];
+  const from = since.replace(/^v/, '');
+  const out: { version: string; entry: string }[] = [];
+  for (const l of lf(changelog).split('\n')) {
+    const v = headingVersion(l);
+    if (!v || compare(v, from) <= 0 || compare(v, version) >= 0 || out.some((x) => x.version === v)) continue;
+    const entry = entryOf(changelog, v);
+    if (entry) out.push({ version: v, entry });
+  }
+  return out.sort((a, b) => compare(b.version, a.version));
+}
+
+/**
+ * A release's entry with those of the versions it brings too (entriesBetween), each under its own `## ` heading after a
+ * line that names them; null when the version has no entry.
+ */
+export function combinedEntry(changelog: string, version: string, since: string | null): string | null {
+  const entry = entryOf(changelog, version);
+  if (!entry) return null;
+  const earlier = entriesBetween(changelog, since, version);
+  if (!earlier.length) return entry;
+  const names = earlier.map((x) => `v${x.version}`);
+  const said = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return [entry, '', `This release brings ${said} too, never released on ${names.length === 1 ? 'its' : 'their'} own:`, ...earlier.flatMap((x) => ['', `## ${x.version}`, '', x.entry])].join('\n');
+}
+
 /**
  * The commits since the release before `version`, for a version with no entry: the newest tag v<x.y.z> below it that
- * HEAD carries, and each commit on the first-parent line since, as commitLine says it (newest first, at most 30).
- * `since` is that tag, or null when HEAD carries none (then the latest 10 commits).
+ * HEAD carries (tagBefore), and each commit on the first-parent line since, as commitLine says it (newest first, at most
+ * 30). `since` is that tag, or null when HEAD carries none (then the latest 10 commits).
  */
 export function commitsSince(root: string, version: string): { since: string | null; lines: string[] } {
-  const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-  let since: string | null = null;
-  try {
-    const tags = git('tag', '--merged', 'HEAD', '--list', 'v[0-9]*').split('\n').map((t) => t.trim()).filter((t) => /^v\d+\.\d+\.\d+$/.test(t));
-    since = tags.filter((t) => compare(t.slice(1), version) < 0).sort((a, b) => compare(b.slice(1), a.slice(1)))[0] ?? null;
-  } catch {
-    // No tags to read: the latest commits, below.
-  }
+  const git = gitAt(root);
+  const since = tagBefore(root, version);
   let log = '';
   try {
     log = git('log', '--first-parent', '--format=%s%x1f%b%x1e', ...(since ? [`${since}..HEAD`] : ['-n', '10']));
@@ -137,6 +175,8 @@ export interface NotesInput {
   changelog?: string | null;
   /** The commits since the release before, instead of asking git (tests). */
   commits?: { since: string | null; lines: string[] };
+  /** The release before (v<x.y.z>), instead of asking git: the entries after it are brought too (combinedEntry). */
+  since?: string | null;
 }
 
 export interface Notes {
@@ -163,8 +203,11 @@ export function releaseNotes(o: NotesInput): Notes {
   const warnings: string[] = [];
   let body: string;
   if (entry) {
-    body = entry;
+    // The versions merged since the release before and never released on their own come with it.
+    const since = o.since !== undefined ? o.since : o.commits ? o.commits.since : tagBefore(o.root, o.version);
+    body = combinedEntry(changelog!, o.version, since)!;
     for (const w of entryWarnings(entry)) warnings.push(`${CHANGELOG}'s entry for ${o.version}: ${w}`);
+    for (const x of entriesBetween(changelog!, since, o.version)) for (const w of entryWarnings(x.entry)) warnings.push(`${CHANGELOG}'s entry for ${x.version}: ${w}`);
   } else {
     warnings.push(changelog ? `${CHANGELOG} has no "## ${o.version}" entry: the notes list the commits instead` : `there's no ${CHANGELOG}: the notes list the commits instead`);
     const c = o.commits ?? commitsSince(o.root, o.version);

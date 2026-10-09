@@ -19,6 +19,9 @@ import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
 import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
 import { askRoundSoon, vouch } from './stages/vouch.ts';
+import { usesChanges } from './stages/stamp.ts';
+import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
+import { CHANGELOG } from './kit/notes.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
@@ -308,9 +311,14 @@ switch (cmd) {
       break;
     }
     const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), ...(kit ? { part: 'kit' as const } : {}) });
-    if (rest.includes('--json')) console.log(JSON.stringify({ ...claim, again }));
-    else if (kit) console.log(`Kit ${claim.version}${again ? ' (claimed already for this branch)' : ''}: yours. Set it in kit/VERSION, and in kit.json where the Steward pins its own kit.`);
-    else console.log(`${e.name} ${claim.version}${again ? ' (claimed already for this branch)' : ''}: yours. Set it in ${e.versionFiles.join(', ')}.`);
+    // A repository that writes its entries in changes/ (entries.ts): the work writes changes/<version>.md and leaves the
+    // version files and the changelog alone; the Steward stamps them as it merges (stages/stamp.ts).
+    const entry = (await usesChanges(ctx, e).catch(() => false)) ? `${kit ? KIT_CHANGES_DIR : CHANGES_DIR}/${claim.version}.md` : null;
+    const mine = again ? ' (claimed already for this branch)' : '';
+    if (rest.includes('--json')) console.log(JSON.stringify({ ...claim, again, ...(entry ? { entry } : {}) }));
+    else if (entry) console.log(`${kit ? 'Kit' : e.name} ${claim.version}${mine}: yours. Write its changelog entry in ${entry}, and leave ${kit ? 'kit/VERSION, kit/CHANGELOG.md and kit.json' : `${e.versionFiles.join(', ')} and ${CHANGELOG}`} as they are: the Steward sets the version as it merges.`);
+    else if (kit) console.log(`Kit ${claim.version}${mine}: yours. Set it in kit/VERSION, and in kit.json where the Steward pins its own kit.`);
+    else console.log(`${e.name} ${claim.version}${mine}: yours. Set it in ${e.versionFiles.join(', ')}.`);
     break;
   }
   case 'release-version': {

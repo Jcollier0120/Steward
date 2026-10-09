@@ -14,6 +14,7 @@ import type { PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
 import { isWrightPr } from './vouch.ts';
 import { ownerFirstHold } from '../review.ts';
+import { changeFiles, KIT_CHANGES_DIR } from '../entries.ts';
 
 /**
  * A merge train (Settings' mergeTrain): a repository's ready PRs that wait their turn in the version queue, merged
@@ -22,7 +23,8 @@ import { ownerFirstHold } from '../review.ts';
  *
  * The cars are the queue's PRs from its lowest version up, while each can ride (canRide: the team's, from the repository
  * itself, ready, no checks on GitHub, no steps after merging, not the Wright's, not one that raises the kit, not one that
- * waits for the owner first: review.ts's ownerFirstHold), each above
+ * waits for the owner first: review.ts's ownerFirstHold, not one written as changes/<version>.md, which merges alone
+ * once stamped: stages/stamp.ts), each above
  * the one under it; the train stops at the first that can't, so a draft still holds its place. In a worktree of the
  * Steward's, each car's head has the stack under it merged in (the employee's branch under the first), its version lines
  * and changelog settled as a catch-up settles them (stages/catchup.ts): the car's own version, its own entry above the
@@ -44,9 +46,12 @@ export interface Car {
   version: string;
 }
 
+/** A PR written as changes/<version>.md (entries.ts): stamped just before it merges, so it merges alone, untested again. */
+const stamped = (pr: PrInfo) => changeFiles(pr.files).length > 0 || changeFiles(pr.files, KIT_CHANGES_DIR).length > 0;
+
 /** Whether a PR can ride in a train. Pure. */
 export const canRide = (pr: PrInfo, branch: string) =>
-  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks === 'none' && pr.mergeState !== 'BLOCKED' && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr);
+  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks === 'none' && pr.mergeState !== 'BLOCKED' && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr) && !stamped(pr);
 
 /**
  * The train the version queue (`pending`: each PR's version, merge.ts's pendingVersions) makes: its PRs from the lowest

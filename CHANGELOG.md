@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.29.0
+
+**Pull requests side by side stop fighting over version lines: a repository can let the Steward set the version as it merges.**
+
+### What's new
+
+- A repository can now keep its changelog entries waiting in a `changes` folder: each piece of work writes its entry as `changes/<version>.md` and leaves the version files and `CHANGELOG.md` alone. Just before merging such a pull request, the Steward brings it up to date, sets its version, moves its entry into `CHANGELOG.md` and deletes the file, all on the pull request's own branch, then merges it. Two pull requests opened side by side no longer conflict on the version or the changelog, and a version someone else took meanwhile is simply replaced by the next free one, with the pull request's title following. A pull request that was vouched for, or passed its checks on this PC, isn't tested again for it. A repository joins by having `changes/README.md` on its branch; others work exactly as before.
+- `claim-version` says which file to write the entry in, for a repository that keeps its entries in `changes`.
+
+### What changed
+
+- A release now brings the changelog entries of every version merged since the release before, not just its own, so versions merged together in one round all reach the release notes and Manor's **What's new**.
+- A pull request written that way never rides a merge train: it merges alone once stamped, without another test run.
+- Brings the Steward's kit 2.44.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.16
 
 **A vouch and a pull request tested here run only the tests the change reaches.**
