@@ -20,8 +20,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The section fills from the next round on; conflicts handled before this version aren't listed.
 
-## 0.27.21
-
 ## 0.28.5
 
 **A pull request whose author already ran its tests merges without the Steward running them again.**
