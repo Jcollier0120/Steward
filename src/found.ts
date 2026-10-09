@@ -4,11 +4,11 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import { originRepo } from './kit/manor.ts';
+import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
-import { loadSettings, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
+import { employeesOfProjects, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
  * The person's own repositories, as Reeve finds them. Reeve lists every git repository on this PC (his GET /api/repos,
@@ -242,12 +242,16 @@ export function employeeFromFound(r: FoundRepo, o: { taken: string[]; merges: bo
  * Look after: the found repository added to Settings (settings.json's employees, the rest of the file as it was). An
  * error in words when it isn't one the Steward can offer.
  */
-export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string }): { employee: Employee } | { error: string } {
+export function lookAfter(repo: string, o: { merges: boolean; release: boolean; found?: FoundState; file?: string; manorHome?: string }): { employee: Employee } | { error: string } {
   // Settings read once first, so a new install is known as one before this writes its settings.json (migrate.ts).
   if (!o.file) loadSettings();
   const file = o.file ?? settingsFile();
   const raw = readJson<Record<string, unknown>>(file, {});
-  const current = normalizeSettings(raw).settings.employees;
+  const own = normalizeSettings(raw).settings;
+  // Off the makers' PC, with Manor's Repositories the list (the kit's spec/REPOSITORIES.md): it goes there.
+  const home = o.manorHome ?? manorHome();
+  const intoManor = !own.releasesCastellan && (o.manorHome !== undefined || !o.file) && manorTakesOver(own.employees, home);
+  const current = intoManor ? employeesOfProjects(manorProjects(home)) : own.employees;
   const found = o.found ?? loadFound();
   const r = candidates(found, current).find((x) => same(x.repo, repo));
   if (!r) {
@@ -255,6 +259,10 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
   }
   const employee = employeeFromFound(r, { taken: current.map((e) => e.id), merges: o.merges, release: o.release });
+  if (intoManor) {
+    const refused = addToManor(employee, home);
+    return refused ? { error: refused } : { employee };
+  }
   const employees = Array.isArray(raw.employees) ? raw.employees : [];
   writeJson(file, { ...raw, employees: [...employees, employee] });
   return { employee };
@@ -271,7 +279,7 @@ export interface Picked {
  * Look after, for several at once (the page's ticked ones): each added in turn as lookAfter adds one, so each takes an
  * id the ones before left free. The ones it couldn't add, each in words.
  */
-export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: string } = {}): { employees: Employee[]; errors: string[] } {
+export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: string; manorHome?: string } = {}): { employees: Employee[]; errors: string[] } {
   const employees: Employee[] = [];
   const errors: string[] = [];
   for (const p of picks) {
@@ -280,6 +288,33 @@ export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: st
     else employees.push(r.employee);
   }
   return { employees, errors };
+}
+
+/**
+ * A repository Look after found, added to Manor's Repositories (settings.json's "projects", the rest of the file and
+ * the list as they were), by the kit's rules. Why not, in words, when they refuse it; null when it's added.
+ */
+export function addToManor(e: Employee, home = manorHome()): string | null {
+  const file = path.join(home, 'settings.json');
+  const raw = readJson<Record<string, unknown>>(file, {});
+  if (raw.projects !== undefined && !Array.isArray(raw.projects)) return `Manor's Repositories can't be read (settings.json's "projects" isn't a list): put it right in Manor's Settings first.`;
+  const list = [...((raw.projects as unknown[] | undefined) ?? [])];
+  const tests = e.test.join(' && ');
+  const entry = {
+    name: e.name,
+    checkout: e.checkout,
+    repo: e.repo,
+    ...(e.branch !== 'main' ? { branch: e.branch } : {}),
+    ...(tests && tests.length <= 300 ? { test: tests } : {}),
+    ...(e.versionFiles.length ? { versionFiles: e.versionFiles } : {}),
+    ...(e.merges ? { merges: true } : {}),
+    ...(e.release ? { release: e.release } : {}),
+  };
+  const own = manorOwn({ home });
+  const problems: string[] = [];
+  if (projectsFrom([...list, entry], own, problems).length <= projectsFrom(list, own).length) return `Manor's Repositories wouldn't take ${e.repo}: ${(problems.at(-1) ?? 'refused').replace(/^settings\.json: "projects" entry \d+ (\("[^]*?"\) )?/, '').replace(/; it's left out\.$/, '')}.`;
+  writeJson(file, { ...raw, projects: [...list, entry] });
+  return null;
 }
 
 /**
@@ -308,6 +343,8 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
 }
 
 /** The page's view of it: what Reeve found that could be looked after, and why nothing can when nothing can. */
-export function foundView(s: FoundState, settings: Pick<Settings, 'employees'>): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number } {
-  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees), found: s.repos.length };
+export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'releasesCastellan'>, home = manorHome()): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number; into: 'manor' | 'steward' } {
+  const own = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings.employees;
+  const into = !settings.releasesCastellan && manorTakesOver(own, home) ? 'manor' : 'steward';
+  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees), found: s.repos.length, into };
 }

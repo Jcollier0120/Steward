@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -11,6 +11,11 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-page-'));
 process.env.STEWARD_HOME = home;
 process.env.STEWARD_PORT = String(41000 + Math.floor(Math.random() * 8000));
 writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], stewardRepo: 'octocat/steward' }));
+// A Manor of its own, with Developer options on, as a developer's: the ping then says its pid (the kit's 2.40.0).
+const manor = path.join(home, 'manor');
+mkdirSync(path.join(manor, 'app'), { recursive: true });
+writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ developerOptions: true }));
+process.env.MANOR_HOME = manor;
 
 const { APP, port } = await import('../src/app.ts');
 const { serveSteward, askOf } = await import('../src/agent.ts');
@@ -115,6 +120,12 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
   assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
+  // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
+  assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
+  const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };
+  const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
+  assert.match(withPr, /<th>Notes<\/th>/);
+  assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

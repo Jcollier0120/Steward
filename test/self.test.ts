@@ -177,3 +177,16 @@ test("under node --test a round leaves the Steward's own releases alone unless a
   ]);
   assert.deepEqual(lines(), ['fill --from kit', 'kit-release --publish', 'release --publish']);
 });
+
+test('a Steward that is also its own employee still releases itself when the rounds take turns', async () => {
+  // takeTurns keeps one entry per id, so the employee comes back in place of the Steward's own entry.
+  const own = { id: 'steward', name: 'Steward', repo: 'Jcollier0120/Steward', checkout, merges: true };
+  writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [own], workRoot: path.join(home, 'work'), stewardCheckout: checkout }));
+  const gh = runner((a) => a[0] === 'pr' && a[1] === 'list' ? { code: 0, out: '[]', err: '' } : ({ code: 0, out: JSON.stringify({ data: { steward: { releases: { nodes: [] }, main: { target: { oid: head() } }, kitVersion: { text: '1.1.0' }, packageJson: { text: '{"version":"0.9.0"}' } } } }), err: '' }));
+  if (existsSync(ran)) unlinkSync(ran);
+  const out = await runStage('round', {}, { run: gh.run, self: { checkout }, turns: { remote: async () => null } });
+  assert.deepEqual(out.results.filter((x) => x.message.startsWith('self: ')).map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [
+    ['done', 'self: released kit-v1.1.0 from origin/main (…)'],
+    ['done', 'self: released v0.9.0 from origin/main (…)'],
+  ], JSON.stringify(out.results));
+});

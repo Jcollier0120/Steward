@@ -278,7 +278,8 @@ async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self:
   ctx.lease = t.guard;
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
-  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), on: !!deps };
+  // takeTurns keeps one entry per id, so a Steward that is also its own employee comes back as that employee: match by id.
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.some((e) => e.id === self.id), on: !!deps };
 }
 
 /**
