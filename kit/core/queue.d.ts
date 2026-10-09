@@ -43,6 +43,10 @@ export type Waiting = {
      * Who it is, from the ticket's contents.
      */
     who?: string;
+    /**
+     * What the request is for, from the ticket's contents, when it says.
+     */
+    doing?: string;
 };
 /**
  * A ticket from its file name, or null for anything that isn't one.
@@ -59,15 +63,19 @@ export declare function parseTicket(name: string): Ticket | null;
  * @returns {string}
  */
 export declare function ticketName(lane: Lane, timeUs: number, pid: number, nonce: string): string;
+/** The longest `doing` a ticket carries: a longer one is cut, ending in an ellipsis. */
+export declare const DOING_MAX = 80;
 /**
- * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`.
+ * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`, and `"doing"` when the
+ * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters.
  * @param {Lane} lane
  * @param {number} timeUs
  * @param {number} pid
  * @param {string} who
+ * @param {string} [doing]
  * @returns {string}
  */
-export declare function ticketText(lane: Lane, timeUs: number, pid: number, who: string): string;
+export declare function ticketText(lane: Lane, timeUs: number, pid: number, who: string, doing?: string): string;
 /**
  * A clock's next reading in microseconds, strictly increasing within a process: the wall clock's, or one
  * past the last when the wall clock hasn't moved on. The driver keeps the last.
@@ -129,8 +137,8 @@ export declare function judgeLine(rules: Pick<Rules, 'queue'>, entries: Entry[],
     alive?: Record<string, boolean>;
 }): LineVerdict;
 /**
- * Who is waiting, in line order, for a status page: the live tickets, each with `who` from its contents
- * when they say. Reads only: the dead are left out, not deleted.
+ * Who is waiting, in line order, for a status page: the live tickets, each with `who` and `doing` from its
+ * contents when they say. Reads only: the dead are left out, not deleted.
  * @param {Pick<Rules, 'queue'>} rules
  * @param {Entry[]} entries
  * @param {number} nowMs

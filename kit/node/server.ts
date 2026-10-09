@@ -38,13 +38,48 @@ export type Reply =
 
 export type Handler = (req: Request) => Reply | Promise<Reply>;
 
+/**
+ * An agent getting settled in: a long piece of work it does once, or again after a big change (Reeve
+ * reading every project for search, the first time and with each new model). Its ping says so as
+ * `settingUp`, and Manor shows a calm banner on the agent's card and its main page, never an alarm.
+ * Left out of the ping once it's done.
+ */
+export interface SettingUp {
+  /** What it is doing and why, in plain words for someone who doesn't know how it works inside. */
+  text: string;
+  /** How far along, when it can count: `done` of `total` `unit` ("projects"). */
+  done?: number;
+  total?: number;
+  unit?: string;
+  /** When it expects to be done (ISO 8601), once it can tell. */
+  until?: string;
+  /** The accelerator it mostly uses meanwhile (an id from the accelerators' config), so Manor can say why that one is busy. */
+  accelerator?: string;
+}
+
+/** A ping's `settingUp`, or null when it has none or it isn't one: anything malformed is left out, never an error. */
+export function settingUpFromPing(ping: Record<string, unknown> | null | undefined): SettingUp | null {
+  const v = ping?.settingUp as Record<string, unknown> | undefined;
+  if (!v || typeof v !== 'object' || typeof v.text !== 'string' || !v.text.trim()) return null;
+  const count = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.floor(x) : undefined);
+  const done = count(v.done);
+  const total = count(v.total);
+  const until = typeof v.until === 'string' && Number.isFinite(Date.parse(v.until)) ? v.until : undefined;
+  return {
+    text: v.text.trim().slice(0, 300),
+    ...(done !== undefined && total !== undefined && total > 0 ? { done: Math.min(done, total), total, unit: typeof v.unit === 'string' ? v.unit.slice(0, 30) : '' } : {}),
+    ...(until ? { until } : {}),
+    ...(typeof v.accelerator === 'string' && v.accelerator ? { accelerator: v.accelerator.slice(0, 60) } : {}),
+  };
+}
+
 export interface ServeOptions {
   port: number;
   /** The agent's icon: /favicon.svg, which Manor shows next to its name. */
   icon: string;
   get?: Record<string, Handler>;
   post?: Record<string, Handler>;
-  /** Extra fields for /api/ping, e.g. whether a run is under way. Keep it cheap: Manor polls it. */
+  /** Extra fields for /api/ping, e.g. whether a run is under way, or `settingUp` (SettingUp). Keep it cheap: Manor polls it. */
   ping?: () => Record<string, unknown>;
   /** Called before the process exits on POST /api/stop. */
   onStop?: () => void | Promise<void>;

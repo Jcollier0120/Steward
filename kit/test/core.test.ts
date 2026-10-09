@@ -82,3 +82,26 @@ test('times are read as ISO 8601 with a zone, the same in every engine', () => {
   for (const bad of ['2026-10-02', '2026-10-02T12:00:00', 'Fri, 02 Oct 2026 12:00:00 GMT', '2026-13-01T00:00:00Z', 12, null]) assert.ok(Number.isNaN(core.parseIsoMs(bad)), String(bad));
   assert.equal(core.isoTime(Date.UTC(2026, 9, 2, 12)), '2026-10-02T12:00:00.000Z');
 });
+
+test("a ticket's doing: said only when given, cut to DOING_MAX, read back for a status page; a ticket without one reads as before", () => {
+  const plain = core.ticketText('background', 1_700_000_000_000_000, 42, 'reeve');
+  assert.deepEqual(JSON.parse(plain), { pid: 42, since: 1_700_000_000_000, lane: 'background', who: 'reeve' });
+  assert.equal(core.ticketText('background', 1_700_000_000_000_000, 42, 'reeve', '  '), plain, 'blank is none');
+  const said = JSON.parse(core.ticketText('interactive', 1_700_000_000_000_000, 42, 'reeve', 'search index: Heiward (17 of 673 files)'));
+  assert.equal(said.doing, 'search index: Heiward (17 of 673 files)');
+  const long = JSON.parse(core.ticketText('background', 1, 42, 'reeve', 'x'.repeat(200))).doing;
+  assert.equal(long.length, core.DOING_MAX);
+  assert.ok(long.endsWith('…'));
+
+  const now = Date.now();
+  const name = (pid: number) => core.ticketName('background', now * 1000 + pid, pid, 'abcd1234');
+  const entries = [
+    { name: name(1), mtimeMs: now, text: core.ticketText('background', now * 1000 + 1, 1, 'reeve', 'search index: Porter (3 of 90 files)') },
+    { name: name(2), mtimeMs: now, text: JSON.stringify({ pid: 2, since: now, lane: 'background', who: 'heiward' }) },
+    { name: name(3), mtimeMs: now, text: JSON.stringify({ pid: 3, who: 'odd', doing: 'y'.repeat(500) }) },
+  ];
+  const rules = core.checkRules(JSON.parse(readFileSync(new URL('../spec/rules.json', import.meta.url), 'utf8')));
+  const w = core.waitingOf(rules, entries, now, { 1: true, 2: true, 3: true });
+  assert.ok('waiting' in w);
+  assert.deepEqual(w.waiting.map((x) => x.doing?.length ?? x.doing), ['search index: Porter (3 of 90 files)'.length, undefined, core.DOING_MAX]);
+});

@@ -34,6 +34,7 @@
  * @property {Lane} lane
  * @property {number} since When it joined, in milliseconds.
  * @property {string} [who] Who it is, from the ticket's contents.
+ * @property {string} [doing] What the request is for, from the ticket's contents, when it says.
  */
 
 const TICKET = /^([01])-(\d{17})-(\d+)-([0-9a-z]+)\.ticket$/;
@@ -60,16 +61,23 @@ export function ticketName(lane, timeUs, pid, nonce) {
   return `${lane === 'interactive' ? 0 : 1}-${String(timeUs).padStart(17, '0')}-${pid}-${nonce}.ticket`;
 }
 
+/** The longest `doing` a ticket carries: a longer one is cut, ending in an ellipsis. */
+export const DOING_MAX = 80;
+
 /**
- * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`.
+ * A ticket's contents, which are only informational: `{"pid", "since", "lane", "who"}`, and `"doing"` when the
+ * waiter says what the request is for ("search index: Heiward (17 of 673 files)"), at most DOING_MAX characters.
  * @param {Lane} lane
  * @param {number} timeUs
  * @param {number} pid
  * @param {string} who
+ * @param {string} [doing]
  * @returns {string}
  */
-export function ticketText(lane, timeUs, pid, who) {
-  return JSON.stringify({ pid, since: Math.floor(timeUs / 1000), lane, who });
+export function ticketText(lane, timeUs, pid, who, doing) {
+  const d = typeof doing === 'string' ? doing.trim() : '';
+  const said = d.length > DOING_MAX ? `${d.slice(0, DOING_MAX - 1)}…` : d;
+  return JSON.stringify({ pid, since: Math.floor(timeUs / 1000), lane, who, ...(said ? { doing: said } : {}) });
 }
 
 /**
@@ -169,8 +177,8 @@ export function judgeLine(rules, entries, nowMs, opts = {}) {
 }
 
 /**
- * Who is waiting, in line order, for a status page: the live tickets, each with `who` from its contents
- * when they say. Reads only: the dead are left out, not deleted.
+ * Who is waiting, in line order, for a status page: the live tickets, each with `who` and `doing` from its
+ * contents when they say. Reads only: the dead are left out, not deleted.
  * @param {Pick<Rules, 'queue'>} rules
  * @param {Entry[]} entries
  * @param {number} nowMs
@@ -184,21 +192,27 @@ export function waitingOf(rules, entries, nowMs, alive) {
   const texts = new Map(entries.map((e) => [e.name, e.text]));
   return {
     waiting: v.live.map((t) => {
-      const who = whoOf(texts.get(t.name));
-      return { pid: t.pid, lane: t.lane === 0 ? 'interactive' : 'background', since: Math.floor(t.timeUs / 1000), ...(who === undefined ? {} : { who }) };
+      const text = texts.get(t.name);
+      const who = fieldOf(text, 'who');
+      const doing = fieldOf(text, 'doing');
+      return { pid: t.pid, lane: t.lane === 0 ? 'interactive' : 'background', since: Math.floor(t.timeUs / 1000), ...(who === undefined ? {} : { who }), ...(doing === undefined ? {} : { doing }) };
     }),
   };
 }
 
 /**
+ * One of a ticket's informational fields, when its contents have it as a string. A `doing` longer than
+ * DOING_MAX (a writer that didn't cut it) is cut here.
  * @param {string | undefined} text
+ * @param {'who' | 'doing'} key
  * @returns {string | undefined}
  */
-function whoOf(text) {
+function fieldOf(text, key) {
   if (text === undefined) return undefined;
   try {
     const v = JSON.parse(text);
-    return v && typeof v === 'object' && typeof v.who === 'string' ? v.who : undefined;
+    const s = v && typeof v === 'object' && typeof v[key] === 'string' ? v[key] : undefined;
+    return key === 'doing' && s !== undefined ? (s.trim() ? (s.length > DOING_MAX ? `${s.slice(0, DOING_MAX - 1)}…` : s) : undefined) : s;
   } catch {
     return undefined;
   }

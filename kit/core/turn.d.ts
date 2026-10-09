@@ -146,6 +146,10 @@ export type TurnOptions = {
      */
     who: string;
     /**
+     * What this request is for, shown beside `who` ("search index: Heiward (17 of 673 files)"): informational, at most DOING_MAX characters.
+     */
+    doing?: string;
+    /**
      * The accelerator in messages (default: "the NPU", or the folder's name).
      */
     what?: string;

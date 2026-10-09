@@ -63,10 +63,11 @@ test('separate processes take their turns first come, first served', async () =>
   writeFileSync(out, '');
   const free = hold(lockDir);
   const moduleUrl = new URL('./fixture/src/kit/npu-queue.ts', import.meta.url).href;
+  const SECOND_DOING = 'search index: Heiward (17 of 673 files)';
   const child = (label: string, lane: string) => {
     const code =
       `import { withNpuTurn } from ${JSON.stringify(moduleUrl)}; import { appendFileSync } from 'node:fs';` +
-      `await withNpuTurn(${JSON.stringify(lockDir)}, async () => { appendFileSync(${JSON.stringify(out)}, ${JSON.stringify(label)} + '\\n'); await new Promise((r) => setTimeout(r, 30)); }, { lane: ${JSON.stringify(lane)}, who: ${JSON.stringify(label)} });`;
+      `await withNpuTurn(${JSON.stringify(lockDir)}, async () => { appendFileSync(${JSON.stringify(out)}, ${JSON.stringify(label)} + '\\n'); await new Promise((r) => setTimeout(r, 30)); }, { lane: ${JSON.stringify(lane)}, who: ${JSON.stringify(label)}${label === 'second' ? `, doing: ${JSON.stringify(SECOND_DOING)}` : ''} });`;
     const p = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: 'inherit' });
     return new Promise<number | null>((resolve) => p.on('exit', resolve));
   };
@@ -78,6 +79,8 @@ test('separate processes take their turns first come, first served', async () =>
   const snap = queueSnapshot(lockDir);
   assert.equal(snap.holder?.pid, process.pid);
   assert.deepEqual(snap.waiting.map((w) => w.who), ['first', 'second', 'third']);
+  // What a request is for, when its waiter says (spec/NPU-QUEUE.md's `doing`).
+  assert.deepEqual(snap.waiting.map((w) => w.doing), [undefined, SECOND_DOING, undefined]);
   free();
   assert.deepEqual(await Promise.all(done), [0, 0, 0]);
   assert.deepEqual(readFileSync(out, 'utf8').trim().split('\n'), ['first', 'second', 'third']);
