@@ -52,12 +52,26 @@ export const NO_GH = "gh isn't installed: install GitHub CLI (https://cli.github
 
 /**
  * The program to start for a command's first word: `node` is the Node running the Steward, and `npm` and
- * `npx` its own npm (no shell, so no cmd.exe quoting). Everything else, gh too, is found on PATH.
+ * `npx` its own npm (no shell, so no cmd.exe quoting). `az` on Windows is the Azure CLI's own Python, as its az.cmd
+ * starts it. Everything else, gh too, is found on PATH.
  */
 export function resolveCommand(cmd: string, args: string[]): [string, string[]] {
   if (cmd === 'node') return [process.execPath, args];
   if ((cmd === 'npm' || cmd === 'npx') && existsSync(npmCli(cmd))) return [process.execPath, [npmCli(cmd), ...args]];
+  if (cmd === 'az' && process.platform === 'win32') {
+    const python = azurePython();
+    if (python) return [python, ['-IBm', 'azure.cli', ...args]];
+  }
   return [cmd, args];
+}
+
+/** The Azure CLI's Python on Windows (az.cmd runs `python.exe -IBm azure.cli`), where it installs; null when it isn't. */
+function azurePython(): string | null {
+  for (const root of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
+    const python = root ? path.join(root, 'Microsoft SDKs', 'Azure', 'CLI2', 'python.exe') : '';
+    if (python && existsSync(python)) return python;
+  }
+  return null;
 }
 
 /** Whether a .NET folder holds an SDK (a runtime alone can't build or test). */

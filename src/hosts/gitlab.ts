@@ -201,8 +201,8 @@ export class GitLab implements SourceHost {
     return a.code === 0 ? { ...a, out: `${parsed<any>(a.out)?.username ?? ''}\n` } : a;
   }
 
-  prRef(n: number): string {
-    return `refs/merge-requests/${n}/head`;
+  prRef(pr: { number: number }): string {
+    return `refs/merge-requests/${pr.number}/head`;
   }
 
   releaseUrl(repo: string, tag: string): string {

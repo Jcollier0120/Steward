@@ -39,6 +39,7 @@ import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
+import { whereAzure } from './hosts/azure.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -107,24 +108,27 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
   return { ...settings, team: t.team };
 }
 
-/** The account glab is signed in as on each GitLab, by its host name, as last asked (an hour at most). */
-const gitlabAccounts = new Map<string, { login: string | null; at: number }>();
+/** The account signed in on each GitLab and Azure DevOps organization, by its address, as last asked (an hour at most). */
+const hostAccounts = new Map<string, { login: string | null; at: number }>();
+
+/** Where an account is its own: a GitLab by its host name, an Azure DevOps organization by its address. */
+const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : null);
 
 /**
- * Settings whose team names none, with the account glab is signed in as on each GitLab whose repositories are worked
- * with GitLab's way (scm.ts): GitLab's accounts are its own, so the person and their sessions are the team there too.
- * Asked once an hour; a GitLab that can't say adds nobody.
+ * Settings whose team names none, with the account glab or az is signed in as on each GitLab and Azure DevOps
+ * organization whose repositories are worked with its way (scm.ts): their accounts are their own, so the person and
+ * their sessions are the team there too. Asked once an hour; one that can't say adds nobody.
  */
-export async function withGitlabTeam(settings: Settings, o: { run: Runner; neutralDir: string; host: (e: Pick<Employee, 'repo'>) => Host }): Promise<Settings> {
-  const gitlabs = settings.employees.filter((e) => o.host(e) === 'gitlab');
+export async function withHostTeams(settings: Settings, o: { run: Runner; neutralDir: string; host: (e: Pick<Employee, 'repo'>) => Host }): Promise<Settings> {
   const team = [...settings.team];
-  for (const e of gitlabs) {
-    const name = whereIs(e.repo).hostname;
-    let known = gitlabAccounts.get(name);
+  for (const e of settings.employees) {
+    const name = accountsAt(o.host(e), e.repo);
+    if (!name) continue;
+    let known = hostAccounts.get(name);
     if (!known || Date.now() - known.at > 60 * 60_000) {
       const who = await hostFor(o, e).whoAmI().catch(() => null);
       known = { login: who?.code === 0 ? who.out.trim() || null : null, at: Date.now() };
-      gitlabAccounts.set(name, known);
+      hostAccounts.set(name, known);
     }
     if (known.login && !team.some((t) => t.toLowerCase() === known!.login!.toLowerCase())) team.push(known.login);
   }
@@ -150,7 +154,7 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   // here, gh isn't asked who it is.
   const noGithub = own.employees.length ? !own.employees.some((e) => host(e) === 'github') : look !== null && !githubReady(look);
   const fromGithub = o.team === false || noGithub ? own : withTeam(own, log, o.owner);
-  const settings = o.team === false || given.team.length ? fromGithub : await withGitlabTeam(fromGithub, { run, neutralDir: dataDir, host });
+  const settings = o.team === false || given.team.length ? fromGithub : await withHostTeams(fromGithub, { run, neutralDir: dataDir, host });
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
   const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);

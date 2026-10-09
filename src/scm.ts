@@ -17,8 +17,11 @@ import type { Employee, Settings } from './settings.ts';
  * - **GitLab**: its repository is on a GitLab (gitlab.com/group/app, or a host whose name says gitlab) and the GitLab
  *   CLI (glab) is installed and signed in. As GitHub's way, merge requests standing for pull requests, with no glance:
  *   each repository is asked on its own.
- * - **Git**: any other, on any host (Azure DevOps, Bitbucket, a server or shared folder of your own), or a GitHub or
- *   GitLab one where its CLI isn't there. Plain git against its own origin: its branch and its tags are read
+ * - **Azure DevOps**: its repository is on Azure DevOps (dev.azure.com/org/project/_git/app, or the older
+ *   org.visualstudio.com) and the Azure CLI (az) is installed and signed in (az login). As GitLab's way; a release is
+ *   an annotated v<version> tag, Azure DevOps having no releases.
+ * - **Git**: any other, on any host (Bitbucket, a server or shared folder of your own), or a GitHub, GitLab or Azure
+ *   DevOps one where its CLI isn't there. Plain git against its own origin: its branch and its tags are read
  *   with `git ls-remote`, a release is a `v<version>` tag on origin (annotated, its message the version's CHANGELOG.md
  *   entry), pushed by the Steward once the release command has run, and there are no pull requests to merge: what
  *   lands on the branch is released.
@@ -26,12 +29,13 @@ import type { Employee, Settings } from './settings.ts';
  * Other source control (Mercurial, Subversion, Perforce, Plastic SCM) is found and named, but not worked with yet.
  * Castellan's own release machinery (releasesCastellan) is GitHub's, whatever is chosen.
  *
- * GitHub and GitLab are asked through a source host (hosts/), the one interface for pull requests, commit statuses,
- * releases and issues, so other hosts with pull requests (Azure DevOps, Gitea/Forgejo, Bitbucket) can stand where
- * they do. Settings' Source control: GitHub means GitHub's way for every repository; GitLab's is chosen by Automatic.
+ * GitHub, GitLab and Azure DevOps are asked through a source host (hosts/), the one interface for pull requests,
+ * commit statuses, releases and issues, so other hosts with pull requests (Gitea/Forgejo, Bitbucket) can stand where
+ * they do. Settings' Source control: GitHub means GitHub's way for every repository; GitLab's and Azure DevOps' are
+ * chosen by Automatic.
  */
 
-export type Host = 'github' | 'gitlab' | 'git';
+export type Host = 'github' | 'gitlab' | 'azure' | 'git';
 export type SourceControl = 'auto' | 'github' | 'git';
 
 export interface Tool {
@@ -40,7 +44,7 @@ export interface Tool {
   name: string;
   /** Its first line of --version, or null when it isn't installed. */
   version: string | null;
-  /** The GitHub and GitLab CLIs only: signed in (a token kept on this PC; neither host is asked). */
+  /** The GitHub, GitLab and Azure CLIs only: signed in (a token or account kept on this PC). */
   signedIn?: boolean;
   /** Whether the Steward works with it. */
   supported: boolean;
@@ -55,6 +59,7 @@ const KNOWN: { cmd: string; name: string; args: string[]; supported: boolean }[]
   { cmd: 'git', name: 'Git', args: ['--version'], supported: true },
   { cmd: 'gh', name: 'GitHub CLI', args: ['--version'], supported: true },
   { cmd: 'glab', name: 'GitLab CLI', args: ['--version'], supported: true },
+  { cmd: 'az', name: 'Azure CLI', args: ['--version'], supported: true },
   { cmd: 'hg', name: 'Mercurial', args: ['--version', '--quiet'], supported: false },
   { cmd: 'svn', name: 'Subversion', args: ['--version', '--quiet'], supported: false },
   { cmd: 'p4', name: 'Perforce', args: ['-V'], supported: false },
@@ -67,7 +72,7 @@ export const LOOK_EVERY_MS = 60 * 60_000;
 
 export const loadScm = (): ScmLook | null => readJson<ScmLook | null>(scmFile(), null);
 
-/** What is installed, asked of each command (its version; the GitHub and GitLab CLIs whether they are signed in). */
+/** What is installed, asked of each command (its version; the GitHub, GitLab and Azure CLIs whether they are signed in). */
 export async function findScm(run: Runner, now = new Date()): Promise<ScmLook> {
   const tools = await Promise.all(
     KNOWN.map(async (k): Promise<Tool> => {
@@ -79,6 +84,8 @@ export async function findScm(run: Runner, now = new Date()): Promise<ScmLook> {
       if (k.cmd === 'gh' && version) tool.signedIn = (await run('gh', ['auth', 'token', '--hostname', 'github.com'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code === 0;
       // glab says whether it holds a token for its hosts; it may check one with its host, never shows it.
       if (k.cmd === 'glab' && version) tool.signedIn = (await run('glab', ['auth', 'status'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code === 0;
+      // az has an account when `az login` was run; Azure isn't asked.
+      if (k.cmd === 'az' && version) tool.signedIn = (await run('az', ['account', 'show', '--output', 'none'], { timeoutMs: 30_000 }).catch(() => ({ code: 1 }))).code === 0;
       return tool;
     }),
   );
@@ -106,6 +113,12 @@ export const githubReady = (look: ScmLook | null) => !!look?.tools.find((t) => t
 /** The GitLab CLI installed and signed in: GitLab's way works. */
 export const gitlabReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'glab' && t.version && t.signedIn);
 
+/** The Azure CLI installed and signed in: Azure DevOps' way works. */
+export const azureReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'az' && t.version && t.signedIn);
+
+/** A repository on Azure DevOps, as repoFromUrl names one: dev.azure.com/…, ssh.dev.azure.com/v3/… or org.visualstudio.com/…. Pure. */
+export const isAzureRepo = (repo: string) => /^(ssh\.)?dev\.azure\.com\/|^[^./]+\.visualstudio\.com\//i.test(repo);
+
 /** A repository on a GitLab, as repoFromUrl names one: gitlab.com/group/app, or a host whose name says gitlab. Pure. */
 export const isGitlabRepo = (repo: string) => /^[^/]*gitlab[^/]*\/[^/]+\/.+$/i.test(repo);
 
@@ -121,6 +134,7 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
   if (s.sourceControl === 'git') return 'git';
   if (s.sourceControl === 'github') return 'github';
   if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
+  if (isAzureRepo(e.repo)) return look && azureReady(look) ? 'azure' : 'git';
   if (!isGithubRepo(e.repo)) return 'git';
   return !look || githubReady(look) ? 'github' : 'git';
 }
@@ -128,9 +142,9 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
 /** What Automatic comes to on this PC, in words, for Settings and the page. Pure. */
 export function autoWords(look: ScmLook | null): string {
   if (!look) return "Automatic: the Steward hasn't looked at this PC's source control yet";
-  const ways = [...(githubReady(look) ? ['GitHub for repositories on GitHub (the GitHub CLI is signed in)'] : []), ...(gitlabReady(look) ? ['GitLab for repositories on GitLab (the GitLab CLI is signed in)'] : [])];
+  const ways = [...(githubReady(look) ? ['GitHub for repositories on GitHub (the GitHub CLI is signed in)'] : []), ...(gitlabReady(look) ? ['GitLab for repositories on GitLab (the GitLab CLI is signed in)'] : []), ...(azureReady(look) ? ['Azure DevOps for repositories on Azure DevOps (the Azure CLI is signed in)'] : [])];
   if (ways.length) return `Automatic: ${ways.join(', ')}, Git for any other`;
-  const unsigned = [...(has(look, 'gh') ? ['the GitHub CLI is installed, but not signed in: gh auth login'] : []), ...(has(look, 'glab') ? ['the GitLab CLI is installed, but not signed in: glab auth login'] : [])];
+  const unsigned = [...(has(look, 'gh') ? ['the GitHub CLI is installed, but not signed in: gh auth login'] : []), ...(has(look, 'glab') ? ['the GitLab CLI is installed, but not signed in: glab auth login'] : []), ...(has(look, 'az') ? ['the Azure CLI is installed, but not signed in: az login'] : [])];
   if (has(look, 'git')) return `Automatic: Git for every repository, on any host${unsigned.length ? ` (${unsigned.join('; ')})` : ''}`;
   return 'Automatic: no source control the Steward works with is installed (Git, say)';
 }
@@ -140,7 +154,7 @@ export function foundWords(look: ScmLook | null): string {
   if (!look) return '';
   const found = look.tools.filter((t) => t.version);
   if (!found.length) return 'None found on this PC.';
-  const works = found.filter((t) => t.supported).map((t) => `${t.name}${t.cmd === 'gh' || t.cmd === 'glab' ? (t.signedIn ? ', signed in' : ', not signed in') : ''}`);
+  const works = found.filter((t) => t.supported).map((t) => `${t.name}${t.cmd === 'gh' || t.cmd === 'glab' || t.cmd === 'az' ? (t.signedIn ? ', signed in' : ', not signed in') : ''}`);
   const not = found.filter((t) => !t.supported).map((t) => t.name);
   return [`Found on this PC: ${works.join('; ') || 'nothing the Steward works with'}.`, ...(not.length ? [`Not worked with yet: ${not.join(', ')}.`] : [])].join(' ');
 }
