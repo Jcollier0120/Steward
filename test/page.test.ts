@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -11,6 +11,11 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-page-'));
 process.env.STEWARD_HOME = home;
 process.env.STEWARD_PORT = String(41000 + Math.floor(Math.random() * 8000));
 writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], stewardRepo: 'octocat/steward' }));
+// A Manor of its own, with Developer options on, as a developer's: the ping then says its pid (the kit's 2.40.0).
+const manor = path.join(home, 'manor');
+mkdirSync(path.join(manor, 'app'), { recursive: true });
+writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ developerOptions: true }));
+process.env.MANOR_HOME = manor;
 
 const { APP, port } = await import('../src/app.ts');
 const { serveSteward, askOf } = await import('../src/agent.ts');

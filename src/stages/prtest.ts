@@ -1,11 +1,12 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, git, removeWorktree } from '../git.ts';
+import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
+import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks } from './bump.ts';
 import { checkoutOf, workRootOf, type Ctx } from './common.ts';
-import type { PrInfo } from './staff.ts';
+import { readPin, type PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
 
 /**
@@ -28,6 +29,8 @@ export interface Tested {
   at: string;
   /** The employee's branch on origin when it was tested: the branch moving on since is a reason to try again. */
   branch?: string;
+  /** The newest kit released when it was tested: a failure at its kit's fill is tried again once a newer one is (kitMayClear). */
+  kit?: string;
 }
 
 const keyOf = (e: Employee, pr: PrInfo) => `${e.id}#${pr.number}@${pr.headOid}`;
@@ -35,11 +38,38 @@ const keyOf = (e: Employee, pr: PrInfo) => `${e.id}#${pr.number}@${pr.headOid}`;
 /** What testing this PR's head here said before, if it has been. */
 export const testedBefore = (e: Employee, pr: PrInfo): Tested | null => (pr.headOid ? (readJson<Record<string, Tested>>(prChecksFile(), {})[keyOf(e, pr)] ?? null) : null);
 
+/**
+ * Whether a failure here may be cleared by a kit released since: it failed at the kit's fill (tools/kit.ts), and the
+ * newest kit released now isn't the one it was tested beside (one tested before 0.27.38 kept none). Manor#135 failed
+ * at its fill for a kit not yet released, and waited for ever, with the PRs above it. Pure.
+ */
+export const kitMayClear = (e: Employee, t: Tested, newest: string | null) => !t.ok && !!e.fill && t.note.includes(`: ${e.fill} failed`) && !!newest && t.kit !== newest;
+
+/** How the hold of a PR whose kit isn't released yet begins. */
+export const KIT_WAIT = 'waits for the kit it takes: ';
+
+/**
+ * Why a PR on the kit waits before it is tested here, or null: the kit its kit.json pins at its head has no release yet
+ * (a PR made beside the Steward's own that raises the kit), so its fill would fail. It is tested once that kit is
+ * released (the round releases the Steward's kit before the agents' merges: steward.ts). Null when the kit's releases
+ * couldn't be read, or its pin can't: then it is tested as before.
+ */
+export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
+  if (!e.usesKit || !e.fill || !pr.headOid || !ctx.kit?.released.length) return null;
+  const repo = checkoutOf(e);
+  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  const pin = readPin(await showFile(ctx.run, repo, pr.headOid, 'kit.json'));
+  if (!pin || ctx.kit.released.includes(pin.kit)) return null;
+  return `${KIT_WAIT}kit ${pin.kit} isn't released yet, so its kit couldn't be filled: it is tested here once it is`;
+}
+
 export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const before = testedBefore(e, pr);
-  if (before) return before;
+  const newest = latestKit(ctx.kit);
+  if (before && kitMayClear(e, before, newest)) ctx.log(`[${e.id}] #${pr.number} failed at its kit's fill before kit ${newest} was released: tested here again`);
+  else if (before) return before;
   if (!pr.headOid) return { ok: false, note: "GitHub didn't say its head commit, so it wasn't tested here", at: new Date().toISOString() };
-  const tested = await test(ctx, e, pr);
+  const tested = { ...(await test(ctx, e, pr)), ...(newest ? { kit: newest } : {}) };
   // Kept by commit, a "can't" too; the oldest go once there are more than 500.
   const kept = readJson<Record<string, Tested>>(prChecksFile(), {});
   kept[keyOf(e, pr)] = tested;

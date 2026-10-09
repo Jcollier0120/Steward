@@ -1,41 +1,11 @@
 Copyright (c) 2026 Jeremy Collier. All rights reserved.
 
-The Steward, apart from its kit, is proprietary software. No licence is
-granted to use, copy, modify, merge, publish, distribute, sublicense or sell
-it, in whole or in part, except under a written licence from the copyright
-holder. Having a copy of it, or access to its repository, gives no right to
-pass it on.
+The Steward, apart from its kit, is proprietary software. No license is granted
+to use, copy, modify or distribute it, in whole or in part, without the
+copyright holder's written permission. Its source is published so that the
+kit it holds can be read and fetched, which grants no license beyond that. It
+is provided "as is", without warranty of any kind, and the copyright holder is
+not liable for any claim or damages arising from it.
 
-Its source is published so that the kit it holds can be read and fetched;
-publishing it grants no licence beyond that.
-
-The kit, the files under kit/ and src/kit, is under the MIT licence below:
-anyone may use it, including the agents built on it.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
-
--------------------------------------------------------------------------------
-
-MIT License
-
-Copyright (c) 2026 Jeremy Collier
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+The kit, the files under kit/ and src/kit, is under the MIT license in
+kit/LICENSE: anyone may use it, including the agents built on it.

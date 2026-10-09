@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.27.24
+## 0.28.6
 
 **See what the Steward does with pull requests that conflict with their branch.**
 
@@ -22,6 +22,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.27.21
 
+## 0.28.2
+
+**The Steward releases itself again, and stops reinstalling agents it has already installed.**
+
+### What changed
+
+- When the Steward's own repository was also one of the repositories it looks after, its rounds stopped releasing its new versions and stopped merging its team's pull requests through its own path, without a word in the log. They do both again.
+- An agent released only on this PC (its release installs it here rather than publishing it) counts the version it has installed as released. Before, the round rebuilt and reinstalled it every time, restarting its page, because it looked only on GitHub for that version.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A Steward that has stopped releasing itself needs this version released once by hand; after that it carries on by itself.
+
+## 0.27.40
+
 **A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**
 
 ### What changed
@@ -29,6 +44,91 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A repository's open pull requests are no longer a column of their own. They are a small table on a line under its row, below the Employee, Checkout and Branch columns: each one's number, title and branch, its checks and whether it can merge.
 - The Notes column shows only when some repository has a note, such as a fetch that failed or a missing kit.json. When none do, the room goes to the other columns.
 - "Keep it on this PC" and "Do it here" stay on one line instead of wrapping in a narrow Release PC column.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.39
+
+**Your repositories in one list, in Manor: the Steward looks after the ones there.**
+
+### What changed
+
+- On your PC (unless it releases Castellan), the repositories the Steward looks after are the ones in Manor's Settings, under Repositories: the one list every agent reads. Each says whether the Steward merges its ready pull requests and how it is released. Manor 0.16.24 brings in the repositories you gave the Steward before, with your choices as they were, once.
+- **Look after** on the Steward's page now adds a repository to Manor's Repositories; you change or remove it there.
+- Without Manor, or with a Manor older than 0.16.24, the Steward keeps the repositories it had, as before.
+- It hands out kit 2.42.0, which describes the one list.
+
+### Before you update
+
+- Update Manor to 0.16.24 first, so your repositories are in its list before the Steward reads it. If you update the Steward first, nothing changes until Manor is updated.
+
+## 0.27.38
+
+**A new kit is merged and released first in a round, so the agents' pull requests that need it aren't held up.**
+
+### What changed
+
+- In a round, the Steward's own pull requests are now merged before the agents', and one that raises the kit goes first of all, ahead of the version line. The new kit is released right after, before any agent's pull request is tested. An agent's pull request made for that kit is then tested with it in the same round, instead of failing because the kit isn't out yet.
+- After a new kit is released, the round looks at every agent's pull requests again, including ones it would otherwise skip because nothing changed on GitHub.
+- A pull request whose checks failed here while filling its kit is tested again once a newer kit is released. Before, it waited for ever, and so did every pull request queued behind it.
+- A pull request that takes a kit with no release yet now says so ("waits for the kit it takes: kit 2.42.0 isn't released yet") and isn't tested until the kit is out, instead of failing its checks.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.31
+
+**A round keeps merging a repository's pull requests until its queue runs out.**
+
+### What changed
+
+- When several pull requests wait in line on one repository, a round used to merge at most five of them and leave the rest for later rounds. It now keeps going until none is left that it can merge: each one merges, the next is caught up with the branch, tested and merged, and so on down the line. A round with a long line takes longer, but the line is cleared in one go.
+- After a merge, a pull request that was stacked on the merged one, or that GitHub was still working out, is looked at again in the same round instead of the next.
+- A pull request that fails its checks here doesn't keep the round going round in circles: once two looks in a row merge nothing, the round moves on.
+- A pull request with checks on GitHub still merges once those pass, at a round that comes sooner.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.29
+
+**Pull requests that pile up on one repository merge in one round, and the next round comes sooner when one is nearly ready.**
+
+### What changed
+
+- Several pull requests to one repository, each raising its version, used to merge one per round: once the lowest merged, the next was caught up with the branch and waited a whole round before merging. Where GitHub runs no checks on them, the Steward now tests the caught-up pull request at its new head and merges it in the same round, and does the same for the next one, up to five in a round.
+- A round that leaves a pull request waiting only on something that settles itself in a few minutes (its checks still running, a head just caught up, or GitHub still working out whether it merges) now has the next round come 2 minutes later instead of 10. This happens at most three times in a row.
+- Each merge now names the exact commit the Steward looked at and tested, so a pull request pushed to in the meantime waits instead of merging untested.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.26
+
+**A pull request waits less for GitHub to work out whether it merges.**
+
+### What changed
+
+- When GitHub hadn't yet worked out whether a ready pull request merges ("GitHub is still working out whether it merges"), the Steward left it for the next round, ten minutes or more later. It now asks GitHub again a few times over about 25 seconds and, once GitHub has said, merges it in the same round. This is often the case for a pull request just caught up with its branch, or just pointed at the main branch after the one it was stacked on merged.
+- A pull request whose checks are failing or still running, or that is a draft, isn't asked about again: it would wait anyway.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.19
+
+**A pull request built on another one no longer gets stuck once that one has merged.**
+
+### What changed
+
+- When a pull request is built on another one's branch (stacked), it waits for that one, and the day's report now says so: "stacked on #N". Once #N has merged, the Steward points the stacked pull request at the main branch itself, leaves a comment on it saying so, and merges it in its turn like any other. Before, it waited for ever: the Steward keeps your branch after merging your pull request, so GitHub never moved what was stacked on it.
+- This happens only in repositories whose pull requests you've let the Steward merge, and never to a pull request from someone outside your team.
 
 ### Before you update
 

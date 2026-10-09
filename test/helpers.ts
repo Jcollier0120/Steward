@@ -11,6 +11,9 @@ import type { Ctx } from '../src/stages/common.ts';
 // The Bailiff's install decides whether the Wright's drafts wait for its approval (settings.ts's bailiffInstalled): a test
 // never sees this PC's. One that wants it installed sets BAILIFF_HOME itself.
 process.env.BAILIFF_HOME ??= path.join(os.tmpdir(), 'steward-test-no-bailiff');
+// Never this PC's Manor: off the makers' PC its Repositories are the Steward's (settings.ts manorTakesOver), and Look
+// after writes into them. A test that wants a Manor makes one.
+process.env.MANOR_HOME ??= path.join(os.tmpdir(), 'steward-test-no-manor');
 // The same for the Wright's and the Surveyor's installs (settings.ts's wrightInstalled, surveyorInstalled): the tests see
 // the owner's PC as it is, with both installed, unless one says otherwise before it imports this.
 for (const [name, home] of [['WRIGHT_HOME', 'steward-test-wright'], ['SURVEYOR_HOME', 'steward-test-surveyor']] as const) {
@@ -94,6 +97,9 @@ export function runner(script: GhScript = () => undefined): { run: Runner; gh: s
   return { run, gh };
 }
 
+/** The gh pr merge commands run, without the head commit each names (--match-head-commit <sha>: the fixtures' commits differ each run). */
+export const mergesOf = (gh: string[][]) => gh.filter((a) => a[1] === 'merge').map((a) => a.filter((x, i) => x !== '--match-head-commit' && a[i - 1] !== '--match-head-commit'));
+
 export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string' ? out : JSON.stringify(out), err: '' });
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
@@ -105,6 +111,8 @@ export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner
     kit: { released: o.released ?? [], releasesError: null, local: null, localDir: null },
     log: (l) => lines.push(l),
     neutralDir: o.neutralDir,
+    // Asking GitHub again (merge.ts) waits for nothing here.
+    pause: async () => {},
     lines,
   };
 }

@@ -40,6 +40,8 @@ export interface FoundView {
   from: FoundState['from'];
   offered: FoundRepo[];
   found: number;
+  /** Where Look after puts one: Manor's Repositories (spec/REPOSITORIES.md), or the Steward's own Settings where there is no Manor. */
+  into?: 'manor' | 'steward';
 }
 
 export interface StewardView {

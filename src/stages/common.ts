@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { NOT_PUBLISHED } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
@@ -11,7 +11,7 @@ import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
 import type { LeaseGuard } from '../lease.ts';
 import type { Runner } from '../run.ts';
-import type { Employee, Settings } from '../settings.ts';
+import { releasedHere, type Employee, type Settings } from '../settings.ts';
 
 /** What a stage did for one employee. */
 export type Outcome = 'done' | 'skipped' | 'refused' | 'failed';
@@ -50,6 +50,11 @@ export interface StageResult {
   offline?: boolean;
   /** A round that asked GitHub nothing and only kept the staff's pages up (tend.ts): no repositories here, or Settings said so. */
   tendOnly?: boolean;
+  /**
+   * A round that left a PR waiting only on something that settles itself within minutes (merge.ts's waitsBriefly): its
+   * checks running, at a head just caught up, or GitHub working out whether it merges. The next round comes sooner (agent.ts).
+   */
+  soon?: boolean;
   results: EmployeeResult[];
   log: string[];
 }
@@ -79,6 +84,8 @@ export interface Ctx {
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.
    */
   lease?: LeaseGuard | null;
+  /** Waits this long before asking GitHub something again (merge.ts); tests stand in for it. Not given: the clock's. */
+  pause?: (ms: number) => Promise<void>;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */
@@ -158,10 +165,28 @@ export const forgetGlance = (ctx: Ctx, e: Employee) => {
   if (ctx.glance) delete ctx.glance.repos[e.id];
 };
 
-/** An employee's released versions: from the glance while it says how things are, else asked of GitHub. */
+/**
+ * An employee's released versions: from the glance while it says how things are, else asked of GitHub. One released
+ * only on this PC (releasedHere) has no release anywhere else: the version its installed copy was built as counts too,
+ * or every round would build and install it again.
+ */
 export async function releasedOf(ctx: Ctx, e: Employee): Promise<ReleaseInfo[]> {
   const g = glanceOf(ctx, e) ?? (hostIs(ctx, e) === 'git' ? await gitGlance(ctx.run, { branch: e.branch, checkout: checkoutOf(e) }) : null);
-  return appReleasesIn(g ? JSON.stringify(g.releases) : await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'));
+  const out = appReleasesIn(g ? JSON.stringify(g.releases) : await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'));
+  const here = installedRelease(e);
+  return here && !out.some((r) => r.version === here.version) ? [{ tag: `v${here.version}`, version: here.version, published: here.built }, ...out] : out;
+}
+
+/** The release installed here of an employee released only on this PC: its install folder's release.json, unless a development build. */
+export function installedRelease(e: Pick<Employee, 'release' | 'installed'>): { version: string; built: string | null } | null {
+  if (!releasedHere(e) || !e.installed) return null;
+  try {
+    const r = JSON.parse(readFileSync(path.join(path.resolve(expandEnv(e.installed)), 'release.json'), 'utf8').replace(/^﻿/, '')) as { version?: unknown; dirty?: unknown; built?: unknown };
+    if (typeof r.version !== 'string' || r.dirty === true) return null;
+    return { version: r.version, built: typeof r.built === 'string' ? r.built : null };
+  } catch {
+    return null;
+  }
 }
 
 /**
