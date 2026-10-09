@@ -120,6 +120,12 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
   assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
+  // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
+  assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
+  const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };
+  const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
+  assert.match(withPr, /<th>Notes<\/th>/);
+  assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');
