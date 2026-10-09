@@ -47,56 +47,77 @@ function ReleaseCell({ r }: { r: StaffRowView }) {
   );
 }
 
-/** The Steward's PRs and the team's: a team member's says whose, and what it is. */
+/** One of the Steward's PRs or the team's, as a line of its repository's PR table: a team member's says whose. */
 function Pr({ p, branch }: { p: PrView; branch: string }) {
   const team = p.whose === 'team';
   return (
-    <div className="pr">
-      <Link url={p.url}>#{p.number}</Link>
-      {team && (
-        <>
-          {' '}
-          <Badge title={`Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`} label="team" />
-        </>
-      )}{' '}
-      <Badge tone={p.checks === 'failing' ? 'danger' : p.checks === 'pending' ? 'caution' : 'success'} label={<>checks {p.checks}</>} />{' '}
-      <Badge tone={p.mergeable === 'MERGEABLE' ? 'success' : p.mergeable === 'CONFLICTING' ? 'danger' : 'caution'} label={p.mergeable.toLowerCase()} />
-      {p.draft && (
-        <>
-          {' '}
-          <Badge tone="caution" label="draft" />
-        </>
-      )}
-      {p.base && p.base !== branch && (
-        <>
-          {' '}
-          <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
-        </>
-      )}
-      {team && (
-        <>
-          <br />
-          <span className="pr-title">{p.title}</span>
-        </>
-      )}
-      {/* What it asks for once merged (its steward block), or why that can't be read. */}
-      {p.afterError ? (
-        <>
-          <br />
-          <Badge tone="danger" title={p.afterError} label="steward block" />
-        </>
-      ) : p.afterText ? (
-        <>
-          <br />
-          <Text variant="muted">then: {p.afterText}</Text>
-        </>
-      ) : null}
-      <br />
-      <Text variant="muted">
-        {p.head}
-        {team ? `, ${p.author}'s` : ''}
-      </Text>
-    </div>
+    <tr>
+      <td className="pr-num">
+        <Link url={p.url}>#{p.number}</Link>
+        {team && (
+          <>
+            {' '}
+            <Badge title={`Opened by ${p.author}: merged by "Merge the team's PRs", or merge --team`} label="team" />
+          </>
+        )}
+      </td>
+      <td>
+        {p.title}
+        <br />
+        <Text variant="muted">
+          {p.head}
+          {team ? `, ${p.author}'s` : ''}
+        </Text>
+        {/* What it asks for once merged (its steward block), or why that can't be read. */}
+        {p.afterError ? (
+          <>
+            {' '}
+            <Badge tone="danger" title={p.afterError} label="steward block" />
+          </>
+        ) : p.afterText ? (
+          <>
+            <br />
+            <Text variant="muted">then: {p.afterText}</Text>
+          </>
+        ) : null}
+      </td>
+      <td className="pr-state">
+        <Badge tone={p.checks === 'failing' ? 'danger' : p.checks === 'pending' ? 'caution' : 'success'} label={<>checks {p.checks}</>} />{' '}
+        <Badge tone={p.mergeable === 'MERGEABLE' ? 'success' : p.mergeable === 'CONFLICTING' ? 'danger' : 'caution'} label={p.mergeable.toLowerCase()} />
+        {p.draft && (
+          <>
+            {' '}
+            <Badge tone="caution" label="draft" />
+          </>
+        )}
+        {p.base && p.base !== branch && (
+          <>
+            {' '}
+            <Badge tone="caution" title={`Merge only takes a PR into ${branch}`} label={<>into {p.base}</>} />
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/** A repository's open PRs, and a branch prepared here and not pushed, as a small table under its row. */
+function PrTable({ r }: { r: StaffRowView }) {
+  return (
+    <table className="pr-table">
+      <tbody>
+        {r.prs.map((p) => (
+          <Pr key={p.number} p={p} branch={r.branch} />
+        ))}
+        {r.prepared && (
+          <tr>
+            <td colSpan={3}>
+              <code>{r.prepared.branch}</code> <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
   );
 }
 
@@ -110,67 +131,73 @@ function Allowed({ r }: { r: StaffRowView }) {
   );
 }
 
-/** One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, open PRs and notes. */
-function StaffRow({ r, kit, castellan, turn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null }) {
+/** The notes a row shows: "not using the kit yet" is said by its kit cell. */
+const shownNotes = (r: StaffRowView) => r.notes.filter((n) => n !== 'not using the kit yet');
+
+/**
+ * One repository's row: its repository, checkout, branch, kit (on Castellan's own PC), release, release PC and notes
+ * (`notes` false: no row has any, so no column). Its open PRs, when it has some, in a small table on a line under it.
+ */
+function StaffRow({ r, kit, castellan, turn, notes: notesColumn }: { r: StaffRowView; kit: string | null; castellan: boolean; turn?: TurnRow | null; notes: boolean }) {
   const co = r.checkout;
-  const notes = r.notes.filter((n) => n !== 'not using the kit yet');
+  const notes = shownNotes(r);
+  const hasPrs = r.prs.length > 0 || !!r.prepared;
+  const rest = (castellan ? 2 : 1) + (turn !== undefined ? 1 : 0) + (notesColumn ? 1 : 0);
   return (
-    <tr>
-      <td>
-        <strong>
-          <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
-        </strong>
-        <br />
-        {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
-      </td>
-      <td>
-        {co.exists ? (
-          <>
-            <code>{co.path}</code>
-            <br />
-            <Text variant="muted">
-              {co.branch ?? ''}
-              {co.changes ? `, ${co.changes} changed` : ''}
-            </Text>
-          </>
-        ) : (
-          <>
-            <Text variant="muted">no checkout at</Text> <code>{co.path}</code>
-          </>
-        )}
-      </td>
-      <td>
-        {r.main ? (
-          <>
-            {r.branch} {r.main.version ?? '?'} <Text variant="muted">{r.main.commit}</Text>
-          </>
-        ) : (
-          <Text variant="muted">unknown</Text>
-        )}
-      </td>
-      {castellan && (
+    <>
+      <tr className={hasPrs ? 'has-prs' : undefined}>
         <td>
-          <KitCell r={r} kit={kit} />
+          <strong>
+            <Link url={`https://github.com/${r.repo}`}>{r.name}</Link>
+          </strong>
+          <br />
+          {castellan ? <Text variant="muted">{r.main?.parts?.join(', ') || 'no parts'}</Text> : <Allowed r={r} />}
         </td>
-      )}
-      <td>
-        <ReleaseCell r={r} />
-      </td>
-      {turn !== undefined && <td>{turn && <TurnCell x={turn} />}</td>}
-      <td>
-        {r.prs.map((p) => (
-          <Pr key={p.number} p={p} branch={r.branch} />
-        ))}
-        {r.prepared && (
-          <>
-            <code>{r.prepared.branch}</code>
-            <br />
-            <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
-          </>
+        <td>
+          {co.exists ? (
+            <>
+              <code>{co.path}</code>
+              <br />
+              <Text variant="muted">
+                {co.branch ?? ''}
+                {co.changes ? `, ${co.changes} changed` : ''}
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text variant="muted">no checkout at</Text> <code>{co.path}</code>
+            </>
+          )}
+        </td>
+        <td>
+          {r.main ? (
+            <>
+              {r.branch} {r.main.version ?? '?'} <Text variant="muted">{r.main.commit}</Text>
+            </>
+          ) : (
+            <Text variant="muted">unknown</Text>
+          )}
+        </td>
+        {castellan && (
+          <td>
+            <KitCell r={r} kit={kit} />
+          </td>
         )}
-      </td>
-      <td>{notes.length > 0 && <Notes items={notes} />}</td>
-    </tr>
+        <td>
+          <ReleaseCell r={r} />
+        </td>
+        {turn !== undefined && <td>{turn && <TurnCell x={turn} />}</td>}
+        {notesColumn && <td>{notes.length > 0 && <Notes items={notes} />}</td>}
+      </tr>
+      {hasPrs && (
+        <tr className="prs-row">
+          <td colSpan={3}>
+            <PrTable r={r} />
+          </td>
+          <td colSpan={rest} />
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -183,6 +210,7 @@ function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; cas
   const turnOf = new Map((turns?.rows ?? []).map((x) => [x.id, x]));
   const loose = (turns?.rows ?? []).filter((x) => !rows.some((r) => r.id === x.id));
   const showTurns = rows.some((r) => turnOf.has(r.id));
+  const showNotes = rows.some((r) => shownNotes(r).length > 0);
   const under = (loose.length > 0 || (clashes?.length ?? 0) > 0) && (
     <div className="turns">
       {loose.map((x) => (
@@ -212,17 +240,17 @@ function StaffTable({ s, castellan, turns, clashes }: { s: StaffView | null; cas
     );
   return (
     <Card tour="staff">
-      <table>
+      <table className="staff">
         <thead>
           <tr>
-            {[castellan ? 'Employee' : 'Repository', 'Checkout', 'Branch on origin', ...(castellan ? ['Kit'] : []), 'Latest release', ...(showTurns ? ['Release PC'] : []), 'Open PRs', 'Notes'].map((h) => (
+            {[castellan ? 'Employee' : 'Repository', 'Checkout', 'Branch on origin', ...(castellan ? ['Kit'] : []), 'Latest release', ...(showTurns ? ['Release PC'] : []), ...(showNotes ? ['Notes'] : [])].map((h) => (
               <th key={h}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} />
+            <StaffRow key={r.id} r={r} kit={s.kit} castellan={castellan} turn={showTurns ? (turnOf.get(r.id) ?? null) : undefined} notes={showNotes} />
           ))}
         </tbody>
       </table>
@@ -697,7 +725,12 @@ const STYLE = `
 .pick { display: inline-flex; gap: 6px; align-items: center; }
 .stages { margin-bottom: 6px; }
 .round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
-.pr + .pr { margin-top: 6px; }
+.staff tr.has-prs > td { border-bottom: 0; }
+.staff tr.prs-row > td { padding-top: 0; }
+.pr-table { font-size: 13px; }
+.pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
+.pr-table .pr-num, .pr-table .pr-state { white-space: nowrap; }
+.turn-cell button { white-space: nowrap; }
 .alarms { border-left: 3px solid var(--alert, #c0392b); }
 .alarm + .alarm, .alarm + details, details + details { margin-top: 10px; }
 .alarm-head { justify-content: space-between; align-items: center; gap: 10px; }
@@ -706,7 +739,6 @@ const STYLE = `
 .turn-cell { margin-top: 4px; }
 .turn-buttons { gap: 6px; flex-wrap: wrap; }
 .alarm .notes { margin: 4px 0; }
-.pr-title { font-size: 13px; }
 pre.log { max-height: 420px; overflow: auto; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; }
 td a { color: var(--accent); }
 `;
