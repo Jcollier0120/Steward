@@ -17,6 +17,48 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The Steward's row appears the next time the table is refreshed.
 
+## 0.28.2
+
+**The Steward releases itself again, and stops reinstalling agents it has already installed.**
+
+### What changed
+
+- When the Steward's own repository was also one of the repositories it looks after, its rounds stopped releasing its new versions and stopped merging its team's pull requests through its own path, without a word in the log. They do both again.
+- An agent released only on this PC (its release installs it here rather than publishing it) counts the version it has installed as released. Before, the round rebuilt and reinstalled it every time, restarting its page, because it looked only on GitHub for that version.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A Steward that has stopped releasing itself needs this version released once by hand; after that it carries on by itself.
+
+## 0.27.40
+
+**A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**
+
+### What changed
+
+- A repository's open pull requests are no longer a column of their own. They are a small table on a line under its row, below the Employee, Checkout and Branch columns: each one's number, title and branch, its checks and whether it can merge.
+- The Notes column shows only when some repository has a note, such as a fetch that failed or a missing kit.json. When none do, the room goes to the other columns.
+- "Keep it on this PC" and "Do it here" stay on one line instead of wrapping in a narrow Release PC column.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.27.39
+
+**Your repositories in one list, in Manor: the Steward looks after the ones there.**
+
+### What changed
+
+- On your PC (unless it releases Castellan), the repositories the Steward looks after are the ones in Manor's Settings, under Repositories: the one list every agent reads. Each says whether the Steward merges its ready pull requests and how it is released. Manor 0.16.24 brings in the repositories you gave the Steward before, with your choices as they were, once.
+- **Look after** on the Steward's page now adds a repository to Manor's Repositories; you change or remove it there.
+- Without Manor, or with a Manor older than 0.16.24, the Steward keeps the repositories it had, as before.
+- It hands out kit 2.42.0, which describes the one list.
+
+### Before you update
+
+- Update Manor to 0.16.24 first, so your repositories are in its list before the Steward reads it. If you update the Steward first, nothing changes until Manor is updated.
+
 ## 0.27.38
 
 **A new kit is merged and released first in a round, so the agents' pull requests that need it aren't held up.**

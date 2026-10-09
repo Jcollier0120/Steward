@@ -11,11 +11,12 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-customer-'));
 process.env.STEWARD_HOME = home;
 // None of the owner's own agents here.
-for (const k of ['WRIGHT_HOME', 'BAILIFF_HOME', 'SURVEYOR_HOME', 'REEVE_HOME', 'ALETASTER_HOME']) process.env[k] = path.join(home, `no-${k.toLowerCase()}`);
+for (const k of ['WRIGHT_HOME', 'BAILIFF_HOME', 'SURVEYOR_HOME', 'REEVE_HOME', 'ALETASTER_HOME', 'MANOR_HOME']) process.env[k] = path.join(home, `no-${k.toLowerCase()}`);
 delete process.env.MANOR_RELEASES_REPO;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { DEFAULT_SETTINGS, SETTINGS_SPEC, inEffect, loadSettings, releasesRepoEnv, settingsFile } = await import('../src/settings.ts');
+const settingsModule = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, SETTINGS_SPEC, inEffect, loadSettings, releasesRepoEnv, settingsFile } = settingsModule;
 const { candidates, findRepos, githubOf, loadFound, lookAfter, anyRepo } = await import('../src/found.ts');
 const { runStage } = await import('../src/steward.ts');
 const { watchAlarms } = await import('../src/alarms.ts');
@@ -71,6 +72,43 @@ test("Reeve's repositories: those on GitHub the person can push to are offered, 
   assert.match((lookAfter('them/lib', { merges: false, release: false }) as { error: string }).error, /isn't one Reeve found here that you can push to/);
   // A version claim works for any repository Reeve found, in Settings or not.
   assert.equal(anyRepo('me/app')?.repo, 'me/app');
+});
+
+test("with Manor here and its Repositories brought in, they are the Steward's list (spec/REPOSITORIES.md), and Look after adds to them", () => {
+  const manor = path.join(home, 'manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  const tracked = [
+    { name: 'Gadget', checkout: path.join(home, 'clones', 'gadget'), repo: 'me/gadget', versionFiles: ['package.json'], merges: true, release: 'tag', test: 'npm test' },
+    { name: 'Notes', checkout: path.join(home, 'clones', 'notes') },
+  ];
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ name: 'Mine', projects: tracked, projectsFromSteward: '2026-10-08T21:00:00.000Z' }));
+  const { employeesOfProjects, manorTakesOver } = settingsModule;
+  const own = loadSettings().employees;
+  assert.equal(manorTakesOver(own, manor), true, 'brought in: Manor has them now');
+  assert.equal(manorTakesOver(own, path.join(home, 'old-manor')), false, 'no Manor here');
+  mkdirSync(path.join(home, 'older', 'app'), { recursive: true });
+  writeFileSync(path.join(home, 'older', 'settings.json'), JSON.stringify({ projects: [] }));
+  assert.equal(manorTakesOver(own, path.join(home, 'older')), false, "an older Manor that hasn't brought them in would leave them out");
+  assert.equal(manorTakesOver([], path.join(home, 'older')), true, 'unless the Steward had none');
+  // Each tracked repository on GitHub, as the Steward looks after it; one with no GitHub repository left out.
+  const projects = [
+    { name: 'Gadget', checkout: tracked[0].checkout, repo: 'me/gadget', branch: 'main', test: 'npm test', versionFiles: ['package.json'], cleanBranches: true, merges: true, release: 'tag' },
+    { name: 'Notes', checkout: tracked[1].checkout, repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true },
+  ];
+  assert.deepEqual(employeesOfProjects(projects), [
+    { id: 'gadget', name: 'Gadget', repo: 'me/gadget', checkout: tracked[0].checkout, branch: 'main', merges: true, usesKit: false, fill: '', test: ['npm test'], versionFiles: ['package.json'], release: 'tag', install: '', approve: '', installed: '', note: "from Manor's Repositories" },
+  ]);
+  const s = inEffect(loadSettings(), false, projects);
+  assert.deepEqual(s.employees.map((e) => e.repo), ['me/gadget'], "Manor's list, not the Steward's own");
+  assert.deepEqual(inEffect({ ...loadSettings(), releasesCastellan: true }, false, projects).employees.map((e) => e.repo), ['me/app'], 'where Castellan is released, its own');
+  // Look after writes into Manor's Repositories, by the kit's rules, the rest of its file kept.
+  const added = lookAfter('me/app', { merges: true, release: true, manorHome: manor });
+  assert.ok('employee' in added, JSON.stringify(added));
+  const m = JSON.parse(readFileSync(path.join(manor, 'settings.json'), 'utf8'));
+  assert.equal(m.name, 'Mine');
+  assert.deepEqual(m.projects.at(-1), { name: 'app', checkout: app.checkout, repo: 'me/app', test: 'npm test', versionFiles: ['package.json', 'package-lock.json', 'src/app.ts'], merges: true, release: 'tag' });
+  assert.match((lookAfter('me/app', { merges: false, release: false, manorHome: manor }) as { error: string }).error, /looked after already/);
+  assert.equal(JSON.parse(readFileSync(settingsFile(), 'utf8')).employees.length, 1, "the Steward's own list untouched");
 });
 
 test("a round on the person's PC: their PRs merged only where they said yes, a new version released to their own repository, and no kit asked for", async () => {
