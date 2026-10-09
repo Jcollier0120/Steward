@@ -356,7 +356,7 @@ switch (cmd) {
     const v = await vouch(ctx, { dir: process.cwd(), ...(n ? { pr: Number(n.replace('#', '')) } : {}), say: (line) => console.log(line) });
     console[v.ok ? 'log' : 'error'](v.message);
     // Its round now, so the PR merges in minutes rather than at the next round.
-    if (v.ok) console.log(await askRoundSoon());
+    if (v.ok) console.log(await askRoundSoon(v.look ? { look: v.look } : {}));
     process.exitCode = v.ok ? 0 : 1;
     break;
   }

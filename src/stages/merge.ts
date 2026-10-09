@@ -8,6 +8,7 @@ import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { changeFiles, changeVersion, CHANGES_DIR } from '../entries.ts';
 import { stamp, usesChanges, type StampResult } from './stamp.ts';
+import { openVouchedBranches } from './branchesin.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
@@ -601,7 +602,13 @@ export const MAX_LOOKS = 40;
  * after the last look.
  */
 export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
+  // The claimed branches pushed and vouched for with no PR: their PRs opened first, so the looks below merge them (branchesin.ts).
+  const opened = o.yes && o.team && e.merges ? await openVouchedBranches(ctx, e) : { opened: [], lines: [] };
   const looks: MergeLook[] = [await mergeOne(ctx, e, o)];
+  if (opened.lines.length) {
+    const first = looks[0];
+    looks[0] = { ...first, message: [...opened.lines, first.message].filter(Boolean).join('; '), did: [...opened.lines, ...(first.did ?? [])], ...(first.outcome === 'skipped' ? { outcome: 'done' as const } : {}) };
+  }
   const idle = (l: MergeLook | undefined) => !!l && !l.merged.length;
   while (o.yes && looks.at(-1)!.lookAgain && !(idle(looks.at(-1)) && idle(looks.at(-2))) && looks.length < MAX_LOOKS) {
     const n = looks.reduce((a, l) => a + l.merged.length, 0);

@@ -1,4 +1,4 @@
-import { employeeFor } from '../claims.ts';
+import { claimsOn, employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
 import { dataFile, readJson } from '../kit/store.ts';
@@ -33,7 +33,16 @@ export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr
  */
 export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[]): Promise<string | null> {
   if (pr.whose !== 'team' || pr.fork || !pr.headOid || isWrightPr(pr)) return null;
-  const r = await ctx.run('gh', ['api', `repos/${e.repo}/commits/${pr.headOid}/statuses?per_page=100`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  return vouchOn(ctx, e.repo, pr.headOid, team);
+}
+
+/**
+ * The team member who vouched for a commit of `repo` (the latest VOUCH_CONTEXT status on it says success, and one of
+ * `team`'s accounts set it), or null. A PR's head (vouchedBy), or a claimed branch's with no PR yet (branchesin.ts).
+ * Never throws.
+ */
+export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: string[]): Promise<string | null> {
+  const r = await ctx.run('gh', ['api', `repos/${repo}/commits/${commit}/statuses?per_page=100`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
   if (r.code !== 0) return null;
   let list: any[];
   try {
@@ -53,12 +62,14 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
  * minutes when its turn has come, rather than at the next round. Its port and token from its server.json, as its own
  * stop reads them. What it answered, in a sentence; never throws, and never fails the vouch.
  */
-export async function askRoundSoon(o: { fetch?: typeof fetch } = {}): Promise<string> {
+export async function askRoundSoon(o: { fetch?: typeof fetch; look?: string } = {}): Promise<string> {
   const later = 'it merges at its next round instead';
   const info = readJson<{ port?: number; token?: string } | null>(dataFile('server.json'), null);
   if (!info?.port || !info.token) return `The Steward's page isn't running on this PC: ${later}.`;
   try {
-    const r = await (o.fetch ?? fetch)(`http://127.0.0.1:${info.port}/api/round/soon`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info.token }, body: '{}', signal: AbortSignal.timeout(5000) });
+    // A branch with no PR yet changes nothing GitHub's glance shows: the round is asked to look at its employee anyway.
+    const body = JSON.stringify(o.look ? { look: [o.look] } : {});
+    const r = await (o.fetch ?? fetch)(`http://127.0.0.1:${info.port}/api/round/soon`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info.token }, body, signal: AbortSignal.timeout(5000) });
     const j = (await r.json().catch(() => null)) as { message?: unknown } | null;
     if (r.ok && typeof j?.message === 'string') return j.message;
     return `The Steward's page answered HTTP ${r.status}: ${later}.`;
@@ -71,12 +82,17 @@ export async function askRoundSoon(o: { fetch?: typeof fetch } = {}): Promise<st
 export interface Vouched {
   ok: boolean;
   message: string;
+  /** A branch vouched for with no PR yet: the employee whose round opens it (branchesin.ts), for the round asked for now. */
+  look?: string;
 }
 
 /**
  * `steward vouch [<pr>]` in the clone at `dir`: the PR (by number, else the one for the clone's branch) checked against
  * the clone (open, from the repository itself, its head the clone's HEAD, nothing uncommitted), the repository's checks
  * run there, and once they pass, the commit status set. Never vouches for what it didn't test.
+ *
+ * A branch with no PR at all is vouched for as it is pushed, once a version is claimed for it (claims.ts): the Steward's
+ * round then opens its PR (branchesin.ts), and merges it as any vouched one.
  */
 export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line: string) => void }): Promise<Vouched> {
   const { run } = ctx;
@@ -92,19 +108,50 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const which = o.pr ? String(o.pr) : branch;
   if (!which) return { ok: false, message: 'name the PR (steward vouch <number>): this clone is on no branch' };
   const v = await run('gh', ['pr', 'view', which, '--repo', repo, '--json', 'number,state,headRefOid,isCrossRepository'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  // No PR from its branch: vouched for as pushed, and its PR opened by the Steward (branchesin.ts).
+  if (v.code !== 0 && !o.pr && /no pull requests found/i.test(`${v.err}\n${v.out}`)) return vouchBranch(ctx, e, { ...o, repo, branch, head });
   if (v.code !== 0) return { ok: false, message: `no open PR ${o.pr ? `#${o.pr}` : `for ${branch}`} in ${repo}: ${(v.err || v.out).trim().split('\n').pop()}` };
   const pr = JSON.parse(v.out) as { number: number; state: string; headRefOid: string; isCrossRepository: boolean };
   if (pr.state !== 'OPEN') return { ok: false, message: `#${pr.number} is ${pr.state.toLowerCase()}, not open` };
   if (pr.isCrossRepository) return { ok: false, message: `#${pr.number} is from a fork: the Steward tests those itself` };
   if (pr.headRefOid !== head) return { ok: false, message: `#${pr.number}'s head is ${pr.headRefOid.slice(0, 7)}, this clone's HEAD ${head.slice(0, 7)}: push, or check out its head, and vouch again` };
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
-  // Only the tests this PR's change reaches (affected.ts), unless Settings say the whole suite.
+  const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
+  if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
+  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };
+}
+
+/**
+ * The repository's checks run in the clone, and once they pass, the vouch set on `head`: null once it is, else why not
+ * (their failure, or "its checks passed, but GitHub wouldn't take the status: …").
+ */
+async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void }): Promise<string | null> {
+  // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
   const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
-  if (failed) return { ok: false, message: `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
+  if (failed) return failed;
   const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
-  const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${head.slice(0, 7)}`.slice(0, 140);
-  const s = await run('gh', ['api', '-X', 'POST', `repos/${repo}/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${description}`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
-  if (s.code !== 0) return { ok: false, message: `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}` };
-  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };
+  const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${o.head.slice(0, 7)}`.slice(0, 140);
+  const s = await ctx.run('gh', ['api', '-X', 'POST', `repos/${o.repo}/statuses/${o.head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${description}`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  if (s.code !== 0) return `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
+  return null;
+}
+
+/**
+ * A branch with no PR, vouched for as it is pushed: a version must be claimed for it (claims.ts), since its PR's title
+ * and its place in the version queue come from that, and origin's head of it must be the clone's HEAD.
+ */
+async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string; branch: string; head: string; say: (line: string) => void }): Promise<Vouched> {
+  const claim = claimsOn(e.repo).find((c) => c.branch === o.branch);
+  if (!claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, and vouch again; the Steward then opens its PR` };
+  if (o.branch.startsWith('wright/') || o.branch.startsWith('steward/')) return { ok: false, message: `${o.branch} is ${o.branch.startsWith('wright/') ? "the Wright's" : "the Steward's"}: it opens its own PRs` };
+  const out = await gitMaybe(ctx.run, o.dir, 'ls-remote', '--heads', 'origin', `refs/heads/${o.branch}`);
+  if (out === null) return { ok: false, message: `git couldn't ask origin for ${o.branch}` };
+  const pushed = out.trim().split(/\s+/)[0] ?? '';
+  if (!pushed) return { ok: false, message: `${o.branch} isn't on origin: push it, and vouch again` };
+  if (pushed !== o.head) return { ok: false, message: `origin's ${o.branch} is at ${pushed.slice(0, 7)}, this clone's HEAD ${o.head.slice(0, 7)}: push, or check out its head, and vouch again` };
+  o.say(`${e.name} ${o.branch} (v${claim.version}, no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
+  const failed = await checkAndRecord(ctx, e, o);
+  if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
+  return { ok: true, look: e.id, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward opens its PR (v${claim.version}) at its round, and merges it without testing it again, unless it is pushed to first` };
 }

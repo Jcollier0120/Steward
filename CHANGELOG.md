@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.29.1
+
+**Work doesn't need to open its own pull request: push the branch, vouch for it, and the Steward opens it.**
+
+### What's new
+
+- `steward vouch` now works on a branch that has no pull request yet, once a version is claimed for that branch (`claim-version … --branch <branch>`) and the branch is pushed as it is in the clone. It runs the checks and records that they passed, as before, and asks the Steward for a round that looks at the repository.
+- At that round the Steward opens the pull request itself, ready: titled with the repository's name, the version and the changelog entry's bold line, and described by the entry, with who vouched for it and what the claim says the work is. The same round then merges it without testing it again, stamping its version first where the repository keeps its entries in `changes`.
+- A branch isn't opened while it has no vouch from your team, once its work is already merged, or when a pull request from it was closed at that same commit. The Wright's branches and the Steward's own still open their own pull requests. Only repositories on GitHub: one worked with plain git has no pull requests to open.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.29.0
 
 **Pull requests side by side stop fighting over version lines: a repository can let the Steward set the version as it merges.**

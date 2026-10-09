@@ -123,6 +123,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   /** A round asked for (POST /api/round/soon) while something ran: it comes once that ends. */
   let roundAfter = false;
+  /** Employees the next round looks at whatever GitHub's glance says: a branch just vouched for with no PR (branchesin.ts). */
+  let lookNext: string[] = [];
   /** What waited for the stage that just ended: jobs to approve, then a round asked for. */
   const afterRunning = () => {
     if (running) return;
@@ -211,7 +213,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
       // doesn't merge and release by itself (it keeps the staff's pages up), it asks GitHub nothing.
-      const ask: StageAsk = full ? { full } : loadSettings().byItself ? {} : { tendOnly: true };
+      const look = lookNext;
+      lookNext = [];
+      const ask: StageAsk = full ? { full } : loadSettings().byItself ? (look.length ? { look } : {}) : { tendOnly: true };
       const out = await runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
       ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
@@ -299,7 +303,10 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       // runs one, so the PR merges in minutes when its turn has come, not at the next round. Its glance sees the status
       // (the PR's checks are in what it compares), so the round looks at that repository. While something runs, once it
       // ends. Only while the Steward merges by itself and is on duty: otherwise its rounds would merge nothing.
-      '/api/round/soon': () => {
+      '/api/round/soon': ({ body }) => {
+        // A branch vouched for with no PR yet: its employee is looked at, though nothing GitHub's glance shows has changed.
+        const look: string[] = Array.isArray(body?.look) ? body.look.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 20) : [];
+        lookNext = [...new Set([...lookNext, ...look])];
         if (!loadSettings().byItself) return { json: { started: false, message: "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now." } };
         if (!duty().onDuty) return { json: { started: false, message: 'The Steward is off duty: it merges the PR at its first round once it is back.' } };
         if (running) {
