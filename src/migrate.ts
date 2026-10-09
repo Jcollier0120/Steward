@@ -301,7 +301,7 @@ export function migrateSettings(o: { settingsFile: string; staffFile: string; no
   try {
     const raw = existsSync(o.settingsFile) ? JSON.parse(readText(o.settingsFile) ?? '{}') : {};
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'employees' in raw) return null;
-    const rows = (readJson<{ rows?: StaffRowLike[] } | null>(o.staffFile, null)?.rows ?? []).filter((r) => r && typeof r === 'object');
+    const rows = (readJson<{ rows?: StaffRowLike[] } | null>(o.staffFile, null)?.rows ?? []).filter((r) => r && typeof r === 'object' && !(r as { self?: boolean }).self);
     if (!rows.length) return null;
     const notes: string[] = [];
     const employees: Employee[] = [];

@@ -7,7 +7,7 @@
  * the core (and dotnet's C#, which runs it too) takes its timings from the spec's rules.json; react, a page drawn
  * in the browser, is served by node with web's Settings panel. A kit from before 2.0.0
  * has no core, and then none is filled. The kit's MIT license comes beside its VERSION, as src\kit\LICENSE (a kit
- * from before 2.43.1 may have none). src\kit\ is git-ignored: never edit it here.
+ * from before 2.43.4 may have none). src\kit\ is git-ignored: never edit it here.
  *
  *   node tools/kit.ts                  the pinned kit; nothing to do when src\kit\VERSION already says it
  *   node tools/kit.ts --from <dir>     a kit tree on this PC (a Steward checkout's kit\), copied every time;

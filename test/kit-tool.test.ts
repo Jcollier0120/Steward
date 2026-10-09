@@ -17,10 +17,10 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-kit-tool-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 let n = 0;
-/** A kit tree at `version`: VERSION and a file in each part; from 2.0.0 the core and dotnet parts too; from 2.43.1 its LICENSE. */
+/** A kit tree at `version`: VERSION and a file in each part; from 2.0.0 the core and dotnet parts too; from 2.43.4 its LICENSE. */
 function kitTree(dir: string, version: string): string {
   const [major, minor, patch] = version.split('.').map(Number);
-  if (major * 1e6 + minor * 1e3 + patch >= 2_043_001) {
+  if (major * 1e6 + minor * 1e3 + patch >= 2_043_004) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, 'LICENSE'), 'MIT License\n');
   }
@@ -65,11 +65,11 @@ test('--from fills the parts kit.json names: node in src/kit, web and spec besid
 });
 
 test("the kit's MIT license comes beside its VERSION, as src/kit/LICENSE, so an agent's release carries it", async () => {
-  const { root } = hire('2.43.1');
-  const r = await tool(root, ['--from', kitTree(path.join(tmp, 'tree-license'), '2.43.1')]);
+  const { root } = hire('2.43.4');
+  const r = await tool(root, ['--from', kitTree(path.join(tmp, 'tree-license'), '2.43.4')]);
   assert.equal(r.code, 0, r.out);
   assert.equal(read(root, 'LICENSE'), 'MIT License\n');
-  assert.equal(read(root, 'VERSION').trim(), '2.43.1');
+  assert.equal(read(root, 'VERSION').trim(), '2.43.4');
 });
 
 test('a part brings the parts it needs: node the core, the core the spec, dotnet the core; none brings web', async () => {

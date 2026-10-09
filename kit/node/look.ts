@@ -28,6 +28,12 @@ export interface Look {
   scene: string;
   /** The scene's motion: CSS rules and keyframes, each rule under `.titlebar.busy .scene`. */
   motion: string;
+  /**
+   * What its first round does, for a role whose first round takes much longer than the rest (kit 2.43.3): the page
+   * says, while it runs, that the agent is settling into the manor and this round takes longer. None: its first round
+   * is like any other, and the page says only that it waits its turn.
+   */
+  firstRound?: string;
 }
 
 const B = '.titlebar.busy .scene';
@@ -380,6 +386,7 @@ const TALLY = [29, 46].flatMap((x) => [
 const reeve: Look = {
   accent: { light: '#9a5b00', dark: '#f5b84b' },
   busy: 'Reading the logs',
+  firstRound: 'finding every repository on this PC and reading each one for the first time',
   scene: `<clipPath id="kit-sc-reeve-log"><rect x="4" y="7" width="20" height="26"/></clipPath>
 <rect class="sc-paper" x="3" y="5.5" width="22" height="29" rx="1"/><rect class="sc-halo" x="3.6" y="18" width="20.8" height="4.2"/>
 <g clip-path="url(#kit-sc-reeve-log)"><path class="sc-line sc-log" d="${logLines}"/></g>
@@ -424,6 +431,7 @@ const blade = `<path class="sc-steel" d="M1.2 0-8 -2-8.4-.6 0 .9z"/><path class=
 const heiward: Look = {
   accent: { light: '#0f7b3f', dark: '#6ccb8f' },
   busy: 'Trimming the hedges',
+  firstRound: 'scanning every drive for the first time',
   scene: `${GROUND}<path class="sc-line" d="M50 25h13.5M50 31h13.5"/>${[51, 56, 61].map((x) => `<path class="sc-wood" d="M${x - 1.3} 35.5V21.6l1.3-1.8 1.3 1.8v13.9z"/>`).join('')}
 <path class="sc-soft" d="M3 35.5V21${'a3.2 3.2 0 0 1 6 0'.repeat(7)}V35.5z"/>
 ${[[8, 27], [16, 31], [23, 25.5], [31, 30], [38, 25.5]].map(([x, y]) => `<path class="sc-role" d="M${x} ${y}c-.2-2 1-3.4 3-3.5.2 2-1.1 3.4-3 3.5z"/>`).join('')}
@@ -439,6 +447,34 @@ ${B} .sc-bl1 { transform-origin: 0 0; ${run('sc-open1', 6)} }
 ${B} .sc-bl2 { transform-origin: 0 0; ${run('sc-open2', 6)} }`,
 };
 
+/* ---- The Toller: a coin drops into the box, the striped bar lifts to let what came through pass, and comes down again. */
+const toller: Look = {
+  accent: { light: '#a8641a', dark: '#e8c27a' },
+  busy: 'Checking the gate',
+  scene: `${GROUND}<rect class="sc-wood" x="6" y="15" width="7" height="20.5" rx="1"/><rect class="sc-back" x="4.5" y="25" width="10" height="6" rx=".8"/><path class="sc-line" d="M7.5 25v-1.5h4V25"/>
+<g class="sc-bar"><rect class="sc-back" x="11" y="17" width="49" height="5" rx="2.5"/>${[18, 28, 38, 48].map((x) => `<path class="sc-role" d="M${x} 17.2h4l-2.6 4.6h-4z"/>`).join('')}</g>
+<g class="sc-coin"><circle class="sc-role" cx="9.5" cy="7" r="3"/><path class="sc-line" d="M9.5 5.6v2.8"/></g>`,
+  motion: `@keyframes sc-coin { 0%, 4% { transform: translateY(0); opacity: 1; } 18% { transform: translateY(16px); opacity: 1; } 20%, 90% { transform: translateY(16px); opacity: 0; } 92% { transform: translateY(0); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+@keyframes sc-lift { 0%, 20% { transform: rotate(0deg); } 32%, 62% { transform: rotate(-24deg); } 76%, 100% { transform: rotate(0deg); } }
+${B} .sc-coin { ${run('sc-coin', 6, 0, 'ease-in')} }
+${B} .sc-bar { transform-origin: 13.5px 19.5px; ${run('sc-lift', 6, 0, 'ease-in-out')} }`,
+};
+
+/* ---- The Assayer: the balance tips as an ingot is weighed against the other pan, settles, and is weighed again. */
+const assayer: Look = {
+  accent: { light: '#7d6a12', dark: '#e8cc7a' },
+  busy: 'Testing the work',
+  scene: `${GROUND}<path class="sc-line" d="M32 9v24.5"/><rect class="sc-front" x="25" y="33" width="14" height="2.5" rx=".5"/><circle class="sc-front" cx="32" cy="8.5" r="1.6"/>
+<g class="sc-beam"><path class="sc-line" d="M14 11h36"/>
+<g class="sc-pan sc-pl"><path class="sc-line" d="M14 11 10.5 21M14 11l3.5 10"/><path class="sc-back" d="M8 21h12a6 4 0 0 1-12 0z"/></g>
+<g class="sc-pan sc-pr"><path class="sc-line" d="M50 11l-3.5 10M50 11l3.5 10"/><path class="sc-back" d="M44 21h12a6 4 0 0 1-12 0z"/><path class="sc-role" d="M46.5 17.5h7l1 3.5h-9z"/></g></g>`,
+  motion: `@keyframes sc-tip { 0%, 8% { transform: rotate(0deg); } 24% { transform: rotate(9deg); } 34% { transform: rotate(4deg); } 44%, 70% { transform: rotate(6deg); } 86%, 100% { transform: rotate(0deg); } }
+@keyframes sc-level { 0%, 8% { transform: rotate(0deg); } 24% { transform: rotate(-9deg); } 34% { transform: rotate(-4deg); } 44%, 70% { transform: rotate(-6deg); } 86%, 100% { transform: rotate(0deg); } }
+${B} .sc-beam { transform-origin: 32px 11px; ${run('sc-tip', 6, 0, 'ease-in-out')} }
+${B} .sc-pl { transform-origin: 14px 11px; ${run('sc-level', 6, 0, 'ease-in-out')} }
+${B} .sc-pr { transform-origin: 50px 11px; ${run('sc-level', 6, 0, 'ease-in-out')} }`,
+};
+
 /** Any other agent: a cog, turning while it works. */
 export const DEFAULT_LOOK: Look = {
   accent: { light: '#66717c', dark: '#a7b1bc' },
@@ -450,7 +486,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd, reeve, chamberlain, heiward };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd, reeve, chamberlain, heiward, toller, assayer };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);

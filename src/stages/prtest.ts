@@ -1,12 +1,14 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks } from './bump.ts';
 import { checkoutOf, workRootOf, type Ctx } from './common.ts';
-import { readPin, type PrInfo } from './staff.ts';
+import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
+import { parsePrs, prListArgs, readPin, type PrInfo } from './staff.ts';
+import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
 import { recordTested } from '../tested.ts';
 
 /**
@@ -41,18 +43,67 @@ export const testedBefore = (e: Employee, pr: PrInfo): Tested | null => (pr.head
 /**
  * Whether a failure here may be cleared by a kit released since: it failed at the kit's fill (tools/kit.ts), and the
  * newest kit released now isn't the one it was tested beside (one tested before 0.27.38 kept none). Manor#135 failed
- * at its fill for a kit not yet released, and waited for ever, with the PRs above it. Pure.
+ * at its fill for a kit not yet released, and waited for ever, with the PRs above it. A PR whose pinned kit still isn't
+ * released isn't tested again yet: kitReleaseHold holds it first, so it is tested again once its kit exists. Pure.
  */
 export const kitMayClear = (e: Employee, t: Tested, newest: string | null) => !t.ok && !!e.fill && t.note.includes(`: ${e.fill} failed`) && !!newest && t.kit !== newest;
 
-/** How the hold of a PR whose kit isn't released yet begins. */
-export const KIT_WAIT = 'waits for the kit it takes: ';
+/** How the hold of a PR whose kit isn't released yet begins, when it waits for it (not when nothing brings it). */
+export const KIT_WAIT = 'waits for kit ';
+
+/** An open PR to the Steward's own repository that raises the kit, and the kit version it brings (null when unread). */
+export interface KitPr {
+  number: number;
+  headOid: string;
+  draft: boolean;
+  kit: string | null;
+}
+
+const kitPrsLooked = new WeakMap<Ctx, Promise<KitPr[]>>();
+
+/**
+ * The open PRs to the Steward's own repository that raise the kit (kit/VERSION among their files), each with the kit
+ * version at its head: from its kit trial (trial.ts, kept by head commit), else the Steward's checkout here, else its
+ * title ("Steward 0.27.39, kit 2.42.0: …"). Asked of GitHub once per stage. Throws when they can't be listed.
+ */
+export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
+  let looked = kitPrsLooked.get(ctx);
+  if (!looked) {
+    looked = (async () => {
+      const repo = ctx.settings.stewardRepo;
+      if (!repo) return [];
+      const trials = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
+      const checkout = ctx.settings.stewardCheckout && existsSync(path.join(ctx.settings.stewardCheckout, '.git')) ? ctx.settings.stewardCheckout : null;
+      const out: KitPr[] = [];
+      for (const p of parsePrs(await gh(ctx.run, ctx.neutralDir, ...prListArgs(repo)), ctx.settings.team)) {
+        if (p.fork || !raisesKit(p)) continue;
+        let kit: string | null = trials[`${p.number}@${p.headOid}`]?.kit ?? null;
+        if (!kit && checkout && p.headOid) {
+          try {
+            await git(ctx.run, checkout, 'fetch', '--quiet', 'origin', `refs/pull/${p.number}/head`);
+            kit = (await showFile(ctx.run, checkout, p.headOid, KIT_VERSION_FILE))?.trim() || null;
+          } catch {
+            kit = null;
+          }
+        }
+        kit ??= kitTitleVersions([p.title])[0] ?? null;
+        out.push({ number: p.number, headOid: p.headOid, draft: p.draft, kit });
+      }
+      return out;
+    })();
+    kitPrsLooked.set(ctx, looked);
+  }
+  return looked;
+}
 
 /**
  * Why a PR on the kit waits before it is tested here, or null: the kit its kit.json pins at its head has no release yet
- * (a PR made beside the Steward's own that raises the kit), so its fill would fail. It is tested once that kit is
- * released (the round releases the Steward's kit before the agents' merges: steward.ts). Null when the kit's releases
- * couldn't be read, or its pin can't: then it is tested as before.
+ * (a PR made beside the Steward's own that raises the kit), so its fill would fail. It isn't tested, so nothing is held
+ * against its commit (no "failed twice"), and it keeps its place in the version line. Its hold names the open Steward
+ * PR that brings that kit ("waits for kit 2.42.0, which Steward#126 brings: it merges once that's released"), and
+ * whether it passed with that kit in the kit's trial (trial.ts's pairs); or says that none brings it, a real problem.
+ * It is tested once that kit is released (the round releases the Steward's kit before the agents' merges: steward.ts).
+ * Null when the kit's releases couldn't be read, or its pin can't: then it is tested as before.
  */
 export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!e.usesKit || !e.fill || !pr.headOid || !ctx.kit?.released.length) return null;
@@ -60,7 +111,20 @@ export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise
   await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
   const pin = readPin(await showFile(ctx.run, repo, pr.headOid, 'kit.json'));
   if (!pin || ctx.kit.released.includes(pin.kit)) return null;
-  return `${KIT_WAIT}kit ${pin.kit} isn't released yet, so its kit couldn't be filled: it is tested here once it is`;
+  let prs: KitPr[];
+  try {
+    prs = await openKitPrs(ctx);
+  } catch (err) {
+    ctx.log(`[${e.id}] #${pr.number} pins kit ${pin.kit}, not released: couldn't list the Steward's open PRs to see which brings it: ${(err as Error).message}`);
+    return `${KIT_WAIT}${pin.kit}, which isn't released yet: it is tested here once it is`;
+  }
+  const where = ctx.settings.stewardRepo.split('/').pop() || 'Steward';
+  const brings = prs.find((p) => p.kit === pin.kit);
+  if (!brings) return `pins kit ${pin.kit}, which isn't released, and no open ${where} PR brings it: release that kit, or pin a released one`;
+  const pair = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})[`${brings.number}@${brings.headOid}`]?.pairs?.find((p) => p.id === e.id && p.number === pr.number && p.head === pr.headOid);
+  const tried = pair?.ok ? ' (it passes with that kit here)' : '';
+  const draft = brings.draft ? ` (#${brings.number} is a draft)` : '';
+  return `${KIT_WAIT}${pin.kit}, which ${where}#${brings.number} brings: it merges once that's released${tried}${draft}`;
 }
 
 export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {

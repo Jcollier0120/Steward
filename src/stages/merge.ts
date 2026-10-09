@@ -10,6 +10,7 @@ import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
+import { vouchedBy } from './vouch.ts';
 import { kitTrialHold, raisesKit } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
@@ -18,6 +19,7 @@ import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
+import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -38,7 +40,8 @@ import { noteMerged } from '../strangers.ts';
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
  * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
  * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
- * (stages/trial.ts), or is labelled to say the agents change with it.
+ * (stages/trial.ts), each agent it fails moving with it in a ready PR of its own that pins the new kit and passes with
+ * it there, or is labelled to say the agents change with it.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -425,8 +428,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
     }
-    if (untested(pr)) {
-      // Its kit not released yet: not tested, nor held against its commit, until it is (prtest.ts).
+    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
+    const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
+    if (vouched) notes.set(pr.number, `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
+    else if (untested(pr)) {
+      // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
+      // that brings that kit, or says none does (prtest.ts).
       const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
       if (kitWaits) {
         waits.push(`${describe(pr)} waits: ${kitWaits}`);
@@ -453,7 +460,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // A PR to the Steward that raises the kit: the new kit tried on every agent first (stages/trial.ts).
     let trial: string | null;
     try {
-      trial = await kitTrialHold(ctx, e, pr);
+      // An agent that moves with the kit in a PR of its own doesn't hold it, and its line says so ("Manor moves with it in #135").
+      trial = await kitTrialHold(ctx, e, pr, { note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
     } catch (err) {
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
@@ -588,14 +596,17 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       if (pr.checks === 'none') testedHere = true;
     }
     // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
+    let sent = false;
     if (c.conflicts?.length && pr.whose === 'team') {
       try {
         const k = await kickBack(ctx, e, pr, c.conflicts, now);
-        c = { done: false, closed: k.closed, note: k.note };
+        c = { ...c, done: false, closed: k.closed, note: k.note };
+        sent = k.sent;
       } catch (err) {
         c = { ...c, note: `${c.note} (couldn't send it back to its author: ${(err as Error).message})` };
       }
     }
+    lookedAtConflict(e, pr, c, sent);
     const h = o.held.find((x) => x.number === pr.number);
     if (h) h.why = c.done ? `${CAUGHT_UP} (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.
@@ -603,6 +614,25 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
   return { lines, testedHere };
+}
+
+/** Why a catch-up didn't try: nothing the page's conflicts need to show. */
+const NOT_TRIED = new Set(['nothing to catch up', 'its branch moved since this round listed it']);
+
+/**
+ * A PR that conflicts with its branch, as the round left it, for the page (conflicts.ts): one GitHub says conflicts,
+ * or whose merge here conflicted. One that was only behind isn't one.
+ */
+function lookedAtConflict(e: Employee, pr: PrInfo, c: CaughtUp, sent: boolean): void {
+  const files = c.conflicted ?? [];
+  if (!files.length && pr.mergeable !== 'CONFLICTING' && pr.mergeState !== 'DIRTY') return;
+  if (!files.length && NOT_TRIED.has(c.note)) return;
+  const outcome: ConflictOutcome = c.done ? 'caught-up' : c.closed ? 'closed' : sent ? 'sent-back' : 'couldnt';
+  try {
+    noteConflict({ id: e.id, name: e.name, repo: e.repo, number: pr.number, url: pr.url, title: pr.title, head: pr.head, author: pr.author, headOid: pr.headOid, outcome, note: c.note, files, needs: c.conflicts ?? [] });
+  } catch {
+    // The page's record only: the round goes on without it.
+  }
 }
 
 /**

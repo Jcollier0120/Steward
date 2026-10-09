@@ -20,7 +20,7 @@ const { page, statusPill, until } = await import('./fixture/src/kit/page.ts');
 const { setDuty } = await import('./fixture/src/kit/duty.ts');
 type Look = import('./fixture/src/kit/look.ts').Look;
 
-const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd', 'reeve', 'chamberlain', 'heiward'];
+const KIT_AGENTS = ['porter', 'auditor', 'clerk', 'herald', 'developer-herald', 'warrener', 'aletaster', 'miller', 'pinder', 'steward', 'surveyor', 'lamplighter', 'smith', 'thatcher', 'reckoner', 'weigher', 'shepherd', 'reeve', 'chamberlain', 'heiward', 'toller', 'assayer'];
 const HEX = /^#[0-9a-f]{6}$/;
 
 /** A scene's motion without its @keyframes blocks: the rules left, as [selector, declarations]. */
@@ -115,7 +115,7 @@ test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, 
   // Its colour and motion, and none for someone who asks for less: its Dark colour on every dark theme.
   assert.ok(html.includes(`:root { --role: ${DEFAULT_LOOK.accent.light}; }`));
   assert.ok(html.includes(`:root[data-theme="dark"], :root[data-theme="arcade"], :root[data-theme="onyx"], :root[data-theme="carbon"] { --role: ${DEFAULT_LOOK.accent.dark}; }`));
-  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \.titlebar \{ transition: none; \} \}/);
+  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before, \.settling-mark \* \{ animation: none !important; \} \.titlebar \{ transition: none; \} \}/);
   assert.match(html, /setProperty\('--phase'/);
   // No external fonts or scripts: the page's CSP allows its own origin only.
   assert.doesNotMatch(html, /https?:\/\/(?!www\.w3\.org)/);

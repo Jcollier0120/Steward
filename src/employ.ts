@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { manorHome, originRepo } from './kit/manor.ts';
 import { readJson, writeJson } from './kit/store.ts';
+import { makersOwn } from './maker.ts';
 import { branchTree, employeeFromClone, folderTree, internalStaff } from './migrate.ts';
 import type { Employee } from './settings.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
@@ -71,7 +72,7 @@ export function manorStaff(home = manorHome()): Set<string> {
 export function employeeFor(
   checkout: string,
   employees: Employee[],
-  o: { branch?: string; internal?: Set<string>; staff?: Set<string>; origin?: (dir: string) => string | null } = {},
+  o: { branch?: string; internal?: Set<string>; staff?: Set<string>; origin?: (dir: string) => string | null; makers?: boolean } = {},
 ): Employed | { error: string } {
   const dir = path.resolve(checkout);
   const branch = o.branch ?? 'main';
@@ -82,6 +83,9 @@ export function employeeFor(
   // Its name from its origin: owner/name on GitHub, host/path anywhere else (scm.ts); GitHub isn't required.
   const repo = (o.origin ?? originName)(dir);
   if (!repo) return { error: `${dir} has no origin, so there is nowhere to read its branch from or push its releases to.` };
+  // Off the maker's laptop, nothing of Castellan's own, nor an agent taking one of its agents' ids (maker.ts).
+  const theirs = makersOwn({ id: me.id, name: me.name, repo }, { makers: o.makers });
+  if (theirs) return { error: theirs };
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   const already = employees.find((e) => same(e.id, me.id) || same(e.repo, repo) || (e.checkout && same(path.resolve(e.checkout), dir)));
   if (already) return { error: `The Steward looks after ${already.name} (${already.id}, ${already.repo}, ${already.checkout}) already.` };
