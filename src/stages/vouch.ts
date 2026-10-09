@@ -17,8 +17,9 @@ import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
  *
  * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on the PR's current head, for a team PR from the repository itself that isn't the
- * Wright's. A new push, a catch-up's merge commit, or a vouch by anyone else: tested here as before. The status isn't a
- * check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own.
+ * Wright's. A new push, or a vouch by anyone else: tested here as before. A catch-up's merge commit keeps the vouch only
+ * where it resolved nothing but version lines and changelogs (catchup.ts keepsStanding, prtest.ts carryTested). The
+ * status isn't a check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own.
  */
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */

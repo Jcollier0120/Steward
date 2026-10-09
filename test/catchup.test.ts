@@ -10,10 +10,11 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-catchup-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { catchUp, catchUpVersion, lockBeside, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts, settledFiles } = await import('../src/stages/catchup.ts');
+const { catchUp, catchUpVersion, keepsStanding, lockBeside, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts, settledFiles } = await import('../src/stages/catchup.ts');
+const { testedBefore } = await import('../src/stages/prtest.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
-const { merge, mergeOne } = await import('../src/stages/merge.ts');
+const { merge, mergeOne, standingOf } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
@@ -403,11 +404,72 @@ test("a team PR whose kit.json conflicts too is caught up: the newer kit, its ve
   const r = runner(() => ok(''));
   const e = employee(checkout);
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
-  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], carry: `checks passed here at ${pr.headOid.slice(0, 7)}` });
   assert.equal(c.done, true, `${c.note}\n${ctx.lines.join('\n')}`);
   assert.match(c.note, /its version lines and kit pin resolved/);
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'show', 'origin/claude/feature:kit.json'), k('1.2.0', '"node", "web"').trim());
+  // A different kit is different code: what passed before isn't carried.
+  const pushed = sh(checkout, 'rev-parse', 'origin/claude/feature');
+  assert.equal(c.carried, undefined);
+  assert.equal(testedBefore(e, { ...pr, headOid: pushed }), null);
+});
+
+test('a catch-up keeps the standing only where it resolved nothing but version files, the lock beside them and changelogs', () => {
+  const files = ['package.json', 'package-lock.json', 'src/app.ts'];
+  assert.equal(keepsStanding([], files, false), true, 'only behind, or given a new version');
+  assert.equal(keepsStanding(['package.json', 'src/app.ts', 'CHANGELOG.md'], files, false), true);
+  assert.equal(keepsStanding(['package-lock.json'], ['package.json'], false), true, 'the lock beside package.json');
+  assert.equal(keepsStanding(['kit.json', 'package.json'], files, false), false, 'a different kit');
+  assert.equal(keepsStanding(['src/server.ts'], files, false), false);
+  assert.equal(keepsStanding(['kit/VERSION', 'kit/CHANGELOG.md'], files, true), true, "the kit's own, in the Steward's repository");
+  assert.equal(keepsStanding(['kit/VERSION'], files, false), false, 'elsewhere kit/VERSION is just a file');
+});
+
+test("the round: a vouched PR caught up only in its version lines merges in the same round, its checks not run again", async () => {
+  const { dir, checkout, pr } = moved('carried');
+  const origin = path.join(dir, 'origin.git');
+  const listed = () => {
+    const at = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+    sh(origin, 'update-ref', 'refs/pull/21/head', at);
+    const caught = at !== pr.headOid;
+    return [{ number: 21, title: pr.title, url: pr.url, body: '', headRefName: pr.head, headRefOid: at, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: caught ? 'MERGEABLE' : 'CONFLICTING', mergeStateStatus: caught ? 'CLEAN' : 'DIRTY', isDraft: false, statusCheckRollup: [], labels: [], additions: 5, deletions: 5, files: [] }];
+  };
+  const releases = [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T00:00:00Z' }, { tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }];
+  // Its author vouched for its head before main moved; nothing at the head the catch-up pushes.
+  const vouch = [{ context: 'steward/tested', state: 'success', creator: { login: 'Jcollier0120' } }];
+  const r = runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'list') return ok(listed());
+    if (a[0] === 'release' && a[1] === 'list') return ok(releases);
+    if (a[0] === 'api' && a[1].includes('/statuses')) return ok(a[1].includes(pr.headOid) ? vouch : []);
+    return ok('');
+  });
+  // Checks that would fail, were they run.
+  const e = employee(checkout, { fill: '', test: ['node -e process.exit(1)'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  ctx.settings.catchUp = true;
+  const [m] = await merge(ctx, [e], { yes: true, team: true });
+  const now = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+  assert.notEqual(now, pr.headOid, 'caught up');
+  assert.equal(m.outcome, 'done', m.message);
+  assert.deepEqual(m.merged.map((p) => p.number), [21]);
+  assert.match(m.message, /its checks not run again \(only version lines and the changelog changed since/);
+  assert.match(m.message, new RegExp(`merged #21 \\(checks passed at ${pr.headOid.slice(0, 7)} in Jcollier0120's clone, vouched for; carried to ${now.slice(0, 7)}`));
+  assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/, 'no checks run');
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '21', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
+  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges without being tested again\.$/);
+});
+
+test('the round: a PR with no vouch and never tested here is caught up as before, and tested at its new head', async () => {
+  const { dir, checkout, pr } = moved('not-carried');
+  const r = runner((a) => (a[0] === 'api' ? ok([]) : ok('')));
+  const e = employee(checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  assert.equal(await standingOf(ctx, e, pr), null);
+  const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [], carry: null });
+  assert.equal(c.done, true, c.note);
+  assert.equal(c.carried, undefined);
+  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges once its checks pass at the new head\.$/);
 });
 
 test("a kit PR whose branch already carries that kit, or a newer one, is closed: it has nothing left to do", async () => {

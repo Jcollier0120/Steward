@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.14
+
+**A queue of tested pull requests merges much faster: catching one up no longer means testing it again.**
+
+### What changed
+
+- Two pull requests written side by side always meet in their version lines and changelog, so each merge used to make the others conflict. The Steward catches those up by itself, but the push left the pull request untested, and the Steward then ran all its checks again before merging. Now, when the catch-up changed only version lines and changelog entries, a pull request its author vouched for, or that already passed its checks here, keeps that standing and merges in the same round with no new test run. Its comment and line say so: "its checks not run again (only version lines and the changelog changed since abc1234)".
+- A catch-up that also settled `kit.json`, or resolved anything else, is tested again as before, since a different kit is different code.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.12
 
 **Fewer kit pull requests: a newer kit goes onto the one still open.**

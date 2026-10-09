@@ -553,6 +553,20 @@ export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?
 }
 
 /**
+ * What passed at a team PR's head as it is now, for its catch-up to carry to the head it pushes (catchup.ts
+ * keepsStanding): its author's vouch (vouch.ts), else its checks passing here (prtest.ts); null when neither, or when
+ * GitHub runs its checks (they run again at the new head whatever the Steward says). Never throws.
+ */
+export async function standingOf(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
+  if (!untested(pr) || pr.fork) return null;
+  const vouched = await vouchedBy(ctx, e, pr, ctx.settings.team).catch(() => null);
+  if (vouched) return `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`;
+  const t = testedBefore(e, pr);
+  // One carried already says where it came from once: caught up again, it is carried on from there.
+  return t?.ok ? t.note.split('; carried to ')[0] : null;
+}
+
+/**
  * After the merges: each PR that waits only on its branch, caught up (stages/catchup.ts), lowest number first, each
  * new version then taken; a PR whose checks failed here only when its branch has moved since. Each one's hold then
  * says what happened. One line each, for the stage's result; and whether it caught up a PR GitHub runs no checks on
@@ -581,7 +595,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
         ? { released: await kitReleased(), taken: [...kitTaken, ...kitTitleVersions(o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head).map((x) => x.version)] }
         : undefined;
-      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}) });
+      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr) });
     } catch (err) {
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }
@@ -608,7 +622,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     }
     lookedAtConflict(e, pr, c, sent);
     const h = o.held.find((x) => x.number === pr.number);
-    if (h) h.why = c.done ? `${CAUGHT_UP} (${c.note}): it merges once its checks pass at the new head` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
+    if (h) h.why = c.done ? `${CAUGHT_UP} (${c.note}): ${c.carried ? 'it merges without being tested again' : 'it merges once its checks pass at the new head'}` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.
     if (h && c.closed) o.held.splice(o.held.indexOf(h), 1);
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
