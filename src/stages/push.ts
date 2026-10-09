@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
 import { changelogBetween } from '../kitfiles.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gh, git, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, git, gitMaybe, showFile } from '../git.ts';
 import { TOOL } from '../kitsource.ts';
 import type { Employee } from '../settings.ts';
 import { readVersion } from '../versions.ts';
 import { bumpBranch, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { readPin } from './staff.ts';
 import { noteOpened } from '../strangers.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /**
  * Stage 2, `steward push`: each bump prepared here (the branch steward/kit-<version>) is pushed, never
@@ -51,13 +52,14 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   await fetchBranch(run, repo, e.branch);
   const remote = `origin/${e.branch}`;
   if ((await aheadOf(run, repo, branch, remote)) === 0) return result(e, 'skipped', `${branch} has nothing ${remote} hasn't`);
+  const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
   // A fold goes only onto a PR still open: pushed to a branch whose PR merged or closed, it would be a branch with no PR.
   if (fold) {
-    const pr = JSON.parse(await gh(run, ctx.neutralDir, 'pr', 'view', String(fold.number), '--repo', e.repo, '--json', 'state,headRefName')) as { state: string; headRefName: string };
+    const pr = JSON.parse(must(await host.viewPr(e.repo, fold.number, 'state,headRefName'))) as { state: string; headRefName: string };
     if (pr.state !== 'OPEN' || pr.headRefName !== fold.head) return result(e, 'skipped', `kit ${o.kit} wasn't put onto PR #${fold.number}: it is ${pr.state.toLowerCase()} now, so the next round bumps ${e.name} afresh`);
   }
 
-  const open = JSON.parse(await gh(run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--head', branch, '--state', 'open', '--json', 'number,url')) as { number: number; url: string }[];
+  const open = JSON.parse(must(await host.listPrs(e.repo, { state: 'open', head: branch, fields: 'number,url' }))) as { number: number; url: string }[];
   const pushed = await gitMaybe(run, repo, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`);
   const remoteSha = pushed?.trim().split(/\s+/)[0] ?? '';
   const localSha = (await commitOf(run, repo, `refs/heads/${branch}`)) ?? '';
@@ -82,12 +84,12 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   const folded = fold ? (/^steward\/kit-(.+)$/.exec(fold.head)?.[1] ?? fold.kit) : undefined;
   const body = prBody({ kit: o.kit, from, version, changelog: o.changelog, files: files.length ? files : e.versionFiles, fill: e.fill, tool: changed.includes(TOOL), folded });
   if (fold) {
-    await gh(run, ctx.neutralDir, 'pr', 'edit', String(fold.number), '--repo', e.repo, '--title', title, '--body', body);
+    must(await host.editPr(e.repo, fold.number, { title, body }));
     const url = open[0]?.url;
     ctx.log(`[${e.id}] kit ${o.kit} onto #${fold.number}`);
     return result(e, 'done', `put kit ${o.kit} onto its open PR #${fold.number}, now "${title}"`, { ...(url ? { url } : {}), version });
   }
-  const out = await gh(run, ctx.neutralDir, 'pr', 'create', '--repo', e.repo, '--base', e.branch, '--head', branch, '--title', title, '--body', body);
+  const out = must(await host.createPr(e.repo, { base: e.branch, head: branch, title, body }));
   const url = out.trim().split('\n').pop() ?? '';
   ctx.log(`[${e.id}] opened ${url}`);
   noteOpened(e, url, localSha);

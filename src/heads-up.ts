@@ -2,6 +2,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Ctx } from './stages/common.ts';
 import { pokePage, type Poke } from './upkeep.ts';
 import type { UpcomingDraft } from './version-queue.ts';
+import { hostFor } from './hosts/index.ts';
 
 /**
  * An early word about a draft coming up in a version queue (version-queue.ts upcomingDrafts): the merges take the
@@ -55,7 +56,7 @@ export async function headsUp(ctx: Ctx, upcoming: UpcomingDraft[], o: { bailiffU
     const stage = stageOf(u);
     const before = told[keyOf(u)];
     if (before && (before.stage === stage || before.stage === 'holding')) continue;
-    const r = await ctx.run('gh', ['pr', 'comment', String(u.number), '--repo', u.repo, '--body', headsUpComment(u)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    const r = await hostFor(ctx, u).commentPr(u.repo, u.number, headsUpComment(u));
     if (r.code !== 0) {
       lines.push(`${u.repo}#${u.number}: couldn't leave its heads-up: ${(r.err || r.out).trim().split('\n').pop()}`);
       continue;

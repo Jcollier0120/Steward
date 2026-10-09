@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterWords } from '../after.ts';
-import { commitOf, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
@@ -21,9 +21,10 @@ import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
-import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
 import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -84,7 +85,7 @@ export async function askAgainWhetherMerges(ctx: Ctx, e: Employee, prs: PrInfo[]
     if (!left.length) break;
     await pause(ms);
     for (const pr of left) {
-      const r = await ctx.run('gh', ['pr', 'view', String(pr.number), '--repo', e.repo, '--json', 'mergeable,mergeStateStatus'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+      const r = await hostFor(ctx, e).viewPr(e.repo, pr.number, 'mergeable,mergeStateStatus');
       if (r.code !== 0) continue;
       let now: { mergeable?: unknown; mergeStateStatus?: unknown };
       try {
@@ -311,12 +312,12 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], b
       pr.bailiffHold = waits;
       continue;
     }
-    const ready = await ctx.run('gh', ['pr', 'ready', String(pr.number), '--repo', e.repo], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    const ready = await hostFor(ctx, e).readyPr(e.repo, pr.number);
     if (ready.code !== 0) {
       pr.reviewHold = `the Steward couldn't mark it ready: ${(ready.err || ready.out).trim().split('\n').pop()}`;
       continue;
     }
-    await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', reviewedComment(pr, s, bailiff)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    await hostFor(ctx, e).commentPr(e.repo, pr.number, reviewedComment(pr, s, bailiff));
     pr.draft = false;
     ctx.log(`[${e.id}] the Wright's #${pr.number}: looked at, and marked ready (${pr.files.length} files, ${pr.changed} lines)`);
   }
@@ -346,7 +347,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (hostIs(ctx, e) === 'git') return { ...result(e, 'skipped', NO_PRS), merged: [], held: [] };
   // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
   const g = glanceOf(ctx, e);
-  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(run, ctx.neutralDir, ...prListArgs(e.repo)), o.team ? ctx.settings.team : []);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor({ run, neutralDir: ctx.neutralDir }, e), e.repo), o.team ? ctx.settings.team : []);
   const none = !o.team ? 'no open Steward PRs' : ctx.settings.team.length ? "no open PRs of the Steward's or the team's" : `no open Steward PRs (${NO_TEAM})`;
   if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
   // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
@@ -546,8 +547,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
-    const at = head ? ['--match-head-commit', head] : [];
-    const r = await run('gh', ['pr', 'merge', String(pr.number), '--repo', e.repo, '--merge', ...at, ...(mine ? ['--delete-branch'] : [])], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+    const r = await hostFor({ run, neutralDir: ctx.neutralDir }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine });
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);
@@ -761,17 +761,18 @@ export async function retargetStacked(ctx: Ctx, e: Employee, prs: PrInfo[]): Pro
   for (const pr of prs) {
     if (pr.whose !== 'team' || pr.fork || !pr.base || pr.base === e.branch || stackedOn(pr, prs, e.branch)) continue;
     try {
-      const out = await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'merged', '--head', pr.base, '--limit', '5', '--json', 'number,baseRefName');
+      const host = hostFor(ctx, e);
+      const out = must(await host.listPrs(e.repo, { state: 'merged', head: pr.base, limit: 5, fields: 'number,baseRefName' }));
       const under = (JSON.parse(out || '[]') as { number: number; baseRefName: string }[]).find((m) => m.baseRefName === e.branch);
       if (!under) continue;
-      await gh(ctx.run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--base', e.branch);
+      must(await host.editPr(e.repo, pr.number, { base: e.branch }));
       const was = pr.base;
       pr.base = e.branch;
       pr.mergeable = 'UNKNOWN';
       done.push(pr.number);
       ctx.log(`[${e.id}] #${pr.number}: pointed at ${e.branch}: it was stacked on ${was}, whose #${under.number} has merged`);
       const body = `The Steward pointed this pull request at \`${e.branch}\`: it was stacked on \`${was}\`, whose #${under.number} has merged into \`${e.branch}\`. It now waits in ${e.branch}'s line like any other.`;
-      await gh(ctx.run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', body).catch(() => '');
+      await host.commentPr(e.repo, pr.number, body).catch(() => null);
     } catch (err) {
       ctx.log(`[${e.id}] #${pr.number}: couldn't point it at ${e.branch} (stacked on ${pr.base}): ${(err as Error).message}`);
     }

@@ -163,7 +163,7 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.equal(create[create.indexOf('--base') + 1], 'master');
   assert.equal(create[create.indexOf('--repo') + 1], 'Jcollier0120/Heiward');
   assert.equal(create[create.indexOf('--title') + 1], "Heiward 1.7.1: the Steward's kit 1.0.1");
-  const body = create[create.indexOf('--body') + 1];
+  const body = create[create.indexOf('--body-file') + 1];
   assert.match(body, /the version is 1\.7\.1 in HEI\.Agent\/HEI\.Agent\.csproj\. The kit itself isn't in the repo: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\\kit\.ps1` fills it/);
   assert.doesNotMatch(body, /tools\/kit\.ts/);
   assert.match(body, /- new vectors/);

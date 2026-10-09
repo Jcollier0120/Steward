@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.30.0
+
+**The groundwork for pull requests on hosts other than GitHub.**
+
+### What changed
+
+- Everything the Steward asks of where a repository lives (its pull requests, the vouch on a commit, its releases, and the Wright's issues) now goes through one place, with GitHub behind it. Nothing works differently today: on GitHub it runs the same commands as before. GitLab, Azure DevOps, Gitea and Forgejo, and Bitbucket come next, each in its own release, so a repository on any of them gets its pull requests merged in version order, stamped and released, as on GitHub.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.29.1
 
 **Work doesn't need to open its own pull request: push the branch, vouch for it, and the Steward opens it.**

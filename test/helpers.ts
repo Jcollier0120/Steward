@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { makersPcForTests } from '../src/maker.ts';
@@ -89,12 +89,16 @@ export function employee(checkout: string, more: Partial<Employee> = {}): Employ
 
 export type GhScript = (args: string[]) => Ran | undefined;
 
-/** A runner that answers gh from `script` (and records every call), and runs everything else for real. */
+/**
+ * A runner that answers gh from `script` (and records every call), and runs everything else for real. A description
+ * written to a file (--body-file, removed once gh has read it) is recorded as its text, in place of the file's path.
+ */
 export function runner(script: GhScript = () => undefined): { run: Runner; gh: string[][] } {
   const gh: string[][] = [];
   const run: Runner = async (cmd, args, opts) => {
     if (cmd === 'gh') {
-      gh.push(args);
+      const i = args.indexOf('--body-file');
+      gh.push(i >= 0 ? args.map((a, j) => (j === i + 1 ? readFileSync(a, 'utf8') : a)) : args);
       return script(args) ?? { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
     }
     return realRun(cmd, args, opts);

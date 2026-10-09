@@ -14,6 +14,7 @@ import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
 import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -231,14 +232,13 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
   const entry = combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md')) ?? '', o.version, o.since ?? null);
   const notesDir = mkdtempSync(path.join(os.tmpdir(), 'steward-notes-'));
   try {
-    let notes: string[];
+    let notesFile: string | null = null;
     if (entry) {
-      const file = path.join(notesDir, 'notes.md');
-      writeFileSync(file, entry);
-      notes = ['--notes-file', file];
-    } else notes = ['--generate-notes'];
+      notesFile = path.join(notesDir, 'notes.md');
+      writeFileSync(notesFile, entry);
+    }
     ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a GitHub release, its notes ${entry ? 'the CHANGELOG.md entry' : "GitHub's, from the commits"}`);
-    const r = await ctx.run('gh', ['release', 'create', tag, '--repo', e.repo, '--target', o.commit, '--title', `${e.name} ${o.version}`, ...notes], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+    const r = await hostFor(ctx, e).createRelease(e.repo, { tag, target: o.commit, title: `${e.name} ${o.version}`, notesFile });
     if (r.code !== 0) return result(e, 'failed', `gh release create ${tag} failed (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
   } finally {
     rmSync(notesDir, { recursive: true, force: true });

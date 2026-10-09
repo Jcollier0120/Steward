@@ -1,15 +1,16 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import { checkoutOf, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
-import { parsePrs, prListArgs, readPin, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
 import { recordTested } from '../tested.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * A team PR that GitHub runs no checks on is tested here before it's merged: the employee's own checks (Settings,
@@ -100,7 +101,7 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
       const trials = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
       const checkout = ctx.settings.stewardCheckout && existsSync(path.join(ctx.settings.stewardCheckout, '.git')) ? ctx.settings.stewardCheckout : null;
       const out: KitPr[] = [];
-      for (const p of parsePrs(await gh(ctx.run, ctx.neutralDir, ...prListArgs(repo)), ctx.settings.team)) {
+      for (const p of parsePrs(await openPrs(hostFor(ctx), repo), ctx.settings.team)) {
         if (p.fork || !raisesKit(p)) continue;
         let kit: string | null = trials[`${p.number}@${p.headOid}`]?.kit ?? null;
         if (!kit && checkout && p.headOid) {

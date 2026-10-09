@@ -3,7 +3,7 @@ import path from 'node:path';
 import { NOT_PUBLISHED } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
-import { commitOf, fetchBranch, gh } from '../git.ts';
+import { commitOf, fetchBranch } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
 import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
@@ -12,6 +12,7 @@ import type { KitInfo } from '../kitsource.ts';
 import type { LeaseGuard } from '../lease.ts';
 import type { Runner } from '../run.ts';
 import { releasedHere, type Employee, type Settings } from '../settings.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /** What a stage did for one employee. */
 export type Outcome = 'done' | 'skipped' | 'refused' | 'failed';
@@ -172,7 +173,7 @@ export const forgetGlance = (ctx: Ctx, e: Employee) => {
  */
 export async function releasedOf(ctx: Ctx, e: Employee): Promise<ReleaseInfo[]> {
   const g = glanceOf(ctx, e) ?? (hostIs(ctx, e) === 'git' ? await gitGlance(ctx.run, { branch: e.branch, checkout: checkoutOf(e) }) : null);
-  const out = appReleasesIn(g ? JSON.stringify(g.releases) : await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'));
+  const out = appReleasesIn(g ? JSON.stringify(g.releases) : must(await hostFor(ctx, e).listReleases(e.repo, 'tagName,isDraft,publishedAt')));
   const here = installedRelease(e);
   return here && !out.some((r) => r.version === here.version) ? [{ tag: `v${here.version}`, version: here.version, published: here.built }, ...out] : out;
 }

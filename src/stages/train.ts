@@ -15,6 +15,7 @@ import { raisesKit } from './trial.ts';
 import { isWrightPr } from './vouch.ts';
 import { ownerFirstHold } from '../review.ts';
 import { changeFiles, KIT_CHANGES_DIR } from '../entries.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * A merge train (Settings' mergeTrain): a repository's ready PRs that wait their turn in the version queue, merged
@@ -207,16 +208,17 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     // The top PR's branch moves on to the stack (never forced: it is on top of its head), and that PR merges at it.
     const pushed = await run('git', ['push', '--quiet', 'origin', `${at}:refs/heads/${top.pr.head}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (pushed.code !== 0) return { merged: [], note: `${numbers} stacked and passed, but the stack couldn't be pushed to ${top.pr.head}: ${(pushed.err || pushed.out).trim().split('\n').pop()}`, tested: true };
-    let merge = await run('gh', ['pr', 'merge', String(top.pr.number), '--repo', e.repo, '--merge', '--match-head-commit', at], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+    const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+    let merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
     for (const ms of TRAIN_WAITS_MS) {
       if (merge.code === 0) break;
       await pause(ms);
-      merge = await run('gh', ['pr', 'merge', String(top.pr.number), '--repo', e.repo, '--merge', '--match-head-commit', at], { cwd: ctx.neutralDir, timeoutMs: 5 * 60_000 });
+      merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
     }
     forgetGlance(ctx, e);
     if (merge.code !== 0) {
       const why = (merge.err || merge.out).trim().split('\n').pop();
-      await run('gh', ['pr', 'comment', String(top.pr.number), '--repo', e.repo, '--body', `The Steward stacked ${numbers} on \`${e.branch}\` here (checks passed at ${at.slice(0, 7)}), but couldn't merge it: ${why}. The PRs under it are in this branch now, so it brings them in when it merges.`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+      await host.commentPr(e.repo, top.pr.number, `The Steward stacked ${numbers} on \`${e.branch}\` here (checks passed at ${at.slice(0, 7)}), but couldn't merge it: ${why}. The PRs under it are in this branch now, so it brings them in when it merges.`);
       return { merged: [], note: `${numbers} stacked and passed, pushed to ${top.pr.head}, but #${top.pr.number} couldn't be merged: ${why}`, tested: true };
     }
     delete failed[e.id];
@@ -225,13 +227,13 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     // Passed here before it merged: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit: at, stage: 'merge', branch: top.pr.head, pr: top.pr.number, version: top.version });
     const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
-    await run('gh', ['pr', 'comment', String(top.pr.number), '--repo', e.repo, '--body', `Merged by the Steward as one train with ${rode.slice(0, -1).map((c) => `#${c.pr.number}`).join(', ')}: ${words}. Each keeps its own version and changelog entry.`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    await host.commentPr(e.repo, top.pr.number, `Merged by the Steward as one train with ${rode.slice(0, -1).map((c) => `#${c.pr.number}`).join(', ')}: ${words}. Each keeps its own version and changelog entry.`);
     // The cars under it are in the branch now: GitHub marks each merged, once it has taken the merge in.
     for (const c of rode.slice(0, -1)) {
       let state = '';
       for (const ms of [0, ...TRAIN_WAITS_MS]) {
         if (ms) await pause(ms);
-        const v = await run('gh', ['pr', 'view', String(c.pr.number), '--repo', e.repo, '--json', 'state'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+        const v = await host.viewPr(e.repo, c.pr.number, 'state');
         try {
           state = String(JSON.parse(v.out).state ?? '');
         } catch {
@@ -240,8 +242,8 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
         if (state === 'MERGED' || state === 'CLOSED') break;
       }
       const body = `Merged by the Steward in one train with #${top.pr.number}: ${words}. Its commits are in \`${e.branch}\`.`;
-      if (state === 'MERGED') await run('gh', ['pr', 'comment', String(c.pr.number), '--repo', e.repo, '--body', body], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
-      else if (state === 'OPEN' || state === '') await run('gh', ['pr', 'close', String(c.pr.number), '--repo', e.repo, '--comment', `${body} GitHub didn't mark it merged, so the Steward closed it.`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+      if (state === 'MERGED') await host.commentPr(e.repo, c.pr.number, body);
+      else if (state === 'OPEN' || state === '') await host.closePr(e.repo, c.pr.number, { comment: `${body} GitHub didn't mark it merged, so the Steward closed it.` });
     }
     ctx.log(`[${e.id}] merged ${numbers} as one train through #${top.pr.number} (${words})`);
     return { merged: rode.map((c) => c.pr), note: `${words}${stopped}`, tested: true };

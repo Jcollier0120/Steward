@@ -7,6 +7,7 @@ import type { Employee } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * A team PR whose checks its author ran and saw pass, at its head commit, isn't tested here again before it merges.
@@ -42,7 +43,7 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
  * Never throws.
  */
 export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: string[]): Promise<string | null> {
-  const r = await ctx.run('gh', ['api', `repos/${repo}/commits/${commit}/statuses?per_page=100`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  const r = await hostFor(ctx).statuses(repo, commit);
   if (r.code !== 0) return null;
   let list: any[];
   try {
@@ -107,7 +108,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const branch = (await gitMaybe(run, o.dir, 'branch', '--show-current'))?.trim() ?? '';
   const which = o.pr ? String(o.pr) : branch;
   if (!which) return { ok: false, message: 'name the PR (steward vouch <number>): this clone is on no branch' };
-  const v = await run('gh', ['pr', 'view', which, '--repo', repo, '--json', 'number,state,headRefOid,isCrossRepository'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  const v = await hostFor({ run, neutralDir: ctx.neutralDir }, e).viewPr(repo, which, 'number,state,headRefOid,isCrossRepository');
   // No PR from its branch: vouched for as pushed, and its PR opened by the Steward (branchesin.ts).
   if (v.code !== 0 && !o.pr && /no pull requests found/i.test(`${v.err}\n${v.out}`)) return vouchBranch(ctx, e, { ...o, repo, branch, head });
   if (v.code !== 0) return { ok: false, message: `no open PR ${o.pr ? `#${o.pr}` : `for ${branch}`} in ${repo}: ${(v.err || v.out).trim().split('\n').pop()}` };
@@ -132,7 +133,7 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   if (failed) return failed;
   const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
   const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${o.head.slice(0, 7)}`.slice(0, 140);
-  const s = await ctx.run('gh', ['api', '-X', 'POST', `repos/${o.repo}/statuses/${o.head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${description}`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  const s = await hostFor(ctx, e).setStatus(o.repo, o.head, { state: 'success', context: VOUCH_CONTEXT, description });
   if (s.code !== 0) return `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
   return null;
 }

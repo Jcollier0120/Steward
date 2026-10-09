@@ -27,7 +27,7 @@ export interface GlanceRelease {
 export interface RepoGlance {
   /** The head commit of the employee's branch on GitHub, or null when the branch isn't there. */
   head: string | null;
-  /** Its open PRs, newest first, in `gh pr list --json`'s shape (prListArgs' fields), for parsePrs. */
+  /** Its open PRs, newest first, in `gh pr list --json`'s shape (PR_FIELDS, stages/staff.ts), for parsePrs. */
   prs: any[];
   /** Its releases, newest first, in `gh release list --json`'s shape, for appReleasesIn. */
   releases: GlanceRelease[];

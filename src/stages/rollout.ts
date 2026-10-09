@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
-import { fetchBranch, gh, showFile } from '../git.ts';
+import { fetchBranch, showFile } from '../git.ts';
 import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
 import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { push } from './push.ts';
-import { parsePrs, prListArgs, readPin } from './staff.ts';
+import { openPrs, parsePrs, readPin } from './staff.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -123,7 +124,7 @@ export async function rolloutFacts(ctx: Ctx, e: Employee, kit: string): Promise<
   const pin = head ? (readPin(await showFile(ctx.run, repo, `origin/${e.branch}`, 'kit.json'))?.kit ?? null) : null;
   if (!pin || compareVersions(pin, kit) >= 0) return { checkout: true, head, pin, kitPrs: [] };
   const g = glanceOf(ctx, e);
-  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), ctx.settings.team);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor(ctx, e), e.repo), ctx.settings.team);
   const open = prs.filter((p) => p.whose === 'steward' && p.head.startsWith('steward/kit-') && !p.fork);
   const kitPrs = open.map((p) => `#${p.number} (${p.head})`);
   if (kitPrs.length) {

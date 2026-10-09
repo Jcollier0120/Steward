@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { changeFiles, CHANGES_DIR, CHANGES_README, entryBody, foldEntries, KIT_CHANGES_DIR, stampVersions, type Stamped } from '../entries.ts';
-import { fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { CHANGELOG } from '../kit/notes.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
@@ -10,6 +10,7 @@ import { checkoutOf, workRootOf, type Ctx } from './common.ts';
 import { KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, repinKit } from './kitpart.ts';
 import { carryTested } from './prtest.ts';
 import type { PrInfo } from './staff.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * The stamp (entries.ts): just before a pull request in a repository that writes its entries in changes/ is merged, the
@@ -140,7 +141,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     ctx.log(`[${e.id}] #${pr.number}: ${note}`);
     // Its title says the version it merges with.
     const wanted = stamped.at(-1)?.wanted;
-    if (wanted && wanted !== version && pr.title.includes(wanted)) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', pr.title.split(wanted).join(version)).catch(() => '');
+    if (wanted && wanted !== version && pr.title.includes(wanted)) await hostFor({ run, neutralDir: ctx.neutralDir }, e).editPr(e.repo, pr.number, { title: pr.title.split(wanted).join(version) }).catch(() => null);
     return { done: true, note, head: pushed, version, stamped };
   } finally {
     try {

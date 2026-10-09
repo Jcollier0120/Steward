@@ -22,6 +22,10 @@ import type { Employee, Settings } from './settings.ts';
  *
  * Other source control (Mercurial, Subversion, Perforce, Plastic SCM) is found and named, but not worked with yet.
  * Castellan's own release machinery (releasesCastellan) is GitHub's, whatever is chosen.
+ *
+ * The GitHub way asks GitHub through a source host (hosts/), the one interface for pull requests, commit statuses,
+ * releases and issues, so other hosts with pull requests (GitLab, Azure DevOps, Gitea/Forgejo, Bitbucket) can stand
+ * where GitHub does.
  */
 
 export type Host = 'github' | 'git';

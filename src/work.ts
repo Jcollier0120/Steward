@@ -12,6 +12,7 @@ import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } fro
 import { showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
 import { readPin } from './stages/staff.ts';
+import { hostFor } from './hosts/index.ts';
 
 /**
  * Work for the Wright: what fails in a round that someone working in the employee's repository can fix, filed as an
@@ -270,18 +271,6 @@ export function wrightSays(work: unknown, f: FiledWork): { state: 'stuck' } | { 
 const localDay = (t: number) => new Date(t).toDateString();
 const lastLine = (r: { out: string; err: string }) => (r.err || r.out).trim().split('\n').pop() ?? '';
 
-/** Runs gh with a Markdown body written to a file (--body-file), never inline. */
-async function withBody(run: Runner, cwd: string, args: string[], body: string) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'steward-work-'));
-  try {
-    const file = path.join(dir, 'body.md');
-    writeFileSync(file, body);
-    return await run('gh', [...args, '--body-file', file], { cwd, timeoutMs: 60_000 });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 /** Whether gh refused to file an issue because the repository has no such label: "could not add label: 'manor:work' not found". */
 const labelMissing = (r: { out: string; err: string }, label: string) => {
   const text = `${r.err}\n${r.out}`;
@@ -290,7 +279,7 @@ const labelMissing = (r: { out: string; err: string }, label: string) => {
 
 /** The Wright's queue label made in a repository that hasn't it, as the others have it; one there already is as good. */
 async function createLabel(o: { run: Runner; cwd: string; log: (line: string) => void }, repo: string, label: string): Promise<boolean> {
-  const r = await o.run('gh', ['label', 'create', label, '--repo', repo, '--color', '1d76db', '--description', 'Queued for the Wright'], { cwd: o.cwd, timeoutMs: 60_000 });
+  const r = await hostFor({ run: o.run, neutralDir: o.cwd }).createLabel(repo, label, { color: '1d76db', description: 'Queued for the Wright' });
   if (r.code === 0) {
     o.log(`work: created the ${label} label in ${repo}, which hadn't it`);
     return true;
@@ -317,14 +306,15 @@ async function supersede(o: { run: Runner; cwd: string; log: (line: string) => v
   if (!older.length) return null;
   const [keep, ...rest] = older;
   const kit = item.id.slice(prefix.length);
-  const r = await withBody(o.run, o.cwd, ['issue', 'edit', String(keep.number), '--repo', item.repo, '--title', item.title], item.body);
+  const host = hostFor({ run: o.run, neutralDir: o.cwd });
+  const r = await host.editIssue(item.repo, keep.number, { title: item.title, body: item.body });
   if (r.code !== 0) {
     o.log(`work: couldn't make ${keep.url} the bump to kit ${kit}: ${redact(lastLine(r))}`);
     return null;
   }
   const closed: number[] = [];
   for (const x of rest) {
-    const c = await o.run('gh', ['issue', 'close', String(x.number), '--repo', item.repo, '--reason', 'not planned', '--comment', `Superseded by #${keep.number}, now the bump to kit ${kit}: one fix on the branch makes both pass.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    const c = await host.closeIssue(item.repo, x.number, { reason: 'not planned', comment: `Superseded by #${keep.number}, now the bump to kit ${kit}: one fix on the branch makes both pass.` });
     if (c.code === 0) closed.push(x.number);
     else o.log(`work: couldn't close ${x.url} as superseded: ${redact(lastLine(c))}`);
   }
@@ -349,6 +339,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
   const perDay = o.perDay ?? PER_DAY;
   const at = o.now.toISOString();
   const today = new Set(Object.entries(filed).filter(([, f]) => !f.adopted && localDay(Date.parse(f.at)) === localDay(o.now.getTime())).map(([id]) => slotOf(id)));
+  const host = hostFor({ run: o.run, neutralDir: o.cwd });
   let login: string | null | undefined;
   const open = new Map<string, { number: number; url: string; body: string }[] | null>();
 
@@ -378,7 +369,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       continue;
     }
     if (login === undefined) {
-      const r = await o.run('gh', ['api', 'user', '--jq', '.login'], { cwd: o.cwd, timeoutMs: 60_000 });
+      const r = await host.whoAmI();
       login = r.code === 0 ? r.out.trim() || null : null;
       if (!login) o.log(`work: gh couldn't say who it's signed in as (${redact(lastLine(r))})`);
     }
@@ -387,7 +378,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       continue;
     }
     if (!open.has(item.repo)) {
-      const r = await o.run('gh', ['issue', 'list', '--repo', item.repo, '--label', q.label, '--state', 'open', '--limit', '100', '--json', 'number,url,body'], { cwd: o.cwd, timeoutMs: 60_000 });
+      const r = await host.listIssues(item.repo, { label: q.label, state: 'open', limit: 100, fields: 'number,url,body' });
       let list: { number: number; url: string; body: string }[] | null = null;
       try {
         list = r.code === 0 ? JSON.parse(r.out || '[]') : null;
@@ -417,7 +408,7 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
       states.set(item.id, { state: 'not-filed', why: `today's ${perDay} issues for the Wright are filed; this one waits for tomorrow` });
       continue;
     }
-    const create = () => withBody(o.run, o.cwd, ['issue', 'create', '--repo', item.repo, '--title', item.title, '--label', q.label], item.body);
+    const create = () => host.createIssue(item.repo, { title: item.title, body: item.body, label: q.label });
     let r = await create();
     // A repository new to the Wright's queue (an employee just taken on) hasn't its label yet, and gh won't file without it.
     if (r.code !== 0 && labelMissing(r, q.label) && (await createLabel(o, item.repo, q.label))) r = await create();
@@ -457,7 +448,7 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
     if (!e || !existsSync(checkoutOf(e))) continue;
     const pin = readPin(await showFile(o.run, checkoutOf(e), `origin/${e.branch}`, 'kit.json'));
     if (!pin || compareVersions(pin.kit, m[2]) < 0) continue;
-    const r = await o.run('gh', ['issue', 'close', String(f.number), '--repo', f.repo, '--reason', 'completed', '--comment', `Nothing left to do: ${e.branch} now carries kit ${pin.kit}, so ${e.name}'s bump to kit ${m[2]} has passed. Closed by the ${APP.name}.`], { cwd: o.cwd, timeoutMs: 60_000 });
+    const r = await hostFor({ run: o.run, neutralDir: o.cwd }).closeIssue(f.repo, f.number, { reason: 'completed', comment: `Nothing left to do: ${e.branch} now carries kit ${pin.kit}, so ${e.name}'s bump to kit ${m[2]} has passed. Closed by the ${APP.name}.` });
     const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
     if (!gone) {
       o.log(`work: couldn't close ${f.url}, whose failure is gone: ${redact(lastLine(r))}`);

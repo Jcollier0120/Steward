@@ -16,6 +16,7 @@ import { CLAIMS_FILE, CLAIMS_REF, remoteFor } from './lease.ts';
 export { CLAIMS_FILE, CLAIMS_REF };
 import { fileAt, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
+import { hostFor, must } from './hosts/index.ts';
 
 /**
  * Versions claimed up front. Two pieces of work started side by side on one repository each used to take "the next
@@ -119,7 +120,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
   const branchVersion = 'version' in read ? read.version : null;
   const released = kit ? (await kitInfo(ctx.run, ctx.neutralDir, e.repo)).released : (await releasedOf(ctx, e)).map((r) => r.version);
   // Worked with plain git (scm.ts): no pull requests, so none sets a version.
-  const prs = hostIs(ctx, e) === 'git' ? [] : (JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--state', 'open', '--limit', '100', '--json', 'title,headRefName')) || '[]') as { title: string; headRefName: string }[]);
+  const prs = hostIs(ctx, e) === 'git' ? [] : (JSON.parse(must(await hostFor(ctx, e).listPrs(e.repo, { state: 'open', limit: 100, fields: 'title,headRefName' })) || '[]') as { title: string; headRefName: string }[]);
   const openVersions = kit ? kitTitleVersions(prs.map((p) => p.title)) : titleVersions(e.name, prs.map((p) => p.title));
   const openBranches = prs.map((p) => p.headRefName);
   const facts = { branchVersion, released, openBranches, openVersions, now };
