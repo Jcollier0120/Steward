@@ -2,6 +2,7 @@ import { git, gitMaybe, showFile } from './git.ts';
 import type { Employee, Settings } from './settings.ts';
 import { checkoutOf, type Ctx } from './stages/common.ts';
 import type { PrInfo } from './stages/staff.ts';
+import { hostFor } from './hosts/index.ts';
 
 /**
  * The Steward's look at the Wright's drafts, in code (no model): the Wright opens every pull request as a draft, so
@@ -171,7 +172,7 @@ export async function bailiffHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<st
     return "waiting for the Bailiff's review";
   }
   if (!pr.headOid) return "gh didn't say its head commit, so the Steward can't match the Bailiff's approval to it";
-  const r = await ctx.run('gh', ['pr', 'view', String(pr.number), '--repo', e.repo, '--json', 'headRefOid,comments'], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+  const r = await hostFor(ctx, e).viewPr(e.repo, pr.number, 'headRefOid,comments');
   if (r.code !== 0) return `the Steward couldn't read the Bailiff's review: ${(r.err || r.out).trim().split('\n').pop()}`;
   let view: { headRefOid?: unknown; comments?: unknown };
   try {

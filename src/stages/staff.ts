@@ -4,12 +4,13 @@ import { expandEnv } from '../kit/settings-kit.ts';
 import { readAfter, type After } from '../after.ts';
 import { compareVersions, lf } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gh, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, gitMaybe, showFile } from '../git.ts';
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
 import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 import { gitGlance } from '../scm.ts';
+import { hostFor, must, type SourceHost } from '../hosts/index.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
@@ -149,7 +150,7 @@ export function whosePr(p: any, team: string[]): PrInfo['whose'] | null {
 /** The issues a PR's description closes, as GitHub reads it: "Closes #12", "fixes #3", "Resolved #7". */
 export const closedIssues = (body: string): number[] => [...new Set([...body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi)].map((m) => Number(m[1])))];
 
-/** The Steward's PRs and the team's in a `gh pr list --json` answer (prListArgs), by number. */
+/** The Steward's PRs and the team's in a `gh pr list --json` answer (openPrs), by number. */
 export function parsePrs(json: string, team: string[]): PrInfo[] {
   const list = JSON.parse(json || '[]') as any[];
   return list
@@ -201,7 +202,11 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
   }
 }
 
-export const prListArgs = (repo: string) => ['pr', 'list', '--repo', repo, '--state', 'open', '--limit', '100', '--json', 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup,labels,additions,deletions,files'];
+/** The PR fields parsePrs reads, as GitHub names them. */
+export const PR_FIELDS = 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup,labels,additions,deletions,files';
+
+/** A repository's open PRs as its host lists them (PR_FIELDS), for parsePrs; CommandFailed when it can't. */
+export const openPrs = async (host: SourceHost, repo: string) => must(await host.listPrs(repo, { state: 'open', limit: 100, fields: PR_FIELDS }));
 
 export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; kit: string | null; tool?: string | null }): Promise<StaffRow> {
   const { run } = ctx;
@@ -270,11 +275,11 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
   })().catch((err) => void notes.push((err as Error).message));
 
-  const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : gh(run, ctx.neutralDir, ...prListArgs(e.repo)))
+  const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : openPrs(hostFor({ run, neutralDir: ctx.neutralDir }, e), e.repo))
     .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
     .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
 
-  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))
+  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ run, neutralDir: ctx.neutralDir }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
     .then((out) => appReleasesIn(out))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
@@ -290,7 +295,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       let kit: string | null | 'unknown' = 'unknown';
       try {
         const tagged = g?.releases.find((r) => r.tagName === latest.tag)?.commit;
-        const target = tagged ?? (byGit ? null : JSON.parse(await gh(run, ctx.neutralDir, 'release', 'view', latest.tag, '--repo', e.repo, '--json', 'targetCommitish')).targetCommitish as string);
+        const target = tagged ?? (byGit ? null : JSON.parse(must(await hostFor({ run, neutralDir: ctx.neutralDir }, e).viewRelease(e.repo, latest.tag, 'targetCommitish'))).targetCommitish as string);
         if (target && row.checkout.exists && /^[0-9a-f]{40}$/i.test(target) && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
       } catch {
         // unknown

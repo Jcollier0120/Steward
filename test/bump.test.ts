@@ -88,7 +88,7 @@ test('push: the branch goes to origin (never forced) and a PR is opened with the
   const create = r.gh.find((a) => a[1] === 'create')!;
   assert.equal(create[create.indexOf('--title') + 1], "Fake 0.4.1: the Steward's kit 1.0.1");
   assert.equal(create[create.indexOf('--base') + 1], 'main');
-  const body = create[create.indexOf('--body') + 1];
+  const body = create[create.indexOf('--body-file') + 1];
   assert.match(body, /## 1\.0\.1\n\n- the fix/);
   assert.doesNotMatch(body, /the first/, 'only the entries after the kit it had');
   // Pushed again with nothing new: no second PR.
@@ -201,7 +201,7 @@ test("tools/kit.ts rides with the pin: an agent's old one is replaced with the S
   const r = runner((args) => (args[1] === 'list' ? ok([]) : args[1] === 'create' ? ok('https://github.com/Jcollier0120/Fake/pull/8\n') : undefined));
   assert.equal((await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.1', changelog: null })).outcome, 'done');
   const create = r.gh.find((a) => a[1] === 'create')!;
-  const body = create[create.indexOf('--body') + 1];
+  const body = create[create.indexOf('--body-file') + 1];
   assert.match(body, /the version is 0\.4\.1 in package\.json, package-lock\.json, src\/app\.ts\. tools\/kit\.ts is the Steward's/);
 });
 
@@ -330,7 +330,7 @@ test("a fold: a newer kit goes onto the kit PR still open for an older one, at i
   const edit = r.gh.find((a) => a[1] === 'edit')!;
   assert.equal(edit[2], '7');
   assert.equal(edit[edit.indexOf('--title') + 1], "Fake 0.4.1: the Steward's kit 1.0.2");
-  assert.match(edit[edit.indexOf('--body') + 1], /^kit\.json pins the Steward's kit 1\.0\.2 \(it pinned 1\.0\.0\)[\s\S]*Opened for kit 1\.0\.1; kit 1\.0\.2 came out while it was open/);
+  assert.match(edit[edit.indexOf('--body-file') + 1], /^kit\.json pins the Steward's kit 1\.0\.2 \(it pinned 1\.0\.0\)[\s\S]*Opened for kit 1\.0\.1; kit 1\.0\.2 came out while it was open/);
   assert.ok(!r.gh.some((a) => a[1] === 'create'));
 });
 

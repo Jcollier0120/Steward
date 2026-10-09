@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { appRoot, devCheckout } from './app.ts';
 import { compareVersions, KIT_VERSION, kitVersionOf } from './kitfiles.ts';
-import { gh } from './git.ts';
 import type { Runner } from './run.ts';
+import { hostFor, must } from './hosts/index.ts';
 
 /**
  * Which kit the Steward hands out. A kit version is released as kit-v<version> in the Steward's repository
@@ -75,7 +75,7 @@ export async function kitInfo(run: Runner, cwd: string, stewardRepo: string): Pr
   let releasesError: string | null = null;
   if (!stewardRepo) return { released, releasesError: "Settings name no Steward repository (The Steward's repository), so no kit releases are looked for", local: localDir ? kitVersionOf(localDir) : null, localDir };
   try {
-    released = kitReleasesIn(await gh(run, cwd, 'release', 'list', '--repo', stewardRepo, '--limit', '100', '--json', 'tagName,isDraft'));
+    released = kitReleasesIn(must(await hostFor({ run, neutralDir: cwd }).listReleases(stewardRepo, 'tagName,isDraft')));
   } catch (e) {
     releasesError = (e as Error).message;
   }

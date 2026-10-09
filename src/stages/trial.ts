@@ -1,12 +1,13 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
-import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump.ts';
 import { checkoutOf, glanceOf, mapLimit, networkFailure, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
-import { parsePrs, prListArgs, readPin, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * A new kit tried on every employee before it is released: when a team PR to the Steward's own repository raises
@@ -171,7 +172,7 @@ const tryAtHead = (ctx: Ctx, steward: Employee, pr: PrInfo, kit: string, employe
  */
 export async function pinningPrs(ctx: Ctx, e: Employee, kit: string): Promise<PrInfo[]> {
   const g = glanceOf(ctx, e);
-  const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), ctx.settings.team);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor(ctx, e), e.repo), ctx.settings.team);
   const repo = checkoutOf(e);
   const out: PrInfo[] = [];
   for (const p of prs) {
@@ -331,7 +332,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       else if (!failed.length) {
         const names = results.filter((r) => r.outcome === 'done').map((r) => r.name);
         const body = `The Steward tried kit ${t.kit} again, as this PR has it at ${pr.headOid.slice(0, 7)}, on ${names.join(', ')}, whose main moved on since: every agent passes with it now, so it merges.`;
-        const r = await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', steward.repo, '--body', body], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+        const r = await hostFor(ctx, steward).commentPr(steward.repo, pr.number, body);
         now.commented = r.code === 0;
       }
       t = now;
@@ -349,10 +350,10 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   const standing = standingFailures(t);
   const sha = pr.headOid.slice(0, 7);
   if (standing.length && !t.commented) {
-    const r = await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', steward.repo, '--body', trialComment(t, sha)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    const r = await hostFor(ctx, steward).commentPr(steward.repo, pr.number, trialComment(t, sha));
     t.commented = r.code === 0;
   } else if (t.failed.length && !standing.length && t.pairsSaid !== pairWords(t)) {
-    const r = await ctx.run('gh', ['pr', 'comment', String(pr.number), '--repo', steward.repo, '--body', pairComment(t, sha)], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
+    const r = await hostFor(ctx, steward).commentPr(steward.repo, pr.number, pairComment(t, sha));
     if (r.code === 0) t.pairsSaid = pairWords(t);
   }
   // Kept by head commit; the oldest go once there are more than 100.

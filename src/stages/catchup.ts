@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { aheadOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { aheadOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions, KIT_VERSION, pinText } from '../kitfiles.ts';
 import { readPin } from './staff.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -11,6 +11,7 @@ import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { carryTested } from './prtest.ts';
 import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, renameKitInTopEntry, repinKit } from './kitpart.ts';
+import { hostFor } from '../hosts/index.ts';
 
 /**
  * Catching a team PR up, so it doesn't wait on its branch moving under it: the Steward merges the branch into it
@@ -288,7 +289,7 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
   const body = o.redundant
     ? `Closed by the Steward: ${why}, so this bump has nothing left to do. The next round bumps ${e.name} to the newest kit from ${e.branch} as it is then.`
     : `Closed by the Steward: ${why}, which it doesn't resolve. The next round bumps ${e.name} to the kit again, from ${e.branch} as it is then.`;
-  const r = await ctx.run('gh', ['pr', 'close', String(pr.number), '--repo', e.repo, '--delete-branch', '--comment', body], { cwd: ctx.neutralDir, timeoutMs: 120_000 });
+  const r = await hostFor(ctx, e).closePr(e.repo, pr.number, { deleteBranch: true, comment: body });
   if (r.code !== 0) return { done: false, note: `${why}, and the Steward couldn't close it: ${(r.err || r.out).trim().split('\n').pop()}` };
   try {
     for (const line of await removeWorktree(ctx.run, repo, bumpDirOf(ctx.settings, e), pr.head)) ctx.log(`[${e.id}] ${line}`);
@@ -469,9 +470,10 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
     let title = choice.why && pr.title.includes(headV) ? pr.title.split(headV).join(choice.version) : pr.title;
     if (kit?.why && kHead) title = title.replace(new RegExp(`\\b(kit )${kHead.replace(/\./g, '\\.')}\\b`, 'i'), `$1${kit.version}`);
-    if (title !== pr.title) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', title).catch(() => '');
+    const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+    if (title !== pr.title) await host.editPr(e.repo, pr.number, { title }).catch(() => null);
     const next = kitPr ? 'The next round merges it.' : carried ? 'It merges without being tested again.' : 'It merges once its checks pass at the new head.';
-    await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${next}`).catch(() => '');
+    await host.commentPr(e.repo, pr.number, `Caught up by the Steward: ${note}. ${next}`).catch(() => null);
     // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
     return said({ done: true, note, version: choice.version, head: pushed, ...(carried ? { carried } : {}), ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) });
   } finally {

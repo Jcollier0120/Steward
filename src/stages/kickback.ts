@@ -3,6 +3,7 @@ import { WRIGHT_LABEL } from '../review.ts';
 import { wrightInstalled, type Employee } from '../settings.ts';
 import type { Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
+import { hostFor, type Answer } from '../hosts/index.ts';
 
 /**
  * A team PR that conflicts with its branch beyond what a catch-up resolves (stages/catchup.ts: version lines, and a
@@ -52,8 +53,9 @@ export function kickBackComment(pr: PrInfo, branch: string, files: string[], aut
   ].join('\n');
 }
 
-async function ghOk(ctx: Ctx, args: string[]): Promise<string | null> {
-  const r = await ctx.run('gh', args, { cwd: ctx.neutralDir, timeoutMs: 120_000 });
+/** Why a request to the host failed, or null when it did as asked. */
+async function failure(answer: Promise<Answer>): Promise<string | null> {
+  const r = await answer;
   return r.code === 0 ? null : (r.err || r.out).trim().split('\n').pop() || `exit ${r.code}`;
 }
 
@@ -75,15 +77,16 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   const issue = author === 'wright' ? wrightIssueOf(pr) : null;
   if (issue) {
     const body = `Closed by the Steward: ${where.replace(/^it /, 'this ')}, beyond what it resolves by itself. #${issue} is queued for the Wright again, to be done afresh from ${e.branch} as it is now.`;
-    const closeFailed = await ghOk(ctx, ['pr', 'close', String(pr.number), '--repo', e.repo, '--delete-branch', '--comment', body]);
+    const host = hostFor(ctx, e);
+    const closeFailed = await failure(host.closePr(e.repo, pr.number, { deleteBranch: true, comment: body }));
     if (!closeFailed) {
-      const relabel = await ghOk(ctx, ['issue', 'edit', String(issue), '--repo', e.repo, '--remove-label', 'wright:done']);
-      await ghOk(ctx, ['issue', 'comment', String(issue), '--repo', e.repo, '--body', `#${pr.number} conflicted with ${code(e.branch)} in ${listOf(files)}, so the Steward closed it${relabel ? `; removing ${code('wright:done')} failed (${relabel}), so remove it to queue this again` : ', and this is queued for the Wright again'}.`]);
+      const relabel = await failure(host.editIssue(e.repo, issue, { removeLabel: 'wright:done' }));
+      await failure(host.commentIssue(e.repo, issue, `#${pr.number} conflicted with ${code(e.branch)} in ${listOf(files)}, so the Steward closed it${relabel ? `; removing ${code('wright:done')} failed (${relabel}), so remove it to queue this again` : ', and this is queued for the Wright again'}.`));
       done = { note: `${where}, so the Steward closed it and ${relabel ? `couldn't queue #${issue} again (${relabel})` : `queued #${issue} for the Wright again`}`, closed: true };
     }
   }
   if (!done) {
-    const failed = await ghOk(ctx, ['pr', 'comment', String(pr.number), '--repo', e.repo, '--body', kickBackComment(pr, e.branch, files, author)]);
+    const failed = await failure(hostFor(ctx, e).commentPr(e.repo, pr.number, kickBackComment(pr, e.branch, files, author)));
     const to = author === 'claude' ? 'the Claude Code session that opened it' : author === 'wright' ? 'the Wright (no issue to queue again, so a comment)' : pr.author;
     done = { note: failed ? `${where}, and the Steward couldn't say so on it (${failed}): that needs a person` : `${where}: back with ${to}, in a comment on it`, closed: false };
     said = !failed;

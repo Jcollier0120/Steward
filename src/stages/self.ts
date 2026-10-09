@@ -4,13 +4,14 @@ import { APP } from '../app.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { releasesRepoEnv } from '../settings.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
-import { commitOf, fetchBranch, gh, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import { exchequerNote, networkFailure, networkNote, passingFailure, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -104,7 +105,7 @@ export async function selfFactsAlone(ctx: Ctx, checkout: string): Promise<{ main
   await fetchBranch(ctx.run, repo, STEWARD_BRANCH);
   const remote = `origin/${STEWARD_BRANCH}`;
   const main = stewardMainFrom({ main: { target: { oid: await commitOf(ctx.run, repo, remote) } }, kitVersion: { text: await showFile(ctx.run, repo, remote, 'kit/VERSION') }, packageJson: { text: await showFile(ctx.run, repo, remote, 'package.json') } });
-  const list = JSON.parse(await gh(ctx.run, ctx.neutralDir, 'release', 'list', '--repo', ctx.settings.stewardRepo, '--limit', '100', '--json', 'tagName')) as { tagName: string }[];
+  const list = JSON.parse(must(await hostFor(ctx).listReleases(ctx.settings.stewardRepo, 'tagName'))) as { tagName: string }[];
   return { main, tags: list.map((r) => r.tagName) };
 }
 

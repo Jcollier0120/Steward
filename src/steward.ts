@@ -7,7 +7,6 @@ import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, ste
 import { withLock } from './kit/lock.ts';
 import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
-import { gh } from './git.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
 import { run as realRun, useDotnet, type Runner } from './run.ts';
 import { expandEnv } from './kit/settings-kit.ts';
@@ -38,6 +37,7 @@ import { loadTending, tend, type OpenAgent } from './tend.ts';
 import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
+import { hostFor, must } from './hosts/index.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -140,7 +140,7 @@ async function changelogFor(ctx: Ctx, kit: string): Promise<string | null> {
   if (local) return local;
   if (!ctx.settings.stewardRepo) return null;
   try {
-    const body = JSON.parse(await gh(ctx.run, ctx.neutralDir, 'release', 'view', `kit-v${kit}`, '--repo', ctx.settings.stewardRepo, '--json', 'body')).body as string;
+    const body = JSON.parse(must(await hostFor(ctx).viewRelease(ctx.settings.stewardRepo, `kit-v${kit}`, 'body'))).body as string;
     return body.startsWith('## ') ? body : `## ${kit}\n\n${body}`;
   } catch {
     return null;

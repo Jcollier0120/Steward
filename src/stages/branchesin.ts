@@ -1,15 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { claimsOn, type Claim } from '../claims.ts';
 import { changeFiles, changeVersion, CHANGES_DIR, entryBody } from '../entries.ts';
-import { fetchBranch, gh, gitMaybe, showFile } from '../git.ts';
+import { fetchBranch, gitMaybe, showFile } from '../git.ts';
 import { CHANGELOG, entryOf, headlineOf } from '../kit/notes.ts';
 import { compareVersions } from '../kitfiles.ts';
 import type { Employee } from '../settings.ts';
 import { checkoutOf, forgetGlance, glanceOf, hostIs, type Ctx } from './common.ts';
-import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, type PrInfo } from './staff.ts';
 import { vouchOn } from './vouch.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /**
  * Branches in: work doesn't open its own pull request. A Claude Code session (or a person) claims a version for its
@@ -82,7 +80,7 @@ export async function openVouchedBranches(ctx: Ctx, e: Employee): Promise<{ open
   if (!claimed.length) return none;
   try {
     const g = glanceOf(ctx, e);
-    const prs: PrInfo[] = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), ctx.settings.team);
+    const prs: PrInfo[] = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor(ctx, e), e.repo), ctx.settings.team);
     const waiting = claimed.filter((c) => !prs.some((p) => p.head === c.branch && !p.fork));
     if (!waiting.length) return none;
     const repo = checkoutOf(e);
@@ -101,7 +99,7 @@ export async function openVouchedBranches(ctx: Ctx, e: Employee): Promise<{ open
       // Merged already (its head in the branch): its claim is done with, not a PR to open.
       if ((await ctx.run('git', ['merge-base', '--is-ancestor', head, `origin/${e.branch}`], { cwd: repo, timeoutMs: 60_000 })).code === 0) continue;
       // Someone closed its PR at this very head: closed is closed, until the branch moves.
-      const closed = JSON.parse((await gh(ctx.run, ctx.neutralDir, 'pr', 'list', '--repo', e.repo, '--head', branch, '--state', 'closed', '--json', 'number,headRefOid')) || '[]') as { number: number; headRefOid: string }[];
+      const closed = JSON.parse(must(await hostFor(ctx, e).listPrs(e.repo, { state: 'closed', head: branch, fields: 'number,headRefOid' })) || '[]') as { number: number; headRefOid: string }[];
       const shut = closed.find((p) => p.headRefOid === head);
       if (shut) {
         ctx.log(`[${e.id}] ${branch}: not opened again, as #${shut.number} was closed at its head ${head.slice(0, 7)}`);
@@ -110,15 +108,7 @@ export async function openVouchedBranches(ctx: Ctx, e: Employee): Promise<{ open
       // Another PC's turn here now (lease.ts): it opens it.
       if (ctx.lease && !(await ctx.lease.ok(e))) break;
       const p = await proposal(ctx, e, c, head, { by });
-      const dir = mkdtempSync(path.join(os.tmpdir(), 'steward-pr-'));
-      let url: string;
-      try {
-        const file = path.join(dir, 'body.md');
-        writeFileSync(file, p.body);
-        url = (await gh(ctx.run, ctx.neutralDir, 'pr', 'create', '--repo', e.repo, '--base', e.branch, '--head', branch, '--title', p.title, '--body-file', file)).trim().split('\n').pop() ?? '';
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      const url = must(await hostFor(ctx, e).createPr(e.repo, { base: e.branch, head: branch, title: p.title, body: p.body })).trim().split('\n').pop() ?? '';
       const number = Number(/\/pull\/(\d+)/.exec(url)?.[1] ?? 0);
       const line = `opened #${number || '?'} from ${branch} (v${p.version}, vouched for by ${by} at ${head.slice(0, 7)})`;
       ctx.log(`[${e.id}] ${line}`);

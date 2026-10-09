@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs';
-import { commitOf, fetchBranch, gh, gitMaybe, showFile } from './git.ts';
+import { commitOf, fetchBranch, gitMaybe, showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
 import { manorProjects, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Employee } from './settings.ts';
 import { checkoutOf, glanceOf, hostIs, type Ctx } from './stages/common.ts';
 import { holdReason, prVersions } from './stages/merge.ts';
-import { parsePrs, prListArgs, type PrInfo } from './stages/staff.ts';
+import { openPrs as listOpenPrs, parsePrs, type PrInfo } from './stages/staff.ts';
 import { agreedVersion, readVersion } from './versions.ts';
+import { hostFor } from './hosts/index.ts';
 
 /**
  * Each repository's version queue, for Manor: the version on its branch, and the open PRs that set a version above it,
@@ -157,7 +158,7 @@ async function versionAt(ctx: Ctx, t: Target, ref: string): Promise<{ version: s
 async function openPrs(ctx: Ctx, t: Target): Promise<PrInfo[]> {
   if (!t.prs || !t.repo) return [];
   const g = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee) : null;
-  const raw = g ? g.prs : JSON.parse((await gh(ctx.run, ctx.neutralDir, ...prListArgs(t.repo))) || '[]');
+  const raw = g ? g.prs : JSON.parse((await listOpenPrs(hostFor(ctx), t.repo)) || '[]');
   const authors = [...new Set(raw.map((p: any) => String(p?.author?.login ?? '')).filter(Boolean))] as string[];
   return parsePrs(JSON.stringify(raw), authors);
 }

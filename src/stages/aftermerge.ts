@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { AfterStep } from '../after.ts';
-import { gh } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import { releasedHere, type Employee, type Settings } from '../settings.ts';
 import { notHiredHere, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
+import { hostFor, must } from '../hosts/index.ts';
 
 /**
  * The steps a merged PR asks for (src/after.ts reads them from its description), run for its employee and
@@ -38,12 +38,13 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command, so it is installed another way (Manor's updates), not by the Steward`);
   const away = notHiredHere(e);
   if (away) return result(e, 'skipped', away);
-  const latest = appReleasesIn(await gh(run, ctx.neutralDir, 'release', 'list', '--repo', e.repo, '--limit', '100', '--json', 'tagName,isDraft,publishedAt'))[0];
+  const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+  const latest = appReleasesIn(must(await host.listReleases(e.repo, 'tagName,isDraft,publishedAt')))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
   const dir = installDirOf(ctx.settings, e);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  await gh(run, ctx.neutralDir, 'release', 'download', latest.tag, '--repo', e.repo, '--pattern', '*.zip', '--pattern', 'SHA256SUMS.txt', '--dir', dir, '--clobber');
+  must(await host.downloadRelease(e.repo, latest.tag, { patterns: ['*.zip', 'SHA256SUMS.txt'], dir }));
   const zips = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.zip'));
   if (zips.length !== 1) return result(e, 'refused', `${latest.tag} has ${zips.length} zips, where one is expected`);
   const zip = zips[0];
@@ -86,7 +87,7 @@ export async function approveJobs(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise
   const unnamed: string[] = [];
   for (const p of asking) {
     try {
-      const files = (JSON.parse(await gh(ctx.run, ctx.neutralDir, 'pr', 'view', String(p.number), '--repo', e.repo, '--json', 'files')).files ?? []) as { path?: string }[];
+      const files = (JSON.parse(must(await hostFor(ctx, e).viewPr(e.repo, p.number, 'files'))).files ?? []) as { path?: string }[];
       for (const f of files) {
         const m = /^jobs\/([^/]+)\.ps1$/.exec(String(f.path ?? ''));
         if (m && !jobs.includes(m[1]) && !unnamed.includes(m[1])) unnamed.push(m[1]);
