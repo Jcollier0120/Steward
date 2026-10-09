@@ -107,7 +107,7 @@ export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?:
 
 /** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
 export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null; first?: RoundState['firstRound'] }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
-  // Settling into the manor (kit 2.43.0): its first round waits its turn, or a long one runs (the look's firstRound).
+  // Settling into the manor (kit 2.43.3): its first round waits its turn, or a long one runs (the look's firstRound).
   if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: agents new to the manor do their first rounds one at a time, so this PC is never swamped.' };
   if (o.first === 'running' && o.look.firstRound) return { kind: 'busy', text: 'Settling in', title: `Its first round: ${o.look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.` };
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
@@ -398,7 +398,7 @@ export function developerOptionsNote(setBy: ManorLink | null): string {
 export const SETTLING_SVG = `<svg class="settling-mark" viewBox="0 0 44 28" width="44" height="28" aria-hidden="true"><path class="st-house" d="M24 26V11l9-7 9 7v15z"/><path class="st-door" d="M30 26v-7.5a3 3 0 0 1 6 0V26"/><circle class="st-step st-s1" cx="4" cy="23.5" r="1.4"/><circle class="st-step st-s2" cx="10" cy="21.5" r="1.4"/><circle class="st-step st-s3" cx="16" cy="23.5" r="1.4"/><circle class="st-step st-s4" cx="22" cy="21.5" r="1.4"/><path class="st-ground" d="M1 26.5h42"/></svg>`;
 
 /**
- * The settling-in banner's words (kit 2.43.0), or null when there's none: while its first round waits its turn, and
+ * The settling-in banner's words (kit 2.43.3), or null when there's none: while its first round waits its turn, and
  * while a first round runs that takes longer (the look's firstRound). A first round like any other gets none.
  */
 export function settlingText(name: string, look: Look, first: RoundState['firstRound']): string | null {
@@ -558,7 +558,7 @@ p { margin: 8px 0; }
 .banner-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 8px; padding: 8px 12px; border-radius: 6px; }
 .banner-note > span { flex: 1 1 260px; }
 .banner-note.offduty { background: var(--warn-bg); color: var(--warn); }
-/* Settling into the manor (kit 2.43.0): the role's colour, footsteps walking up to the door in turn. */
+/* Settling into the manor (kit 2.43.3): the role's colour, footsteps walking up to the door in turn. */
 .banner-note.settling { background: var(--role-soft); color: var(--fg); }
 .settling-mark { flex: none; color: var(--role); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .settling-mark .st-step { fill: currentColor; stroke: none; opacity: .2; animation: kit-step 3s linear infinite; }

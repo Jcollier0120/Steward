@@ -13,6 +13,7 @@ import { run as realRun, useDotnet, type Runner } from './run.ts';
 import { expandEnv } from './kit/settings-kit.ts';
 import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
+import { DEVELOPER_ONLY, makersPc, stewardActs } from './maker.ts';
 import { bump } from './stages/bump.ts';
 import { headsUp } from './heads-up.ts';
 import { keepVersionQueues } from './version-queue.ts';
@@ -154,7 +155,7 @@ export const releasedSomething = (r: EmployeeResult) => r.outcome === 'done' && 
 export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glance | null } = {}): Promise<Staff> {
   const c = o.glance === undefined ? ctx : { ...ctx, glance: o.glance };
   const chosen = chooseKit(c.kit);
-  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool() });
+  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool(), self: selfForStaff(c) });
   writeJson(staffFile(), s);
   try {
     pruneKitsNow(s, c.kit);
@@ -165,12 +166,22 @@ export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glan
 }
 
 /**
+ * The Steward's own repository for the staff's table, on the PC that releases it (Settings name it and its clone is
+ * here): its GitHub side shown as an employee's is, its kit the one it pins, released when it releases itself.
+ */
+function selfForStaff(ctx: Ctx): Employee | null {
+  const s = ctx.settings;
+  if (!s.releasesCastellan || !s.stewardRepo || !s.stewardCheckout || !existsSync(s.stewardCheckout)) return null;
+  return { ...stewardEmployee(s, s.stewardCheckout), usesKit: true, merges: s.mergeSelf, release: s.releaseSelf ? 'its own round' : '' };
+}
+
+/**
  * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
  * still right, and is only marked as checked; true then. False when it needs making again.
  */
 export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
   const s = loadStaff();
-  if (!s?.seen || s.rows.length !== employees.length) return false;
+  if (!s?.seen || s.rows.filter((r) => !r.self).length !== employees.length) return false;
   for (const e of employees) {
     const g = glance.repos[e.id];
     if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;
@@ -278,7 +289,8 @@ async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self:
   ctx.lease = t.guard;
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
-  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), on: !!deps };
+  // takeTurns keeps one entry per id, so a Steward that is also its own employee comes back as that employee: match by id.
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.some((e) => e.id === self.id), on: !!deps };
 }
 
 /**
@@ -359,6 +371,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
     lines.push(line);
     o.log?.(line);
   };
+  // A developer's work: off the maker's laptop, nothing runs while Developer options are off (maker.ts), and nothing is kept.
+  if (!stewardActs()) {
+    const at = new Date().toISOString();
+    log(DEVELOPER_ONLY);
+    return { stage: name, started: at, finished: at, kit: null, asked: { ...ask }, results: [], log: lines, error: DEVELOPER_ONLY };
+  }
   return withLock(
     stageLock(),
     async () => {
@@ -507,7 +525,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.results = await release(ctx, picked.employees, { kit: null, hire: true });
         } else if (!ctx.settings.releasesCastellan) {
           // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
-          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
+          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does${makersPc() ? ' ("Releases Castellan itself" in Settings)' : ''}`);
           const turns = await takeTurnsFor(ctx, o, picked.employees, null);
           out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: null }))];
         } else {
@@ -572,8 +590,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Merged or released by something that isn't this Steward (strangers.ts): looked for only in a round that asked GitHub.
           const strangers = await lookForStrangers({ ctx, glance: quiet || out.error ? null : ctx.glance, alarms: loadAlarms(), now: o.now?.() });
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
-          // which has no Manor of its own to read.
-          const ports = process.env.NODE_TEST_CONTEXT ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
+          // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
+          const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
           await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);

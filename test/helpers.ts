@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { makersPcForTests } from '../src/maker.ts';
 import { run as realRun, type Ran, type Runner } from '../src/run.ts';
 import type { Employee, Settings } from '../src/settings.ts';
 import type { Ctx } from '../src/stages/common.ts';
@@ -25,6 +26,10 @@ for (const [name, home] of [['WRIGHT_HOME', 'steward-test-wright'], ['SURVEYOR_H
 // The Exchequer's publisher key (the kit's exchequer.ts) marks the PC that releases Castellan, which settings from before
 // releasesCastellan are migrated to (migrate.ts): the tests see the owner's PC, with it, whatever this PC holds.
 process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
+
+// The maker's laptop (maker.ts, its firmware): the tests see it, wherever they run, unless one says otherwise
+// (makersPcForTests(() => false), or STEWARD_CUSTOMER=1 for a child process).
+makersPcForTests(() => true);
 
 export const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 
@@ -104,7 +109,7 @@ export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
   const lines: string[] = [];
-  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', bailiffUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true };
+  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, problemHours: 6, manorUrl: '', surveyorUrl: '', wrightUrl: '', bailiffUrl: '', reeveUrl: '', tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true, makersPc: true };
   return {
     settings,
     run: o.run,

@@ -6,7 +6,7 @@ import { manorHome } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 
 /**
- * The manor's pace (kit 2.43.0, spec/ROUND.md's "Pace"): how the agents' scheduled rounds share this PC, so they never
+ * The manor's pace (kit 2.43.3, spec/ROUND.md's "Pace"): how the agents' scheduled rounds share this PC, so they never
  * all do their heavy first work at once and grind it to a halt (a first install, every agent hired together). One
  * setting for every agent, Manor's settings.json `"backgroundPace"`:
  *
@@ -18,7 +18,7 @@ import { withAcceleratorTurn } from './npu-queue.ts';
  *     come, first served, and a holder whose process has gone gives up its place at once.
  *   - **Below-normal priority.** A scheduled round runs at below-normal priority, and so does every program it starts
  *     (Windows gives a below-normal process's children its class), so it gives way to whatever the person is doing.
- * - **full**: as before kit 2.43.0: normal priority, and no line.
+ * - **full**: as before kit 2.43.3: normal priority, and no line.
  *
  * A round the person asked for (Run now) never waits in the line, and runs at normal priority: someone is waiting on it.
  * What Heiward adds in the background (Windows' efficiency mode, a very low disk priority, a hard cap on the processor)

@@ -59,13 +59,14 @@ async function ghOk(ctx: Ctx, args: string[]): Promise<string | null> {
 
 /**
  * Sends a conflicting PR back to its author, as the module's comment says; `branchAt` is its branch's head now. What
- * happened, for its hold and the round's line; `closed` when the Wright's PR was closed (it then waits for nothing).
+ * happened, for its hold and the round's line; `closed` when the Wright's PR was closed (it then waits for nothing),
+ * `sent` when it went back (closed, or a comment left on it), not when the Steward couldn't say so.
  */
-export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[], branchAt: string | null): Promise<{ note: string; closed: boolean }> {
+export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[], branchAt: string | null): Promise<{ note: string; closed: boolean; sent: boolean }> {
   const key = `${e.repo}#${pr.number}`;
   const kept = readJson<Record<string, Kicked>>(kickbacksFile(), {});
   const was = kept[key];
-  if (was && was.head === pr.headOid && was.branch === (branchAt ?? '')) return { note: was.note, closed: was.closed };
+  if (was && was.head === pr.headOid && was.branch === (branchAt ?? '')) return { note: was.note, closed: was.closed, sent: true };
   const where = `it conflicts with ${e.branch} in ${files.join(', ')}`;
   const author = authorOf(pr);
   let done: { note: string; closed: boolean } | null = null;
@@ -89,8 +90,8 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   }
   ctx.log(`[${e.id}] #${pr.number}: ${done.note}`);
   // One that couldn't be said is tried again next round.
-  if (!said) return done;
+  if (!said) return { ...done, sent: false };
   kept[key] = { head: pr.headOid, branch: branchAt ?? '', ...done, at: new Date().toISOString() };
   writeJson(kickbacksFile(), Object.fromEntries(Object.entries(kept).slice(-300)));
-  return done;
+  return { ...done, sent: true };
 }

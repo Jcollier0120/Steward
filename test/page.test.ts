@@ -120,12 +120,31 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
   assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
+  // The Steward's own repository: a row of the table, with its release PC in it, and no stage ticks it.
+  const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
+  const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
+  const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
+  assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
+  assert.doesNotMatch(withSelf, /Merging and releasing for Steward/, 'said in its row, not under the table');
+  assert.match(withSelf, /name="employees"[^>]*value="fake"/);
+  assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
   // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
   assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
   const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };
   const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
   assert.match(withPr, /<th>Notes<\/th>/);
   assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
+  // Merge conflicts: none looked at yet, and then each with what the Steward did, its badge on the PR's line too.
+  assert.match(withPr, /Merge conflicts[\s\S]*No PR the rounds looked at has conflicted with its branch/);
+  const t = new Date().toISOString();
+  const looks = [
+    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 7, url: pr.url, title: 'Fix the thing', head: 'claude/fix', author: 'octocat', headOid: 'abc', outcome: 'sent-back', note: 'it conflicts with main in LICENSE: back with the Claude Code session that opened it, in a comment on it', files: ['LICENSE', 'package.json'], needs: ['LICENSE'], firstAt: t, at: t, lookedAt: t },
+    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 5, url: 'https://github.com/octocat/fake/pull/5', title: 'Old', head: 'claude/old', author: 'octocat', headOid: 'def', outcome: 'caught-up', note: 'merged main into it, its version lines resolved', files: ['package.json'], needs: [], firstAt: t, at: t, lookedAt: t },
+  ];
+  const withLooks = (await renderStewardBody())({ ...body, conflicts: looks, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: [] }] }, round: { ...body.round, repos: true } });
+  assert.match(withLooks, /<table class="pr-table">.*title="it conflicts with main in LICENSE[^"]*"[^>]*>.*sent back/, "the PR's line says what was done");
+  assert.match(withLooks, /<table class="conflicts">.*#7.*sent back.*back with the Claude Code session.*Conflicted in LICENSE, package\.json; LICENSE needed a person/);
+  assert.match(withLooks, /#5.*caught up.*merged main into it.*no longer open/, 'one since merged or closed says so');
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

@@ -22,7 +22,7 @@ export interface RoundState {
   /** What its rounds wait for from the person (required.ts's needsSettings, in words); null when they wait for nothing. */
   waiting: string | null;
   /**
-   * Its first round (kit 2.43.0): `waiting` in the first-round line (pace.ts), `running` while it runs, null once a
+   * Its first round (kit 2.43.3): `waiting` in the first-round line (pace.ts), `running` while it runs, null once a
    * round has gone through. The page shows the agent settling into the manor.
    */
   firstRound: 'waiting' | 'running' | null;
@@ -98,7 +98,7 @@ function recordRound(name: string, record: RoundRecord): void {
 }
 
 /**
- * round.json's `wentThrough`: each schedule's first round that went through, when (kit 2.43.0). A round.json from before
+ * round.json's `wentThrough`: each schedule's first round that went through, when (kit 2.43.3). A round.json from before
  * it, with rounds but no `wentThrough`, counts every schedule it names as through: an agent that already ran is never
  * taken for a new one, so updating never puts it in the first-round line.
  */
@@ -154,7 +154,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * Staggered: Manor may start every agent at once, so the first round comes 30 s to 3 min after start
  * (random), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
  *
- * At the manor's pace (pace.ts, kit 2.43.0; gentle unless Manor's Settings say full), a scheduled round runs at
+ * At the manor's pace (pace.ts, kit 2.43.3; gentle unless Manor's Settings say full), a scheduled round runs at
  * below-normal priority, and a schedule's first round (none has gone through: round.json's wentThrough) waits its
  * turn in one line with the other agents' first rounds, one at a time. While it waits, its state says so (waiting,
  * firstRound), and the page shows the agent settling into the manor. A round the person asks for never waits.

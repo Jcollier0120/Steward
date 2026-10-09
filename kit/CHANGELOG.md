@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.43.0
+## 2.43.3
 
 **The manor's pace: agents new to the manor do their heavy first rounds one at a time, and every scheduled round gives way to the person.** A first install, or every agent hired together, ran each one's first round at once, at normal priority: first indexes, first scans, a first look at every repository, together, and the PC ground to a halt.
 
@@ -20,6 +20,21 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - spec/ROUND.md has a Pace section.
 - **What an agent must do:** nothing: its rounds take the pace with this kit. One whose first round takes much longer than the rest gives its look a `firstRound`. An agent that schedules its own heavy work outside every() (Heiward) joins the same line through the kit's lock on `first-rounds`.
 - **Its tests:** kit/test/pace.test.ts.
+
+## 2.43.2
+
+**The Toller and the Assayer say where their work runs, and have their own scenes.**
+
+### What's new
+
+- **node/work.ts:** `WORK` entries for the Toller (its hourly round over your projects' lockfiles, changed files and tools, and one look at the listening ports; no model) and the Assayer (test runs in throwaway worktrees at below-normal priority, at most 3 a round, every 15 minutes; no model). Both are developer roles (`developerRole`): with Developer options off, their pages have no "Where its work runs".
+- **node/look.ts:** a scene for each: the Toller's striped bar lifts once the coin drops; the Assayer's balance tips and settles.
+
+### What changed
+
+- **What an agent must do:** nothing. The Toller and the Assayer show the new section and scene once they take this kit.
+- **spec/DEVELOPER-OPTIONS.md:** the developer roles' list names the Toller and the Assayer.
+- **Its tests:** kit/test/work.test.ts, kit/test/look.test.ts.
 
 ### Before you update
 

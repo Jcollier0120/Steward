@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-// The manor's pace (pace.ts, kit 2.43.0): first rounds one at a time, below-normal priority, and the page settling in.
+// The manor's pace (pace.ts, kit 2.43.3): first rounds one at a time, below-normal priority, and the page settling in.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-pace-'));
 after(() => rmSync(home, { recursive: true, force: true }));
 process.env.FIXTURE_HOME = path.join(home, 'data');
@@ -75,14 +75,14 @@ test('first rounds, one at a time: the second waits until the first has finished
   assert.deepEqual(waits, [true, false]);
 });
 
-test("a schedule's first round: none until one goes through; a round.json from before 2.43.0 counts every schedule it names as through", () => {
+test("a schedule's first round: none until one goes through; a round.json from before 2.43.3 counts every schedule it names as through", () => {
   const file = roundFile();
   assert.equal(firstRoundDone('round'), false, 'a new agent');
   writeFileSync(file, JSON.stringify({ rounds: { round: { started: 'x', finished: '2026-10-01T00:00:00.000Z', ok: false, error: 'it failed', everyMs: 1, next: null } } }));
   assert.equal(firstRoundDone('round'), true, 'an agent that ran before this kit: updating never puts it in the line');
   assert.equal(firstRoundDone('grind'), false);
   writeFileSync(file, JSON.stringify({ rounds: { round: { ok: false } }, wentThrough: {} }));
-  assert.equal(firstRoundDone('round'), false, 'since 2.43.0, only a round that went through counts');
+  assert.equal(firstRoundDone('round'), false, 'since 2.43.3, only a round that went through counts');
   writeFileSync(file, JSON.stringify({ rounds: {}, wentThrough: { round: '2026-10-08T00:00:00.000Z' } }));
   assert.equal(firstRoundDone('round'), true);
   assert.ok(readFileSync(file, 'utf8'));

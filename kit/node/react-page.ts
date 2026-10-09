@@ -55,7 +55,7 @@ export interface PageShell {
   scene: string;
   /** Off duty: since when, in words; null on duty. */
   offDutySince: string | null;
-  /** Settling into the manor (kit 2.43.0): the banner's words and its drawing (the kit's markup), while its first round waits its turn or a long one runs; null otherwise. */
+  /** Settling into the manor (kit 2.43.3): the banner's words and its drawing (the kit's markup), while its first round waits its turn or a long one runs; null otherwise. */
   settling: { text: string; svg: string } | null;
   manor: { name: string; url: string; theme: string; settingsUrl: string } | null;
   themes: ShellTheme[];
