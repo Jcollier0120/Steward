@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.43.5
+
+**A queue ticket can say what the request is for, and an agent can say it is setting up.**
+
+### What's new
+
+- **spec/NPU-QUEUE.md, core/queue.js:** a ticket's contents may carry `doing`, what the request is for ("search index: Heiward (17 of 673 files)"), at most 80 characters (`DOING_MAX`, cut with an ellipsis by writers and readers). `ticketText` takes it, `startTurn`'s and `withAcceleratorTurn`'s options pass it (`doing`), and `waitingOf` / `queueSnapshot` give it back for status pages. A program on a long job says the job's overall progress there, so a status page can show that rather than guess when one turn ends. Informational only: nobody's turn depends on it.
+- **node/server.ts:** `SettingUp` and `settingUpFromPing()`. An agent doing a long piece of work once, or again after a big change (Reeve reading every project for search, the first time and with each new model), puts `settingUp: { text, done?, total?, unit?, until?, accelerator? }` in its ping (`ServeOptions.ping`) until it's done. Manor shows it as a calm banner, never an alarm.
+
+### What changed
+
+- **What an agent must do:** nothing. A ticket without `doing` and a ping without `settingUp` read as before. An agent that queues long jobs should pass `doing`. One that sets itself up at length should say `settingUp`.
+- **The kit's dotnet part** doesn't write `doing` yet. Its tickets read as before.
+- **Its tests:** kit/test/core.test.ts, kit/test/npu-queue.test.ts, kit/test/setting-up.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.43.4
 
 **The kit's MIT license comes with the kit, as `src/kit/LICENSE`.** An agent's own LICENSE now points to the kit's license instead of pasting the MIT text, so the kit brings its license itself, and every agent's release carries it beside the kit.

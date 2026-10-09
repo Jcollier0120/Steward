@@ -46,7 +46,7 @@ The line is the folder next to the lock: `<lock>.queue` (`%USERPROFILE%\.npu-age
 | `pid` | the waiter's process id, in decimal |
 | `nonce` | random lowercase hex (8 characters), so two waiters in one process never collide |
 
-Its contents are informational: `{"pid", "since", "lane", "who"}`. `who` names the program for status displays. Readers must not depend on the contents. A name that doesn't match `^([01])-(\d{17})-(\d+)-([0-9a-z]+)\.ticket$` is ignored.
+Its contents are informational: `{"pid", "since", "lane", "who"}`, and optionally `"doing"`. `who` names the program for status displays. `doing` says what this request is for, in words a person reads beside `who` (`search index: Heiward (17 of 673 files)`): at most 80 characters (a writer cuts a longer one, ending it in `…`, and so does a reader), left out when there's nothing to say. A program that takes turn after turn for one job says the job's overall progress there, so a status display can show it rather than guess when this one turn ends. Readers must not depend on the contents, and a writer that predates `doing` is read as before. A name that doesn't match `^([01])-(\d{17})-(\d+)-([0-9a-z]+)\.ticket$` is ignored.
 
 **The order of the line:** sort by (effective lane, time, pid, nonce), all ascending; the nonce compares as a string.
 - The effective lane is `0` for an interactive ticket.

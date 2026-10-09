@@ -120,7 +120,7 @@ const readText = (file: string) => {
 /** Who holds the NPU and who is waiting, for status pages. Reads only. */
 export function queueSnapshot(lockDir: string): {
   holder: { pid: number; since: number } | null;
-  waiting: { pid: number; lane: Lane; since: number; who?: string }[];
+  waiting: { pid: number; lane: Lane; since: number; who?: string; doing?: string }[];
 } {
   let holder: { pid: number; since: number } | null = core.readOwner(readText(path.join(lockDir, 'owner.json')));
   if (!holder && existsSync(lockDir)) holder = { pid: 0, since: 0 };
@@ -198,6 +198,8 @@ export interface TurnOptions {
   lane?: Lane;
   /** Shown to whoever looks at the line ("reeve", "heiward", ...). */
   who?: string;
+  /** What this request is for, shown beside who ("search index: Heiward (17 of 673 files)"): informational, at most 80 characters. */
+  doing?: string;
   /** Don't join when this many are already waiting: throws QueueFull at once. */
   maxAhead?: number;
   /** Told what's worth a line in a log: waiting behind others, taking over from a holder that died. */
@@ -345,6 +347,7 @@ export async function withAcceleratorTurn<T>(lockDirs: string[], fn: (slot: numb
       nonce: randomBytes(4).toString('hex'),
       lane: currentLane(opts.lane),
       who: opts.who ?? path.basename(process.argv[1] ?? 'node'),
+      doing: opts.doing,
       waitMs: opts.waitMs,
       staleMs: opts.staleMs,
       maxAhead: opts.maxAhead,
