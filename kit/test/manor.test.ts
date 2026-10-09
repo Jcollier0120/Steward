@@ -212,9 +212,9 @@ test('a project: its name, checkout, repo, branch, test, version files and branc
   ], NO_OWN, problems);
   assert.deepEqual(problems, []);
   assert.deepEqual(projects, [
-    { name: 'Side Car', checkout: 'C:\\Projects\\SideCar', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true },
-    { name: 'Full', checkout: 'D:\\code\\full\\', repo: 'someone/full.js', branch: 'release/2.x', test: 'npm test', versionFiles: ['package.json', 'package-lock.json'], cleanBranches: false },
-    { name: 'Share', checkout: '\\\\nas\\code\\share', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true },
+    { name: 'Side Car', checkout: 'C:\\Projects\\SideCar', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: false, release: '' },
+    { name: 'Full', checkout: 'D:\\code\\full\\', repo: 'someone/full.js', branch: 'release/2.x', test: 'npm test', versionFiles: ['package.json', 'package-lock.json'], cleanBranches: false, merges: false, release: '' },
+    { name: 'Share', checkout: '\\\\nas\\code\\share', repo: null, branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: false, release: '' },
   ]);
   assert.deepEqual(projectsFrom(undefined, NO_OWN), [], 'none listed');
   assert.deepEqual(projectsFrom(null, NO_OWN), []);
@@ -326,12 +326,41 @@ test("the manor's own: its staff's and announced agents' repositories, the Stewa
   });
   // Nothing installed: nothing, never a name or folder of the kit's own.
   assert.deepEqual(manorOwn({ home: path.join(tmp, 'nowhere'), stewardHome: path.join(tmp, 'nowhere') }), { repos: [], checkouts: [] });
+  // Kit 2.42.0: the Steward's employees are the manor's own only where it releases Castellan, those off the kit too.
+  const noStaff = path.join(tmp, 'no-staff.json');
+  writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ releasesCastellan: true, employees: [{ id: 'clerk', repo: 'me/Clerk', checkout: 'E:\\src\\Clerk', usesKit: true }, { id: 'site', repo: 'me/Site', checkout: 'E:\\src\\Site', usesKit: false }] }));
+  assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: noStaff }).repos, ['Jcollier0120/Chamberlain', 'me/Clerk', 'me/Site'], "Castellan's site, off the kit, is still Castellan's");
+  writeFileSync(path.join(steward, 'settings.json'), JSON.stringify({ releasesCastellan: false, employees: [{ id: 'mine', repo: 'me/Mine', checkout: 'E:\\src\\Mine', usesKit: true }] }));
+  assert.deepEqual(manorOwn({ home, stewardHome: steward, staffFile: noStaff }), { repos: ['Jcollier0120/Chamberlain'], checkouts: [] }, "on anyone else's PC the Steward's repositories are the person's, to track as projects");
+});
+
+test('a project says whether the Steward merges it and how it is released: off unless it says, and only with what they need', () => {
+  const problems: string[] = [];
+  const projects = projectsFrom([
+    { name: 'Mine', checkout: 'D:\\mine', repo: 'me/mine', versionFiles: ['package.json'], merges: true, release: ' tag ' },
+    { name: 'Cmd', checkout: 'D:\\cmd', repo: 'me/cmd', versionFiles: ['package.json'], release: 'npm run release', merges: null },
+  ], NO_OWN, problems);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(projects.map((p) => [p.name, p.merges, p.release]), [['Mine', true, 'tag'], ['Cmd', false, 'npm run release']]);
+  const cases: [unknown, RegExp][] = [
+    [{ name: 'A', checkout: 'C:\\x', repo: 'me/a', merges: 'yes' }, /"merges" as true or false/],
+    [{ name: 'A', checkout: 'C:\\x', merges: true }, /says "merges", but has no "repo"/],
+    [{ name: 'A', checkout: 'C:\\x', repo: 'me/a', release: 'tag' }, /needs a "repo" and its "versionFiles"/],
+    [{ name: 'A', checkout: 'C:\\x', versionFiles: ['package.json'], release: 'tag' }, /needs a "repo"/],
+    [{ name: 'A', checkout: 'C:\\x', repo: 'me/a', versionFiles: ['package.json'], release: 'one\ntwo' }, /"release" as "tag" or one command/],
+    [{ name: 'A', checkout: 'C:\\x', repo: 'me/a', versionFiles: ['package.json'], release: 7 }, /"release"/],
+  ];
+  for (const [entry, said] of cases) {
+    const p: string[] = [];
+    assert.deepEqual(projectsFrom([entry], NO_OWN, p), [], JSON.stringify(entry));
+    assert.match(p[0], said);
+  }
 });
 
 test("manorProjects: Manor's projects, checked, read afresh; none without an installed Manor", () => {
   const home = manorAt('projects', { projects: [{ name: 'Side car', checkout: 'D:\\side-car', versionFiles: ['package.json'] }, { name: 'Bad' }] });
   writeFileSync(path.join(home, 'app', 'staff.json'), JSON.stringify({ agents: [{ id: 'porter', release: { repo: 'Jcollier0120/Porter' } }] }));
-  assert.deepEqual(manorProjects(home), [{ name: 'Side car', checkout: 'D:\\side-car', repo: null, branch: 'main', test: null, versionFiles: ['package.json'], cleanBranches: true }]);
+  assert.deepEqual(manorProjects(home), [{ name: 'Side car', checkout: 'D:\\side-car', repo: null, branch: 'main', test: null, versionFiles: ['package.json'], cleanBranches: true, merges: false, release: '' }]);
   writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ projects: [{ name: 'Porter', checkout: 'D:\\porter', repo: 'Jcollier0120/Porter' }, { name: 'Other', checkout: 'D:\\other', cleanBranches: false }] }));
   assert.deepEqual(manorProjects(home).map((p) => [p.name, p.cleanBranches]), [['Other', false]], "Manor's staff, from its app's staff.json, is never a project");
   assert.deepEqual(manorProjects(manorAt('projects-none', {})), []);

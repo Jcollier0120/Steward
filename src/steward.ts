@@ -278,7 +278,8 @@ async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self:
   ctx.lease = t.guard;
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
-  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.includes(self), on: !!deps };
+  // takeTurns keeps one entry per id, so a Steward that is also its own employee comes back as that employee: match by id.
+  return { acting: picked.filter((e) => t.acting.includes(e)), elsewhere, selfActs: !self || t.acting.some((e) => e.id === self.id), on: !!deps };
 }
 
 /**
@@ -310,15 +311,18 @@ function selfForTurns(ctx: Ctx, o: StageOptions, merging: boolean, releasing: bo
 /** Whether this PC is online: the kit's look, or online under node --test (StageOptions.online). */
 export const onlineNow = (): Promise<boolean> => (process.env.NODE_TEST_CONTEXT ? Promise.resolve(true) : kitOnline());
 
-/** The round's look at the Steward's own versions: from its glance at GitHub, else asked on their own. */
-async function selfRound(ctx: Ctx, o: StageOptions): Promise<EmployeeResult[]> {
+/**
+ * The round's look at the Steward's own versions: from its glance at GitHub, else asked on their own; asked on their own
+ * too once this round has merged into its main (`moved`), which the glance, from before, doesn't show.
+ */
+async function selfRound(ctx: Ctx, o: StageOptions, moved = false): Promise<EmployeeResult[]> {
   if (!ctx.settings.releaseSelf) return [];
   if (process.env.NODE_TEST_CONTEXT && !o.self) return [];
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
   // No repository or clone of its own in Settings: it doesn't release itself.
   if (!ctx.settings.stewardRepo || !checkout) return [];
   try {
-    const facts = ctx.glance ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
+    const facts = ctx.glance && !moved ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
     return await releaseSelf(ctx, { checkout, ...facts });
   } catch (e) {
     ctx.log(`[steward] its own releases: ${(e as Error).message}`);
@@ -403,28 +407,48 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const whole = !ask.employees?.length;
           const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
           turnsOn = turns.on;
-          let employees = turns.acting;
+          const acting = turns.acting;
+          // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
+          // the head of its line (merge.ts), and the new kit released at once (selfRound), so the agents' PRs that take
+          // that kit are tested after it is there, in this round. Not in a stage asked about some of them.
+          const self = (round || ask.team) && whole && turns.selfActs ? selfEmployee(ctx, o) : null;
+          let selfLine: EmployeeResult | null = null;
+          let selfMovedMain = false;
+          if (self) {
+            const [r] = await merge(ctx, [self], { yes, team: true });
+            const { merged: selfMerged, held: prs, ...line } = r;
+            selfLine = line;
+            if (prs.length) held.push({ employee: self, prs });
+            if (selfMerged.length) selfMovedMain = true;
+          }
+          // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
+          const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
+          if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
+            // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
+            // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
+            try {
+              ctx.kit = await kitInfo(ctx.run, ctx.neutralDir, ctx.settings.stewardRepo);
+              log(`kit ${latestKit(ctx.kit)} released: every employee's PRs looked at again with it`);
+            } catch (err) {
+              log(`couldn't read the kit's releases again: ${(err as Error).message}`);
+            }
+          }
+          let employees = acting;
           if (round) {
-            plan = planRound({ employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            plan = planRound({ employees: acting, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
           const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
-          out.results = [...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r)];
-          held = merged.flatMap((r) => {
-            const employee = employees.find((e) => e.id === r.id);
-            return employee && r.held.length ? [{ employee, prs: r.held }] : [];
-          });
+          out.results = [...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
+          held.push(
+            ...merged.flatMap((r) => {
+              const employee = employees.find((e) => e.id === r.id);
+              return employee && r.held.length ? [{ employee, prs: r.held }] : [];
+            }),
+          );
           // Those not looked at still have the PRs that waited when they last were: the alarms go on counting their hours.
           if (plan) held.push(...heldBefore(seen!, plan.quiet));
-          // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts); not in a stage asked about some of them.
-          const self = (round || ask.team) && whole && turns.selfActs ? selfEmployee(ctx, o) : null;
-          if (self) {
-            const [r] = await merge(ctx, [self], { yes, team: true });
-            const { merged: _m, held: prs, ...line } = r;
-            out.results.push(line);
-            if (prs.length) held.push({ employee: self, prs });
-          }
           // A PR that waits only on something settling within minutes: the next round comes sooner (agent.ts).
           const brief = held.flatMap((h) => h.prs.filter((p) => !p.draft && waitsBriefly(p.why)).map((p) => `${h.employee.name} #${p.number}`));
           if (round && brief.length) {
@@ -452,8 +476,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
             const released = await releaseUnreleased(ctx, employees.filter((e) => !releasedNow.has(e.id)));
             out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
-            // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
-            if (whole && turns.selfActs) out.results.push(...(await selfRound(ctx, o)));
+            // The Steward's own, released before the agents' merges (above).
+            out.results.push(...selfReleases);
             // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
             // merged and released by later rounds.
             const newest = latestKit(ctx.kit);
