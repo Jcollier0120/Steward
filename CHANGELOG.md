@@ -2,6 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.9
+
+**The kit it hands out, 2.43.3, keeps the agents from all doing their heavy first work at once.**
+
+### What changed
+
+- The Steward hands out kit 2.43.3. Agents new to the manor do their first rounds one at a time, and their pages say they're settling in. Every agent's scheduled rounds run at low priority, so they give way to whatever you are doing. Manor's Settings will have the switch for it; until then it is on.
+
 ## 0.28.8
 
 **The Steward has a row of its own in the staff table, and is never looked after twice.**
