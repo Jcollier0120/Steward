@@ -120,6 +120,14 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(inTable, /Merging and releasing for Clerk/, 'a row in the table says it there');
   assert.match(inTable, /Merging and releasing for Porter: this PC \(kept there\)/, 'a turn with no row, under the table');
   assert.doesNotMatch(html, /<h2[^>]*>Release PC/);
+  // The Steward's own repository: a row of the table, with its release PC in it, and no stage ticks it.
+  const self = { ...rows[0], id: 'steward', name: 'Steward', repo: 'octocat/steward', self: true };
+  const selfTurn = row({ id: 'steward', name: 'Steward', repo: 'octocat/steward', status: 'here', holder: 'this PC' });
+  const withSelf = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [rows[0], self] }, round: { ...body.round, repos: true }, turns: { at: null, rows: [selfTurn] } });
+  assert.match(withSelf, /href="https:\/\/github\.com\/octocat\/steward"/);
+  assert.doesNotMatch(withSelf, /Merging and releasing for Steward/, 'said in its row, not under the table');
+  assert.match(withSelf, /name="employees"[^>]*value="fake"/);
+  assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
   // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
   assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
   const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };

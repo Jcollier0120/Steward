@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.8
+
+**The Steward has a row of its own in the staff table, and is never looked after twice.**
+
+### What changed
+
+- On the PC that releases Castellan, the Steward's own repository is a row of the staff table, like every employee's: its checkout, branch, kit, latest release, release PC and open pull requests. Its release PC sits in that row, so the lines that used to appear under the table for it (sometimes twice) are gone.
+- Its row isn't one of the stages' tick boxes: its own rounds merge and release it, as before.
+- Found on this PC no longer offers the Steward's own repository. If it was looked after from there already, that extra entry is ignored, so its pull requests aren't merged twice. You can remove it from Settings, under Repositories.
+- Version claims for the Steward are now let go once their work lands or goes stale, as every other repository's are.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Steward's row appears the next time the table is refreshed.
+
 ## 0.28.7
 
 **Look after several of the repositories found on this PC in one go.**

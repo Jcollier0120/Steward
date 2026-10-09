@@ -663,11 +663,14 @@ export function manorTakesOver(own: Employee[], home = manorHome()): boolean {
  * releases Castellan, and none of the maker's own repositories is looked after, even when the file or Manor's list names
  * one (makersOwn): Castellan's, its site's and its Exchequer's are its makers' alone; one of Manor's list that would
  * take the id of one of Castellan's agents gets its own (porter-2). Where the Wright isn't installed, nothing is handed
- * to it and its drafts aren't looked at. Pure, but for asking the PC (makersPc, Manor's staff) unless `o` says.
+ * to it and its drafts aren't looked at. On the PC that releases Castellan, the Steward's own repository is never an
+ * employee as well (one looked after by mistake): it is looked after as itself (stages/selfmerge.ts), and twice would
+ * merge it twice. Pure, but for asking the PC (makersPc, Manor's staff) unless `o` says.
  */
 export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null, o: { makers?: boolean; ids?: Set<string> } = {}): Settings {
   let out = s;
   const makers = o.makers ?? makersPc();
+  if (s.releasesCastellan && s.employees.some((e) => isSelf(s, e))) out = { ...out, employees: out.employees.filter((e) => !isSelf(s, e)) };
   if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
   if (!makers) out = { ...out, releasesCastellan: false, makersPc: false };
   if (!out.releasesCastellan)
@@ -695,6 +698,13 @@ export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProje
 export const releasesRepoEnv = (s: Pick<Settings, 'releasesCastellan' | 'releasesRepo'>): Record<string, string> => ({ MANOR_RELEASES_REPO: s.releasesCastellan && makersPc() ? s.releasesRepo : '' });
 
 export const settingsFile = () => dataFile('settings.json');
+
+/** Whether a repository is the Steward's own, as Settings name it: its repository, or its clone. */
+export function isSelf(s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>, e: { repo?: string; checkout?: string; path?: string }): boolean {
+  const dir = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+  const clone = e.checkout ?? e.path;
+  return (!!s.stewardRepo && !!e.repo && e.repo.toLowerCase() === s.stewardRepo.toLowerCase()) || (!!s.stewardCheckout && !!clone && dir(clone) === dir(s.stewardCheckout));
+}
 
 /** The Steward's own repository: Settings' when they name it, else the origin of the clone they name, else none. */
 export const selfRepoOf = (s: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): string => s.stewardRepo || (s.stewardCheckout ? (originRepo(s.stewardCheckout) ?? '') : '');
