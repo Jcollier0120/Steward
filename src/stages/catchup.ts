@@ -9,6 +9,7 @@ import { runChecks } from './bump.ts';
 import { bumpDirOf, checkoutOf, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { carryTested } from './prtest.ts';
 import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, renameKitInTopEntry, repinKit } from './kitpart.ts';
 
 /**
@@ -28,6 +29,11 @@ import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitV
  * changelog entry, its kit.json pin of its own kit and its title follow the kit's new version.
  * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
  * (steward/kit-…).
+ *
+ * A team PR vouched for at its head, or whose checks passed here there, keeps that standing through a catch-up that
+ * resolved nothing but version lines and changelogs (keepsStanding): its new head merges without its checks run again,
+ * the same trust a PR only behind its branch already gets. Before this, every merge cost each other open PR a catch-up
+ * and a full test run, since two PRs side by side always meet in the version lines.
  *
  * A kit PR of the Steward's is caught up by the same rules, and, since no one else tests it, its checks run (its kit
  * filled again, then the employee's tests, as its bump ran them) before it is pushed. A kit PR that conflicts beyond
@@ -214,6 +220,10 @@ export interface CaughtUp {
   version?: string;
   /** The kit's version it carries, in the Steward's own repository (stages/kitpart.ts). */
   kitVersion?: string;
+  /** The head it pushed. */
+  head?: string;
+  /** Its standing from before (`carry`) was carried to that head, so it merges without being tested again (keepsStanding). */
+  carried?: boolean;
 }
 
 /** npm's lockfile, which carries package.json's version twice (its own, and its root package's). */
@@ -222,6 +232,18 @@ const named = (files: string[], f: string) => files.some((x) => x.replace(/\\/g,
 
 /** package-lock.json, when an employee's version files name package.json but not it: npm keeps it in step all the same. */
 export const lockBeside = (files: string[]) => (named(files, 'package.json') && !named(files, LOCKFILE) ? [LOCKFILE] : []);
+
+/**
+ * Whether a catch-up that conflicted in `conflicted` keeps the PR's standing (prtest.ts carryTested): every file it
+ * resolved is a version file (the lock beside them too), the changelog, or, where the repository carries the kit
+ * (`kit`), kit/VERSION and the kit's changelog. Such a catch-up writes nothing of its own but versions and entries, so
+ * what passed at the PR's head before still says what its code does. kit.json, or any other file, doesn't: a different
+ * kit is different code. One with no conflict at all (only behind, or given a new version) keeps it too. Pure.
+ */
+export function keepsStanding(conflicted: string[], versionFiles: string[], kit: boolean): boolean {
+  const versions = new Set([...versionFiles, ...lockBeside(versionFiles)].map((f) => f.replace(/\\/g, '/').toLowerCase()));
+  return conflicted.every((f) => versions.has(f.replace(/\\/g, '/').toLowerCase()) || isChangelog(f) || (kit && (isKitVersionFile(f) || isKitChangelog(f))));
+}
 
 /**
  * The files a catch-up settles the version in: the employee's version files, and package-lock.json beside them
@@ -279,9 +301,11 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
 
 /**
  * One team PR (or kit PR of the Steward's) caught up with its branch, as the module's comment says: `released` are the employee's released
- * versions, `taken` the versions other open PRs set (which keep theirs).
+ * versions, `taken` the versions other open PRs set (which keep theirs). `carry`: what passed at its head before ("checks
+ * passed here at abc1234", or its vouch), carried to the head it pushes where the catch-up touched only versions and
+ * changelogs (keepsStanding), so it isn't tested again.
  */
-export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] } }): Promise<CaughtUp> {
+export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null }): Promise<CaughtUp> {
   const { run } = ctx;
   const kitPr = isKitPr(pr);
   if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
@@ -431,17 +455,25 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     // Another PC's turn here now (lease.ts): it catches this PR up.
     if (ctx.lease && !(await ctx.lease.ok(e))) return said({ done: false, note: `${did.join('; ')}, but another PC publishes ${e.name} now, so it wasn't pushed` });
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
+    const pushed = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
     // A kit PR's new head, whose checks passed here: the Surveyor's GET /api/tested (tested.ts).
-    if (kitPr) recordTested(e.id, { commit: (await git(run, dir, 'rev-parse', 'HEAD')).trim(), stage: 'catch-up', branch: pr.head, pr: pr.number, version: choice.version });
+    if (kitPr) recordTested(e.id, { commit: pushed, stage: 'catch-up', branch: pr.head, pr: pr.number, version: choice.version });
+    // What passed at its head before still holds, where the catch-up wrote only versions and entries.
+    const carried = !kitPr && !!o.carry && keepsStanding(conflictedFiles, e.versionFiles, !!kit);
+    if (carried) {
+      carryTested(e, pr, pushed, o.carry!);
+      did.push(`its checks not run again (only version lines and the changelog changed since ${pr.headOid.slice(0, 7)})`);
+    }
     const note = did.join('; ');
     ctx.log(`[${e.id}] #${pr.number}: caught up (${note})`);
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
     let title = choice.why && pr.title.includes(headV) ? pr.title.split(headV).join(choice.version) : pr.title;
     if (kit?.why && kHead) title = title.replace(new RegExp(`\\b(kit )${kHead.replace(/\./g, '\\.')}\\b`, 'i'), `$1${kit.version}`);
     if (title !== pr.title) await gh(run, ctx.neutralDir, 'pr', 'edit', String(pr.number), '--repo', e.repo, '--title', title).catch(() => '');
-    await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${kitPr ? 'The next round merges it.' : 'It merges once its checks pass at the new head.'}`).catch(() => '');
+    const next = kitPr ? 'The next round merges it.' : carried ? 'It merges without being tested again.' : 'It merges once its checks pass at the new head.';
+    await gh(run, ctx.neutralDir, 'pr', 'comment', String(pr.number), '--repo', e.repo, '--body', `Caught up by the Steward: ${note}. ${next}`).catch(() => '');
     // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
-    return said({ done: true, note, version: choice.version, ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) });
+    return said({ done: true, note, version: choice.version, head: pushed, ...(carried ? { carried } : {}), ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
