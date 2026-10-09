@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.11
+
+**More pull requests caught up without help: lockfiles, and changelogs whose older notes were edited.**
+
+### What changed
+
+- When a pull request falls behind and its `package-lock.json` clashes only in its version lines, the Steward now settles it as it does `package.json`, even where its settings name `package.json` alone. Before, it handed the pull request back for a person to merge.
+- When a pull request edited older entries of its changelog (a spelling swept through the notes, say) while the branch added a new entry, the Steward now keeps both: the branch's new entry, and the pull request's wording of the older ones. Only an older entry changed differently on both sides still goes back to its author.
+- When the Steward changes a pull request's version, its `package-lock.json` follows too, wherever it said the same version as `package.json`.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.10
 
 **The kit it hands out, 2.43.4, brings its own MIT license.**
