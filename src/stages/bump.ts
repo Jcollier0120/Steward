@@ -3,7 +3,8 @@ import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
-import { commitOf, fetchBranch, git, onOrigin, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
+import { affectedTests, nodeTestScript, scriptsIn } from '../affected.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
@@ -122,11 +123,15 @@ export const needsNpmCi = (dir: string) =>
  * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
   const steps: string[] = [];
   if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) steps.push('npm ci --no-audit --no-fund');
   if (e.fill) steps.push(e.fill);
-  steps.push(...e.test);
+  for (const step of e.test) {
+    // Only the tests the change reaches (affected.ts), where the caller asks and `npm test` is a plain node --test.
+    if (o.affected && step.trim() === 'npm test') steps.push(...(await affectedSteps(ctx, dir, o.affected, o.say)));
+    else steps.push(step);
+  }
   for (const step of steps) {
     const t0 = Date.now();
     const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
@@ -146,6 +151,64 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     }
   }
   return null;
+}
+
+/**
+ * A run of only the tests a change reaches (affected.ts): the change is the worktree's HEAD against `base` (the employee's
+ * branch on origin). `chose` is filled with what was run, for the vouch's status and the PR test's note.
+ */
+export interface AffectedScope {
+  base: string;
+  chose?: string;
+}
+
+/**
+ * What runs in place of `npm test` for an AffectedScope: its pretest, then `node <its flags> --test <the affected files>`;
+ * nothing when no test reaches the change; `npm test` itself when the script isn't a plain node --test, the change can't
+ * be read, or it reaches everything. Never throws.
+ */
+export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope, say: (line: string) => void): Promise<string[]> {
+  const whole = (why: string) => {
+    scope.chose = 'the whole suite';
+    say(`npm test: the whole suite (${why})`);
+    return ['npm test'];
+  };
+  try {
+    const scripts = scriptsIn(dir);
+    const plain = nodeTestScript(scripts.test);
+    if (!plain) return whole("its test script isn't a plain node --test");
+    const names = await gitMaybe(ctx.run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
+    const patch = await gitMaybe(ctx.run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
+    if (names === null || patch === null) return whole(`git couldn't compare it with ${scope.base}`);
+    const changed = names
+      .split('\n')
+      .map((l) => l.trim().split('\t'))
+      .filter((p) => p.length >= 2)
+      .map(([status, file]) => ({ status, path: file }));
+    const patches = patchesByFile(patch);
+    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '' });
+    if (a.all) return whole(a.why);
+    if (!a.files.length) {
+      scope.chose = 'no test reaches the change';
+      say(`npm test: skipped, no test reaches the change (${a.why})`);
+      return scripts.pretest ? ['npm run pretest'] : [];
+    }
+    scope.chose = `affected: ${a.files.length} of ${a.tests.length} test files`;
+    say(`npm test: ${scope.chose} (${a.why})`);
+    return [...(scripts.pretest ? ['npm run pretest'] : []), ['node', ...plain.flags, '--test', ...a.files.map((f) => `"${f}"`)].join(' ')];
+  } catch (err) {
+    return whole(`couldn't work out which: ${(err as Error).message}`);
+  }
+}
+
+/** A `git diff` cut into each file's part, by its path (the b/ side; the a/ side for a deletion). Pure. */
+export function patchesByFile(patch: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const part of patch.split(/^(?=diff --git )/m)) {
+    const m = /^diff --git a\/(\S+) b\/(\S+)/.exec(part);
+    if (m) out.set(m[2] === '/dev/null' ? m[1] : m[2], part);
+  }
+  return out;
 }
 
 /** Where runChecks keeps the whole output of the step that failed in a worktree: beside it, as <worktree>.log. */
