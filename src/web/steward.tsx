@@ -676,7 +676,7 @@ function FoundCard({ f, finding, now }: { f: FoundView | undefined; finding: boo
         ) : (
           <>
             <Text variant="muted" as="p">
-              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched. It merges your ready PRs, or releases its new versions, only if you tick that.
+              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched. It merges your ready PRs, or releases its new versions, only if you tick that.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
             </Text>
             <table>
               <tbody>

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
-import { originRepo } from './kit/manor.ts';
+import { manorHome, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
@@ -590,12 +590,53 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
 const REPO_NAME = new RegExp(`^${REPO.pattern}$`);
 
 /**
+ * One of Manor's tracked repositories (the kit's spec/REPOSITORIES.md) as the Steward looks after it: merged where it
+ * says `merges`, released where it says `release`, its version claimed in its `versionFiles`; never on the kit, never
+ * installed. Null for one with no repository on GitHub: the Steward works through pull requests. `taken` are the ids
+ * already given, so each gets its own.
+ */
+export function employeeOfProject(p: ManorProject, taken: string[] = []): Employee | null {
+  if (!p.repo) return null;
+  const base = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'repository';
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
+  return { id, name: p.name, repo: p.repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories" };
+}
+
+/** Manor's tracked repositories as the Steward's employees, each with its own id; those with no GitHub repository left out. */
+export function employeesOfProjects(projects: ManorProject[]): Employee[] {
+  const out: Employee[] = [];
+  for (const p of projects) {
+    const e = employeeOfProject(p, out.map((x) => x.id));
+    if (e) out.push(e);
+  }
+  return out;
+}
+
+/** Manor is installed here (its app folder is there): then, off the makers' PC, its Repositories are the Steward's. */
+export const manorInstalled = (home = manorHome()) => existsSync(path.join(home, 'app'));
+
+/**
+ * Whether Manor's Repositories are the Steward's list here (off the makers' PC): Manor is installed and has brought in
+ * the repositories the Steward had (its settings.json's projectsFromSteward, Manor 0.16.24 on), or the Steward has none
+ * of its own to lose. Before that, an older Manor's list would leave out what the person gave the Steward.
+ */
+export function manorTakesOver(own: Employee[], home = manorHome()): boolean {
+  if (!manorInstalled(home)) return false;
+  if (!own.length) return true;
+  const m = readJson<Record<string, unknown> | null>(path.join(home, 'settings.json'), null);
+  return !!m && typeof m === 'object' && m.projectsFromSteward !== undefined;
+}
+
+/**
  * The settings as the Steward works by them: on a PC that doesn't release Castellan itself (every PC but its makers'),
  * nothing of Castellan's runs, whatever the file says: no kit rollout, no releases or PRs of the Steward's own, and no
- * repository takes the kit; the releases repository isn't used. Where the Wright isn't installed, nothing is handed to
- * it and its drafts aren't looked at. Pure.
+ * repository takes the kit; the releases repository isn't used. There, where Manor is installed, the repositories it
+ * looks after are Manor's Repositories (`tracked`, the kit's spec/REPOSITORIES.md), the one list every agent derives
+ * its own from; its own employees are read only where there is no Manor. Where the Wright isn't installed, nothing is
+ * handed to it and its drafts aren't looked at. Pure.
  */
-export function inEffect(s: Settings, wright = s.wrightHere): Settings {
+export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null): Settings {
   let out = s;
   if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
   if (!s.releasesCastellan)
@@ -607,7 +648,7 @@ export function inEffect(s: Settings, wright = s.wrightHere): Settings {
       stewardRepo: '',
       stewardCheckout: '',
       releasesRepo: '',
-      employees: out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
+      employees: tracked ? employeesOfProjects(tracked) : out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
     };
   return out;
 }
@@ -648,5 +689,7 @@ export function loadSettings(): Settings {
   fillMigrationGaps({ settingsFile: settingsFile() });
   // Once, for an install from before the Steward looked after anyone's repositories: today's behaviour, written out.
   migrateToOwnRepos({ settingsFile: settingsFile(), dataDir });
-  return inEffect(normalizeSettings(readJson<unknown>(settingsFile(), {})).settings);
+  const s = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
+  // Off the makers' PC, with Manor here: its Repositories, read afresh (the kit's manorProjects).
+  return inEffect(s, s.wrightHere, !s.releasesCastellan && manorTakesOver(s.employees) ? manorProjects() : null);
 }
