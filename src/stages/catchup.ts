@@ -241,7 +241,7 @@ export function settledFiles(dir: string, files: string[]): string[] {
 }
 
 /** Each version file in a folder set to `version` where it says otherwise; the files changed. */
-function settleVersion(dir: string, files: string[], version: string): string[] {
+export function settleVersion(dir: string, files: string[], version: string): string[] {
   const changed: string[] = [];
   for (const f of files) {
     const p = path.join(dir, f);

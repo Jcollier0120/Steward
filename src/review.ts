@@ -55,6 +55,25 @@ export const sensitiveFiles = (files: string[], patterns: string[]) => {
  * a repository and what it is told (.claude\, CLAUDE.md, AGENTS.md, .mcp.json), where npm fetches from (.npmrc), and
  * secrets (.env files, keys).
  */
+/**
+ * A PR that needs the owner before it merges (a database migration they run themselves, say) isn't merged by the Steward,
+ * nor put on a train, whoever wrote it: its author labels it OWNER_FIRST_LABEL, and one that changes a migration's files
+ * (OWNER_FIRST_FILES) waits the same, labelled or not. The owner does what it needs, then merges it themselves, or takes
+ * the label off (or labels one held for its files OWNER_DONE_LABEL), and the Steward merges it as any other.
+ */
+export const OWNER_FIRST_LABEL = 'owner-first';
+export const OWNER_DONE_LABEL = 'owner-done';
+export const OWNER_FIRST_FILES = ['**/*.sql', '**/migrations/**'];
+
+/** Why a PR waits for the owner first, or null. Pure. */
+export function ownerFirstHold(pr: Pick<PrInfo, 'labels' | 'files'>): string | null {
+  if (pr.labels.includes(OWNER_FIRST_LABEL)) return `labelled ${OWNER_FIRST_LABEL}: it needs you first (a migration to run, say). Once that's done, merge it yourself or take the label off`;
+  if (pr.labels.includes(OWNER_DONE_LABEL)) return null;
+  const files = sensitiveFiles(pr.files, OWNER_FIRST_FILES);
+  if (!files.length) return null;
+  return `it changes ${files.slice(0, 3).join(', ')}${files.length > 3 ? ', …' : ''}, which may need you to run it first. Once that's done, merge it yourself or label it ${OWNER_DONE_LABEL}`;
+}
+
 export const ALWAYS_REVIEWED = ['.claude/**', '**/CLAUDE.md', '**/AGENTS.md', '**/.mcp.json', '**/.npmrc', '**/.env', '**/.env.*', '**/*.pem', '**/*.key'];
 
 /**
