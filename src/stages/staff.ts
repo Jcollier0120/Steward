@@ -275,11 +275,11 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
   })().catch((err) => void notes.push((err as Error).message));
 
-  const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : openPrs(hostFor({ run, neutralDir: ctx.neutralDir }, e), e.repo))
+  const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : openPrs(hostFor({ ...ctx, run }, e), e.repo))
     .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
     .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
 
-  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ run, neutralDir: ctx.neutralDir }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
+  const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ ...ctx, run }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
     .then((out) => appReleasesIn(out))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
@@ -295,7 +295,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       let kit: string | null | 'unknown' = 'unknown';
       try {
         const tagged = g?.releases.find((r) => r.tagName === latest.tag)?.commit;
-        const target = tagged ?? (byGit ? null : JSON.parse(must(await hostFor({ run, neutralDir: ctx.neutralDir }, e).viewRelease(e.repo, latest.tag, 'targetCommitish'))).targetCommitish as string);
+        const target = tagged ?? (byGit ? null : JSON.parse(must(await hostFor({ ...ctx, run }, e).viewRelease(e.repo, latest.tag, 'targetCommitish'))).targetCommitish as string);
         if (target && row.checkout.exists && /^[0-9a-f]{40}$/i.test(target) && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
       } catch {
         // unknown

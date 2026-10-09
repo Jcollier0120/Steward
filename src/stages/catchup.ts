@@ -470,7 +470,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     // Its title says its version, when it did; the comment says what changed, and that it merges once tested again.
     let title = choice.why && pr.title.includes(headV) ? pr.title.split(headV).join(choice.version) : pr.title;
     if (kit?.why && kHead) title = title.replace(new RegExp(`\\b(kit )${kHead.replace(/\./g, '\\.')}\\b`, 'i'), `$1${kit.version}`);
-    const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+    const host = hostFor({ ...ctx, run }, e);
     if (title !== pr.title) await host.editPr(e.repo, pr.number, { title }).catch(() => null);
     const next = kitPr ? 'The next round merges it.' : carried ? 'It merges without being tested again.' : 'It merges once its checks pass at the new head.';
     await host.commentPr(e.repo, pr.number, `Caught up by the Steward: ${note}. ${next}`).catch(() => null);

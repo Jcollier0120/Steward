@@ -33,7 +33,7 @@ export function must(a: Answer): string {
 
 export interface SourceHost {
   /** Which host this is, as scm.ts names it. */
-  readonly kind: 'github';
+  readonly kind: 'github' | 'gitlab';
   /** Its name in words, for logs and the page ("GitHub"). */
   readonly name: string;
 
@@ -77,4 +77,10 @@ export interface SourceHost {
 
   /** The account this PC is signed in to the host as (its login, alone on the answer's output). */
   whoAmI(): Promise<Answer>;
+
+  /** The ref a pull request's head is fetched by from origin, by its number (a fork's too). */
+  prRef(n: number): string;
+
+  /** A release's page, for the round's line and the page. */
+  releaseUrl(repo: string, tag: string): string;
 }

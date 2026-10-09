@@ -171,7 +171,8 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
  *
  * A repository worked with plain git (`host`, scm.ts) isn't asked of GitHub: its branch head and its v<x.y.z> tags come
  * from one `git ls-remote` of its origin, in its clone, and it has no PRs. With none on GitHub (and no repository of
- * the Steward's own), gh isn't run at all.
+ * the Steward's own), gh isn't run at all. One worked with GitLab's way has no glance: each stage asks GitLab of it on
+ * its own (hosts/gitlab.ts).
  */
 export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>, host: (e: Employee) => Host = () => 'github'): Promise<Glance> {
   const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
@@ -183,7 +184,7 @@ export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settin
       glance.errors[e.id] = (err as Error).message;
     }
   }
-  const all = settings.employees.filter((e) => !byGit.includes(e));
+  const all = settings.employees.filter((e) => host(e) === 'github');
   // Nothing to ask GitHub about: no employee on it, and no repository of its own.
   if (!all.length && !settings.stewardRepo) return glance;
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {

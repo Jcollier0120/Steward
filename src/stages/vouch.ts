@@ -1,6 +1,7 @@
 import { claimsOn, employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
+import { originUrl, repoFromUrl } from '../scm.ts';
 import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
@@ -43,7 +44,7 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
  * Never throws.
  */
 export async function vouchOn(ctx: Ctx, repo: string, commit: string, team: string[]): Promise<string | null> {
-  const r = await hostFor(ctx).statuses(repo, commit);
+  const r = await hostFor(ctx, { repo }).statuses(repo, commit);
   if (r.code !== 0) return null;
   let list: any[];
   try {
@@ -97,8 +98,9 @@ export interface Vouched {
  */
 export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line: string) => void }): Promise<Vouched> {
   const { run } = ctx;
-  const repo = originRepo(o.dir);
-  if (!repo) return { ok: false, message: `${o.dir} isn't a clone of a GitHub repository (its origin)` };
+  const url = originUrl(o.dir);
+  const repo = originRepo(o.dir) ?? (url ? repoFromUrl(url) : null);
+  if (!repo) return { ok: false, message: `${o.dir} isn't a clone of a repository (it has no origin)` };
   const e = employeeFor(ctx.settings, repo, o.dir);
   if (!e) return { ok: false, message: `${repo} isn't a repository the Steward looks after (Settings), nor its own: it has no checks to run` };
   const dirty = (await gitMaybe(run, o.dir, 'status', '--porcelain'))?.trim();
@@ -108,7 +110,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   const branch = (await gitMaybe(run, o.dir, 'branch', '--show-current'))?.trim() ?? '';
   const which = o.pr ? String(o.pr) : branch;
   if (!which) return { ok: false, message: 'name the PR (steward vouch <number>): this clone is on no branch' };
-  const v = await hostFor({ run, neutralDir: ctx.neutralDir }, e).viewPr(repo, which, 'number,state,headRefOid,isCrossRepository');
+  const v = await hostFor({ ...ctx, run }, e).viewPr(repo, which, 'number,state,headRefOid,isCrossRepository');
   // No PR from its branch: vouched for as pushed, and its PR opened by the Steward (branchesin.ts).
   if (v.code !== 0 && !o.pr && /no pull requests found/i.test(`${v.err}\n${v.out}`)) return vouchBranch(ctx, e, { ...o, repo, branch, head });
   if (v.code !== 0) return { ok: false, message: `no open PR ${o.pr ? `#${o.pr}` : `for ${branch}`} in ${repo}: ${(v.err || v.out).trim().split('\n').pop()}` };
@@ -119,7 +121,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, { ...o, repo, head });
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };
+  return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };
 }
 
 /**
@@ -134,7 +136,7 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
   const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${o.head.slice(0, 7)}`.slice(0, 140);
   const s = await hostFor(ctx, e).setStatus(o.repo, o.head, { state: 'success', context: VOUCH_CONTEXT, description });
-  if (s.code !== 0) return `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
+  if (s.code !== 0) return `its checks passed, but ${hostFor(ctx, e).name} wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
   return null;
 }
 
@@ -154,5 +156,5 @@ async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string
   o.say(`${e.name} ${o.branch} (v${claim.version}, no PR yet) at ${o.head.slice(0, 7)}: its checks, in ${o.dir}`);
   const failed = await checkAndRecord(ctx, e, o);
   if (failed) return { ok: false, message: failed.startsWith('its checks passed') ? failed : `${o.branch}'s checks failed at ${o.head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  return { ok: true, look: e.id, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward opens its PR (v${claim.version}) at its round, and merges it without testing it again, unless it is pushed to first` };
+  return { ok: true, look: e.id, message: `${o.branch}'s checks passed at ${o.head.slice(0, 7)}, and ${hostFor(ctx, e).name} has it (${VOUCH_CONTEXT}): the Steward opens its PR (v${claim.version}) at its round, and merges it without testing it again, unless it is pushed to first` };
 }

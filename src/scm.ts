@@ -11,11 +11,14 @@ import type { Employee, Settings } from './settings.ts';
  * kept in source-control.json) and works with what it finds, choosing by itself (Settings' Source control: Automatic)
  * unless the person picks one.
  *
- * Each repository is worked with one of two ways:
+ * Each repository is worked with one of three ways:
  * - **GitHub**: its repository is on GitHub (owner/name) and the GitHub CLI is installed and signed in. Everything as
  *   before: one GraphQL glance, pull requests merged, GitHub releases, issues filed for the Wright.
- * - **Git**: any other, on any host (GitLab, Azure DevOps, Bitbucket, a server or shared folder of your own), or a
- *   GitHub one where the GitHub CLI isn't there. Plain git against its own origin: its branch and its tags are read
+ * - **GitLab**: its repository is on a GitLab (gitlab.com/group/app, or a host whose name says gitlab) and the GitLab
+ *   CLI (glab) is installed and signed in. As GitHub's way, merge requests standing for pull requests, with no glance:
+ *   each repository is asked on its own.
+ * - **Git**: any other, on any host (Azure DevOps, Bitbucket, a server or shared folder of your own), or a GitHub or
+ *   GitLab one where its CLI isn't there. Plain git against its own origin: its branch and its tags are read
  *   with `git ls-remote`, a release is a `v<version>` tag on origin (annotated, its message the version's CHANGELOG.md
  *   entry), pushed by the Steward once the release command has run, and there are no pull requests to merge: what
  *   lands on the branch is released.
@@ -23,13 +26,13 @@ import type { Employee, Settings } from './settings.ts';
  * Other source control (Mercurial, Subversion, Perforce, Plastic SCM) is found and named, but not worked with yet.
  * Castellan's own release machinery (releasesCastellan) is GitHub's, whatever is chosen.
  *
- * The GitHub way asks GitHub through a source host (hosts/), the one interface for pull requests, commit statuses,
- * releases and issues, so other hosts with pull requests (GitLab, Azure DevOps, Gitea/Forgejo, Bitbucket) can stand
- * where GitHub does.
+ * GitHub and GitLab are asked through a source host (hosts/), the one interface for pull requests, commit statuses,
+ * releases and issues, so other hosts with pull requests (Azure DevOps, Gitea/Forgejo, Bitbucket) can stand where
+ * they do. Settings' Source control: GitHub means GitHub's way for every repository; GitLab's is chosen by Automatic.
  */
 
-export type Host = 'github' | 'git';
-export type SourceControl = 'auto' | Host;
+export type Host = 'github' | 'gitlab' | 'git';
+export type SourceControl = 'auto' | 'github' | 'git';
 
 export interface Tool {
   /** Its command. */
@@ -37,7 +40,7 @@ export interface Tool {
   name: string;
   /** Its first line of --version, or null when it isn't installed. */
   version: string | null;
-  /** The GitHub CLI only: signed in (a token kept on this PC; GitHub isn't asked). */
+  /** The GitHub and GitLab CLIs only: signed in (a token kept on this PC; neither host is asked). */
   signedIn?: boolean;
   /** Whether the Steward works with it. */
   supported: boolean;
@@ -51,6 +54,7 @@ export interface ScmLook {
 const KNOWN: { cmd: string; name: string; args: string[]; supported: boolean }[] = [
   { cmd: 'git', name: 'Git', args: ['--version'], supported: true },
   { cmd: 'gh', name: 'GitHub CLI', args: ['--version'], supported: true },
+  { cmd: 'glab', name: 'GitLab CLI', args: ['--version'], supported: true },
   { cmd: 'hg', name: 'Mercurial', args: ['--version', '--quiet'], supported: false },
   { cmd: 'svn', name: 'Subversion', args: ['--version', '--quiet'], supported: false },
   { cmd: 'p4', name: 'Perforce', args: ['-V'], supported: false },
@@ -63,7 +67,7 @@ export const LOOK_EVERY_MS = 60 * 60_000;
 
 export const loadScm = (): ScmLook | null => readJson<ScmLook | null>(scmFile(), null);
 
-/** What is installed, asked of each command (its version; the GitHub CLI whether it is signed in). */
+/** What is installed, asked of each command (its version; the GitHub and GitLab CLIs whether they are signed in). */
 export async function findScm(run: Runner, now = new Date()): Promise<ScmLook> {
   const tools = await Promise.all(
     KNOWN.map(async (k): Promise<Tool> => {
@@ -73,6 +77,8 @@ export async function findScm(run: Runner, now = new Date()): Promise<ScmLook> {
       const tool: Tool = { cmd: k.cmd, name: k.name, version, supported: k.supported };
       // A token kept on this PC: GitHub isn't asked, and the token itself is never kept or shown.
       if (k.cmd === 'gh' && version) tool.signedIn = (await run('gh', ['auth', 'token', '--hostname', 'github.com'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code === 0;
+      // glab says whether it holds a token for its hosts; it may check one with its host, never shows it.
+      if (k.cmd === 'glab' && version) tool.signedIn = (await run('glab', ['auth', 'status'], { timeoutMs: 20_000 }).catch(() => ({ code: 1 }))).code === 0;
       return tool;
     }),
   );
@@ -97,6 +103,12 @@ const has = (look: ScmLook | null, cmd: string) => !!look?.tools.find((t) => t.c
 /** The GitHub CLI installed and signed in: the GitHub way works. */
 export const githubReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'gh' && t.version && t.signedIn);
 
+/** The GitLab CLI installed and signed in: GitLab's way works. */
+export const gitlabReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'glab' && t.version && t.signedIn);
+
+/** A repository on a GitLab, as repoFromUrl names one: gitlab.com/group/app, or a host whose name says gitlab. Pure. */
+export const isGitlabRepo = (repo: string) => /^[^/]*gitlab[^/]*\/[^/]+\/.+$/i.test(repo);
+
 /** A repository named as GitHub names one (owner/name), not a host's path (gitlab.com/group/name). */
 export const isGithubRepo = (repo: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) && !/\./.test(repo.split('/')[0]);
 
@@ -108,6 +120,7 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
   if (s.releasesCastellan) return 'github';
   if (s.sourceControl === 'git') return 'git';
   if (s.sourceControl === 'github') return 'github';
+  if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (!isGithubRepo(e.repo)) return 'git';
   return !look || githubReady(look) ? 'github' : 'git';
 }
@@ -115,8 +128,10 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
 /** What Automatic comes to on this PC, in words, for Settings and the page. Pure. */
 export function autoWords(look: ScmLook | null): string {
   if (!look) return "Automatic: the Steward hasn't looked at this PC's source control yet";
-  if (githubReady(look)) return 'Automatic: GitHub for repositories on GitHub (the GitHub CLI is signed in), Git for any other';
-  if (has(look, 'git')) return `Automatic: Git for every repository, on any host${has(look, 'gh') ? ' (the GitHub CLI is installed, but not signed in: gh auth login)' : ''}`;
+  const ways = [...(githubReady(look) ? ['GitHub for repositories on GitHub (the GitHub CLI is signed in)'] : []), ...(gitlabReady(look) ? ['GitLab for repositories on GitLab (the GitLab CLI is signed in)'] : [])];
+  if (ways.length) return `Automatic: ${ways.join(', ')}, Git for any other`;
+  const unsigned = [...(has(look, 'gh') ? ['the GitHub CLI is installed, but not signed in: gh auth login'] : []), ...(has(look, 'glab') ? ['the GitLab CLI is installed, but not signed in: glab auth login'] : [])];
+  if (has(look, 'git')) return `Automatic: Git for every repository, on any host${unsigned.length ? ` (${unsigned.join('; ')})` : ''}`;
   return 'Automatic: no source control the Steward works with is installed (Git, say)';
 }
 
@@ -125,7 +140,7 @@ export function foundWords(look: ScmLook | null): string {
   if (!look) return '';
   const found = look.tools.filter((t) => t.version);
   if (!found.length) return 'None found on this PC.';
-  const works = found.filter((t) => t.supported).map((t) => `${t.name}${t.cmd === 'gh' ? (t.signedIn ? ', signed in' : ', not signed in') : ''}`);
+  const works = found.filter((t) => t.supported).map((t) => `${t.name}${t.cmd === 'gh' || t.cmd === 'glab' ? (t.signedIn ? ', signed in' : ', not signed in') : ''}`);
   const not = found.filter((t) => !t.supported).map((t) => t.name);
   return [`Found on this PC: ${works.join('; ') || 'nothing the Steward works with'}.`, ...(not.length ? [`Not worked with yet: ${not.join(', ')}.`] : [])].join(' ');
 }

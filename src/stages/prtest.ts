@@ -134,7 +134,7 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
 export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!e.usesKit || !e.fill || !pr.headOid || !ctx.kit?.released.length) return null;
   const repo = checkoutOf(e);
-  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr.number));
   const pin = readPin(await showFile(ctx.run, repo, pr.headOid, 'kit.json'));
   if (!pin || ctx.kit.released.includes(pin.kit)) return null;
   let prs: KitPr[];
@@ -175,7 +175,7 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const { run } = ctx;
   const repo = checkoutOf(e);
   const sha = pr.headOid.slice(0, 7);
-  await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  await git(run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr.number));
   await fetchBranch(run, repo, e.branch);
   const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);

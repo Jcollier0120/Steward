@@ -124,4 +124,12 @@ export class GitHub implements SourceHost {
   whoAmI() {
     return this.gh(['api', 'user', '--jq', '.login'], MINUTE);
   }
+
+  prRef(n: number) {
+    return `refs/pull/${n}/head`;
+  }
+
+  releaseUrl(repo: string, tag: string) {
+    return `https://github.com/${repo}/releases/tag/${tag}`;
+  }
 }

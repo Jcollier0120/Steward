@@ -158,7 +158,7 @@ async function versionAt(ctx: Ctx, t: Target, ref: string): Promise<{ version: s
 async function openPrs(ctx: Ctx, t: Target): Promise<PrInfo[]> {
   if (!t.prs || !t.repo) return [];
   const g = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee) : null;
-  const raw = g ? g.prs : JSON.parse((await listOpenPrs(hostFor(ctx), t.repo)) || '[]');
+  const raw = g ? g.prs : JSON.parse((await listOpenPrs(hostFor(ctx, { repo: t.repo }), t.repo)) || '[]');
   const authors = [...new Set(raw.map((p: any) => String(p?.author?.login ?? '')).filter(Boolean))] as string[];
   return parsePrs(JSON.stringify(raw), authors);
 }

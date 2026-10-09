@@ -38,6 +38,7 @@ import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 import { hostFor, must } from './hosts/index.ts';
+import { whereIs } from './hosts/gitlab.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -106,6 +107,30 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
   return { ...settings, team: t.team };
 }
 
+/** The account glab is signed in as on each GitLab, by its host name, as last asked (an hour at most). */
+const gitlabAccounts = new Map<string, { login: string | null; at: number }>();
+
+/**
+ * Settings whose team names none, with the account glab is signed in as on each GitLab whose repositories are worked
+ * with GitLab's way (scm.ts): GitLab's accounts are its own, so the person and their sessions are the team there too.
+ * Asked once an hour; a GitLab that can't say adds nobody.
+ */
+export async function withGitlabTeam(settings: Settings, o: { run: Runner; neutralDir: string; host: (e: Pick<Employee, 'repo'>) => Host }): Promise<Settings> {
+  const gitlabs = settings.employees.filter((e) => o.host(e) === 'gitlab');
+  const team = [...settings.team];
+  for (const e of gitlabs) {
+    const name = whereIs(e.repo).hostname;
+    let known = gitlabAccounts.get(name);
+    if (!known || Date.now() - known.at > 60 * 60_000) {
+      const who = await hostFor(o, e).whoAmI().catch(() => null);
+      known = { login: who?.code === 0 ? who.out.trim() || null : null, at: Date.now() };
+      gitlabAccounts.set(name, known);
+    }
+    if (known.login && !team.some((t) => t.toLowerCase() === known!.login!.toLowerCase())) team.push(known.login);
+  }
+  return team.length === settings.team.length ? settings : { ...settings, team };
+}
+
 /**
  * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
  * `owner` stands in for the account gh is signed in as (tests).
@@ -118,13 +143,14 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   // How each repository is worked with (scm.ts), from what this PC has: looked at once an hour. Under node --test, only
   // what a test says (else GitHub's way, as before), so a test never depends on this PC's tools.
   const look = o.scm !== undefined ? o.scm : process.env.NODE_TEST_CONTEXT ? null : await scmNow(realRun);
-  const host = (e: Employee) => hostOf(e, given, look);
+  const host = (e: Pick<Employee, 'repo'>) => hostOf(e, given, look);
   // The Steward's own repository: Settings', else its clone's origin; none when Settings name neither (it doesn't release itself).
   const own = { ...given, stewardRepo: selfRepoOf(given) };
   // The team is GitHub's: when every repository is worked with plain git, or (with none) the GitHub CLI isn't signed in
   // here, gh isn't asked who it is.
   const noGithub = own.employees.length ? !own.employees.some((e) => host(e) === 'github') : look !== null && !githubReady(look);
-  const settings = o.team === false || noGithub ? own : withTeam(own, log, o.owner);
+  const fromGithub = o.team === false || noGithub ? own : withTeam(own, log, o.owner);
+  const settings = o.team === false || given.team.length ? fromGithub : await withGitlabTeam(fromGithub, { run, neutralDir: dataDir, host });
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
   const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);

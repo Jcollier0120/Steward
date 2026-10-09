@@ -78,8 +78,8 @@ export interface Ctx {
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
-  /** How each repository is worked with (scm.ts): GitHub's way, or plain git. Not given: GitHub's, as before. */
-  host?: (e: Employee) => Host;
+  /** How each repository is worked with (scm.ts): GitHub's way, GitLab's, or plain git. Not given: GitHub's, as before. */
+  host?: (e: Pick<Employee, 'repo'>) => Host;
   /**
    * The turns this stage took with this PC's others (lease.ts): asked before each merge and release whether this
    * PC still has its turn in that repository. None when there are no turns to take: every repository is this PC's.

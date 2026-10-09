@@ -177,7 +177,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       const now = await releasedOf(ctx, e).catch(() => null);
       if (now && !now.some((x) => x.version === version)) {
         keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
-        return result(e, 'failed', `${e.release} finished, but GitHub has no release v${version} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
+        return result(e, 'failed', `${e.release} finished, but ${hostFor(ctx, e).name} has no release v${version} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
       }
     }
     // Released from this commit of its branch: the Surveyor's GET /api/tested (tested.ts).
@@ -186,7 +186,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     noteReleased(e, version);
     // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: `https://github.com/${e.repo}/releases/tag/v${version}` }) });
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
@@ -237,7 +237,7 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
       notesFile = path.join(notesDir, 'notes.md');
       writeFileSync(notesFile, entry);
     }
-    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a GitHub release, its notes ${entry ? 'the CHANGELOG.md entry' : "GitHub's, from the commits"}`);
+    ctx.log(`[${e.id}] releasing ${tag} from ${o.remote} (${o.commit.slice(0, 7)}): a ${hostFor(ctx, e).name} release, its notes ${entry ? 'the CHANGELOG.md entry' : "the host's"}`);
     const r = await hostFor(ctx, e).createRelease(e.repo, { tag, target: o.commit, title: `${e.name} ${o.version}`, notesFile });
     if (r.code !== 0) return result(e, 'failed', `gh release create ${tag} failed (exit ${r.code}): ${(r.err || r.out).trim().split('\n').pop()}${networkNote(`${r.out}\n${r.err}`)}`, { version: o.version, commit: o.commit.slice(0, 7) });
   } finally {
@@ -246,7 +246,7 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
   forgetGlance(ctx, e);
   recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
   noteReleased(e, o.version);
-  return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)})${o.noted}`, { version: o.version, commit: o.commit.slice(0, 7), url: `https://github.com/${e.repo}/releases/tag/${tag}` });
+  return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)})${o.noted}`, { version: o.version, commit: o.commit.slice(0, 7), url: hostFor(ctx, e).releaseUrl(e.repo, tag) });
 }
 
 /**

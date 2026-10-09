@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.31.0
+
+**Repositories on GitLab get their merge requests merged, stamped and released, as on GitHub.**
+
+### What's new
+
+- A repository on GitLab (gitlab.com, or a GitLab of your own whose address says gitlab) is now worked with GitLab's way once the GitLab CLI (`glab`) is installed and signed in on the PC. Its merge requests are merged in version order, at the commit that was checked; `steward vouch` works on them and on branches with no merge request yet; the Steward opens a vouched branch's merge request itself; and a release is a GitLab release with the changelog entry as its notes. Without `glab`, such a repository is worked with plain git, as before.
+- With no team named in Settings, the account `glab` is signed in as joins the team, as the GitHub account already did.
+- Settings' **Source control** says whether the GitLab CLI was found and signed in.
+
+### What changed
+
+- A release's link in the round's line and on the page points at the release on its own host.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use GitLab's way, install the GitLab CLI and sign in with `glab auth login`; the Steward notices within the hour.
+- The Wright's work issues are still filed on GitHub only.
+
 ## 0.30.0
 
 **The groundwork for pull requests on hosts other than GitHub.**
