@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.2
+
+**The Steward stays at least 10% under GitHub's API limit, and spreads its rounds over the hour.**
+
+### What changed
+
+- A round asks GitHub about four times less than before. Looking at every repository at once used to cost 152 of the 5,000 points GitHub allows an hour for 38 repositories. It now costs 38.
+- The Steward reads the account's limit, and what's left of it, from GitHub at every round. It never uses the last tenth, which stays free for your own `gh`, your sessions and the other agents on the same account.
+- Rounds are spread over the hour. When a round would spend more than the hour so far allows, it waits and asks GitHub nothing. Its merges and releases come at the next round the budget allows. Run now still goes at once, short of the spare tenth.
+- If GitHub still says the limit is reached, the Steward waits until the limit resets and writes one line saying until when. Before, every repository failed on its own, with a warning each.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.1
 
 **Castellan's 7-day trial now ends in each agent too, not only in Manor.**

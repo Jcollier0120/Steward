@@ -49,6 +49,8 @@ export interface StageResult {
   error?: string;
   /** A round while this PC was offline (the kit's net.ts): nothing was asked of GitHub, and it waited for the network. */
   offline?: boolean;
+  /** A round that waited for GitHub's API budget (budget.ts): nothing was asked of GitHub, until when and why. */
+  budget?: { until: string; why: string };
   /** A round that asked GitHub nothing and only kept the staff's pages up (tend.ts): no repositories here, or Settings said so. */
   tendOnly?: boolean;
   /**

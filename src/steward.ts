@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './alarms.ts';
 import { portUses } from './ports.ts';
 import { dataDir } from './app.ts';
+import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restReset, roundCost, saveBudget, waitLine } from './budget.ts';
 import { repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
@@ -83,19 +84,40 @@ const kitsPrunedFile = () => dataFile('kits-pruned.json');
 export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(), null);
 export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
 
-/** One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way. */
-export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host): Promise<Glance | null> {
+/**
+ * One glance at GitHub for every employee (glance.ts), or null, said in the log, when GitHub can't be asked that way.
+ * What GitHub says of the account's API budget is kept (budget.ts); when GitHub refuses the account, one line says
+ * so and until when nothing is asked of it.
+ */
+export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host, now: () => Date = () => new Date()): Promise<Glance | null> {
   try {
     const g = await takeGlance(run, dataDir, settings, host);
+    if (g.rates?.length || g.cost !== undefined) saveBudget(noteGlance(loadBudget(), g, now()));
     for (const [id, why] of Object.entries(g.errors)) {
       const e = settings.employees.find((x) => x.id === id);
       log(e && host?.(e) === 'git' ? `[${id}] git couldn't read ${e.repo}'s origin (${why}): it is asked on its own` : `[${id}] GitHub said nothing of ${e?.repo ?? id} at a glance (${why}): it is asked on its own`);
     }
     return g;
   } catch (e) {
+    if (e instanceof GithubLimited) {
+      const s = noteLimited(loadBudget(), { now: now(), secondary: e.secondary, restReset: e.secondary ? null : await restReset(run, dataDir), why: `GitHub refused the account (${e.message})` });
+      saveBudget(s);
+      log(`GitHub's API limit is reached (${e.message}): nothing is asked of GitHub until ${clock(s.limitedUntil!)}`);
+      return null;
+    }
     log(`couldn't ask GitHub about everyone at once (${(e as Error).message}): each is asked on its own`);
     return null;
   }
+}
+
+/**
+ * Whether a round may ask GitHub now (budget.ts): never into the spare tenth of the account's limit, and, unless the
+ * person asked for it (Run now), no faster than the hour allows. Null: it may.
+ */
+export function roundWaits(settings: Settings, ask: StageAsk, now: Date): { until: string; why: string } | null {
+  const s = loadBudget();
+  const g = gate(s, roundCost(s, settings.employees.length), now, { paced: !ask.full });
+  return g.go ? null : { until: g.until, why: g.why };
 }
 
 /**
@@ -160,8 +182,10 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
   const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);
-  // Offline, the kit's releases aren't asked for either: what's known here (its cache, this checkout) is all there is.
-  const kitRun: Runner = o.offline ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
+  // Offline, or with GitHub refusing the account (budget.ts), the kit's releases aren't asked for either: what's known
+  // here (its cache, this checkout) is all there is.
+  const refused = glance === null && o.glance !== false && !gate(loadBudget(), 0, new Date()).go;
+  const kitRun: Runner = o.offline || refused ? async (cmd, args, opts) => (cmd === 'gh' ? { code: 1, out: '', err: 'this PC is offline' } : run(cmd, args, opts)) : run;
   const kit = glance?.stewardReleases ? kitInfoFrom(glance.stewardReleases) : await kitInfo(kitRun, dataDir, settings.stewardRepo);
   return { settings, run, kit, log, neutralDir: dataDir, glance, host };
 }
@@ -421,8 +445,20 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Offline (the kit's net.ts), a round asks nothing of GitHub: it would only fail for every employee, every
       // few minutes, and the person knows the PC is offline. It waits for the network; the alarms still look.
       const offline = name === 'round' && !tendOnly && !(await (o.online ?? onlineNow)());
-      const quiet = offline || tendOnly;
+      const at = () => o.now?.() ?? new Date();
+      // GitHub's API budget (budget.ts): a round that would spend the account's spare tenth, or more than the hour so far
+      // allows, waits, asking GitHub nothing; the alarms still look.
+      let budget = name === 'round' && !tendOnly && !offline ? roundWaits(given, ask, at()) : null;
+      let quiet = offline || tendOnly || !!budget;
       const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm });
+      // GitHub refused the glance itself: the round waits too, rather than asking of every repository on its own.
+      if (name === 'round' && !quiet && !ctx.glance) {
+        const g = gate(loadBudget(), 0, at());
+        if (!g.go) {
+          budget = { until: g.until, why: g.why };
+          quiet = true;
+        }
+      }
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
@@ -450,6 +486,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         } else if (offline) {
           out.offline = true;
           log('this PC is offline, so the round waits for the network: nothing is asked of GitHub until it is back');
+        } else if (budget) {
+          out.budget = budget;
+          log(waitLine(budget));
         } else if (name === 'merge' || name === 'round') {
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
@@ -641,7 +680,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       }
       // Each repository's version queue, for Manor (version-queue.ts): after the merges, so it says where each one is now.
       // Not in a test, which has no Manor and no projects of its own.
-      if ((name === 'round' || name === 'merge') && !out.error && !process.env.NODE_TEST_CONTEXT) {
+      // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
+      if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
         try {
           const queues = await keepVersionQueues(ctx);
           // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
@@ -669,8 +709,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // A round that only kept the staff's pages up changed nothing on GitHub: the table stands.
       if (tendOnly) return out;
       try {
-        // The stage changed things on GitHub: a fresh glance for the table.
-        await refreshStaff(ctx, { fetch: true, glance: await tryGlance(ctx.run, ctx.settings, undefined, ctx.host) });
+        // The stage changed things on GitHub: a fresh glance for the table, when the budget allows one (budget.ts); else
+        // the stage's own, and the next round's glance puts the table right.
+        const b = loadBudget();
+        const fresh = gate(b, b.glanceCost ?? ctx.settings.employees.length + 1, at(), { paced: true }).go;
+        if (!fresh && !ctx.glance) return out;
+        await refreshStaff(ctx, { fetch: true, glance: fresh ? await tryGlance(ctx.run, ctx.settings, undefined, ctx.host, at) : ctx.glance });
       } catch (e) {
         log(`couldn't refresh the staff's table: ${(e as Error).message}`);
       }

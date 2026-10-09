@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { glanceQuery, PER_QUERY, prFromGraph, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
+import { GithubLimited } from '../src/budget.ts';
+import { glanceQuery, PER_QUERY, PR_PAGE, prFromGraph, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
 import type { Runner } from '../src/run.ts';
 import { appReleasesIn, parsePrs } from '../src/stages/staff.ts';
 import { employee, ok } from './helpers.ts';
@@ -41,7 +42,8 @@ const empty = (): Glance => ({ at: '', stewardReleases: null, repos: {}, errors:
 
 test('one query asks for every employee by an alias of its own, with its branch, and the Steward\'s releases', () => {
   const q = glanceQuery([porter, heiward], 'Jcollier0120/Steward');
-  assert.match(q, /^fragment R on Repository \{ pullRequests\(states: OPEN, first: 100/);
+  assert.match(q, new RegExp(`^fragment R on Repository \\{ pullRequests\\(states: OPEN, first: ${PR_PAGE}, .*\\) \\{ totalCount nodes`));
+  assert.match(q, /query \{ rateLimit \{ cost limit remaining used resetAt \} /, 'what it costs and what is left, asked in the query itself');
   assert.match(q, /steward: repository\(owner: "Jcollier0120", name: "Steward"\) \{ releases\(first: 100/);
   assert.match(q, /e0: repository\(owner: "Jcollier0120", name: "Porter"\) \{ \.\.\.R ref\(qualifiedName: "refs\/heads\/main"\)/);
   assert.match(q, /e1: repository\(owner: "Jcollier0120", name: "Heiward"\) \{ \.\.\.R ref\(qualifiedName: "refs\/heads\/master"\)/);
@@ -94,6 +96,35 @@ test('one gh call for up to 15 employees, one more for each 15 after; nothing pr
   assert.equal(Object.keys(g.repos).length, PER_QUERY + 2);
   assert.deepEqual(g.stewardReleases, []);
   await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'gh: To get started with GitHub CLI, please run: gh auth login' }), '.', { employees: [porter], stewardRepo: 'x/y' }), /gh auth login/);
+});
+
+test("each query's rateLimit is kept: what the glance cost, summed, and what GitHub said is left", async () => {
+  const many = Array.from({ length: PER_QUERY + 1 }, (_, i) => employee('C:\\nowhere', { id: `e${i}x`, repo: `Jcollier0120/E${i}` }));
+  let left = 4000;
+  const run: Runner = async (_cmd, args) => {
+    const n = (args[3].match(/ e\d+: repository/g) ?? []).length;
+    left -= n;
+    return ok({ data: { rateLimit: { cost: n, limit: 5000, remaining: left, used: 5000 - left, resetAt: '2026-10-09T22:06:17Z' }, ...Object.fromEntries(Array.from({ length: n }, (_, i) => [`e${i}`, graphRepo()])) } });
+  };
+  const g = await takeGlance(run, '.', { employees: many, stewardRepo: '' });
+  assert.equal(g.cost, PER_QUERY + 1);
+  assert.deepEqual(g.rates?.map((r) => [r.limit, r.remaining, r.resetAt]), [[5000, 4000 - PER_QUERY, '2026-10-09T22:06:17.000Z'], [5000, 4000 - PER_QUERY - 1, '2026-10-09T22:06:17.000Z']]);
+});
+
+test(`a repository with more than ${PR_PAGE} open PRs is asked on its own, as one GitHub didn't answer for`, () => {
+  const g = empty();
+  readGlance([porter, heiward], JSON.stringify({ data: { e0: graphRepo({ pullRequests: { totalCount: PR_PAGE + 3, nodes: [graphPr()] } }), e1: graphRepo({ pullRequests: { totalCount: 1, nodes: [graphPr()] } }) } }), null, g);
+  assert.ok(!('porter' in g.repos));
+  assert.match(g.errors.porter, new RegExp(`${PR_PAGE + 3} open PRs`));
+  assert.equal(g.repos.heiward.prs.length, 1);
+});
+
+test("GitHub refusing the account is told apart from any other failure, whether gh printed GitHub's answer or not", async () => {
+  const limited = { data: null, errors: [{ type: 'RATE_LIMITED', message: 'API rate limit already exceeded for user ID 9358221.' }] };
+  assert.throws(() => readGlance([porter], JSON.stringify(limited), null, empty()), GithubLimited);
+  await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'GraphQL: API rate limit already exceeded for user ID 9358221.' }), '.', { employees: [porter], stewardRepo: '' }), (e: unknown) => e instanceof GithubLimited && !e.secondary);
+  await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' }), '.', { employees: [porter], stewardRepo: '' }), (e: unknown) => e instanceof GithubLimited && e.secondary);
+  await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'gh: Bad credentials' }), '.', { employees: [porter], stewardRepo: '' }), (e: unknown) => !(e instanceof GithubLimited));
 });
 
 test("a repository's signature changes with anything in it, and not with the order GitHub lists it in", () => {
