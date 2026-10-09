@@ -32,7 +32,8 @@ const me = employee(steward.checkout, { id: 'steward', name: 'Steward', repo: 'J
 const pr = (o: Partial<PrInfo> = {}): PrInfo => ({ number: 7, title: 'Steward 0.11.0, kit 1.0.1', url: 'https://github.com/Jcollier0120/Steward/pull/7', head: 'claude/kit', base: 'main', author: 'Jcollier0120', whose: 'team', headOid: head, after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 10, files: ['kit/VERSION', 'kit/node/npu.ts', 'kit/CHANGELOG.md'], ...o });
 
 function ctx() {
-  const r = runner((args) => (args[0] === 'pr' && args[1] === 'comment' ? ok('') : undefined));
+  // No agent has an open PR that pins the kit (stages/trial.ts's pairs): kitpair.test.ts has those.
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'comment' ? ok('') : args[0] === 'pr' && args[1] === 'list' ? ok([]) : undefined));
   const c = ctxFor({ employees: [good, bad], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
   return { c, r, comments: () => r.gh.filter((a) => a[1] === 'comment') };
 }

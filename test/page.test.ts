@@ -134,6 +134,17 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
   assert.match(withPr, /<th>Notes<\/th>/);
   assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
+  // Merge conflicts: none looked at yet, and then each with what the Steward did, its badge on the PR's line too.
+  assert.match(withPr, /Merge conflicts[\s\S]*No PR the rounds looked at has conflicted with its branch/);
+  const t = new Date().toISOString();
+  const looks = [
+    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 7, url: pr.url, title: 'Fix the thing', head: 'claude/fix', author: 'octocat', headOid: 'abc', outcome: 'sent-back', note: 'it conflicts with main in LICENSE: back with the Claude Code session that opened it, in a comment on it', files: ['LICENSE', 'package.json'], needs: ['LICENSE'], firstAt: t, at: t, lookedAt: t },
+    { id: 'fake', name: 'Fake', repo: 'octocat/fake', number: 5, url: 'https://github.com/octocat/fake/pull/5', title: 'Old', head: 'claude/old', author: 'octocat', headOid: 'def', outcome: 'caught-up', note: 'merged main into it, its version lines resolved', files: ['package.json'], needs: [], firstAt: t, at: t, lookedAt: t },
+  ];
+  const withLooks = (await renderStewardBody())({ ...body, conflicts: looks, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: [] }] }, round: { ...body.round, repos: true } });
+  assert.match(withLooks, /<table class="pr-table">.*title="it conflicts with main in LICENSE[^"]*"[^>]*>.*sent back/, "the PR's line says what was done");
+  assert.match(withLooks, /<table class="conflicts">.*#7.*sent back.*back with the Claude Code session.*Conflicted in LICENSE, package\.json; LICENSE needed a person/);
+  assert.match(withLooks, /#5.*caught up.*merged main into it.*no longer open/, 'one since merged or closed says so');
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

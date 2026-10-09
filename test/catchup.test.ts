@@ -12,6 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { catchUp, catchUpVersion, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts } = await import('../src/stages/catchup.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
+const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
 const { merge, mergeOne } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
@@ -82,6 +83,7 @@ test("a PR whose version lines conflict is caught up: main merged in, the next f
   assert.equal(c.done, true, c.note);
   assert.equal(c.version, '0.4.2');
   assert.match(c.note, /merged main into it, its version lines resolved; v0\.4\.2, since v0\.4\.1 is already released/);
+  assert.deepEqual(c.conflicted, ['package-lock.json'], 'the files it conflicted in, resolved ones too');
   // What origin's branch holds now: main's licence, the PR's feature, and 0.4.2 in every version file.
   sh(checkout, 'fetch', '--quiet', 'origin');
   const at = (f: string) => sh(checkout, 'show', `origin/claude/feature:${f}`);
@@ -105,6 +107,7 @@ test('a conflict beyond the version lines is left for a person, and the branch u
   const c = await catchUp(ctx, e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
   assert.equal(c.done, false);
   assert.equal(c.note, 'it conflicts with main in LICENSE: that needs a person');
+  assert.ok(c.conflicted?.includes('LICENSE'));
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'rev-parse', 'origin/claude/feature'), pr.headOid);
   assert.equal(gh.length, 0, 'nothing said on the PR');
@@ -156,6 +159,7 @@ test('a conflict that needs judgement says which files, for its author', async (
 
 test("the round: a conflict that needs judgement goes back to its author, once for a head; the Wright's is closed and its issue queued again", async () => {
   rmSync(kickbacksFile(), { force: true });
+  rmSync(conflictsFile(), { force: true });
   const { dir, checkout, pr } = moved('kickback', { LICENSE: 'MIT\n' });
   const listed = (o: { head?: string; labels?: string[]; body?: string } = {}) => [
     { number: pr.number, title: pr.title, url: pr.url, body: o.body ?? '', headRefName: o.head ?? pr.head, headRefOid: pr.headOid, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', isDraft: false, statusCheckRollup: [], labels: (o.labels ?? []).map((name) => ({ name })), additions: 5, deletions: 5, files: [] },
@@ -179,10 +183,15 @@ test("the round: a conflict that needs judgement goes back to its author, once f
 ${JSON.stringify(first.out.held)}`);
   assert.match(said!.at(-1)!, /conflicts with `main` in `LICENSE`[\s\S]*Over to the Claude Code session that opened it: merge `main` into `claude\/feature`/);
   assert.match(first.out.held[0].why, /back with the Claude Code session that opened it, in a comment on it/);
-  // The next round, nothing new: said once.
+  // The page's record of it: sent back, the file that needed a person.
+  const [look] = loadConflicts();
+  assert.deepEqual([look.number, look.outcome, look.needs, look.files.includes('LICENSE')], [21, 'sent-back', ['LICENSE'], true]);
+  assert.match(look.note, /back with the Claude Code session that opened it/);
+  // The next round, nothing new: said once, and its record keeps when it was sent back.
   const again = await round(listed());
   assert.equal(again.gh.filter((a) => a[1] === 'comment').length, 0);
   assert.match(again.out.held[0].why, /back with the Claude Code session/);
+  assert.deepEqual(loadConflicts().map((l) => l.at), [look.at]);
 
   // The Wright's: closed and its branch deleted (the redo's branch has its name), its issue queued again; it then waits for nothing.
   rmSync(kickbacksFile(), { force: true });
@@ -193,6 +202,7 @@ ${JSON.stringify(first.out.held)}`);
   assert.ok(wright.gh.some((a) => a[0] === 'issue' && a[1] === 'comment' && a[2] === '7'));
   assert.equal(wright.out.held.length, 0);
   assert.match(wright.out.message, /#21 closed: it conflicts with main in LICENSE, so the Steward closed it and queued #7 for the Wright again/);
+  assert.equal(loadConflicts()[0].outcome, 'closed');
 });
 
 test("the round: a conflicting team PR is caught up after the merges, and its hold says so", async () => {
@@ -210,6 +220,9 @@ test("the round: a conflicting team PR is caught up after the merges, and its ho
   assert.equal(r.merged.length, 0);
   assert.match(r.message, /#21 caught up: merged main into it, its version lines resolved; v0\.4\.2/);
   assert.match(r.held[0].why, /^caught up by the Steward \(.*\): it merges once its checks pass at the new head$/);
+  const look = loadConflicts().find((l) => l.repo === e.repo && l.number === 21)!;
+  assert.equal(look.outcome, 'caught-up');
+  assert.match(look.note, /^merged main into it, its version lines resolved/);
   // Off in Settings (the tests' default): it only waits.
   const off = runner((a) => (a[1] === 'list' ? ok(a[0] === 'pr' ? listed : []) : ok('')));
   const ctxOff = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: off.run, neutralDir: dir });

@@ -120,9 +120,15 @@ function checkState(c: any): Checks {
   return ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(done) ? 'passing' : 'failing';
 }
 
-/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. */
+/**
+ * The commit status `steward vouch` sets on a PR's head once its checks passed in its author's clone (stages/vouch.ts).
+ * It isn't a check GitHub runs: checksOf leaves it out, and the merge stage decides whether to trust it.
+ */
+export const VOUCH_CONTEXT = 'steward/tested';
+
+/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. A vouch (VOUCH_CONTEXT) isn't one. */
 export function checksOf(rollup: unknown): Checks {
-  const list = Array.isArray(rollup) ? rollup : [];
+  const list = (Array.isArray(rollup) ? rollup : []).filter((c) => c?.context !== VOUCH_CONTEXT);
   if (!list.length) return 'none';
   const states = list.map(checkState);
   return states.includes('failing') ? 'failing' : states.includes('pending') ? 'pending' : 'passing';

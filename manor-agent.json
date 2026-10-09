@@ -4,6 +4,11 @@
     "name": "Steward",
     "role": "Looks after your repositories: claims versions, merges your ready pull requests and releases, where you say yes",
     "description": "Looks after the repositories of yours that you pick from the ones Reeve finds on this PC: claims each new version up front so parallel work never collides, watches your pull requests and releases, merges your ready, green pull requests and releases new versions, each only where you say yes.",
+    "category": "Upkeep",
+    "uses": [
+      "developer"
+    ],
+    "autonomous": true,
     "fills": [
       "steward"
     ],

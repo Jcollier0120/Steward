@@ -17,7 +17,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const settingsModule = await import('../src/settings.ts');
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, inEffect, loadSettings, releasesRepoEnv, settingsFile } = settingsModule;
-const { candidates, findRepos, githubOf, loadFound, lookAfter, anyRepo } = await import('../src/found.ts');
+const { candidates, findRepos, githubOf, loadFound, lookAfter, lookAfterAll, anyRepo } = await import('../src/found.ts');
 const { runStage } = await import('../src/steward.ts');
 const { watchAlarms } = await import('../src/alarms.ts');
 const { tend } = await import('../src/tend.ts');
@@ -72,6 +72,29 @@ test("Reeve's repositories: those on GitHub the person can push to are offered, 
   assert.match((lookAfter('them/lib', { merges: false, release: false }) as { error: string }).error, /isn't one Reeve found here that you can push to/);
   // A version claim works for any repository Reeve found, in Settings or not.
   assert.equal(anyRepo('me/app')?.repo, 'me/app');
+});
+
+test('several picked are looked after in one go, each as ticked, and the ones it can\'t are said', () => {
+  const two = fakeEmployee(path.join(home, 'clones', 'two'), { version: '0.1.0', kit: null });
+  const three = fakeEmployee(path.join(home, 'clones', 'three'), { version: '0.1.0', kit: null });
+  const repo = (slug: string, dir: string) => ({ repo: slug, name: slug.split('/')[1], path: dir, branch: 'main', lockfiles: [], push: true });
+  const found = { at: new Date().toISOString(), from: 'reeve' as const, error: null, repos: [repo('me/two', two.checkout), repo('me/three', three.checkout)] };
+  const file = path.join(home, 'many-settings.json');
+  writeFileSync(file, JSON.stringify({ releasesCastellan: false }));
+  const r = lookAfterAll(
+    [
+      { repo: 'me/two', merges: true, release: false },
+      { repo: 'me/three', merges: false, release: true },
+      { repo: 'them/lib', merges: true, release: true },
+    ],
+    { found, file },
+  );
+  assert.deepEqual(r.employees.map((e) => [e.repo, e.merges, e.release !== '']), [['me/two', true, false], ['me/three', false, true]]);
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0], /them\/lib isn't one Reeve found here/);
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual(saved.employees.map((e: { id: string }) => e.id), ['two', 'three'], 'both written, each with an id of its own');
+  assert.equal(saved.releasesCastellan, false, 'the rest of the file as it was');
 });
 
 test("with Manor here and its Repositories brought in, they are the Steward's list (spec/REPOSITORIES.md), and Look after adds to them", () => {
@@ -199,6 +222,8 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   assert.match(html, /PRs left to you/);
   assert.match(html, /merges and releases only when asked, until you say yes/);
   assert.match(html, /data-post="\/api\/repos\/look-after"/);
+  assert.match(html, /aria-label="Pick me\/new"/, 'each one found can be picked');
+  assert.match(html, /<button[^>]*disabled=""[^>]*data-post="\/api\/repos\/look-after"[^>]*>Look after the picked</, 'none picked yet: nothing to look after in one go');
   assert.match(html, /data-post="\/api\/stage\/merge-team"[^>]*>Merge your ready PRs</);
 });
 
@@ -232,5 +257,5 @@ test("the Steward's own repository is never an employee as well on the PC that r
   // Elsewhere a repository of the same name is anyone's.
   assert.deepEqual(inEffect({ ...DEFAULT_SETTINGS, stewardRepo: 'me/steward', employees: [mine, other] }).employees.map((e) => e.id), ['steward', 'app']);
   const found = { at: null, from: 'reeve' as const, error: null, repos: [{ repo: 'me/steward', name: 'steward', path: own.stewardCheckout, branch: 'main', lockfiles: [], push: true }, { repo: 'me/new', name: 'new', path: path.join(home, 'clones', 'new'), branch: 'main', lockfiles: [], push: true }] };
-  assert.deepEqual(candidates(found, [], inEffect(own)).map((r) => r.repo), ['me/new']);
+  assert.deepEqual(candidates(found, [], undefined, inEffect(own)).map((r) => r.repo), ['me/new']);
 });
