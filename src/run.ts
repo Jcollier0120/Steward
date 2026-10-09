@@ -13,6 +13,8 @@ export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
+  /** Written to its standard input, which is then closed (git credential fill reads its question there). */
+  input?: string;
 }
 
 /**
@@ -116,7 +118,7 @@ export const run: Runner = (cmd, args, opts = {}) => {
   env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
   if (dotnetDir) env.DOTNET_ROOT = dotnetDir;
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       file,
       argv,
       { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
@@ -128,6 +130,7 @@ export const run: Runner = (cmd, args, opts = {}) => {
         resolve({ code, out: String(stdout ?? ''), err });
       },
     );
+    if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 };
 

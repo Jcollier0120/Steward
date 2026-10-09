@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.34.0
+
+**Repositories on Bitbucket Cloud get their pull requests merged, stamped and released, as on GitHub.**
+
+### What's new
+
+- A repository on Bitbucket Cloud (bitbucket.org) is now worked with Bitbucket's way once an Atlassian API token for it is saved on the PC. Its pull requests are merged in version order, and only while their head is still the commit that was checked; `steward vouch` works on them and on branches with no pull request yet; the Steward opens a vouched branch's pull request itself. Bitbucket has no releases, so a release there is a `v<version>` tag with the changelog entry as its message. Without a token, such a repository is worked with plain git, as before.
+- With no team named in Settings, the token's Bitbucket account joins the team.
+- Settings' **Source control** says whether a Bitbucket token was found.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use Bitbucket's way, create an Atlassian API token with Bitbucket scopes (read and write for repositories and pull requests, read for your account), then open Windows' **Credential Manager**, choose **Windows Credentials**, **Add a generic credential**, and enter `git:https://api.bitbucket.org` as the address, your Atlassian account's email as the user name and the token as the password. The Steward notices within the hour, and never stores the token itself.
+- Bitbucket Data Center (a Bitbucket server of your own) is still worked with plain git. On Bitbucket, the Wright's work issues aren't filed, and a pull request from a fork isn't worked with.
+
 ## 0.33.0
 
 **Repositories on Gitea and Forgejo, Codeberg among them, get their pull requests merged, stamped and released, as on GitHub.**
