@@ -3,6 +3,7 @@ import { compareVersions } from './kitfiles.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { originRepo } from './kit/manor.ts';
+import { makersOnly, makersOwn, makersPc } from './maker.ts';
 import { stewardCloneAt } from './migrate.ts';
 import type { Employee, Settings } from './settings.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -106,6 +107,9 @@ export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filte
 export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
   const kit = o.part === 'kit';
+  // Off the maker's laptop, no version of Castellan's own repositories or kit is claimed (maker.ts).
+  const theirs = kit && !makersPc() ? makersOnly("Claiming a version of Castellan's kit") : makersOwn({ name: e.name, repo: e.repo }, { byId: false });
+  if (theirs) throw new Error(theirs);
   const key = kit ? kitClaimKey(e.repo) : e.repo;
   const files = kit ? [KIT_VERSION_FILE] : e.versionFiles;
   // What GitHub and the branch say, read before the lock is taken: the lock is held only to choose and write.

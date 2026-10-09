@@ -13,6 +13,7 @@ import { run as realRun, useDotnet, type Runner } from './run.ts';
 import { expandEnv } from './kit/settings-kit.ts';
 import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
+import { DEVELOPER_ONLY, makersPc, stewardActs } from './maker.ts';
 import { bump } from './stages/bump.ts';
 import { headsUp } from './heads-up.ts';
 import { keepVersionQueues } from './version-queue.ts';
@@ -360,6 +361,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
     lines.push(line);
     o.log?.(line);
   };
+  // A developer's work: off the maker's laptop, nothing runs while Developer options are off (maker.ts), and nothing is kept.
+  if (!stewardActs()) {
+    const at = new Date().toISOString();
+    log(DEVELOPER_ONLY);
+    return { stage: name, started: at, finished: at, kit: null, asked: { ...ask }, results: [], log: lines, error: DEVELOPER_ONLY };
+  }
   return withLock(
     stageLock(),
     async () => {
@@ -508,7 +515,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.results = await release(ctx, picked.employees, { kit: null, hire: true });
         } else if (!ctx.settings.releasesCastellan) {
           // Not the PC that releases Castellan: there is no kit to hand out. Release takes each repository's own version.
-          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does ("Releases Castellan itself" in Settings)`);
+          if (name !== 'release') throw new Error(`${name} rolls Castellan's kit out, which only its makers' PC does${makersPc() ? ' ("Releases Castellan itself" in Settings)' : ''}`);
           const turns = await takeTurnsFor(ctx, o, picked.employees, null);
           out.results = [...turns.elsewhere, ...(await release(ctx, turns.acting, { kit: null }))];
         } else {
@@ -573,8 +580,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Merged or released by something that isn't this Steward (strangers.ts): looked for only in a round that asked GitHub.
           const strangers = await lookForStrangers({ ctx, glance: quiet || out.error ? null : ctx.glance, alarms: loadAlarms(), now: o.now?.() });
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
-          // which has no Manor of its own to read.
-          const ports = process.env.NODE_TEST_CONTEXT ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
+          // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
+          const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
           await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), tending: ctx.settings.tend ? loadTending() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
