@@ -114,7 +114,7 @@ test('with Developer options off, the section is in plain words: the local AI, n
   assert.match(workSection({ id: 'miller', name: 'Miller', config: both, developer: false }), /Windows may count the video encoding as graphics use/);
   assert.match(workSection({ id: 'lamplighter', name: 'Lamplighter', config: both, developer: false }), /the local AI on the AI chip only/);
   // A developer role's work doesn't run with the switch off, so its page has no section then; with it on, all of it.
-  for (const id of ['auditor', 'developer-herald', 'aletaster', 'pinder', 'steward']) {
+  for (const id of ['auditor', 'developer-herald', 'aletaster', 'pinder', 'steward', 'toller', 'assayer']) {
     assert.equal(WORK[id].developerRole, true, `${id} is a developer role`);
     assert.equal(workSection({ id, name: id, config: both, developer: false }), '', `${id} has no section when off`);
     assert.match(workSection({ id, name: id, config: both, developer: true }), /Where its work runs/, `${id} has it when on`);

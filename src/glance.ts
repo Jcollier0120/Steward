@@ -62,7 +62,7 @@ const PRS = `pullRequests(states: OPEN, first: 100, orderBy: {field: CREATED_AT,
   author { __typename login }
   labels(first: 20) { nodes { name } }
   files(first: 100) { nodes { path } }
-  commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state } } } } } } }
+  commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state context } } } } } } }
 } }`;
 const RELEASES = 'releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft publishedAt tagCommit { oid } } }';
 
