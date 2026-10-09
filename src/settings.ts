@@ -91,6 +91,8 @@ export interface Settings {
   wrightReview: WrightReviewSettings;
   /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
   catchUp: boolean;
+  /** In its rounds, a repository's ready PRs in the version queue are stacked, tested once and merged together (stages/train.ts). */
+  mergeTrain: boolean;
   /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
   afterRelease: string[];
   /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
@@ -257,6 +259,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '', reeveUrl: REEVE_URL, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
+  mergeTrain: true,
   tasteBeforeRelease: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
@@ -387,6 +390,12 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: 'Catches PRs up with their branch',
     help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines, or a new entry at the top of CHANGELOG.md on each side), the next free version given when its own is taken, and pushed, with a comment; then it is tested and merged, or merged without a new test where only its version lines and changelog changed and it was vouched for or tested here before. One whose checks failed here is caught up when the branch moves on. Any other conflict goes back to whoever wrote the PR: the Wright's is closed and its issue queued for it again; anyone else's, a Claude Code session's too, gets a comment that names the files.",
+  },
+  {
+    key: 'mergeTrain',
+    kind: 'switch',
+    label: 'Merges ready PRs together',
+    help: "In its rounds, where two or more of a repository's ready PRs wait their turn in the version queue (the team's, from the repository itself, with no checks on GitHub), they are stacked on its branch lowest version first, each one's version lines and changelog settled as a catch-up settles them, tested once at the top, and merged together through the top PR: the ones under it come in with it. Each keeps its own version and changelog entry. A PR that conflicts beyond its version lines ends the stack, and goes its own way as before; a stack whose checks fail is merged one PR at a time, as before. Off: one PR at a time, each caught up and tested in turn.",
   },
   {
     key: 'rollout',
@@ -600,6 +609,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
+      mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
       releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,

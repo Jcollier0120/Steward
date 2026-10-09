@@ -17,6 +17,25 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.28.15
+
+**Ready pull requests merge together, tested once; and a pull request that needs you first waits for you.**
+
+### What's new
+
+- When two or more of a repository's ready pull requests wait their turn (each raising the version one step), the Steward now stacks them on the branch, lowest version first, settles their version lines and changelog entries as it does when it catches one up, runs the checks once on the whole stack, and merges them together through the top pull request. Before, each one was caught up after the one under it merged and tested again on its own: five ready pull requests meant five test runs, now it is one. Each keeps its own version and changelog entry.
+- A pull request labelled **owner-first** is never merged by the Steward, and neither is one that adds or changes a database migration (an `.sql` file, or anything in a `migrations` folder), labelled or not. Do what it needs (run the migration), then merge it yourself, take the label off, or label it **owner-done**. Pull requests above it in the version queue wait for it, as they wait for a draft.
+
+### What changed
+
+- **Merges ready PRs together** is a new switch in Settings, on by default. Off, pull requests merge one at a time as before.
+- A pull request that conflicts with the one under it beyond its version lines ends the stack there and goes its own way as before; if the stack's checks fail, the pull requests merge one at a time, and the same stack isn't built again until one of them, or the branch, moves on.
+- Pull requests with checks on GitHub, steps to run after merging, the Wright's, and ones that raise the kit still merge on their own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.14
 
 **A queue of tested pull requests merges much faster: catching one up no longer means testing it again.**
