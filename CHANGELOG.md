@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.33.0
+
+**Repositories on Gitea and Forgejo, Codeberg among them, get their pull requests merged, stamped and released, as on GitHub.**
+
+### What's new
+
+- A repository on a Gitea or Forgejo server (gitea.com, codeberg.org, or one of your own) is now worked with Gitea's way once the Gitea CLI (`tea`) is installed and has a login for that server. Its pull requests are merged in version order, at the commit that was checked; `steward vouch` works on them and on branches with no pull request yet; the Steward opens a vouched branch's pull request itself; and a release is a Gitea release with the changelog entry as its notes, whose files can be downloaded for an install after merging. Without `tea`, or with no login for that server, such a repository is worked with plain git, as before.
+- With no team named in Settings, the account `tea` is signed in as on each server joins the team.
+- Settings' **Source control** says whether the Gitea CLI was found and which servers it can work with.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use Gitea's way, install a Gitea CLI recent enough to have `tea api`, and add a login with `tea login add`; the Steward notices within the hour.
+- The Wright's work issues are still filed on GitHub only.
+
 ## 0.32.0
 
 **Repositories on Azure DevOps get their pull requests merged, stamped and released, as on GitHub.**

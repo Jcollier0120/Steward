@@ -40,6 +40,7 @@ import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
+import { whereGitea } from './hosts/gitea.ts';
 
 /**
  * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
@@ -108,16 +109,16 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
   return { ...settings, team: t.team };
 }
 
-/** The account signed in on each GitLab and Azure DevOps organization, by its address, as last asked (an hour at most). */
+/** The account signed in on each GitLab, Azure DevOps organization and Gitea, by its address, as last asked (an hour at most). */
 const hostAccounts = new Map<string, { login: string | null; at: number }>();
 
-/** Where an account is its own: a GitLab by its host name, an Azure DevOps organization by its address. */
-const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : null);
+/** Where an account is its own: a GitLab or a Gitea by its host name, an Azure DevOps organization by its address. */
+const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : host === 'gitea' ? (whereGitea(repo)?.hostname ?? null) : null);
 
 /**
- * Settings whose team names none, with the account glab or az is signed in as on each GitLab and Azure DevOps
- * organization whose repositories are worked with its way (scm.ts): their accounts are their own, so the person and
- * their sessions are the team there too. Asked once an hour; one that can't say adds nobody.
+ * Settings whose team names none, with the account glab, az or tea is signed in as on each GitLab, Azure DevOps
+ * organization and Gitea whose repositories are worked with its way (scm.ts): their accounts are their own, so the
+ * person and their sessions are the team there too. Asked once an hour; one that can't say adds nobody.
  */
 export async function withHostTeams(settings: Settings, o: { run: Runner; neutralDir: string; host: (e: Pick<Employee, 'repo'>) => Host }): Promise<Settings> {
   const team = [...settings.team];
