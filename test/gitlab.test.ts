@@ -151,7 +151,7 @@ test("GitLab's requests: glab api to the repository's own GitLab, bodies as JSON
     ['POST', `${P}/statuses/abc123`, { state: 'success', name: 'steward/tested', description: 'npm test passed at abc123' }],
   ]);
   assert.deepEqual(call(ran.find((r) => r.args.includes('DELETE'))!), ['DELETE', `${P}/repository/branches/claude%2Ffeature`]);
-  assert.equal(host.prRef(7), 'refs/merge-requests/7/head');
+  assert.equal(host.prRef({ number: 7, head: 'x' }), 'refs/merge-requests/7/head');
   assert.equal(host.releaseUrl(R, 'v0.4.1'), 'https://gitlab.com/acme/fake/-/releases/v0.4.1');
 });
 

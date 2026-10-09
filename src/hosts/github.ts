@@ -125,8 +125,8 @@ export class GitHub implements SourceHost {
     return this.gh(['api', 'user', '--jq', '.login'], MINUTE);
   }
 
-  prRef(n: number) {
-    return `refs/pull/${n}/head`;
+  prRef(pr: { number: number }) {
+    return `refs/pull/${pr.number}/head`;
   }
 
   releaseUrl(repo: string, tag: string) {

@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.32.0
+
+**Repositories on Azure DevOps get their pull requests merged, stamped and released, as on GitHub.**
+
+### What's new
+
+- A repository on Azure DevOps (dev.azure.com, or an older organization.visualstudio.com) is now worked with Azure DevOps' way once the Azure CLI (`az`) is installed and signed in on the PC. Its pull requests are completed in version order, at the commit that was checked; `steward vouch` works on them and on branches with no pull request yet; the Steward opens a vouched branch's pull request itself. Azure DevOps has no releases, so a release there is an annotated `v<version>` tag with the changelog entry as its message. Without `az`, such a repository is worked with plain git, as before.
+- With no team named in Settings, the account `az` is signed in as joins the team for that organization.
+- Settings' **Source control** says whether the Azure CLI was found and signed in.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use Azure DevOps' way, install the Azure CLI and sign in with `az login`; the Steward notices within the hour.
+- On Azure DevOps, the Wright's work issues aren't filed (they stay on GitHub), and a pull request from a fork isn't worked with.
+
 ## 0.31.0
 
 **Repositories on GitLab get their merge requests merged, stamped and released, as on GitHub.**
