@@ -9,6 +9,7 @@ import { agreedVersion } from '../versions.ts';
 import { changeFiles, changeVersion, CHANGES_DIR } from '../entries.ts';
 import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { openVouchedBranches } from './branchesin.ts';
+import { handInBranches } from './gitevents.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
@@ -603,11 +604,14 @@ export const MAX_LOOKS = 40;
  */
 export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
   // The claimed branches pushed and vouched for with no PR: their PRs opened first, so the looks below merge them (branchesin.ts).
-  const opened = o.yes && o.team && e.merges ? await openVouchedBranches(ctx, e) : { opened: [], lines: [] };
+  // Worked with plain git, there are none to open: its When a branch is ready command hands them in (gitevents.ts).
+  const byGit = hostIs(ctx, e) === 'git';
+  const opened = !(o.yes && o.team && e.merges) ? { lines: [], failed: false, handed: 0 } : byGit ? await handInBranches(ctx, e) : await openVouchedBranches(ctx, e).then((r) => ({ ...r, failed: false, handed: r.opened.length }));
   const looks: MergeLook[] = [await mergeOne(ctx, e, o)];
   if (opened.lines.length) {
     const first = looks[0];
-    looks[0] = { ...first, message: [...opened.lines, first.message].filter(Boolean).join('; '), did: [...opened.lines, ...(first.did ?? [])], ...(first.outcome === 'skipped' ? { outcome: 'done' as const } : {}) };
+    const outcome = opened.failed ? ('failed' as const) : first.outcome === 'skipped' && opened.handed ? ('done' as const) : first.outcome;
+    looks[0] = { ...first, message: [...opened.lines, first.message].filter(Boolean).join('; '), did: [...opened.lines, ...(first.did ?? [])], outcome };
   }
   const idle = (l: MergeLook | undefined) => !!l && !l.merged.length;
   while (o.yes && looks.at(-1)!.lookAgain && !(idle(looks.at(-1)) && idle(looks.at(-2))) && looks.length < MAX_LOOKS) {

@@ -36,7 +36,7 @@ export function claimedBranches(e: Employee, claims: Claim[] = claimsOn(e.repo))
 }
 
 /** A branch's heads on origin, by branch name, for the ones origin has. One ls-remote for them all. */
-async function headsOnOrigin(ctx: Ctx, repo: string, branches: string[]): Promise<Map<string, string>> {
+export async function headsOnOrigin(ctx: Ctx, repo: string, branches: string[]): Promise<Map<string, string>> {
   const out = await gitMaybe(ctx.run, repo, 'ls-remote', '--heads', 'origin', ...branches.map((b) => `refs/heads/${b}`));
   const heads = new Map<string, string>();
   for (const line of (out ?? '').split('\n')) {
@@ -51,7 +51,7 @@ async function headsOnOrigin(ctx: Ctx, repo: string, branches: string[]): Promis
  * the entry for it (that file, else CHANGELOG.md's entry at its head), and the entry's bold line, else what its claim
  * says the work is.
  */
-export async function proposal(ctx: Ctx, e: Employee, c: Claim, head: string, o: { by: string }): Promise<{ title: string; body: string; version: string }> {
+export async function proposal(ctx: Ctx, e: Employee, c: Claim, head: string, o: { by: string }): Promise<{ title: string; body: string; version: string; entry: string | null }> {
   const repo = checkoutOf(e);
   const start = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, head))?.trim();
   const listed = async (ref: string) => changeFiles(((await gitMaybe(ctx.run, repo, 'ls-tree', '--name-only', ref, `${CHANGES_DIR}/`)) ?? '').split('\n').map((l) => l.trim()));
@@ -65,7 +65,7 @@ export async function proposal(ctx: Ctx, e: Employee, c: Claim, head: string, o:
   } else entry = entryOf((await showFile(ctx.run, repo, head, CHANGELOG)) ?? '', version);
   const line = (entry && headlineOf(entry)) || c.for || c.branch!;
   const from = `Opened by the Steward from \`${c.branch}\`, whose head ${head.slice(0, 7)} ${o.by} vouched for (its checks passed in their clone). Claimed by ${c.by}${c.for ? ` for ${c.for}` : ''}.`;
-  return { version, title: `${e.name} ${version}: ${line.replace(/[.\s]+$/, '')}`, body: [entry ?? `No changelog entry for v${version} was found on the branch.`, '', '---', '', from].join('\n') };
+  return { version, entry, title: `${e.name} ${version}: ${line.replace(/[.\s]+$/, '')}`, body: [entry ?? `No changelog entry for v${version} was found on the branch.`, '', '---', '', from].join('\n') };
 }
 
 /**
