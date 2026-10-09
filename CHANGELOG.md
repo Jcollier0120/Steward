@@ -19,6 +19,40 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. To use it, have whoever opens pull requests run `steward vouch` after pushing.
 
+## 0.28.4
+
+**A change that needs both a new kit and an agent's matching change no longer waits for you.**
+
+### What changed
+
+- When a new kit breaks an agent's tests as its main stands, but that agent has a ready pull request that takes the new kit and passes with it, the kit no longer waits. The kit's pull request merges and the kit is released, and its comment says why ("Manor moves with it in #135 (passes with this kit)"). The agent's pull request is then tested with the released kit and merged. Before, the two waited for each other until you labelled the kit's pull request.
+- If that agent's pull request fails with the new kit, or is still a draft, the kit waits as before, and the reason says so.
+- An agent's pull request that takes a kit not released yet now says which pull request brings that kit, for example "waits for kit 2.42.0, which Steward#126 brings: it merges once that's released". If no open pull request brings it, it says that instead, because only a person can sort that out.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.28.3
+
+**The Steward is yours: it looks after your own repositories, and nothing of Castellan's.**
+
+### What's new
+
+- The Steward looks after the repositories you pick (in Manor's Repositories, or from the ones Reeve finds on this PC with **Look after**), and only those: it claims each new version up front so work going on side by side never collides, watches your pull requests and releases, and merges your ready, green pull requests and releases, each only where you say yes.
+- Castellan's own repositories (Manor and its agents, its website and its licensing service) are its makers' alone. The Steward doesn't offer them, and refuses to look after one, to claim a version of it, to merge it or to release it, saying why in a sentence. A repository of yours whose name is the same as one of Castellan's agents gets its own id instead (porter-2, say).
+- It is a hire for people who write software: with Developer options off in Manor's Settings, it does nothing. Its rounds don't run, its buttons and commands say why, and its page is one plain line.
+
+### What changed
+
+- The work that only Castellan's makers do (handing out the kit, publishing to Castellan's releases, the ports of new agents) is off everywhere else and can't be turned on. Its commands say they are the makers' only, and its page and Settings show none of it.
+- The Toller and the Assayer are named among the developer hires, with where their work runs (kit 2.43.2).
+
+### Before you update
+
+- Nothing: it updates itself as usual. Your repositories it already looks after stay as they are; one of Castellan's that you had added stays where you added it, unused.
+- Turn on Developer options in Manor's Settings if it's off, or the Steward waits.
+
 ## 0.28.2
 
 **The Steward releases itself again, and stops reinstalling agents it has already installed.**

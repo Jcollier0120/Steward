@@ -17,13 +17,16 @@ import type { StageResult } from './stages/common.ts';
 import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
+import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
 import { vouch } from './stages/vouch.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
   Each stage reports for every repository it looks after (Settings). bump and push are Castellan's kit
   rollout, only on the PC that releases Castellan itself; elsewhere release takes each repository's
-  own version, and merge merges only where Settings say yes (Merges your ready PRs).
+  own version, and merge merges only where Settings say yes (Merges your ready PRs). Castellan's own
+  repositories (Manor, its agents, its site) are its makers' alone: refused on any other PC. Except on
+  that PC, the commands that work on repositories run only while Developer options are on in Manor.
   bump [--kit <version>] [--employees a,b]
                    for each employee: a worktree of its branch on origin, on steward/kit-<version>, with
                    kit.json pinned to the kit and its patch version up; its kit filled, its checks run,
@@ -81,6 +84,7 @@ const USAGE = `${APP.id}: ${APP.role}
                    on that commit on GitHub (status steward/tested). The Steward then merges the PR without
                    testing it again, unless it is pushed to first. Without a number: the PR for this branch
   claims [--json]  the versions claimed and not yet landed
+  Only on the PC Castellan is made on (elsewhere they say so, and do nothing):
   claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]
                    before giving a new agent its page's port: the next free one of the agents' series
                    (above every port Manor's staff, this PC's own staff, the agents announced on GitHub,
@@ -94,6 +98,7 @@ const USAGE = `${APP.id}: ${APP.role}
                    mark a merge of one of the Steward's PRs, or a release, as yours, done by hand: on the PC
                    that releases Castellan, the alarm for merges and releases no round here made never
                    counts it, before or after (Dismiss on the alarm does the same for all it names)
+
   allow-update <version>
                    allow a version the install rolled back to be installed again
   uninstall [--purge] [--dry-run]
@@ -154,6 +159,16 @@ function printStaff(s: Staff): void {
 const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
+/** The commands that work on repositories: a developer's, so only while Developer options are on (maker.ts' stewardActs). */
+const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'staff', 'employ', 'claim-version', 'release-version', 'claims', 'vouch'];
+/** The commands only the PC Castellan is made on has: the ports of Castellan's new agents, and its merges done by hand. */
+const MAKERS_COMMANDS: Record<string, string> = {
+  'claim-port': "Claiming a port for a new agent of Castellan's",
+  'release-port': "Giving back a port of Castellan's agents",
+  ports: "The ports of Castellan's agents",
+  mine: "Marking Castellan's merges and releases as done by hand",
+};
+
 async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Promise<number> {
   const bad = unknownFlags(name, rest);
   if (bad.length) {
@@ -181,6 +196,15 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
     }
     throw e;
   }
+}
+
+if (cmd && cmd in MAKERS_COMMANDS && !makersPc()) {
+  console.error(makersOnly(MAKERS_COMMANDS[cmd]));
+  process.exit(1);
+}
+if (cmd && DEVELOPER_COMMANDS.includes(cmd) && !stewardActs()) {
+  console.error(DEVELOPER_ONLY);
+  process.exit(1);
 }
 
 switch (cmd) {
@@ -262,12 +286,24 @@ switch (cmd) {
       process.exitCode = 2;
       break;
     }
-    const ctx = await context({ glance: false, team: false });
-    // The kit is a part of the Steward's own repository, claimed under its own key (stages/kitpart.ts).
+    // The kit is a part of the Steward's own repository, claimed under its own key (stages/kitpart.ts): Castellan's.
     const kit = who.toLowerCase() === 'kit';
+    if (kit && !makersPc()) {
+      console.error(makersOnly("Claiming a version of Castellan's kit"));
+      process.exitCode = 1;
+      break;
+    }
+    const ctx = await context({ glance: false, team: false });
     const e = kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, who) ?? anyRepo(who));
+    // Off the maker's laptop, nothing of Castellan's own (maker.ts): Manor, the site, the Exchequer, any agent.
+    const theirs = e && !kit ? makersOwn({ name: e.name, repo: e.repo }, { byId: false }) : null;
+    if (theirs) {
+      console.error(theirs);
+      process.exitCode = 1;
+      break;
+    }
     if (!e) {
-      console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, the clone this runs in, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'}).`);
+      console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, or the clone this runs in${makersPc() ? `, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'})` : ''}.`);
       process.exitCode = 2;
       break;
     }
@@ -278,9 +314,20 @@ switch (cmd) {
     break;
   }
   case 'release-version': {
-    const ctx = await context({ glance: false, team: false });
     const kit = rest[0]?.toLowerCase() === 'kit';
+    if (kit && !makersPc()) {
+      console.error(makersOnly("Giving back a version of Castellan's kit"));
+      process.exitCode = 1;
+      break;
+    }
+    const ctx = await context({ glance: false, team: false });
     const e = rest[0] ? (kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0]))) : null;
+    const theirs = e && !kit ? makersOwn({ name: e.name, repo: e.repo }, { byId: false }) : null;
+    if (theirs) {
+      console.error(theirs);
+      process.exitCode = 1;
+      break;
+    }
     if (!e || !/^\d+\.\d+\.\d+$/.test(rest[1] ?? '')) {
       console.error('release-version takes an employee and a version: release-version porter 0.4.12');
       process.exitCode = 2;

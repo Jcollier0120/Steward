@@ -5,6 +5,7 @@ import { dataDir } from './app.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { manorHome, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
+import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
@@ -130,6 +131,11 @@ export interface Settings {
   sourceControl: SourceControl;
   /** Whether the Wright is installed on this PC (wrightInstalled): read from the PC, never set. Its settings show only then. */
   wrightHere: boolean;
+  /**
+   * Whether this is the laptop Castellan is made on (maker.ts' makersPc, its firmware): read from the PC, never set.
+   * Anywhere else releasesCastellan is off whatever settings.json says, and its switch isn't offered.
+   */
+  makersPc: boolean;
 }
 
 export interface WrightReviewSettings {
@@ -261,10 +267,16 @@ export const DEFAULT_SETTINGS: Settings = {
   dotnetRoot: '',
   sourceControl: 'auto',
   wrightHere: wrightInstalled(),
+  // Read from the PC when asked (as normalizeSettings does), so the defaults read as themselves.
+  get makersPc() {
+    return makersPc();
+  },
 };
 
 /** Shown only on the PC that releases Castellan itself (releasesCastellan): the kit, the Steward's own releases, Manor's staff. */
 const CASTELLAN = { shownWhen: { key: 'releasesCastellan', is: ['true'] } };
+/** Shown only on the laptop Castellan is made on (makersPc): the switch that makes it Castellan's release machinery. */
+const MAKERS = { shownWhen: { key: 'makersPc', is: ['true'] } };
 /** Shown only where the Wright is installed (wrightHere): its drafts, and the work handed to it. */
 const WRIGHT = { shownWhen: { key: 'wrightHere', is: ['true'] } };
 
@@ -474,7 +486,9 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Releases Castellan itself',
     help: "Only on the PC Castellan is made on. On: the Steward also rolls its kit out to Castellan's agents, releases and merges its own new versions, and publishes each agent's release to the releases repository below as well as to its own. Off, as on every other PC: it looks after your repositories, and nothing of Castellan's.",
     advanced: true,
+    ...MAKERS,
   },
+  { key: 'makersPc', kind: 'switch', label: "Castellan's makers' PC", help: 'Read from this PC: only here can the Steward release Castellan itself.', readOnly: true, advanced: true, ...MAKERS },
   { key: 'releasesRepo', kind: 'text', label: 'The releases repository', help: "Where each of Castellan's releases is published for every Manor, as well as in the agent's own repository (the kit's release, as MANOR_RELEASES_REPO).", empty: 'None: each release in its own repository only', maxLength: 140, ...REPO, ...CASTELLAN },
 ];
 
@@ -553,6 +567,14 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
     employees = r.employees.map(normalizeEmployee).filter((e): e is Employee => e !== null);
     if (employees.length < r.employees.length) problems.push(`${r.employees.length - employees.length} employee(s) without a usable id were left out.`);
   }
+  // Read from the PC, never from the file: only the maker's laptop releases Castellan, whatever settings.json says.
+  const makers = makersPc();
+  // Off it, the maker's own repositories are kept in the file but never looked after (inEffect): said, so it's known why.
+  if (!makers)
+    for (const e of employees) {
+      const why = makersOwn(e, { makers });
+      if (why) problems.push(why);
+    }
   const parallel = Number(r.parallel);
   const roundMinutes = Number(r.roundMinutes);
   return {
@@ -576,12 +598,13 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       tasteBeforeRelease: typeof r.tasteBeforeRelease === 'boolean' ? r.tasteBeforeRelease : d.tasteBeforeRelease,
       fileWork: typeof r.fileWork === 'boolean' ? r.fileWork : d.fileWork,
       tend: typeof r.tend === 'boolean' ? r.tend : d.tend,
-      releasesCastellan: typeof r.releasesCastellan === 'boolean' ? r.releasesCastellan : d.releasesCastellan,
+      releasesCastellan: makers && (typeof r.releasesCastellan === 'boolean' ? r.releasesCastellan : d.releasesCastellan),
       releasesRepo: typeof r.releasesRepo === 'string' && (r.releasesRepo.trim() === '' || REPO_NAME.test(r.releasesRepo.trim())) ? r.releasesRepo.trim() : d.releasesRepo,
       dotnetRoot: str(r.dotnetRoot, d.dotnetRoot),
       sourceControl: r.sourceControl === 'git' || r.sourceControl === 'github' ? r.sourceControl : d.sourceControl,
       // Never read from the file: whether the Wright is on this PC now.
       wrightHere: wrightInstalled(),
+      makersPc: makers,
     },
     problems,
   };
@@ -603,11 +626,14 @@ export function employeeOfProject(p: ManorProject, taken: string[] = []): Employ
   return { id, name: p.name, repo: p.repo, checkout: p.checkout, branch: p.branch, merges: p.merges === true, usesKit: false, fill: '', test: p.test ? [p.test] : [], versionFiles: p.versionFiles, release: p.release ?? '', install: '', approve: '', installed: '', note: "from Manor's Repositories" };
 }
 
-/** Manor's tracked repositories as the Steward's employees, each with its own id; those with no GitHub repository left out. */
-export function employeesOfProjects(projects: ManorProject[]): Employee[] {
+/**
+ * Manor's tracked repositories as the Steward's employees, each with its own id, none of `taken` (off the maker's
+ * laptop, the ids of Castellan's agents and repositories); those with no GitHub repository left out.
+ */
+export function employeesOfProjects(projects: ManorProject[], taken: string[] = []): Employee[] {
   const out: Employee[] = [];
   for (const p of projects) {
-    const e = employeeOfProject(p, out.map((x) => x.id));
+    const e = employeeOfProject(p, [...taken, ...out.map((x) => x.id)]);
     if (e) out.push(e);
   }
   return out;
@@ -633,13 +659,18 @@ export function manorTakesOver(own: Employee[], home = manorHome()): boolean {
  * nothing of Castellan's runs, whatever the file says: no kit rollout, no releases or PRs of the Steward's own, and no
  * repository takes the kit; the releases repository isn't used. There, where Manor is installed, the repositories it
  * looks after are Manor's Repositories (`tracked`, the kit's spec/REPOSITORIES.md), the one list every agent derives
- * its own from; its own employees are read only where there is no Manor. Where the Wright isn't installed, nothing is
- * handed to it and its drafts aren't looked at. Pure.
+ * its own from; its own employees are read only where there is no Manor. Off the maker's laptop (maker.ts) it never
+ * releases Castellan, and none of the maker's own repositories is looked after, even when the file or Manor's list names
+ * one (makersOwn): Castellan's, its site's and its Exchequer's are its makers' alone; one of Manor's list that would
+ * take the id of one of Castellan's agents gets its own (porter-2). Where the Wright isn't installed, nothing is handed
+ * to it and its drafts aren't looked at. Pure, but for asking the PC (makersPc, Manor's staff) unless `o` says.
  */
-export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null): Settings {
+export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProject[] | null = null, o: { makers?: boolean; ids?: Set<string> } = {}): Settings {
   let out = s;
+  const makers = o.makers ?? makersPc();
   if (!wright && (s.fileWork || s.wrightReview.on)) out = { ...out, fileWork: false, wrightReview: { ...out.wrightReview, on: false } };
-  if (!s.releasesCastellan)
+  if (!makers) out = { ...out, releasesCastellan: false, makersPc: false };
+  if (!out.releasesCastellan)
     out = {
       ...out,
       rollout: false,
@@ -648,8 +679,12 @@ export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProje
       stewardRepo: '',
       stewardCheckout: '',
       releasesRepo: '',
-      employees: tracked ? employeesOfProjects(tracked) : out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
+      employees: tracked ? employeesOfProjects(tracked, makers ? [] : [...(o.ids ?? makersIds())]) : out.employees.map((e) => (e.usesKit ? { ...e, usesKit: false } : e)),
     };
+  if (!makers) {
+    const theirs = out.employees.filter((e) => !makersOwn(e, { makers, ids: o.ids }));
+    if (theirs.length < out.employees.length) out = { ...out, employees: theirs };
+  }
   return out;
 }
 
@@ -657,7 +692,7 @@ export function inEffect(s: Settings, wright = s.wrightHere, tracked: ManorProje
  * The releases repository a release command is told of (MANOR_RELEASES_REPO, read by the kit's release.ts from kit
  * 2.32.0): Settings' while this PC releases Castellan itself, else none, so a release goes to its own repository only.
  */
-export const releasesRepoEnv = (s: Pick<Settings, 'releasesCastellan' | 'releasesRepo'>): Record<string, string> => ({ MANOR_RELEASES_REPO: s.releasesCastellan ? s.releasesRepo : '' });
+export const releasesRepoEnv = (s: Pick<Settings, 'releasesCastellan' | 'releasesRepo'>): Record<string, string> => ({ MANOR_RELEASES_REPO: s.releasesCastellan && makersPc() ? s.releasesRepo : '' });
 
 export const settingsFile = () => dataFile('settings.json');
 
@@ -679,7 +714,18 @@ export const SETTINGS_SPEC: SettingsSpec<Settings> = {
   defaults: DEFAULT_SETTINGS,
   file: settingsFile,
   normalize: normalizeSettings,
+  // Off the maker's laptop, a repository of Castellan's own (or one taking the id of one of its agents) is refused, beside it.
+  check: (next) => {
+    const errors: Record<string, string> = {};
+    next.employees.forEach((e, i) => {
+      const why = makersOwn(e, { makers: next.makersPc });
+      if (why) errors[`employees.${i}.${makersOwn(e, { makers: next.makersPc, byId: false }) ? 'repo' : 'id'}`] = why;
+    });
+    return { errors, warnings: {} };
+  },
   usedFrom: 'from the next stage on',
+  // A developer's hire, all about their code: with the manor's Developer options off, no form at all.
+  developerOnly: true,
 };
 
 export function loadSettings(): Settings {
@@ -689,6 +735,8 @@ export function loadSettings(): Settings {
   fillMigrationGaps({ settingsFile: settingsFile() });
   // Once, for an install from before the Steward looked after anyone's repositories: today's behaviour, written out.
   migrateToOwnRepos({ settingsFile: settingsFile(), dataDir });
+  // Off the maker's laptop releasesCastellan reads as off whatever the file says (normalizeSettings); the file itself is
+  // never rewritten for it, so a firmware that couldn't be read for a moment changes nothing that lasts.
   const s = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings;
   // Off the makers' PC, with Manor here: its Repositories, read afresh (the kit's manorProjects).
   return inEffect(s, s.wrightHere, !s.releasesCastellan && manorTakesOver(s.employees) ? manorProjects() : null);

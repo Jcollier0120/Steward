@@ -34,6 +34,8 @@ const releaseCmd = `node -e "const fs=require('fs');fs.appendFileSync(process.ar
 const released = () => ['0.4.0', ...(existsSync(releasedFile) ? readFileSync(releasedFile, 'utf8').split('\n').filter(Boolean) : [])];
 
 const NOTE = 'Deploys the payment service: its database migrations go first, by hand';
+// Developer options on, by the Steward's own switch (there is no Manor here, helpers.ts): its Settings are a developer's
+// (SETTINGS_SPEC.developerOnly), and a save is refused with them off.
 writeFileSync(
   path.join(home, 'settings.json'),
   JSON.stringify({
@@ -44,6 +46,7 @@ writeFileSync(
     ],
     team: ['Jcollier0120'],
     workRoot: path.join(home, 'work'),
+    developerOptions: true,
   }),
 );
 

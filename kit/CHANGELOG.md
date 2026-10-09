@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.43.2
+
+**The Toller and the Assayer say where their work runs, and have their own scenes.**
+
+### What's new
+
+- **node/work.ts:** `WORK` entries for the Toller (its hourly round over your projects' lockfiles, changed files and tools, and one look at the listening ports; no model) and the Assayer (test runs in throwaway worktrees at below-normal priority, at most 3 a round, every 15 minutes; no model). Both are developer roles (`developerRole`): with Developer options off, their pages have no "Where its work runs".
+- **node/look.ts:** a scene for each: the Toller's striped bar lifts once the coin drops; the Assayer's balance tips and settles.
+
+### What changed
+
+- **What an agent must do:** nothing. The Toller and the Assayer show the new section and scene once they take this kit.
+- **spec/DEVELOPER-OPTIONS.md:** the developer roles' list names the Toller and the Assayer.
+- **Its tests:** kit/test/work.test.ts, kit/test/look.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.42.0
 
 **One list of tracked repositories, in Manor.** The repositories the manor looks after on a PC were set in five places: the Steward's employees, Manor's non-employee projects, Reeve's found repositories, the Wright's and the Aletaster's own lists. From this version Manor's list (settings.json's `"projects"`) is the one place, and each agent derives its own from it. The rule is the new spec/REPOSITORIES.md.

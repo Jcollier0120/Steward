@@ -442,6 +442,7 @@ function TendingCard({ t, r, now }: { t: TendState | undefined; r: RoundView; no
 
 /** Run now, in the title bar: a round now, on duty or not, asked first. */
 export function RunNow({ v }: { v: StewardView }) {
+  if (v.off) return null;
   return (
     <PostButton title="Run now" variant="secondary" path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={!!v.running} />
   );
@@ -794,6 +795,13 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
 /** The page's body: everything above Settings. */
 export function StewardBody({ v }: { v: StewardView }) {
   const now = useNow();
+  // Developer options off (maker.ts): the plain line, and nothing else.
+  if (v.off)
+    return (
+      <Card>
+        <Text as="p">{v.off}</Text>
+      </Card>
+    );
   const s = v.staff;
   const castellan = v.castellan !== false;
   return (
