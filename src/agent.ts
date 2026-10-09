@@ -7,6 +7,7 @@ import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { afterWords } from './after.ts';
+import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
@@ -154,6 +155,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
 
   const refresh = () => {
     if (refreshing) return refreshing;
+    // Not while GitHub's API budget says wait (budget.ts): the page shows the table it has, and a later look refreshes it.
+    const b = loadBudget();
+    if (!gate(b, b.glanceCost ?? loadSettings().employees.length + 1, new Date(), { paced: true }).go) return Promise.resolve();
     refreshing = (async () => {
       try {
         await refreshStaff(await context({ run: o.run, owner: o.owner }));

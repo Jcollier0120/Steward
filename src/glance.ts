@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { expandEnv } from './kit/settings-kit.ts';
+import { GithubLimited, LIMITED, readingFrom, type RateReading } from './budget.ts';
 import type { Runner } from './run.ts';
 import { gitGlance, type Host } from './scm.ts';
 import type { Employee, Settings } from './settings.ts';
@@ -52,12 +53,22 @@ export interface Glance {
   /** By employee id. One GitHub gave no answer for is left out, and `errors` says why. */
   repos: Record<string, RepoGlance>;
   errors: Record<string, string>;
+  /** What its queries cost, in GraphQL points, and what GitHub said is left: each query's `rateLimit` (budget.ts). */
+  cost?: number;
+  rates?: RateReading[];
 }
 
 /** How many repositories one query asks about: GitHub allows 500,000 nodes a query, and each takes about 22,000. */
 export const PER_QUERY = 15;
 
-const PRS = `pullRequests(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes {
+/**
+ * The open PRs a glance reads of each repository. GitHub charges a query by the nodes it may return, and each PR's
+ * labels, files and checks are a page each: at 100 PRs a repository cost 4 points, at 25 it costs 1 (budget.ts). One
+ * with more open than this is asked on its own (readGlance), as one GitHub gave no answer for is.
+ */
+export const PR_PAGE = 25;
+
+const PRS = `pullRequests(states: OPEN, first: ${PR_PAGE}, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount nodes {
   number title url body headRefName headRefOid baseRefName isCrossRepository isDraft mergeable mergeStateStatus additions deletions
   author { __typename login }
   labels(first: 20) { nodes { name } }
@@ -81,6 +92,8 @@ export function glanceQuery(employees: Employee[], stewardRepo: string | null): 
         `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} }`,
     );
   }
+  // What it costs and what's left (budget.ts), asked in the query itself: free.
+  parts.unshift('rateLimit { cost limit remaining used resetAt }');
   const fragment = employees.length ? `fragment R on Repository { ${PRS} ${RELEASES} } ` : '';
   return `${fragment}query { ${parts.join(' ')} }`.replace(/\s+/g, ' ');
 }
@@ -140,7 +153,7 @@ export function stewardMainFrom(s: any): StewardMain {
  * GitHub's answer to a glanceQuery, read: `gh api graphql` exits 1 when any part of the query failed (a repository
  * that isn't there, say), but still prints what it could answer, with `errors` for the rest.
  */
-export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance): void {
+export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance, now = new Date()): void {
   let j: any;
   try {
     j = JSON.parse(answer);
@@ -148,7 +161,13 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     throw new Error(`GitHub's answer isn't JSON: ${answer.trim().split('\n').pop()?.slice(0, 200) || 'nothing'}`);
   }
   const data = j?.data;
-  if (!data || typeof data !== 'object') throw new Error(String(j?.errors?.[0]?.message ?? j?.message ?? 'GitHub gave no data'));
+  if (!data || typeof data !== 'object') {
+    const why = String(j?.errors?.[0]?.message ?? j?.message ?? 'GitHub gave no data');
+    throw LIMITED.test(why) || j?.errors?.[0]?.type === 'RATE_LIMITED' ? new GithubLimited(why) : new Error(why);
+  }
+  const rate = readingFrom(data.rateLimit, now);
+  if (rate) into.rates = [...(into.rates ?? []), rate];
+  if (typeof data.rateLimit?.cost === 'number') into.cost = (into.cost ?? 0) + data.rateLimit.cost;
   const why = (alias: string) => {
     const err = (Array.isArray(j.errors) ? j.errors : []).find((x: any) => Array.isArray(x?.path) && x.path[0] === alias);
     return String(err?.message ?? 'GitHub gave no answer for it');
@@ -159,7 +178,9 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
   }
   employees.forEach((e, i) => {
     const r = data[`e${i}`];
-    if (r) into.repos[e.id] = repoFromGraph(r);
+    const open = Number(r?.pullRequests?.totalCount ?? 0);
+    if (r && open > PR_PAGE) into.errors[e.id] = `${open} open PRs, more than a glance reads (${PR_PAGE})`;
+    else if (r) into.repos[e.id] = repoFromGraph(r);
     else into.errors[e.id] = why(`e${i}`);
   });
 }
@@ -191,7 +212,10 @@ export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settin
     const chunk = all.slice(i, i + PER_QUERY);
     const stewardRepo = i === 0 ? settings.stewardRepo : null;
     const r = await run('gh', ['api', 'graphql', '-f', `query=${glanceQuery(chunk, stewardRepo)}`], { cwd, timeoutMs: 2 * 60_000 });
-    if (!r.out.trim()) throw new Error(`gh api graphql failed (${r.code}): ${(r.err || 'no output').trim().split('\n').slice(-3).join(' / ')}`);
+    if (!r.out.trim()) {
+      const why = (r.err || 'no output').trim().split('\n').slice(-3).join(' / ');
+      throw LIMITED.test(why) ? new GithubLimited(why) : new Error(`gh api graphql failed (${r.code}): ${why}`);
+    }
     readGlance(chunk, r.out, stewardRepo, glance);
   }
   return glance;
