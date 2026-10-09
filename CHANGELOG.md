@@ -16,6 +16,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A release now brings the changelog entries of every version merged since the release before, not just its own, so versions merged together in one round all reach the release notes and Manor's **What's new**.
 - A pull request written that way never rides a merge train: it merges alone once stamped, without another test run.
 - Brings the Steward's kit 2.44.0.
+
 ### Before you update
 
 - Nothing: it updates itself as usual.
