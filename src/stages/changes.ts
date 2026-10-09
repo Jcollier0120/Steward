@@ -48,7 +48,7 @@ export interface RoundPlan {
  * Which employees this round looks at (see above). `kit` is the kit a rollout would bring (the newest kit release, and
  * the kit this Steward carries: stages/rollout.ts), so a new one is something new for every employee. Pure.
  */
-export function planRound(o: { employees: Employee[]; glance: Glance | null | undefined; seen: Seen; settings: Settings; force?: boolean; now?: Date; kit?: { newest: string | null; own: string | null } | null }): RoundPlan {
+export function planRound(o: { employees: Employee[]; glance: Glance | null | undefined; seen: Seen; settings: Settings; force?: boolean; look?: string[]; now?: Date; kit?: { newest: string | null; own: string | null } | null }): RoundPlan {
   const sigs: Record<string, string> = {};
   for (const e of o.employees) {
     const g = o.glance?.repos[e.id];
@@ -57,7 +57,8 @@ export function planRound(o: { employees: Employee[]; glance: Glance | null | un
   const now = (o.now ?? new Date()).getTime();
   const why = o.force ? 'asked for' : !o.glance ? "GitHub couldn't be asked at once" : !o.seen.full && !Object.keys(o.seen.repos).length ? 'no round before' : !o.seen.ok ? 'the last round failed' : !o.seen.full || now - Date.parse(o.seen.full) >= FULL_EVERY_MS ? 'a full look, as each hour' : null;
   if (why) return { full: true, why, look: o.employees, quiet: [], sigs };
-  const look = o.employees.filter((e) => !sigs[e.id] || o.seen.repos[e.id]?.sig !== sigs[e.id]);
+  // Those asked for are looked at too: a branch just vouched for with no PR changes nothing the glance shows (branchesin.ts).
+  const look = o.employees.filter((e) => !sigs[e.id] || o.seen.repos[e.id]?.sig !== sigs[e.id] || o.look?.includes(e.id));
   return { full: false, why: null, look, quiet: o.employees.filter((e) => !look.includes(e)), sigs };
 }
 

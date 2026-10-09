@@ -63,6 +63,8 @@ export interface StageAsk {
   hire?: boolean;
   /** round: every employee looked at, whatever has changed (Run now, and `steward round`). */
   full?: boolean;
+  /** round: these employees (ids) looked at too, whatever GitHub's glance says: a branch just vouched for with no PR (branchesin.ts). */
+  look?: string[];
   /**
    * round: only the staff's pages kept up (tend.ts) and the alarms, nothing asked of GitHub: a scheduled round while
    * Settings say it doesn't merge and release by itself. A round on a PC with no repositories to look after is this too.
@@ -452,7 +454,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           let employees = acting;
           if (round) {
-            plan = planRound({ employees: acting, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            plan = planRound({ employees: acting, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
