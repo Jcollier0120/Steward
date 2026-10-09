@@ -746,13 +746,19 @@ function Stages({ v }: { v: StewardView }) {
 
 /**
  * The repositories Reeve found on this PC that you can push to and the Steward doesn't look after yet (found.ts), each
- * with Look after: added to Settings with merging and releasing as ticked here, both off unless you tick them.
+ * with Look after: added to Settings with merging and releasing as ticked here, both off unless you tick them. Several
+ * picked (their boxes, or All) are looked after in one go, each with its own ticks.
  */
 function FoundCard({ f, finding, now }: { f: FoundView | undefined; finding: boolean; now: number }) {
   const [asked, setAsked] = useState<Record<string, { merges: boolean; release: boolean }>>({});
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
   if (!f) return null;
   const of = (repo: string) => asked[repo] ?? { merges: false, release: false };
   const set = (repo: string, k: 'merges' | 'release', on: boolean) => setAsked({ ...asked, [repo]: { ...of(repo), [k]: on } });
+  // Only those still offered: one looked after leaves the list, and its pick with it.
+  const picks = f.offered.filter((r) => picked[r.repo]);
+  const all = f.offered.length > 0 && picks.length === f.offered.length;
+  const pickAll = (on: boolean) => setPicked(Object.fromEntries(f.offered.map((r) => [r.repo, on])));
   return (
     <Section title="Found on this PC" count={f.offered.length || undefined}>
       <Card tour="found">
@@ -771,12 +777,26 @@ function FoundCard({ f, finding, now }: { f: FoundView | undefined; finding: boo
         ) : (
           <>
             <Text variant="muted" as="p">
-              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched. It merges your ready PRs, or releases its new versions, only if you tick that.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
+              Your repositories on GitHub that Reeve found here and you can push to. Look after one to have its versions claimed, and its PRs and releases watched, or tick several and look after them in one go. It merges your ready PRs, or releases its new versions, only if you tick that.{f.into === 'manor' ? " It goes into Manor's Repositories, the one list every agent reads: change or remove it there." : ''}
             </Text>
+            <div className="row pick-bar">
+              <label className="pick">
+                <input type="checkbox" checked={all} onChange={(e) => pickAll(e.target.checked)} aria-label="Pick every repository" /> All
+              </label>
+              <PostButton
+                title={picks.length ? `Look after ${picks.length}` : 'Look after the picked'}
+                path="/api/repos/look-after"
+                disabled={!picks.length}
+                body={() => ({ repos: picks.map((r) => ({ repo: r.repo, ...of(r.repo) })) })}
+              />
+            </div>
             <table>
               <tbody>
                 {f.offered.map((r) => (
                   <tr key={r.repo}>
+                    <td className="pick-cell">
+                      <input type="checkbox" checked={!!picked[r.repo]} onChange={(e) => setPicked({ ...picked, [r.repo]: e.target.checked })} aria-label={`Pick ${r.repo}`} />
+                    </td>
                     <td>
                       <strong>
                         <Link url={`https://github.com/${r.repo}`}>{r.repo}</Link>
@@ -818,6 +838,8 @@ const STYLE = `
 .notes { margin: 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
+.pick-bar { gap: 12px; align-items: center; margin: 8px 0; }
+td.pick-cell { width: 1%; padding-right: 0; }
 .stages { margin-bottom: 6px; }
 .round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
 .staff tr.has-prs > td { border-bottom: 0; }
