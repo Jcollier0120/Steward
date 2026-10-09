@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.16
+
+**A vouch and a pull request tested here run only the tests the change reaches.**
+
+### What's new
+
+- When `steward vouch` runs a pull request's checks, and when the Steward tests a single pull request itself, `npm test` now runs only the test files the change can reach: the ones it changed, the ones whose imports (and their imports, and so on) take in a changed file, and the ones that name a changed file. A change that is only a version step and its changelog entry runs no test at all. The vouch says what it ran ("affected: 26 of 91 test files").
+- Whatever it can't follow runs the whole suite as before: the TypeScript or npm setup, the kit, test fixtures, a file deleted or renamed, a file no code names, or more than 200 files at once. A merge train, a kit catch-up, a version step and a release always run the whole suite.
+- It needs no tags or settings in the repository: it reads the imports. It works for repositories whose test script is `node --test "<files>"`, as the manor's are; any other test script runs whole.
+- Settings has a switch for it, **Tests only what a change reaches**, on by default.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.13
 
 **A pull request someone has vouched for merges in minutes, not at the next round.**

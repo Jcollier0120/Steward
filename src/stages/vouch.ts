@@ -4,7 +4,7 @@ import { originRepo } from '../kit/manor.ts';
 import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
-import { runChecks } from './bump.ts';
+import { runChecks, type AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
 
@@ -97,9 +97,12 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   if (pr.isCrossRepository) return { ok: false, message: `#${pr.number} is from a fork: the Steward tests those itself` };
   if (pr.headRefOid !== head) return { ok: false, message: `#${pr.number}'s head is ${pr.headRefOid.slice(0, 7)}, this clone's HEAD ${head.slice(0, 7)}: push, or check out its head, and vouch again` };
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say });
+  // Only the tests this PR's change reaches (affected.ts), unless Settings say the whole suite.
+  const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
   if (failed) return { ok: false, message: `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  const description = `${[e.fill, ...e.test].filter(Boolean).join(', ')} passed at ${head.slice(0, 7)}`.slice(0, 140);
+  const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
+  const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${head.slice(0, 7)}`.slice(0, 140);
   const s = await run('gh', ['api', '-X', 'POST', `repos/${repo}/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${description}`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
   if (s.code !== 0) return { ok: false, message: `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}` };
   return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };

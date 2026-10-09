@@ -80,6 +80,8 @@ export interface Settings {
   releaseAfterMerge: boolean;
   stewardRepo: string;
   parallel: number;
+  /** A vouch and a PR tested here run only the tests its change reaches (affected.ts); false: the whole suite. Absent: on. */
+  affectedTests?: boolean;
   /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
   byItself: boolean;
   roundMinutes: number;
@@ -248,6 +250,7 @@ export const DEFAULT_SETTINGS: Settings = {
   releaseAfterMerge: false,
   stewardRepo: '',
   parallel: 2,
+  affectedTests: true,
   // It merges and releases by itself only once the person says yes: here, and for each repository (Employee.merges).
   byItself: false,
   roundMinutes: 10,
@@ -367,6 +370,12 @@ export const SETTINGS_SCHEMA: Field[] = [
   { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', help: 'Off: Release is a stage of its own.' },
   { key: 'stewardRepo', kind: 'text', label: "The Steward's repository", help: "The Steward's own GitHub repository, if you keep one: where its kit releases (kit-v<version>) are, and where it releases itself.", empty: "None: it doesn't release itself, and a kit rollout needs a kit you name", maxLength: 140, ...REPO, ...CASTELLAN },
   { key: 'parallel', kind: 'whole', min: 1, max: 10, unit: 'employees', label: 'Checked at once', help: 'How many employees a bump tests at the same time.' },
+  {
+    key: 'affectedTests',
+    kind: 'switch',
+    label: 'Tests only what a change reaches',
+    help: "A vouch, and a pull request the Steward tests itself, run only the test files the change reaches: the ones it changed, the ones whose imports reach a file it changed, and the ones that name one. A change to the setup (tsconfig, package.json beyond its version, the kit, test fixtures), a deleted file, or a file no code names runs the whole suite. A merge train's stack, a kit pull request, a bump and a release always run the whole suite. Off: the whole suite every time.",
+  },
   {
     key: 'byItself',
     kind: 'switch',
@@ -585,6 +594,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       releaseAfterMerge: typeof r.releaseAfterMerge === 'boolean' ? r.releaseAfterMerge : d.releaseAfterMerge,
       stewardRepo: str(r.stewardRepo, d.stewardRepo),
       parallel: Number.isInteger(parallel) ? Math.min(10, Math.max(1, parallel)) : d.parallel,
+      affectedTests: typeof r.affectedTests === 'boolean' ? r.affectedTests : d.affectedTests,
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
       alarms: normalizeAlarms(r.alarms),

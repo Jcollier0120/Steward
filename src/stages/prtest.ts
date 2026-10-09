@@ -4,7 +4,7 @@ import { commitOf, fetchBranch, gh, git, removeWorktree, showFile } from '../git
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
-import { runChecks } from './bump.ts';
+import { runChecks, type AffectedScope } from './bump.ts';
 import { checkoutOf, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
 import { parsePrs, prListArgs, readPin, type PrInfo } from './staff.ts';
@@ -159,10 +159,14 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {
     const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
-    const failed = await runChecks(ctx, e, dir, { say });
-    if (!failed) return { ok: true, note: `checks passed here at ${sha}`, at: now(), branch };
+    // Only the tests its change reaches (affected.ts), unless Settings say the whole suite.
+    const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
+    const affected = scope ? { affected: scope } : {};
+    const failed = await runChecks(ctx, e, dir, { say, ...affected });
+    const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
+    if (!failed) return { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch };
     say(`#${pr.number}: its checks once more (${failed})`);
-    const again = await runChecks(ctx, e, dir, { say });
+    const again = await runChecks(ctx, e, dir, { say, ...affected });
     return again
       ? { ok: false, note: `its checks failed here at ${sha}, twice: ${again}`, at: now(), branch }
       : { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch };
