@@ -121,12 +121,21 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         afterRunning();
       });
   };
-  /** What waited for the stage that just ended: jobs to approve. */
+  /** A round asked for (POST /api/round/soon) while something ran: it comes once that ends. */
+  let roundAfter = false;
+  /** What waited for the stage that just ended: jobs to approve, then a round asked for. */
   const afterRunning = () => {
-    if (running || !approveAfter) return;
-    const ids = approveAfter;
-    approveAfter = null;
-    approveNow(ids);
+    if (running) return;
+    if (approveAfter) {
+      const ids = approveAfter;
+      approveAfter = null;
+      approveNow(ids);
+      return;
+    }
+    if (roundAfter) {
+      roundAfter = false;
+      startRound();
+    }
   };
 
   /** The repositories Reeve finds (found.ts): looked at again in the background, at most one look at a time. */
@@ -212,6 +221,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       afterRunning();
     }
   };
+  /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
+  const startRound = () => void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
   // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it.
   let rounds: ReturnType<typeof every> | null = null;
@@ -283,6 +294,20 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
         void roundJob(true).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true } };
+      },
+      // `steward vouch`, once a PR's checks passed and GitHub has its status (stages/vouch.ts): a round now, as the schedule
+      // runs one, so the PR merges in minutes when its turn has come, not at the next round. Its glance sees the status
+      // (the PR's checks are in what it compares), so the round looks at that repository. While something runs, once it
+      // ends. Only while the Steward merges by itself and is on duty: otherwise its rounds would merge nothing.
+      '/api/round/soon': () => {
+        if (!loadSettings().byItself) return { json: { started: false, message: "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now." } };
+        if (!duty().onDuty) return { json: { started: false, message: 'The Steward is off duty: it merges the PR at its first round once it is back.' } };
+        if (running) {
+          roundAfter = true;
+          return { json: { started: false, queued: true, message: `The Steward's ${running.stage} is running: a round comes as soon as it ends.` } };
+        }
+        startRound();
+        return { json: { started: true, message: "The Steward's round has started: it merges the PR now if its turn has come." } };
       },
       // Manor, right after it installs an update: the jobs whose scripts it changed, approved now when they are exactly
       // what was merged (stages/jobs.ts), not at the next round's end. While a stage runs, once it ends.

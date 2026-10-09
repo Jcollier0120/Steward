@@ -1,9 +1,10 @@
 import { employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
+import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
-import { runChecks } from './bump.ts';
+import { runChecks, type AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
 
@@ -23,7 +24,7 @@ import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
  */
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */
-const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');
+export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');
 
 /**
  * The team member who vouched for this PR's head (the latest VOUCH_CONTEXT status on it says success, and one of `team`'s
@@ -45,6 +46,25 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
   if (!latest || latest.state !== 'success') return null;
   const by = String(latest.creator?.login ?? '');
   return by && team.some((t) => t.toLowerCase() === by.toLowerCase()) ? by : null;
+}
+
+/**
+ * After a vouch: the Steward running on this PC asked for a round now (its POST /api/round/soon), so the PR merges in
+ * minutes when its turn has come, rather than at the next round. Its port and token from its server.json, as its own
+ * stop reads them. What it answered, in a sentence; never throws, and never fails the vouch.
+ */
+export async function askRoundSoon(o: { fetch?: typeof fetch } = {}): Promise<string> {
+  const later = 'it merges at its next round instead';
+  const info = readJson<{ port?: number; token?: string } | null>(dataFile('server.json'), null);
+  if (!info?.port || !info.token) return `The Steward's page isn't running on this PC: ${later}.`;
+  try {
+    const r = await (o.fetch ?? fetch)(`http://127.0.0.1:${info.port}/api/round/soon`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info.token }, body: '{}', signal: AbortSignal.timeout(5000) });
+    const j = (await r.json().catch(() => null)) as { message?: unknown } | null;
+    if (r.ok && typeof j?.message === 'string') return j.message;
+    return `The Steward's page answered HTTP ${r.status}: ${later}.`;
+  } catch (e) {
+    return `The Steward's page didn't answer (${(e as Error).message}): ${later}.`;
+  }
 }
 
 /** What `steward vouch` did: whether it set the status, and in a sentence what happened. */
@@ -78,9 +98,12 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
   if (pr.isCrossRepository) return { ok: false, message: `#${pr.number} is from a fork: the Steward tests those itself` };
   if (pr.headRefOid !== head) return { ok: false, message: `#${pr.number}'s head is ${pr.headRefOid.slice(0, 7)}, this clone's HEAD ${head.slice(0, 7)}: push, or check out its head, and vouch again` };
   o.say(`${e.name} #${pr.number} at ${head.slice(0, 7)}: its checks, in ${o.dir}`);
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say });
+  // Only the tests this PR's change reaches (affected.ts), unless Settings say the whole suite.
+  const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
   if (failed) return { ok: false, message: `#${pr.number}'s checks failed at ${head.slice(0, 7)}: ${failed}. Nothing was recorded` };
-  const description = `${[e.fill, ...e.test].filter(Boolean).join(', ')} passed at ${head.slice(0, 7)}`.slice(0, 140);
+  const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
+  const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${head.slice(0, 7)}`.slice(0, 140);
   const s = await run('gh', ['api', '-X', 'POST', `repos/${repo}/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${description}`], { cwd: ctx.neutralDir, timeoutMs: 60_000 });
   if (s.code !== 0) return { ok: false, message: `its checks passed, but GitHub wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}` };
   return { ok: true, message: `#${pr.number}'s checks passed at ${head.slice(0, 7)}, and GitHub has it (${VOUCH_CONTEXT}): the Steward merges it without testing it again, unless it is pushed to first` };

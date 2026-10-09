@@ -14,7 +14,41 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - A release now brings the changelog entries of every version merged since the release before, not just its own, so versions merged together in one round all reach the release notes and Manor's **What's new**.
+- A pull request written that way never rides a merge train: it merges alone once stamped, without another test run.
 - Brings the Steward's kit 2.44.0.
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.28.16
+
+**A vouch and a pull request tested here run only the tests the change reaches.**
+
+### What's new
+
+- When `steward vouch` runs a pull request's checks, and when the Steward tests a single pull request itself, `npm test` now runs only the test files the change can reach: the ones it changed, the ones whose imports (and their imports, and so on) take in a changed file, and the ones that name a changed file. A change that is only a version step and its changelog entry runs no test at all. The vouch says what it ran ("affected: 26 of 91 test files").
+- Whatever it can't follow runs the whole suite as before: the TypeScript or npm setup, the kit, test fixtures, a file deleted or renamed, a file no code names, or more than 200 files at once. A merge train, a kit catch-up, a version step and a release always run the whole suite.
+- It needs no tags or settings in the repository: it reads the imports. It works for repositories whose test script is `node --test "<files>"`, as the manor's are; any other test script runs whole.
+- Settings has a switch for it, **Tests only what a change reaches**, on by default.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.28.15
+
+**Ready pull requests merge together, tested once; and a pull request that needs you first waits for you.**
+
+### What's new
+
+- When two or more of a repository's ready pull requests wait their turn (each raising the version one step), the Steward now stacks them on the branch, lowest version first, settles their version lines and changelog entries as it does when it catches one up, runs the checks once on the whole stack, and merges them together through the top pull request. Before, each one was caught up after the one under it merged and tested again on its own: five ready pull requests meant five test runs, now it is one. Each keeps its own version and changelog entry.
+- A pull request labelled **owner-first** is never merged by the Steward, and neither is one that adds or changes a database migration (an `.sql` file, or anything in a `migrations` folder), labelled or not. Do what it needs (run the migration), then merge it yourself, take the label off, or label it **owner-done**. Pull requests above it in the version queue wait for it, as they wait for a draft.
+
+### What changed
+
+- **Merges ready PRs together** is a new switch in Settings, on by default. Off, pull requests merge one at a time as before.
+- A pull request that conflicts with the one under it beyond its version lines ends the stack there and goes its own way as before; if the stack's checks fail, the pull requests merge one at a time, and the same stack isn't built again until one of them, or the branch, moves on.
+- Pull requests with checks on GitHub, steps to run after merging, the Wright's, and ones that raise the kit still merge on their own.
 
 ### Before you update
 
@@ -33,6 +67,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.28.13
+
+**A pull request someone has vouched for merges in minutes, not at the next round.**
+
+### What changed
+
+- Once `steward vouch` has run a pull request's checks and recorded that they passed, it asks the Steward running on the same PC to start its round straight away, so the pull request merges as soon as its turn has come, rather than up to a round's interval later. If the Steward is busy, the round comes as soon as it finishes. The vouch says what the Steward answered. If the Steward isn't running, doesn't merge by itself, or is off duty, the vouch still counts, and the pull request merges at the next round as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.12
 
 **Fewer kit pull requests: a newer kit goes onto the one still open.**
@@ -45,6 +91,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.28.11
 
 **More pull requests caught up without help: lockfiles, and changelogs whose older notes were edited.**

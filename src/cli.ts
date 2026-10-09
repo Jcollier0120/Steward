@@ -18,7 +18,7 @@ import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
 import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
-import { vouch } from './stages/vouch.ts';
+import { askRoundSoon, vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
@@ -355,6 +355,8 @@ switch (cmd) {
     const ctx = await context({ glance: false, team: false });
     const v = await vouch(ctx, { dir: process.cwd(), ...(n ? { pr: Number(n.replace('#', '')) } : {}), say: (line) => console.log(line) });
     console[v.ok ? 'log' : 'error'](v.message);
+    // Its round now, so the PR merges in minutes rather than at the next round.
+    if (v.ok) console.log(await askRoundSoon());
     process.exitCode = v.ok ? 0 : 1;
     break;
   }

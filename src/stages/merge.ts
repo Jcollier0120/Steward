@@ -13,12 +13,13 @@ import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, map
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
+import { runTrain, trainCars, type TrainRun } from './train.ts';
 import { kitTrialHold, raisesKit } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
-import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, reviewedComment, reviewHold } from '../review.ts';
+import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
 import { parsePrs, prListArgs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
 import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
@@ -117,6 +118,9 @@ export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
   if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `${BAILIFF_WAIT}${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
+  // One that needs the owner first (a migration to run): never merged by the Steward until they say (review.ts).
+  const owner = ownerFirstHold(pr);
+  if (owner) return owner;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
   if (pr.mergeable !== 'MERGEABLE') return WORKING_OUT;
   if (pr.checks === 'failing') return 'checks failing';
@@ -396,14 +400,36 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   }
   // Lowest version first: of the open PRs that set a new version, only the lowest merges; each above it waits its turn.
   // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up.
-  // Only where two or more could merge; where the versions can't be read, the order is the PRs' as before.
-  const queued = prs.filter((p) => p.base === e.branch).length > 1 && merge.length && existsSync(checkoutOf(e));
+  // Only where two or more could merge; where the versions can't be read, the order is the PRs' as before. With merge
+  // trains on, also where none can merge yet (the lowest behind its branch, say): the train may take them all.
+  const trains = o.yes && !!o.team && ctx.settings.mergeTrain;
+  const queued = prs.filter((p) => p.base === e.branch).length > 1 && (merge.length || trains) && existsSync(checkoutOf(e));
   const pending = queued
     ? await pendingVersions(ctx, e, prs, ready, lookup).catch((err) => {
         ctx.log(`[${e.id}] couldn't read the versions its PRs set, so they merge in their own order: ${(err as Error).message}`);
         return new Map<number, string>();
       })
     : new Map<number, string>();
+  // A merge train (stages/train.ts): the queue's ready PRs from its lowest version up, stacked, tested once and merged
+  // together. Once it has merged, the next look takes what is left; where it didn't, they merge one at a time below.
+  let trainLine: string[] = [];
+  if (trains && pending.size > 1) {
+    const cars = trainCars(prs, pending, e.branch);
+    if (cars.length) {
+      let t: TrainRun;
+      try {
+        t = await runTrain(ctx, e, cars);
+      } catch (err) {
+        t = { merged: [], note: `couldn't stack them: ${(err as Error).message}`, tested: false };
+      }
+      if (t.merged.length) {
+        const words = `merged ${t.merged.map((p) => `#${p.number}`).join(', ')} as one train (${t.note})`;
+        return { ...result(e, 'done', words, { url: t.merged.at(-1)!.url }), merged: t.merged, held: [], did: [words], waits: [], lookAgain: true };
+      }
+      ctx.log(`[${e.id}] no train for ${cars.map((c) => `#${c.pr.number}`).join(', ')}: ${t.note}`);
+      if (t.tested) trainLine = [`didn't merge ${cars.map((c) => `#${c.pr.number}`).join(', ')} as one train: ${t.note}`];
+    }
+  }
   const turnAfter = new Map<number, number>();
   // The kit's PRs (in the Steward's own repository) come first: one waits only for a lower one of the kit's, and the rest,
   // merged after it, are caught up to versions above it. The agents' PRs that take the new kit wait for it (prtest.ts).
@@ -551,7 +577,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   }
   const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false };
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
-  const did = [...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
+  const did = [...trainLine, ...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
   const parts = [...did, ...waits, ...caught.lines];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
   return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, lookAgain: !leftToAnother && lookAgainAfter({ merged: merged.length, held, testedHere: caught.testedHere }) };
