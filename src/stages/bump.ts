@@ -8,7 +8,7 @@ import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
@@ -46,6 +46,11 @@ export interface BumpOptions {
    * own (never a bump's, which may be left for a look), nothing committed; trial.ts removes them after.
    */
   trial?: boolean;
+  /**
+   * By employee id: its kit PR open for an older kit, which this kit goes onto (the rollout's fold): its branch bumped
+   * again, at its version, with its changelog entry written again. Never with `base` or a trial.
+   */
+  folds?: Record<string, KitFold>;
 }
 
 /** Where a trial bumps an employee, and on which local branch. */
@@ -87,6 +92,21 @@ export function kitBumpEntry(o: { version: string; from: string; kit: string; ch
     '',
     care.length ? care.join('\n') : NOTHING_TO_DO,
   ].join('\n');
+}
+
+/**
+ * The changelog with `entry` in place of the one it has for that version (a fold's: the kit PR's own entry, written
+ * again for the newer kit), the rest as it was; as withEntry when it has no entry for that version.
+ */
+export function replacingEntry(text: string | null, entry: string, name: string): string {
+  const version = headingVersion(lf(entry).split('\n')[0]);
+  const lines = lf(text ?? '').split('\n');
+  const at = version ? lines.findIndex((l) => headingVersion(l) === version) : -1;
+  if (text === null || at < 0) return withEntry(text, entry, name);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const end = lines.findIndex((l, i) => i > at && l.startsWith('## '));
+  const rest = end < 0 ? [] : lines.slice(end);
+  return [...lines.slice(0, at), ...lf(entry).trim().split('\n'), '', ...rest].join('\n').replace(/\n/g, eol);
 }
 
 /**
@@ -150,8 +170,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (!e.usesKit) return result(e, 'skipped', NOT_ON_KIT);
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
-  const base = o.base ?? `origin/${e.branch}`;
+  // A fold starts from its open kit PR's branch, not the employee's own (the rollout's: rollout.ts).
+  const fold = o.trial || o.base ? undefined : o.folds?.[e.id];
+  const base = o.base ?? `origin/${fold ? fold.head : e.branch}`;
   if (!o.base) await fetchBranch(run, repo, e.branch);
+  if (fold) await fetchBranch(run, repo, fold.head);
   const baseCommit = await commitOf(run, repo, base);
   if (!baseCommit) return result(e, 'refused', `no ${base} in ${repo}`);
 
@@ -159,14 +182,16 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const pin = readPin(pinRaw);
   if (!pin) return result(e, 'refused', `${base} has no kit.json`);
   if (pin.kit === o.kit) return result(e, 'skipped', `already on kit ${o.kit}`);
+  // The kit the employee's branch pins: a fold's changelog entry covers every kit since, not only since its PR's.
+  const from = fold ? (readPin(await showFile(run, repo, `origin/${e.branch}`, 'kit.json'))?.kit ?? pin.kit) : pin.kit;
 
   // The tools/kit.ts it gets: the Steward's, read before anything is made.
   const toolFile = o.tool ?? stewardToolFile();
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  const branch = o.trial ? trialBranch(o.kit) : bumpBranch(o.kit);
-  if (!o.trial && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
+  const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
+  if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
   // A bump made here before and not pushed is made again, from scratch.
   const dir = o.trial ? trialDirOf(ctx.settings, e) : bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
@@ -187,9 +212,10 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const agreed = agreedVersion(texts);
   if ('error' in agreed) return result(e, 'failed', agreed.error, { base: baseCommit });
   // A trial's branch is never pushed, so it claims nothing. A version that can't be claimed (GitHub out of reach) is no
-  // bump: the next patch could be another PR's, and the rounds try again.
-  let next = bumpPatch(agreed.version);
-  if (!o.trial) {
+  // bump: the next patch could be another PR's, and the rounds try again. A fold keeps its PR's version, claimed when
+  // that PR was bumped: one PR, one version.
+  let next = fold ? agreed.version : bumpPatch(agreed.version);
+  if (!o.trial && !fold) {
     try {
       next = (await claimVersion(ctx, e, { branch, by: 'steward', for: `the Steward's kit ${o.kit}` })).claim.version;
     } catch (err) {
@@ -201,12 +227,13 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   } catch (err) {
     return result(e, 'failed', (err as Error).message, { base: baseCommit });
   }
-  say(`kit.json: ${pin.kit} → ${o.kit}; version ${agreed.version} → ${next} in ${e.versionFiles.join(', ')}`);
-  // The new version's entry, so its release's notes say what it brings.
+  say(`kit.json: ${pin.kit} → ${o.kit}; ${fold ? `version ${next} as PR #${fold.number} has it` : `version ${agreed.version} → ${next}`} in ${e.versionFiles.join(', ')}`);
+  // The new version's entry, so its release's notes say what it brings: a fold's, its PR's entry written again.
   const logAt = path.join(dir, CHANGELOG);
   const logText = existsSync(logAt) ? readFileSync(logAt, 'utf8') : null;
-  writeFileSync(logAt, withEntry(logText, kitBumpEntry({ version: next, from: pin.kit, kit: o.kit, changelog: o.changelog ?? null }), e.name));
-  say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : ''}`);
+  const entry = kitBumpEntry({ version: next, from, kit: o.kit, changelog: o.changelog ?? null });
+  writeFileSync(logAt, fold ? replacingEntry(logText, entry, e.name) : withEntry(logText, entry, e.name));
+  say(`${CHANGELOG}: the entry for ${next}${logText === null ? ' (a new changelog)' : fold ? `, for every kit since ${from}` : ''}`);
 
   // A failure is tried once more, as a PR's checks are here (prtest.ts): a round bumps several employees at once, and a
   // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
@@ -222,13 +249,16 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
 
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
+  const what = fold
+    ? `kit.json pins the Steward's kit ${o.kit} (this PR, #${fold.number}, brought ${pin.kit}: the newer kit goes onto it rather than a PR of its own); the version stays ${next}, and ${CHANGELOG}'s entry for it covers every kit since ${from}.`
+    : `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.`;
+  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
   const commit = full.slice(0, 7);
   // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit tree.
   if (!o.kitFrom) recordTested(e.id, { commit: full, stage: 'bump', branch, version: next });
   const back =compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
-  return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
+  return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${fold ? `, onto its open PR #${fold.number}` : ''}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
 }
 
 export async function bump(ctx: Ctx, employees: Employee[], o: BumpOptions): Promise<EmployeeResult[]> {

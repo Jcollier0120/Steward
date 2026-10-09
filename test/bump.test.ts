@@ -12,7 +12,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 
 const { bumpBranch } = await import('../src/stages/common.ts');
-const { bumpOne, kitBumpEntry, repin } = await import('../src/stages/bump.ts');
+const { bumpOne, kitBumpEntry, repin, replacingEntry } = await import('../src/stages/bump.ts');
 const { prBody, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -289,4 +289,73 @@ test("a bump's version is claimed: above an open PR's (an agent's own work besid
   const offline = await bumpOne({ ...s.ctx, run: runner().run }, s.e, { kit: '1.0.1', kitFrom });
   assert.equal(offline.outcome, 'failed');
   assert.match(offline.message, /^couldn't claim a version for the bump: /);
+});
+
+test("a fold: a newer kit goes onto the kit PR still open for an older one, at its version, its entry written again for every kit since main's", async () => {
+  const s = setup();
+  assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
+  sh(s.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
+  const claims = loadClaims().map((c) => [c.version, c.branch]);
+  const kit102 = path.join(tmp, 'kit-1.0.2');
+  mkdirSync(path.join(kit102, 'node'), { recursive: true });
+  writeFileSync(path.join(kit102, 'node', 'npu.ts'), 'export const npu = 2;\n');
+  writeFileSync(path.join(kit102, 'VERSION'), '1.0.2\n');
+  const folds = { fake: { number: 7, head: 'steward/kit-1.0.1', kit: '1.0.1' } };
+  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.2', kitFrom: kit102, folds });
+  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
+  assert.equal(res.version, '0.4.1', "its PR's version, not another");
+  assert.match(res.message, /^0\.4\.1 on steward\/kit-1\.0\.1 \(.{7}\): kit 1\.0\.1 → 1\.0\.2, onto its open PR #7, checks passed/);
+  assert.deepEqual(loadClaims().map((c) => [c.version, c.branch]), claims, 'nothing claimed');
+  // On top of the PR's branch, never instead of it.
+  assert.equal(sh(s.checkout, 'rev-list', '--count', 'origin/steward/kit-1.0.1..steward/kit-1.0.1'), '1');
+  assert.equal(sh(s.checkout, 'rev-list', '--count', 'steward/kit-1.0.1..origin/steward/kit-1.0.1'), '0');
+  assert.equal(sh(s.checkout, 'show', 'steward/kit-1.0.1:kit.json'), '{\n  "kit": "1.0.2",\n  "parts": ["node"]\n}');
+  assert.match(sh(s.checkout, 'show', 'steward/kit-1.0.1:src/app.ts'), /version: '0\.4\.1'/);
+  const log = sh(s.checkout, 'show', 'steward/kit-1.0.1:CHANGELOG.md').replace(/\r\n/g, '\n');
+  assert.equal(log.match(/^## 0\.4\.1$/gm)?.length, 1, 'one entry for its version');
+  assert.match(log, /\n## 0\.4\.1\n\n\*\*It carries the Steward's kit 1\.0\.2: [\s\S]*- The Steward's kit 1\.0\.2, after 1\.0\.0: /);
+  assert.doesNotMatch(log, /kit 1\.0\.1/, "the PR's old entry is gone");
+  assert.equal(sh(s.checkout, 'log', '-1', '--format=%s', 'steward/kit-1.0.1'), "Fake 0.4.1: the Steward's kit 1.0.2");
+
+  // Pushed onto the PR, whose title and description become the new kit's: no second PR.
+  const r = runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'view') return ok({ state: 'OPEN', headRefName: 'steward/kit-1.0.1' });
+    if (a[0] === 'pr' && a[1] === 'list') return ok([{ number: 7, url: 'https://github.com/Jcollier0120/Fake/pull/7' }]);
+    if (a[0] === 'pr' && a[1] === 'edit') return ok('');
+  });
+  const pushed = await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.2', changelog: null, folds });
+  assert.equal(pushed.outcome, 'done', pushed.message);
+  assert.equal(pushed.message, `put kit 1.0.2 onto its open PR #7, now "Fake 0.4.1: the Steward's kit 1.0.2"`);
+  assert.equal(sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1'), sh(s.checkout, 'rev-parse', 'steward/kit-1.0.1'));
+  const edit = r.gh.find((a) => a[1] === 'edit')!;
+  assert.equal(edit[2], '7');
+  assert.equal(edit[edit.indexOf('--title') + 1], "Fake 0.4.1: the Steward's kit 1.0.2");
+  assert.match(edit[edit.indexOf('--body') + 1], /^kit\.json pins the Steward's kit 1\.0\.2 \(it pinned 1\.0\.0\)[\s\S]*Opened for kit 1\.0\.1; kit 1\.0\.2 came out while it was open/);
+  assert.ok(!r.gh.some((a) => a[1] === 'create'));
+});
+
+test('a fold whose PR merged or closed meanwhile is pushed nowhere', async () => {
+  const s = setup();
+  assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');
+  sh(s.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
+  const was = sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1');
+  const folds = { fake: { number: 7, head: 'steward/kit-1.0.1', kit: '1.0.1' } };
+  // A commit on the PR's branch here, as a fold's bump leaves it.
+  writeFileSync(path.join(s.work, 'more.txt'), 'more\n');
+  sh(s.work, 'add', 'more.txt');
+  sh(s.work, 'commit', '--quiet', '-m', 'more');
+  const r = runner((a) => (a[0] === 'pr' && a[1] === 'view' ? ok({ state: 'MERGED', headRefName: 'steward/kit-1.0.1' }) : undefined));
+  const res = await pushOne({ ...s.ctx, run: r.run }, s.e, { kit: '1.0.2', changelog: null, folds });
+  assert.equal(res.outcome, 'skipped');
+  assert.equal(res.message, "kit 1.0.2 wasn't put onto PR #7: it is merged now, so the next round bumps Fake afresh");
+  assert.equal(sh(s.origin, 'rev-parse', 'refs/heads/steward/kit-1.0.1'), was);
+  assert.ok(!r.gh.some((a) => a[1] === 'edit' || a[1] === 'create'));
+});
+
+test("replacingEntry writes a version's entry again, leaving the others; withEntry's when it has none", () => {
+  const log = '# Fake\n\n## 0.4.1\n\n**Old.**\n\n## 0.4.0\n\n**First.**\n';
+  assert.equal(replacingEntry(log, '## 0.4.1\n\n**New.**', 'Fake'), '# Fake\n\n## 0.4.1\n\n**New.**\n\n## 0.4.0\n\n**First.**\n');
+  assert.equal(replacingEntry('# Fake\n\n## 0.4.1\n\n**Old.**\n', '## 0.4.1\n\n**New.**', 'Fake'), '# Fake\n\n## 0.4.1\n\n**New.**\n');
+  assert.equal(replacingEntry(log.replace(/\n/g, '\r\n'), '## 0.4.1\n\n**New.**', 'Fake'), '# Fake\r\n\r\n## 0.4.1\r\n\r\n**New.**\r\n\r\n## 0.4.0\r\n\r\n**First.**\r\n');
+  assert.equal(replacingEntry(log, '## 0.4.2\n\n**Next.**', 'Fake'), '# Fake\n\n## 0.4.2\n\n**Next.**\n\n## 0.4.1\n\n**Old.**\n\n## 0.4.0\n\n**First.**\n');
 });
