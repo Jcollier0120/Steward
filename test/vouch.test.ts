@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -13,7 +13,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { vouch } = await import('../src/stages/vouch.ts');
+const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const vouchStatus = { __typename: 'StatusContext', context: VOUCH_CONTEXT, state: 'SUCCESS' };
@@ -110,4 +110,20 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.equal(dirty.v.ok, false);
   assert.match(dirty.v.message, /uncommitted changes/);
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
+});
+
+test("after a vouch, the Steward running here is asked for a round now, with its server.json's token; nothing it says fails the vouch", async () => {
+  const file = path.join(tmp, 'home', 'server.json');
+  rmSync(file, { force: true });
+  assert.equal(await askRoundSoon({ fetch: async () => assert.fail('nothing to ask') }), "The Steward's page isn't running on this PC: it merges at its next round instead.");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ pid: 1, port: 21012, token: 'tok', since: '' }));
+  const asked: [string, RequestInit][] = [];
+  const answer = (status: number, body: unknown) => async (url: any, init: any) => (asked.push([String(url), init]), new Response(JSON.stringify(body), { status }));
+  assert.equal(await askRoundSoon({ fetch: answer(200, { started: true, message: "The Steward's round has started." }) as typeof fetch }), "The Steward's round has started.");
+  assert.equal(asked[0][0], 'http://127.0.0.1:21012/api/round/soon');
+  assert.equal(asked[0][1].method, 'POST');
+  assert.equal((asked[0][1].headers as Record<string, string>)['x-token'], 'tok');
+  assert.equal(await askRoundSoon({ fetch: answer(403, { error: 'forbidden' }) as typeof fetch }), "The Steward's page answered HTTP 403: it merges at its next round instead.");
+  assert.equal(await askRoundSoon({ fetch: (async () => { throw new Error('connect ECONNREFUSED'); }) as typeof fetch }), "The Steward's page didn't answer (connect ECONNREFUSED): it merges at its next round instead.");
 });

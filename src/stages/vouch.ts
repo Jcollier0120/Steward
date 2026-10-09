@@ -1,6 +1,7 @@
 import { employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
+import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
 import { runChecks } from './bump.ts';
@@ -45,6 +46,25 @@ export async function vouchedBy(ctx: Ctx, e: Employee, pr: PrInfo, team: string[
   if (!latest || latest.state !== 'success') return null;
   const by = String(latest.creator?.login ?? '');
   return by && team.some((t) => t.toLowerCase() === by.toLowerCase()) ? by : null;
+}
+
+/**
+ * After a vouch: the Steward running on this PC asked for a round now (its POST /api/round/soon), so the PR merges in
+ * minutes when its turn has come, rather than at the next round. Its port and token from its server.json, as its own
+ * stop reads them. What it answered, in a sentence; never throws, and never fails the vouch.
+ */
+export async function askRoundSoon(o: { fetch?: typeof fetch } = {}): Promise<string> {
+  const later = 'it merges at its next round instead';
+  const info = readJson<{ port?: number; token?: string } | null>(dataFile('server.json'), null);
+  if (!info?.port || !info.token) return `The Steward's page isn't running on this PC: ${later}.`;
+  try {
+    const r = await (o.fetch ?? fetch)(`http://127.0.0.1:${info.port}/api/round/soon`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': info.token }, body: '{}', signal: AbortSignal.timeout(5000) });
+    const j = (await r.json().catch(() => null)) as { message?: unknown } | null;
+    if (r.ok && typeof j?.message === 'string') return j.message;
+    return `The Steward's page answered HTTP ${r.status}: ${later}.`;
+  } catch (e) {
+    return `The Steward's page didn't answer (${(e as Error).message}): ${later}.`;
+  }
 }
 
 /** What `steward vouch` did: whether it set the status, and in a sentence what happened. */

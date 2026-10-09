@@ -15,6 +15,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.28.13
+
+**A pull request someone has vouched for merges in minutes, not at the next round.**
+
+### What changed
+
+- Once `steward vouch` has run a pull request's checks and recorded that they passed, it asks the Steward running on the same PC to start its round straight away, so the pull request merges as soon as its turn has come, rather than up to a round's interval later. If the Steward is busy, the round comes as soon as it finishes. The vouch says what the Steward answered. If the Steward isn't running, doesn't merge by itself, or is off duty, the vouch still counts, and the pull request merges at the next round as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.12
 
 **Fewer kit pull requests: a newer kit goes onto the one still open.**
@@ -27,6 +39,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 ## 0.28.11
 
 **More pull requests caught up without help: lockfiles, and changelogs whose older notes were edited.**
