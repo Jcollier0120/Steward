@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.43.2
+
+**The Toller and the Assayer say where their work runs, and have their own scenes.**
+
+### What's new
+
+- **node/work.ts:** `WORK` entries for the Toller (its hourly round over your projects' lockfiles, changed files and tools, and one look at the listening ports; no model) and the Assayer (test runs in throwaway worktrees at below-normal priority, at most 3 a round, every 15 minutes; no model). Both are developer roles (`developerRole`): with Developer options off, their pages have no "Where its work runs".
+- **node/look.ts:** a scene for each: the Toller's striped bar lifts once the coin drops; the Assayer's balance tips and settles.
+
+### What changed
+
+- **What an agent must do:** nothing. The Toller and the Assayer show the new section and scene once they take this kit.
+- **spec/DEVELOPER-OPTIONS.md:** the developer roles' list names the Toller and the Assayer.
+- **Its tests:** kit/test/work.test.ts, kit/test/look.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.41.0
 
 **A reranker the keeper sets up and keeps: a fourth serve kind, `rerank`.** Reeve's search gives its ten best files a second look by a reranker (Qwen3-Reranker-0.6B through llama.cpp's `/v1/rerank`), which on its 24 test questions put the right file first 16 times instead of 13. A reranker started by hand on a manor port was stopped as an orphan after 5 minutes, since no configured server was it. Now it is one.

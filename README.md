@@ -8,10 +8,17 @@ The *steward* ran the household for its lord: he kept the keys, saw that every s
 
 One of the agents employed at Manor, the home of the local agents on this PC. Its page is http://steward.localhost:19494/.
 
-It has two jobs, and Settings say which a PC gets:
+It is a developer's hire, sold for the Steward's office, and it has two jobs:
 
 - **On your PC: your own repositories** (below). Every PC.
-- **On Castellan's own PC: Castellan's release machinery** (the kit, its rollout, and the Steward's own releases; from "The kit" on). Only where Settings' **Releases Castellan itself** (`releasesCastellan`) is on, which a new install never is.
+- **On Castellan's own PC: Castellan's release machinery** (the kit, its rollout, and the Steward's own releases; from "The kit" on). Only on the laptop Castellan is made on, and there only where Settings' **Releases Castellan itself** (`releasesCastellan`) is on.
+
+**Which PC this is** (`src/maker.ts`) is the maker's laptop itself: its firmware's (SMBIOS) UUID, as Windows keeps it (`HKLM\SYSTEM\HardwareConfig`, `LastConfig`), salted and hashed, the same check as Manor's customer view; the Steward holds only the hash. No file, setting or environment variable makes another PC the maker's (`STEWARD_CUSTOMER=1` only ever takes it away, to see the Steward as a customer has it). Everywhere else:
+
+- **Releases Castellan itself** reads as off whatever settings.json says, and Settings don't offer it, so the kit, its rollout, the Steward's own releases and PRs and the releases repository are out of reach, and the page shows none of them.
+- **Castellan's own repositories are its makers' alone.** One whose origin is under the maker's GitHub account (Manor, the site, the Exchequer, the releases repository, every agent), or that takes the id of one of Manor's agents (its shipped `staff.json`) or of the manor's own repositories (`manor`, `steward`, `kit`, `exchequer`, `castellansite`, `manor-releases`), is never offered or looked after, and **Look after**, `employ`, `claim-version`, `release-version` and a save in Settings each refuse it in a sentence. One already in settings.json is left there, unused, and Settings say why. A repository of yours whose name is an agent's gets its own id (`porter-2`).
+- `claim-port`, `release-port`, `ports` and `mine`, and a claim of the kit's version, answer that they are for the people who make Castellan; the rounds raise no port alarms.
+- **Developer options** (Manor's switch, or the Steward's own `"developerOptions"` without Manor): off, the Steward does nothing. Its rounds don't run, every stage and the commands that work on repositories answer with one plain line, its buttons and reads say the same (Manor's `/api/alarms` and `/api/version-queues` keep their shape, empty), its Settings form is left out, and its page is that line alone. On the maker's laptop the switch never holds it: the release machinery runs whatever it says.
 
 ## Your own repositories
 
@@ -246,7 +253,7 @@ Each PC may run a Steward signed in to the same GitHub account. They elect one r
 
 ## Ports claimed up front
 
-Every agent's page has a port of its own (its `src/app.ts`, and its Manor entry's `home` and `ping`), and Manor never offers an agent whose port another already has. New agents used to be given one by whoever started them, looking only at the clones on their PC: the Assayer took the Shepherd's 20707, and its role sat in Manor with no one to hire. Now a new agent's port is asked for first, as its version is (`src/ports.ts`):
+Only on Castellan's own PC. Every agent's page has a port of its own (its `src/app.ts`, and its Manor entry's `home` and `ping`), and Manor never offers an agent whose port another already has. New agents used to be given one by whoever started them, looking only at the clones on their PC: the Assayer took the Shepherd's 20707, and its role sat in Manor with no one to hire. Now a new agent's port is asked for first, as its version is (`src/ports.ts`):
 
 ```powershell
 node %USERPROFILE%\.steward\app\src\cli.ts claim-port tallyman --branch claude/tallyman --for "the Tallyman"
@@ -395,8 +402,8 @@ Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\set
 | Releases its own new versions (`releaseSelf`) | on | Whether rounds release a kit version or a Steward version on the Steward's own main that has no release yet (Its own releases, above). |
 | The Steward's checkout (`stewardCheckout`) | none | Your clone of the Steward, if you keep one, which its own releases are made from: a worktree of it at origin/main, in the work folder. Without one, it doesn't release itself or merge its own PRs; `claim-version steward` then uses the Steward clone it is run in. |
 | Alarms (`alarms`) | on, with a notification; 24 hours, 6 hours, 6 hours; `http://127.0.0.1:18585`, `http://127.0.0.1:19595`, `http://127.0.0.1:18383`; the Wright's `http://127.0.0.1:19797` and the Bailiff's `http://127.0.0.1:19999` only where each is installed | Whether rounds raise alarms (`on`), with a Windows notification (`toast`); how long a PR waits (`waitingHours`), a Surveyor's problem lasts (`problemHours`) and the Aletaster's tasting holds a release (`tastingHours`), 1 to 168, before it is one; Manor's page (`manorUrl`), the Surveyor's (`surveyorUrl`), Reeve's (`reeveUrl`, read only where Reeve is installed) the Wright's (`wrightUrl`) and the Bailiff's (`bailiffUrl`), local addresses only, empty for not read. |
-
-| Releases Castellan itself (`releasesCastellan`) | off (an install from before 0.16.0: on) | Only on the PC Castellan is made on: the kit's rollout, the Steward's own releases and PRs, and each release published to the releases repository too. Off, `rollout`, `releaseSelf`, `mergeSelf`, `stewardRepo`, `stewardCheckout` and each repository's `usesKit` count as off, whatever the file says, and those settings aren't shown. |
+| Castellan's makers' PC (`makersPc`) | read from this PC | Shown only there, never saved: whether this is the laptop Castellan is made on (Which PC this is, at the top). Elsewhere `releasesCastellan` counts as off and Castellan's own repositories aren't looked after, whatever the file says. |
+| Releases Castellan itself (`releasesCastellan`) | off (an install from before 0.16.0: on) | Only on the laptop Castellan is made on: the kit's rollout, the Steward's own releases and PRs, and each release published to the releases repository too. Off, `rollout`, `releaseSelf`, `mergeSelf`, `stewardRepo`, `stewardCheckout` and each repository's `usesKit` count as off, whatever the file says, and those settings aren't shown. |
 | The releases repository (`releasesRepo`) | none (an install from before 0.16.0: the one it published to) | Where each of Castellan's releases is published for every Manor, as well as in the agent's own repository: passed to every release command as `MANOR_RELEASES_REPO`, which the kit's release.ts reads (kit 2.32.0). |
 | .NET SDK (`dotnetRoot`) | none: DOTNET_ROOT's, else Program Files' | A folder with dotnet.exe and an SDK, for a .NET repository's tests and release. |
 
@@ -439,7 +446,7 @@ All in `%USERPROFILE%\.steward` (`%USERPROFILE%\.steward-dev` for a checkout; `S
 
 ## Manor entry
 
-[manor-agent.json](manor-agent.json) is its entry, as Manor's staff.json has it, and its role, as Manor's roles.json has it. Every release publishes it beside the zip, listed in SHA256SUMS.txt (the kit's release.ts, from kit 2.12.0), so a Manor that finds it on GitHub offers Hire on the Steward's card (Manor's "New agents, announced on GitHub"). The release refuses to build when its `release.repo` isn't this repository or its id isn't `steward`. Keep it the same as Manor's staff.json entry.
+[manor-agent.json](manor-agent.json) is its entry, as Manor's staff.json has it, and its role, as Manor's roles.json has it. Every release publishes it beside the zip, listed in SHA256SUMS.txt (the kit's release.ts, from kit 2.12.0), so a Manor that finds it on GitHub offers Hire on the Steward's card (Manor's "New agents, announced on GitHub"). The release refuses to build when its `release.repo` isn't this repository or its id isn't `steward`. Keep it the same as Manor's staff.json entry. Its `uses` is `developer`: the Steward is for people who write software, and does nothing while Developer options is off.
 
 It points at the installed copy (see Install). Its role in Manor's roles is `steward`.
 
