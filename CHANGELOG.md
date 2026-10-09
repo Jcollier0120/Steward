@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
-- The Steward looks after the repositories you pick from the ones Reeve finds on this PC, and only those: it claims each new version up front so work going on side by side never collides, watches your pull requests and releases, and merges your ready, green pull requests and releases, each only where you say yes.
+- The Steward looks after the repositories you pick (in Manor's Repositories, or from the ones Reeve finds on this PC with **Look after**), and only those: it claims each new version up front so work going on side by side never collides, watches your pull requests and releases, and merges your ready, green pull requests and releases, each only where you say yes.
 - Castellan's own repositories (Manor and its agents, its website and its licensing service) are its makers' alone. The Steward doesn't offer them, and refuses to look after one, to claim a version of it, to merge it or to release it, saying why in a sentence. A repository of yours whose name is the same as one of Castellan's agents gets its own id instead (porter-2, say).
 - It is a hire for people who write software: with Developer options off in Manor's Settings, it does nothing. Its rounds don't run, its buttons and commands say why, and its page is one plain line.
 
@@ -19,8 +19,23 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing: it updates itself as usual. Your repositories it already looks after stay as they are; one of Castellan's that you had added stays in Settings, unused, and Settings say why.
+- Nothing: it updates itself as usual. Your repositories it already looks after stay as they are; one of Castellan's that you had added stays where you added it, unused.
 - Turn on Developer options in Manor's Settings if it's off, or the Steward waits.
+
+## 0.27.39
+
+**Your repositories in one list, in Manor: the Steward looks after the ones there.**
+
+### What changed
+
+- On your PC (unless it releases Castellan), the repositories the Steward looks after are the ones in Manor's Settings, under Repositories: the one list every agent reads. Each says whether the Steward merges its ready pull requests and how it is released. Manor 0.16.24 brings in the repositories you gave the Steward before, with your choices as they were, once.
+- **Look after** on the Steward's page now adds a repository to Manor's Repositories; you change or remove it there.
+- Without Manor, or with a Manor older than 0.16.24, the Steward keeps the repositories it had, as before.
+- It hands out kit 2.42.0, which describes the one list.
+
+### Before you update
+
+- Update Manor to 0.16.24 first, so your repositories are in its list before the Steward reads it. If you update the Steward first, nothing changes until Manor is updated.
 
 ## 0.27.38
 

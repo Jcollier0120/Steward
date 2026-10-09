@@ -21,6 +21,26 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: it updates itself as usual.
 
+## 2.42.0
+
+**One list of tracked repositories, in Manor.** The repositories the manor looks after on a PC were set in five places: the Steward's employees, Manor's non-employee projects, Reeve's found repositories, the Wright's and the Aletaster's own lists. From this version Manor's list (settings.json's `"projects"`) is the one place, and each agent derives its own from it. The rule is the new spec/REPOSITORIES.md.
+
+### What's new
+
+- **node/manor.ts:** a project has `merges` (the Steward merges the team's ready pull requests into its branch; needs `repo`) and `release` (`tag` or a command; needs `repo` and `versionFiles`). Both are off unless it says, as the person's yes. `projectsFrom()` checks them, and says why it leaves out an entry that gets them wrong.
+- **spec/REPOSITORIES.md:** staff (Castellan's own agents, only where Castellan is released) and tracked repositories (the person's own, on every PC), an entry's keys, which agent uses which, and the move to one list.
+
+### What changed
+
+- **`manorOwn()`** counts the Steward's employees as the manor's own only where the Steward releases Castellan (`releasesCastellan` not false), as before there. On any other PC the repositories a person gave the Steward are theirs, and may be tracked as projects. A Steward settings.json from before `releasesCastellan` reads as before.
+- **What an agent must do:** nothing to keep working: a project read before has `merges` false and `release` empty. An agent that keeps its own list of repositories should derive it from `manorProjects()` where Manor is installed, as spec/REPOSITORIES.md says. Manor, the Steward and the Wright follow in their own PRs.
+- **Manor** moves with it: its tests check a project's every key, so Manor before 0.16.24 fails three of them on this kit. Manor 0.16.24 (its tracked-repositories change) expects `merges` and `release` and passes, so this kit is released with `kit:breaks-agents` and Manor 0.16.24 merges right after.
+- **Its tests:** kit/test/manor.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.41.0
 
 **A reranker the keeper sets up and keeps: a fourth serve kind, `rerank`.** Reeve's search gives its ten best files a second look by a reranker (Qwen3-Reranker-0.6B through llama.cpp's `/v1/rerank`), which on its 24 test questions put the right file first 16 times instead of 13. A reranker started by hand on a manor port was stopped as an orphan after 5 minutes, since no configured server was it. Now it is one.

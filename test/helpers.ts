@@ -12,6 +12,9 @@ import type { Ctx } from '../src/stages/common.ts';
 // The Bailiff's install decides whether the Wright's drafts wait for its approval (settings.ts's bailiffInstalled): a test
 // never sees this PC's. One that wants it installed sets BAILIFF_HOME itself.
 process.env.BAILIFF_HOME ??= path.join(os.tmpdir(), 'steward-test-no-bailiff');
+// Never this PC's Manor: off the makers' PC its Repositories are the Steward's (settings.ts manorTakesOver), and Look
+// after writes into them. A test that wants a Manor makes one.
+process.env.MANOR_HOME ??= path.join(os.tmpdir(), 'steward-test-no-manor');
 // The same for the Wright's and the Surveyor's installs (settings.ts's wrightInstalled, surveyorInstalled): the tests see
 // the owner's PC as it is, with both installed, unless one says otherwise before it imports this.
 for (const [name, home] of [['WRIGHT_HOME', 'steward-test-wright'], ['SURVEYOR_HOME', 'steward-test-surveyor']] as const) {

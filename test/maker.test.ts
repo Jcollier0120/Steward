@@ -87,6 +87,12 @@ test("a customer's PC: Castellan's releases off whatever the file says, and none
   assert.deepEqual(releasesRepoEnv({ releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases' }), { MANOR_RELEASES_REPO: '' }, "never Castellan's releases repository");
   // A repository of theirs that takes an agent's id is left out until they give it another.
   assert.deepEqual(inEffect({ ...s, employees: [{ ...MINE, id: 'porter' }] }).employees, []);
+  // Manor's Repositories (the list off the maker's laptop): Castellan's own left out, and theirs called porter is porter-2.
+  const tracked = [
+    { name: 'Manor', checkout: path.join(os.tmpdir(), 'manor'), repo: 'Jcollier0120/Manor', branch: 'main', test: null, versionFiles: [], cleanBranches: true, merges: true, release: 'tag' },
+    { name: 'Porter', checkout: path.join(os.tmpdir(), 'porter'), repo: 'me/porter', branch: 'main', test: null, versionFiles: ['package.json'], cleanBranches: true, merges: true, release: 'tag' },
+  ];
+  assert.deepEqual(inEffect(s, false, tracked, { ids: new Set(['porter']) }).employees.map((e) => [e.id, e.repo]), [['porter-2', 'me/porter']]);
   // Settings: the switch isn't offered, and a save naming one of Castellan's is refused beside it.
   const field = (k: string) => SETTINGS_SPEC.schema.find((f) => f.key === k) as any;
   assert.deepEqual(field('releasesCastellan').shownWhen, { key: 'makersPc', is: ['true'] });
