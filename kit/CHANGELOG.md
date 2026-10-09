@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.43.3
+## 2.43.5
 
 **A queue ticket can say what the request is for, and an agent can say it is setting up.**
 
@@ -20,6 +20,35 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 2.43.4
+
+**The kit's MIT license comes with the kit, as `src/kit/LICENSE`.** An agent's own LICENSE now points to the kit's license instead of pasting the MIT text, so the kit brings its license itself, and every agent's release carries it beside the kit.
+
+### What changed
+
+- **tools/kit.ts:** filling `src/kit` copies the kit's `LICENSE` beside its `VERSION`, as `src/kit/LICENSE`. A kit release has held `LICENSE` all along (tools/kit-release.ts); only the fill left it out. A kit tree or release without one (as a test's may be) fills as before, with no `LICENSE`.
+- **What an agent must do:** nothing: the Steward's bump brings the new tools/kit.ts and fills `src/kit` again. An agent's release takes everything under `src/`, so `src/kit/LICENSE` goes into its zip with the kit.
+- **Its tests:** test/kit-tool.test.ts.
+
+## 2.43.3
+
+**The manor's pace: agents new to the manor do their heavy first rounds one at a time, and every scheduled round gives way to the person.** A first install, or every agent hired together, ran each one's first round at once, at normal priority: first indexes, first scans, a first look at every repository, together, and the PC ground to a halt.
+
+### What's new
+
+- **node/pace.ts:** Manor's settings.json `"backgroundPace"`, `gentle` (the default) or `full` (as before), read afresh with `pace()`.
+  - **First rounds one at a time.** A schedule whose round has never gone through waits for its first round in one line with the others (`inFirstRoundTurn`, the lock folder `first-rounds` beside the accelerators' locks, one slot), and runs once the one before it has finished. Later rounds, which only catch up, never wait.
+  - **Below-normal priority** for a scheduled round (`setPriorityFor`), passed on to the programs it starts.
+  - A round the person asks for never waits, and runs at normal priority. Under node --test the pace is full unless `MANOR_PACE` says, so no test waits in this PC's line.
+- **node/schedule.ts:** `every()` does all of that. round.json keeps `wentThrough` (each schedule's first round that went through; a round.json from before counts as through, so an update never queues anyone). A round's state has `firstRound` (`waiting` or `running`), and `firstRoundNow()` gives the agent's.
+- **Settling into the manor.** While a first round waits its turn, or a long one runs, the status pill says "Settling in" and the page, string-built or React, shows a banner in the role's colour (the manor's door, with footsteps walking up to it) saying it is new and takes longer this once (`settlingText`, `SETTLING_SVG`). A look's new `firstRound` says what a long first round does: Reeve's and Heiward's have one.
+
+### What changed
+
+- spec/ROUND.md has a Pace section.
+- **What an agent must do:** nothing: its rounds take the pace with this kit. One whose first round takes much longer than the rest gives its look a `firstRound`. An agent that schedules its own heavy work outside every() (Heiward) joins the same line through the kit's lock on `first-rounds`.
+- **Its tests:** kit/test/pace.test.ts.
 
 ## 2.43.2
 

@@ -2,6 +2,94 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.10
+
+**The kit it hands out, 2.43.4, brings its own MIT license.**
+
+### What changed
+
+- The Steward hands out kit 2.43.4: each agent's copy of the kit now comes with the kit's license, and so does every agent's release. The agents' own license files are short and point to it.
+
+## 0.28.9
+
+**The kit it hands out, 2.43.3, keeps the agents from all doing their heavy first work at once.**
+
+### What changed
+
+- The Steward hands out kit 2.43.3. Agents new to the manor do their first rounds one at a time, and their pages say they're settling in. Every agent's scheduled rounds run at low priority, so they give way to whatever you are doing. Manor's Settings will have the switch for it; until then it is on.
+
+## 0.28.8
+
+**The Steward has a row of its own in the staff table, and is never looked after twice.**
+
+### What changed
+
+- On the PC that releases Castellan, the Steward's own repository is a row of the staff table, like every employee's: its checkout, branch, kit, latest release, release PC and open pull requests. Its release PC sits in that row, so the lines that used to appear under the table for it (sometimes twice) are gone.
+- Its row isn't one of the stages' tick boxes: its own rounds merge and release it, as before.
+- Found on this PC no longer offers the Steward's own repository. If it was looked after from there already, that extra entry is ignored, so its pull requests aren't merged twice. You can remove it from Settings, under Repositories.
+- Version claims for the Steward are now let go once their work lands or goes stale, as every other repository's are.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Steward's row appears the next time the table is refreshed.
+
+## 0.28.7
+
+**Look after several of the repositories found on this PC in one go.**
+
+### What's new
+
+- Under Found on this PC, each repository has a box to pick it, and All picks every one. Look after N then adds all the picked ones at once, each with its own Merge my ready PRs and Release each new version ticks. If some can't be added, the page says which and why, and adds the rest.
+
+## 0.28.6
+
+**See what the Steward does with pull requests that conflict with their branch.**
+
+### What's new
+
+- A new **Merge conflicts** section on the Steward's page, under your repositories. It lists each pull request that conflicted with its branch in the last two weeks, and what the Steward did with it:
+  - **caught up**: only version lines, a changelog's new entry or a kit pin conflicted, so it resolved them and pushed a merge commit;
+  - **sent back**: something needed judgement, so it left a comment for whoever wrote it (a Claude Code session or a person);
+  - **closed**: one of the Wright's, queued for the Wright to do again, or a kit update of its own, to be bumped again;
+  - **couldn't**: it tried and something went wrong, with why.
+- Each one says which files conflicted and which of them needed a person, when the Steward did it, when it last looked again, and whether the pull request is still open.
+- In your repositories' table, a pull request it has dealt with carries the same badge on its line. Hover over it for what was done.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The section fills from the next round on; conflicts handled before this version aren't listed.
+
+## 0.28.5
+
+**A pull request whose author already ran its tests merges without the Steward running them again.**
+
+### What's new
+
+- `steward vouch`: run it in the clone you pushed a pull request from. It runs the repository's checks there, and once they pass it records that on the pull request's commit on GitHub. The Steward then merges that pull request without testing it again, saving a full test run per pull request.
+- It trusts the record only from your team's GitHub accounts, only for the exact commit that was tested, and never for the Wright's pull requests or a fork's. Anything pushed afterwards, including the Steward's own catch-ups, is tested by the Steward as before.
+
+### What changed
+
+- A passing commit status no longer counts as one of a pull request's GitHub checks when it is this record, so it can never skip the Steward's testing by itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To use it, have whoever opens pull requests run `steward vouch` after pushing.
+
+## 0.28.4
+
+**A change that needs both a new kit and an agent's matching change no longer waits for you.**
+
+### What changed
+
+- When a new kit breaks an agent's tests as its main stands, but that agent has a ready pull request that takes the new kit and passes with it, the kit no longer waits. The kit's pull request merges and the kit is released, and its comment says why ("Manor moves with it in #135 (passes with this kit)"). The agent's pull request is then tested with the released kit and merged. Before, the two waited for each other until you labelled the kit's pull request.
+- If that agent's pull request fails with the new kit, or is still a draft, the kit waits as before, and the reason says so.
+- An agent's pull request that takes a kit not released yet now says which pull request brings that kit, for example "waits for kit 2.42.0, which Steward#126 brings: it merges once that's released". If no open pull request brings it, it says that instead, because only a person can sort that out.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.3
 
 **The Steward is yours: it looks after your own repositories, and nothing of Castellan's.**
@@ -48,6 +136,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
 
 ## 0.27.39
 

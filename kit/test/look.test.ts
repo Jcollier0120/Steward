@@ -115,7 +115,7 @@ test('the title bar: icon, name, role, scene, the status pill, Settings, Theme, 
   // Its colour and motion, and none for someone who asks for less: its Dark colour on every dark theme.
   assert.ok(html.includes(`:root { --role: ${DEFAULT_LOOK.accent.light}; }`));
   assert.ok(html.includes(`:root[data-theme="dark"], :root[data-theme="arcade"], :root[data-theme="onyx"], :root[data-theme="carbon"] { --role: ${DEFAULT_LOOK.accent.dark}; }`));
-  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before \{ animation: none !important; \} \.titlebar \{ transition: none; \} \}/);
+  assert.match(html, /@media \(prefers-reduced-motion: reduce\) \{ \.scene, \.scene \*, \.status-pill::before, \.settling-mark \* \{ animation: none !important; \} \.titlebar \{ transition: none; \} \}/);
   assert.match(html, /setProperty\('--phase'/);
   // No external fonts or scripts: the page's CSP allows its own origin only.
   assert.doesNotMatch(html, /https?:\/\/(?!www\.w3\.org)/);

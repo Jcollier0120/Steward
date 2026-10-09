@@ -57,6 +57,19 @@ Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 - How long since `finished`, against `everyMs`, says whether the rounds are keeping up; `next` in the past while the agent is on duty says a round is overdue or under way.
 - An entry with `waiting` is an agent waiting for the person, not one that has stopped: say what it waits for, not that its rounds are late.
 
+## Pace (kit 2.43.3)
+
+Manor's settings.json `"backgroundPace"` sets how every agent's scheduled rounds share the PC: `gentle` (the default) or `full` (as before).
+
+- **First rounds one at a time.** A schedule whose round has never gone through waits for its first round in one line with the other agents' first rounds (the lock folder `<locks>irst-rounds`, one slot, the kit's line as the NPU's), and runs it once the one before it has finished. The first round is the heavy one; the rounds after it only catch up on what changed, so nothing else waits.
+  - round.json's `"wentThrough": { "<schedule>": "<ISO time>" }` says which have gone through. A round.json from before 2.43.3, with rounds but no `wentThrough`, counts every schedule it names as through: updating an agent never puts it in the line.
+  - A round that waited six hours without its turn is recorded with `"ok": null` and `"waiting"`, and waits again at its next round. A holder keeps its turn for its round's time limit, and 12 hours at the least (a first scan of every drive takes hours); one whose process has gone gives up its place at once.
+- **Below-normal priority.** A scheduled round runs at below-normal priority, and the programs it starts take that class too.
+- **A round asked for** (Run now) never waits, and runs at normal priority.
+- **Settling into the manor.** While a first round waits its turn, or a long one runs (a look's `firstRound`: Reeve's, Heiward's), the status pill says "Settling in" and the page shows a banner in the role's colour: the manor's door, with footsteps walking up to it, and a line saying it is new and takes longer this once. Its state's `firstRound` is `waiting` or `running`.
+
+An agent that doesn't run its rounds with every() (Heiward's .NET scans) takes the same line through the kit's .NET lock on the same folder.
+
 ## Where it is implemented
 
 | Part | Implementation |

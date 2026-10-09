@@ -7,9 +7,9 @@ import { lookFor, sceneSvg } from './look.ts';
 import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
-import { ago, CSS, esc, lookCss, pillOf } from './page.ts';
+import { ago, CSS, esc, lookCss, pillOf, SETTLING_SVG, settlingText } from './page.ts';
 import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.ts';
-import { roundTimes } from './schedule.ts';
+import { firstRoundNow, roundTimes } from './schedule.ts';
 import type { Handler } from './server.ts';
 import { groupLabel, themes, themesCss } from './themes.ts';
 import { workSection } from './work.ts';
@@ -55,6 +55,8 @@ export interface PageShell {
   scene: string;
   /** Off duty: since when, in words; null on duty. */
   offDutySince: string | null;
+  /** Settling into the manor (kit 2.43.3): the banner's words and its drawing (the kit's markup), while its first round waits its turn or a long one runs; null otherwise. */
+  settling: { text: string; svg: string } | null;
   manor: { name: string; url: string; theme: string; settingsUrl: string } | null;
   themes: ShellTheme[];
   /** Where this browser keeps the agent's theme, without Manor. */
@@ -85,14 +87,17 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
   const onboarding = o.onboarding === undefined ? AGENT_ONBOARDING : o.onboarding;
   const needs = needsSettings(onboarding);
   const dev = developer().on;
+  const first = firstRoundNow();
+  const settling = settlingText(APP.name, look, first);
   return {
     app: { id: APP.id, name: APP.name, role: APP.role, version: APP.version },
     title: o.title ?? APP.name,
     busy: !!o.busy,
     refreshSec: o.refreshSec ?? 0,
-    pill: pillOf({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, needs: needs?.text }),
+    pill: pillOf({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, needs: needs?.text, first }),
     scene: sceneSvg(look),
     offDutySince: d.onDuty ? null : ago(d.since),
+    settling: settling ? { text: settling, svg: SETTLING_SVG } : null,
     manor: m ? { name: m.name, url: m.url, theme: m.theme, settingsUrl: manorSettingsUrl(m) } : null,
     themes: themes().map((t) => ({ name: t.name, label: t.label, description: t.description, swatch: t.swatch, group: t.group, groupLabel: groupLabel(t.group) })),
     themeKey: `${APP.id}:theme`,

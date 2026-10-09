@@ -9,7 +9,7 @@ import { originUrl, repoFromUrl } from './scm.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
-import { employeesOfProjects, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
+import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
  * The person's own repositories, as Reeve finds them. Reeve lists every git repository on this PC (his GET /api/repos,
@@ -164,11 +164,12 @@ const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === pat
  * The repositories offered: ones gh's account can push to, that Settings don't already name (by repository or clone).
  * Off the maker's laptop, none of Castellan's own (maker.ts), even where the account could push to one.
  */
-export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[], makers = makersPc()): FoundRepo[] {
+export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[], makers = makersPc(), self?: Pick<Settings, 'stewardRepo' | 'stewardCheckout'>): FoundRepo[] {
   return s.repos.filter(
     (r) =>
       (r.push === true || (r.byGit === true && r.push === null)) &&
       !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))) &&
+      !(self && isSelf(self, r)) &&
       !makersOwn({ repo: r.repo }, { makers, byId: false }),
   );
 }
@@ -265,10 +266,12 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   const home = o.manorHome ?? manorHome();
   const intoManor = !own.releasesCastellan && (o.manorHome !== undefined || !o.file) && manorTakesOver(own.employees, home);
   const current = intoManor ? employeesOfProjects(manorProjects(home)) : own.employees;
+  // The Steward's own, on the PC that releases it: looked after as itself already (settings.ts's inEffect).
+  const self = inEffect(own, own.wrightHere, null, { makers });
   const found = o.found ?? loadFound();
-  const r = candidates(found, current, makers).find((x) => same(x.repo, repo));
+  const r = candidates(found, current, makers, self).find((x) => same(x.repo, repo));
   if (!r) {
-    if (current.some((e) => same(e.repo, repo))) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
+    if (current.some((e) => same(e.repo, repo)) || isSelf(self, { repo })) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
   }
   // Its id never one of Castellan's agents' (porter-2 for a repository of yours called porter), off the maker's laptop.
@@ -280,6 +283,28 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   const employees = Array.isArray(raw.employees) ? raw.employees : [];
   writeJson(file, { ...raw, employees: [...employees, employee] });
   return { employee };
+}
+
+/** A repository picked on the page, with what it may do. */
+export interface Picked {
+  repo: string;
+  merges: boolean;
+  release: boolean;
+}
+
+/**
+ * Look after, for several at once (the page's ticked ones): each added in turn as lookAfter adds one, so each takes an
+ * id the ones before left free. The ones it couldn't add, each in words.
+ */
+export function lookAfterAll(picks: Picked[], o: { found?: FoundState; file?: string; manorHome?: string } = {}): { employees: Employee[]; errors: string[] } {
+  const employees: Employee[] = [];
+  const errors: string[] = [];
+  for (const p of picks) {
+    const r = lookAfter(p.repo, { ...o, merges: p.merges, release: p.release });
+    if ('error' in r) errors.push(r.error);
+    else employees.push(r.employee);
+  }
+  return { employees, errors };
 }
 
 /**
@@ -335,8 +360,8 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
 }
 
 /** The page's view of it: what Reeve found that could be looked after, and why nothing can when nothing can. */
-export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'releasesCastellan'>, home = manorHome()): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number; into: 'manor' | 'steward' } {
+export function foundView(s: FoundState, settings: Pick<Settings, 'employees' | 'releasesCastellan' | 'stewardRepo' | 'stewardCheckout'>, home = manorHome()): { at: string | null; error: string | null; from: FoundState['from']; offered: FoundRepo[]; found: number; into: 'manor' | 'steward' } {
   const own = normalizeSettings(readJson<unknown>(settingsFile(), {})).settings.employees;
   const into = !settings.releasesCastellan && manorTakesOver(own, home) ? 'manor' : 'steward';
-  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees), found: s.repos.length, into };
+  return { at: s.at, error: s.error, from: s.from, offered: candidates(s, settings.employees, undefined, settings), found: s.repos.length, into };
 }

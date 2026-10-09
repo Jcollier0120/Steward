@@ -155,7 +155,7 @@ export const releasedSomething = (r: EmployeeResult) => r.outcome === 'done' && 
 export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glance | null } = {}): Promise<Staff> {
   const c = o.glance === undefined ? ctx : { ...ctx, glance: o.glance };
   const chosen = chooseKit(c.kit);
-  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool() });
+  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool(), self: selfForStaff(c) });
   writeJson(staffFile(), s);
   try {
     pruneKitsNow(s, c.kit);
@@ -166,12 +166,22 @@ export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glan
 }
 
 /**
+ * The Steward's own repository for the staff's table, on the PC that releases it (Settings name it and its clone is
+ * here): its GitHub side shown as an employee's is, its kit the one it pins, released when it releases itself.
+ */
+function selfForStaff(ctx: Ctx): Employee | null {
+  const s = ctx.settings;
+  if (!s.releasesCastellan || !s.stewardRepo || !s.stewardCheckout || !existsSync(s.stewardCheckout)) return null;
+  return { ...stewardEmployee(s, s.stewardCheckout), usesKit: true, merges: s.mergeSelf, release: s.releaseSelf ? 'its own round' : '' };
+}
+
+/**
  * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
  * still right, and is only marked as checked; true then. False when it needs making again.
  */
 export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
   const s = loadStaff();
-  if (!s?.seen || s.rows.length !== employees.length) return false;
+  if (!s?.seen || s.rows.filter((r) => !r.self).length !== employees.length) return false;
   for (const e of employees) {
     const g = glance.repos[e.id];
     if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;

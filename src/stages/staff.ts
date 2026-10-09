@@ -63,6 +63,8 @@ export interface ReleaseInfo {
 }
 
 export interface StaffRow {
+  /** The Steward's own repository (stages/selfmerge.ts), shown beside the employees: no stage is run on it from the table. */
+  self?: boolean;
   id: string;
   name: string;
   repo: string;
@@ -118,9 +120,15 @@ function checkState(c: any): Checks {
   return ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(done) ? 'passing' : 'failing';
 }
 
-/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. */
+/**
+ * The commit status `steward vouch` sets on a PR's head once its checks passed in its author's clone (stages/vouch.ts).
+ * It isn't a check GitHub runs: checksOf leaves it out, and the merge stage decides whether to trust it.
+ */
+export const VOUCH_CONTEXT = 'steward/tested';
+
+/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. A vouch (VOUCH_CONTEXT) isn't one. */
 export function checksOf(rollup: unknown): Checks {
-  const list = Array.isArray(rollup) ? rollup : [];
+  const list = (Array.isArray(rollup) ? rollup : []).filter((c) => c?.context !== VOUCH_CONTEXT);
   if (!list.length) return 'none';
   const states = list.map(checkState);
   return states.includes('failing') ? 'failing' : states.includes('pending') ? 'pending' : 'passing';
@@ -309,9 +317,13 @@ function releasedHereRow(e: Employee, row: StaffRow): { version: string | null }
   }
 }
 
-/** Every employee's row, a few at a time; with what GitHub said of each (glance.ts's repoSig), so a round can tell when the table is out of date. */
-export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null }): Promise<Staff> {
+/**
+ * Every employee's row, a few at a time, then the Steward's own (`self`) when it has one; with what GitHub said of each
+ * employee (glance.ts's repoSig), so a round can tell when the table is out of date.
+ */
+export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null; self?: Employee | null }): Promise<Staff> {
   const rows = await mapLimit(ctx.settings.employees, 5, (e) => staffRow(ctx, e, opts));
+  if (opts.self) rows.push({ ...(await staffRow(ctx, opts.self, { ...opts, kit: null, tool: null })), self: true });
   const at = new Date().toISOString();
   const seen = ctx.glance ? Object.fromEntries(Object.entries(ctx.glance.repos).map(([id, g]) => [id, repoSig(g)])) : undefined;
   return { at, checked: at, kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows, ...(seen ? { seen } : {}) };

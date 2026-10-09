@@ -17,9 +17,10 @@ import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
 import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
-import { findRepos, foundStale, foundView, loadFound, lookAfter } from './found.ts';
+import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
 import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
+import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { githubReady, loadScm } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
@@ -239,7 +240,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), conflicts: loadConflicts(), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 
@@ -300,14 +301,23 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
       },
-      // Look after a repository Reeve found (found.ts): added to Settings, merging and releasing only as ticked.
+      // Look after repositories Reeve found (found.ts): added to Settings, merging and releasing only as ticked. One
+      // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
       '/api/repos/look-after': ({ body }) => {
-        const repo = typeof body?.repo === 'string' ? body.repo.trim().slice(0, 140) : '';
-        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { json: { error: 'Send { "repo": "owner/name" }, one of the repositories the page offers.' }, status: 400 };
-        const r = lookAfter(repo, { merges: body?.merges === true, release: body?.release === true });
-        if ('error' in r) return { json: { error: r.error }, status: 409 };
-        if (!running) void refresh();
-        return { json: { ok: true, id: r.employee.id } };
+        const many = Array.isArray(body?.repos);
+        const picks = (many ? (body.repos as any[]).slice(0, 200) : [body]).map((p) => ({
+          repo: typeof p?.repo === 'string' ? p.repo.trim().slice(0, 140) : '',
+          merges: p?.merges === true,
+          release: p?.release === true,
+        }));
+        if (!picks.length || picks.some((p) => !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(p.repo)))
+          return { json: { error: 'Send { "repo": "owner/name" }, or { "repos": [{ "repo": "owner/name" }, …] }, of the repositories the page offers.' }, status: 400 };
+        const r = lookAfterAll(picks);
+        if (r.employees.length && !running) void refresh();
+        if (!r.employees.length) return { json: { error: r.errors.join('\n') }, status: 409 };
+        const ids = r.employees.map((e) => e.id);
+        // Some added and some not: the page says which weren't, and why.
+        return { json: { ok: true, ...(many ? { ids } : { id: ids[0] }), ...(r.errors.length ? { message: `Looked after ${ids.length}; not ${r.errors.length}:\n${r.errors.join('\n')}` } : {}) } };
       },
       // The release PC of a repository (lease.ts): "Do it here" ({ repo }), "Keep it on this PC" ({ repo, pin: true }), or
       // Unpin ({ repo, pin: false }), written to the repository's remote; then a round publishes what waits.
