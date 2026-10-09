@@ -211,6 +211,41 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   assert.equal(ping.busy, false);
 });
 
+test("a vouch's ask for a round: one now while it merges by itself; while something runs, once that ends; none when it doesn't merge by itself", async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  assert.equal((await post('/api/round/soon', {}, {})).status, 403, 'the token, as ever');
+  const settingsFile = path.join(home, 'settings.json');
+  const was = readFileSync(settingsFile, 'utf8');
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), byItself: false }));
+  const no = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
+  assert.deepEqual([no.started, no.message], [false, "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now."]);
+
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), byItself: true, employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
+  // A round looks at GitHub first: its glance (asked again when the stand-in has no answer).
+  const glances = () => r.gh.filter((a) => a[0] === 'api' && a[1] === 'graphql').length;
+  const before = glances();
+  const now = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
+  assert.deepEqual([now.started, now.message], [true, "The Steward's round has started: it merges the PR now if its turn has come."]);
+  await served.idle();
+  const each = glances() - before;
+  assert.ok(each > 0, 'a round ran');
+
+  // While a round runs: queued, and another round once it ends.
+  let letGo = () => {};
+  hold = new Promise((done) => (letGo = done));
+  assert.deepEqual(await (await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` })).json(), { started: true });
+  const queued = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
+  assert.deepEqual([queued.started, queued.queued, queued.message], [false, true, "The Steward's round is running: a round comes as soon as it ends."]);
+  letGo();
+  hold = Promise.resolve();
+  await served.idle();
+  assert.equal(glances(), before + 3 * each, 'Run now, then the round asked for');
+  writeFileSync(settingsFile, was);
+  assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
+});
+
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {
   assert.deepEqual(askOf({ employees: ['porter', 'pinder'], kit: '1.0.1' }), { employees: ['porter', 'pinder'], kit: '1.0.1' });
   assert.deepEqual(askOf({ employees: 'porter', kit: '1.0.1; rm' }), { employees: [], kit: null });
