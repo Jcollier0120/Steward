@@ -141,7 +141,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     ctx.log(`[${e.id}] #${pr.number}: ${note}`);
     // Its title says the version it merges with.
     const wanted = stamped.at(-1)?.wanted;
-    if (wanted && wanted !== version && pr.title.includes(wanted)) await hostFor({ run, neutralDir: ctx.neutralDir }, e).editPr(e.repo, pr.number, { title: pr.title.split(wanted).join(version) }).catch(() => null);
+    if (wanted && wanted !== version && pr.title.includes(wanted)) await hostFor({ ...ctx, run }, e).editPr(e.repo, pr.number, { title: pr.title.split(wanted).join(version) }).catch(() => null);
     return { done: true, note, head: pushed, version, stamped };
   } finally {
     try {

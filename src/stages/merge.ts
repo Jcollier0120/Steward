@@ -162,8 +162,8 @@ type Lookup = () => Promise<{ released: string[]; base: string | null }>;
 export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null; entries?: string[] }> {
   const { run } = ctx;
   const repo = checkoutOf(e);
-  // The PR's head, fetched by its number (a fork's too), read at the commit GitHub named.
-  await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  // The PR's head, fetched by its number (a fork's too), read at the commit its host named.
+  await git(run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr.number));
   const at = pr.headOid || 'FETCH_HEAD';
   const read = async (ref: string) => {
     const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, ref, f)] as [string, string | null])));
@@ -347,7 +347,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (hostIs(ctx, e) === 'git') return { ...result(e, 'skipped', NO_PRS), merged: [], held: [] };
   // With no team, only the Steward's are read. From the stage's glance at GitHub when it has them (glance.ts).
   const g = glanceOf(ctx, e);
-  const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor({ run, neutralDir: ctx.neutralDir }, e), e.repo), o.team ? ctx.settings.team : []);
+  const prs = parsePrs(g ? JSON.stringify(g.prs) : await openPrs(hostFor({ ...ctx, run }, e), e.repo), o.team ? ctx.settings.team : []);
   const none = !o.team ? 'no open Steward PRs' : ctx.settings.team.length ? "no open PRs of the Steward's or the team's" : `no open Steward PRs (${NO_TEAM})`;
   if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
   // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
@@ -547,7 +547,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
-    const r = await hostFor({ run, neutralDir: ctx.neutralDir }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine });
+    const r = await hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine });
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);

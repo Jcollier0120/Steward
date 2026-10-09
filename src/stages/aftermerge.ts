@@ -38,7 +38,7 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   if (!e.install) return result(e, 'skipped', `Settings give ${e.name} no install command, so it is installed another way (Manor's updates), not by the Steward`);
   const away = notHiredHere(e);
   if (away) return result(e, 'skipped', away);
-  const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+  const host = hostFor({ ...ctx, run }, e);
   const latest = appReleasesIn(must(await host.listReleases(e.repo, 'tagName,isDraft,publishedAt')))[0];
   if (!latest) return result(e, 'refused', 'it has no release to install');
   const dir = installDirOf(ctx.settings, e);
@@ -72,7 +72,7 @@ export async function installOne(ctx: Ctx, e: Employee): Promise<EmployeeResult>
   } catch (err) {
     ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
   }
-  return result(e, 'done', `installed ${latest.tag} on this PC`, { version: latest.version, url: `https://github.com/${e.repo}/releases/tag/${latest.tag}` });
+  return result(e, 'done', `installed ${latest.tag} on this PC`, { version: latest.version, url: host.releaseUrl(e.repo, latest.tag) });
 }
 
 /**

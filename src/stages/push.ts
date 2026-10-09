@@ -52,7 +52,7 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   await fetchBranch(run, repo, e.branch);
   const remote = `origin/${e.branch}`;
   if ((await aheadOf(run, repo, branch, remote)) === 0) return result(e, 'skipped', `${branch} has nothing ${remote} hasn't`);
-  const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+  const host = hostFor({ ...ctx, run }, e);
   // A fold goes only onto a PR still open: pushed to a branch whose PR merged or closed, it would be a branch with no PR.
   if (fold) {
     const pr = JSON.parse(must(await host.viewPr(e.repo, fold.number, 'state,headRefName'))) as { state: string; headRefName: string };

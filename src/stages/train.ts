@@ -208,7 +208,7 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     // The top PR's branch moves on to the stack (never forced: it is on top of its head), and that PR merges at it.
     const pushed = await run('git', ['push', '--quiet', 'origin', `${at}:refs/heads/${top.pr.head}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (pushed.code !== 0) return { merged: [], note: `${numbers} stacked and passed, but the stack couldn't be pushed to ${top.pr.head}: ${(pushed.err || pushed.out).trim().split('\n').pop()}`, tested: true };
-    const host = hostFor({ run, neutralDir: ctx.neutralDir }, e);
+    const host = hostFor({ ...ctx, run }, e);
     let merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
     for (const ms of TRAIN_WAITS_MS) {
       if (merge.code === 0) break;
