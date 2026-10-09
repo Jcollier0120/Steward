@@ -14,6 +14,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.27.40
+
+**A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**
+
+### What changed
+
+- A repository's open pull requests are no longer a column of their own. They are a small table on a line under its row, below the Employee, Checkout and Branch columns: each one's number, title and branch, its checks and whether it can merge.
+- The Notes column shows only when some repository has a note, such as a fetch that failed or a missing kit.json. When none do, the room goes to the other columns.
+- "Keep it on this PC" and "Do it here" stay on one line instead of wrapping in a narrow Release PC column.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.27.39
 
 **Your repositories in one list, in Manor: the Steward looks after the ones there.**
