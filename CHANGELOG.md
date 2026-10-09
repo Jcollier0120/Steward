@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.12
+
+**Fewer kit pull requests: a newer kit goes onto the one still open.**
+
+### What changed
+
+- When a new kit comes out while the Steward's pull request for the last one is still open (waiting its turn behind an agent's other pull requests), the Steward now puts the new kit onto that pull request, at the version it already has, instead of waiting for it to merge and opening a second one. Its title, description and changelog entry are rewritten for the new kit, covering every kit since the one the agent's main branch carries. One pull request to merge and one release, where there were two.
+- If that pull request merged or closed while the new kit was being checked, nothing is pushed, and the next round brings the kit in a pull request of its own, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 ## 0.28.11
 
 **More pull requests caught up without help: lockfiles, and changelogs whose older notes were edited.**
