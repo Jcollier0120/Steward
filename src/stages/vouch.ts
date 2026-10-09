@@ -24,7 +24,7 @@ import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
  */
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */
-const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');
+export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');
 
 /**
  * The team member who vouched for this PR's head (the latest VOUCH_CONTEXT status on it says success, and one of `team`'s
