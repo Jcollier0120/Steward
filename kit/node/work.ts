@@ -42,7 +42,7 @@ export interface AgentWork {
   /** The notes in plain words, for when Developer options are off; `notes` when left out. */
   plainNotes?: string[];
   /**
-   * One of the manor's developer roles (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward):
+   * One of the manor's developer roles (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward, the Toller, the Assayer):
    * its work runs only while Developer options are on, so with them off its page has no "Where its work runs".
    */
   developerRole?: boolean;
@@ -142,6 +142,23 @@ export const WORK: Record<string, AgentWork> = {
       { what: "Rolling out a kit version: a worktree of each agent, its packages, its typecheck and tests, its release build", where: 'the processor, the disk and the network', when: 'only when a stage is started, two agents at a time (Settings), for a few minutes', dev: true },
     ],
     notes: ['Between stages it does nothing.'],
+  },
+  toller: {
+    model: false,
+    developerRole: true,
+    lines: [
+      { what: "A round over your projects and tools: each lockfile, for what was added, updated and removed; each file changed since the last look, for secrets left in it; your editors' extensions, global tools, PATH and git settings", where: 'the processor and the disk', when: 'every hour (Settings), a few seconds; a file read before and unchanged since is not read again', dev: true },
+      { what: 'One look at the listening ports, for a dev server open to the network', where: 'the processor (PowerShell)', when: 'in the same round, a moment', dev: true },
+    ],
+    notes: ['It uses no model and nothing goes over the network: what it finds, its own code finds.'],
+  },
+  assayer: {
+    model: false,
+    developerRole: true,
+    lines: [
+      { what: "Testing a branch or a draft: the project's test command, in a throwaway git worktree of its own", where: 'the processor and the disk, at below-normal priority, so never ahead of your own work', when: 'every 15 minutes (Settings), at most 3 test runs a round, one at a time; each project\'s branch once a day', dev: true },
+    ],
+    notes: ['It uses no model, and never merges, tags or releases anything: what passes becomes a pull request for you.'],
   },
   surveyor: {
     model: true,
