@@ -33,12 +33,37 @@ export interface Tested {
   branch?: string;
   /** The newest kit released when it was tested: a failure at its kit's fill is tried again once a newer one is (kitMayClear). */
   kit?: string;
+  /** The head it was carried from (carryTested): this commit itself wasn't tested, the one before its catch-up was. */
+  carried?: string;
 }
 
-const keyOf = (e: Employee, pr: PrInfo) => `${e.id}#${pr.number}@${pr.headOid}`;
+const keyOf = (e: Employee, pr: PrInfo, head = pr.headOid) => `${e.id}#${pr.number}@${head}`;
 
 /** What testing this PR's head here said before, if it has been. */
 export const testedBefore = (e: Employee, pr: PrInfo): Tested | null => (pr.headOid ? (readJson<Record<string, Tested>>(prChecksFile(), {})[keyOf(e, pr)] ?? null) : null);
+
+/**
+ * A PR's standing carried to the head its catch-up pushed (catchup.ts), where the catch-up changed nothing of its own
+ * but version lines and changelogs (keepsStanding): `why` says what passed at the head before ("checks passed here at
+ * abc1234", "… vouched for"), and the new head is then taken as tested (testAtHead returns it), so it merges without
+ * its checks run again. The same trust a PR only behind its branch gets: its tested head merged with what the branch
+ * gained. Not recorded for the Surveyor (tested.ts): nothing ran at the new head.
+ */
+export function carryTested(e: Employee, pr: PrInfo, head: string, why: string, now = new Date()): Tested {
+  const was = testedBefore(e, pr);
+  const tested: Tested = {
+    ok: true,
+    note: `${why}; carried to ${head.slice(0, 7)}, as its catch-up changed only version lines and the changelog`,
+    at: now.toISOString(),
+    ...(was?.branch ? { branch: was.branch } : {}),
+    ...(was?.kit ? { kit: was.kit } : {}),
+    carried: pr.headOid,
+  };
+  const kept = readJson<Record<string, Tested>>(prChecksFile(), {});
+  kept[keyOf(e, pr, head)] = tested;
+  writeJson(prChecksFile(), Object.fromEntries(Object.entries(kept).slice(-500)));
+  return tested;
+}
 
 /**
  * Whether a failure here may be cleared by a kit released since: it failed at the kit's fill (tools/kit.ts), and the

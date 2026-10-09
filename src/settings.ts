@@ -386,7 +386,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'catchUp',
     kind: 'switch',
     label: 'Catches PRs up with their branch',
-    help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines, or a new entry at the top of CHANGELOG.md on each side), the next free version given when its own is taken, and pushed, with a comment; the next round tests and merges it. One whose checks failed here is caught up when the branch moves on. Any other conflict goes back to whoever wrote the PR: the Wright's is closed and its issue queued for it again; anyone else's, a Claude Code session's too, gets a comment that names the files.",
+    help: "In its rounds, a ready PR of the team's that waits only because its branch moved on is caught up: the branch merged into it (a conflict resolved only where it is in the version lines, or a new entry at the top of CHANGELOG.md on each side), the next free version given when its own is taken, and pushed, with a comment; then it is tested and merged, or merged without a new test where only its version lines and changelog changed and it was vouched for or tested here before. One whose checks failed here is caught up when the branch moves on. Any other conflict goes back to whoever wrote the PR: the Wright's is closed and its issue queued for it again; anyone else's, a Claude Code session's too, gets a comment that names the files.",
   },
   {
     key: 'rollout',
