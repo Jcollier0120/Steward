@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.4
+
+**A change that needs both a new kit and an agent's matching change no longer waits for you.**
+
+### What changed
+
+- When a new kit breaks an agent's tests as its main stands, but that agent has a ready pull request that takes the new kit and passes with it, the kit no longer waits. The kit's pull request merges and the kit is released, and its comment says why ("Manor moves with it in #135 (passes with this kit)"). The agent's pull request is then tested with the released kit and merged. Before, the two waited for each other until you labelled the kit's pull request.
+- If that agent's pull request fails with the new kit, or is still a draft, the kit waits as before, and the reason says so.
+- An agent's pull request that takes a kit not released yet now says which pull request brings that kit, for example "waits for kit 2.42.0, which Steward#126 brings: it merges once that's released". If no open pull request brings it, it says that instead, because only a person can sort that out.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.28.3
 
 **The Steward is yours: it looks after your own repositories, and nothing of Castellan's.**

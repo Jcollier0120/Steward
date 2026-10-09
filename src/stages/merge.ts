@@ -38,7 +38,8 @@ import { noteMerged } from '../strangers.ts';
  * its branch's, and no other ready PR's), and one GitHub runs no checks on is tested here first, at its head
  * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
  * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
- * (stages/trial.ts), or is labelled to say the agents change with it.
+ * (stages/trial.ts), each agent it fails moving with it in a ready PR of its own that pins the new kit and passes with
+ * it there, or is labelled to say the agents change with it.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -426,7 +427,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
     }
     if (untested(pr)) {
-      // Its kit not released yet: not tested, nor held against its commit, until it is (prtest.ts).
+      // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
+      // that brings that kit, or says none does (prtest.ts).
       const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
       if (kitWaits) {
         waits.push(`${describe(pr)} waits: ${kitWaits}`);
@@ -453,7 +455,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // A PR to the Steward that raises the kit: the new kit tried on every agent first (stages/trial.ts).
     let trial: string | null;
     try {
-      trial = await kitTrialHold(ctx, e, pr);
+      // An agent that moves with the kit in a PR of its own doesn't hold it, and its line says so ("Manor moves with it in #135").
+      trial = await kitTrialHold(ctx, e, pr, { note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
     } catch (err) {
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
