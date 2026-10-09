@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Field } from './kit/settings-kit.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { GlanceRelease, RepoGlance } from './glance.ts';
+import { bitbucketLogin, TOKEN_HOST, whereBitbucket } from './hosts/bitbucket.ts';
 import { teaLogins, whereGitea } from './hosts/gitea.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
@@ -23,8 +24,10 @@ import type { Employee, Settings } from './settings.ts';
  *   an annotated v<version> tag, Azure DevOps having no releases.
  * - **Gitea**: its repository is on a Gitea or Forgejo (gitea.com, codeberg.org, or one of your own) that the Gitea CLI
  *   (tea) has a login for, and tea is new enough to have `tea api`. As GitLab's way.
- * - **Git**: any other, on any host (Bitbucket, a server or shared folder of your own), or a GitHub, GitLab, Azure
- *   DevOps or Gitea one where its CLI isn't there. Plain git against its own origin: its branch and its tags are read
+ * - **Bitbucket**: its repository is on Bitbucket Cloud (bitbucket.org/workspace/app) and an Atlassian API token for
+ *   api.bitbucket.org is in this PC's git credential store. As Azure DevOps' way.
+ * - **Git**: any other, on any host (Bitbucket Data Center, a server or shared folder of your own), or one of the above
+ *   where its CLI or token isn't there. Plain git against its own origin: its branch and its tags are read
  *   with `git ls-remote`, a release is a `v<version>` tag on origin (annotated, its message the version's CHANGELOG.md
  *   entry), pushed by the Steward once the release command has run, and there are no pull requests to merge: what
  *   lands on the branch is released.
@@ -32,12 +35,12 @@ import type { Employee, Settings } from './settings.ts';
  * Other source control (Mercurial, Subversion, Perforce, Plastic SCM) is found and named, but not worked with yet.
  * Castellan's own release machinery (releasesCastellan) is GitHub's, whatever is chosen.
  *
- * GitHub, GitLab, Azure DevOps and Gitea are asked through a source host (hosts/), the one interface for pull requests,
- * commit statuses, releases and issues, so other hosts with pull requests (Bitbucket) can stand where they do.
- * Settings' Source control: GitHub means GitHub's way for every repository; the others are chosen by Automatic.
+ * GitHub, GitLab, Azure DevOps, Gitea and Bitbucket are asked through a source host (hosts/), the one interface for pull
+ * requests, commit statuses, releases and issues. Settings' Source control: GitHub means GitHub's way for every
+ * repository; the others are chosen by Automatic.
  */
 
-export type Host = 'github' | 'gitlab' | 'azure' | 'gitea' | 'git';
+export type Host = 'github' | 'gitlab' | 'azure' | 'gitea' | 'bitbucket' | 'git';
 export type SourceControl = 'auto' | 'github' | 'git';
 
 export interface Tool {
@@ -46,7 +49,7 @@ export interface Tool {
   name: string;
   /** Its first line of --version, or null when it isn't installed. */
   version: string | null;
-  /** The GitHub, GitLab, Azure and Gitea CLIs only: signed in (a token or account kept on this PC). */
+  /** The GitHub, GitLab, Azure and Gitea CLIs and the Bitbucket token only: signed in (a token or account kept on this PC). */
   signedIn?: boolean;
   /** The Gitea CLI only: the servers it has a login for (codeberg.org). */
   hosts?: string[];
@@ -100,6 +103,10 @@ export async function findScm(run: Runner, now = new Date()): Promise<ScmLook> {
       return tool;
     }),
   );
+  // Bitbucket has no CLI to sign in with: its API token in git's credential store (never read back into this file) is.
+  const git = tools.find((t) => t.cmd === 'git')?.version;
+  const bitbucket = git ? !!(await bitbucketLogin(run).catch(() => null)) : false;
+  tools.push({ cmd: 'bitbucket', name: 'Bitbucket API token', version: bitbucket ? `in the credential store, for ${TOKEN_HOST}` : null, signedIn: bitbucket, supported: true });
   return { at: now.toISOString(), tools };
 }
 
@@ -127,6 +134,9 @@ export const gitlabReady = (look: ScmLook | null) => !!look?.tools.find((t) => t
 /** The Azure CLI installed and signed in: Azure DevOps' way works. */
 export const azureReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'az' && t.version && t.signedIn);
 
+/** A Bitbucket API token in the credential store: Bitbucket's way works. */
+export const bitbucketReady = (look: ScmLook | null) => !!look?.tools.find((t) => t.cmd === 'bitbucket' && t.version && t.signedIn);
+
 /** The Gitea servers the Gitea CLI is signed in to and can be worked with (tea api). */
 export const giteaHosts = (look: ScmLook | null): string[] => look?.tools.find((t) => t.cmd === 'tea' && t.version && t.signedIn)?.hosts ?? [];
 
@@ -152,6 +162,7 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
   if (s.sourceControl === 'github') return 'github';
   if (isGitlabRepo(e.repo)) return look && gitlabReady(look) ? 'gitlab' : 'git';
   if (isAzureRepo(e.repo)) return look && azureReady(look) ? 'azure' : 'git';
+  if (whereBitbucket(e.repo)) return look && bitbucketReady(look) ? 'bitbucket' : 'git';
   if (isGiteaRepo(e.repo, look)) return 'gitea';
   if (!isGithubRepo(e.repo)) return 'git';
   return !look || githubReady(look) ? 'github' : 'git';
@@ -160,7 +171,7 @@ export function hostOf(e: Pick<Employee, 'repo'>, s: Pick<Settings, 'sourceContr
 /** What Automatic comes to on this PC, in words, for Settings and the page. Pure. */
 export function autoWords(look: ScmLook | null): string {
   if (!look) return "Automatic: the Steward hasn't looked at this PC's source control yet";
-  const ways = [...(githubReady(look) ? ['GitHub for repositories on GitHub (the GitHub CLI is signed in)'] : []), ...(gitlabReady(look) ? ['GitLab for repositories on GitLab (the GitLab CLI is signed in)'] : []), ...(azureReady(look) ? ['Azure DevOps for repositories on Azure DevOps (the Azure CLI is signed in)'] : []), ...(giteaHosts(look).length ? [`Gitea for repositories on ${giteaHosts(look).join(', ')} (the Gitea CLI is signed in there)`] : [])];
+  const ways = [...(githubReady(look) ? ['GitHub for repositories on GitHub (the GitHub CLI is signed in)'] : []), ...(gitlabReady(look) ? ['GitLab for repositories on GitLab (the GitLab CLI is signed in)'] : []), ...(azureReady(look) ? ['Azure DevOps for repositories on Azure DevOps (the Azure CLI is signed in)'] : []), ...(giteaHosts(look).length ? [`Gitea for repositories on ${giteaHosts(look).join(', ')} (the Gitea CLI is signed in there)`] : []), ...(bitbucketReady(look) ? ['Bitbucket for repositories on bitbucket.org (its API token is in the credential store)'] : [])];
   if (ways.length) return `Automatic: ${ways.join(', ')}, Git for any other`;
   const unsigned = [...(has(look, 'gh') ? ['the GitHub CLI is installed, but not signed in: gh auth login'] : []), ...(has(look, 'glab') ? ['the GitLab CLI is installed, but not signed in: glab auth login'] : []), ...(has(look, 'az') ? ['the Azure CLI is installed, but not signed in: az login'] : []), ...(has(look, 'tea') ? ['the Gitea CLI is installed, but has no login (tea login add) or is too old for tea api (update it)'] : [])];
   if (has(look, 'git')) return `Automatic: Git for every repository, on any host${unsigned.length ? ` (${unsigned.join('; ')})` : ''}`;

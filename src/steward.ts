@@ -109,16 +109,17 @@ export function withTeam(settings: Settings, log: (line: string) => void, owner?
   return { ...settings, team: t.team };
 }
 
-/** The account signed in on each GitLab, Azure DevOps organization and Gitea, by its address, as last asked (an hour at most). */
+/** The account signed in on each GitLab, Azure DevOps organization, Gitea and Bitbucket, by its address, as last asked (an hour at most). */
 const hostAccounts = new Map<string, { login: string | null; at: number }>();
 
-/** Where an account is its own: a GitLab or a Gitea by its host name, an Azure DevOps organization by its address. */
-const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : host === 'gitea' ? (whereGitea(repo)?.hostname ?? null) : null);
+/** Where an account is its own: a GitLab, a Gitea or Bitbucket by its host name, an Azure DevOps organization by its address. */
+const accountsAt = (host: Host, repo: string) => (host === 'gitlab' ? whereIs(repo).hostname : host === 'azure' ? (whereAzure(repo)?.base ?? null) : host === 'gitea' ? (whereGitea(repo)?.hostname ?? null) : host === 'bitbucket' ? 'bitbucket.org' : null);
 
 /**
- * Settings whose team names none, with the account glab, az or tea is signed in as on each GitLab, Azure DevOps
- * organization and Gitea whose repositories are worked with its way (scm.ts): their accounts are their own, so the
- * person and their sessions are the team there too. Asked once an hour; one that can't say adds nobody.
+ * Settings whose team names none, with the account glab, az, tea or the Bitbucket token is signed in as on each
+ * GitLab, Azure DevOps organization, Gitea and Bitbucket whose repositories are worked with its way (scm.ts): their
+ * accounts are their own, so the person and their sessions are the team there too. Asked once an hour; one that can't
+ * say adds nobody.
  */
 export async function withHostTeams(settings: Settings, o: { run: Runner; neutralDir: string; host: (e: Pick<Employee, 'repo'>) => Host }): Promise<Settings> {
   const team = [...settings.team];

@@ -2,6 +2,7 @@ import type { Runner } from '../run.ts';
 import type { Host } from '../scm.ts';
 import type { Employee } from '../settings.ts';
 import { AzureDevOps, whereAzure } from './azure.ts';
+import { Bitbucket } from './bitbucket.ts';
 import { GitHub } from './github.ts';
 import { Gitea, whereGitea } from './gitea.ts';
 import { GitLab, whereIs } from './gitlab.ts';
@@ -10,7 +11,7 @@ import type { SourceHost } from './host.ts';
 export { must, type Answer, type PrState, type SourceHost } from './host.ts';
 
 /**
- * The host a repository lives on (host.ts), asked from `neutralDir`: GitLab's, Azure DevOps' or Gitea's for one the context's
+ * The host a repository lives on (host.ts), asked from `neutralDir`: GitLab's, Azure DevOps', Gitea's or Bitbucket's for one the context's
  * `host` (scm.ts's hostOf) says is worked with its way, else GitHub's. One worked with plain git asks none: the stages
  * pass over it before they would. With no repository named, GitHub (the Steward's own repository, the Wright's queue).
  */
@@ -21,5 +22,6 @@ export function hostFor(o: { run: Runner; neutralDir: string; host?: (e: Pick<Em
   if (azure) return new AzureDevOps(o.run, o.neutralDir, azure.base);
   const gitea = e && host === 'gitea' ? whereGitea(e.repo) : null;
   if (gitea) return new Gitea(o.run, o.neutralDir, gitea.hostname);
+  if (e && host === 'bitbucket') return new Bitbucket(o.run, o.neutralDir);
   return new GitHub(o.run, o.neutralDir);
 }

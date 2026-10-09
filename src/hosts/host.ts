@@ -33,7 +33,7 @@ export function must(a: Answer): string {
 
 export interface SourceHost {
   /** Which host this is, as scm.ts names it. */
-  readonly kind: 'github' | 'gitlab' | 'azure' | 'gitea';
+  readonly kind: 'github' | 'gitlab' | 'azure' | 'gitea' | 'bitbucket';
   /** Its name in words, for logs and the page ("GitHub"). */
   readonly name: string;
 
