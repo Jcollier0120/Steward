@@ -18,6 +18,7 @@ import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
 import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
+import { vouch } from './stages/vouch.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
@@ -77,6 +78,11 @@ const USAGE = `${APP.id}: ${APP.role}
                    Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
+  vouch [<pr number>]
+                   in the clone a PR was pushed from, once it is pushed: run the repository's checks (Settings')
+                   at HEAD, which must be the PR's head with nothing uncommitted, and once they pass, record it
+                   on that commit on GitHub (status steward/tested). The Steward then merges the PR without
+                   testing it again, unless it is pushed to first. Without a number: the PR for this branch
   claims [--json]  the versions claimed and not yet landed
   Only on the PC Castellan is made on (elsewhere they say so, and do nothing):
   claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]
@@ -154,7 +160,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
 /** The commands that work on repositories: a developer's, so only while Developer options are on (maker.ts' stewardActs). */
-const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'staff', 'employ', 'claim-version', 'release-version', 'claims'];
+const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'staff', 'employ', 'claim-version', 'release-version', 'claims', 'vouch'];
 /** The commands only the PC Castellan is made on has: the ports of Castellan's new agents, and its merges done by hand. */
 const MAKERS_COMMANDS: Record<string, string> = {
   'claim-port': "Claiming a port for a new agent of Castellan's",
@@ -329,6 +335,19 @@ switch (cmd) {
     }
     const name = kit ? 'Kit' : e.name;
     console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1], { remote: await remoteFor(ctx.run, ctx.settings, e).catch(() => null), run: ctx.run })) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
+    break;
+  }
+  case 'vouch': {
+    const n = rest[0];
+    if (rest.length > 1 || (n !== undefined && !/^#?\d+$/.test(n))) {
+      console.error('vouch takes at most a PR number, in the clone the PR was pushed from: vouch 134, or vouch for the PR of this branch');
+      process.exitCode = 2;
+      break;
+    }
+    const ctx = await context({ glance: false, team: false });
+    const v = await vouch(ctx, { dir: process.cwd(), ...(n ? { pr: Number(n.replace('#', '')) } : {}), say: (line) => console.log(line) });
+    console[v.ok ? 'log' : 'error'](v.message);
+    process.exitCode = v.ok ? 0 : 1;
     break;
   }
   case 'claims': {
