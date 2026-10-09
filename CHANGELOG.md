@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.2
+
+**The Steward releases itself again, and stops reinstalling agents it has already installed.**
+
+### What changed
+
+- When the Steward's own repository was also one of the repositories it looks after, its rounds stopped releasing its new versions and stopped merging its team's pull requests through its own path, without a word in the log. They do both again.
+- An agent released only on this PC (its release installs it here rather than publishing it) counts the version it has installed as released. Before, the round rebuilt and reinstalled it every time, restarting its page, because it looked only on GitHub for that version.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A Steward that has stopped releasing itself needs this version released once by hand; after that it carries on by itself.
+
 ## 0.27.40
 
 **A tidier staff table: open pull requests sit under their repository, and Notes shows only when there's something in it.**
