@@ -23,6 +23,7 @@ import { claimClashes } from './claims.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { githubReady, loadScm } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
+import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -77,6 +78,29 @@ export function askOf(body: any): StageAsk {
 /** The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words. */
 export const staffView = (s: Staff | null): StaffView | null =>
   s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
+
+/** /api/page's body with Developer options off, off the maker's laptop (maker.ts): the plain line, the rest empty. */
+export const offView = (): StewardView => ({ off: DEVELOPER_ONLY, staff: null, last: null, running: null, refreshing: false, team: [], round: { on: false, minutes: 0, onDuty: false, lastRunAt: null } });
+
+/** With Developer options off off the maker's laptop, what Manor's two reads answer: their usual shape, empty. */
+const OFF_GETS: Record<string, () => unknown> = {
+  '/api/version-queues': () => ({ at: '', repos: [] }),
+  '/api/alarms': () => ({ on: false, at: null, open: [], cleared: [], page: '/#alarms' }),
+};
+
+/**
+ * The page's reads, each answering nothing of the repositories while the Steward may not act (maker.ts' stewardActs):
+ * the page itself and /api/page draw the plain line (pageData), Manor's reads keep their shape, empty, and the rest say
+ * why. Read per request, so flipping Developer options takes effect at once.
+ */
+export function gateGets(gets: Record<string, Handler>, acts: () => boolean = () => stewardActs()): Record<string, Handler> {
+  return Object.fromEntries(Object.entries(gets).map(([p, h]): [string, Handler] => [p, p === '/' || p === '/api/page' ? h : (req) => (acts() ? h(req) : { json: OFF_GETS[p]?.() ?? { off: DEVELOPER_ONLY } })]));
+}
+
+/** The page's buttons and Manor's posts: refused in plain words while the Steward may not act; nothing is started. */
+export function gatePosts(posts: Record<string, Handler>, acts: () => boolean = () => stewardActs()): Record<string, Handler> {
+  return Object.fromEntries(Object.entries(posts).map(([p, h]): [string, Handler] => [p, (req) => (acts() ? h(req) : { json: { started: false, error: DEVELOPER_ONLY, message: DEVELOPER_ONLY }, status: 409 })]));
+}
 
 /** `run` stands in for git, gh and the employees' commands in a test; `owner`, for the account gh is signed in as (team.ts). */
 export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson; turns?: TurnsDeps } = {}) {
@@ -170,7 +194,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
   // release what isn't. It passes while a stage runs here or in a terminal (the stage lock).
   const roundJob = async (full = false) => {
-    if (running) return;
+    // Off the maker's laptop with Developer options off, no round runs: a developer's work (maker.ts).
+    if (running || !stewardActs()) return;
     running = { stage: 'round', since: new Date().toISOString() };
     sooner = null;
     try {
@@ -202,6 +227,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
 
   /** What the page shows (src/web/types.ts's StewardView), in the kit's frame. */
   const pageData = () => {
+    // Developer options off, off the maker's laptop: the plain line in its place, a role in plain words and no tour;
+    // nothing of the repositories is even read (the kit's spec/DEVELOPER-OPTIONS.md).
+    if (!stewardActs()) {
+      const shell = pageShell({ busy: false, onboarding: null });
+      return { shell: { ...shell, app: { ...shell.app, role: PLAIN_ROLE } }, body: offView() };
+    }
     const s = loadSettings();
     const busy = running !== null || refreshing !== null;
     const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s), castellan: s.releasesCastellan };
@@ -216,12 +247,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     port,
     icon: ICON,
     ping: () => ({ busy: running !== null, stage: running?.stage ?? null, tour: hasTour() }),
-    get: {
+    get: gateGets({
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
       // /api/page again every few seconds while a stage runs, and after each button.
       '/': ({ token }) => {
-        if (!running && !roundsKeepIt() && staleTable()) void refresh();
-        if (foundStale(loadFound())) void find();
+        if (stewardActs() && !running && !roundsKeepIt() && staleTable()) void refresh();
+        if (stewardActs() && foundStale(loadFound())) void find();
         return { html: reactPage({ token, data: pageData() }) };
       },
       '/api/page': () => ({ json: pageData() }),
@@ -238,8 +269,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         const a = loadAlarms();
         return { json: { on: loadSettings().alarms.on, at: a.at, open: a.open, cleared: a.cleared, page: '/#alarms' } };
       },
-    },
-    post: {
+    }),
+    post: gatePosts({
       '/api/stage/bump': stagePost('bump'),
       '/api/stage/push': stagePost('push'),
       // The page's buttons asked first: that is merge --yes, and merge --yes --team.
@@ -301,7 +332,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         void refresh();
         return { json: { started: true } };
       },
-    },
+    }),
     settings: { ...SETTINGS_SPEC, onSaved: arrange },
   });
   console.log(`${APP.name} is serving http://${APP.id}.localhost:${port}/`);

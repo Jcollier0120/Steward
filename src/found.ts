@@ -6,6 +6,7 @@ import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
+import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
 import { employeesOfProjects, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
@@ -159,9 +160,17 @@ export const foundStale = (s: FoundState, now = Date.now()) => !s.at || now - Da
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
-/** The repositories offered: ones gh's account can push to, that Settings don't already name (by repository or clone). */
-export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[]): FoundRepo[] {
-  return s.repos.filter((r) => (r.push === true || (r.byGit === true && r.push === null)) && !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))));
+/**
+ * The repositories offered: ones gh's account can push to, that Settings don't already name (by repository or clone).
+ * Off the maker's laptop, none of Castellan's own (maker.ts), even where the account could push to one.
+ */
+export function candidates(s: FoundState, employees: Pick<Employee, 'repo' | 'checkout'>[], makers = makersPc()): FoundRepo[] {
+  return s.repos.filter(
+    (r) =>
+      (r.push === true || (r.byGit === true && r.push === null)) &&
+      !employees.some((e) => (e.repo && same(e.repo, r.repo)) || (e.checkout && samePath(e.checkout, r.path))) &&
+      !makersOwn({ repo: r.repo }, { makers, byId: false }),
+  );
 }
 
 /** The npm default test script, which only fails: not a test. */
@@ -248,17 +257,22 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
   const file = o.file ?? settingsFile();
   const raw = readJson<Record<string, unknown>>(file, {});
   const own = normalizeSettings(raw).settings;
+  // Castellan's own repositories are its makers' alone (maker.ts): refused here, whatever else is true of them.
+  const makers = makersPc();
+  const theirs = makersOwn({ repo }, { makers, byId: false });
+  if (theirs) return { error: theirs };
   // Off the makers' PC, with Manor's Repositories the list (the kit's spec/REPOSITORIES.md): it goes there.
   const home = o.manorHome ?? manorHome();
   const intoManor = !own.releasesCastellan && (o.manorHome !== undefined || !o.file) && manorTakesOver(own.employees, home);
   const current = intoManor ? employeesOfProjects(manorProjects(home)) : own.employees;
   const found = o.found ?? loadFound();
-  const r = candidates(found, current).find((x) => same(x.repo, repo));
+  const r = candidates(found, current, makers).find((x) => same(x.repo, repo));
   if (!r) {
     if (current.some((e) => same(e.repo, repo))) return { error: `${repo} is looked after already: see Settings, under Repositories.` };
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
   }
-  const employee = employeeFromFound(r, { taken: current.map((e) => e.id), merges: o.merges, release: o.release });
+  // Its id never one of Castellan's agents' (porter-2 for a repository of yours called porter), off the maker's laptop.
+  const employee = employeeFromFound(r, { taken: [...current.map((e) => e.id), ...(makers ? [] : makersIds())], merges: o.merges, release: o.release });
   if (intoManor) {
     const refused = addToManor(employee, home);
     return refused ? { error: refused } : { employee };
