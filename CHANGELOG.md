@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.0
+
+**Repositories worked with plain git: you say what the Steward does when a branch is ready, and after a release.**
+
+### What's new
+
+- Two new commands for each repository in Settings, used only when it's worked with plain git (it has no pull requests):
+  - **When a branch is ready.** A branch that claimed a version and is pushed gets tested here at its head with your Test it commands. Then your command runs in your clone, lowest version first. Examples: `git push origin {commit}:refs/heads/{base}` lands it as a fast-forward, or a command of your own can open a review or send a mail. It fills in `{branch}`, `{base}`, `{commit}`, `{version}`, `{title}`, `{notesFile}` (the changelog entry), `{repo}` and `{checkout}`.
+  - **After a release.** This runs once a release's tag is pushed, with `{tag}`, `{version}`, `{commit}` and `{notesFile}` (the release's notes), for a script that uploads the build or tells the team.
+- A command that says yes isn't run again for that commit.
+- A failing command is tried again at the next rounds, up to three times per commit, before it's reported as failed. A branch that can't go in holds the versions above it.
+- A failed After a release is noted on the release, and the release still stands.
+
+### What changed
+
+- The Source control help in Settings now points to the two new commands.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Both commands start empty, and an empty command changes nothing.
+
 ## 0.34.0
 
 **Repositories on Bitbucket Cloud get their pull requests merged, stamped and released, as on GitHub.**

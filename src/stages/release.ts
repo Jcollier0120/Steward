@@ -15,6 +15,7 @@ import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
 import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { hostFor } from '../hosts/index.ts';
+import { runWhenReleased } from './gitevents.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -186,7 +187,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     noteReleased(e, version);
     // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
+    const after = byGit ? await afterReleaseNote(ctx, e, { repo, commit, version, since }) : '';
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
@@ -217,6 +219,18 @@ export const NO_RELEASE = 'not released by the Steward: Settings name no way to 
  * release before (kit/node/notes.ts combinedEntry), else GitHub's own
  * from the commits since the release before.
  */
+/**
+ * A plain-git release's After a release command (gitevents.ts), its notes the version's CHANGELOG.md entry with those
+ * of the versions since the release before: '' when it ran or there is none, else a note for the release's line. The
+ * release stands either way.
+ */
+async function afterReleaseNote(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; since?: string | null }): Promise<string> {
+  if (!e.whenReleased) return '';
+  const notes = combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md').catch(() => null)) ?? '', o.version, o.since ?? null);
+  const failed = await runWhenReleased(ctx, e, { commit: o.commit, version: o.version, notes });
+  return failed ? `; After a release failed (${failed})` : '; After a release ran';
+}
+
 async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; remote: string; noted: string; since: string | null }): Promise<EmployeeResult> {
   const tag = `v${o.version}`;
   // Worked with plain git (scm.ts): the release is the tag itself, pushed to origin.
@@ -227,7 +241,8 @@ async function tagRelease(ctx: Ctx, e: Employee, o: { repo: string; commit: stri
     forgetGlance(ctx, e);
     recordTested(e.id, { commit: o.commit, stage: 'release', branch: e.branch, version: o.version });
     noteReleased(e, o.version);
-    return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)}), tagged ${tag} on its origin${o.noted}`, { version: o.version, commit: o.commit.slice(0, 7) });
+    const after = await afterReleaseNote(ctx, e, o);
+    return result(e, 'done', `released v${o.version} from ${o.remote} (${o.commit.slice(0, 7)}), tagged ${tag} on its origin${o.noted}${after}`, { version: o.version, commit: o.commit.slice(0, 7) });
   }
   const entry = combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md')) ?? '', o.version, o.since ?? null);
   const notesDir = mkdtempSync(path.join(os.tmpdir(), 'steward-notes-'));

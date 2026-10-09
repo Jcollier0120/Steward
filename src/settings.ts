@@ -68,6 +68,14 @@ export interface Employee {
    * which lists every product's release notes and downloads. Empty: nothing is run.
    */
   refresh?: string;
+  /**
+   * Worked with plain git (scm.ts), where there are no pull requests: run in its clone for each claimed branch that is
+   * pushed and tested here, lowest version first, to hand it in (stages/gitevents.ts). {branch} {base} {commit}
+   * {version} {title} {notesFile} {repo} {checkout}. Empty or none: claimed branches are left to you.
+   */
+  whenReady?: string;
+  /** Worked with plain git: run in its clone once a release's tag is pushed. {tag} {version} {commit} {notesFile} {base} {repo} {checkout}. Empty or none: nothing. */
+  whenReleased?: string;
   /** A word on its row of the page: why its PRs are left to you, say. Empty or none: none. */
   note?: string;
 }
@@ -294,7 +302,7 @@ const SOURCE_CONTROL: Field = {
   key: 'sourceControl',
   kind: 'choice',
   label: 'Source control',
-  help: "How the Steward works with your repositories. GitHub: pull requests merged, GitHub releases (needs the GitHub CLI, signed in). Git: any host (GitLab, Azure DevOps, Bitbucket, a server or folder of your own) with plain git: a release is a v<version> tag pushed to the repository, and what lands on the branch is released (there are no pull requests to merge). Automatic: the Steward chooses for each repository from what this PC has.",
+  help: "How the Steward works with your repositories. GitHub: pull requests merged, GitHub releases (needs the GitHub CLI, signed in). Git: any host (GitLab, Azure DevOps, Bitbucket, a server or folder of your own) with plain git: a release is a v<version> tag pushed to the repository, and what lands on the branch is released (there are no pull requests to merge: each repository's When a branch is ready and After a release say what the Steward does instead). Automatic: the Steward chooses for each repository from what this PC has.",
   options: [
     { value: 'auto', label: 'Automatic' },
     { value: 'github', label: 'GitHub, for every repository' },
@@ -347,6 +355,24 @@ export const SETTINGS_SCHEMA: Field[] = [
         label: 'Refresh after releases',
         help: "Run after the Steward released anything, any repository's (a site's npm run sync, say, that lists every release's notes and downloads): in a fresh worktree of its branch, with gh at hand. When it changed tracked files, the tests above run, then the change is committed and pushed to the branch, never forced. Nothing changed: nothing pushed. A failure is an alarm, and nothing failing is pushed; the next release tries again.",
         empty: 'Nothing run after releases',
+        optional: true,
+        ...command,
+      },
+      {
+        key: 'whenReady',
+        kind: 'text',
+        label: 'When a branch is ready',
+        help: "Only for a repository worked with plain git (Source control), which has no pull requests: what the Steward does with a branch that claimed a version once it is pushed and its Test it commands pass here at its head, lowest version first, while Merges your ready PRs is on. Run in your clone, with {branch}, {base} (the branch above), {commit} (its head), {version}, {title}, {notesFile} (its changelog entry, in a file), {repo} and {checkout} filled in. Exit 0 is handed in, and it isn't run again at that head; once the head is in the branch above, its version is released as any other. Say: git push origin {commit}:refs/heads/{base}, to land it as a fast-forward; or a command of your own that opens a review or sends a mail. A failure is tried again next round, three times at most at one head.",
+        empty: 'Claimed branches are left to you',
+        optional: true,
+        ...command,
+      },
+      {
+        key: 'whenReleased',
+        kind: 'text',
+        label: 'After a release',
+        help: "Only for a repository worked with plain git (Source control): run in your clone once a release's tag is pushed, with {tag}, {version}, {commit}, {notesFile} (the release's notes, in a file), {base}, {repo} and {checkout} filled in. Say, a script that uploads the build or tells the team. A failure is noted on the release, which stands.",
+        empty: 'Nothing run after its releases',
         optional: true,
         ...command,
       },
@@ -533,6 +559,8 @@ function normalizeEmployee(e: any): Employee | null {
     installed: typeof e.installed === 'string' ? e.installed.trim() : known.installed,
     // Left out when empty, as the page keeps them (optional), so a record without them reads as it always did.
     ...(typeof e.refresh === 'string' && e.refresh.trim() ? { refresh: e.refresh.trim() } : {}),
+    ...(typeof e.whenReady === 'string' && e.whenReady.trim() ? { whenReady: e.whenReady.trim() } : {}),
+    ...(typeof e.whenReleased === 'string' && e.whenReleased.trim() ? { whenReleased: e.whenReleased.trim() } : {}),
     ...(typeof e.note === 'string' && e.note.trim() ? { note: e.note.trim() } : {}),
   };
 }
