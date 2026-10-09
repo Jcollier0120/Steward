@@ -2,6 +2,16 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.43.4
+
+**The kit's MIT license comes with the kit, as `src/kit/LICENSE`.** An agent's own LICENSE now points to the kit's license instead of pasting the MIT text, so the kit brings its license itself, and every agent's release carries it beside the kit.
+
+### What changed
+
+- **tools/kit.ts:** filling `src/kit` copies the kit's `LICENSE` beside its `VERSION`, as `src/kit/LICENSE`. A kit release has held `LICENSE` all along (tools/kit-release.ts); only the fill left it out. A kit tree or release without one (as a test's may be) fills as before, with no `LICENSE`.
+- **What an agent must do:** nothing: the Steward's bump brings the new tools/kit.ts and fills `src/kit` again. An agent's release takes everything under `src/`, so `src/kit/LICENSE` goes into its zip with the kit.
+- **Its tests:** test/kit-tool.test.ts.
+
 ## 2.43.3
 
 **The manor's pace: agents new to the manor do their heavy first rounds one at a time, and every scheduled round gives way to the person.** A first install, or every agent hired together, ran each one's first round at once, at normal priority: first indexes, first scans, a first look at every repository, together, and the PC ground to a halt.

@@ -2,6 +2,14 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.28.10
+
+**The kit it hands out, 2.43.4, brings its own MIT license.**
+
+### What changed
+
+- The Steward hands out kit 2.43.4: each agent's copy of the kit now comes with the kit's license, and so does every agent's release. The agents' own license files are short and point to it.
+
 ## 0.28.9
 
 **The kit it hands out, 2.43.3, keeps the agents from all doing their heavy first work at once.**
