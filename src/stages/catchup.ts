@@ -299,8 +299,10 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     return 'version' in v ? v.version : null;
   };
   // A kit PR whose branch already pins that kit or a newer one (another PR took it there first) has nothing left to do.
-  // Its kit is its branch's name's (steward/kit-<version>).
-  const brings = kitPr ? /^steward\/kit-(\d+\.\d+\.\d+)$/.exec(pr.head)?.[1] : undefined;
+  // Its kit is the one its head pins: a newer kit than its branch's name (steward/kit-<version>) once the rollout folded
+  // one onto it. The name's, when its head's kit.json can't be read.
+  const pinned = kitPr ? readPin(await showFile(run, repo, head, 'kit.json'))?.kit : undefined;
+  const brings = pinned && KIT_VERSION.test(pinned) ? pinned : kitPr ? /^steward\/kit-(\d+\.\d+\.\d+)$/.exec(pr.head)?.[1] : undefined;
   if (brings) {
     const theirs = readPin(await showFile(run, repo, branch, 'kit.json'));
     if (theirs && KIT_VERSION.test(theirs.kit) && compareVersions(theirs.kit, brings) >= 0) return await closeKitPr(ctx, e, pr, repo, `${e.branch} already carries kit ${theirs.kit}`, { redundant: true });

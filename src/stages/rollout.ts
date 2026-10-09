@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 import { fetchBranch, gh, showFile } from '../git.ts';
-import { compareVersions } from '../kitfiles.ts';
+import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
-import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { push } from './push.ts';
 import { parsePrs, prListArgs, readPin } from './staff.ts';
 
@@ -17,6 +17,12 @@ import { parsePrs, prListArgs, readPin } from './staff.ts';
  * worktree of its branch, the new pin and a version claimed for it (claims.ts), its checks run, committed) and pushes
  * the PR, a few employees at a time (Settings' parallel). Later rounds merge the PR and release it, as any PR of the
  * Steward's.
+ *
+ * A kit PR of the Steward's still open for an older kit (waiting its turn behind the employee's other PRs, which its
+ * version is above) gets the newer kit instead of a second kit PR beside it: the fold. Its branch is bumped again, at
+ * the version it already has, its changelog entry rewritten for every kit since the one the employee's branch pins, its
+ * checks run, and the commit pushed on top (never forced), with the PR's title and description made the new kit's. One
+ * PR to merge and one release, where there would have been two.
  *
  * A bump or a push that fails is kept in rollout-failed.json, with the kit and the branch's head it failed at: an
  * alarm at once, and the rounds don't try that kit again until a new commit lands on the employee's branch, or a
@@ -50,6 +56,8 @@ export interface RolloutFacts {
   pin: string | null;
   /** Its open kit PRs of the Steward's (#12 steward/kit-2.9.0). */
   kitPrs: string[];
+  /** The one of them that pins an older kit than the one rolled out, which takes the new kit (the fold). */
+  fold?: KitFold;
   /** Its other open PRs that pin the kit rolled out already, or a newer one (#20 (claude/developer-options, kit 2.39.0)). */
   pinPrs?: string[];
 }
@@ -61,8 +69,8 @@ export interface RolloutPlan {
   why: string | null;
   /** True when it waits only for this Steward to carry the kit: an alarm once that lasts. */
   waitsForSteward: boolean;
-  /** Bumped and pushed now, each with its branch's head. */
-  bump: { employee: Employee; head: string }[];
+  /** Bumped and pushed now, each with its branch's head; `fold`, onto its kit PR open for an older kit. */
+  bump: { employee: Employee; head: string; fold?: KitFold }[];
   /** Not now, and why; `held` for one whose bump failed at this head. */
   skip: { employee: Employee; why: string; held?: boolean }[];
 }
@@ -92,12 +100,12 @@ export function planRollout(o: { on: boolean; kit: string | null; ownKit: string
     else if (!f.head) skip(`no ${e.branch} on origin`);
     else if (!f.pin) skip(`no kit.json on origin/${e.branch}`);
     else if (compareVersions(f.pin, kit) >= 0) skip(`on kit ${f.pin} already`);
-    else if (f.kitPrs.length) skip(`its kit PR ${f.kitPrs.join(', ')} is open: the rounds merge it once it is ready`);
+    else if (f.kitPrs.length && !f.fold) skip(`its kit PR ${f.kitPrs.join(', ')} is open: the rounds merge it once it is ready`);
     else if (f.pinPrs?.length) skip(`its open PR ${f.pinPrs.join(', ')} already brings kit ${kit}, so it gets no kit PR of its own beside it`);
     else {
       const h = o.failed[e.id];
       if (h && h.kit === kit && h.head === f.head) skip(`its ${h.stage} to kit ${kit} failed at ${f.head.slice(0, 7)} (${h.message}), so the rounds leave it until a new commit lands on ${e.branch}, or you press ${h.stage === 'bump' ? 'Bump' : 'Push'}`, true);
-      else plan.bump.push({ employee: e, head: f.head });
+      else plan.bump.push({ employee: e, head: f.head, ...(f.fold ? { fold: f.fold } : {}) });
     }
   }
   return plan;
@@ -116,8 +124,17 @@ export async function rolloutFacts(ctx: Ctx, e: Employee, kit: string): Promise<
   if (!pin || compareVersions(pin, kit) >= 0) return { checkout: true, head, pin, kitPrs: [] };
   const g = glanceOf(ctx, e);
   const prs = parsePrs(g ? JSON.stringify(g.prs) : await gh(ctx.run, ctx.neutralDir, ...prListArgs(e.repo)), ctx.settings.team);
-  const kitPrs = prs.filter((p) => p.whose === 'steward' && p.head.startsWith('steward/kit-')).map((p) => `#${p.number} (${p.head})`);
-  if (kitPrs.length) return { checkout: true, head, pin, kitPrs };
+  const open = prs.filter((p) => p.whose === 'steward' && p.head.startsWith('steward/kit-') && !p.fork);
+  const kitPrs = open.map((p) => `#${p.number} (${p.head})`);
+  if (kitPrs.length) {
+    // One kit PR open for an older kit takes this one: what its branch on origin pins now, not its name, says which.
+    if (open.length !== 1 || open[0].draft) return { checkout: true, head, pin, kitPrs };
+    const p = open[0];
+    const at = await fetchBranch(ctx.run, repo, p.head)
+      .then(async () => readPin(await showFile(ctx.run, repo, `origin/${p.head}`, 'kit.json'))?.kit ?? null)
+      .catch(() => null);
+    return { checkout: true, head, pin, kitPrs, ...(at && KIT_VERSION.test(at) && compareVersions(at, kit) < 0 ? { fold: { number: p.number, head: p.head, kit: at } } : {}) };
+  }
   // Its other open PRs that change kit.json (or say nothing of their files): one that pins this kit, or a newer one, at
   // its head brings the kit with it. Read from origin's branch; a fork's isn't there, and is left out.
   const pinPrs: string[] = [];
@@ -183,7 +200,8 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     } catch {
       // The entry names the kit alone, and the PR's body points at the kit's changelog.
     }
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog });
+    const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
+    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
       // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.
@@ -192,12 +210,15 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
     }
     for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
     if (ready.length) {
-      const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog });
+      const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog, folds });
       for (const p of pushed) {
         const b = ready.find((r) => r.id === p.id)!;
         if (p.outcome === 'done') {
           delete failed[p.id];
           results.push({ ...p, message: `rollout: kit ${kit}: ${b.message}; ${p.message}`, version: b.version ?? p.version });
+        } else if (p.outcome === 'skipped') {
+          // A fold whose PR merged or closed meanwhile: nothing failed, and the next round bumps it afresh.
+          results.push({ ...p, message: `rollout: ${p.message}` });
         } else {
           if (!(await networkFailure(ctx, p.message))) failed[p.id] = { kit, head: heads.get(p.id)!, stage: 'push', message: p.message, at };
           results.push({ ...p, outcome: 'failed', message: `rollout: push of kit ${kit}: ${p.message} (the bump is ready: ${b.message})` });

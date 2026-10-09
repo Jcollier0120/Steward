@@ -14,7 +14,8 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');
-const { planRollout, rolloutFacts, rolloutGate, loadRolloutFailures } = await import('../src/stages/rollout.ts');
+const { planRollout, rollout, rolloutFacts, rolloutGate, loadRolloutFailures } = await import('../src/stages/rollout.ts');
+const { bumpOne } = await import('../src/stages/bump.ts');
 const { planRound } = await import('../src/stages/changes.ts');
 const { roundSig } = await import('../src/glance.ts');
 const { roundConditions } = await import('../src/alarms.ts');
@@ -90,6 +91,64 @@ test("an employee whose own open PR pins the kit already gets no kit-only PR bes
   assert.deepEqual((await rolloutFacts(ctx, e, '1.0.1')).pinPrs, ['#20 (claude/developer-options, kit 1.0.1)']);
   open = open.slice(1);
   assert.deepEqual((await rolloutFacts(ctx, e, '1.0.1')).pinPrs, [], 'with that PR merged or closed, the kit is rolled out as ever');
+});
+
+test('a kit PR open for an older kit takes the new kit (the fold), instead of waiting to merge and a second kit PR after it', async () => {
+  const fold = { number: 12, head: 'steward/kit-2.9.0', kit: '2.9.0' };
+  const plan = planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter, miller], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }), miller: facts('2.8.3', { kitPrs: ['#13 (steward/kit-2.9.1)'] }) }, failed: {} });
+  assert.deepEqual(plan.bump.map((b) => [b.employee.id, b.fold]), [['porter', fold]]);
+  assert.deepEqual(plan.skip.map((s) => s.why), ['its kit PR #13 (steward/kit-2.9.1) is open: the rounds merge it once it is ready']);
+  // A fold that failed at that head is held like any bump.
+  const failed = { porter: { kit: '2.9.1', head: H1, stage: 'bump' as const, message: 'npm test failed (exit 1)', at: '' } };
+  assert.deepEqual(planRollout({ on: true, kit: '2.9.1', ownKit: null, employees: [porter], facts: { porter: facts('2.8.3', { kitPrs: ['#12 (steward/kit-2.9.0)'], fold }) }, failed }).bump, []);
+
+  // Read from the kit PR's branch on origin: it folds when that pins an older kit than the one rolled out; not when it
+  // pins that kit already, nor when more than one kit PR is open.
+  const dir = mkdtempSync(path.join(home, 'folds-'));
+  const fk = fakeEmployee(dir, { kit: '1.0.0' });
+  const branch = (name: string, kit: string) => {
+    sh(fk.checkout, 'checkout', '--quiet', '-b', name, 'origin/main');
+    writeFileSync(path.join(fk.checkout, 'kit.json'), `{\n  "kit": "${kit}",\n  "parts": ["node"]\n}\n`);
+    sh(fk.checkout, 'commit', '--quiet', '-am', name);
+    sh(fk.checkout, 'push', '--quiet', 'origin', name);
+    sh(fk.checkout, 'checkout', '--quiet', 'main');
+  };
+  branch('steward/kit-1.0.1', '1.0.1');
+  branch('steward/kit-1.0.2', '1.0.2');
+  const pr = (number: number, head: string) => ({ number, title: `Fake 0.4.${number}: the Steward's kit`, url: `u${number}`, body: '', headRefName: head, headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] });
+  let open = [pr(30, 'steward/kit-1.0.1')];
+  const e = employee(fk.checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(open) : undefined)).run, neutralDir: dir });
+  assert.deepEqual((await rolloutFacts(ctx, e, '1.0.2')).fold, { number: 30, head: 'steward/kit-1.0.1', kit: '1.0.1' });
+  open = [pr(31, 'steward/kit-1.0.2')];
+  const on = await rolloutFacts(ctx, e, '1.0.2');
+  assert.deepEqual([on.kitPrs, on.fold], [['#31 (steward/kit-1.0.2)'], undefined]);
+  open = [pr(30, 'steward/kit-1.0.1'), pr(31, 'steward/kit-1.0.2')];
+  assert.equal((await rolloutFacts(ctx, e, '1.0.3')).fold, undefined);
+});
+
+test("a round's rollout folds the new kit onto the open kit PR: pushed onto its branch and the PR retitled, none opened", async () => {
+  const dir = mkdtempSync(path.join(home, 'fold-round-'));
+  const fk = fakeEmployee(dir, { kit: '1.0.0' });
+  const e = employee(fk.checkout, { fill: '' });
+  let open: any[] = [];
+  const r = runner((a) => {
+    if (a[0] === 'release' && a[1] === 'list') return ok([]);
+    if (a[0] === 'pr' && a[1] === 'list') return ok(open);
+    if (a[0] === 'pr' && a[1] === 'view') return ok({ state: 'OPEN', headRefName: 'steward/kit-1.0.1' });
+    if (a[0] === 'pr' && a[1] === 'edit') return ok('');
+  });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir });
+  // Kit 1.0.1's PR, open and waiting.
+  assert.equal((await bumpOne(ctx, e, { kit: '1.0.1', changelog: null })).outcome, 'done');
+  sh(fk.checkout, 'push', '--quiet', 'origin', 'steward/kit-1.0.1');
+  open = [{ number: 30, title: "Fake 0.4.1: the Steward's kit 1.0.1", url: 'u30', body: '', headRefName: 'steward/kit-1.0.1', headRefOid: '', baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, files: [{ path: 'kit.json' }] }];
+
+  const out = await rollout(ctx, [e], { kit: '1.0.2', ownKit: null, changelog: async () => null });
+  assert.deepEqual(out.results.map((x) => [x.outcome, x.message.replace(/\(.{7}\)/, '(…)')]), [['done', `rollout: kit 1.0.2: 0.4.1 on steward/kit-1.0.1 (…): kit 1.0.1 → 1.0.2, onto its open PR #30, checks passed; put kit 1.0.2 onto its open PR #30, now "Fake 0.4.1: the Steward's kit 1.0.2"`]]);
+  assert.match(sh(fk.origin, 'show', 'steward/kit-1.0.1:kit.json'), /"kit": "1\.0\.2"/);
+  assert.ok(!r.gh.some((a) => a[1] === 'create'), 'no second kit PR');
+  assert.ok(r.gh.some((a) => a[1] === 'edit' && a[2] === '30'));
 });
 
 test('nothing is rolled out with the setting off, with no kit release, or while this Steward carries an older kit', () => {

@@ -228,6 +228,15 @@ export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), 
 export const releaseDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), `${e.id}-release`);
 /** The branch a bump to a kit version is prepared on. */
 export const bumpBranch = (kit: string) => `steward/kit-${kit}`;
+/**
+ * The Steward's kit PR still open for an older kit, which a newer kit goes onto instead of a PR of its own (the rollout's
+ * fold): its number, its branch (steward/kit-<the kit it was opened for>) and the kit its branch pins now.
+ */
+export interface KitFold {
+  number: number;
+  head: string;
+  kit: string;
+}
 export const NOT_ON_KIT = 'not using the kit yet';
 
 /** Runs `fn` on each item, at most `limit` at once, keeping the order of the results. */
