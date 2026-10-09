@@ -4,6 +4,7 @@ import http from 'node:http';
 import { APP, HOST_NAME } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
+import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
 import { hasTour, pageScript } from './react-page.ts';
@@ -144,6 +145,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   const tour = hasTour();
   // Its required settings (its onboarding's) are read from these: until they're filled in, its rounds wait (required.ts).
   watchRequired(opts.settings);
+  // The trial's end (license-check.ts): read now, then every hour.
+  startLicenseCheck();
 
   const stop: Handler = () => {
     setTimeout(async () => {
@@ -164,9 +167,13 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // `developer`: the manor's Developer options as this agent reads them now (developer.ts), so an open page that sees
     // it change draws itself again, with or without its developer content. `pid` (kit 2.40.0) only with it on: a process
     // id is developer content, and its one reader, the Pinder (a developer role), knows an agent by its port first.
+    // `license` (kit 2.45.0), only for an agent the Exchequer sells: how the license Manor holds stands for it
+    // (license-check.ts). Once a trial has ended, `running` is false and `summary` says so; a license it can't judge only
+    // says why in `license.problem`, and it runs.
     '/api/ping': () => {
       const developer = isDeveloper();
-      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, ...opts.ping?.() } };
+      const license = licenseNow();
+      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, license.ended), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, ...opts.ping?.() } };
     },
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).

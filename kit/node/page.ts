@@ -2,6 +2,7 @@ import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.t
 import { APP, dataDir } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
+import { trialEnded, trialEndedNote } from './license-check.ts';
 import { lookFor, sceneSvg, type Look } from './look.ts';
 import { manorLink, manorSettingsUrl, type ManorLink } from './manor.ts';
 import { firstRoundNow, roundTimes, type RoundState } from './schedule.ts';
@@ -100,17 +101,19 @@ ${items.join('\n')}
  * The status pill, from what the page knows: a round under way (the agent's own words for it: "Tasting"),
  * on duty (with its next round, when the agent says when that is), or off duty.
  */
-export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; first?: RoundState['firstRound'] }): string {
+export function statusPill(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; first?: RoundState['firstRound']; ended?: string | null }): string {
   const p = pillOf(o);
   return `<span class="status-pill ${p.kind}" title="${esc(p.title)}">${esc(p.text)}</span>`;
 }
 
 /** The status pill as data: its kind (busy, off, on: its class), its words and its tooltip. A React page draws it from this. */
-export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null; first?: RoundState['firstRound'] }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
+export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: number | string | null; now?: number; needs?: string | null; first?: RoundState['firstRound']; ended?: string | null }): { kind: 'busy' | 'off' | 'on'; text: string; title: string } {
   // Settling into the manor (kit 2.43.3): its first round waits its turn, or a long one runs (the look's firstRound).
   if (o.first === 'waiting') return { kind: 'busy', text: 'Settling in', title: 'Its first round waits its turn: agents new to the manor do their first rounds one at a time, so this PC is never swamped.' };
   if (o.first === 'running' && o.look.firstRound) return { kind: 'busy', text: 'Settling in', title: `Its first round: ${o.look.firstRound}. It takes longer than the rounds after it, which only catch up on what changed.` };
   if (o.busy) return { kind: 'busy', text: o.look.busy, title: "A round is under way. This page refreshes itself until it's done." };
+  // The trial has ended (license-check.ts): nothing runs until a license brings it back.
+  if (o.ended) return { kind: 'off', text: 'Trial ended', title: `${o.ended}. Its settings and data are kept.` };
   // Its required settings not filled in yet (required.ts): nothing runs until they are.
   if (o.needs) return { kind: 'off', text: 'Needs settings', title: `Waiting for its settings before it can start: ${o.needs}.` };
   if (!o.duty.onDuty) return { kind: 'off', text: 'Off duty', title: `Off duty since ${ago(o.duty.since, o.now)}: its scheduled rounds are paused. Run now still works.` };
@@ -187,13 +190,13 @@ export function page(o: { token: string; body: string; title?: string; busy?: bo
   <a class="brand" href="#/"><img class="brand-mark" src="/favicon.svg" alt="" width="28" height="28"><div class="brand-text"><h1>${esc(APP.name)}</h1><p class="role">${esc(APP.role)}</p></div></a>
   ${sceneSvg(look)}
   <div class="tools">
-    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow() })}
+    ${statusPill({ look, busy: o.busy, duty: d, nextAt: o.nextAt === undefined ? roundTimes().nextRunAt : o.nextAt, first: firstRoundNow(), ended: trialEnded() })}
     <a class="tool-link" id="settings-link" href="#/settings" title="Settings" hidden>${GEAR}<span>Settings</span></a>
     ${themeMenu(manor)}
     <span class="titlebar-action" id="titlebar-action"></span>
   </div>
 </header>
-${settling(look, firstRoundNow())}${offDuty(d)}<main class="view">
+${settling(look, firstRoundNow())}${trialEnded() ? trialEndedBanner() : offDuty(d)}<main class="view">
 ${o.body}
 ${workSection({ developer: dev })}
 </main>
@@ -411,6 +414,12 @@ function settling(look: Look, first: RoundState['firstRound']): string {
   const text = settlingText(APP.name, look, first);
   return text ? `<div class="banners"><div class="banner-note settling" role="status">${SETTLING_SVG}<span><strong>Settling into the manor</strong>: ${esc(text)}</span></div></div>
 ` : '';
+}
+
+/** The trial has ended (license-check.ts): said in plain words, in place of the off-duty banner, with no Back on duty. */
+function trialEndedBanner(): string {
+  return `<div class="banners"><div class="banner-note offduty trial-ended" role="status"><span>${esc(trialEndedNote())}</span></div></div>
+`;
 }
 
 function offDuty(d: Duty): string {

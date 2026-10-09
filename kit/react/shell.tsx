@@ -292,7 +292,14 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
             </div>
           </div>
         )}
-        {s.offDutySince && (
+        {s.trialEnded && (
+          <div className="banners">
+            <div className="banner-note offduty trial-ended" role="status">
+              <span>{s.trialEnded}</span>
+            </div>
+          </div>
+        )}
+        {s.offDutySince && !s.trialEnded && (
           <div className="banners">
             <div className="banner-note offduty" role="status">
               <span>
