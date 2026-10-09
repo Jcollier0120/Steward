@@ -15,6 +15,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **`manorOwn()`** counts the Steward's employees as the manor's own only where the Steward releases Castellan (`releasesCastellan` not false), as before there. On any other PC the repositories a person gave the Steward are theirs, and may be tracked as projects. A Steward settings.json from before `releasesCastellan` reads as before.
 - **What an agent must do:** nothing to keep working: a project read before has `merges` false and `release` empty. An agent that keeps its own list of repositories should derive it from `manorProjects()` where Manor is installed, as spec/REPOSITORIES.md says. Manor, the Steward and the Wright follow in their own PRs.
+- **Manor** moves with it: its tests check a project's every key, so Manor before 0.16.24 fails three of them on this kit. Manor 0.16.24 (its tracked-repositories change) expects `merges` and `release` and passes, so this kit is released with `kit:breaks-agents` and Manor 0.16.24 merges right after.
 - **Its tests:** kit/test/manor.test.ts.
 
 ### Before you update
