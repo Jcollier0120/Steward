@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.47.0
+
+**A long page, and long Settings, in tabs; a short one stays a single column.**
+
+### What's new
+
+- **react/tabs.tsx:** `PageTabs` (`{ id, label, count?, mark?, content }[]`), an agent's page in tabs, for a page too long for one column. The agent puts it in its body after whatever shows on every tab (a summary). The chosen tab is in the address, `#/<id>` (`usePageTab`, `pageTabInHash`; never `settings` or `tour`), kept through Settings and back. Every panel is drawn and kept while hidden, so what's typed or ticked in one stays. `count` shows beside a tab's name, `mark` a dot with its words on hover.
+- **react/tour.tsx:** a tour step whose part is in a hidden tab shows that tab first (`SHOW_TAB`), then brings the part into view.
+- **react/settings-form.tsx:** a long Settings form, two or more groups and `TAB_FIELDS` (10) ordinary settings, is in tabs: General (the settings in no group, then Advanced), then a tab for each group, in place of the jump links and folded sections. One Save sends them all. A tab with a problem is marked, and a refused save shows the first one. A shorter form is as before.
+- **react/styles.ts:** `.tab-count`, `.tab-mark`, and `.tab-panel[hidden]`.
+
+### What changed
+
+- **react/tabs.tsx:** `Tabs` takes `count` and `mark` on each tab.
+- **What an agent must do:** nothing, to keep its page as it is. A long Settings form changes by itself (on the agents today, the Steward's). To put a long page in tabs, use `PageTabs`, and only where it helps: a short page needs none.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.46.1
 
 **Settings' "changed" mark shows only beside a field that's changed.**

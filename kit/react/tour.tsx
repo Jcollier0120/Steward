@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Onboarding, PageShell } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
+import { SHOW_TAB } from './tabs.tsx';
 import { Button, LinkButton, Text } from './ui.tsx';
 
 /**
@@ -37,8 +38,11 @@ function useSpotlight(name: string | null) {
     if (!name) return;
     const el = document.querySelector<HTMLElement>(`[data-tour="${CSS.escape(name)}"]`);
     if (!el) return;
+    // A part in a tab not shown (PageTabs): that tab first, then the part, once it's drawn.
+    const panel = el.closest<HTMLElement>('[role="tabpanel"][hidden]');
+    if (panel?.id.startsWith('page-panel-')) window.dispatchEvent(new CustomEvent(SHOW_TAB, { detail: panel.id.slice('page-panel-'.length) }));
     el.classList.add('tour-target');
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    requestAnimationFrame(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }));
     return () => el.classList.remove('tour-target');
   }, [name]);
 }

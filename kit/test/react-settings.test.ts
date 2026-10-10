@@ -36,6 +36,8 @@ const schema = [
 ];
 const values = { variant: 'gamer', stocks: ['MSFT'], notes: true, interval: 5, folders: null, kinds: ['b'], agents: [{ port: 18383, name: 'Reeve' }], jobs: [{ name: 'build', cmds: ['npm test'] }], env: { A: '1' }, limits: { piece: 6, share: 0.5 }, alarms: { on: true }, port: 19494, since: '2026-10-05T12:00:00.000Z' };
 const data = (warnings = {}) => ({ schema, values, defaults: { ...values, interval: 10 }, problems: ['settings.json had a stray key.'], warnings, file: 'C:\\x\\settings.json' });
+// The same with fewer ordinary settings than a form in tabs has (TAB_FIELDS): the short page.
+const short = (warnings = {}) => ({ ...data(warnings), schema: schema.filter((f) => !['agents', 'jobs', 'env'].includes(f.key)) });
 
 test('every field kind, drawn as settings-panel.js draws it, class for class', () => {
   const h = m.form(data());
@@ -61,14 +63,15 @@ test('every field kind, drawn as settings-panel.js draws it, class for class', (
 });
 
 test('the short page: groups are sections with jump links, the advanced folded, a field shown only when it applies', () => {
-  const h = m.form(data());
+  const h = m.form(short());
+  assert.doesNotMatch(h, /role="tablist"/, 'a short page has no tabs');
   assert.match(h, /<nav class="sf-jump" aria-label="Sections"><button type="button" class="link">Limits<\/button><button type="button" class="link">Alarms<\/button><\/nav>/);
   assert.match(h, /<details class="sf sf-section" data-key="limits" id="sf-section-limits">/, 'two groups: each folded');
   assert.match(h, /<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Port/, 'the advanced top-level setting, folded at the end');
   assert.match(h, /data-key="limits".*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Share/, "and a group's advanced field, folded in it");
   assert.doesNotMatch(h, /data-key="stocks"/, 'stocks is for the financial variant: hidden for gamer');
-  assert.match(m.form({ ...data(), values: { ...values, variant: 'financial' } }), /data-key="stocks"/, 'and shown for financial');
-  const err = m.form(data({ stocks: 'Not a ticker.', share: 'x', 'limits.share': 'Between 0 and 1.' }));
+  assert.match(m.form({ ...short(), values: { ...values, variant: 'financial' } }), /data-key="stocks"/, 'and shown for financial');
+  const err = m.form(short({ stocks: 'Not a ticker.', share: 'x', 'limits.share': 'Between 0 and 1.' }));
   assert.match(err, /data-key="stocks"/, 'a message about a hidden field shows it anyway');
   assert.match(err, /<details class="sf sf-section" data-key="limits" id="sf-section-limits" open="">/, 'and opens the section it is in');
 });
@@ -88,6 +91,20 @@ test('onboarding: only the keys asked for, never an advanced one; none at all sa
   assert.doesNotMatch(h, /data-key="port"/, 'advanced: left out, even when asked for');
   assert.doesNotMatch(h, /sf-jump|Advanced/);
   assert.match(m.form(data(), []), /Nothing to set: the defaults just work\./);
+});
+
+test('a long form (two groups or more, TAB_FIELDS ordinary settings) is in tabs: General, then each group, one Save', () => {
+  const h = m.form(data());
+  assert.match(h, /<div class="tabs" role="tablist" aria-label="Settings sections">/);
+  assert.match(h, /<button type="button" role="tab" class="tab" id="sf-tab-general" aria-selected="true" aria-controls="sf-panel-general" tabindex="0">General<\/button>/);
+  assert.match(h, /id="sf-tab-limits" aria-selected="false"[^>]*>Limits<\/button>.*id="sf-tab-alarms"[^>]*>Alarms<\/button>/);
+  assert.match(h, /<div class="tab-panel" role="tabpanel" id="sf-panel-general" aria-labelledby="sf-tab-general">.*data-key="interval".*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Port/, 'General: the settings in no group, then Advanced');
+  assert.match(h, /<div class="tab-panel" role="tabpanel" id="sf-panel-limits" aria-labelledby="sf-tab-limits" hidden="">.*data-key="limits"/, 'each group in a tab of its own, drawn while hidden so one Save sends it');
+  assert.doesNotMatch(h, /sf-jump|sf-section/, 'no jump links, no folded sections');
+  assert.equal(h.match(/<form /g)?.length, 1, 'one form');
+  const err = m.form(data({ 'limits.share': 'Between 0 and 1.' }));
+  assert.match(err, /id="sf-tab-limits"[^>]*>Limits<span class="tab-mark" title="Something here needs a look" aria-label="Something here needs a look"><\/span><\/button>/, 'a tab with a problem in it, marked');
+  assert.doesNotMatch(err, /id="sf-tab-alarms"[^>]*>Alarms<span class="tab-mark"/);
 });
 
 test("the Tour's three steps: what the role is, its settings, what its page shows", () => {

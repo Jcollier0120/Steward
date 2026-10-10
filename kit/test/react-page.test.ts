@@ -231,3 +231,34 @@ test("Settings in tabs: General (the kit's form) first, then the agent's own, th
   assert.equal(inHash('#/settings'), null);
   assert.equal(inHash('#/settings/a b'), null);
 });
+
+test('a long page in tabs (PageTabs): the one the address names shown, the rest drawn but hidden, counts and marks', async () => {
+  const { render, inHash } = await bundleForNode<{ render: () => string; inHash: (h: string) => string | null }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { PageTabs, pageTabInHash } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+     export const inHash = pageTabInHash;
+     export const render = () => renderToStaticMarkup(
+       <PageTabs label="The page" tabs={[
+         { id: 'files', label: 'Loose files', count: 34, content: <section data-tour="files">The files</section> },
+         { id: 'moves', label: 'Moves', mark: 'One failed', content: <section data-tour="moves">The moves</section> },
+       ]} />);`,
+    { location: { hash: '#/' }, document: { documentElement: { dataset: {} } } },
+  );
+  const first = render();
+  assert.match(first, /<div class="tabs" role="tablist" aria-label="The page">/);
+  assert.match(first, /id="page-tab-files" aria-selected="true" aria-controls="page-panel-files" tabindex="0">Loose files<span class="tab-count">34<\/span><\/button>/);
+  assert.match(first, /id="page-tab-moves" aria-selected="false"[^>]*>Moves<span class="tab-mark" title="One failed" aria-label="One failed"><\/span><\/button>/);
+  assert.match(first, /<div class="tab-panel" role="tabpanel" id="page-panel-files" aria-labelledby="page-tab-files"><section data-tour="files">/);
+  assert.match(first, /<div class="tab-panel" role="tabpanel" id="page-panel-moves" aria-labelledby="page-tab-moves" hidden=""><section data-tour="moves">/, 'drawn while hidden: the tour finds it, and what was typed in it stays');
+
+  (globalThis as unknown as { location: { hash: string } }).location.hash = '#/moves';
+  assert.match(render(), /id="page-panel-files" aria-labelledby="page-tab-files" hidden="">.*id="page-panel-moves" aria-labelledby="page-tab-moves">/, 'the tab the address names');
+  (globalThis as unknown as { location: { hash: string } }).location.hash = '#/nothing';
+  assert.match(render(), /id="page-panel-files" aria-labelledby="page-tab-files">/, "one that isn't there: the first");
+  assert.equal(inHash('#/moves'), 'moves');
+  assert.equal(inHash('#moves'), 'moves');
+  assert.equal(inHash('#/'), null);
+  assert.equal(inHash('#/settings'), null, "the kit's own addresses are never a page's tab");
+  assert.equal(inHash('#/tour'), null);
+  assert.equal(inHash('#/settings/logs'), null);
+});
