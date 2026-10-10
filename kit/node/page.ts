@@ -622,10 +622,12 @@ details[open] > summary { margin-bottom: 8px; }
 
 /* ---- Settings, a page of its own ---- */
 body.on-settings main > :not(#settings-view), body:not(.on-settings) #settings-view { display: none; }
+/* About, a page of its own too (the React frame's: shell.tsx). */
+body.on-about main > :not(#about-view), body:not(.on-about) #about-view { display: none; }
 .back-link { display: inline-block; margin-top: 16px; color: var(--accent-text); font-size: 13px; text-decoration: none; }
 .back-link::before { content: '\\2190\\00a0'; }
 .back-link:hover { text-decoration: underline; }
-#settings-view > h2:first-of-type { font-size: 20px; color: var(--fg); margin: 8px 0 12px; letter-spacing: 0; }
+#settings-view > h2:first-of-type, #about-view > h2:first-of-type { font-size: 20px; color: var(--fg); margin: 8px 0 12px; letter-spacing: 0; }
 .work-runs .work-table td:first-child { width: 42%; }
 .work-runs p { margin: 8px 0; }
 

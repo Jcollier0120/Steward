@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.8
+
+**It carries the kit 2.48.0: About beside Settings on every agent's page.**
+
+### What's new
+
+- The kit 2.48.0: each agent's title bar has an About button beside Settings, as Manor's has. About holds what you read once rather than every day, such as "Where its work runs" and, on agents that give one, how it works and how to set it up again.
+
+### What changed
+
+- "Where its work runs" moves from Settings to About on every agent once it takes the kit 2.48.0, so Settings holds only settings.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.7
 
 **It carries the kit 2.47.0: long pages and long Settings in tabs.**
