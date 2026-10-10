@@ -195,8 +195,8 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
  * the Steward's own), gh isn't run at all. One worked with GitLab's way has no glance: each stage asks GitLab of it on
  * its own (hosts/gitlab.ts).
  */
-export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>, host: (e: Employee) => Host = () => 'github'): Promise<Glance> {
-  const glance: Glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
+export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>, host: (e: Employee) => Host = () => 'github', now: () => Date = () => new Date()): Promise<Glance> {
+  const glance: Glance = { at: now().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
   const byGit = settings.employees.filter((e) => host(e) === 'git');
   for (const e of byGit) {
     try {
@@ -216,7 +216,7 @@ export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settin
       const why = (r.err || 'no output').trim().split('\n').slice(-3).join(' / ');
       throw LIMITED.test(why) ? new GithubLimited(why) : new Error(`gh api graphql failed (${r.code}): ${why}`);
     }
-    readGlance(chunk, r.out, stewardRepo, glance);
+    readGlance(chunk, r.out, stewardRepo, glance, now());
   }
   return glance;
 }

@@ -3,6 +3,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Condition, GetJson } from './alarms.ts';
 import type { EmployeeResult } from './stages/common.ts';
 import { pageToken, request, tokenHeaders } from './upkeep.ts';
+import { takeFreshStart } from './fresh-start.ts';
 
 /**
  * The staff kept answering: in each round, every agent Manor employs that is on duty but whose page doesn't answer
@@ -150,6 +151,9 @@ export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenA
   }
   const open = o.open ?? openThroughManor(o.manorUrl);
   const down: Record<string, DownAgent> = {};
+  // After a fresh start (fresh-start.ts), an agent down before is tried again at once, rather than an hour after its last
+  // try: it may have been down only because the PC was going to sleep or shutting down. Its alarm stays until it answers.
+  const fresh = takeFreshStart('tend');
   const revived = [...was.revived];
   const results: EmployeeResult[] = [];
   for (const a of staff) {
@@ -158,7 +162,7 @@ export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenA
       // Back by itself, or by a person, since the last look: nothing to keep.
       continue;
     }
-    const d: DownAgent = before ? { ...before, name: a.name, canOpen: a.canOpen } : { name: a.name, since: now().toISOString(), tries: 0, lastTry: null, said: null, canOpen: a.canOpen };
+    const d: DownAgent = before ? { ...before, name: a.name, canOpen: a.canOpen, ...(fresh ? { lastTry: null } : {}) } : { name: a.name, since: now().toISOString(), tries: 0, lastTry: null, said: null, canOpen: a.canOpen };
     if (!a.canOpen) d.said = "Manor has no Open for it here: its entry has no open command, or the paths it needs aren't on this PC";
     if (a.busy || !dueNow(d, now().getTime())) {
       down[a.id] = d;

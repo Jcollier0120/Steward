@@ -26,6 +26,7 @@ import { stewardEmployee } from './stages/selfmerge.ts';
 import { githubReady, loadScm } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
+import { noteFreshStart, watchWake } from './fresh-start.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -244,6 +245,12 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     } else rounds?.reschedule();
   };
   arrange();
+  // Just started: the page may have been down with the PC (shut down, asleep, offline), so what failed before is tried
+  // once more at the first round. The PC woke from sleep: the same before is tried again (fresh-start.ts), in a round now rather than at the next.
+  noteFreshStart();
+  watchWake(() => {
+    if (rounds) startRound();
+  });
 
   /** What the page shows (src/web/types.ts's StewardView), in the kit's frame. */
   const pageData = () => {

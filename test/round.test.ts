@@ -103,6 +103,16 @@ test("a release that fails is tried once at its commit; later rounds leave it to
   const alarms = JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8'));
   assert.deepEqual(alarms.open.map((a: any) => a.id), [`release:fake:${sha.slice(0, 7)}`]);
   assert.ok('manor:down' in alarms.watching && !alarms.open.some((a: any) => a.id === 'manor:down'), 'watched, not yet an hour');
+
+  // A fresh start (the page started again, or the PC woke): it may have failed only because the PC was going down, so
+  // it's tried once more; failing again, it stands as before.
+  const { noteFreshStart } = await import('../src/fresh-start.ts');
+  noteFreshStart();
+  await round();
+  assert.equal(readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length, 2, 'tried again after the fresh start');
+  assert.deepEqual(JSON.parse(readFileSync(roundFailuresFile(), 'utf8')), { fake: sha.slice(0, 7) }, 'failed again: held as before');
+  await round();
+  assert.equal(readFileSync(attempts, 'utf8').split('\n').filter((v) => v === '0.4.3').length, 2, 'once per fresh start');
 });
 
 test('a round while this PC is offline asks GitHub nothing, fails nothing and leaves no trace: it waits for the network', async () => {

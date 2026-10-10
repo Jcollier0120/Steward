@@ -91,7 +91,7 @@ export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
  */
 export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host, now: () => Date = () => new Date()): Promise<Glance | null> {
   try {
-    const g = await takeGlance(run, dataDir, settings, host);
+    const g = await takeGlance(run, dataDir, settings, host, now);
     if (g.rates?.length || g.cost !== undefined) saveBudget(noteGlance(loadBudget(), g, now()));
     for (const [id, why] of Object.entries(g.errors)) {
       const e = settings.employees.find((x) => x.id === id);
@@ -163,7 +163,7 @@ export async function withHostTeams(settings: Settings, o: { run: Runner; neutra
  * The stages' context. `team: false` leaves Settings' team as it is, gh unasked: for what never merges (claims).
  * `owner` stands in for the account gh is signed in as (tests).
  */
-export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner; scm?: ScmLook | null } = {}): Promise<Ctx> {
+export async function context(o: { settings?: Settings; run?: Runner; log?: (line: string) => void; glance?: boolean; offline?: boolean; team?: false; owner?: Owner; scm?: ScmLook | null; now?: () => Date } = {}): Promise<Ctx> {
   const run = o.run ?? realRun;
   const log = o.log ?? (() => {});
   mkdirSync(dataDir, { recursive: true });
@@ -181,7 +181,7 @@ export async function context(o: { settings?: Settings; run?: Runner; log?: (lin
   const settings = o.team === false || given.team.length ? fromGithub : await withHostTeams(fromGithub, { run, neutralDir: dataDir, host });
   // A .NET repository's commands run with Settings' SDK, when they name one (run.ts).
   useDotnet(settings.dotnetRoot ? expandEnv(settings.dotnetRoot) : '');
-  const glance = o.glance === false ? null : await tryGlance(run, settings, log, host);
+  const glance = o.glance === false ? null : await tryGlance(run, settings, log, host, o.now);
   // Offline, or with GitHub refusing the account (budget.ts), the kit's releases aren't asked for either: what's known
   // here (its cache, this checkout) is all there is.
   const refused = glance === null && o.glance !== false && !gate(loadBudget(), 0, new Date()).go;
@@ -450,7 +450,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // allows, waits, asking GitHub nothing; the alarms still look.
       let budget = name === 'round' && !tendOnly && !offline ? roundWaits(given, ask, at()) : null;
       let quiet = offline || tendOnly || !!budget;
-      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm });
+      const ctx = await context({ settings: given, run: o.run, log, glance: quiet ? false : undefined, offline: quiet, owner: o.owner, team: tendOnly ? false : undefined, scm: o.scm, now: o.now });
       // GitHub refused the glance itself: the round waits too, rather than asking of every repository on its own.
       if (name === 'round' && !quiet && !ctx.glance) {
         const g = gate(loadBudget(), 0, at());
