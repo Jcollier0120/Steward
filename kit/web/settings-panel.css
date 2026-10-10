@@ -13,7 +13,8 @@
 .sf-form > .sf:last-child { border-bottom: 0; }
 .sf-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .sf-head label, .sf-head .sf-name, .sf legend { font-weight: 600; }
-.sf-changed { display: none; }
+/* .sf too: a page's own .badge rule, drawn after this file, would otherwise show every mark. */
+.sf .sf-changed { display: none; }
 .sf.is-changed > .sf-head .sf-changed, .sf.is-changed > fieldset > legend .sf-changed { display: inline-block; }
 .sf-help, .sf-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .sf-meta { display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }

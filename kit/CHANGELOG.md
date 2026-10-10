@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.46.1
+
+**Settings' "changed" mark shows only beside a field that's changed.**
+
+### What changed
+
+- **web/settings-panel.css:** the rule hiding `.sf-changed` is `.sf .sf-changed`, so a page's own `.badge` rule drawn after `settings.css` (the React shell's styles) no longer shows the mark on every field. Reeve's Settings had it on every field and group, with nothing edited.
+- **What an agent must do:** nothing; take the kit as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.46.0
 
 **Every agent's Settings can be in tabs.**
