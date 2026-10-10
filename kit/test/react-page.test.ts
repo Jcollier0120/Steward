@@ -111,7 +111,7 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
     `import { renderToStaticMarkup } from 'react-dom/server';
      import { Page, Card, Text, Badge, PostButton } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
      export const render = (data) => renderToStaticMarkup(
-       <Page data={data} reload={() => {}} action={<PostButton title="Run now" variant="secondary" path="/api/run" confirm="Now?" />} tour={<p>Step one</p>}>
+       <Page data={data} reload={() => {}} action={<PostButton title="Run now" variant="secondary" path="/api/run" confirm="Now?" />} tour={<p>Step one</p>} about={data.about && <p className="mine-about">{data.about}</p>}>
          <Card className="empty" tour="mine"><Text variant="muted">quiet</Text> <Badge label="fine" tone="success" /></Card>
        </Page>);`,
     { location: { hash: '' }, document: { documentElement: { dataset: {} } } },
@@ -127,12 +127,16 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<div class="card empty" data-tour="mine"><span class="muted">quiet<\/span> <span class="badge tone-success">fine<\/span><\/div>/);
   assert.match(html, /<section id="settings-view"><a class="back-link" href="#\/">Back to /);
   assert.match(html, /<div class="card sf-panel" data-tour="settings-panel"><p class="muted">Loading the settings…<\/p><\/div>/, "the kit's React Settings form, loading");
-  assert.match(html, /Where its work runs/);
+  assert.match(html, /<a class="tool-link" id="about-link" href="#\/about" title="About" aria-current="false" data-tour="about">.*<span>About<\/span><\/a><a class="tool-link" id="settings-link"/, 'About, beside Settings, as Manor has it');
+  assert.match(html, /<section id="about-view"><a class="back-link" href="#\/">Back to [^<]+<\/a><h2>About [^<]+<\/h2><div data-tour="work" style="display:contents">[\s\S]*Where its work runs/, 'About: Where its work runs');
+  assert.doesNotMatch(html.slice(html.indexOf('id="settings-view"'), html.indexOf('id="about-view"')), /Where its work runs/, "no longer in Settings");
+  assert.match(render({ shell, body: {}, about: "How it works" }), /<h2>About [^<]+<\/h2><p class="mine-about">How it works<\/p><div data-tour="work"/, "the agent's own, then the work");
+  assert.doesNotMatch(render({ shell: { ...shell, work: "" }, body: {} }), /about-link|about-view/, "nothing to say: no About");
   assert.match(html, /<footer>[^<]+ · this PC only<\/footer>/, 'Developer options off (no Manor, no switch of its own): no data folder');
   const dev = render({ shell: { ...shell, developer: true, dataDir: 'D:\\agent-data' }, body: {} });
   assert.match(dev, /<footer>[^<]+ · this PC only · its files are in <code>D:\\agent-data<\/code><\/footer>/);
   // Room for the onboarding tour: every part of the frame named, and the tour drawn over the page only at #/tour.
-  for (const name of ['titlebar', 'status', 'settings', 'theme', 'action', 'settings-panel', 'work']) assert.match(html, new RegExp(`data-tour="${name}"`), name);
+  for (const name of ['titlebar', 'status', 'about', 'settings', 'theme', 'action', 'settings-panel', 'work']) assert.match(html, new RegExp(`data-tour="${name}"`), name);
   assert.doesNotMatch(html, /tour-layer/);
   (globalThis as unknown as { location: { hash: string } }).location.hash = '#/tour';
   assert.match(render({ shell, body: {} }), /<div class="tour-layer" role="dialog" aria-label="A tour of [^"]+(&#x27;|')s page"><p>Step one<\/p><\/div>/);
@@ -260,5 +264,9 @@ test('a long page in tabs (PageTabs): the one the address names shown, the rest 
   assert.equal(inHash('#/'), null);
   assert.equal(inHash('#/settings'), null, "the kit's own addresses are never a page's tab");
   assert.equal(inHash('#/tour'), null);
+  assert.equal(inHash('#/about'), null);
   assert.equal(inHash('#/settings/logs'), null);
+  // Drawn where there's no address at all (an agent's tests, rendering its page on the server): the first tab.
+  delete (globalThis as { location?: unknown }).location;
+  assert.match(render(), /id="page-panel-files" aria-labelledby="page-tab-files">/, 'no location: the first');
 });
