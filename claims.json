@@ -1,0 +1,18 @@
+[
+  {
+    "repo": "Jcollier0120/Steward#kit",
+    "version": "2.47.0",
+    "branch": "claude/page-tabs",
+    "by": "claude",
+    "for": "Page tabs and long Settings in tabs",
+    "at": "2026-10-10T22:00:09.357Z"
+  },
+  {
+    "repo": "Jcollier0120/Steward",
+    "version": "0.35.8",
+    "branch": "claude/about-view",
+    "by": "claude",
+    "for": "Kit 2.48.0: an About view beside Settings in every agent's title bar",
+    "at": "2026-10-10T22:44:28.333Z"
+  }
+]
