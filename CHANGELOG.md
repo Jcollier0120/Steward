@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.5
+
+**A ready PR waits until it's 10 minutes old before it merges, which leaves time to push a small fix first.**
+
+### What's new
+
+- New setting: **A PR merges once it is** (default 10 minutes). The Steward won't merge a PR, even a ready one, until that long after it was opened. While it waits, its line says how long ago it was opened and when it will merge, and the next round comes sooner. Set it to 0 to merge as soon as a PR is ready.
+
+### Before you update
+
+- Nothing: it updates itself as usual. From now on, a PR opened less than 10 minutes ago waits for that time before it merges.
+
 ## 0.35.4
 
 **It carries the kit 2.46.0: every agent's Settings can be in tabs.**

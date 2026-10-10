@@ -34,6 +34,8 @@ export interface PrInfo {
   whose: 'steward' | 'team';
   /** Its head commit. */
   headOid: string;
+  /** When it was opened (ISO), as its host says; absent when it doesn't. A younger one than Settings' mergeMinAgeMinutes waits. */
+  createdAt?: string;
   /** What its description's steward block asks for after merging (src/after.ts), or why that can't be read. */
   after: After | null;
   afterError: string | null;
@@ -167,6 +169,7 @@ export function parsePrs(json: string, team: string[]): PrInfo[] {
         author: String(p.author?.login ?? ''),
         whose,
         headOid: String(p.headRefOid ?? ''),
+        ...(typeof p.createdAt === 'string' && p.createdAt ? { createdAt: p.createdAt } : {}),
         after: 'after' in after ? after.after : null,
         afterError: 'error' in after ? after.error : null,
         mergeable: String(p.mergeable ?? 'UNKNOWN'),
@@ -203,7 +206,7 @@ export function readPin(text: string | null): { kit: string; parts: string[] | n
 }
 
 /** The PR fields parsePrs reads, as GitHub names them. */
-export const PR_FIELDS = 'number,title,url,body,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup,labels,additions,deletions,files';
+export const PR_FIELDS = 'number,title,url,body,createdAt,headRefName,headRefOid,baseRefName,isCrossRepository,author,mergeable,mergeStateStatus,isDraft,statusCheckRollup,labels,additions,deletions,files';
 
 /** A repository's open PRs as its host lists them (PR_FIELDS), for parsePrs; CommandFailed when it can't. */
 export const openPrs = async (host: SourceHost, repo: string) => must(await host.listPrs(repo, { state: 'open', limit: 100, fields: PR_FIELDS }));

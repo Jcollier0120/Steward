@@ -33,7 +33,7 @@ const signedIn: ScmLook = { at: '2026-10-09T00:00:00Z', tools: [{ cmd: 'git', na
 const http = (status: number, body: unknown = {}): Ran => ({ code: 0, out: typeof body === 'string' ? body : JSON.stringify(body), err: `HTTP/1.1 ${status} ${status < 300 ? 'OK' : status === 404 ? 'Not Found' : 'Error'}\nContent-Type: application/json\n` });
 
 /** A pull request as GET /repos/:owner/:repo/pulls lists one. */
-const pull = (o: Record<string, unknown> = {}) => ({ number: 7, title: 'Fake 0.4.1: A feature', body: '**A feature.**', state: 'open', merged: false, html_url: 'https://codeberg.org/acme/fake/pulls/7', head: { ref: 'claude/feature', sha: 'abc123', repo: { full_name: 'acme/fake' } }, base: { ref: 'main', sha: 'def', repo: { full_name: 'acme/fake' } }, user: { login: 'jcollier0120' }, mergeable: true, draft: false, labels: [{ id: 1, name: 'steward' }], additions: 2, deletions: 1, ...o });
+const pull = (o: Record<string, unknown> = {}) => ({ number: 7, title: 'Fake 0.4.1: A feature', body: '**A feature.**', state: 'open', merged: false, html_url: 'https://codeberg.org/acme/fake/pulls/7', head: { ref: 'claude/feature', sha: 'abc123', repo: { full_name: 'acme/fake' } }, base: { ref: 'main', sha: 'def', repo: { full_name: 'acme/fake' } }, user: { login: 'jcollier0120' }, mergeable: true, draft: false, labels: [{ id: 1, name: 'steward' }], additions: 2, deletions: 1, created_at: '2026-10-10T11:50:00Z', ...o });
 
 /** A tea api request's method, endpoint and parsed body. */
 const call = (args: string[]) => {
@@ -105,6 +105,7 @@ test("a pull request in GitHub's words: what the Steward reads of one", () => {
     state: 'OPEN',
     headRefName: 'claude/feature',
     headRefOid: 'abc123',
+    createdAt: '2026-10-10T11:50:00Z',
     baseRefName: 'main',
     isCrossRepository: false,
     author: { login: 'jcollier0120' },

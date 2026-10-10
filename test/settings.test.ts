@@ -35,6 +35,11 @@ test("nobody's employees, repository or clone are built in: they start empty, an
   assert.deepEqual([DEFAULT_SETTINGS.byItself, DEFAULT_SETTINGS.roundMinutes], [false, 10], 'it merges and releases by itself only once the person says yes; then a round every 10 minutes on duty');
   assert.equal(DEFAULT_SETTINGS.releasesCastellan, false, "a new install releases nothing of Castellan's");
   assert.deepEqual([normalizeSettings({ roundMinutes: 1 }).settings.roundMinutes, normalizeSettings({ byItself: false }).settings.byItself], [2, false]);
+  assert.deepEqual(
+    [{}, { mergeMinAgeMinutes: 0 }, { mergeMinAgeMinutes: 25 }, { mergeMinAgeMinutes: -3 }, { mergeMinAgeMinutes: 'soon' }].map((r) => normalizeSettings(r).settings.mergeMinAgeMinutes),
+    [10, 0, 25, 0, 10],
+    'a ready PR merges once it is 10 minutes old, unless Settings say otherwise',
+  );
   assert.deepEqual(DEFAULT_SETTINGS.team, [], 'none named: the account gh is signed in as (team.ts)');
   assert.equal(DEFAULT_SETTINGS.workRoot, path.join(home, 'work'));
 });

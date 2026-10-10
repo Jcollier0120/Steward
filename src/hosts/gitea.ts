@@ -362,6 +362,7 @@ export function prOf(pr: any, more: { files?: string[]; statuses?: any[] } = {})
     state: pr?.merged === true ? 'MERGED' : pr?.state === 'open' ? 'OPEN' : 'CLOSED',
     headRefName: String(pr?.head?.ref ?? ''),
     headRefOid: String(pr?.head?.sha ?? ''),
+    createdAt: pr?.created_at,
     baseRefName: String(pr?.base?.ref ?? ''),
     isCrossRepository: !!head && !!base && head !== base,
     author: { login: String(pr?.user?.login ?? '') },

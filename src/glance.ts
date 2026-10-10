@@ -69,7 +69,7 @@ export const PER_QUERY = 15;
 export const PR_PAGE = 25;
 
 const PRS = `pullRequests(states: OPEN, first: ${PR_PAGE}, orderBy: {field: CREATED_AT, direction: DESC}) { totalCount nodes {
-  number title url body headRefName headRefOid baseRefName isCrossRepository isDraft mergeable mergeStateStatus additions deletions
+  number title url body createdAt headRefName headRefOid baseRefName isCrossRepository isDraft mergeable mergeStateStatus additions deletions
   author { __typename login }
   labels(first: 20) { nodes { name } }
   files(first: 100) { nodes { path } }
@@ -108,6 +108,7 @@ export function prFromGraph(n: any): any {
     body: n?.body,
     headRefName: n?.headRefName,
     headRefOid: n?.headRefOid,
+    createdAt: n?.createdAt,
     baseRefName: n?.baseRefName,
     isCrossRepository: n?.isCrossRepository,
     isDraft: n?.isDraft,

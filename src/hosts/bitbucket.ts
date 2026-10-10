@@ -369,6 +369,7 @@ export function prOf(pr: any, more: { head?: string; diffstat?: any[]; statuses?
     state: state === 'OPEN' ? 'OPEN' : state === 'MERGED' ? 'MERGED' : 'CLOSED',
     headRefName: String(pr?.source?.branch?.name ?? ''),
     headRefOid: more.head ?? String(pr?.source?.commit?.hash ?? ''),
+    createdAt: pr?.created_on,
     baseRefName: String(pr?.destination?.branch?.name ?? ''),
     isCrossRepository: !!from && !!to && from !== to,
     author: { login: String(pr?.author?.nickname ?? '') },

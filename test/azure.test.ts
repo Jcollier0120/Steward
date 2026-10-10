@@ -26,7 +26,7 @@ const B = 'https://dev.azure.com/acme/proj/_apis/git/repositories/fake';
 const signedIn: ScmLook = { at: '2026-10-09T00:00:00Z', tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.47', supported: true }, { cmd: 'az', name: 'Azure CLI', version: 'azure-cli 2.65.0', signedIn: true, supported: true }] };
 
 /** A pull request as GET …/pullrequests lists one. */
-const pull = (o: Record<string, unknown> = {}) => ({ pullRequestId: 7, title: 'Fake 0.4.1: A feature', description: '**A feature.**', status: 'active', sourceRefName: 'refs/heads/claude/feature', targetRefName: 'refs/heads/main', lastMergeSourceCommit: { commitId: 'abc123' }, isDraft: false, createdBy: { uniqueName: 'jcollier0120' }, mergeStatus: 'succeeded', labels: [{ name: 'steward' }], ...o });
+const pull = (o: Record<string, unknown> = {}) => ({ pullRequestId: 7, title: 'Fake 0.4.1: A feature', description: '**A feature.**', status: 'active', sourceRefName: 'refs/heads/claude/feature', targetRefName: 'refs/heads/main', lastMergeSourceCommit: { commitId: 'abc123' }, isDraft: false, createdBy: { uniqueName: 'jcollier0120' }, mergeStatus: 'succeeded', labels: [{ name: 'steward' }], creationDate: '2026-10-10T11:50:00Z', ...o });
 const list = (value: unknown[]) => ok({ count: value.length, value });
 
 /** A request's method and where it went, below the repository (`/pullrequests…`) or the URL whole, api-version left out. */
@@ -89,6 +89,7 @@ test("a pull request in GitHub's words: what the Steward reads of one", () => {
     state: 'OPEN',
     headRefName: 'claude/feature',
     headRefOid: 'abc123',
+    createdAt: '2026-10-10T11:50:00Z',
     baseRefName: 'main',
     isCrossRepository: false,
     author: { login: 'jcollier0120' },

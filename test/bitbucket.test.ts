@@ -28,7 +28,7 @@ const TOKEN = 'ATATT3x"secret\\token';
 const signedIn: ScmLook = { at: '2026-10-09T00:00:00Z', tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.47', supported: true }, { cmd: 'bitbucket', name: 'Bitbucket API token', version: 'in the credential store, for api.bitbucket.org', signedIn: true, supported: true }] };
 
 /** A pull request as GET …/pullrequests lists one: its head commit by a short hash. */
-const pull = (o: Record<string, unknown> = {}) => ({ id: 7, title: 'Fake 0.4.1: A feature', description: '**A feature.**', state: 'OPEN', draft: false, author: { nickname: 'jcollier0120', display_name: 'J' }, source: { branch: { name: 'claude/feature' }, commit: { hash: 'abc123def456' }, repository: { full_name: 'acme/fake' } }, destination: { branch: { name: 'main' }, repository: { full_name: 'acme/fake' } }, links: { html: { href: 'https://bitbucket.org/acme/fake/pull-requests/7' } }, ...o });
+const pull = (o: Record<string, unknown> = {}) => ({ id: 7, title: 'Fake 0.4.1: A feature', description: '**A feature.**', state: 'OPEN', draft: false, author: { nickname: 'jcollier0120', display_name: 'J' }, source: { branch: { name: 'claude/feature' }, commit: { hash: 'abc123def456' }, repository: { full_name: 'acme/fake' } }, destination: { branch: { name: 'main' }, repository: { full_name: 'acme/fake' } }, links: { html: { href: 'https://bitbucket.org/acme/fake/pull-requests/7' } }, created_on: '2026-10-10T11:50:00Z', ...o });
 const FULL = 'abc123def456' + '0'.repeat(28);
 
 /** What curl prints with --write-out '\n%{http_code}': the body, then the status. */
@@ -114,6 +114,7 @@ test("a pull request in GitHub's words: what the Steward reads of one", () => {
     state: 'OPEN',
     headRefName: 'claude/feature',
     headRefOid: FULL,
+    createdAt: '2026-10-10T11:50:00Z',
     baseRefName: 'main',
     isCrossRepository: false,
     author: { login: 'jcollier0120' },

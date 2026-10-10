@@ -93,6 +93,8 @@ export interface Settings {
   /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
   byItself: boolean;
   roundMinutes: number;
+  /** A ready PR merges only once it was opened at least this many minutes ago, so a small fix can still be pushed to it (merge.ts' ageHold). 0: at once. Absent: none. */
+  mergeMinAgeMinutes?: number;
   /** What needs the person, after each round (alarms.ts). */
   alarms: AlarmSettings;
   /** The Steward's look at the Wright's drafts (review.ts). */
@@ -264,6 +266,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // It merges and releases by itself only once the person says yes: here, and for each repository (Employee.merges).
   byItself: false,
   roundMinutes: 10,
+  mergeMinAgeMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '', reeveUrl: REEVE_URL, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
@@ -475,6 +478,15 @@ export const SETTINGS_SCHEMA: Field[] = [
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', help: 'How often it looks, while on duty. A round asks GitHub once about every employee, and looks again only at those with something new (and at all of them each hour).' },
   {
+    key: 'mergeMinAgeMinutes',
+    kind: 'whole',
+    min: 0,
+    max: 1440,
+    unit: 'minutes',
+    label: 'A PR merges once it is',
+    help: "How long after a PR is opened it may merge, even when it's ready: time to push a small fix to it first. Until then it waits and says so, and the next round comes sooner. 0: as soon as it's ready.",
+  },
+  {
     key: 'afterRelease',
     kind: 'list',
     label: 'Told after a release',
@@ -623,6 +635,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
     }
   const parallel = Number(r.parallel);
   const roundMinutes = Number(r.roundMinutes);
+  const mergeMinAge = r.mergeMinAgeMinutes == null || r.mergeMinAgeMinutes === '' ? NaN : Number(r.mergeMinAgeMinutes);
   return {
     settings: {
       employees,
@@ -634,6 +647,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       affectedTests: typeof r.affectedTests === 'boolean' ? r.affectedTests : d.affectedTests,
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,
+      mergeMinAgeMinutes: Number.isInteger(mergeMinAge) ? Math.min(1440, Math.max(0, mergeMinAge)) : d.mergeMinAgeMinutes,
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
