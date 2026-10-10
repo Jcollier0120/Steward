@@ -264,5 +264,9 @@ test('a long page in tabs (PageTabs): the one the address names shown, the rest 
   assert.equal(inHash('#/'), null);
   assert.equal(inHash('#/settings'), null, "the kit's own addresses are never a page's tab");
   assert.equal(inHash('#/tour'), null);
+  assert.equal(inHash('#/about'), null);
   assert.equal(inHash('#/settings/logs'), null);
+  // Drawn where there's no address at all (an agent's tests, rendering its page on the server): the first tab.
+  delete (globalThis as { location?: unknown }).location;
+  assert.match(render(), /id="page-panel-files" aria-labelledby="page-tab-files">/, 'no location: the first');
 });

@@ -57,7 +57,7 @@ export const SHOW_TAB = 'kit-show-tab';
  */
 export function usePageTab(ids: readonly string[]): [string, (id: string) => void] {
   const [tab, setTab] = useState(() => {
-    const want = pageTabInHash(location.hash);
+    const want = pageTabInHash(globalThis.location?.hash ?? '');
     return want && ids.includes(want) ? want : ids[0];
   });
   useEffect(() => {
@@ -120,7 +120,7 @@ export const settingsTabInHash = (hash: string): string | null => /^#\/?settings
  */
 export function useSettingsTab(ids: readonly string[]): [string, (id: string) => void] {
   const pick = () => {
-    const want = settingsTabInHash(location.hash);
+    const want = settingsTabInHash(globalThis.location?.hash ?? '');
     return want && ids.includes(want) ? want : ids[0];
   };
   const [tab, setTab] = useState(pick);

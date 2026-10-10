@@ -14,7 +14,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### What changed
 
 - **react/shell.tsx:** "Where its work runs" moves from Settings to About, so Settings holds only settings.
-- **react/tabs.tsx:** a page tab's id is never `about` either, and choosing a tab leaves an About address as it is.
+- **react/tabs.tsx:** a page tab's id is never `about` either, and choosing a tab leaves an About address as it is. `PageTabs` and Settings' tabs draw on the server too, where there's no address (an agent's tests rendering its page): the first tab, where 2.47.0 stopped with "location is not defined".
 - **What an agent must do:** nothing, for "Where its work runs" to move. To give About more, pass `about` to `Page`: reference parts of the page that a person won't need every day (a long how-it-works, a setup done once) belong there rather than in a page tab. A string-built page (node/page.ts) is unchanged.
 
 ### Before you update
