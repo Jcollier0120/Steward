@@ -14,6 +14,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. From now on, a PR opened less than 10 minutes ago waits for that time before it merges.
 
+## 0.35.4
+
+**It carries the kit 2.46.0: every agent's Settings can be in tabs.**
+
+### What's new
+
+- The kit 2.46.0: an agent can split its Settings into tabs, each with its own address, the way Castellan's Settings is. General holds the settings every agent has; the agent's own tabs follow.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.3
 
 **After the PC sleeps, shuts down or loses its connection, the Steward tries again what failed meanwhile.**

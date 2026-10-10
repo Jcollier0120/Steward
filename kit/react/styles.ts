@@ -127,4 +127,11 @@ details.sf-advanced[open] > summary { margin-bottom: 4px; }
 .tour-card .sf-panel { margin: 4px 0 0; }
 .tour-needs { margin: 0; padding: 8px 12px; border-radius: 6px; background: var(--warn-bg); color: var(--warn); }
 .tour-target { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 8px; position: relative; z-index: 79; }
+/* Tabs (tabs.tsx): Settings' tabs, and any page's. The chosen one underlined. */
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 6px 0 18px; }
+.tab { font: inherit; font-size: 14px; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 14px; color: var(--muted); cursor: pointer; border-radius: 6px 6px 0 0; }
+.tab:hover { color: var(--fg); background: var(--hover); }
+.tab[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab-panel > h2:first-child, .tab-panel > h3:first-child { margin-top: 0; }
 `;
