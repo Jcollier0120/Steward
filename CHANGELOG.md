@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.6
+
+**It carries the kit 2.46.1: Settings marks a field "changed" only when you've changed it.**
+
+### What changed
+
+- The kit 2.46.1: on some agents' pages (Reeve's among them), every setting showed a "changed" mark even when nothing had been edited. Now the mark appears only beside a field you've changed and not yet saved.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.5
 
 **A ready PR waits until it's 10 minutes old before it merges, which leaves time to push a small fix first.**
