@@ -111,7 +111,7 @@ details.sf-section[open] > summary { margin-bottom: 0; }
 details.sf-section > .sf-help, details.sf-section > div, details.sf-section > .sf-meta { margin-left: 16px; }
 details.sf-section[open] { padding-bottom: 10px; }
 .sf.is-changed > summary .sf-changed { display: inline-block; }
-details.sf-advanced { margin: 12px 0 0; border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
+details.sf-advanced { margin: 12px 0 14px; border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
 details.sf-advanced > summary { color: var(--muted); font-weight: 600; cursor: pointer; }
 details.sf-advanced[open] > summary { margin-bottom: 4px; }
 
@@ -134,4 +134,7 @@ details.sf-advanced[open] > summary { margin-bottom: 4px; }
 .tab[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tab-panel > h2:first-child, .tab-panel > h3:first-child { margin-top: 0; }
+.tab-panel[hidden] { display: none; }
+.tab-count { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--quiet-bg, var(--line)); color: var(--muted); font-size: 12px; font-weight: 600; }
+.tab-mark { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--alert); vertical-align: 2px; }
 `;

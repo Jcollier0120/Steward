@@ -27,7 +27,7 @@ export { ChoiceGroup, Input, SaveStatus, Segmented, Select, Switch, type ChoiceL
 export { EmptyNote, ErrorNote, Loading, ModalCard, QueryView, Toast, type QueryLike } from './feedback.tsx';
 export { UI_CSS } from './styles.ts';
 export { SettingsForm } from './settings-form.tsx';
-export { settingsTabInHash, Tabs, useSettingsTab, type SettingsTab } from './tabs.tsx';
+export { pageTabInHash, PageTabs, settingsTabInHash, SHOW_TAB, Tabs, usePageTab, useSettingsTab, type PageTab, type SettingsTab } from './tabs.tsx';
 export { blank, canon, same, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 export { onPage, Tour, tourFrom, tourStart } from './tour.tsx';
 export { OnPageList, type OnPageItem } from './lists.tsx';

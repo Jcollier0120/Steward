@@ -36,6 +36,8 @@ const schema = [
 ];
 const values = { variant: 'gamer', stocks: ['MSFT'], notes: true, interval: 5, folders: null, kinds: ['b'], agents: [{ port: 18383, name: 'Reeve' }], jobs: [{ name: 'build', cmds: ['npm test'] }], env: { A: '1' }, limits: { piece: 6, share: 0.5 }, alarms: { on: true }, port: 19494, since: '2026-10-05T12:00:00.000Z' };
 const data = (warnings = {}) => ({ schema, values, defaults: { ...values, interval: 10 }, problems: ['settings.json had a stray key.'], warnings, file: 'C:\\x\\settings.json' });
+// The same with fewer ordinary settings than a form in tabs has (TAB_FIELDS): the short page.
+const short = (warnings = {}) => ({ ...data(warnings), schema: schema.filter((f) => !['agents', 'jobs', 'env'].includes(f.key)) });
 
 test('every field kind, drawn as settings-panel.js draws it, class for class', () => {
   const h = m.form(data());
@@ -61,14 +63,15 @@ test('every field kind, drawn as settings-panel.js draws it, class for class', (
 });
 
 test('the short page: groups are sections with jump links, the advanced folded, a field shown only when it applies', () => {
-  const h = m.form(data());
+  const h = m.form(short());
+  assert.doesNotMatch(h, /role="tablist"/, 'a short page has no tabs');
   assert.match(h, /<nav class="sf-jump" aria-label="Sections"><button type="button" class="link">Limits<\/button><button type="button" class="link">Alarms<\/button><\/nav>/);
   assert.match(h, /<details class="sf sf-section" data-key="limits" id="sf-section-limits">/, 'two groups: each folded');
   assert.match(h, /<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Port/, 'the advanced top-level setting, folded at the end');
   assert.match(h, /data-key="limits".*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Share/, "and a group's advanced field, folded in it");
   assert.doesNotMatch(h, /data-key="stocks"/, 'stocks is for the financial variant: hidden for gamer');
-  assert.match(m.form({ ...data(), values: { ...values, variant: 'financial' } }), /data-key="stocks"/, 'and shown for financial');
-  const err = m.form(data({ stocks: 'Not a ticker.', share: 'x', 'limits.share': 'Between 0 and 1.' }));
+  assert.match(m.form({ ...short(), values: { ...values, variant: 'financial' } }), /data-key="stocks"/, 'and shown for financial');
+  const err = m.form(short({ stocks: 'Not a ticker.', share: 'x', 'limits.share': 'Between 0 and 1.' }));
   assert.match(err, /data-key="stocks"/, 'a message about a hidden field shows it anyway');
   assert.match(err, /<details class="sf sf-section" data-key="limits" id="sf-section-limits" open="">/, 'and opens the section it is in');
 });
@@ -88,6 +91,20 @@ test('onboarding: only the keys asked for, never an advanced one; none at all sa
   assert.doesNotMatch(h, /data-key="port"/, 'advanced: left out, even when asked for');
   assert.doesNotMatch(h, /sf-jump|Advanced/);
   assert.match(m.form(data(), []), /Nothing to set: the defaults just work\./);
+});
+
+test('a long form (two groups or more, TAB_FIELDS ordinary settings) is in tabs: General, then each group, one Save', () => {
+  const h = m.form(data());
+  assert.match(h, /<div class="tabs" role="tablist" aria-label="Settings sections">/);
+  assert.match(h, /<button type="button" role="tab" class="tab" id="sf-tab-general" aria-selected="true" aria-controls="sf-panel-general" tabindex="0">General<\/button>/);
+  assert.match(h, /id="sf-tab-limits" aria-selected="false"[^>]*>Limits<\/button>.*id="sf-tab-alarms"[^>]*>Alarms<\/button>/);
+  assert.match(h, /<div class="tab-panel" role="tabpanel" id="sf-panel-general" aria-labelledby="sf-tab-general">.*data-key="interval".*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*Port/, 'General: the settings in no group, then Advanced');
+  assert.match(h, /<div class="tab-panel" role="tabpanel" id="sf-panel-limits" aria-labelledby="sf-tab-limits" hidden="">.*data-key="limits"/, 'each group in a tab of its own, drawn while hidden so one Save sends it');
+  assert.doesNotMatch(h, /sf-jump|sf-section/, 'no jump links, no folded sections');
+  assert.equal(h.match(/<form /g)?.length, 1, 'one form');
+  const err = m.form(data({ 'limits.share': 'Between 0 and 1.' }));
+  assert.match(err, /id="sf-tab-limits"[^>]*>Limits<span class="tab-mark" title="Something here needs a look" aria-label="Something here needs a look"><\/span><\/button>/, 'a tab with a problem in it, marked');
+  assert.doesNotMatch(err, /id="sf-tab-alarms"[^>]*>Alarms<span class="tab-mark"/);
 });
 
 test("the Tour's three steps: what the role is, its settings, what its page shows", () => {
@@ -174,4 +191,22 @@ test("Developer options off: a developer's whole form is left out, and a record'
   assert.doesNotMatch(h, /Kept|abc123/);
   // With the switch on the same form is drawn whole, as ever.
   assert.match(m.form(data()), /<div class="card sf-panel" data-tour="settings-panel">/);
+});
+
+test('a list with item.options is picked, not typed: each item by its label with Remove, and a dropdown of the rest', () => {
+  const repos = [{ value: 'acme/site', label: 'acme/site' }, { value: 'acme/api', label: 'acme/api (Reeve)' }, { value: 'acme/docs', label: 'acme/docs' }];
+  const field = { key: 'repos', kind: 'list', label: 'Repositories', item: { label: 'Repository', options: repos } };
+  const h = m.form({ schema: [field], values: { repos: ['acme/api', 'gone/old'] }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(h, /<span class="sf-item-text">acme\/api \(Reeve\)<\/span>/, 'an item by its option label');
+  assert.match(h, /<span class="sf-item-text">gone\/old<\/span>/, 'an item no longer offered still shows, as it is');
+  assert.match(h, /aria-label="Remove repository 2"/);
+  assert.match(h, /<select class="sf-pick" aria-label="Add repository">/);
+  const pick = h.match(/<select class="sf-pick".*?<\/select>/)?.[0] ?? '';
+  assert.match(pick, /<option value="" selected="">Add repository…<\/option><option value="acme\/site">acme\/site<\/option><option value="acme\/docs">acme\/docs<\/option>/, 'only the options not picked yet');
+  assert.doesNotMatch(h, /<input type="text"[^>]*aria-label="Repository/, 'nothing to type');
+  const all = m.form({ schema: [field], values: { repos: repos.map((r) => r.value) }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(all, /Every repository there is to pick is in the list\./);
+  assert.doesNotMatch(all, /sf-pick/);
+  const none = m.form({ schema: [{ ...field, item: { label: 'Repository', options: [] } }], values: { repos: [] }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(none, /No repository to pick from yet\./);
 });

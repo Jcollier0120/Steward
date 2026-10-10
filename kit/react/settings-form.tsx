@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ErrorNote } from './feedback.tsx';
 import { Switch } from './forms.tsx';
+import { Tabs } from './tabs.tsx';
 import { post } from './page-data.ts';
 import { APPLIES_NOTE, blank, canon, clone, laterNotes, same, SCALAR, shown, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 import { Badge, Button, LinkButton, Text } from './ui.tsx';
@@ -138,6 +139,7 @@ function List({ f, value, onChange, path }: EdProps) {
   if (f.kind !== 'list') return null;
   const items = Array.isArray(value) ? value.map((x) => String(x ?? '')) : [];
   const noun = f.item.label.toLowerCase();
+  if (f.item.options) return <PickList f={f} items={items} noun={noun} path={path} onChange={onChange} />;
   return (
     <div>
       <ul className="sf-list">
@@ -152,6 +154,43 @@ function List({ f, value, onChange, path }: EdProps) {
         ))}
       </ul>
       <Button title={`Add ${noun}`} variant="secondary" size="sm" disabled={f.maxItems !== undefined && items.length >= f.maxItems} onPress={() => (setAdded(items.length), onChange([...items, '']))} />
+    </div>
+  );
+}
+
+/**
+ * A list whose items are picked, not typed (`item.options`): each item by its option's label, with Remove, and a
+ * dropdown of the options not in it yet. An item no longer offered shows as it is, until it's removed.
+ */
+function PickList({ f, items, noun, path, onChange }: { f: SettingsField & { kind: 'list' }; items: string[]; noun: string; path: string; onChange: (v: unknown) => void }) {
+  const options = f.item.options ?? [];
+  const left = options.filter((o) => !items.includes(o.value));
+  const full = f.maxItems !== undefined && items.length >= f.maxItems;
+  return (
+    <div>
+      <ul className="sf-list">
+        {items.map((x, i) => (
+          <li key={x}>
+            <div className="sf-item">
+              <span className="sf-item-text">{options.find((o) => o.value === x)?.label ?? x}</span>
+              <Button title="Remove" variant="secondary" size="sm" accessibilityLabel={`Remove ${noun} ${i + 1}`} onPress={() => onChange(items.filter((_, j) => j !== i))} />
+            </div>
+            <Msg path={`${path}.${i}`} />
+          </li>
+        ))}
+      </ul>
+      {left.length ? (
+        <select className="sf-pick" value="" disabled={full} aria-label={`Add ${noun}`} onChange={(e) => e.target.value && onChange([...items, e.target.value])}>
+          <option value="">Add {noun}…</option>
+          {left.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <p className="sf-meta">{options.length ? `Every ${noun} there is to pick is in the list.` : `No ${noun} to pick from yet.`}</p>
+      )}
     </div>
   );
 }
@@ -536,16 +575,62 @@ function useFormGuards(root: RefObject<HTMLDivElement | null>, dirty: boolean, m
 }
 
 /**
+ * A long form's tabs: General (the settings in no group, then Advanced), then each group. Every panel is drawn and kept
+ * while hidden, so one Save sends them all; a tab with a problem in it has a mark.
+ */
+function FormTabs({ sections, general, advanced, tab, onChoose, block }: { sections: SettingsField[]; general: SettingsField[]; advanced: SettingsField[]; tab: string; onChoose: (id: string) => void; block: (f: SettingsField) => ReactNode }) {
+  const msgs = useContext(MsgContext);
+  // General only when something's in it: a form of groups alone opens on its first.
+  const panels = [{ id: 'general', label: 'General', fields: [...general, ...advanced] }, ...sections.map((f) => ({ id: f.key, label: f.label, fields: [f] }))].filter((p) => p.fields.length);
+  const shown = panels.some((p) => p.id === tab) ? tab : panels[0].id;
+  const marked = (p: (typeof panels)[number]) => (p.fields.some((f) => under(msgs, f.key)) ? 'Something here needs a look' : undefined);
+  return (
+    <>
+      <Tabs tabs={panels.map((p) => ({ id: p.id, label: p.label, mark: marked(p) }))} tab={shown} onChoose={onChoose} label="Settings sections" prefix="sf" />
+      {panels.map((p) => (
+        <div key={p.id} className="tab-panel" role="tabpanel" id={`sf-panel-${p.id}`} aria-labelledby={`sf-tab-${p.id}`} hidden={p.id !== shown}>
+          {p.id === 'general' ? (
+            <>
+              {general.map(block)}
+              <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
+                {advanced.map(block)}
+              </Advanced>
+            </>
+          ) : (
+            p.fields.map(block)
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** How many ordinary settings (a group counting as one) a form with two or more groups needs before it's in tabs. */
+export const TAB_FIELDS = 10;
+
+/**
  * The agent's settings, as a form: all of them, or `keys` (onboarding's few, never an advanced one). A short page: the
  * ordinary settings, each top-level group a section of its own (folded unless it's the only one, with jump links when
- * there are two or more), and the advanced ones folded under Advanced at the end. A field with `shownWhen` shows only
- * while its key holds one of those values. `initial` is GET /api/settings's answer, already in hand (a test's).
+ * there are two or more), and the advanced ones folded under Advanced at the end. A long one (two or more groups and
+ * TAB_FIELDS ordinary settings) is in tabs instead: General (the settings in no group, and Advanced), then a tab for
+ * each group; one Save for them all, and a tab with a problem in it marked, and shown when a save is refused. A field
+ * with `shownWhen` shows only while its key holds one of those values. `initial` is GET /api/settings's answer, already
+ * in hand (a test's).
  */
 export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: string[]; onSaved?: () => void; onDirty?: (dirty: boolean) => void; initial?: SettingsData }) {
   const s = useSettings(initial, onSaved);
   const { data, draft, saved, msgs } = s;
   const [opened, setOpened] = useState<Record<string, boolean>>({});
+  // A long form's tab (in tabs: see above): 'general', or a group's key.
+  const [tab, setTab] = useState('general');
   const root = useRef<HTMLDivElement>(null);
+  // A save refused in a long form: the tab with the first problem, and the problem in it, shown.
+  useEffect(() => {
+    if (!s.status.error || !data) return;
+    const bad = data.schema.find((f) => f.kind === 'group' && !f.advanced && under(msgs, f.key));
+    setTab(bad ? bad.key : 'general');
+    requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[aria-invalid="true"], .sf-general')?.focus());
+  }, [msgs, s.status.error]); // eslint-disable-line react-hooks/exhaustive-deps
   const fields = data ? (keys ? keys.map((k) => data.schema.find((f) => f.key === k)).filter((f): f is SettingsField => !!f && !f.advanced) : data.schema) : [];
   const dirty = fields.some((f) => !f.readOnly && !same(f, draft[f.key], saved[f.key]));
   useFormGuards(root, dirty, msgs, s.status.error, onDirty);
@@ -570,13 +655,14 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
   const ordinary = visible.filter((f) => !f.advanced);
   const advanced = visible.filter((f) => f.advanced);
   const sections: SettingsField[] = keys ? [] : ordinary.filter((f) => f.kind === 'group');
+  const tabbed = sections.length >= 2 && ordinary.length >= TAB_FIELDS;
   const open = (key: string) => sections.length === 1 || !!opened[key] || under(msgs, key);
   const jump = (key: string) => {
     setOpened({ ...opened, [key]: true });
     requestAnimationFrame(() => document.getElementById(sectionId(key))?.scrollIntoView({ block: 'start' }));
   };
   const block = (f: SettingsField) => (
-    <FieldBlock key={f.key} f={f} value={draft[f.key]} path={f.key} def={data.defaults[f.key]} saved={saved[f.key]} tracked top onChange={(v) => s.setDraft({ ...draft, [f.key]: v })} fold={sections.includes(f) ? { open: open(f.key), onToggle: (o) => setOpened({ ...opened, [f.key]: o }) } : undefined} />
+    <FieldBlock key={f.key} f={f} value={draft[f.key]} path={f.key} def={data.defaults[f.key]} saved={saved[f.key]} tracked top onChange={(v) => s.setDraft({ ...draft, [f.key]: v })} fold={sections.includes(f) && !tabbed ? { open: open(f.key), onToggle: (o) => setOpened({ ...opened, [f.key]: o }) } : undefined} />
   );
   const cancel = () => {
     s.setDraft(clone(saved));
@@ -591,7 +677,7 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
     <div ref={root} className="card sf-panel" data-tour="settings-panel" data-dirty={dirty ? '' : undefined}>
       <TopContext.Provider value={draft}>
         <MsgContext.Provider value={msgs}>
-          {sections.length >= 2 && (
+          {sections.length >= 2 && !tabbed && (
             <nav className="sf-jump" aria-label="Sections">
               {sections.map((f) => (
                 <LinkButton key={f.key} title={f.label} onPress={() => jump(f.key)} />
@@ -600,10 +686,16 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
           )}
           <FormHead data={data} later={laterNotes(fields)} general={msgs['']} />
           <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
-            {ordinary.map(block)}
-            <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
-              {advanced.map(block)}
-            </Advanced>
+            {tabbed ? (
+              <FormTabs sections={sections} general={ordinary.filter((f) => !sections.includes(f))} advanced={advanced} tab={tab} onChoose={setTab} block={block} />
+            ) : (
+              <>
+                {ordinary.map(block)}
+                <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
+                  {advanced.map(block)}
+                </Advanced>
+              </>
+            )}
             <FormActions dirty={dirty} busy={s.busy} status={s.status} onCancel={cancel} onDefaults={defaults} />
           </form>
         </MsgContext.Provider>
