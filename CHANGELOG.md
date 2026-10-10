@@ -10,6 +10,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - The Steward's Settings is in tabs: General, Alarms and the Wright's drafts, instead of one long form. One Save still keeps them all, and a tab with something to fix is marked.
 - The kit 2.47.0: an agent whose page is long can put it in tabs, each with its own address. Short pages and short Settings stay as they are.
+- The kit 2.47.0: a setting that lists things an agent already knows, such as your repositories, can be picked from a dropdown instead of typed.
+
+### What changed
+
+- The foot of every agent's Settings is tidier once it takes the kit 2.47.0: no band of another shade behind Save, and no lines stacked over each other above it.
 
 ### Before you update
 

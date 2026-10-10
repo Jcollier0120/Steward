@@ -139,6 +139,7 @@ function List({ f, value, onChange, path }: EdProps) {
   if (f.kind !== 'list') return null;
   const items = Array.isArray(value) ? value.map((x) => String(x ?? '')) : [];
   const noun = f.item.label.toLowerCase();
+  if (f.item.options) return <PickList f={f} items={items} noun={noun} path={path} onChange={onChange} />;
   return (
     <div>
       <ul className="sf-list">
@@ -153,6 +154,43 @@ function List({ f, value, onChange, path }: EdProps) {
         ))}
       </ul>
       <Button title={`Add ${noun}`} variant="secondary" size="sm" disabled={f.maxItems !== undefined && items.length >= f.maxItems} onPress={() => (setAdded(items.length), onChange([...items, '']))} />
+    </div>
+  );
+}
+
+/**
+ * A list whose items are picked, not typed (`item.options`): each item by its option's label, with Remove, and a
+ * dropdown of the options not in it yet. An item no longer offered shows as it is, until it's removed.
+ */
+function PickList({ f, items, noun, path, onChange }: { f: SettingsField & { kind: 'list' }; items: string[]; noun: string; path: string; onChange: (v: unknown) => void }) {
+  const options = f.item.options ?? [];
+  const left = options.filter((o) => !items.includes(o.value));
+  const full = f.maxItems !== undefined && items.length >= f.maxItems;
+  return (
+    <div>
+      <ul className="sf-list">
+        {items.map((x, i) => (
+          <li key={x}>
+            <div className="sf-item">
+              <span className="sf-item-text">{options.find((o) => o.value === x)?.label ?? x}</span>
+              <Button title="Remove" variant="secondary" size="sm" accessibilityLabel={`Remove ${noun} ${i + 1}`} onPress={() => onChange(items.filter((_, j) => j !== i))} />
+            </div>
+            <Msg path={`${path}.${i}`} />
+          </li>
+        ))}
+      </ul>
+      {left.length ? (
+        <select className="sf-pick" value="" disabled={full} aria-label={`Add ${noun}`} onChange={(e) => e.target.value && onChange([...items, e.target.value])}>
+          <option value="">Add {noun}…</option>
+          {left.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <p className="sf-meta">{options.length ? `Every ${noun} there is to pick is in the list.` : `No ${noun} to pick from yet.`}</p>
+      )}
     </div>
   );
 }

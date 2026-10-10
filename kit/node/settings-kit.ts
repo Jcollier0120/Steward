@@ -122,7 +122,12 @@ export type Field =
   /** Any number of values from a list (kept in the list's order). */
   | (Common & { kind: 'choices'; options: Option[] })
   /** A list of text: folders, repos, names. No item twice: ignoring case, unless `matchCase` (keywords). */
-  | (Common & { kind: 'list'; item: TextRules & { label: string }; matchCase?: boolean; minItems?: number; maxItems?: number })
+  /**
+   * A list of texts. With `item.options`, the page offers those to pick from (a dropdown of the ones not in the list
+   * yet) in place of typing; the value is the same list of texts, checked by the same rules, so an item no longer
+   * offered stays until removed, and a page on an older kit simply types them.
+   */
+  | (Common & { kind: 'list'; item: TextRules & { label: string; options?: Option[] }; matchCase?: boolean; minItems?: number; maxItems?: number })
   /** A list of small records, each with the same fields. */
   | (Common & {
       kind: 'records';

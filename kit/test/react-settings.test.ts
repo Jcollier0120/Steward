@@ -192,3 +192,21 @@ test("Developer options off: a developer's whole form is left out, and a record'
   // With the switch on the same form is drawn whole, as ever.
   assert.match(m.form(data()), /<div class="card sf-panel" data-tour="settings-panel">/);
 });
+
+test('a list with item.options is picked, not typed: each item by its label with Remove, and a dropdown of the rest', () => {
+  const repos = [{ value: 'acme/site', label: 'acme/site' }, { value: 'acme/api', label: 'acme/api (Reeve)' }, { value: 'acme/docs', label: 'acme/docs' }];
+  const field = { key: 'repos', kind: 'list', label: 'Repositories', item: { label: 'Repository', options: repos } };
+  const h = m.form({ schema: [field], values: { repos: ['acme/api', 'gone/old'] }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(h, /<span class="sf-item-text">acme\/api \(Reeve\)<\/span>/, 'an item by its option label');
+  assert.match(h, /<span class="sf-item-text">gone\/old<\/span>/, 'an item no longer offered still shows, as it is');
+  assert.match(h, /aria-label="Remove repository 2"/);
+  assert.match(h, /<select class="sf-pick" aria-label="Add repository">/);
+  const pick = h.match(/<select class="sf-pick".*?<\/select>/)?.[0] ?? '';
+  assert.match(pick, /<option value="" selected="">Add repository…<\/option><option value="acme\/site">acme\/site<\/option><option value="acme\/docs">acme\/docs<\/option>/, 'only the options not picked yet');
+  assert.doesNotMatch(h, /<input type="text"[^>]*aria-label="Repository/, 'nothing to type');
+  const all = m.form({ schema: [field], values: { repos: repos.map((r) => r.value) }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(all, /Every repository there is to pick is in the list\./);
+  assert.doesNotMatch(all, /sf-pick/);
+  const none = m.form({ schema: [{ ...field, item: { label: 'Repository', options: [] } }], values: { repos: [] }, defaults: { repos: [] }, problems: [], warnings: {}, file: 's.json' });
+  assert.match(none, /No repository to pick from yet\./);
+});

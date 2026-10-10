@@ -12,11 +12,13 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **react/tour.tsx:** a tour step whose part is in a hidden tab shows that tab first (`SHOW_TAB`), then brings the part into view.
 - **react/settings-form.tsx:** a long Settings form, two or more groups and `TAB_FIELDS` (10) ordinary settings, is in tabs: General (the settings in no group, then Advanced), then a tab for each group, in place of the jump links and folded sections. One Save sends them all. A tab with a problem is marked, and a refused save shows the first one. A shorter form is as before.
 - **react/styles.ts:** `.tab-count`, `.tab-mark`, and `.tab-panel[hidden]`.
+- **node/settings-kit.ts, react/settings-form.tsx:** a `list` field's `item` takes `options` (`{ value, label }[]`): its items are then picked from a dropdown of the options not chosen yet, not typed. Each item shows by its option's label with Remove; one no longer offered still shows until it's removed. The agent fills `options` when it serves the schema (a getter on `schema` works), for a list of things it knows, such as its repositories. An older kit ignores `options` and shows the list as text boxes, as before.
 
 ### What changed
 
 - **react/tabs.tsx:** `Tabs` takes `count` and `mark` on each tab.
-- **What an agent must do:** nothing, to keep its page as it is. A long Settings form changes by itself (on the agents today, the Steward's). To put a long page in tabs, use `PageTabs`, and only where it helps: a short page needs none.
+- **web/settings-panel.css, react/styles.ts:** the foot of a Settings form is clean. The Save bar takes the panel's own background (it was `--card`, a band of another shade on a darker panel). The field before Advanced, or before Save, has no rule of its own under the edge that follows. Advanced has room under it.
+- **What an agent must do:** nothing, to keep its page as it is. To offer a list's items as picks, give its `item` `options`. A long Settings form changes by itself (on the agents today, the Steward's). To put a long page in tabs, use `PageTabs`, and only where it helps: a short page needs none.
 
 ### Before you update
 

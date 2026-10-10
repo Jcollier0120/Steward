@@ -111,7 +111,7 @@ details.sf-section[open] > summary { margin-bottom: 0; }
 details.sf-section > .sf-help, details.sf-section > div, details.sf-section > .sf-meta { margin-left: 16px; }
 details.sf-section[open] { padding-bottom: 10px; }
 .sf.is-changed > summary .sf-changed { display: inline-block; }
-details.sf-advanced { margin: 12px 0 0; border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
+details.sf-advanced { margin: 12px 0 14px; border: 1px dashed var(--line); border-radius: 8px; padding: 6px 12px; }
 details.sf-advanced > summary { color: var(--muted); font-weight: 600; cursor: pointer; }
 details.sf-advanced[open] > summary { margin-bottom: 4px; }
 
