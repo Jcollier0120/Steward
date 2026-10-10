@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.46.0
+
+**Every agent's Settings can be in tabs.**
+
+### What's new
+
+- **react/tabs.tsx:** `Tabs`, a row of tabs by the WAI-ARIA pattern (the arrows, Home and End move between them, the chosen one alone in the tab order; each panel `<prefix>-panel-<id>`, labelled by `<prefix>-tab-<id>`), for Settings or any page. `useSettingsTab(ids)` keeps the chosen tab in the address, `#/settings/<id>`, so a reload or a link keeps it; `settingsTabInHash` reads it.
+- **react/shell.tsx:** `Page`'s `settingsTabs` (`{ id, label, content }[]`): Settings in tabs. The first, General, is the kit's Settings form, with `settings` above it and "Where its work runs" below, as before; then the agent's own. Only the chosen tab is drawn.
+- **react/styles.ts:** the tabs' look (`.tabs`, `.tab`, `.tab-panel`), in every theme.
+
+### What changed
+
+- **react/shell.tsx:** `useRoute()` reads `#/settings/<tab>` as Settings too.
+- **What an agent must do:** nothing. Without `settingsTabs`, Settings is one page as before. Manor's own Settings uses the same tabs.
+- **Its tests:** kit/test/react-page.test.ts.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.45.0
 
 **Each agent Castellan sells checks the trial's end itself, from the license Manor holds.**

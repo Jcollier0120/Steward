@@ -5,6 +5,7 @@ import type { PageData, PageShell, ShellTheme } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
 import { UI_CSS } from './styles.ts';
 import { Tour } from './tour.tsx';
+import { Tabs, useSettingsTab, type SettingsTab } from './tabs.tsx';
 import { Button, PostButton, ReloadProvider } from './ui.tsx';
 
 /**
@@ -226,9 +227,24 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
 
 export type Route = 'page' | 'settings' | 'tour';
 
-/** The route: the page at #/, Settings at #/settings, a tour of the page at #/tour (over the page itself; `?from=` too). */
+/** Settings in tabs: General (the kit's form, its children) first, then the agent's own. Only the chosen one is drawn. */
+function TabbedSettings({ tabs, children }: { tabs: SettingsTab[]; children: ReactNode }) {
+  const all = [{ id: 'general', label: 'General', content: children }, ...tabs.filter((t) => t.id !== 'general')];
+  const [tab, choose] = useSettingsTab(all.map((t) => t.id));
+  const shown = all.find((t) => t.id === tab) ?? all[0];
+  return (
+    <>
+      <Tabs tabs={all} tab={shown.id} onChoose={choose} label="Settings" prefix="settings" />
+      <div className="tab-panel" role="tabpanel" id={`settings-panel-${shown.id}`} aria-labelledby={`settings-tab-${shown.id}`}>
+        {shown.content}
+      </div>
+    </>
+  );
+}
+
+/** The route: the page at #/, Settings at #/settings (a tab of it at #/settings/<tab>), a tour of the page at #/tour (over the page itself; `?from=` too). */
 export function useRoute(): Route {
-  const read = (): Route => (/^#\/?settings$/.test(location.hash) ? 'settings' : /^#\/?tour(\?.*)?$/.test(location.hash) ? 'tour' : 'page');
+  const read = (): Route => (/^#\/?settings(\/[\w-]+)?$/.test(location.hash) ? 'settings' : /^#\/?tour(\?.*)?$/.test(location.hash) ? 'tour' : 'page');
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const change = () => {
@@ -254,12 +270,14 @@ export function useRoute(): Route {
  * `data-tour` names: the frame's are titlebar, status, settings, theme, action, settings-panel and work, and an agent
  * names its own sections the same way.
  *
- * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves.
+ * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves. With
+ * `settingsTabs`, Settings is in tabs (tabs.tsx): the kit's form, with `settings` above it, is the first, General,
+ * then the agent's own, each at #/settings/<id>.
  *
  * It hands the manor's Developer options down (developer.tsx: useDeveloper(), <DeveloperOnly>), from the shell's
  * `developer`; the footer names the data folder only while they're on, and the Settings form is read again when they flip.
  */
-export function Page<Body>({ data, reload, action, settings, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; tour?: ReactNode; children: ReactNode }) {
+export function Page<Body>({ data, reload, action, settings, settingsTabs, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; settingsTabs?: SettingsTab[]; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
   const route = useRoute();
   const onSettings = route === 'settings';
@@ -316,11 +334,23 @@ export function Page<Body>({ data, reload, action, settings, tour, children }: {
               Back to {s.app.name}
             </a>
             <h2>Settings</h2>
-            {settings}
-            <SettingsForm key={`${settingsDrawn} ${dev}`} />
-            <div data-tour="work" style={{ display: 'contents' }}>
-              <Markup html={s.work} />
-            </div>
+            {settingsTabs?.length ? (
+              <TabbedSettings tabs={settingsTabs}>
+                {settings}
+                <SettingsForm key={`${settingsDrawn} ${dev}`} />
+                <div data-tour="work" style={{ display: 'contents' }}>
+                  <Markup html={s.work} />
+                </div>
+              </TabbedSettings>
+            ) : (
+              <>
+                {settings}
+                <SettingsForm key={`${settingsDrawn} ${dev}`} />
+                <div data-tour="work" style={{ display: 'contents' }}>
+                  <Markup html={s.work} />
+                </div>
+              </>
+            )}
           </section>
         </main>
         {route === 'tour' && walkthrough && (
