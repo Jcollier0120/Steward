@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.3
+
+**After the PC sleeps, shuts down or loses its connection, the Steward tries again what failed meanwhile.**
+
+### What changed
+
+- When the Steward starts, or notices the PC has just woken from sleep, it gives each release that failed before one more try. Before, a failed release waited for you to release it by hand. If it goes through, its alert clears; if it fails again, the alert stays as before.
+- When the PC wakes, the Steward runs a round straight away instead of waiting for the next one, so alerts that are no longer true clear within minutes.
+- An agent whose page didn't answer before the PC went down is opened again at once, rather than an hour later. Its alert stays until its page answers.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.2
 
 **The Steward stays at least 10% under GitHub's API limit, and spreads its rounds over the hour.**

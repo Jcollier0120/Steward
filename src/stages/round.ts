@@ -3,6 +3,7 @@ import type { Employee } from '../settings.ts';
 import { mapLimit, networkFailure, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
 import { clearTastingHold } from '../tasting.ts';
+import { takeFreshStart } from '../fresh-start.ts';
 
 /**
  * The Steward's round (`steward round`, and on duty every few minutes when Settings say it merges and releases
@@ -22,12 +23,15 @@ export const roundFailuresFile = () => dataFile('round-failed.json');
 export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promise<EmployeeResult[]> {
   const failed = readJson<Record<string, string>>(roundFailuresFile(), {});
   if (!employees.length) return [];
+  // After a fresh start (fresh-start.ts), each release that failed before is tried once more: it may have failed only
+  // because the PC was going to sleep, shutting down or offline. Failing again, it stands as before.
+  const retry = takeFreshStart('releases') ? new Set(Object.keys(failed)) : new Set<string>();
   // A few employees at a time (Settings' parallel); what failed is kept once all are done.
   const out = await mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
       return await releaseOne(ctx, e, {
         kit: null,
-        unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
+        unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) && !retry.has(e.id) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
       });
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);

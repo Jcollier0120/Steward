@@ -177,3 +177,60 @@ test('Settings can switch it off: then the round leaves the staff alone', async 
   assert.equal(out.tendOnly, true);
   assert.deepEqual(out.results, []);
 });
+
+test('after a fresh start (the page started, or the PC woke), a down agent whose tries are spent is tried at once, its alarm kept until it answers', async () => {
+  const { noteFreshStart } = await import('../src/fresh-start.ts');
+  let now = Date.parse('2026-10-06T12:00:00Z');
+  let up = false;
+  const opened: number[] = [];
+  const look = () =>
+    tend({
+      manorUrl: 'http://127.0.0.1:18585',
+      getJson: async () => stateOf([agent('porter', { up })]),
+      open: async () => (opened.push(now), up ? { ok: true, said: 'opened' } : { ok: false, said: 'no' }),
+      now: () => new Date(now),
+      log: () => {},
+    });
+  for (let i = 0; i < MAX_TRIES; i++) {
+    await look();
+    now += RETRY_MS;
+  }
+  assert.equal(tendConditions(loadTending()).length, 1, 'spent: an alarm');
+  await look();
+  assert.equal(opened.length, MAX_TRIES, 'spent: the next try is an hour off');
+
+  // The PC slept; the page starts again. Still down: tried at once, and the alarm stays.
+  noteFreshStart();
+  await look();
+  assert.equal(opened.length, MAX_TRIES + 1);
+  assert.equal(tendConditions(loadTending()).length, 1, 'still down: the alarm stays');
+  await look();
+  assert.equal(opened.length, MAX_TRIES + 1, 'once per fresh start');
+
+  // Another fresh start, and this time it opens: no alarm.
+  noteFreshStart();
+  up = false;
+  const opens = async () => ({ ok: true, said: 'opened' });
+  await tend({ manorUrl: 'http://127.0.0.1:18585', getJson: async () => stateOf([agent('porter', { up: false })]), open: opens, now: () => new Date(now), log: () => {} });
+  assert.deepEqual(tendConditions(loadTending()), []);
+});
+
+test('a tick that comes long after the last is the PC waking: a fresh start, and a round now', async () => {
+  const { watchWake, takeFreshStart, WOKE_AFTER_MS } = await import('../src/fresh-start.ts');
+  takeFreshStart('releases');
+  takeFreshStart('tend');
+  let t = 0;
+  let woke = 0;
+  const stop = watchWake(() => woke++, 5, () => t);
+  t += 1_000;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(woke, 0, 'ticks close together: awake');
+  assert.equal(takeFreshStart('releases'), false);
+  t += WOKE_AFTER_MS + 1;
+  await new Promise((r) => setTimeout(r, 30));
+  stop();
+  assert.equal(woke, 1);
+  assert.equal(takeFreshStart('releases'), true);
+  assert.equal(takeFreshStart('releases'), false, 'once');
+  assert.equal(takeFreshStart('tend'), true);
+});
