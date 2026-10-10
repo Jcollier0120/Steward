@@ -198,3 +198,36 @@ test('useDeveloper() and <DeveloperOnly>: what the page hides follows the shell,
   assert.doesNotMatch(render({ shell: older, body: {} }), /exit code/, "a shell that doesn't say: off");
   assert.doesNotMatch(bare(), /exit code/, 'outside a <Page>: off');
 });
+
+test("Settings in tabs: General (the kit's form) first, then the agent's own, the one the address names drawn", async () => {
+  const shell = pageShell({ busy: false });
+  const { render, inHash } = await bundleForNode<{ render: (d: unknown) => string; inHash: (h: string) => string | null }>(
+    `import { renderToStaticMarkup } from 'react-dom/server';
+     import { Page, settingsTabInHash } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+     export const inHash = settingsTabInHash;
+     export const render = (data) => renderToStaticMarkup(
+       <Page data={data} reload={() => {}} settings={<p>Above the form</p>} settingsTabs={[{ id: 'logs', label: 'Logs', content: <p>The logs tab</p> }]}>
+         <p>The page</p>
+       </Page>);`,
+    { location: { hash: '#/settings' }, document: { documentElement: { dataset: {} } } },
+  );
+  const general = render({ shell, body: {} });
+  assert.match(general, /<div class="tabs" role="tablist" aria-label="Settings">/);
+  assert.match(general, /<button type="button" role="tab" class="tab" id="settings-tab-general" aria-selected="true" aria-controls="settings-panel-general" tabindex="0">General<\/button>/);
+  assert.match(general, /<button type="button" role="tab" class="tab" id="settings-tab-logs" aria-selected="false" aria-controls="settings-panel-logs" tabindex="-1">Logs<\/button>/);
+  assert.match(general, /<div class="tab-panel" role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general"><p>Above the form<\/p>/);
+  assert.match(general, /data-tour="settings-panel"/, "General holds the kit's Settings form");
+  assert.doesNotMatch(general, /The logs tab/, 'only the chosen tab is drawn');
+
+  (globalThis as unknown as { location: { hash: string } }).location.hash = '#/settings/logs';
+  const logs = render({ shell, body: {} });
+  assert.match(logs, /<div class="tab-panel" role="tabpanel" id="settings-panel-logs" aria-labelledby="settings-tab-logs"><p>The logs tab<\/p><\/div>/);
+  assert.doesNotMatch(logs, /data-tour="settings-panel"/);
+
+  (globalThis as unknown as { location: { hash: string } }).location.hash = '#/settings/no-such-tab';
+  assert.match(render({ shell, body: {} }), /id="settings-panel-general"/, 'a tab that isn\'t there: General');
+  assert.equal(inHash('#/settings/logs'), 'logs');
+  assert.equal(inHash('#settings/logs'), 'logs');
+  assert.equal(inHash('#/settings'), null);
+  assert.equal(inHash('#/settings/a b'), null);
+});
