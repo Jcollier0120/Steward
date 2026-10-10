@@ -324,6 +324,7 @@ export function prOf(repo: string, pr: any, more: { files?: string[]; statuses?:
     state: pr?.status === 'active' ? 'OPEN' : pr?.status === 'completed' ? 'MERGED' : 'CLOSED',
     headRefName: branchOf(pr?.sourceRefName),
     headRefOid: String(pr?.lastMergeSourceCommit?.commitId ?? ''),
+    createdAt: pr?.creationDate,
     baseRefName: branchOf(pr?.targetRefName),
     isCrossRepository: !!pr?.forkSource,
     author: { login: String(pr?.createdBy?.uniqueName ?? '') },

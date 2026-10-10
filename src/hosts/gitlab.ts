@@ -257,6 +257,7 @@ export function prOf(mr: any, more: { diffs?: any[]; statuses?: any[] } = {}): R
     state: mr?.state === 'opened' ? 'OPEN' : mr?.state === 'merged' ? 'MERGED' : 'CLOSED',
     headRefName: String(mr?.source_branch ?? ''),
     headRefOid: String(mr?.sha ?? ''),
+    createdAt: mr?.created_at,
     baseRefName: String(mr?.target_branch ?? ''),
     isCrossRepository: mr?.source_project_id !== undefined && mr?.source_project_id !== mr?.target_project_id,
     author: { login: String(mr?.author?.username ?? '') },

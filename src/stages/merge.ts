@@ -112,12 +112,35 @@ export const CAUGHT_UP = 'caught up by the Steward';
 
 /**
  * Whether a PR waits only on something that settles itself within minutes, so a round soon after can merge it: its checks
- * running, its head just caught up (checks starting there), or GitHub working out whether it merges.
+ * running, its head just caught up (checks starting there), GitHub working out whether it merges, or it being just opened.
  */
-export const waitsBriefly = (why: string) => why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`);
+export const waitsBriefly = (why: string) => why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED);
 
-/** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, and its checks passing (or none: a team PR with none is then tested here). */
-export function holdReason(pr: PrInfo, branch?: string): string | null {
+/** How a PR's hold begins while it is younger than Settings' mergeMinAgeMinutes. */
+export const JUST_OPENED = 'opened ';
+
+/** How young a PR may be and still merge, and the time now: Settings' mergeMinAgeMinutes, and the round's clock. */
+export interface AgeRule {
+  minAgeMinutes?: number;
+  now?: number;
+}
+
+/**
+ * Why a PR waits for being too young, or null: one opened less than `minAgeMinutes` ago waits, so a small fix can still
+ * be pushed to it before it merges. One whose host doesn't say when it was opened never waits for this.
+ */
+export function ageHold(pr: PrInfo, o: AgeRule = {}): string | null {
+  const min = o.minAgeMinutes ?? 0;
+  const at = Date.parse(pr.createdAt ?? '');
+  if (!(min > 0) || !Number.isFinite(at)) return null;
+  const age = Math.max(0, (o.now ?? Date.now()) - at);
+  if (age >= min * 60_000) return null;
+  const ago = Math.floor(age / 60_000);
+  return `${JUST_OPENED}${ago < 1 ? 'less than a minute' : `${ago} minute${ago === 1 ? '' : 's'}`} ago: it merges once it is ${min} minutes old, so small fixes can be pushed first`;
+}
+
+/** Why a PR waits, or null when it can be merged: into the employee's branch, mergeable, not a draft, its checks passing (or none: a team PR with none is then tested here), and old enough (ageHold). */
+export function holdReason(pr: PrInfo, branch?: string, age: AgeRule = {}): string | null {
   if (branch && pr.base && pr.base !== branch) return `it merges into ${pr.base}, not ${branch}`;
   if (pr.draft) return pr.reviewHold ? `a draft from the Wright, waiting for you: ${pr.reviewHold}` : pr.bailiffHold ? `${BAILIFF_WAIT}${pr.bailiffHold}` : 'a draft';
   if (pr.afterError) return pr.afterError;
@@ -130,7 +153,7 @@ export function holdReason(pr: PrInfo, branch?: string): string | null {
   if (pr.checks === 'pending') return CHECKS_RUNNING;
   if (pr.mergeState === 'BLOCKED') return 'blocked: a required review or check';
   if (pr.mergeState === 'BEHIND') return 'behind its branch, which must be up to date to merge';
-  return null;
+  return ageHold(pr, age);
 }
 
 /** The open PR whose branch this one is stacked on (its base is that PR's head), if any. */
@@ -138,12 +161,12 @@ export const stackedOn = (pr: PrInfo, prs: PrInfo[], branch?: string): PrInfo | 
   pr.base && pr.base !== branch ? prs.find((p) => p !== pr && p.head === pr.base) : undefined;
 
 /** The PRs to merge, and the ones that wait with their reasons. */
-export function mergeSelection(prs: PrInfo[], branch?: string): { merge: PrInfo[]; hold: { pr: PrInfo; why: string }[] } {
+export function mergeSelection(prs: PrInfo[], branch?: string, age: AgeRule = {}): { merge: PrInfo[]; hold: { pr: PrInfo; why: string }[] } {
   const merge: PrInfo[] = [];
   const hold: { pr: PrInfo; why: string }[] = [];
   for (const pr of prs) {
     const under = stackedOn(pr, prs, branch);
-    const why = under ? `stacked on #${under.number} (${pr.base}): once #${under.number} has merged, it is pointed at ${branch} and joins the line` : holdReason(pr, branch);
+    const why = under ? `stacked on #${under.number} (${pr.base}): once #${under.number} has merged, it is pointed at ${branch} and joins the line` : holdReason(pr, branch, age);
     if (why) hold.push({ pr, why });
     else merge.push(pr);
   }
@@ -359,7 +382,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   // GitHub still working out whether one merges (just retargeted, or pushed to): asked again, so it needn't wait a round.
   if (o.yes) await askAgainWhetherMerges(ctx, e, prs);
-  const { merge: mergeable, hold } = mergeSelection(prs, e.branch);
+  const { merge: mergeable, hold } = mergeSelection(prs, e.branch, { minAgeMinutes: ctx.settings.mergeMinAgeMinutes });
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
     (looked ??= (async () => {

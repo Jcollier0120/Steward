@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
-import { holdReason, mergeOne, mergeSelection } from '../src/stages/merge.ts';
+import { holdReason, mergeOne, mergeSelection, waitsBriefly } from '../src/stages/merge.ts';
 import { releaseDecision } from '../src/stages/release.ts';
 import { appReleasesIn, checksOf, parsePrs, readPin, staffRow, type PrInfo } from '../src/stages/staff.ts';
 import { ctxFor, employee, fakeEmployee, mergesOf, ok, runner, sh } from './helpers.ts';
@@ -181,6 +181,37 @@ test('merge takes only PRs that merge cleanly with checks passing or none; the r
   // Only into the employee's own branch: a PR stacked on another branch waits for that one.
   assert.equal(holdReason(info({ base: 'claude/accelerators' }), 'main'), 'it merges into claude/accelerators, not main');
   assert.equal(holdReason(info({ base: 'main' }), 'main'), null);
+});
+
+test('a ready PR opened less than mergeMinAgeMinutes ago waits, so a small fix can still be pushed; then it merges', () => {
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  const opened = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+  const { merge, hold } = mergeSelection(
+    [
+      info({ number: 1, createdAt: opened(0.5) }),
+      info({ number: 2, createdAt: opened(4) }),
+      info({ number: 3, createdAt: opened(10) }),
+      info({ number: 4 }),
+      info({ number: 5, createdAt: opened(1), checks: 'failing' }),
+    ],
+    'main',
+    { minAgeMinutes: 10, now },
+  );
+  assert.deepEqual(merge.map((p) => p.number), [3, 4], "10 minutes old merges; one whose host doesn't say when it was opened never waits for this");
+  assert.deepEqual(
+    hold.map((h) => [h.pr.number, h.why]),
+    [
+      [1, 'opened less than a minute ago: it merges once it is 10 minutes old, so small fixes can be pushed first'],
+      [2, 'opened 4 minutes ago: it merges once it is 10 minutes old, so small fixes can be pushed first'],
+      [5, 'checks failing'],
+    ],
+    'any other reason is said first',
+  );
+  assert.ok(waitsBriefly(hold[0].why), 'the next round comes sooner for it');
+  assert.equal(holdReason(info({ createdAt: opened(1) }), 'main', { minAgeMinutes: 0, now }), null, '0: as soon as it is ready');
+  assert.equal(holdReason(info({ createdAt: opened(1) }), 'main'), null, 'no rule given: none');
+  assert.equal(parsePrs(JSON.stringify([pr({ createdAt: '2026-10-10T11:58:00Z' })]), [])[0].createdAt, '2026-10-10T11:58:00Z');
+  assert.equal('createdAt' in parsePrs(JSON.stringify([pr({})]), [])[0], false);
 });
 
 test('merge without --yes merges nothing; with it, only the mergeable and green, with merge commits and the branch deleted', async () => {

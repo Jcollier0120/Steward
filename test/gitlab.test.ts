@@ -25,7 +25,7 @@ const P = 'projects/acme%2Ffake';
 const signedIn: ScmLook = { at: '2026-10-09T00:00:00Z', tools: [{ cmd: 'git', name: 'Git', version: 'git version 2.47', supported: true }, { cmd: 'glab', name: 'GitLab CLI', version: 'glab 1.50.0', signedIn: true, supported: true }] };
 
 /** A merge request as GET /projects/:id/merge_requests lists one. */
-const mr = (o: Record<string, unknown> = {}) => ({ id: 901, iid: 7, project_id: 42, title: 'Fake 0.4.1: A feature', description: '**A feature.**', state: 'opened', source_branch: 'claude/feature', target_branch: 'main', source_project_id: 42, target_project_id: 42, author: { username: 'jcollier0120' }, draft: false, work_in_progress: false, labels: ['steward'], sha: 'abc123', detailed_merge_status: 'mergeable', has_conflicts: false, merge_status: 'can_be_merged', web_url: 'https://gitlab.com/acme/fake/-/merge_requests/7', ...o });
+const mr = (o: Record<string, unknown> = {}) => ({ id: 901, iid: 7, project_id: 42, title: 'Fake 0.4.1: A feature', description: '**A feature.**', state: 'opened', source_branch: 'claude/feature', target_branch: 'main', source_project_id: 42, target_project_id: 42, author: { username: 'jcollier0120' }, draft: false, work_in_progress: false, labels: ['steward'], sha: 'abc123', detailed_merge_status: 'mergeable', has_conflicts: false, merge_status: 'can_be_merged', web_url: 'https://gitlab.com/acme/fake/-/merge_requests/7', created_at: '2026-10-10T11:50:00Z', ...o });
 
 /** A host on GitLab whose glab answers `answer`, and every glab command it ran, with any --input body as parsed. */
 function recorded(answer: (args: string[]) => Ran | undefined) {
@@ -72,6 +72,7 @@ test("a merge request in GitHub's words: what the Steward reads of a pull reques
     state: 'OPEN',
     headRefName: 'claude/feature',
     headRefOid: 'abc123',
+    createdAt: '2026-10-10T11:50:00Z',
     baseRefName: 'main',
     isCrossRepository: false,
     author: { login: 'jcollier0120' },
