@@ -11,11 +11,12 @@ import { Button, PostButton, ReloadProvider } from './ui.tsx';
 /**
  * The kit's frame of every React page, as page.ts draws it for a string-built one, element for element and class for
  * class (page.ts's CSS styles both): the title bar (back to the manor, the agent's icon, name and role, its scene, the
- * status pill, Settings, the Theme menu, and the agent's own action, Run now), the off-duty notice, the page, the
- * Settings view at #/settings (the Settings panel and "Where its work runs"), and the footer.
+ * status pill, About, Settings, the Theme menu, and the agent's own action, Run now), the off-duty notice, the page,
+ * the About view at #/about (what's read once: the agent's own, then "Where its work runs"), the Settings view at
+ * #/settings (the Settings panel), and the footer. About and Settings are where Manor's title bar has them.
  *
- * The agent gives its page as children, its title-bar action as `action`, and anything of its own for the Settings
- * view as `settings` (above the panel).
+ * The agent gives its page as children, its title-bar action as `action`, anything of its own for the Settings view as
+ * `settings` (above the panel), and for the About view as `about`.
  */
 
 /** The title bar's icons, as Heiward's and Manor's draw them: 16 × 16, in the text's colour. */
@@ -30,6 +31,14 @@ const Gear = () => (
   <Icon>
     <path d="M6.9 1.8h2.2l.4 1.7 1.2.6 1.5-.9 1.6 1.6-.9 1.5.6 1.2 1.7.4v2.2l-1.7.4-.6 1.2.9 1.5-1.6 1.6-1.5-.9-1.2.6-.4 1.7H6.9l-.4-1.7-1.2-.6-1.5.9-1.6-1.6.9-1.5-.6-1.2-1.7-.4V6.9l1.7-.4.6-1.2-.9-1.5 1.6-1.6 1.5.9 1.2-.6z" />
     <circle cx="8" cy="8" r="2.2" />
+  </Icon>
+);
+/** Manor's About icon: an i in a circle. */
+const Info = () => (
+  <Icon>
+    <circle cx="8" cy="8" r="6.2" />
+    <path d="M8 7.2v4" />
+    <circle cx="8" cy="4.9" r="0.8" fill="currentColor" stroke="none" />
   </Icon>
 );
 const Palette = () => (
@@ -167,7 +176,7 @@ export function ThemeMenu({ shell }: { shell: PageShell }) {
 }
 
 /** The title bar: sticky, with a line under it once the page has scrolled, and --titlebar-h kept to its height. */
-function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boolean; action?: ReactNode }) {
+function TitleBar({ shell, route, about, action }: { shell: PageShell; route: Route; about: boolean; action?: ReactNode }) {
   const bar = useRef<HTMLElement>(null);
   const [stuck, setStuck] = useState(false);
   useEffect(() => {
@@ -210,7 +219,13 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
         <span className={`status-pill ${shell.pill.kind}`} title={shell.pill.title} data-tour="status">
           {shell.pill.text}
         </span>
-        <a className="tool-link" id="settings-link" href="#/settings" title="Settings" aria-current={settings ? 'page' : 'false'} data-tour="settings">
+        {about && (
+          <a className="tool-link" id="about-link" href="#/about" title="About" aria-current={route === 'about' ? 'page' : 'false'} data-tour="about">
+            <Info />
+            <span>About</span>
+          </a>
+        )}
+        <a className="tool-link" id="settings-link" href="#/settings" title="Settings" aria-current={route === 'settings' ? 'page' : 'false'} data-tour="settings">
           <Gear />
           <span>Settings</span>
         </a>
@@ -225,7 +240,7 @@ function TitleBar({ shell, settings, action }: { shell: PageShell; settings: boo
   );
 }
 
-export type Route = 'page' | 'settings' | 'tour';
+export type Route = 'page' | 'settings' | 'about' | 'tour';
 
 /** Settings in tabs: General (the kit's form, its children) first, then the agent's own. Only the chosen one is drawn. */
 function TabbedSettings({ tabs, children }: { tabs: SettingsTab[]; children: ReactNode }) {
@@ -242,9 +257,9 @@ function TabbedSettings({ tabs, children }: { tabs: SettingsTab[]; children: Rea
   );
 }
 
-/** The route: the page at #/, Settings at #/settings (a tab of it at #/settings/<tab>), a tour of the page at #/tour (over the page itself; `?from=` too). */
+/** The route: the page at #/, Settings at #/settings (a tab of it at #/settings/<tab>), About at #/about, a tour of the page at #/tour (over the page itself; `?from=` too). */
 export function useRoute(): Route {
-  const read = (): Route => (/^#\/?settings(\/[\w-]+)?$/.test(location.hash) ? 'settings' : /^#\/?tour(\?.*)?$/.test(location.hash) ? 'tour' : 'page');
+  const read = (): Route => (/^#\/?settings(\/[\w-]+)?$/.test(location.hash) ? 'settings' : /^#\/?about$/.test(location.hash) ? 'about' : /^#\/?tour(\?.*)?$/.test(location.hash) ? 'tour' : 'page');
   const [route, setRoute] = useState(read);
   useEffect(() => {
     const change = () => {
@@ -257,6 +272,7 @@ export function useRoute(): Route {
   }, []);
   useEffect(() => {
     document.body.classList.toggle('on-settings', route === 'settings');
+    document.body.classList.toggle('on-about', route === 'about');
     document.body.classList.toggle('on-tour', route === 'tour');
   }, [route]);
   return route;
@@ -267,8 +283,11 @@ export function useRoute(): Route {
  *
  * `tour` is the page's walkthrough, drawn over the page at #/tour: by default its onboarding (the shell's, from
  * pageShell(): tour.tsx draws it), so an agent writes no tour of its own. It points at the page's parts by their
- * `data-tour` names: the frame's are titlebar, status, settings, theme, action, settings-panel and work, and an agent
- * names its own sections the same way.
+ * `data-tour` names: the frame's are titlebar, status, about, settings, theme, action, settings-panel and work, and an
+ * agent names its own sections the same way.
+ *
+ * The About view holds what a person reads once, not every day: `about` (how it works, what it sets up, setting it up
+ * again), then "Where its work runs". Its button is in the title bar whenever it has either.
  *
  * The Settings view is the kit's Settings form (settings-form.tsx), drawn again after onboarding saves. With
  * `settingsTabs`, Settings is in tabs (tabs.tsx): the kit's form, with `settings` above it, is the first, General,
@@ -277,10 +296,10 @@ export function useRoute(): Route {
  * It hands the manor's Developer options down (developer.tsx: useDeveloper(), <DeveloperOnly>), from the shell's
  * `developer`; the footer names the data folder only while they're on, and the Settings form is read again when they flip.
  */
-export function Page<Body>({ data, reload, action, settings, settingsTabs, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; settingsTabs?: SettingsTab[]; tour?: ReactNode; children: ReactNode }) {
+export function Page<Body>({ data, reload, action, settings, settingsTabs, about, tour, children }: { data: PageData<Body>; reload: () => void | Promise<void>; action?: ReactNode; settings?: ReactNode; settingsTabs?: SettingsTab[]; about?: ReactNode; tour?: ReactNode; children: ReactNode }) {
   const s = data.shell;
   const route = useRoute();
-  const onSettings = route === 'settings';
+  const hasAbout = !!about || !!s.work;
   const [settingsDrawn, setSettingsDrawn] = useState(0);
   const dev = s.developer === true;
   // After onboarding saves, the Settings view is drawn again, and the page's data read again: what it still needs may have changed.
@@ -289,7 +308,7 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, tour,
     <DeveloperProvider on={dev}>
       <ReloadProvider value={reload}>
         <style>{UI_CSS}</style>
-        <TitleBar shell={s} settings={onSettings} action={action} />
+        <TitleBar shell={s} route={route} about={hasAbout} action={action} />
         {s.needs && route !== 'tour' && (
           <div className="banners">
             <div className="banner-note offduty" role="status">
@@ -338,20 +357,26 @@ export function Page<Body>({ data, reload, action, settings, settingsTabs, tour,
               <TabbedSettings tabs={settingsTabs}>
                 {settings}
                 <SettingsForm key={`${settingsDrawn} ${dev}`} />
-                <div data-tour="work" style={{ display: 'contents' }}>
-                  <Markup html={s.work} />
-                </div>
               </TabbedSettings>
             ) : (
               <>
                 {settings}
                 <SettingsForm key={`${settingsDrawn} ${dev}`} />
-                <div data-tour="work" style={{ display: 'contents' }}>
-                  <Markup html={s.work} />
-                </div>
               </>
             )}
           </section>
+          {hasAbout && (
+            <section id="about-view">
+              <a className="back-link" href="#/">
+                Back to {s.app.name}
+              </a>
+              <h2>About {s.app.name}</h2>
+              {about}
+              <div data-tour="work" style={{ display: 'contents' }}>
+                <Markup html={s.work} />
+              </div>
+            </section>
+          )}
         </main>
         {route === 'tour' && walkthrough && (
           <div className="tour-layer" role="dialog" aria-label={`A tour of ${s.app.name}'s page`}>

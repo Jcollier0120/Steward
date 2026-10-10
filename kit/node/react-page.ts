@@ -70,7 +70,7 @@ export interface PageShell {
    * with the react part's useDeveloper() and <DeveloperOnly>. Read afresh for each page and each /api/page.
    */
   developer: boolean;
-  /** "Where its work runs" (work.ts), the kit's own markup, for the Settings view: in plain words when developer is off. */
+  /** "Where its work runs" (work.ts), the kit's own markup, for the About view: in plain words when developer is off. */
   work: string;
   /** The agent's data folder, for the footer: empty when developer is off (a path is developer content). */
   dataDir: string;

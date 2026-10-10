@@ -33,7 +33,7 @@ export function Tabs<T extends string>({ tabs, tab, onChoose, label, prefix = 't
  * `mark` puts a dot there with these words on hover (something in it needs you).
  */
 export interface PageTab {
-  /** Letters, digits and dashes: it's part of the address. Never "settings" or "tour", the kit's own. */
+  /** Letters, digits and dashes: it's part of the address. Never "settings", "about" or "tour", the kit's own. */
   id: string;
   label: string;
   count?: number;
@@ -41,10 +41,10 @@ export interface PageTab {
   content: ReactNode;
 }
 
-/** The page's tab the address names (#/<id>), or null: at #/, and at the kit's own #/settings and #/tour. */
+/** The page's tab the address names (#/<id>), or null: at #/, and at the kit's own #/settings, #/about and #/tour. */
 export const pageTabInHash = (hash: string): string | null => {
   const id = /^#\/?([\w-]+)$/.exec(hash)?.[1] ?? null;
-  return id === 'settings' || id === 'tour' ? null : id;
+  return id === 'settings' || id === 'about' || id === 'tour' ? null : id;
 };
 
 /** What the tour sends (its detail a tab's id) to bring a part of the page in a hidden tab into view (tour.tsx). */
@@ -70,7 +70,7 @@ export function usePageTab(ids: readonly string[]): [string, (id: string) => voi
   }, [ids.join(' ')]);
   const choose = (id: string) => {
     setTab(id);
-    if (!/^#\/?(tour|settings)\b/.test(location.hash)) history.replaceState(null, '', `#/${id}`);
+    if (!/^#\/?(tour|settings|about)\b/.test(location.hash)) history.replaceState(null, '', `#/${id}`);
   };
   return [ids.includes(tab) ? tab : ids[0], choose];
 }
