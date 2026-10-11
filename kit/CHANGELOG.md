@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.49.0
+
+**Developer Pro: the Wright's and the Bailiff's work with the rest of the staff, shown only where it's sold.**
+
+### What's new
+
+- **node/developer-pro.ts:** `developerPro()`, which says whether this PC may see and run what other agents do with the Wright and the Bailiff. That covers the Assayer testing the Wright's drafts, failures filed for the Wright, the Aletaster's work orders sent to the Wright's queue, the Surveyor's findings handed to the Wright, and the Steward's look at the Wright's drafts. Today it is true only on the maker's laptop, by the same salted firmware check as the Steward's maker.ts. Once the Exchequer sells a Developer Pro license, its tier turns it on too, with no change in the agents. `CASTELLAN_CUSTOMER=1` makes even the maker's laptop answer no. `developerProForTests` stands in for the PC in a test.
+
+### What an agent must do
+
+- Ask `developerPro()` before showing a setting, a line or a button that names the Wright or the Bailiff, and before doing that work. Having the Wright installed is no longer enough. Ask it per request: after the first call it costs nothing.
+
 ## 2.48.0
 
 **About, beside Settings: what's read once, out of the way of what's used every day.**

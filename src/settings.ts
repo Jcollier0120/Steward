@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from './app.ts';
+import { developerPro } from './kit/developer-pro.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { manorHome, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
@@ -208,10 +209,11 @@ export const blankEmployee = (id: string, name: string): Employee => ({
 });
 
 /**
- * The Wright, where it is installed (%USERPROFILE%\.wright\app, or WRIGHT_HOME's app): the Steward reads its page for
- * alarms. It looks after the Wright's own code only when Settings name it as an employee, as any other.
+ * The Wright, where it is installed (%USERPROFILE%\.wright\app, or WRIGHT_HOME's app) and Developer Pro is here (the
+ * kit's developerPro: the maker's laptop, for now): the Steward reads its page for alarms, and looks at its drafts. It
+ * looks after the Wright's own code only when Settings name it as an employee, as any other.
  */
-export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
+export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
 export const WRIGHT_URL = 'http://127.0.0.1:19797';
 
 /** Reeve is installed here when his home (%USERPROFILE%\.reeve, or REEVE_HOME) has an app folder: only then are his alerts read. */
@@ -222,9 +224,9 @@ export const REEVE_URL = 'http://127.0.0.1:18383';
  * The Bailiff is ours alone too (Manor marks it internal), and reviews the Wright's drafts. Where it is installed
  * (%USERPROFILE%\.bailiff\app, or BAILIFF_HOME's app) the Steward takes it on as it does the Wright, reads its page for
  * alarms, and marks a draft of the Wright's ready only once the Bailiff has approved its head commit (review.ts). Where
- * it isn't, the Wright's drafts wait for a person: the manor takes on no new work without both.
+ * it isn't, or Developer Pro isn't here, the Wright's drafts wait for a person: the manor takes on no new work without both.
  */
-export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
+export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
 export const BAILIFF_URL = 'http://127.0.0.1:19999';
 
 /**
