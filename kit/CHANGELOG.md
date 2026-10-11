@@ -2,6 +2,36 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.50.0
+
+**Heiward's background pace for every agent, and fewer programs started all day.**
+
+### What's new
+
+- **node/gentle.ts, node/gentle.cs: Heiward's background pace.** At the manor's gentle pace (the default), Windows runs an agent as it runs Heiward in the background, from the agent's start and through its scheduled rounds:
+  - in Windows' efficiency mode;
+  - at a very low disk priority;
+  - under a hard cap on the processor, of a quarter and two processors' worth at most. The cap holds the agent and every program it starts (git, ffmpeg, PowerShell, a model's runtime), however many threads they run.
+
+  A round the person asked for (Run now) lifts all three while it runs, and a full pace in Manor's Settings never sets them. The agent's PowerShell worker sets them, with a small helper compiled once per PC and shared by every agent, and only when the pace changes. `KIT_GENTLE=0` leaves an agent at below-normal priority alone, as before.
+- **node/schedule.ts: `runSoon()`.** Starts a scheduled round now, at the pace. Use it for an agent's own reasons to start early (a file changed, a request came in); `runNow()` is for the person, and runs at full speed.
+- **node/ps.ts: one PowerShell for the agent.** `powershell()` runs scripts in one long-lived PowerShell (node/ps-worker.ps1), each in its own runspace and several at once, rather than starting powershell.exe for each script. The worker leaves after 2 minutes with nothing to run, and is replaced after 500 scripts. A script that calls `exit`, or writes to the console itself (`[Console]::Out`, `[Console]::WriteLine`), still gets its own powershell.exe, and `KIT_PS_WORKER=0` turns the worker off.
+- **node/github.ts: `GitHubApi`.** GitHub's REST and GraphQL from Node, signed in as the GitHub CLI is (it asks `gh auth token` once). GETs keep their ETag, so an unchanged answer costs nothing of the rate limit. Use it in place of starting `gh` for each question.
+
+### What changed
+
+- **node/schedule.ts:** at a gentle pace, a schedule's first round comes 2 to 15 minutes after the agent starts (random), not 30 s to 3 min, so a PC that has just started isn't ground down by every agent at once. At a full pace it is as before.
+
+### What an agent must do
+
+- Nothing, for the background pace: every() sets it.
+- A round the agent starts for its own reasons should call `runSoon()`, not `runNow()`, so it runs at the pace.
+- Where it starts `gh` to read from GitHub, it can ask `GitHubApi` instead.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first time an agent runs gently, it spends a few seconds compiling the shared helper, once per PC.
+
 ## 2.49.0
 
 **Developer Pro: the Wright's and the Bailiff's work with the rest of the staff, shown only where it's sold.**

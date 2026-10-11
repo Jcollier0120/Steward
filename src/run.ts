@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -107,6 +107,16 @@ export function useDotnet(dir: string): void {
 }
 
 /**
+ * Without a console of its own to share (the Steward running in the background, Steward 0.35.11), a command starts
+ * detached: Windows gives a console program started from a process with none a console host (conhost.exe) of its own,
+ * a second process for every git and gh, all day. Detached, it has none, and the programs it starts open no window.
+ * From a terminal (the CLI) it shares the terminal's, as before, so Ctrl+C stops what it started.
+ */
+const DETACHED = process.platform === 'win32' && !process.stdin.isTTY && !process.stdout.isTTY;
+/** The commands that start detached: git and gh, the Steward's most frequent, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
+const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
+
+/**
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
@@ -121,8 +131,9 @@ export const run: Runner = (cmd, args, opts = {}) => {
     const child = execFile(
       file,
       argv,
-      { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
-      (e: any, stdout, stderr) => {
+      // execFile hands its options to spawn, detached among them, though its type doesn't name it.
+      { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
+      (e: any, stdout: string, stderr: string) => {
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;

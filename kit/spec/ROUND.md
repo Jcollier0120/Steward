@@ -65,7 +65,14 @@ Manor's settings.json `"backgroundPace"` sets how every agent's scheduled rounds
   - round.json's `"wentThrough": { "<schedule>": "<ISO time>" }` says which have gone through. A round.json from before 2.43.3, with rounds but no `wentThrough`, counts every schedule it names as through: updating an agent never puts it in the line.
   - A round that waited six hours without its turn is recorded with `"ok": null` and `"waiting"`, and waits again at its next round. A holder keeps its turn for its round's time limit, and 12 hours at the least (a first scan of every drive takes hours); one whose process has gone gives up its place at once.
 - **Below-normal priority.** A scheduled round runs at below-normal priority, and the programs it starts take that class too.
-- **A round asked for** (Run now) never waits, and runs at normal priority.
+- **Heiward's background pace** (kit 2.50.0, `node/gentle.ts`). On Windows the agent runs as Heiward does in the background, from its start and in its scheduled rounds:
+  - Windows' efficiency mode (EcoQoS);
+  - a very low disk priority;
+  - a hard processor cap, on a job holding the agent and every program it starts: a quarter of the processor, and two processors' worth at most.
+
+  They are set from outside the process by the agent's PowerShell worker, with `node/gentle.cs` compiled once to `<locks>\..\kit\gentle-<hash>.dll`, shared by every agent, and only when what's wanted changes. `KIT_GENTLE=0` leaves an agent to priority alone.
+- **First rounds come later.** A schedule's first round comes 2 to 15 minutes after the agent starts (random), not 30 s to 3 min, so a PC that has just started isn't ground down by every agent at once.
+- **A round asked for** (Run now) never waits, and runs at normal priority with the cap, efficiency mode and disk priority lifted until it ends. `runSoon()` starts a scheduled round now, at the pace: for an agent's own reasons (something changed), never the person's.
 - **Settling into the manor.** While a first round waits its turn, or a long one runs (a look's `firstRound`: Reeve's, Heiward's), the status pill says "Settling in" and the page shows a banner in the role's colour: the manor's door, with footsteps walking up to it, and a line saying it is new and takes longer this once. Its state's `firstRound` is `waiting` or `running`.
 
 An agent that doesn't run its rounds with every() (Heiward's .NET scans) takes the same line through the kit's .NET lock on the same folder.

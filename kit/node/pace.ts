@@ -22,7 +22,7 @@ import { withAcceleratorTurn } from './npu-queue.ts';
  *
  * A round the person asked for (Run now) never waits in the line, and runs at normal priority: someone is waiting on it.
  * What Heiward adds in the background (Windows' efficiency mode, a very low disk priority, a hard cap on the processor)
- * needs Windows calls Node doesn't have; below-normal priority is the part every agent can take.
+ * needs Windows calls Node doesn't have: gentle.ts sets them through the agent's PowerShell worker (kit 2.50.0).
  */
 
 export type Pace = 'gentle' | 'full';

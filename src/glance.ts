@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { expandEnv } from './kit/settings-kit.ts';
 import { GithubLimited, LIMITED, readingFrom, type RateReading } from './budget.ts';
+import { GitHubApi } from './kit/github.ts';
 import type { Runner } from './run.ts';
 import { gitGlance, type Host } from './scm.ts';
 import type { Employee, Settings } from './settings.ts';
@@ -196,7 +197,14 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
  * the Steward's own), gh isn't run at all. One worked with GitLab's way has no glance: each stage asks GitLab of it on
  * its own (hosts/gitlab.ts).
  */
-export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settings, 'employees' | 'stewardRepo'>, host: (e: Employee) => Host = () => 'github', now: () => Date = () => new Date()): Promise<Glance> {
+export async function takeGlance(
+  run: Runner,
+  cwd: string,
+  settings: Pick<Settings, 'employees' | 'stewardRepo'>,
+  host: (e: Employee) => Host = () => 'github',
+  now: () => Date = () => new Date(),
+  ask: GlanceAsk = ghAsk(run, cwd),
+): Promise<Glance> {
   const glance: Glance = { at: now().toISOString(), stewardReleases: null, stewardMain: null, repos: {}, errors: {} };
   const byGit = settings.employees.filter((e) => host(e) === 'git');
   for (const e of byGit) {
@@ -212,15 +220,40 @@ export async function takeGlance(run: Runner, cwd: string, settings: Pick<Settin
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {
     const chunk = all.slice(i, i + PER_QUERY);
     const stewardRepo = i === 0 ? settings.stewardRepo : null;
-    const r = await run('gh', ['api', 'graphql', '-f', `query=${glanceQuery(chunk, stewardRepo)}`], { cwd, timeoutMs: 2 * 60_000 });
-    if (!r.out.trim()) {
-      const why = (r.err || 'no output').trim().split('\n').slice(-3).join(' / ');
-      throw LIMITED.test(why) ? new GithubLimited(why) : new Error(`gh api graphql failed (${r.code}): ${why}`);
-    }
-    readGlance(chunk, r.out, stewardRepo, glance, now());
+    readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now());
   }
   return glance;
 }
+
+/** Asks GitHub a glance's query: its answer as JSON text, partial answers (with `errors`) included. */
+export type GlanceAsk = (query: string) => Promise<string>;
+
+/** Through `gh api graphql`, as before Steward 0.35.11: a gh process for each query. */
+export const ghAsk = (run: Runner, cwd: string): GlanceAsk => async (query) => {
+  const r = await run('gh', ['api', 'graphql', '-f', `query=${query}`], { cwd, timeoutMs: 2 * 60_000 });
+  if (!r.out.trim()) {
+    const why = (r.err || 'no output').trim().split('\n').slice(-3).join(' / ');
+    throw LIMITED.test(why) ? new GithubLimited(why) : new Error(`gh api graphql failed (${r.code}): ${why}`);
+  }
+  return r.out;
+};
+
+let api: GitHubApi | null = null;
+
+/**
+ * Through GitHub's API from the Steward's own process (kit/github.ts, Steward 0.35.11): no gh process for each round,
+ * only once for its token. A partial answer comes back as gh's did, with `errors`; a refusal for the rate limit is
+ * GithubLimited, as gh's was.
+ */
+export const apiAsk = (o?: ConstructorParameters<typeof GitHubApi>[0]): GlanceAsk => async (query) => {
+  const client = o ? new GitHubApi(o) : (api ??= new GitHubApi());
+  try {
+    return JSON.stringify(await client.rest('POST', 'graphql', { body: { query } }));
+  } catch (e) {
+    const why = (e as Error).message;
+    throw LIMITED.test(why) ? new GithubLimited(why) : e;
+  }
+};
 
 const sha = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
 
