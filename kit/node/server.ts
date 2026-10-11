@@ -12,6 +12,7 @@ import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
 import { dataFile, writeJson } from './store.ts';
+import { repair, repairKinds } from './repair.ts';
 
 /**
  * The agent's page and API, on 127.0.0.1 only. On top of that, the same rules as Manor's server:
@@ -173,7 +174,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     '/api/ping': () => {
       const developer = isDeveloper();
       const license = licenseNow();
-      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, license.ended), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, ...opts.ping?.() } };
+      return { json: { app: APP.id, name: APP.name, version: APP.version, ...(developer ? { pid: process.pid } : {}), ...dutyStatus(duty(), true, license.ended), ...licensePing(license), ...roundTimes(), rounds: rounds(), tour, needsSettings: needsSettings(), developer, repairs: repairKinds(), ...opts.ping?.() } };
     },
     '/favicon.svg': () => ({ body: opts.icon, type: 'image/svg+xml' }),
     // Manor's icon, from this agent's own address, for the title bar's "Back to <manor>" (manor.ts).
@@ -187,6 +188,8 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   const post: Record<string, Handler> = {
     '/api/stop': stop,
     '/api/duty': ({ body }) => ({ json: setDuty(body?.onDuty === true) }),
+    // A repair another agent asks for (repair.ts, kit 2.51.0): the Surveyor's, for something this agent can put right.
+    '/api/repair': async ({ body }) => ({ json: await repair(body) }),
     ...opts.post,
   };
   const spec = opts.settings;

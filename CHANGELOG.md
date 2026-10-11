@@ -8,6 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
+- Every agent can now be asked to put something right itself, such as starting its rounds again when they stopped coming. The Surveyor uses this to pass problems straight to the agent that can fix them, so you see only the ones that need you.
 - When Manor's page stops answering, the Steward starts it again, as signing in would: after a minute and a half (Manor may just be updating itself), then up to three times, five minutes apart, then hourly. Manor already did the same for the Steward, so either one brings the other back.
 
 ### What changed
