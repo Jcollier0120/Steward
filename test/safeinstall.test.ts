@@ -218,3 +218,100 @@ test("the kit's own safe install, as every agent's: a flagged version says how t
   assert.equal(versionIn(allowed.app), '0.8.14');
   assert.deepEqual(loadUnsafe(), {});
 });
+
+test('the install waits only for the probation to settle; the rest is handed to a watcher of its own (kit 2.52.0)', async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  rmSync(unsafeFile(), { force: true });
+  const s = setup();
+  const asked: string[][] = [];
+  s.d.watch = async (args) => (asked.push(args), true);
+  let t0 = -1;
+  const now = s.d.now;
+  s.d.now = () => (t0 < 0 ? (t0 = now()) : now());
+  assert.equal(await safeInstall({}, s.d), 0, s.said.join('\n'));
+  assert.ok(s.d.now() >= kit.SETTLE_MS && s.d.now() < 30_000, `waited ${s.d.now()} ms, not the whole probation`);
+  assert.deepEqual(asked, [['--watch-probation', '0.8.14', '--from', '0.8.13', '--since', '0']]);
+  assert.match(s.said.at(-1)!, /0\.8\.14 is up and answering\. The rest of its 30 s probation is watched in the background: if it stops answering, 0\.8\.13 is put back/);
+
+  // --wait waits for all of it, as before.
+  const w = setup();
+  w.d.watch = async () => assert.fail('no watcher with --wait');
+  assert.equal(await safeInstall({ wait: true }, w.d), 0);
+  assert.match(w.said.at(-1)!, /held up for 30 s/);
+});
+
+test('a watcher that fails to start leaves the rest to the install, which goes back as before', async () => {
+  rmSync(unsafeFile(), { force: true });
+  const s = setup({ page: (t) => (t < 20_000 ? '0.8.14' : null) });
+  s.d.watch = async () => false;
+  assert.equal(await safeInstall({}, s.d), 1);
+  assert.equal(versionIn(s.app), '0.8.13');
+  assert.match(loadUnsafe()['0.8.14'].why, /its page stopped answering 20 s into its probation/);
+});
+
+test('the watcher goes back and flags a version that stops answering, timed from the update; a later install it leaves alone', async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  rmSync(unsafeFile(), { force: true });
+  const s = setup({ page: (t) => (t < 20_000 ? '0.8.14' : null) });
+  s.d.watch = async () => true;
+  assert.equal(await safeInstall({}, s.d), 0, 'handed on, settled');
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, s.d), 1);
+  assert.equal(versionIn(s.app), '0.8.13', 'the version before, back');
+  assert.equal(s.running(), '0.8.13');
+  assert.match(loadUnsafe()['0.8.14'].why, /its page stopped answering 20 s into its probation/);
+
+  rmSync(unsafeFile(), { force: true });
+  const ok = setup();
+  ok.d.watch = async () => true;
+  assert.equal(await safeInstall({}, ok.d), 0);
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, ok.d), 0);
+  assert.match(ok.said.at(-1)!, /0\.8\.14 held up for 30 s/);
+  assert.equal(versionIn(ok.app), '0.8.14');
+
+  // Another version installed meanwhile: the watcher of the one before it leaves app as it is.
+  const later = setup({ page: (t) => (t < 20_000 ? '0.8.14' : null) });
+  later.d.watch = async () => true;
+  assert.equal(await safeInstall({}, later.d), 0);
+  writeFileSync(path.join(later.app, 'release.json'), JSON.stringify({ id: 'steward', name: 'Steward', version: '0.8.15' }));
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, later.d), 0);
+  assert.equal(versionIn(later.app), '0.8.15');
+  assert.deepEqual(loadUnsafe(), {});
+});
+
+test('install --watch-probation takes exactly its arguments, and says it is watching while it does', async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  assert.equal(await kit.safeInstallCli(['--watch-probation', '0.8.14']), 2);
+  assert.equal(await kit.safeInstallCli(['--watch-probation', '0.8.14', '--from', '0.8.13', '--since', 'soon']), 2);
+  const s = setup();
+  let seen: unknown = null;
+  s.d.pingVersion = async () => ((seen ??= JSON.parse(readFileSync(kit.watchingFile(), 'utf8'))), '0.8.14');
+  assert.equal(await kit.safeInstallCli(['--watch-probation', '0.8.14', '--from', '0.8.13', '--since', '0'], { ...s.d, out: s.d.out }), 0);
+  assert.deepEqual(seen, { version: '0.8.14', pid: process.pid, since: 0 });
+  assert.ok(!existsSync(kit.watchingFile()), 'gone once it is done');
+});
+
+test("the real watcher is a process of its own, counted only once it says it is watching", async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  const { appFolder, defaultDeps } = await import('../src/kit/install.ts');
+  const cli = path.join(appFolder(defaultDeps().dataDir), 'src', 'cli.ts');
+  const real = appFolder(defaultDeps().dataDir);
+  const had = existsSync(real);
+  if (had) cpSync(real, `${real}.test-keep`, { recursive: true });
+  try {
+    mkdirSync(path.dirname(cli), { recursive: true });
+    // A copy whose watcher says so (and ends, so the test's folder can go).
+    writeFileSync(cli, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(kit.watchingFile())}, JSON.stringify({ version: process.argv[4], pid: process.pid, since: 0 }));\n`);
+    assert.equal(await kit.safeDeps().watch!(['--watch-probation', '9.9.9', '--from', '9.9.8', '--since', '0']), true);
+    // One that can't watch (it ends at once, saying nothing): not counted, so the install waits for the rest itself.
+    rmSync(kit.watchingFile(), { force: true });
+    writeFileSync(cli, 'process.exit(2);\n');
+    assert.equal(await kit.safeDeps().watch!(['--watch-probation', '9.9.9', '--from', '9.9.8', '--since', '0']), false);
+  } finally {
+    rmSync(kit.watchingFile(), { force: true });
+    rmSync(real, { recursive: true, force: true });
+    if (had) {
+      cpSync(`${real}.test-keep`, real, { recursive: true });
+      rmSync(`${real}.test-keep`, { recursive: true, force: true });
+    }
+  }
+});

@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.52.0
+
+**An update's install no longer holds Manor's update pass for its whole probation.**
+
+### What changed
+
+- **node/safeinstall.ts: the probation is watched in the background.** The install now waits only until the new version is up and answering (about 15 s, `SETTLE_MS`), then hands the rest of the 90 s probation to a watcher started from the new copy (`install --watch-probation`, hidden and detached), and exits. Manor's update pass, which installs agents one after another, goes on to the next agent instead of waiting a minute and a half for each. A version that fails later is still rolled back and flagged as before; the watcher writes what it saw to `probation.log` in the data folder (its last 200 lines), and `probation.json` while it watches. The watcher leaves alone an agent that was updated again or rolled back in the meantime.
+- If the watcher can't be started (it must say it is watching within 10 s), the install waits out the probation itself, as 2.51.0 did. `install --wait` always does.
+
+### For an agent
+
+- Nothing: take the kit and release as usual.
+
 ## 2.51.0
 
 **The Steward's safe install for every agent, and sign-in tasks that wait and try again.**

@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
-import { cpSync, existsSync, renameSync, rmSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { APP, pageUrl } from '../app.ts';
 import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, type InstallDeps } from './install.ts';
@@ -21,6 +22,12 @@ import { dataFile, readJson, writeJson } from './store.ts';
  * (the Steward's: Dismiss on its alarm). A newer version isn't flagged, and installs as usual.
  * An install that changed nothing (the old page wouldn't stop, the copy couldn't be made) flags nothing: it is
  * tried again. A first install has no version before it to go back to.
+ *
+ * The install waits only for the probation's start (kit 2.52.0): the new page up, answering as the new version and its
+ * home page rendering, for SETTLE_MS. The rest is watched by a process of its own (`install --watch-probation`, no
+ * window), which goes back and flags just the same if the page stops answering. So Manor's update pass, which installs
+ * one agent after another, waits seconds for each, not the whole probation. `--wait` (or a watcher that can't start)
+ * waits for all of it here, as before.
  */
 
 export const unsafeFile = () => dataFile('unsafe-updates.json');
@@ -51,6 +58,8 @@ export const unsafeAlarmId = (version: string) => `unsafe:${version}`;
 
 /** How long a new version must keep answering before the update counts as done. */
 export const PROBATION_MS = 90_000;
+/** How much of it the install itself waits for (kit 2.52.0): the rest is watched in the background. */
+export const SETTLE_MS = 15_000;
 const LOOK_EVERY_MS = 5_000;
 /**
  * How many looks in a row a page may miss before it has stopped answering. One ping can miss on a busy PC (each has
@@ -77,6 +86,20 @@ export interface SafeDeps extends InstallDeps {
   now(): number;
   record(u: Unsafe): void;
   flagged(): Record<string, Unsafe>;
+  /**
+   * Starts the rest of the probation in a process of its own (`install` with these arguments, from the new copy), so
+   * the install can return: true once it says it is watching (watchingFile), false when it didn't. Without it, the
+   * install waits for the whole probation.
+   */
+  watch?(args: string[]): Promise<boolean>;
+}
+
+/** A probation watcher's word that it is watching: its version and pid, while it does (removed once it's done). */
+export const watchingFile = () => dataFile('probation.json');
+interface Watching {
+  version: string;
+  pid: number;
+  since: number;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -113,11 +136,12 @@ async function moveWithRetries(from: string, to: string, d: SafeDeps): Promise<v
 }
 
 /**
- * Whether the new version holds up: its page answers as `version` for the whole probation, and its home page renders.
- * The reason when it doesn't.
+ * Whether the new version holds up: its page answers as `version` until `ms` after `since` (now, and the whole
+ * probation, unless said), and its home page renders. The reason when it doesn't, timed from `since`.
  */
-export async function probation(version: string, d: SafeDeps): Promise<string | null> {
-  const start = d.now();
+export async function probation(version: string, d: SafeDeps, o: { ms?: number; since?: number } = {}): Promise<string | null> {
+  const start = o.since ?? d.now();
+  const ms = o.ms ?? d.probationMs;
   let homeSeen = false;
   let missedAt: number | null = null;
   let misses = 0;
@@ -137,7 +161,7 @@ export async function probation(version: string, d: SafeDeps): Promise<string | 
       if (status !== 200) return `its home page ${status === null ? "didn't answer" : `answered ${status}`}`;
       homeSeen = true;
     }
-    if (d.now() - start >= d.probationMs) return null;
+    if (d.now() - start >= ms) return null;
     await d.sleep(LOOK_EVERY_MS);
   }
 }
@@ -171,7 +195,50 @@ async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): P
 
 const defaultAllowHint = () => 'install it again with --allow-unsafe (node src\\cli.ts install --allow-unsafe, in the release)';
 
-export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; allowUnsafe?: boolean } = {}, d: SafeDeps = safeDeps()): Promise<number> {
+/**
+ * A version that failed its probation: the one before put back and started, the failed copy kept, the version flagged,
+ * and what happened said. Exit 1.
+ */
+async function goBack(version: string, from: string, why: string, d: SafeDeps): Promise<number> {
+  const { out } = d;
+  const app = appFolder(d.dataDir);
+  out(`${APP.name} ${version} failed: ${why}. Going back to ${from}.`);
+  const kept = `${app}.unsafe-${version}`;
+  const answers = await rollBack(app, `${app}.prev`, kept, d);
+  d.record({ version, from, why, at: new Date(d.now()).toISOString(), kept: existsSync(kept) ? kept : null });
+  const start = `start it with node ${path.win32.join(app, 'src', 'cli.ts')} open`;
+  out(
+    answers === from
+      ? `${APP.name} ${from} is back, and its page is up: ${d.pageUrl}`
+      : answers
+        ? `${APP.name} ${from} is back in ${app}, but its page answers as ${answers}: end that one (node ${path.win32.join(app, 'src', 'cli.ts')} shutdown), then ${start}`
+        : `${APP.name} ${from} is back in ${app}, but its page didn't answer: ${start}`,
+  );
+  out(`${version} is flagged as unsafe, and won't be installed again until you allow it.${existsSync(kept) ? ` Its copy is kept in ${kept} for a look.` : ''}`);
+  return 1;
+}
+
+/**
+ * The rest of an update's probation, in a process of its own (`install --watch-probation <version> --from <before>
+ * --since <ms>`, kit 2.52.0): the page watched until the probation's end, counted from `since`, and the version before
+ * put back if it stops holding up. Only the update it was started for: once another version is in app, or the one
+ * before isn't the one in app.prev any more (a later install, or one by hand), it's left alone.
+ */
+export async function watchProbation(version: string, from: string, since: number, d: SafeDeps): Promise<number> {
+  const app = appFolder(d.dataDir);
+  const why = d.now() - since < d.probationMs ? await probation(version, d, { since }) : null;
+  if (!why) {
+    d.out(`${APP.name} ${version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${app}.prev, to go back to by hand.`);
+    return 0;
+  }
+  if (readRelease(app)?.version !== version || readRelease(`${app}.prev`)?.version !== from) {
+    d.out(`${APP.name} ${version} ${why}, but another install has changed ${app} since: it is left as it is.`);
+    return 0;
+  }
+  return goBack(version, from, why, d);
+}
+
+export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; allowUnsafe?: boolean; wait?: boolean } = {}, d: SafeDeps = safeDeps()): Promise<number> {
   const { out } = d;
   const release = d.dev ? null : readRelease(d.root);
   // A checkout, not a release, or a dry run: the kit's install says what it says, and changes nothing.
@@ -206,25 +273,24 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
     rmSync(prev, { recursive: true, force: true });
     return code;
   }
-  const why = code !== 0 ? `its install failed (exit ${code}) once it was in place` : await probation(release.version, d);
-  if (!why) {
-    out(`${APP.name} ${release.version} held up for ${Math.round(d.probationMs / 1000)} s. ${before!.version} stays in ${prev}, to go back to by hand.`);
-    return 0;
+  const from = before!.version;
+  if (code !== 0) return goBack(release.version, from, `its install failed (exit ${code}) once it was in place`, d);
+  // Its start waited for here; the rest, in the background, when a watcher can take it (kit 2.52.0).
+  const since = d.now();
+  const background = !opts.wait && !!d.watch && d.probationMs > SETTLE_MS;
+  const why = await probation(release.version, d, { since, ms: background ? SETTLE_MS : d.probationMs });
+  if (why) return goBack(release.version, from, why, d);
+  if (background) {
+    if (await d.watch!(['--watch-probation', release.version, '--from', from, '--since', String(since)])) {
+      out(`${APP.name} ${release.version} is up and answering. The rest of its ${Math.round(d.probationMs / 1000)} s probation is watched in the background: if it stops answering, ${from} is put back.`);
+      return 0;
+    }
+    // No watcher: the rest is waited for here, as before 2.52.0.
+    const late = await probation(release.version, d, { since });
+    if (late) return goBack(release.version, from, late, d);
   }
-  out(`${APP.name} ${release.version} failed: ${why}. Going back to ${before!.version}.`);
-  const kept = `${app}.unsafe-${release.version}`;
-  const answers = await rollBack(app, prev, kept, d);
-  d.record({ version: release.version, from: before!.version, why, at: new Date(d.now()).toISOString(), kept: existsSync(kept) ? kept : null });
-  const start = `start it with node ${path.win32.join(app, 'src', 'cli.ts')} open`;
-  out(
-    answers === before!.version
-      ? `${APP.name} ${before!.version} is back, and its page is up: ${d.pageUrl}`
-      : answers
-        ? `${APP.name} ${before!.version} is back in ${app}, but its page answers as ${answers}: end that one (node ${path.win32.join(app, 'src', 'cli.ts')} shutdown), then ${start}`
-        : `${APP.name} ${before!.version} is back in ${app}, but its page didn't answer: ${start}`,
-  );
-  out(`${release.version} is flagged as unsafe, and won't be installed again until you allow it.${existsSync(kept) ? ` Its copy is kept in ${kept} for a look.` : ''}`);
-  return 1;
+  out(`${APP.name} ${release.version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${prev}, to go back to by hand.`);
+  return 0;
 }
 
 /** The real things: the kit's install and its deps, the page's ping, the clock and the flags in the data folder. */
@@ -263,19 +329,69 @@ export function safeDeps(): SafeDeps {
     now: () => Date.now(),
     record: (u) => writeJson(unsafeFile(), { ...loadUnsafe(), [u.version]: u }),
     flagged: loadUnsafe,
+    // From the new copy, working in the user's folder (never in app, which a rollback moves, nor the data folder), with
+    // no window and nothing tying it to the install that started it: Manor's update pass goes on to the next agent.
+    watch: async (args) => {
+      let pid: number | undefined;
+      try {
+        const child = spawn(process.execPath, [path.join(appFolder(d.dataDir), 'src', 'cli.ts'), 'install', ...args], { cwd: os.homedir(), detached: true, stdio: 'ignore', windowsHide: true });
+        child.on('error', () => {});
+        child.unref();
+        pid = child.pid;
+      } catch {
+        return false;
+      }
+      if (typeof pid !== 'number') return false;
+      // Started is not watching: a copy that can't run its watcher would leave the rest unwatched, so it must say so.
+      for (let waited = 0; waited < 10_000; waited += 250) {
+        const w = readJson<Watching | null>(watchingFile(), null);
+        if (w?.pid === pid && w.version === args[1]) return true;
+        if (!alive(pid)) return false;
+        await d.sleep(250);
+      }
+      return false;
+    },
   };
+}
+
+/** Where a probation watcher, which has no console, says what it did: the last lines kept, never more. */
+export const watchLogFile = () => dataFile('probation.log');
+const WATCH_LOG_LINES = 200;
+
+function watchLog(line: string): void {
+  const file = watchLogFile();
+  try {
+    const old = existsSync(file) ? readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean) : [];
+    writeFileSync(file, [...old, `${new Date().toISOString()} ${line}`].slice(-WATCH_LOG_LINES).join('\n') + '\n');
+  } catch {
+    // A log that can't be written changes nothing of the watch.
+  }
 }
 
 /** install from the command line, behind the fail-safe. An unknown option is refused, so a mistyped --dry-run never installs. */
 export async function safeInstallCli(args: string[], d?: Partial<SafeDeps>): Promise<number> {
-  const known = ['--no-start', '--dry-run', '--allow-unsafe'];
+  // The rest of an update's probation, started by the install itself (kit 2.52.0): not one for people to type.
+  if (args[0] === '--watch-probation') {
+    const [, version, fromFlag, from, sinceFlag, since] = args;
+    if (args.length !== 6 || !version || fromFlag !== '--from' || !from || sinceFlag !== '--since' || !Number.isFinite(Number(since))) {
+      console.error('install --watch-probation <version> --from <version before> --since <ms>');
+      return 2;
+    }
+    writeJson(watchingFile(), { version, pid: process.pid, since: Number(since) } satisfies Watching);
+    try {
+      return await watchProbation(version, from, Number(since), { ...safeDeps(), out: watchLog, ...d });
+    } finally {
+      if (readJson<Watching | null>(watchingFile(), null)?.pid === process.pid) rmSync(watchingFile(), { force: true });
+    }
+  }
+  const known = ['--no-start', '--dry-run', '--allow-unsafe', '--wait'];
   const unknown = args.filter((a) => !known.includes(a));
   if (unknown.length) {
     console.error(`install: unknown ${unknown.join(' ')} (it takes ${known.join(' ')})`);
     return 2;
   }
   return safeInstall(
-    { noStart: args.includes('--no-start'), dryRun: args.includes('--dry-run'), allowUnsafe: args.includes('--allow-unsafe') },
+    { noStart: args.includes('--no-start'), dryRun: args.includes('--dry-run'), allowUnsafe: args.includes('--allow-unsafe'), wait: args.includes('--wait') },
     { ...safeDeps(), ...d },
   );
 }

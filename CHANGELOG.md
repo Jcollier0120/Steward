@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.13
+
+**It hands out the kit 2.52.0: Manor's updates no longer wait a minute and a half for each agent.**
+
+### What changed
+
+- Since the last kit, each agent's update was watched for 90 seconds before Manor moved on to the next one, so updating everyone took a long time. Now an update is checked for about 15 seconds, until the new version is up, and the rest of its watch runs in the background. A version that fails is still put back and flagged, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent picks this up with its next release.
+
 ## 0.35.12
 
 **The Steward and Manor bring each other back, and it hands out the kit 2.51.0: every agent's updates are rolled back when they don't hold up.**
