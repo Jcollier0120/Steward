@@ -11,6 +11,7 @@ import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
+import { demoAnswer, demoDir, DEMO_NO } from './demo.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 
@@ -22,6 +23,8 @@ import { repair, repairKinds } from './repair.ts';
  *   server.json, for the CLI's stop), from a page of its own origin, so no other site can press a button.
  * - With `settings`, it serves the Settings panel's API (settings-kit.ts): GET and POST /api/settings,
  *   the POST guarded like every other and read with a small body limit.
+ * - In demo mode (KIT_DEMO, demo.ts), its GETs are answered from the demo folder's made-up data where it has them, its
+ *   ping says `demo: true`, and every button is refused: nothing changes.
  */
 
 export interface Request {
@@ -209,14 +212,22 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
       if (!hostAllowed(hosts, req.headers.host)) return send({ json: { error: 'wrong host' }, status: 421 });
       const url = new URL(req.url ?? '/', `http://${HOST_NAME}:${opts.port}`);
       if (req.method === 'GET' || req.method === 'HEAD') {
+        const demo = demoDir();
+        const made = demo && url.pathname !== '/api/ping' ? demoAnswer(url.pathname, demo) : undefined;
+        if (made !== undefined) return send({ json: made });
         const h = get[url.pathname];
         if (!h) return send({ json: { error: 'not found' }, status: 404 });
-        return send(await h({ path: url.pathname, query: url.searchParams, body: {}, token }));
+        const r = await h({ path: url.pathname, query: url.searchParams, body: {}, token });
+        // Its own ping, said to be a demo's, with the demo folder's laid over it (a round under way, say).
+        if (demo && url.pathname === '/api/ping' && 'json' in r) return send({ json: { ...(r.json as object), ...(demoAnswer('/api/ping', demo) as object | undefined), demo: true } });
+        return send(r);
       }
       if (req.method === 'POST') {
         if (!postAllowed(hosts, req.headers.origin, req.headers['x-token'], token)) return send({ json: { error: 'forbidden' }, status: 403 });
         const h = post[url.pathname];
         if (!h) return send({ json: { error: 'not found' }, status: 404 });
+        // A demo changes nothing; it can still be stopped.
+        if (demoDir() && url.pathname !== '/api/stop') return send({ json: { error: DEMO_NO }, status: 403 });
         const body = await readBody(req, url.pathname === '/api/settings' ? SETTINGS_BODY_LIMIT : 1_000_000);
         return send(await h({ path: url.pathname, query: url.searchParams, body, token }));
       }

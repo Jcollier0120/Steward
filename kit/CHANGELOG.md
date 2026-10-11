@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.53.0
+
+**Demo mode: an agent's page with made-up data, for Manor's pictures of each employee.**
+
+### What's new
+
+- **node/demo.ts, and node/server.ts in demo mode.** With `KIT_DEMO=1` (the agent's `demo` folder) or `KIT_DEMO=<folder>`, the page server answers each GET from the demo folder where it has a file for it (`/api/state` from `demo/api/state.json`), the agent's own handlers otherwise, says `demo: true` in its ping (with `demo/api/ping.json` laid over it), and refuses every button with 403. Run beside `<ID>_HOME` (an empty folder) and `<ID>_PORT`, nothing of the installed copy is read or touched. `isDemo()` tells an agent's own background work to stay off.
+- **spec/DEMO.md**: how to run one, and what the demo folder holds: made-up data only, and an optional `demo/hero.json` saying which view Manor's capture pictures.
+
+### For an agent
+
+- Nothing yet. To have a picture in Manor instead of the office's initial, add a `demo` folder with made-up answers for the GETs your page makes (spec/DEMO.md), and keep any background work of the page process off while `isDemo()`.
+
 ## 2.52.0
 
 **An update's install no longer holds Manor's update pass for its whole probation.**
