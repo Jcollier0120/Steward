@@ -122,6 +122,12 @@ const schedules = new Set<() => RoundState>();
 /** Each schedule's rounds: an agent may run several (the Miller grinds and names on two). */
 export const rounds = (): RoundState[] => [...schedules].map((s) => s());
 
+/** Every schedule's runSoon(), by its state: the kit's `round` repair (repair.ts) starts them. */
+const soon = new Map<() => RoundState, () => boolean>();
+
+/** Starts a scheduled round now on every schedule that can start one (runSoon); the names of those that did. */
+export const runRoundsSoon = (): string[] => [...soon].filter(([, go]) => go()).map(([s]) => s().name);
+
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 const latest = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort().at(-1) ?? null;
 const earliest = (xs: (string | null)[]) => xs.filter((x): x is string => !!x).sort()[0] ?? null;
@@ -349,7 +355,7 @@ export function every(
   });
   schedules.add(state);
 
-  return {
+  const handle = {
     /** Starts a run now; false when one is already under way, the trial has ended (license-check.ts), or its required settings are still to be filled in (required.ts). */
     runNow(): boolean {
       if (running || trialEnded() || needsSettings()) return false;
@@ -385,6 +391,9 @@ export function every(
       stopped = true;
       clearTimeout(timer);
       schedules.delete(state);
+      soon.delete(state);
     },
   };
+  soon.set(state, () => handle.runSoon());
+  return handle;
 }

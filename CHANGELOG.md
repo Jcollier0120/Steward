@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.12
+
+**The Steward and Manor bring each other back, and it hands out the kit 2.51.0: every agent's updates are rolled back when they don't hold up.**
+
+### What's new
+
+- Every agent can now be asked to put something right itself, such as starting its rounds again when they stopped coming. The Surveyor uses this to pass problems straight to the agent that can fix them, so you see only the ones that need you.
+- When Manor's page stops answering, the Steward starts it again, as signing in would: after a minute and a half (Manor may just be updating itself), then up to three times, five minutes apart, then hourly. Manor already did the same for the Steward, so either one brings the other back.
+
+### What changed
+
+- After the PC starts, each agent's page now starts a little after you sign in, each at its own moment, and Windows tries again if it fails. A restart at noon on 11 October left every page down, because Windows ran them all at once before your folders were ready.
+- Manor's down alarm now says the Steward is starting it again, and where to look if it stays down.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent gets the safe install with its next release built on the kit 2.51.0.
+
 ## 0.35.11
 
 **Lighter in the background: it hands out the kit 2.50.0, and starts far fewer programs itself.**

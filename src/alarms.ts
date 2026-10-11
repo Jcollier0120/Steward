@@ -317,7 +317,7 @@ export function noAnswer(v: unknown): string | null {
 export function manorConditions(state: unknown): Condition[] {
   const why = noAnswer(state);
   if (why !== null) {
-    return [{ id: 'manor:down', who: 'manor', title: "Manor's page doesn't answer", detail: [why, 'Open Manor from the Start menu, or restart the PC: its sign-in task starts it.'], afterMs: HOUR }];
+    return [{ id: 'manor:down', who: 'manor', title: "Manor's page doesn't answer", detail: [why, "The Steward starts it again through its sign-in task (three times, five minutes apart, then hourly). If it stays down, open Manor from the Start menu, or look at the end of serve.log in Manor's folder (%USERPROFILE%\\.manor) for why it stopped."], afterMs: HOUR }];
   }
   const u = (state as any).updates;
   const out: Condition[] = [];

@@ -11,7 +11,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-tend-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { MAX_TRIES, RETRY_MS, SPENT_RETRY_MS, loadTending, staffFromState, tend, tendConditions, tendFile } = await import('../src/tend.ts');
+const { MANOR_GRACE_MS, MAX_TRIES, RETRY_MS, SPENT_RETRY_MS, loadTending, staffFromState, tend, tendConditions, tendFile } = await import('../src/tend.ts');
 const { reposHere, runStage, lastStageFile } = await import('../src/steward.ts');
 const { takeGlance } = await import('../src/glance.ts');
 const { normalizeSettings } = await import('../src/settings.ts');
@@ -129,6 +129,57 @@ test("an agent Manor can't open is an alarm at once; Manor not answering changes
   assert.equal(t.manor, false);
   assert.ok(t.down.porter);
   assert.deepEqual(tendConditions(t), []);
+});
+
+test("Manor's own page down: still down after a grace, its sign-in task is started, with an agent's tries; back, it's said", async () => {
+  let now = Date.parse('2026-10-11T12:05:00Z');
+  let manorUp = false;
+  let upAfterGrace = false;
+  const started: number[] = [];
+  const waits: number[] = [];
+  const lines: string[] = [];
+  const look = () =>
+    tend({
+      manorUrl: 'http://127.0.0.1:18585',
+      getJson: async () => (manorUp ? stateOf([agent('herald')]) : { error: 'ECONNREFUSED' }),
+      wait: async (ms) => {
+        waits.push(ms);
+        if (upAfterGrace) manorUp = true;
+      },
+      startManor: async () => (started.push(now), { ok: true, said: 'started its sign-in task (\\Manor\\Home page)' }),
+      now: () => new Date(now),
+      log: (l) => lines.push(l),
+    });
+
+  // Updating itself: back within the grace, so nothing is started.
+  upAfterGrace = true;
+  assert.deepEqual(await look(), []);
+  assert.deepEqual(started, []);
+  assert.deepEqual(waits, [MANOR_GRACE_MS]);
+  assert.equal(loadTending().manorDown, undefined);
+
+  // Down and staying down: started, then not again within RETRY_MS.
+  manorUp = false;
+  upAfterGrace = false;
+  const [r] = await look();
+  assert.equal(r.id, 'manor');
+  assert.equal(r.outcome, 'done');
+  assert.match(r.message, /sign-in task .*try 1 of 3/);
+  assert.equal(started.length, 1);
+  now += RETRY_MS / 2;
+  assert.deepEqual(await look(), []);
+  assert.equal(started.length, 1);
+  now += RETRY_MS / 2;
+  await look();
+  assert.equal(started.length, 2);
+  assert.equal(loadTending().manorDown?.tries, 2);
+
+  // Back: said once, kept among those brought back, and nothing left down.
+  manorUp = true;
+  await look();
+  assert.equal(loadTending().manorDown, undefined);
+  assert.equal(loadTending().revived[0].id, 'manor');
+  assert.ok(lines.some((l) => /\[manor\] its page answers again/.test(l)));
 });
 
 test('repositories here: an employee with a clone, not one without', () => {

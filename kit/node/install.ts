@@ -97,11 +97,24 @@ function xmlEscape(s: string): string {
 }
 
 /**
+ * How long after sign-in an agent's home page starts (kit 2.51.0): 30 s, and up to 2½ minutes more, the same for an
+ * agent each time (from its id), different from one agent to the next. Started in the very second of sign-in, every
+ * agent's task failed at once on the owner's PC ("the system cannot find the path specified", 0x80070003), and the
+ * whole staff starting together is the heaviest minute the PC has.
+ */
+export function signInDelaySeconds(id: string): number {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return 30 + (h % 151);
+}
+
+/**
  * Reeve's task (its src/jobs/schedule.ts), at this user's sign-in: only while the user is logged on
  * (an interactive token needs no stored password or admin), on battery too, one instance at a time,
- * hidden, below-normal priority, and no time limit.
+ * hidden, below-normal priority, and no time limit. It waits signInDelaySeconds after sign-in, and a start that
+ * fails is tried again every minute, five times (kit 2.51.0).
  */
-export function homePageTaskXml(o: { node: string; app: string; user: string; pageUrl: string }): string {
+export function homePageTaskXml(o: { node: string; app: string; user: string; pageUrl: string; id?: string }): string {
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -112,6 +125,7 @@ export function homePageTaskXml(o: { node: string; app: string; user: string; pa
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>${xmlEscape(o.user)}</UserId>
+      <Delay>PT${signInDelaySeconds(o.id ?? APP.id)}S</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>
@@ -138,6 +152,10 @@ export function homePageTaskXml(o: { node: string; app: string; user: string; pa
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>5</Count>
+    </RestartOnFailure>
   </Settings>
   <Actions Context="Author">
     <Exec>
@@ -394,16 +412,20 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
   return code;
 }
 
-/** install and uninstall from the command line. An unknown option is refused, so a mistyped --dry-run never installs. */
+/**
+ * install and uninstall from the command line. An unknown option is refused, so a mistyped --dry-run never installs.
+ * install goes through the fail-safe (safeinstall.ts, kit 2.51.0): an update that doesn't hold up is rolled back.
+ */
 export async function installCli(cmd: 'install' | 'uninstall', args: string[]): Promise<number> {
-  const known = cmd === 'install' ? ['--no-start', '--dry-run'] : ['--purge', '--dry-run'];
+  if (cmd === 'install') return (await import('./safeinstall.ts')).safeInstallCli(args);
+  const known = ['--purge', '--dry-run'];
   const unknown = args.filter((a) => !known.includes(a));
   if (unknown.length) {
     console.error(`${cmd}: unknown ${unknown.join(' ')} (it takes ${known.join(' ')})`);
     return 2;
   }
   const dryRun = args.includes('--dry-run');
-  return cmd === 'install' ? install({ noStart: args.includes('--no-start'), dryRun }) : uninstall({ purge: args.includes('--purge'), dryRun });
+  return uninstall({ purge: args.includes('--purge'), dryRun });
 }
 
 function run(file: string, args: string[]): Promise<Ran> {

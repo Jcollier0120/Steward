@@ -83,3 +83,11 @@ An agent that doesn't run its rounds with every() (Heiward's .NET scans) takes t
 |---|---|
 | node | `schedule.ts`'s `every()`, since kit 2.8.0 (`roundFile()`, `RoundRecord`, `roundError()`). Every Node agent that runs its rounds with `every()` writes it, with nothing to do. |
 | dotnet | **Node-only for now.** The dotnet part has no scheduler (Heiward schedules its own work), so Heiward doesn't write round.json yet. A .NET agent that does writes this same shape, in its own data folder. |
+
+## Repairs
+
+Since kit 2.51.0 an agent takes repairs another agent asks for (`repair.ts`): the Surveyor, finding something the agent can put right itself, asks it to rather than showing the person a fix to follow, and shows it only when the repair fails or the agent says it needs the person.
+
+- `POST /api/repair` with `{ "kind", "finding"?, "detail"? }`, behind the page's token like every POST. It answers `{ "ok", "did", "needsYou"? }`: whether it is in hand, what it did in a few words, and what only the person can do, when that's so.
+- `/api/ping`'s `repairs` lists the kinds it takes. Every agent takes `round`: its scheduled rounds start now, at the pace (`runSoon`), for rounds that stopped coming or went stale. An agent adds its own with `onRepair(kind, fn)` (the Smith's model servers, for example).
+- `askRepair(origin, ask)` is the asker's side: the token read from the agent's page, as its own script reads it, then the POST. An agent on an older kit answers 404, which is no answer: the asker shows the finding as before.
