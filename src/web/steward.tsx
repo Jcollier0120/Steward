@@ -227,10 +227,10 @@ function LookBadge({ l }: { l: ConflictLook }) {
  * they did: caught it up (its version lines, changelog or kit pin resolved, and a merge commit pushed), sent it back to
  * its author, closed it, or couldn't. The newest first; one no longer open says so.
  */
-function ConflictsCard({ looks, s, now }: { looks: ConflictLook[]; s: StaffView | null; now: number }) {
+function ConflictsCard({ looks, s, now, tour }: { looks: ConflictLook[]; s: StaffView | null; now: number; tour?: string }) {
   if (!looks.length)
     return (
-      <Card className="empty" tour="conflicts">
+      <Card className="empty" tour={tour}>
         No PR the rounds looked at has conflicted with its branch in the last two weeks. When one does, it's here with
         what the Steward did: caught it up, where only version lines or a changelog's new entry conflict, or
         sent it back to whoever wrote it.
@@ -238,7 +238,7 @@ function ConflictsCard({ looks, s, now }: { looks: ConflictLook[]; s: StaffView 
     );
   const open = s ? new Set(s.rows.flatMap((r) => r.prs.map((p) => lookKey(r.repo, p.number)))) : null;
   return (
-    <Card tour="conflicts">
+    <Card tour={tour}>
       <table className="conflicts">
         <thead>
           <tr>
@@ -413,7 +413,7 @@ function ResultTable({ results }: { results: StageResult['results'] }) {
 function LastStage({ l, now }: { l: StageResult | null; now: number }) {
   if (!l)
     return (
-      <Card className="empty" tour="last-stage">
+      <Card className="empty">
         No stage has run yet.
       </Card>
     );
@@ -422,7 +422,7 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
     .map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(',') : v}`)
     .join('; ');
   return (
-    <Card tour="last-stage">
+    <Card>
       <p>
         <strong>{l.stage}</strong>
         {l.kit ? ` to kit ${l.kit}` : ''}, {ago(l.finished, now)}
@@ -752,7 +752,7 @@ function Stages({ v }: { v: StewardView }) {
  * with Look after: added to Settings with merging and releasing as ticked here, both off unless you tick them. Several
  * picked (their boxes, or All) are looked after in one go, each with its own ticks.
  */
-function FoundCard({ f, finding, now }: { f: FoundView | undefined; finding: boolean; now: number }) {
+function FoundCard({ f, finding, now, tour }: { f: FoundView | undefined; finding: boolean; now: number; tour?: string }) {
   const [asked, setAsked] = useState<Record<string, { merges: boolean; release: boolean }>>({});
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   if (!f) return null;
@@ -764,7 +764,7 @@ function FoundCard({ f, finding, now }: { f: FoundView | undefined; finding: boo
   const pickAll = (on: boolean) => setPicked(Object.fromEntries(f.offered.map((r) => [r.repo, on])));
   return (
     <Section title="Found on this PC" count={f.offered.length || undefined}>
-      <Card tour="found">
+      <Card tour={tour}>
         {f.error && !f.offered.length ? (
           <Text variant="muted" as="p">
             {f.error}. Add a repository in Settings, under Repositories, instead.
@@ -871,7 +871,7 @@ td a { color: var(--accent); }
 function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; handsOut: boolean }) {
   if (s && !handsOut)
     return (
-      <Card tour="kit">
+      <Card>
         <p>
           The kit the Steward manages: <strong>{s.kit ?? s.local ?? 'none'}</strong>
         </p>
@@ -881,7 +881,7 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
       </Card>
     );
   return (
-    <Card tour="kit">
+    <Card>
       {s ? (
         <>
           <p>
@@ -944,20 +944,59 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       <TendingCard t={v.tending} r={v.round} now={now} />
-      {/* With no employees and no repositories here it hands the kit to no one: it keeps it to run on. */}
-      {castellan && <KitCard s={s} now={now} handsOut={!(v.round.repos === false && !s?.rows.length)} />}
-      <FoundCard f={v.found} finding={!!v.finding} now={now} />
+      {foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" />}
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
         <StaffTable s={s} castellan={castellan} turns={v.turns} clashes={v.claimClashes} looks={v.conflicts ?? []} />
       </Section>
-      {(s?.rows.some((r) => !r.self) ?? false) && (
+      {conflictsOnPage(v) && (
         <Section title="Merge conflicts" count={v.conflicts?.length}>
-          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} />
+          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} tour="conflicts" />
         </Section>
       )}
-      {(s?.rows.some((r) => !r.self) ?? false) && (
+      {hasEmployees(v) && (
         <Section title={castellan ? 'Roll out the kit' : 'Merge and release'}>
           <Stages v={v} />
+        </Section>
+      )}
+    </>
+  );
+}
+
+const hasEmployees = (v: StewardView) => v.staff?.rows.some((r) => !r.self) ?? false;
+
+/** Found on this PC is on the page while there's something to do with it: repositories to look after, a first look, or one that failed. */
+const foundOnPage = (f: FoundView | undefined) => !!f && (!f.at || f.offered.length > 0 || !!f.error);
+
+/** Merge conflicts is on the page while a PR it lists is still open; the record of settled ones is read in About. */
+function conflictsOnPage(v: StewardView): boolean {
+  if (!hasEmployees(v) || !v.conflicts?.length || !v.staff) return false;
+  const open = new Set(v.staff.rows.flatMap((r) => r.prs.map((p) => lookKey(r.repo, p.number))));
+  return v.conflicts.some((l) => open.has(lookKey(l.repo, l.number)));
+}
+
+/**
+ * The About view, beside Settings in the title bar (the kit's Page about): what's read now and then rather than acted
+ * on. The kit it hands out, Found on this PC with nothing to offer, the record of merge conflicts it settled, and the
+ * last stage's log. No tour names: the tour shows the page.
+ */
+export function StewardAbout({ v }: { v: StewardView }) {
+  const now = useNow();
+  if (v.off) return null;
+  const s = v.staff;
+  const castellan = v.castellan !== false;
+  return (
+    <>
+      <style>{STYLE}</style>
+      {/* With no employees and no repositories here it hands the kit to no one: it keeps it to run on. */}
+      {castellan && (
+        <Section title="The kit">
+          <KitCard s={s} now={now} handsOut={!(v.round.repos === false && !s?.rows.length)} />
+        </Section>
+      )}
+      {v.found && !foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} />}
+      {hasEmployees(v) && !conflictsOnPage(v) && (
+        <Section title="Merge conflicts" count={v.conflicts?.length || undefined}>
+          <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} />
         </Section>
       )}
       <Section title="Last stage">
