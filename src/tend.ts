@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { APP } from './app.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Condition, GetJson } from './alarms.ts';
@@ -19,6 +21,11 @@ import { takeFreshStart } from './fresh-start.ts';
  * An agent is tried at most MAX_TRIES times while it stays down, RETRY_MS apart, then once an hour. Once its tries are
  * spent, or Manor has no Open for it, it is an alarm (tendConditions) until its page answers again. What it did is kept
  * in tending.json: the agents down now, and the last few brought back.
+ *
+ * Manor itself is tended too (Steward 0.35.12): Manor keeps the Steward's page up, and the Steward keeps Manor's. When
+ * Manor's page doesn't answer, and still doesn't MANOR_GRACE_MS later (it may be updating itself), the Steward starts
+ * Manor's sign-in task, as signing in would, with the same tries as an agent's. Its alarm stays Manor's own
+ * (alarms.ts's manor:down), an hour on, while the tries go on.
  */
 
 export const MAX_TRIES = 3;
@@ -62,7 +69,36 @@ export interface TendState {
   revived: { id: string; name: string; at: string; tries: number }[];
   /** Manor said it keeps the staff's pages up itself (manorKeeps): the Steward left them to it. */
   keptByManor?: boolean;
+  /** Manor's own page down, and the Steward's tries to start it (Steward 0.35.12). */
+  manorDown?: DownAgent;
 }
+
+/** How long Manor's page may be away before the Steward starts it: an update stops and starts it within this. */
+export const MANOR_GRACE_MS = 90_000;
+
+/** Manor's sign-in task, by the names Manor has had: the Steward runs the first that is there. */
+export const MANOR_TASKS = ['\\Manor\\Home page', '\\Castellan\\Home page'];
+
+export type StartManor = () => Promise<{ ok: boolean; said: string }>;
+
+/** Starts Manor's sign-in task (schtasks /Run), as signing in does: Manor's page, in the person's session. */
+export const startManorTask: StartManor = async () => {
+  const schtasks = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'schtasks.exe');
+  let said = 'no task';
+  for (const name of MANOR_TASKS) {
+    const r = await new Promise<{ ok: boolean; said: string }>((resolve) =>
+      execFile(schtasks, ['/Run', '/TN', name], { windowsHide: true, timeout: 30_000, encoding: 'utf8' }, (e, out, err) =>
+        resolve(e ? { ok: false, said: String(err || out || e.message).trim().split('\n')[0] } : { ok: true, said: `started its sign-in task (${name})` }),
+      ),
+    );
+    if (r.ok) return r;
+    said = r.said;
+  }
+  return { ok: false, said: `its sign-in task couldn't be started: ${said}` };
+};
+
+/** Whether a page answered: getJson's lone { error } is no answer. */
+const answered = (v: unknown) => !!v && typeof v === 'object' && !(Object.keys(v as object).length === 1 && 'error' in (v as object));
 
 export const tendFile = () => dataFile('tending.json');
 
@@ -135,10 +171,26 @@ export function openThroughManor(manorUrl: string): OpenAgent {
  * tried (done when its page is back, failed when not); none when nothing was down. Manor not answering changes nothing:
  * its page down is an alarm of its own (alarms.ts).
  */
-export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenAgent; now?: () => Date; log: (line: string) => void }): Promise<EmployeeResult[]> {
+export async function tend(o: {
+  manorUrl: string;
+  getJson: GetJson;
+  open?: OpenAgent;
+  startManor?: StartManor;
+  wait?: (ms: number) => Promise<void>;
+  now?: () => Date;
+  log: (line: string) => void;
+}): Promise<EmployeeResult[]> {
   const was = loadTending();
   const now = o.now ?? (() => new Date());
+  // After a fresh start (fresh-start.ts), what was down before is tried again at once, rather than an hour after its last
+  // try: it may have been down only because the PC was going to sleep or shutting down. Its alarm stays until it answers.
+  const fresh = takeFreshStart('tend');
   const state = await o.getJson(new URL('/api/state', o.manorUrl).href);
+  if (!answered(state)) return tendManor(o, was, now, fresh);
+  if (was.manorDown?.tries) {
+    o.log(`[manor] its page answers again, after the Steward started it (${was.manorDown.tries} tr${was.manorDown.tries === 1 ? 'y' : 'ies'})`);
+    was.revived.unshift({ id: 'manor', name: 'Manor', at: now().toISOString(), tries: was.manorDown.tries });
+  }
   // Manor keeps its staff's pages up itself: nothing for the Steward to do, and nothing of its own to raise.
   if (manorKeeps(state).has('tend')) {
     writeJson(tendFile(), { at: now().toISOString(), manor: true, down: {}, revived: was.revived, keptByManor: true } satisfies TendState);
@@ -151,9 +203,6 @@ export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenA
   }
   const open = o.open ?? openThroughManor(o.manorUrl);
   const down: Record<string, DownAgent> = {};
-  // After a fresh start (fresh-start.ts), an agent down before is tried again at once, rather than an hour after its last
-  // try: it may have been down only because the PC was going to sleep or shutting down. Its alarm stays until it answers.
-  const fresh = takeFreshStart('tend');
   const revived = [...was.revived];
   const results: EmployeeResult[] = [];
   for (const a of staff) {
@@ -185,6 +234,42 @@ export async function tend(o: { manorUrl: string; getJson: GetJson; open?: OpenA
   }
   writeJson(tendFile(), { at: now().toISOString(), manor: true, down, revived: revived.slice(0, KEEP_REVIVED) } satisfies TendState);
   return results;
+}
+
+/**
+ * Manor's page doesn't answer: once due (an agent's tries: MAX_TRIES, RETRY_MS apart, then hourly), and still down
+ * MANOR_GRACE_MS on, its sign-in task is started. Under node --test nothing is started unless the test says how.
+ */
+async function tendManor(
+  o: Parameters<typeof tend>[0],
+  was: TendState,
+  now: () => Date,
+  fresh: boolean,
+): Promise<EmployeeResult[]> {
+  const before = was.manorDown;
+  const d: DownAgent = before
+    ? { ...before, ...(fresh ? { lastTry: null } : {}) }
+    : { name: 'Manor', since: now().toISOString(), tries: 0, lastTry: null, said: null, canOpen: true };
+  const save = (manorDown: DownAgent | undefined) => writeJson(tendFile(), { ...was, at: now().toISOString(), manor: false, manorDown } satisfies TendState);
+  const start = o.startManor ?? (process.env.NODE_TEST_CONTEXT ? null : startManorTask);
+  if (!start || !dueNow(d, now().getTime())) {
+    save(d);
+    return [];
+  }
+  await (o.wait ?? ((ms) => new Promise((r) => setTimeout(r, ms))))(MANOR_GRACE_MS);
+  if (answered(await o.getJson(new URL('/api/state', o.manorUrl).href))) {
+    // Back by itself (an update, or a person): nothing to do.
+    save(undefined);
+    return [];
+  }
+  const r = await start().catch((e: Error) => ({ ok: false, said: e.message }));
+  d.tries += 1;
+  d.lastTry = now().toISOString();
+  d.said = r.said;
+  save(d);
+  o.log(`[manor] its page doesn't answer, so the Steward ${r.ok ? r.said : `tried to start it: ${r.said}`} (try ${d.tries})`);
+  if (d.tries > MAX_TRIES) return [];
+  return [{ id: 'manor', name: 'Manor', outcome: r.ok ? 'done' : 'failed', message: `tend: Manor's page didn't answer, so the Steward ${r.ok ? r.said : `tried to start it: ${r.said}`} (try ${d.tries} of ${MAX_TRIES})` }];
 }
 
 /** The alarms tending raises: an agent down whose tries are spent, or that Manor can't open. At once. */

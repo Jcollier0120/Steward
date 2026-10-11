@@ -16,7 +16,7 @@ process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -115,7 +115,15 @@ test('the sign-in task runs open from app at sign-in, hidden, with no time limit
   assert.ok(xml.includes('<Command>C:\\Windows\\System32\\conhost.exe</Command>'));
   assert.ok(xml.includes(`<Arguments>${args.replace(/"/g, '&quot;')}</Arguments>`));
   assert.ok(xml.includes(`<WorkingDirectory>${app}</WorkingDirectory>`));
-  assert.match(xml, /<LogonTrigger>\s*<Enabled>true<\/Enabled>\s*<UserId>PC\\pat<\/UserId>\s*<\/LogonTrigger>/);
+  assert.match(xml, /<LogonTrigger>\s*<Enabled>true<\/Enabled>\s*<UserId>PC\\pat<\/UserId>\s*<Delay>PT(\d+)S<\/Delay>\s*<\/LogonTrigger>/);
+  // Not in the second of sign-in (every agent's start failed there), each agent at its own time, the same each time.
+  const delay = Number(/<Delay>PT(\d+)S<\/Delay>/.exec(xml)![1]);
+  assert.equal(delay, signInDelaySeconds(APP.id));
+  assert.equal(signInDelaySeconds('porter'), signInDelaySeconds('porter'));
+  const spread = new Set(['manor', 'steward', 'reeve', 'porter', 'surveyor', 'smith', 'miller', 'herald', 'clerk', 'pinder'].map(signInDelaySeconds));
+  assert.ok(spread.size >= 8, 'agents start at different times');
+  assert.ok([...spread].every((s) => s >= 30 && s <= 180));
+  assert.match(xml, /<RestartOnFailure>\s*<Interval>PT1M<\/Interval>\s*<Count>5<\/Count>\s*<\/RestartOnFailure>/, 'a start that fails is tried again');
   for (const part of ['<LogonType>InteractiveToken</LogonType>', '<RunLevel>LeastPrivilege</RunLevel>', '<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>', '<Hidden>true</Hidden>', '<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>', '<Priority>7</Priority>']) {
     assert.ok(xml.includes(part), part);
   }

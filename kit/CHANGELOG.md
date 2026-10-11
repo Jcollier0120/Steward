@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.51.0
+
+**The Steward's safe install for every agent, and sign-in tasks that wait and try again.**
+
+### What's new
+
+- **node/safeinstall.ts: every agent's install is behind the Steward's fail-safe.** An update keeps the version it replaces whole beside it (`app.prev`), installs as before, then is on probation for 90 s: its page must answer as the new version (three missed looks in a row on a busy PC are forgiven) and its home page must render. One that doesn't hold up is rolled back: the failed copy set aside as `app.unsafe-<version>`, the version before put back and started, and the version flagged in the data folder's `unsafe-updates.json`. A flagged version is refused at once (exit 3, nothing changed), so Manor's automatic updates stop trying it; a newer version installs as usual. `install --allow-unsafe` allows it again. `KIT_PROBATION_MS` changes the probation.
+- `installCli('install', …)` goes through it, so an agent needs no change: its `install` command is the safe one from this kit on. An agent with its own way to allow a version (the Steward's Dismiss) passes `allowHint` to `safeInstallCli`.
+
+### What changed
+
+- **node/install.ts: the sign-in task waits, and tries again.** `homePageTaskXml` gives the logon trigger a delay of 30 to 180 s, the same for an agent each time and spread across agents (`signInDelaySeconds(id)`), and Windows restarts a failed start up to five times, a minute apart. On 11 October every agent's task failed at sign-in (0x80070003, path not found) after a restart, while Heiward's, which waits a minute, started.
+
+### For an agent
+
+- Take the kit and release: the new task is registered with the next install, and the safe install guards the one after it.
+
 ## 2.50.0
 
 **Heiward's background pace for every agent, and fewer programs started all day.**

@@ -116,7 +116,7 @@ test("a new version whose page stops answering is rolled back: the one before is
   const again = setup();
   assert.equal(await safeInstall({}, again.d), 3);
   assert.equal(versionIn(again.app), '0.8.13');
-  assert.match(again.said[0], /isn't installed again until you allow it: Dismiss its alarm/);
+  assert.match(again.said[0], /isn't installed again until it is allowed: Dismiss its alarm/);
   assert.equal(allowUpdate('0.8.14'), true);
   assert.equal(allowUpdate('0.8.14'), false);
   const allowed = setup();
@@ -202,4 +202,19 @@ test("a flagged version is an alarm at once, saying how to allow it again", () =
   assert.equal(c.afterMs, 0);
   assert.match(c.title, /update to 0\.8\.14 failed and was rolled back to 0\.8\.13/);
   assert.match(c.detail.join(' '), /Dismiss this once you've looked: that allows 0\.8\.14 again/);
+});
+
+test("the kit's own safe install, as every agent's: a flagged version says how to allow it, and --allow-unsafe allows it", async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  rmSync(unsafeFile(), { force: true });
+  writeFileSync(unsafeFile(), JSON.stringify({ '0.8.14': { version: '0.8.14', from: '0.8.13', why: 'its page stopped answering', at: '2026-10-11T12:00:00Z', kept: null } }));
+  const refused = setup();
+  const { allowHint: _, ...plain } = { ...refused.d, allowHint: undefined };
+  assert.equal(await kit.safeInstall({}, plain), 3);
+  assert.match(refused.said[0], /until it is allowed: install it again with --allow-unsafe .*A newer version installs as usual/);
+  const allowed = setup();
+  assert.equal(await kit.safeInstall({ allowUnsafe: true }, allowed.d), 0, allowed.said.join('\n'));
+  assert.match(allowed.said[0], /0\.8\.14 is allowed again, as asked/);
+  assert.equal(versionIn(allowed.app), '0.8.14');
+  assert.deepEqual(loadUnsafe(), {});
 });

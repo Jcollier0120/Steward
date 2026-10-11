@@ -34,7 +34,7 @@ import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts'
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
-import { loadTending, tend, type OpenAgent } from './tend.ts';
+import { loadTending, tend, type OpenAgent, type StartManor } from './tend.ts';
 import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
@@ -291,7 +291,7 @@ export interface StageOptions {
    * Stands in for Manor in the round's look at the staff's pages (tend.ts): its page, its /api/state and its Open. Under
    * node --test the staff are looked at only when this is given, so a test never opens a real agent.
    */
-  tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent };
+  tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent; startManor?: StartManor; wait?: (ms: number) => Promise<void> };
   /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
   scm?: ScmLook | null;
   /**
@@ -320,7 +320,7 @@ async function tendRound(settings: Settings, o: StageOptions, log: (line: string
   if (process.env.NODE_TEST_CONTEXT && !o.tend) return [];
   const manorUrl = o.tend?.manorUrl ?? settings.alarms.manorUrl;
   if (!manorUrl) return [];
-  return tend({ manorUrl, getJson: o.tend?.getJson ?? getJson, open: o.tend?.open, now: o.now, log });
+  return tend({ manorUrl, getJson: o.tend?.getJson ?? getJson, open: o.tend?.open, startManor: o.tend?.startManor, wait: o.tend?.wait, now: o.now, log });
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
