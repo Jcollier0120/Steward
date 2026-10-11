@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { APP, appRoot, dataDir } from '../app.ts';
+import { APP, appRoot } from '../app.ts';
 import { developer } from './developer.ts';
 import { duty } from './duty.ts';
 import { trialEnded, trialEndedNote } from './license-check.ts';
@@ -9,6 +9,7 @@ import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
 import { ago, CSS, esc, lookCss, pillOf, SETTLING_SVG, settlingText } from './page.ts';
+import { demoAnswer, shownDataDir } from './demo.ts';
 import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.ts';
 import { firstRoundNow, roundTimes } from './schedule.ts';
 import type { Handler } from './server.ts';
@@ -108,7 +109,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     themeKey: `${APP.id}:theme`,
     developer: dev,
     work: workSection({ developer: dev }),
-    dataDir: dev ? dataDir : '',
+    dataDir: dev ? shownDataDir() : '',
     onboarding,
     needs,
   };
@@ -126,9 +127,12 @@ export const scriptJson = (v: unknown) =>
 
 /**
  * The page's HTML: page.ts's head (the manor's theme on <html> at first paint, the themes, the kit's CSS, the scene's
- * colour), the first data as JSON, and the bundle. `data` is what /api/page answers: { shell, body }.
+ * colour), the first data as JSON, and the bundle. `data` is what /api/page answers: { shell, body }. In demo mode
+ * (demo.ts), with the demo folder's api/page.json laid over it, as /api/page is.
  */
 export function reactPage(o: { token: string; data: { shell: PageShell; body: unknown } }): string {
+  const made = demoAnswer('/api/page');
+  if (made && typeof made === 'object' && !Array.isArray(made)) o = { ...o, data: { ...o.data, ...(made as object) } };
   const look = lookFor(APP.id);
   const m = manorLink();
   const htmlTheme = m ? `${m.theme === 'system' ? '' : ` data-theme="${esc(m.theme)}"`} data-manor="${esc(m.name)}" data-manor-url="${esc(m.url)}"` : '';

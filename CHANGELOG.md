@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.16
+
+**It hands out the kit 2.53.0, with a demo mode for each agent's page.**
+
+### What's new
+
+- The kit 2.53.0's demo mode: an agent's page can be shown with made-up data, so Manor can show a picture of each employee at work in the hire popup and on its role's page, without anyone's own files or mail in it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.15
 
 **A PR you labelled owner-done is merged even while it still carries owner-first.**
