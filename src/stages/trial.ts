@@ -8,6 +8,7 @@ import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump
 import { checkoutOf, glanceOf, mapLimit, networkFailure, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
+import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
 
 /**
@@ -39,7 +40,19 @@ import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
  * version lines and changelogs) keeps the trial's verdict, tried again only for its agents whose branch moved. And each
  * agent that passes is kept with the commit it was bumped from: its rollout bump from that same commit, once the kit is
  * released as tried, isn't checked a second time (trialpass.ts).
+ *
+ * In slices, so the round isn't held for the whole trial: each round tries a few agents (Settings' parallel at a time)
+ * for at most TRIAL_SLICE_MS, keeps what it found (KitTrial's `pending`: the ones still to try), and goes on with the
+ * rest of its work; the PR waits meanwhile (TRIAL_GOING, a brief wait: the next round comes sooner). And each agent is
+ * tried only as far as the kit changes it (kitreach.ts): one none of whose kit files change isn't tried at all, and one
+ * whose files change runs only the tests they reach; its rollout's bump runs them all.
  */
+
+/** How long a round tries agents for before it goes on with the rest of its work (the agents in flight finish). */
+export const TRIAL_SLICE_MS = 8 * 60_000;
+
+/** How the hold of a PR whose kit is still being tried begins (merge.ts's waitsBriefly). */
+export const TRIAL_GOING = 'its kit is being tried on the agents';
 
 export const KIT_BREAKS_LABEL = 'kit:breaks-agents';
 export { kitTrialsFile };
@@ -55,6 +68,10 @@ export interface KitTrial extends TrialPasses {
   failed: { id: string; name: string; message: string; main?: string | null }[];
   /** How many were tried, and passed. */
   passed: number;
+  /** The employees (by id) still to try, while the trial goes on over several rounds; gone once all are tried. */
+  pending?: string[];
+  /** How many weren't tried: nothing they take from the kit changes (kitreach.ts). */
+  untouched?: number;
   at: string;
   /** Whether its comment on the PR was left. */
   commented?: boolean;
@@ -127,14 +144,21 @@ export const pairComment = (t: KitTrial, sha: string): string =>
   `The Steward tried kit ${t.kit}, as this PR has it at ${sha}, on every agent: ${t.failed.map((f) => f.name).join(', ')} ${t.failed.length === 1 ? 'fails' : 'fail'} its checks with it on main, but ${pairWords(t)}. So this PR merges and the kit is released; then ${t.failed.length === 1 ? 'that PR is' : 'those PRs are'} tested with the released kit and merged.`;
 
 /** Each employee tried with the kit at the PR's head, its worktree and branch removed after. */
-async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string): Promise<EmployeeResult[]> {
+async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string, reachFrom?: { repo: string; head: string }): Promise<EmployeeResult[]> {
   // The PR's own kit changelog, so each trial bump writes the entry its real bump will (its tests read it too).
   const changelogFile = path.join(dir, 'kit', 'CHANGELOG.md');
   const changelog = existsSync(changelogFile) ? readFileSync(changelogFile, 'utf8') : null;
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     let r: EmployeeResult;
     try {
-      r = await bumpOne(ctx, e, { kit, kitFrom: path.join(dir, 'kit'), tool: path.join(dir, 'tools', 'kit.ts'), trial: true, changelog });
+      r = await bumpOne(ctx, e, {
+        kit,
+        kitFrom: path.join(dir, 'kit'),
+        tool: path.join(dir, 'tools', 'kit.ts'),
+        trial: true,
+        changelog,
+        ...(reachFrom ? { reach: (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => kitReach(ctx, { ...reachFrom, pin, toolChanged }) } : {}),
+      });
     } catch (err) {
       r = result(e, 'failed', (err as Error).message);
     }
@@ -169,7 +193,7 @@ async function withKitTree<T>(ctx: Ctx, steward: Employee, pr: PrInfo, use: (dir
 
 /** `employees` tried with the kit at the PR's head, from the Steward's own worktree of it, removed after. */
 const tryAtHead = (ctx: Ctx, steward: Employee, pr: PrInfo, kit: string, employees: Employee[]): Promise<EmployeeResult[]> =>
-  withKitTree(ctx, steward, pr, (dir) => tryEach(ctx, employees, kit, dir));
+  withKitTree(ctx, steward, pr, (dir) => tryEach(ctx, employees, kit, dir, { repo: checkoutOf(steward), head: pr.headOid! }));
 
 /**
  * An employee's open PRs whose kit.json pins exactly `kit` at their head: to its branch, from the repository itself,
@@ -275,8 +299,46 @@ async function pairUp(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial): Pro
 const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
   results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null }));
 
-/** Each employee that passed, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). */
-const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base).map((r) => [r.id, r.base!]));
+/**
+ * Each employee that passed with all its checks, by id: the commit of its branch it was bumped from (TrialPasses'
+ * `mains`). One that ran only some of them (`partial`) isn't: its rollout's bump runs them all.
+ */
+const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base && !r.partial).map((r) => [r.id, r.base!]));
+
+/**
+ * A slice of a trial (KitTrial's `pending`): its agents tried a few at a time, each only as far as the kit changes it,
+ * until none are left or `sliceMs` has passed; `save` after each few. A try the network cut short leaves its agent to
+ * try again, and says so (the slice ends there).
+ */
+async function trySlice(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial, sliceMs: number, save: () => void): Promise<string | null> {
+  const repo = checkoutOf(steward);
+  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  const t0 = Date.now();
+  return withKitTree(ctx, steward, pr, async (dir) => {
+    while (t.pending?.length) {
+      const ids = t.pending.slice(0, Math.max(1, ctx.settings.parallel));
+      const employees = ids.map((id) => ctx.settings.employees.find((e) => e.id === id)).filter((e): e is Employee => !!e && e.usesKit && existsSync(checkoutOf(e)));
+      const results = await tryEach(ctx, employees, t.kit, dir, { repo, head: pr.headOid! });
+      let cut: string | null = null;
+      const counted: EmployeeResult[] = [];
+      for (const r of results) {
+        if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) cut ??= `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
+        else counted.push(r);
+      }
+      // Tried, or gone from the staff meanwhile: no longer pending.
+      const settled = new Set([...ids.filter((id) => !employees.some((e) => e.id === id)), ...counted.map((r) => r.id)]);
+      t.pending = t.pending.filter((id) => !settled.has(id));
+      t.failed = [...t.failed, ...failuresOf(counted)];
+      t.passed += counted.filter((r) => r.outcome === 'done').length;
+      t.untouched = (t.untouched ?? 0) + counted.filter((r) => r.outcome === 'skipped' && r.message.includes(': not tried, ')).length;
+      t.mains = { ...t.mains, ...mainsOf(counted) };
+      save();
+      if (cut) return cut;
+      if (Date.now() - t0 >= sliceMs) break;
+    }
+    return null;
+  });
+}
 
 /** What a trial at this head fills the agents with: the git tree of its kit\, and the blob of its tools/kit.ts (null for none). */
 async function triedAt(ctx: Ctx, repo: string, head: string): Promise<{ tree?: string; tool?: string | null }> {
@@ -314,7 +376,7 @@ const sameFailures = (a: KitTrial['failed'], b: KitTrial['failed']) => a.length 
  * passing, each one failing moving with it in a PR of its own (pairUp), or labelled KIT_BREAKS_LABEL). `steward`: the
  * Steward as the merge stage's employee. `o.note`: given the pairs' words when they are why it merges, for its line.
  */
-export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: { note?: (words: string) => void } = {}): Promise<string | null> {
+export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: { note?: (words: string) => void; sliceMs?: number; going?: () => void } = {}): Promise<string | null> {
   if (steward.id !== APP.id || !raisesKit(pr)) return null;
   if (!pr.headOid) return "GitHub didn't say its head commit, so its kit wasn't tried on the agents";
   const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
@@ -334,16 +396,30 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       ctx.log(`[${APP.id}] #${pr.number}: kit ${kit} was tried at ${before[0].split('@')[1].slice(0, 7)}, and its kit and tools/kit.ts are the same at ${pr.headOid.slice(0, 7)}: not tried again`);
       t = { ...before[1] };
     } else {
-      fresh = true;
       const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
-      ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges`);
-      const results = await tryAtHead(ctx, steward, pr, kit, employees);
-      // Refused (no kit.json on its main, say) isn't the kit's doing, and isn't held against it.
-      const failed = results.filter((r) => r.outcome === 'failed');
-      // One the network cut short is no verdict on the kit: not kept, so the next round tries it again.
-      for (const r of failed) if (await networkFailure(ctx, r.message)) return `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
-      t = { kit, failed: failuresOf(results), passed: results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...tried, mains: mainsOf(results) };
+      ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, a few each round`);
+      t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id) };
     }
+  }
+  const save = () => {
+    kept[keyOf(pr)] = t;
+    writeJson(kitTrialsFile(), Object.fromEntries(Object.entries(kept).slice(-100)));
+  };
+  if (t.pending) {
+    // Still being tried: this round's slice, kept as it goes. Refused (no kit.json on its main, say) isn't the kit's
+    // doing, and isn't held against it; one the network cut short is no verdict on the kit, and is tried again.
+    const cut = await trySlice(ctx, steward, pr, t, o.sliceMs ?? TRIAL_SLICE_MS, save);
+    if (cut || t.pending.length) {
+      o.going?.();
+      if (cut) return cut;
+      const total = t.passed + t.failed.length + (t.untouched ?? 0) + t.pending.length;
+      const failing = t.failed.length ? `, ${t.failed.length} failing (${t.failed.map((f) => f.name).join(', ')})` : '';
+      return `${TRIAL_GOING}: ${total - t.pending.length} of ${total} so far${failing}; the rounds go on meanwhile`;
+    }
+    fresh = true;
+    delete t.pending;
+    t.at = new Date().toISOString();
+    ctx.log(`[${APP.id}] #${pr.number}: kit ${t.kit} tried on every agent: ${t.passed} passed, ${t.failed.length} failed, ${t.untouched ?? 0} not tried (nothing they take from the kit changes)`);
   }
   if (!fresh && t.failed.length) {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
@@ -388,8 +464,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     if (r.code === 0) t.pairsSaid = pairWords(t);
   }
   // Kept by head commit; the oldest go once there are more than 100.
-  kept[keyOf(pr)] = t;
-  writeJson(kitTrialsFile(), Object.fromEntries(Object.entries(kept).slice(-100)));
+  save();
   if (!t.failed.length) return null;
   if (!standing.length) {
     const words = pairWords(t);
