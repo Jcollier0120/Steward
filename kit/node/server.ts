@@ -11,6 +11,7 @@ import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
 import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpec } from './settings-kit.ts';
+import { demoAnswer, demoDir, DEMO_NO } from './demo.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
 
@@ -22,6 +23,8 @@ import { repair, repairKinds } from './repair.ts';
  *   server.json, for the CLI's stop), from a page of its own origin, so no other site can press a button.
  * - With `settings`, it serves the Settings panel's API (settings-kit.ts): GET and POST /api/settings,
  *   the POST guarded like every other and read with a small body limit.
+ * - In demo mode (KIT_DEMO, demo.ts), its GETs are answered from the demo folder's made-up data where it has them, its
+ *   ping says `demo: true`, and every button is refused: nothing changes.
  */
 
 export interface Request {
@@ -209,14 +212,26 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
       if (!hostAllowed(hosts, req.headers.host)) return send({ json: { error: 'wrong host' }, status: 421 });
       const url = new URL(req.url ?? '/', `http://${HOST_NAME}:${opts.port}`);
       if (req.method === 'GET' || req.method === 'HEAD') {
+        const demo = demoDir();
+        const made = demo ? demoAnswer(url.pathname, demo) : undefined;
         const h = get[url.pathname];
-        if (!h) return send({ json: { error: 'not found' }, status: 404 });
-        return send(await h({ path: url.pathname, query: url.searchParams, body: {}, token }));
+        if (!h) return made === undefined ? send({ json: { error: 'not found' }, status: 404 }) : send({ json: made });
+        const r = await h({ path: url.pathname, query: url.searchParams, body: {}, token });
+        if (!demo) return send(r);
+        // The demo's made-up answer laid over its own (the page's frame from the kit, its findings made up), and its ping
+        // said to be a demo's.
+        const own = 'json' in r && r.json && typeof r.json === 'object' && !Array.isArray(r.json) ? (r.json as object) : null;
+        const over = made && typeof made === 'object' && !Array.isArray(made) ? made : null;
+        if (url.pathname === '/api/ping' && own) return send({ json: { ...own, ...over, demo: true } });
+        if (made === undefined) return send(r);
+        return send({ json: own && over ? { ...own, ...over } : made });
       }
       if (req.method === 'POST') {
         if (!postAllowed(hosts, req.headers.origin, req.headers['x-token'], token)) return send({ json: { error: 'forbidden' }, status: 403 });
         const h = post[url.pathname];
         if (!h) return send({ json: { error: 'not found' }, status: 404 });
+        // A demo changes nothing; it can still be stopped.
+        if (demoDir() && url.pathname !== '/api/stop') return send({ json: { error: DEMO_NO }, status: 403 });
         const body = await readBody(req, url.pathname === '/api/settings' ? SETTINGS_BODY_LIMIT : 1_000_000);
         return send(await h({ path: url.pathname, query: url.searchParams, body, token }));
       }
