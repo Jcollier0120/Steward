@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.17
+
+**Each repository's pull requests sit under a heading of their own on the Steward's page.**
+
+### What changed
+
+- In Your repositories, a repository's open pull requests now sit under a small heading, in the words its host uses: Pull requests on GitHub, Azure DevOps, Gitea and Bitbucket, Merge requests on GitLab.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.15
 
 **A PR you labelled owner-done is merged even while it still carries owner-first.**

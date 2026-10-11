@@ -11,7 +11,7 @@ import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { loadSettings, SETTINGS_SPEC } from './settings.ts';
-import type { Staff } from './stages/staff.ts';
+import type { Staff, StaffRow } from './stages/staff.ts';
 import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
 import { loadTending } from './tend.ts';
 import type { StaffView, StewardView } from './web/types.ts';
@@ -23,7 +23,7 @@ import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
-import { githubReady, loadScm } from './scm.ts';
+import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
@@ -78,9 +78,12 @@ export function askOf(body: any): StageAsk {
   return { employees, kit, ...(body?.hire === true ? { hire: true } : {}) };
 }
 
-/** The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words. */
-export const staffView = (s: Staff | null): StaffView | null =>
-  s && { ...s, rows: s.rows.map((r) => ({ ...r, prs: r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
+/**
+ * The staff's table as the page shows it: each PR with what its steward block asks for once merged, in words, and each
+ * repository with how it is worked with (scm.ts's hostOf), so its PRs go by their host's name.
+ */
+export const staffView = (s: Staff | null, host?: (r: StaffRow) => Host): StaffView | null =>
+  s && { ...s, rows: s.rows.map((r) => ({ ...r, ...(host ? { host: host(r) } : {}), prs:r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** /api/page's body with Developer options off, off the maker's laptop (maker.ts): the plain line, the rest empty. */
 export const offView = (): StewardView => ({ off: DEVELOPER_ONLY, staff: null, last: null, running: null, refreshing: false, team: [], round: { on: false, minutes: 0, onDuty: false, lastRunAt: null } });
@@ -266,7 +269,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff()), conflicts: loadConflicts(), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    const scm = loadScm();
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
     return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
   };
 
