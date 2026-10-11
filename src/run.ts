@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -131,8 +131,9 @@ export const run: Runner = (cmd, args, opts = {}) => {
     const child = execFile(
       file,
       argv,
-      { cwd: opts.cwd, env, windowsHide: true, detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd), timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
-      (e: any, stdout, stderr) => {
+      // execFile hands its options to spawn, detached among them, though its type doesn't name it.
+      { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
+      (e: any, stdout: string, stderr: string) => {
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
