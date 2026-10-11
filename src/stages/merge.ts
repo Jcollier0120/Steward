@@ -468,8 +468,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     turnAfter.set(pr.number, below[0]);
     return false;
   });
-  // The kit's first, then those that change no version, then by version.
-  const rank = (pr: PrInfo) => (raisesKit(pr) ? 0 : pending.has(pr.number) ? 2 : 1);
+  // The kit's first, then those that change no version, then by version; but one below a kit PR's version goes before
+  // it, so it neither waits for the kit's trial on every agent nor is left below the kit's version and caught up
+  // (Steward#171 waited for #170's trial). The kit PR is caught up after it, which keeps its trial (trial.ts).
+  const kitVersions = merge.filter(raisesKit).map((p) => pending.get(p.number)).filter((v): v is string => !!v);
+  const belowKit = (pr: PrInfo) => !raisesKit(pr) && pending.has(pr.number) && kitVersions.some((k) => compareVersions(pending.get(pr.number)!, k) < 0);
+  const rank = (pr: PrInfo) => (belowKit(pr) ? -1 : raisesKit(pr) ? 0 : pending.has(pr.number) ? 2 : 1);
   merge.sort((a, b) => rank(a) - rank(b) || (pending.has(a.number) && pending.has(b.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);

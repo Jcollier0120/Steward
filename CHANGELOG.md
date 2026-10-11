@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.19
+
+**A new kit reaches your agents sooner: each agent is tested with it once, not twice.**
+
+### What changed
+
+- Before a new kit is released, the Steward tries it on every agent and runs their checks. Once it's released, the update it opens for each agent no longer runs those same checks again where nothing has changed since: the agent's code is where it was when the kit was tried, and the kit and its fill tool are the ones that were tried. An agent that changed since is checked as before.
+- A pull request that brings a new kit, caught up with its branch afterwards without changing the kit, keeps its trial: the agents aren't tried again for a version-number change.
+- A pull request with a lower version than a new kit's no longer waits for that kit's trial on every agent: it merges first, and the kit's pull request follows it. Before, the lower one waited the whole trial, then had to be renumbered.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.15
 
 **A PR you labelled owner-done is merged even while it still carries owner-first.**

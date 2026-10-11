@@ -12,7 +12,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit } = await import('../src/stages/trial.ts');
 const { writeJson } = await import('../src/kit/store.ts');
-const { trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
+const { bumpOne, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
@@ -147,4 +147,69 @@ test('a failure kept before its commit was is tried again once; one whose commit
   const unknown = ctx();
   assert.match((await kitTrialHold(unknown.c, me, pr())) ?? '', /\(Good\)/);
   assert.equal(unknown.c.lines.length, 0);
+});
+
+test("a new head of the PR whose kit and tools/kit.ts are the same keeps the trial's verdict: nothing is tried again", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const first = ctx();
+  first.c.settings.employees = [good];
+  assert.equal(await kitTrialHold(first.c, me, pr()), null, first.c.lines.join('\n'));
+  // Caught up with its branch: a new head that changes no kit.
+  writeFileSync(path.join(steward.checkout, 'README.md'), 'Steward, caught up\n');
+  sh(steward.checkout, 'add', '-A');
+  sh(steward.checkout, 'commit', '--quiet', '-m', 'Caught up');
+  sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+  const caught = sh(steward.checkout, 'rev-parse', 'HEAD');
+  const again = ctx();
+  again.c.settings.employees = [good];
+  assert.equal(await kitTrialHold(again.c, me, pr({ headOid: caught })), null, again.c.lines.join('\n'));
+  assert.ok(!again.c.lines.some((l) => l.includes('trial:')), again.c.lines.join('\n'));
+  assert.match(again.c.lines.join('\n'), /kit 1\.0\.1 was tried at [0-9a-f]{7}, and its kit and tools\/kit\.ts are the same at [0-9a-f]{7}: not tried again/);
+  const kept = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'));
+  assert.deepEqual(kept[`7@${caught}`].mains, kept[`7@${head}`].mains);
+  sh(steward.checkout, 'reset', '--quiet', '--hard', head);
+  sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+});
+
+test("the rollout's bump of an agent the trial passed, from the same commit and with the kit as released, doesn't run its checks again; once its branch moved, it does", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const trial = ctx();
+  trial.c.settings.employees = [good, me];
+  assert.equal(await kitTrialHold(trial.c, me, pr()), null, trial.c.lines.join('\n'));
+  const kept = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`];
+  assert.deepEqual(kept.mains, { good: sh(good.checkout, 'rev-parse', 'origin/main') }, 'the commit each passing agent was bumped from');
+  assert.equal(kept.tree, sh(steward.checkout, 'rev-parse', `${head}:kit`));
+
+  // The PR merged and the kit released: kit-v1.0.1 at its head.
+  sh(steward.checkout, 'tag', '-f', 'kit-v1.0.1', head);
+  sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'refs/tags/kit-v1.0.1');
+  const tool = path.join(steward.checkout, 'tools', 'kit.ts');
+  const rollout = () => {
+    const r = runner((a) => (a[0] === 'release' && a[1] === 'list' ? ok([]) : a[0] === 'pr' && a[1] === 'list' ? ok([]) : undefined));
+    return ctxFor({ employees: [good, me], workRoot: path.join(tmp, 'work'), run: r.run, released: ['1.0.1'], neutralDir: tmp });
+  };
+  const ran = (lines: string[]) => lines.filter((l) => /: (ok|exit \d+) \(\d+ s\)$/.test(l));
+  const c = rollout();
+  const res = await bumpOne(c, good, { kit: '1.0.1', tool });
+  assert.equal(res.outcome, 'done', `${res.message}\n${c.lines.join('\n')}`);
+  assert.match(res.message, /checks passed in the kit's trial \(kit 1\.0\.1's trial passed it from [0-9a-f]{7}, in #7\), not run again/);
+  assert.deepEqual(ran(c.lines), [], 'no check was run');
+  assert.match(sh(good.checkout, 'log', '-1', '--format=%b', 'steward/kit-1.0.1'), /passed in the kit's trial from the same commit/);
+
+  // Another tools/kit.ts handed out than the one tried: run.
+  const other = path.join(tmp, 'other-kit.ts');
+  writeFileSync(other, `${readFileSync(tool, 'utf8')}\n// changed\n`);
+  const c2 = rollout();
+  await bumpOne(c2, good, { kit: '1.0.1', tool: other });
+  assert.ok(ran(c2.lines).length > 0, c2.lines.join('\n'));
+
+  // Its branch moved since the trial: run.
+  writeFileSync(path.join(good.checkout, 'README.md'), 'Good, moved on\n');
+  sh(good.checkout, 'add', '-A');
+  sh(good.checkout, 'commit', '--quiet', '-m', 'Moved on');
+  sh(good.checkout, 'push', '--quiet', 'origin', 'main');
+  const c3 = rollout();
+  const moved = await bumpOne(c3, good, { kit: '1.0.1', tool });
+  assert.ok(!moved.message.includes('not run again'), moved.message);
+  assert.ok(ran(c3.lines).length > 0, c3.lines.join('\n'));
 });

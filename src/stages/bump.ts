@@ -13,6 +13,7 @@ import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, r
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { trialPassOf } from './trialpass.ts';
 
 /**
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
@@ -301,25 +302,30 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // A failure is tried once more, as a PR's checks are here (prtest.ts): a round bumps several employees at once, and a
   // test that keeps time can fail under that load and pass alone. Failing twice is the bump's failure.
   const env: Record<string, string> = o.kitFrom ?{ STEWARD_KIT: path.resolve(o.kitFrom) } : {};
-  const first = await runChecks(ctx, e, dir, { env, say });
+  // The kit's trial passed it from this very commit, with the kit as released and the same tools/kit.ts (trialpass.ts):
+  // the same checks on the same files but for the version, so they aren't run a second time.
+  const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
+  if (tried) say(`its checks not run again: ${tried}`);
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say });
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say });
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
   if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit });
-  const secondTry = first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
+  const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));
   const toolLine = toolChanged ? ` ${TOOL} is the Steward's.` : '';
   const what = fold
     ? `kit.json pins the Steward's kit ${o.kit} (this PR, #${fold.number}, brought ${pin.kit}: the newer kit goes onto it rather than a PR of its own); the version stays ${next}, and ${CHANGELOG}'s entry for it covers every kit since ${from}.`
     : `kit.json pins the Steward's kit ${o.kit} (it pinned ${pin.kit}); the version is ${next} in ${e.versionFiles.join(', ')}, and ${CHANGELOG} has its entry.`;
-  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
+  await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${next}: the Steward's kit ${o.kit}`, '-m', `${what}${toolLine} Made by steward bump.${tried ? ` Its checks passed in the kit's trial from the same commit (${tried}), so they weren't run again.` : first ? ` Its checks passed on a second try; the first failed: ${first}.` : ''}`);
   const full = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
   const commit = full.slice(0, 7);
-  // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit tree.
-  if (!o.kitFrom) recordTested(e.id, { commit: full, stage: 'bump', branch, version: next });
+  // Passed with the kit's release, as anyone can fetch it: the Surveyor's GET /api/tested (tested.ts). Not a trial's kit
+  // tree, nor one whose checks the trial ran (nothing ran at this commit).
+  if (!o.kitFrom && !tried) recordTested(e.id, { commit: full, stage: 'bump', branch, version: next });
   const back =compareVersions(o.kit, pin.kit) < 0 ? ' (a step back to an older kit)' : '';
   return result(e, 'done', `${next} on ${branch} (${commit}): kit ${pin.kit} → ${o.kit}${back}${fold ? `, onto its open PR #${fold.number}` : ''}${toolChanged ? `, ${TOOL} updated` : ''}, checks passed${secondTry}${o.kitFrom ? ` with the kit from ${o.kitFrom}` : ''}`, { version: next, commit });
 }
