@@ -16,6 +16,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Merge trains are on unless you switched them off in Settings.
 
+## 0.35.17
+
+**Each repository's pull requests sit under a heading of their own on the Steward's page.**
+
+### What changed
+
+- In Your repositories, a repository's open pull requests now sit under a small heading, in the words its host uses: Pull requests on GitHub, Azure DevOps, Gitea and Bitbucket, Merge requests on GitLab.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.16
 
 **It hands out the kit 2.53.0, with a demo mode for each agent's page.**
