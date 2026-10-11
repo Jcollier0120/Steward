@@ -62,7 +62,7 @@ test("a round merges the team's ready PR to the Steward once its checks pass her
   assert.ok(!merge.includes('--delete-branch'), "a team member's branch stays");
 });
 
-test("a PR that raises the kit merges first, ahead of a lower version that doesn't", async () => {
+test("a PR that raises the kit merges in the same round as a lower version that doesn't, after it: the lower one doesn't wait for the kit's trial", async () => {
   const dir = path.join(home, 'steward-kit-first');
   const { checkout } = fakeEmployee(dir, { version: '0.8.13', kit: null });
   // Two PRs: #48 sets 0.8.14 and leaves the kit alone; #49 sets 0.8.15 and raises the kit.
@@ -97,5 +97,5 @@ test("a PR that raises the kit merges first, ahead of a lower version that doesn
   const ctx = ctxFor({ employees: [], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
   const out = await mergeOne(ctx, stewardEmployee(ctx.settings, checkout), { yes: true, team: true });
   assert.equal(out.outcome, 'done', `${out.message}\n${ctx.lines.join('\n')}`);
-  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge').map((a) => a[2]), ['49', '48'], 'the kit first, though its version is the higher');
+  assert.deepEqual(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'merge').map((a) => a[2]), ['48', '49'], 'the lower version first, then the kit, both before any agent');
 });
