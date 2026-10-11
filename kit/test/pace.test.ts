@@ -6,7 +6,8 @@ import { after, test } from 'node:test';
 
 // The manor's pace (pace.ts, kit 2.43.3): first rounds one at a time, below-normal priority, and the page settling in.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-pace-'));
-after(() => rmSync(home, { recursive: true, force: true }));
+// Retried: the gentle test's DLL stays loaded until its PowerShell worker has gone.
+after(() => rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
 process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
@@ -101,4 +102,44 @@ test('the page while it settles in: the pill, and the banner only where its firs
   assert.equal(settlingText('Reeve', reeve, null), null);
   assert.match(lookFor('heiward').firstRound!, /every drive/);
   assert.match(FIRST_ROUND_WAITING, /one at a time/);
+});
+
+// Heiward's background pace for every agent (gentle.ts, kit 2.50.0): efficiency mode, very low disk priority, a cap.
+const { gentleCap, gentleDll, gentleScript } = await import('./fixture/src/kit/gentle.ts');
+
+test('the processor cap at a gentle pace: a quarter, and two processors at most', () => {
+  assert.equal(gentleCap(4), 2500, '4 processors: a quarter (one)');
+  assert.equal(gentleCap(8), 2500, '8: a quarter (two)');
+  assert.equal(gentleCap(18), 1111, '18: two of them');
+  assert.equal(gentleCap(1), 2500);
+  assert.match(path.basename(gentleDll('a')), /^gentle-[0-9a-f]{12}\.dll$/);
+  assert.equal(path.basename(path.dirname(gentleDll('a'))), 'kit');
+  assert.notEqual(gentleDll('a'), gentleDll('b'), 'a new helper is a new DLL: an old one loaded by a running agent is never overwritten');
+});
+
+test('the gentle script: compiles the helper only when asked to, to a name of its own, then sets the process', () => {
+  const only = gentleScript(42, true, 1111, 'C:/x/gentle.dll', null);
+  assert.doesNotMatch(only, /Add-Type -TypeDefinition/);
+  assert.match(only, /\[KitGentle\]::Set\(42, \$true, 1111\)/);
+  const first = gentleScript(42, false, 1111, "C:/o'k/gentle.dll", "class A { // can't }");
+  assert.match(first, /Add-Type -TypeDefinition 'class A \{ \/\/ can''t \}' -OutputAssembly \$tmp/);
+  assert.ok(first.includes("'C:/o''k/gentle.dll'"), 'paths quoted');
+  assert.match(first, /\[KitGentle\]::Set\(42, \$false, 1111\)/);
+});
+
+test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take', { skip: process.platform !== 'win32' }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { readFileSync: read } = await import('node:fs');
+  const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
+  const source = read(new URL('./fixture/src/kit/gentle.cs', import.meta.url), 'utf8');
+  const dll = path.join(home, 'gentle-test.dll');
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true });
+  try {
+    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, source), { timeoutMs: 120_000 })).trim(), 'eco io cap');
+    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, null))).trim(), 'eco io cap', 'again: the same job');
+    assert.equal((await powershell(gentleScript(child.pid!, false, 2500, dll, null))).trim(), 'eco io cap', 'lifted');
+  } finally {
+    child.kill();
+    stopPowerShellWorker();
+  }
 });

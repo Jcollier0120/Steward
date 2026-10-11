@@ -4,7 +4,8 @@ import { trialEnded } from './license-check.ts';
 import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { FIRST_ROUND_WAITING, inFirstRoundTurn, pace, setPriorityFor } from './pace.ts';
+import { paceProcess } from './gentle.ts';
+import { FIRST_ROUND_WAITING, inFirstRoundTurn, pace } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
@@ -152,15 +153,19 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * Runs `job` soon after start and then every `everyMs` after the last run ended, never two at once.
  * The agent works only while it is employed (running): there's no Task Scheduler entry to leave behind.
  *
- * Staggered: Manor may start every agent at once, so the first round comes 30 s to 3 min after start
- * (random), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
+ * Staggered: Manor may start every agent at once, so the first round comes a while after start (random: 2 to 15
+ * minutes at a gentle pace, kit 2.50.0, so a PC that has just started isn't ground down by every agent at once; 30 s
+ * to 3 min at a full pace), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
  *
- * At the manor's pace (pace.ts, kit 2.43.3; gentle unless Manor's Settings say full), a scheduled round runs at
- * below-normal priority, and a schedule's first round (none has gone through: round.json's wentThrough) waits its
+ * At the manor's pace (pace.ts, kit 2.43.3; gentle unless Manor's Settings say full), the agent runs gentle from
+ * the start, and a scheduled round too: below-normal priority, and Heiward's efficiency mode, very low disk priority
+ * and processor cap (gentle.ts, kit 2.50.0); a round someone asked for lifts them while it runs. A schedule's first
+ * round (none has gone through: round.json's wentThrough) waits its
  * turn in one line with the other agents' first rounds, one at a time. While it waits, its state says so (waiting,
  * firstRound), and the page shows the agent settling into the manor. A round the person asks for never waits.
  *
- * Off duty (duty.ts), scheduled rounds are skipped; runNow() still runs one.
+ * Off duty (duty.ts), scheduled rounds are skipped; runNow() still runs one. runSoon() is for the agent's own
+ * reasons to start a round early (something changed): a scheduled round, at the pace, now.
  *
  * `everyMs` may be a function, read each time a wait is set: then an interval changed on the Settings
  * panel takes effect at once, with reschedule() setting the wait under way to the new interval.
@@ -252,7 +257,7 @@ export function every(
     let limitTimer: NodeJS.Timeout | undefined;
     // The manor's pace (pace.ts): a scheduled round at below-normal priority, and an agent's first in its turn.
     const p = pace();
-    setPriorityFor(p, asked);
+    void paceProcess(p, asked);
     const name = opts.name ?? 'round';
     // The heavy first round, asked for or not; only a scheduled one waits its turn.
     const isFirst = !firstRoundDone(name);
@@ -307,6 +312,8 @@ export function every(
       lastOffline = offline;
       running = false;
       startedAt = null;
+      // Someone's round is over: back to the pace.
+      if (asked) void paceProcess(pace());
       const ended = Date.now();
       lastEnded = ended;
       // A round still running when stop() was called must not set up the next one.
@@ -324,7 +331,9 @@ export function every(
       });
     }
   };
-  waitFor(opts.firstDelayMs ?? 30_000 + Math.random() * 150_000);
+  const startPace = pace();
+  void paceProcess(startPace);
+  waitFor(opts.firstDelayMs ?? (startPace === 'gentle' ? 120_000 + Math.random() * 780_000 : 30_000 + Math.random() * 150_000));
 
   const state = (): RoundState => ({
     name: opts.name ?? 'round',
@@ -345,6 +354,12 @@ export function every(
     runNow(): boolean {
       if (running || trialEnded() || needsSettings()) return false;
       void tick(true);
+      return true;
+    },
+    /** Starts a scheduled round now, at the pace (the agent's own reason, not the person's); false as runNow() and off duty. */
+    runSoon(): boolean {
+      if (running || stopped || trialEnded() || needsSettings() || !duty().onDuty) return false;
+      void tick(false);
       return true;
     },
     /**
