@@ -12,7 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
-const { demoAnswer, demoDir, DEMO_NO, isDemo } = await import('./fixture/src/kit/demo.ts');
+const { demoAnswer, demoDir, DEMO_NO, isDemo, when } = await import('./fixture/src/kit/demo.ts');
 const { isDeveloper } = await import('./fixture/src/kit/developer.ts');
 
 const demo = path.join(home, 'demo');
@@ -30,6 +30,9 @@ test('demo mode: only where KIT_DEMO says, the agent\'s own demo folder for 1', 
   assert.equal(demoAnswer('/api/none', demo), undefined);
   assert.equal(demoAnswer('/../secret', demo), undefined, 'nothing outside the demo folder');
   assert.equal(demoAnswer('/api/state', null), undefined);
+  assert.equal(when('@now-300', Date.parse('2026-10-11T12:00:00Z')), '2026-10-11T11:55:00.000Z', 'five minutes before the picture');
+  assert.equal(when('@now', 0), '1970-01-01T00:00:00.000Z');
+  assert.equal(when('now'), 'now');
 });
 
 test('demo mode: the made-up data laid over its own answers, the ping marked, the developer view off, every button refused', async () => {

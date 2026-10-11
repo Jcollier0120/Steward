@@ -35,5 +35,11 @@ export function demoAnswer(pathname: string, dir = demoDir()): unknown {
   if (!parts.length || !parts.every((p) => /^[\w.-]+$/.test(p) && p !== '..' && p !== '.')) return undefined;
   const file = `${path.join(dir, ...parts)}.json`;
   if (!existsSync(file)) return undefined;
-  return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+  return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''), (_k, v) => (typeof v === 'string' ? when(v) : v));
+}
+
+/** "@now", "@now-300" (five minutes ago), "@now+3600": the time then, so a picture says "5 min ago" whenever it's taken. */
+export function when(v: string, now = Date.now()): string {
+  const m = /^@now([+-]\d+)?$/.exec(v);
+  return m ? new Date(now + Number(m[1] ?? 0) * 1000).toISOString() : v;
 }

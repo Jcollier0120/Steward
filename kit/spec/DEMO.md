@@ -28,6 +28,7 @@ An agent whose page process starts background work of its own (a watcher, a firs
 ## The demo folder
 
 - `demo/api/<path>.json`: one file per GET the page makes that should show something. Copy the shape from the real answer, and make up every value: names like "Holiday photos", "Invoices 2026", "family-recipes"; no real person's name or email, no path from a real PC (use `C:\Users\Alex\...`).
-- `demo/hero.json` (optional): how Manor's capture takes the picture: `{ "path": "/#/findings", "wait": 1500 }`, the page's address (default `/`) and how long to let it settle after it loads, in milliseconds (default 1500).
+- A time as `"@now"`, `"@now-300"` (five minutes before) or `"@now+3600"` is filled in when it's read, so the page says "5 min ago" whenever the picture is taken.
+- `demo/hero.json` (optional): how Manor's capture takes the picture: `{ "path": "/#/findings", "wait": 1500 }`, the page's address (default `/`) and how long to let it settle after it loads, in milliseconds (default 1500). An agent whose page isn't served by `node src\cli.ts serve` adds `"command": ["<its command>", ...]`.
 
 Keep it small: the files ship with the agent's release, and the page should look as it does on a PC where the agent has been at work for a week.
