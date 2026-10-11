@@ -452,6 +452,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         const words = `merged ${t.merged.map((p) => `#${p.number}`).join(', ')} as one train (${t.note})`;
         return { ...result(e, 'done', words, { url: t.merged.at(-1)!.url }), merged: t.merged, held: [], did: [words], waits: [], lookAgain: true };
       }
+      // Pushed and waiting for GitHub's checks at the stack: the cars wait as one train, none merged alone meanwhile.
+      if (t.waiting) {
+        const words = `${cars.map((c) => `#${c.pr.number}`).join(', ')} wait as one train: ${t.note}`;
+        ctx.log(`[${e.id}] ${words}`);
+        return { ...result(e, 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: cars.map((c) => heldOf(c.pr, CHECKS_RUNNING)), did: [], waits: [words], lookAgain: false };
+      }
       ctx.log(`[${e.id}] no train for ${cars.map((c) => `#${c.pr.number}`).join(', ')}: ${t.note}`);
       if (t.tested) trainLine = [`didn't merge ${cars.map((c) => `#${c.pr.number}`).join(', ')} as one train: ${t.note}`];
     }
@@ -468,8 +474,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     turnAfter.set(pr.number, below[0]);
     return false;
   });
-  // The kit's first, then those that change no version, then by version.
-  const rank = (pr: PrInfo) => (raisesKit(pr) ? 0 : pending.has(pr.number) ? 2 : 1);
+  // The kit's first, then those that change no version, then by version; but one below a kit PR's version goes before
+  // it, so it neither waits for the kit's trial on every agent nor is left below the kit's version and caught up
+  // (Steward#171 waited for #170's trial). The kit PR is caught up after it, which keeps its trial (trial.ts).
+  const kitVersions = merge.filter(raisesKit).map((p) => pending.get(p.number)).filter((v): v is string => !!v);
+  const belowKit = (pr: PrInfo) => !raisesKit(pr) && pending.has(pr.number) && kitVersions.some((k) => compareVersions(pending.get(pr.number)!, k) < 0);
+  const rank = (pr: PrInfo) => (belowKit(pr) ? -1 : raisesKit(pr) ? 0 : pending.has(pr.number) ? 2 : 1);
   merge.sort((a, b) => rank(a) - rank(b) || (pending.has(a.number) && pending.has(b.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);

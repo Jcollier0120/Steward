@@ -10,7 +10,7 @@ import { runChecks } from './bump.ts';
 import { isChangelog, isKitPin, lockBeside, mergeChangelogs, mergeKitPins, resolveVersionConflicts, settledFiles, settleVersion } from './catchup.ts';
 import { checkoutOf, forgetGlance, workRootOf, type Ctx } from './common.ts';
 import { kitReleaseHold } from './prtest.ts';
-import type { PrInfo } from './staff.ts';
+import { checksOf, type PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
 import { isWrightPr } from './vouch.ts';
 import { ownerFirstHold } from '../review.ts';
@@ -23,7 +23,7 @@ import { hostFor } from '../hosts/index.ts';
  * new head.
  *
  * The cars are the queue's PRs from its lowest version up, while each can ride (canRide: the team's, from the repository
- * itself, ready, no checks on GitHub, no steps after merging, not the Wright's, not one that raises the kit, not one that
+ * itself, ready, no checks on GitHub failing, no steps after merging, not the Wright's, not one that raises the kit, not one that
  * waits for the owner first: review.ts's ownerFirstHold, not one written as changes/<version>.md, which merges alone
  * once stamped: stages/stamp.ts), each above
  * the one under it; the train stops at the first that can't, so a draft still holds its place. In a worktree of the
@@ -33,12 +33,15 @@ import { hostFor } from '../hosts/index.ts';
  *
  * The repository's checks then run once, at the top. Once they pass, the top is pushed to the top car's branch (a fast
  * forward: nothing of the PR's is rewritten) and that PR is merged, at that commit, the usual way: never a push to the
- * branch itself. Every car under it is in the branch then, and GitHub marks its PR merged; one it doesn't is closed with
+ * branch itself. Where the cars have checks on GitHub (a site's preview build, say), they run once more at the top, on
+ * the whole stack, and the train waits for them (TRAIN_CHECKS_MS) before it merges: one wait for the train, where one at a
+ * time each PR waited for its own after each catch-up. Still running then, the cars wait for them as one train, and the
+ * next round, finding the stack already on the top PR's branch and passed here, merges it once they pass. Every car under it is in the branch then, and GitHub marks its PR merged; one it doesn't is closed with
  * a comment saying which PR brought it in. Each car keeps its version and its changelog entry; the round's release is of
  * the top version.
  *
- * A train whose checks fail is kept (trains.json) so it isn't built again until something in it moves (the branch, a
- * car's head): the PRs merge one at a time meanwhile, as without trains.
+ * A train whose checks fail, here or on GitHub, is kept (trains.json) so it isn't built again until something in it moves
+ * (the branch, a car's head): the PRs merge one at a time meanwhile, as without trains.
  */
 
 export interface Car {
@@ -52,7 +55,7 @@ const stamped = (pr: PrInfo) => changeFiles(pr.files).length > 0 || changeFiles(
 
 /** Whether a PR can ride in a train. Pure. */
 export const canRide = (pr: PrInfo, branch: string) =>
-  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks === 'none' && pr.mergeState !== 'BLOCKED' && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr) && !stamped(pr);
+  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks !== 'failing' && (pr.mergeState !== 'BLOCKED' || pr.checks === 'pending') && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr) && !stamped(pr);
 
 /**
  * The train the version queue (`pending`: each PR's version, merge.ts's pendingVersions) makes: its PRs from the lowest
@@ -74,7 +77,10 @@ export const trainDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s),
 
 /** The trains whose checks failed, by employee id: the branch and heads they were built from, and what failed. */
 export const trainsFile = () => dataFile('trains.json');
-type Failed = Record<string, { key: string; note: string; at: string }>;
+type Failed = Record<string, { key: string; note: string; at: string; stack?: string }>;
+
+/** The stack each employee's last train passed its checks here at, by employee id: not tested again while it waits for GitHub's. */
+export const trainsPassedFile = () => dataFile('trains-passed.json');
 
 /** A train as it was built: the branch's commit under it and each car's head. */
 export const trainKey = (base: string, cars: Car[]) => [base, ...cars.map((c) => `${c.pr.number}@${c.pr.headOid}`)].join(' ');
@@ -86,6 +92,37 @@ export interface TrainRun {
   note: string;
   /** It got as far as testing the stack (so a failure is worth a line in the round). */
   tested: boolean;
+  /** Pushed to the top PR's branch, and waiting there for GitHub's checks: the cars wait as one train. */
+  waiting?: boolean;
+}
+
+/** How long a pushed train waits for GitHub's checks at its top, asking every TRAIN_CHECK_EVERY_MS. */
+export const TRAIN_CHECKS_MS = 10 * 60_000;
+export const TRAIN_CHECK_EVERY_MS = 20_000;
+/** GitHub may not have started the checks a push brings for a while: after this long with none, there are none. */
+const NO_CHECKS_AFTER_MS = 2 * 60_000;
+
+/**
+ * GitHub's checks on PR `n` while its head is `at`: passing (or none at all), failing, still running once
+ * TRAIN_CHECKS_MS is up, or its head moved on from `at`.
+ */
+async function checksAtTop(ctx: Ctx, e: Employee, n: number, at: string, pause: (ms: number) => Promise<void>): Promise<'passing' | 'failing' | 'pending' | 'moved'> {
+  const host = hostFor(ctx, e);
+  for (let waited = 0; ; waited += TRAIN_CHECK_EVERY_MS) {
+    const v = await host.viewPr(e.repo, n, 'headRefOid,statusCheckRollup');
+    let o: { headRefOid?: string; statusCheckRollup?: unknown } = {};
+    try {
+      o = JSON.parse(v.out);
+    } catch {
+      o = {};
+    }
+    if (o.headRefOid && o.headRefOid !== at) return 'moved';
+    const c = v.code === 0 ? checksOf(o.statusCheckRollup) : 'pending';
+    if (c === 'failing') return 'failing';
+    if (c === 'passing' || (c === 'none' && waited >= NO_CHECKS_AFTER_MS)) return 'passing';
+    if (waited >= TRAIN_CHECKS_MS) return 'pending';
+    await pause(TRAIN_CHECK_EVERY_MS);
+  }
 }
 
 /** How long it waits before each time it asks again, for GitHub to take in a push (the merge) or a merge (the cars under it). */
@@ -156,6 +193,8 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     }
     if ((await git(run, repo, 'rev-parse', `origin/${c.pr.head}`)).trim() !== c.pr.headOid) break;
     if (await kitReleaseHold(ctx, e, c.pr).catch(() => null)) break;
+    // The checks it waits for at the top are GitHub's: elsewhere, only cars without any ride.
+    if (c.pr.checks !== 'none' && (ctx.host?.(e) ?? 'github') !== 'github') break;
     listed.push(c);
   }
   if (listed.length < 2) return { merged: [], note: 'fewer than two of its PRs can ride as they are now', tested: false };
@@ -172,9 +211,15 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     let under = base;
     let label = e.branch;
     let stopped = '';
+    const has = async (head: string, commit: string) => (await run('git', ['merge-base', '--is-ancestor', commit, head], { cwd: dir })).code === 0;
     for (const c of listed) {
       await git(run, dir, 'checkout', '--quiet', '--detach', c.pr.headOid);
-      const why = await stackOn(ctx, e, dir, under, label, c);
+      // A car whose head has the branch and every car under it already (a stack the Steward pushed to it, still waiting
+      // for GitHub's checks, or a PR opened on top of the others): its head is the stack so far, as it is. Stacked again,
+      // the merges under it would be new commits, which it would conflict with.
+      let contains = rode.length > 0 && (await has(c.pr.headOid, base));
+      for (const r of rode) contains = contains && (await has(c.pr.headOid, r.pr.headOid));
+      const why = await stackOn(ctx, e, dir, contains ? c.pr.headOid : under, label, c);
       if (why) {
         stopped = `; #${c.pr.number} goes its own way: ${why}`;
         break;
@@ -192,11 +237,19 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     await git(run, dir, 'checkout', '--quiet', '--detach', at);
     ctx.log(`[${e.id}] a train of ${numbers} (v${rode[0].version} to v${top.version}) stacked at ${at.slice(0, 7)}: its checks, once${stopped}`);
     const say = (line: string) => ctx.log(`[${e.id}] train: ${line}`);
-    // Once more on a failure, as a PR tested here is (prtest.ts): a flaky test doesn't break up a train.
-    let checks = await runChecks(ctx, e, dir, { say });
-    if (checks) {
-      say(`its checks once more (${checks})`);
+    if (failed[e.id]?.stack === at) return { merged: [], note: `the same stack failed before: ${failed[e.id].note}`, tested: false };
+    // Passed here already (a train still waiting for GitHub's checks at it): not tested again.
+    const passed = readJson<Record<string, string>>(trainsPassedFile(), {});
+    let checks: string | null = null;
+    if (passed[e.id] === at) say(`its checks passed here at ${at.slice(0, 7)} already`);
+    else {
+      // Once more on a failure, as a PR tested here is (prtest.ts): a flaky test doesn't break up a train.
       checks = await runChecks(ctx, e, dir, { say });
+      if (checks) {
+        say(`its checks once more (${checks})`);
+        checks = await runChecks(ctx, e, dir, { say });
+      }
+      if (!checks) writeJson(trainsPassedFile(), { ...passed, [e.id]: at });
     }
     if (checks) {
       failed[e.id] = { key: trainKey(base, rode), note: checks, at: new Date().toISOString() };
@@ -209,6 +262,19 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     const pushed = await run('git', ['push', '--quiet', 'origin', `${at}:refs/heads/${top.pr.head}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (pushed.code !== 0) return { merged: [], note: `${numbers} stacked and passed, but the stack couldn't be pushed to ${top.pr.head}: ${(pushed.err || pushed.out).trim().split('\n').pop()}`, tested: true };
     const host = hostFor({ ...ctx, run }, e);
+    // GitHub's checks, where the cars have any, run once more on the whole stack: it merges once they pass.
+    if (rode.some((c) => c.pr.checks !== 'none')) {
+      say(`pushed to ${top.pr.head}: waiting for its checks on GitHub at ${at.slice(0, 7)}`);
+      const ci = await checksAtTop({ ...ctx, run }, e, top.pr.number, at, pause);
+      forgetGlance(ctx, e);
+      if (ci === 'pending') return { merged: [], note: `${numbers} stacked and passed here, and pushed to ${top.pr.head}: its checks on GitHub are still running at ${at.slice(0, 7)}, and it merges once they pass`, tested: true, waiting: true };
+      if (ci === 'moved') return { merged: [], note: `${numbers} stacked and passed, but ${top.pr.head} moved on while its checks ran`, tested: true };
+      if (ci === 'failing') {
+        failed[e.id] = { key: trainKey(base, rode), note: `its checks on GitHub failed at ${at.slice(0, 7)}`, at: new Date().toISOString(), stack: at };
+        writeJson(trainsFile(), failed);
+        return { merged: [], note: `${numbers} stacked and passed here, but its checks on GitHub failed at ${at.slice(0, 7)}: they merge one at a time${stopped}`, tested: true };
+      }
+    }
     let merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
     for (const ms of TRAIN_WAITS_MS) {
       if (merge.code === 0) break;

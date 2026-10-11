@@ -1,13 +1,14 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
-import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
-import { dataFile, readJson, writeJson } from '../kit/store.ts';
+import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump.ts';
 import { checkoutOf, glanceOf, mapLimit, networkFailure, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
+import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
 
 /**
  * A new kit tried on every employee before it is released: when a team PR to the Steward's own repository raises
@@ -33,14 +34,19 @@ import { hostFor } from '../hosts/index.ts';
  * Kit 2.42.0 (Steward#126) and Manor 0.16.24 (Manor#135), two halves of one change, each waited for the other until the
  * owner labelled the kit's PR (2026-10-08). A pair is kept by the agent PR's head commit: a new push there is tried
  * afresh. One that fails, or is a draft, leaves the kit waiting as before, its hold saying so.
+ *
+ * What is tried is the PR's kit\ and tools\kit.ts, so a new head that changes neither (the PR caught up with its branch:
+ * version lines and changelogs) keeps the trial's verdict, tried again only for its agents whose branch moved. And each
+ * agent that passes is kept with the commit it was bumped from: its rollout bump from that same commit, once the kit is
+ * released as tried, isn't checked a second time (trialpass.ts).
  */
 
 export const KIT_BREAKS_LABEL = 'kit:breaks-agents';
-export const kitTrialsFile = () => dataFile('kit-trials.json');
+export { kitTrialsFile };
 /** The Steward's own worktree of the PR's head, whose kit\ the employees are filled from. */
 export const kitTrialDirOf = (ctx: Ctx) => path.join(workRootOf(ctx.settings), `_${APP.id}-kit-trial`);
 
-export interface KitTrial {
+export interface KitTrial extends TrialPasses {
   kit: string;
   /**
    * Each employee whose checks failed with it, what failed, and the commit of its branch on origin it was tried from
@@ -269,6 +275,17 @@ async function pairUp(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial): Pro
 const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
   results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null }));
 
+/** Each employee that passed, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). */
+const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base).map((r) => [r.id, r.base!]));
+
+/** What a trial at this head fills the agents with: the git tree of its kit\, and the blob of its tools/kit.ts (null for none). */
+async function triedAt(ctx: Ctx, repo: string, head: string): Promise<{ tree?: string; tool?: string | null }> {
+  const tree = (await gitMaybe(ctx.run, repo, 'rev-parse', `${head}:kit`))?.trim();
+  if (!tree) return {};
+  const tool = await showFile(ctx.run, repo, head, 'tools/kit.ts');
+  return { tree, tool: tool === null ? null : blobOf(tool) };
+}
+
 /**
  * The employees a kept trial failed whose branch on origin has moved since (fixed on their side): they are tried again.
  * One kept before their commits were (no `main`) counts as moved, once. One that can't be fetched now waits.
@@ -303,19 +320,32 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
   const repo = checkoutOf(steward);
   let t = kept[keyOf(pr)];
+  // Tried just now: no branch has moved since.
+  let fresh = false;
   if (!t) {
     await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
     const kit = (await showFile(ctx.run, repo, pr.headOid, 'kit/VERSION'))?.trim();
     if (!kit || !/^\d+\.\d+\.\d+$/.test(kit)) return `its kit/VERSION at ${pr.headOid.slice(0, 7)} isn't a version, so its kit wasn't tried on the agents`;
-    const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
-    ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges`);
-    const results = await tryAtHead(ctx, steward, pr, kit, employees);
-    // Refused (no kit.json on its main, say) isn't the kit's doing, and isn't held against it.
-    const failed = results.filter((r) => r.outcome === 'failed');
-    // One the network cut short is no verdict on the kit: not kept, so the next round tries it again.
-    for (const r of failed) if (await networkFailure(ctx, r.message)) return `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
-    t = { kit, failed: failuresOf(results), passed: results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString() };
-  } else if (t.failed.length) {
+    const tried = await triedAt(ctx, repo, pr.headOid);
+    // The same kit and tools/kit.ts tried at an earlier head of this PR (it was caught up with its branch since): its
+    // verdict stands, and only the agents whose branch moved are tried again, below.
+    const before = tried.tree ? Object.entries(kept).reverse().find(([k, x]) => k.startsWith(`${pr.number}@`) && x.kit === kit && x.tree === tried.tree && x.tool === tried.tool) : undefined;
+    if (before) {
+      ctx.log(`[${APP.id}] #${pr.number}: kit ${kit} was tried at ${before[0].split('@')[1].slice(0, 7)}, and its kit and tools/kit.ts are the same at ${pr.headOid.slice(0, 7)}: not tried again`);
+      t = { ...before[1] };
+    } else {
+      fresh = true;
+      const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
+      ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges`);
+      const results = await tryAtHead(ctx, steward, pr, kit, employees);
+      // Refused (no kit.json on its main, say) isn't the kit's doing, and isn't held against it.
+      const failed = results.filter((r) => r.outcome === 'failed');
+      // One the network cut short is no verdict on the kit: not kept, so the next round tries it again.
+      for (const r of failed) if (await networkFailure(ctx, r.message)) return `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
+      t = { kit, failed: failuresOf(results), passed: results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...tried, mains: mainsOf(results) };
+    }
+  }
+  if (!fresh && t.failed.length) {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
     const moved = await movedOn(ctx, t);
     if (moved.length) {
@@ -327,7 +357,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       const ids = new Set(moved.map((e) => e.id));
       const failed = [...t.failed.filter((f) => !ids.has(f.id)), ...failuresOf(results)];
       // Its pairs kept, by head commit: one tried before isn't tried again (pairUp).
-      const now: KitTrial = { kit: t.kit, failed, passed: t.passed + results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...(t.pairs ? { pairs: t.pairs } : {}), ...(t.pairsSaid ? { pairsSaid: t.pairsSaid } : {}) };
+      const mains = { ...Object.fromEntries(Object.entries(t.mains ?? {}).filter(([id]) => !ids.has(id))), ...mainsOf(results) };
+      const now: KitTrial = { kit: t.kit, failed, passed: t.passed + results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...(t.tree ? { tree: t.tree, tool: t.tool } : {}), mains, ...(t.pairs ? { pairs: t.pairs } : {}), ...(t.pairsSaid ? { pairsSaid: t.pairsSaid } : {}) };
       if (sameFailures(t.failed, failed)) now.commented = t.commented;
       else if (!failed.length) {
         const names = results.filter((r) => r.outcome === 'done').map((r) => r.name);

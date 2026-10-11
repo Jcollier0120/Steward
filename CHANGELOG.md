@@ -2,6 +2,46 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.19
+
+**A new kit reaches your agents sooner: each agent is tested with it once, not twice.**
+
+### What changed
+
+- Before a new kit is released, the Steward tries it on every agent and runs their checks. Once it's released, the update it opens for each agent no longer runs those same checks again where nothing has changed since: the agent's code is where it was when the kit was tried, and the kit and its fill tool are the ones that were tried. An agent that changed since is checked as before.
+- A pull request that brings a new kit, caught up with its branch afterwards without changing the kit, keeps its trial: the agents aren't tried again for a version-number change.
+- A pull request with a lower version than a new kit's no longer waits for that kit's trial on every agent: it merges first, and the kit's pull request follows it. Before, the lower one waited the whole trial, then had to be renumbered.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.18
+
+**Your repositories' ready pull requests merge together as one train even where GitHub runs checks on them.**
+
+### What changed
+
+- Merge trains (several ready PRs of a repository stacked lowest version first, tested once and merged together) now take PRs that GitHub runs checks on, such as a site's preview build. Before, only PRs with no checks rode, so such a repository's PRs merged one at a time, each waiting for its checks again after every catch-up. Now the checks run once more on the whole stack, on the top PR, and the train merges once they pass: one wait for the lot.
+- If those checks are still running after ten minutes, the PRs wait for them together (none merges alone meanwhile), and the next round merges the stack as it is, without testing it again. If they fail, the PRs merge one at a time, as before.
+- A PR whose branch already holds the PRs under it (a stack pushed by the Steward, or one opened on top of the others) is taken as it is, rather than stacked again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Merge trains are on unless you switched them off in Settings.
+
+## 0.35.17
+
+**Each repository's pull requests sit under a heading of their own on the Steward's page.**
+
+### What changed
+
+- In Your repositories, a repository's open pull requests now sit under a small heading, in the words its host uses: Pull requests on GitHub, Azure DevOps, Gitea and Bitbucket, Merge requests on GitLab.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.16
 
 **It hands out the kit 2.53.0, with a demo mode for each agent's page.**

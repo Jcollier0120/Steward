@@ -177,3 +177,14 @@ test('the next round comes sooner at most a few times in a row, and never later 
   assert.deepEqual(soonAfter(false, 2, every), { sooner: null, run: 0 }, 'a round that asks for nothing sooner resets the count');
   assert.deepEqual(soonAfter(true, 0, SOON_MS), { sooner: null, run: 0 }, 'an interval as short already stays');
 });
+
+test("the page's staff table names each repository's host, so its PRs go by that host's name", async () => {
+  const { staffView } = await import('../src/agent.ts');
+  const { hostOf } = await import('../src/scm.ts');
+  const row = (repo: string) => ({ id: repo, name: repo, repo, prs: [] }) as any;
+  const staff = { at: '', kit: null, kitNote: null, released: [], local: null, rows: [row('alex/recipes'), row('gitlab.com/alex/garden')] };
+  const look = { at: '', tools: [{ cmd: 'gh', name: 'GitHub CLI', version: '2', signedIn: true, supported: true }, { cmd: 'glab', name: 'GitLab CLI', version: '1', signedIn: true, supported: true }] } as any;
+  const view = staffView(staff, (r) => hostOf(r, { sourceControl: 'auto', releasesCastellan: false }, look));
+  assert.deepEqual(view?.rows.map((r) => r.host), ['github', 'gitlab']);
+  assert.equal(staffView(staff)?.rows[0].host, undefined, 'none given, none said: the page reads it as GitHub');
+});

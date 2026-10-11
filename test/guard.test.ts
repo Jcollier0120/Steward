@@ -211,3 +211,14 @@ test('drafts wait, whatever their checks', async () => {
   assert.match(m.message, /^#14 .* waits: a draft$/);
   assert.ok(!r.gh.some((a) => a[1] === 'merge'));
 });
+
+test("a PR below a kit PR's version merges before it, rather than waiting for the kit's trial and being caught up after", async () => {
+  const f = employeeWithPrs('below-kit');
+  const kitPr = f.make(20, { version: '0.4.6', files: { 'kit/VERSION': '1.0.1\n' } });
+  const fix = f.make(21, { version: '0.4.5' });
+  const prs = [listed(20, kitPr, { files: [{ path: 'kit/VERSION' }] }), listed(21, fix)];
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : args[1] === 'merge' ? ok('') : undefined));
+  const e = employee(f.checkout, { fill: '' });
+  const m = await mergeOne(ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-below-kit'), run: r.run, neutralDir: tmp }), e, { yes: true, team: true });
+  assert.deepEqual(m.merged.map((p) => p.number), [21, 20], m.message);
+});

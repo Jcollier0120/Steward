@@ -4,6 +4,7 @@ import type { Alarm, AlarmState } from '../alarms.ts';
 import type { ConflictLook, ConflictOutcome } from '../conflicts.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
+import type { Host } from '../scm.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 
@@ -108,23 +109,29 @@ function Pr({ p, branch, look }: { p: PrView; branch: string; look?: ConflictLoo
   );
 }
 
-/** A repository's open PRs, and a branch prepared here and not pushed, as a small table under its row. */
+/** What each host calls a PR, for the heading over a repository's: GitLab's are merge requests. Plain git has none. */
+const PRS_CALLED: Record<Host, string> = { github: 'Pull requests', gitlab: 'Merge requests', azure: 'Pull requests', gitea: 'Pull requests', bitbucket: 'Pull requests', git: 'Branches' };
+
+/** A repository's open PRs under a small heading in its host's words, and a branch prepared here and not pushed, as a small table under its row. */
 function PrTable({ r, looks }: { r: StaffRowView; looks: Map<string, ConflictLook> }) {
   return (
-    <table className="pr-table">
-      <tbody>
-        {r.prs.map((p) => (
-          <Pr key={p.number} p={p} branch={r.branch} look={looks.get(lookKey(r.repo, p.number))} />
-        ))}
-        {r.prepared && (
-          <tr>
-            <td colSpan={3}>
-              <code>{r.prepared.branch}</code> <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
+    <>
+      {r.prs.length > 0 && <div className="pr-head">{PRS_CALLED[r.host ?? 'github']}</div>}
+      <table className="pr-table">
+        <tbody>
+          {r.prs.map((p) => (
+            <Pr key={p.number} p={p} branch={r.branch} look={looks.get(lookKey(r.repo, p.number))} />
+          ))}
+          {r.prepared && (
+            <tr>
+              <td colSpan={3}>
+                <code>{r.prepared.branch}</code> <Text variant="muted">{r.prepared.ahead} ahead, not pushed?</Text>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -847,6 +854,7 @@ td.pick-cell { width: 1%; padding-right: 0; }
 .round { gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; }
 .staff tr.has-prs > td { border-bottom: 0; }
 .staff tr.prs-row > td { padding-top: 0; }
+.pr-head { font-size: 12px; font-weight: 600; color: var(--muted); margin: 2px 0; }
 .pr-table { font-size: 13px; }
 .pr-table td { padding: 3px 12px 3px 0; border-bottom: 0; }
 .conflicts .when { white-space: nowrap; }
