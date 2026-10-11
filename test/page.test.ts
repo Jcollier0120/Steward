@@ -38,14 +38,26 @@ after(async () => {
 
 const base = () => `http://127.0.0.1:${port}`;
 
-/** The page's body (src/web/steward.tsx), or Run now, as HTML from /api/page's body: what the browser draws. */
+/**
+ * The page's body (src/web/steward.tsx) and its About as <Page> draws them (About in #about-view), or Run now, as HTML
+ * from /api/page's body: what the browser draws.
+ */
 const renderStewardBody = async (name: 'StewardBody' | 'RunNow' = 'StewardBody') => {
   const m = await bundleForNode<{ render: (body: unknown) => string }>(
-    `import { renderToStaticMarkup } from 'react-dom/server';
-     import { ${name} } from '${importPath('src/web/steward.tsx')}';
-     export const render = (v) => renderToStaticMarkup(<${name} v={v} />);`,
+    name === 'RunNow'
+      ? `import { renderToStaticMarkup } from 'react-dom/server';
+     import { RunNow } from '${importPath('src/web/steward.tsx')}';
+     export const render = (v) => renderToStaticMarkup(<RunNow v={v} />);`
+      : `import { renderToStaticMarkup } from 'react-dom/server';
+     import { StewardAbout, StewardBody } from '${importPath('src/web/steward.tsx')}';
+     export const render = (v) => renderToStaticMarkup(<><StewardBody v={v} /><section id="about-view"><StewardAbout v={v} /></section></>);`,
   );
   return m.render;
+};
+/** The page and its About, split where <Page> splits them. */
+const split = (html: string) => {
+  const [page, about] = html.split('<section id="about-view">');
+  return { page, about };
 };
 const post = (route: string, headers: Record<string, string>, body: unknown = { employees: [], kit: '1.0.0' }) =>
   fetch(`${base()}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -145,6 +157,17 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withLooks, /<table class="pr-table">.*title="it conflicts with main in LICENSE[^"]*"[^>]*>.*sent back/, "the PR's line says what was done");
   assert.match(withLooks, /<table class="conflicts">.*#7.*sent back.*back with the Claude Code session.*Conflicted in LICENSE, package\.json; LICENSE needed a person/);
   assert.match(withLooks, /#5.*caught up.*merged main into it.*no longer open/, 'one since merged or closed says so');
+  // Read now and then, in About: the kit, the last stage, and merge conflicts once none it lists is open. A PR it lists
+  // that is still open keeps them on the page. About carries no tour names: the tour shows the page.
+  for (const [h, open] of [[withPr, false], [withLooks, true], [withOne, false]] as const) {
+    const { page, about } = split(h);
+    assert.ok(about.includes('The kit the Steward hands out') && !page.includes('The kit the Steward hands out'));
+    assert.ok(about.includes('Last stage') && !page.includes('Last stage'));
+    assert.equal(page.includes('<table class="conflicts">') || page.includes('No PR the rounds looked at'), open);
+    assert.doesNotMatch(about, /data-tour/);
+  }
+  const settled = split((await renderStewardBody())({ ...body, conflicts: [looks[1]], staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: [] }] }, round: { ...body.round, repos: true } }));
+  assert.ok(settled.about.includes('<table class="conflicts">') && !settled.page.includes('Merge conflicts'), 'only a settled one: in About');
   const ping =await (await fetch(`${base()}/api/ping`)).json();
   assert.deepEqual(ping.rounds.map((r: { name: string }) => r.name), ['round'], 'Manor sees its rounds');
   assert.equal(typeof ping.nextRunAt, 'string');

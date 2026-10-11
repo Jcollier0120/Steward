@@ -15,6 +15,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.9
+
+**Its page keeps what you act on; the rest is in About, beside Settings.**
+
+### What changed
+
+- About, beside Settings in the title bar, now has what you read now and then: the kit it hands out, the last stage with its log, and the merge conflicts it has settled.
+- Merge conflicts stays on the page while a pull request it lists is still open.
+- Found on this PC stays on the page while it has repositories to offer you, and moves to About once it has none.
+- The tour's last step is now About.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.8
 
 **It carries the kit 2.48.0: About beside Settings on every agent's page.**
