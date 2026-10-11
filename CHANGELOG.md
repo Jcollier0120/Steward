@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.15
+
+**A PR you labelled owner-done is merged even while it still carries owner-first.**
+
+### What changed
+
+- A PR that needs you first (labelled owner-first) is merged once you label it owner-done, as the rule says, whether or not you also took owner-first off. Before, the two labels together held it for good: CastellanSite's early-access PR waited five hours as next in line, and every PR behind it waited too. Its hold now says to label it owner-done, rather than to take the label off.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A PR held this way merges at the Steward's first round after the update.
+
 ## 0.35.13
 
 **It hands out the kit 2.52.0: Manor's updates no longer wait a minute and a half for each agent.**
