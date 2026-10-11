@@ -15,17 +15,24 @@ const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
  * Scripts run in the agent's PowerShell worker (ps-worker.ps1): one powershell.exe that stays while scripts keep
  * coming, each script in its own runspace, several at once. Starting powershell.exe for each script cost the PC a
  * process and its console host every time, all day: Windows doesn't give all of a process's memory back when it ends.
- * The worker goes after IDLE_MS with nothing to run, and is replaced after MAX_SCRIPTS. A script that calls `exit`, and
- * any script while the worker can't run, gets its own powershell.exe as before (oneShot).
+ * The worker goes after IDLE_MS with nothing to run, and is replaced after MAX_SCRIPTS. A script that calls `exit` or
+ * writes to the console itself, and any script while the worker can't run, gets its own powershell.exe as before
+ * (oneShot).
  */
 export function powershell(script: string, opts: { timeoutMs?: number } = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 60_000;
-  if (oneShotOnly || CALLS_EXIT.test(script)) return oneShot(script, timeoutMs);
+  if (oneShotOnly || CALLS_EXIT.test(script) || WRITES_CONSOLE.test(script)) return oneShot(script, timeoutMs);
   return worker().run(script, timeoutMs).catch((e) => (e instanceof WorkerGone ? oneShot(script, e.timeLeft) : Promise.reject(e)));
 }
 
 /** `exit`, as a command: in a runspace it would drop the script's output and its exit code. */
 export const CALLS_EXIT = /(^|[\s;{(|&])exit(\s|;|$|\))/im;
+
+/**
+ * Writing to the console itself ([Console]::Out, ::Write, ::WriteLine, ::Error): in the worker that is the worker's own
+ * output, shared by every script and read by ps.ts, not the script's.
+ */
+export const WRITES_CONSOLE = /\[(System\.)?Console\]::(Out\b|Error\b|Write(Line)?\b|OpenStandardOutput|OpenStandardError)/i;
 
 /** PowerShell from Node without the worker: KIT_PS_WORKER=0, or after the worker couldn't start. */
 let oneShotOnly = process.env.KIT_PS_WORKER === '0';

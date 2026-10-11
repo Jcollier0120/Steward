@@ -3,7 +3,7 @@ import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './ala
 import { portUses } from './ports.ts';
 import { dataDir } from './app.ts';
 import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restReset, roundCost, saveBudget, waitLine } from './budget.ts';
-import { repoSig, takeGlance, type Glance } from './glance.ts';
+import { apiAsk, repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { withLock } from './kit/lock.ts';
 import { online as kitOnline } from './kit/net.ts';
@@ -91,7 +91,8 @@ export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
  */
 export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host, now: () => Date = () => new Date()): Promise<Glance | null> {
   try {
-    const g = await takeGlance(run, dataDir, settings, host, now);
+    // The Steward's own runner asks GitHub from its process (no gh for each round); a test's runner, through gh.
+    const g = await takeGlance(run, dataDir, settings, host, now, run === realRun && process.env.STEWARD_GLANCE_GH !== '1' ? apiAsk() : undefined);
     if (g.rates?.length || g.cost !== undefined) saveBudget(noteGlance(loadBudget(), g, now()));
     for (const [id, why] of Object.entries(g.errors)) {
       const e = settings.employees.find((x) => x.id === id);

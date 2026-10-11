@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.11
+
+**Lighter in the background: it hands out the kit 2.50.0, and starts far fewer programs itself.**
+
+### What changed
+
+- Each round asks GitHub what changed straight from the Steward, instead of starting the GitHub command-line tool to ask. That tool now starts once, to sign in.
+- It reads each repository's branches from the repository's own files, and starts git only to fetch or change something.
+- Running in the background, git and the GitHub tool start without a console of their own, so each one is a single process rather than two.
+- The Steward's own rounds run in the kit 2.50.0's background pace: Windows' efficiency mode, a very low disk priority and a cap on the processor while nobody is waiting on them.
+- The kit 2.50.0 gives every agent the same background pace (its notes say more).
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.10
 
 **It hands out the kit 2.49.0: Developer Pro, for the work the Wright and the Bailiff do with the rest of the staff.**

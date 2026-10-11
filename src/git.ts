@@ -1,4 +1,4 @@
-import { lstatSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
@@ -42,9 +42,68 @@ export async function trackedAt(run: Runner, repo: string, ref: string): Promise
   return (await git(run, repo, 'ls-tree', '-r', '--name-only', ref)).split('\n').filter(Boolean);
 }
 
-/** A ref's commit, or null when there's no such ref. */
+/**
+ * A ref's commit, or null when there's no such ref. A branch's or origin's (refs/heads/…, refs/remotes/…, origin/…) is
+ * read from the clone's files when they say it plainly (refOnDisk, Steward 0.35.11): a round asks this of every
+ * employee, and each `git rev-parse` was a process started and ended. Anything else is git's to say.
+ */
 export async function commitOf(run: Runner, repo: string, ref: string): Promise<string | null> {
+  const known = refOnDisk(repo, ref);
+  if (known) return known;
   return (await gitMaybe(run, repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`))?.trim() || null;
+}
+
+const SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * A branch's commit as the clone's files say it: its loose ref, else packed-refs, in the clone's common folder (a
+ * worktree's branches are its main clone's). Only for a full refs/heads/… or refs/remotes/… name, or origin/<branch>
+ * when no ref git would take before refs/remotes/origin/<branch> exists. Null when the files don't say it plainly
+ * (no such ref, a symbolic one, a reftable clone, anything unreadable): then git is asked, as before.
+ */
+export function refOnDisk(repo: string, ref: string): string | null {
+  try {
+    const full = /^refs\/(heads|remotes)\//.test(ref) ? ref : /^origin\/[^\^~:@{}\s]+$/.test(ref) ? `refs/remotes/${ref}` : null;
+    if (!full || /\.\.|[\^~:?*[\\\s]|@\{/.test(ref)) return null;
+    const common = commonDir(repo);
+    if (!common || existsSync(path.join(common, 'reftable'))) return null;
+    const packed = readPacked(common);
+    const at = (name: string) => {
+      const loose = path.join(common, ...name.split('/'));
+      if (existsSync(loose)) return readFileSync(loose, 'utf8').trim();
+      return packed.get(name) ?? null;
+    };
+    // git takes refs/<name>, refs/tags/<name> and refs/heads/<name> before refs/remotes/<name>.
+    if (full !== ref && [`refs/${ref}`, `refs/tags/${ref}`, `refs/heads/${ref}`].some((n) => at(n) !== null)) return null;
+    const sha = at(full);
+    return sha && SHA.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The folder a clone keeps its refs in: .git, or for a worktree the main clone's (its gitdir's commondir). */
+function commonDir(repo: string): string | null {
+  const dotGit = path.join(repo, '.git');
+  if (!existsSync(dotGit)) return null;
+  if (lstatSync(dotGit).isDirectory()) return dotGit;
+  const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
+  if (!gitdir) return null;
+  const own = path.resolve(repo, gitdir);
+  const common = path.join(own, 'commondir');
+  return existsSync(common) ? path.resolve(own, readFileSync(common, 'utf8').trim()) : own;
+}
+
+/** packed-refs' names and commits (a peeled line, `^…`, belongs to the tag above it and isn't a ref). */
+function readPacked(common: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const file = path.join(common, 'packed-refs');
+  if (!existsSync(file)) return out;
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const m = /^([0-9a-f]{40}) (\S+)\r?$/.exec(line);
+    if (m) out.set(m[2], m[1]);
+  }
+  return out;
 }
 
 export const branchExists = async (run: Runner, repo: string, branch: string) => (await commitOf(run, repo, `refs/heads/${branch}`)) !== null;
