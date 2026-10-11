@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.10
+
+**It hands out the kit 2.49.0: Developer Pro, for the work the Wright and the Bailiff do with the rest of the staff.**
+
+### What changed
+
+- The Steward looks at the Wright's drafts, reads the Wright's and the Bailiff's pages for alarms, and shows their settings only with Developer Pro. That isn't sold yet, so on a customer's PC none of it shows, even with a Wright installed.
+- The kit 2.49.0 gives every agent the same check.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.9
 
 **Its page keeps what you act on; the rest is in About, beside Settings.**
