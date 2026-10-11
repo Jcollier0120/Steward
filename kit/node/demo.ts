@@ -1,0 +1,66 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { APP, appRoot, dataDir } from '../app.ts';
+
+/**
+ * Demo mode (kit 2.53.0): the agent's page shown with made-up data, for pictures of it (Manor's hero pictures, each
+ * employee's entry in the hire popup and on its role's page) that show it at work without anyone's own files, mail or
+ * repositories. Started with `KIT_DEMO=1` (the agent's own `demo` folder) or `KIT_DEMO=<folder>`, beside its `<ID>_HOME`
+ * pointing at an empty folder and `<ID>_PORT` at a free port, so nothing of the installed copy is read or touched.
+ *
+ * Then the page server lays the demo folder's file for a GET over the agent's own answer, key by key at the top
+ * (`/api/page` with `api/page.json` holding `{ "body": … }`: the kit's frame kept, the body made up), answers the rest
+ * with the agent's own handlers (with an empty data folder, they show nothing yet), adds `demo: true` to its ping, shows
+ * no developer content (developer.ts), and refuses every button: nothing changes. An agent's
+ * own background work (watchers, first scans) checks `isDemo()` and stays off.
+ */
+
+/** Why a button does nothing in demo mode. */
+export const DEMO_NO = 'This is a demo of the page: its buttons change nothing.';
+
+/** The demo folder, or null outside demo mode. Read each time, so a test can set KIT_DEMO. */
+export function demoDir(env: NodeJS.ProcessEnv = process.env): string | null {
+  const v = env.KIT_DEMO?.trim();
+  if (!v || v === '0') return null;
+  return v === '1' ? path.join(appRoot, 'demo') : path.resolve(v);
+}
+
+export const isDemo = (env: NodeJS.ProcessEnv = process.env) => demoDir(env) !== null;
+
+/** The demo folder's answer to a GET of `pathname` (its file `<path>.json`), or undefined when it has none. */
+export function demoAnswer(pathname: string, dir = demoDir()): unknown {
+  if (!dir) return undefined;
+  const parts = pathname.split('/').filter(Boolean);
+  // Only plain names: nothing outside the demo folder is ever read.
+  if (!parts.length || !parts.every((p) => /^[\w.-]+$/.test(p) && p !== '..' && p !== '.')) return undefined;
+  const file = `${path.join(dir, ...parts)}.json`;
+  if (!existsSync(file)) return undefined;
+  return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''), (_k, v) => (typeof v === 'string' ? when(v) : v));
+}
+
+/**
+ * Whether the demo shows the developer view (developer.ts): only where its hero.json says `"developer": true`, for a
+ * developer agent, whose pictures only developers see. Off otherwise, whatever this PC's own switch says.
+ */
+export function demoDeveloper(dir = demoDir()): boolean {
+  if (!dir) return false;
+  try {
+    return (JSON.parse(readFileSync(path.join(dir, 'hero.json'), 'utf8').replace(/^﻿/, '')) as { developer?: unknown }).developer === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The data folder the developer view's footer names: in a demo, a made-up one where it would be on Alex's PC, never the
+ * scratch folder on the PC taking the picture (whose path has its owner's name in it).
+ */
+export function shownDataDir(): string {
+  return isDemo() ? `C:\\Users\\Alex\\.${APP.id}` : dataDir;
+}
+
+/** "@now", "@now-300" (five minutes ago), "@now+3600": the time then, so a picture says "5 min ago" whenever it's taken. */
+export function when(v: string, now = Date.now()): string {
+  const m = /^@now([+-]\d+)?$/.exec(v);
+  return m ? new Date(now + Number(m[1] ?? 0) * 1000).toISOString() : v;
+}

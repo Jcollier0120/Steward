@@ -1,5 +1,6 @@
 import { noteLabel, theAccelerator, type AcceleratorRef } from './accelerators.ts';
-import { APP, dataDir } from '../app.ts';
+import { APP } from '../app.ts';
+import { shownDataDir } from './demo.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, type Duty } from './duty.ts';
 import { trialEnded, trialEndedNote } from './license-check.ts';
@@ -200,7 +201,7 @@ ${settling(look, firstRoundNow())}${trialEnded() ? trialEndedBanner() : offDuty(
 ${o.body}
 ${workSection({ developer: dev })}
 </main>
-<footer>${esc(APP.name)} ${esc(APP.version)} · this PC only${dev ? ` · its files are in <code>${esc(dataDir)}</code>` : ''}</footer>
+<footer>${esc(APP.name)} ${esc(APP.version)} · this PC only${dev ? ` · its files are in <code>${esc(shownDataDir())}</code>` : ''}</footer>
 <script>
 const TOKEN = ${JSON.stringify(o.token)};
 const REFRESH = ${refresh};
