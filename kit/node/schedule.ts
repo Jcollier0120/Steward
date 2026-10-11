@@ -1,6 +1,7 @@
 import { APP } from '../app.ts';
 import { duty } from './duty.ts';
 import { trialEnded } from './license-check.ts';
+import { isDemo } from './demo.ts';
 import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
@@ -237,6 +238,11 @@ export function every(
     if (running) return;
     // Off duty, only the rounds asked for run.
     if (!asked && !duty().onDuty) {
+      if (!stopped) wait();
+      return;
+    }
+    // A demo (demo.ts) shows made-up work: no round ever runs, so nothing of the PC taking its picture is read.
+    if (isDemo()) {
       if (!stopped) wait();
       return;
     }
