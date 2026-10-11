@@ -145,7 +145,7 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };
   const withPr = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows: [{ ...rows[0], prs: [pr], notes: ["couldn't list its releases: offline"] }] }, round: { ...body.round, repos: true } });
   assert.match(withPr, /<th>Notes<\/th>/);
-  assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
+  assert.match(withPr, /<tr class="prs-row"><td colSpan="3"><div class="pr-head">Pull requests<\/div><table class="pr-table">.*#7.*Fix the thing.*claude\/fix, octocat(&#x27;|')s/);
   // Merge conflicts: none looked at yet, and then each with what the Steward did, its badge on the PR's line too.
   assert.match(withPr, /Merge conflicts[\s\S]*No PR the rounds looked at has conflicted with its branch/);
   const t = new Date().toISOString();

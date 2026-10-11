@@ -3,6 +3,7 @@ import type { ConflictLook } from '../conflicts.ts';
 import type { FoundRepo, FoundState } from '../found.ts';
 import type { TendState } from '../tend.ts';
 import type { TurnsView } from '../lease.ts';
+import type { Host } from '../scm.ts';
 import type { StageResult } from '../stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from '../stages/staff.ts';
 
@@ -30,7 +31,8 @@ export interface RoundView {
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */
 export type PrView = PrInfo & { afterText: string | null };
-export type StaffRowView = Omit<StaffRow, 'prs'> & { prs: PrView[] };
+/** A repository as the page shows it, with how the Steward works with it (scm.ts's hostOf): its PRs go by that host's name. */
+export type StaffRowView = Omit<StaffRow, 'prs'> & { prs: PrView[]; host?: Host };
 export type StaffView = Omit<Staff, 'rows'> & { rows: StaffRowView[] };
 
 /** The repositories Reeve found that could be looked after (found.ts's foundView). */
