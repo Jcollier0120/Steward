@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.21
+
+**The Steward no longer tries to open a pull request that is already open.**
+
+### What changed
+
+- When work opened its own pull request while a long round was under way (the Steward merging and releasing its own changes first), the Steward could try to open a second one for the same branch later in that round. GitHub refused it, and the round logged a failure that the Surveyor then reported as a warning. The Steward now checks with GitHub just before it opens one, and leaves the branch alone when its pull request is already there.
+- If GitHub still answers that a pull request already exists, that branch counts as open, and the Steward goes on to its other branches instead of stopping.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.20
 
 **A new kit's trial no longer holds up everything else, and takes far less time.**
