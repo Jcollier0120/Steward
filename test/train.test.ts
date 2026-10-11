@@ -144,13 +144,16 @@ test('a PR that conflicts beyond its version lines ends the train: the ones unde
   assert.equal(JSON.parse(sh(q.origin, 'show', 'refs/heads/main:package.json')).version, '0.4.2');
 });
 
-test('which PRs ride: the queue from its lowest version up, while each can; a draft, checks on GitHub or steps after merging stop it', () => {
+test('which PRs ride: the queue from its lowest version up, while each can; a draft, failing checks on GitHub or steps after merging stop it', () => {
   const pr = (number: number, more: Partial<PrInfo> = {}): PrInfo => ({ number, title: '', url: '', head: `claude/f${number}`, base: 'main', author: 'Jcollier0120', whose: 'team', headOid: `${number}abc`, after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 1, files: [], fork: false, ...more }) as PrInfo;
   const pending = new Map([[31, '0.4.1'], [32, '0.4.2'], [33, '0.4.3']]);
   const numbers = (prs: PrInfo[], p = pending) => trainCars(prs, p, 'main').map((c) => c.pr.number);
   assert.deepEqual(numbers([pr(33), pr(31), pr(32)]), [31, 32, 33], 'by version, whatever order GitHub lists them in');
   assert.deepEqual(numbers([pr(31), pr(32, { draft: true }), pr(33)]), [], 'a draft holds its place: only #31 would ride, and one is no train');
-  assert.deepEqual(numbers([pr(31), pr(32), pr(33, { checks: 'passing' })]), [31, 32], 'checks on GitHub: not on a train');
+  assert.deepEqual(numbers([pr(31), pr(32), pr(33, { checks: 'passing' })]), [31, 32, 33], 'checks on GitHub passing: on the train, which waits for them at its top');
+  assert.deepEqual(numbers([pr(31), pr(32), pr(33, { checks: 'pending', mergeState: 'BLOCKED' })]), [31, 32, 33], 'still running, even where they block merging: they run again at the top');
+  assert.deepEqual(numbers([pr(31), pr(32), pr(33, { checks: 'failing' })]), [31, 32], 'failing: not on a train');
+  assert.deepEqual(numbers([pr(31), pr(32), pr(33, { mergeState: 'BLOCKED' })]), [31, 32], 'blocked for something other than its checks: not on a train');
   assert.deepEqual(numbers([pr(31), pr(32), pr(33, { after: { steps: ['release'] } } as Partial<PrInfo>)]), [31, 32], 'steps after merging: on its own');
   assert.deepEqual(numbers([pr(31, { draft: true }), pr(32), pr(33)]), [], 'the lowest a draft: nothing rides');
   assert.deepEqual(numbers([pr(31), pr(32)], new Map([[31, '0.4.1'], [32, '0.4.1']])), [], 'two on one version: no train');
@@ -191,4 +194,70 @@ test("a PR that needs the owner first (labelled owner-first, or changing a migra
   assert.deepEqual(gh.gh.filter((a) => a[1] === 'merge'), []);
   assert.match(r.held.find((h) => h.number === 31)!.why, /^labelled owner-first/);
   assert.match(r.held.find((h) => h.number === 32)!.why, /its turn comes after #31/);
+});
+
+/** A check GitHub runs (a site's preview build, say), as gh lists it: done and passed, or still running. */
+const vercel = (state: 'passing' | 'pending' | 'failing') => ({ __typename: 'CheckRun', name: 'Vercel', status: state === 'pending' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: state === 'pending' ? '' : state === 'passing' ? 'SUCCESS' : 'FAILURE' });
+
+/** GitHub with checks on every PR: passing at each PR's own head, and `atTop` at the stack once it is pushed to the top PR. */
+function githubWithChecks(q: ReturnType<typeof queue>, atTop: () => 'passing' | 'pending' | 'failing') {
+  const listed = () => q.listed().map((p) => ({ ...p, headRefOid: q.prs.find((x) => x.number === p.number)!.oid, statusCheckRollup: [vercel('passing')] }));
+  return runner((a) => {
+    if (a[0] === 'pr' && a[1] === 'list') return ok(listed());
+    if (a[0] === 'pr' && a[1] === 'view' && a.some((x) => x.includes('statusCheckRollup'))) {
+      const head = q.prs.at(-1)!.head;
+      return ok({ headRefOid: sh(q.origin, 'rev-parse', `refs/heads/${head}`), statusCheckRollup: [vercel(atTop())] });
+    }
+    if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }]);
+    if (a[0] === 'pr' && a[1] === 'merge') {
+      sh(q.origin, 'update-ref', 'refs/heads/main', a[a.indexOf('--match-head-commit') + 1]);
+      return ok('');
+    }
+    if (a[0] === 'pr' && a[1] === 'view' && a.includes('state')) return ok({ state: 'MERGED' });
+    return ok('');
+  });
+}
+
+test("PRs with checks on GitHub ride too: the train waits once for them at its top, on the whole stack, then merges", async () => {
+  const q = queue('checks', 3);
+  let asked = 0;
+  // Running at the stack for the first two looks, then passed.
+  const gh = githubWithChecks(q, () => (++asked < 3 ? 'pending' : 'passing'));
+  const { e, ctx } = ctxOf(q, gh.run);
+  const waits: number[] = [];
+  ctx.pause = async (ms) => void waits.push(ms);
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(r.outcome, 'done', r.message);
+  assert.deepEqual(r.merged.map((p) => p.number), [31, 32, 33]);
+  assert.equal(asked, 3, "it asked for the top's checks until they passed");
+  const merges = gh.gh.filter((a) => a[1] === 'merge');
+  assert.equal(merges.length, 1, 'one merge, of the top PR');
+  assert.equal(sh(q.origin, 'rev-parse', 'refs/heads/claude/f3'), merges[0][merges[0].indexOf('--match-head-commit') + 1], 'at the stack its checks passed at');
+  assert.match(ctx.lines.join('\n'), /pushed to claude\/f3: waiting for its checks on GitHub at [0-9a-f]{7}/);
+});
+
+test('a train whose checks on GitHub are still running waits as one train, and the next round merges it without testing it again', async () => {
+  const q = queue('running', 3);
+  let top: 'passing' | 'pending' = 'pending';
+  const gh = githubWithChecks(q, () => top);
+  const { e, ctx } = ctxOf(q, gh.run);
+  ctx.pause = async () => {};
+  const first = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(first.outcome, 'skipped', first.message);
+  assert.deepEqual(first.merged, []);
+  assert.deepEqual(first.held.map((h) => [h.number, h.why]), [[31, 'checks still running'], [32, 'checks still running'], [33, 'checks still running']], 'none merges alone meanwhile, and the next round comes sooner');
+  assert.match(first.message, /^#31, #32, #33 wait as one train: .*its checks on GitHub are still running/);
+  assert.equal(gh.gh.filter((a) => a[1] === 'merge').length, 0);
+
+  // The next round: the top PR's head is the stack now, its checks have passed there.
+  const stack = sh(q.origin, 'rev-parse', 'refs/heads/claude/f3');
+  q.prs.at(-1)!.oid = stack;
+  top = 'passing';
+  ctx.lines.length = 0;
+  const second = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(second.outcome, 'done', second.message);
+  assert.deepEqual(second.merged.map((p) => p.number), [31, 32, 33], [second.message, ...ctx.lines].join(' | '));
+  const merge = gh.gh.find((a) => a[1] === 'merge')!;
+  assert.equal(merge[merge.indexOf('--match-head-commit') + 1], stack, 'the same stack, not built anew');
+  assert.match(ctx.lines.join('\n'), /its checks passed here at [0-9a-f]{7} already/);
 });

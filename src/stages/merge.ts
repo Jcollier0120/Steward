@@ -452,6 +452,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         const words = `merged ${t.merged.map((p) => `#${p.number}`).join(', ')} as one train (${t.note})`;
         return { ...result(e, 'done', words, { url: t.merged.at(-1)!.url }), merged: t.merged, held: [], did: [words], waits: [], lookAgain: true };
       }
+      // Pushed and waiting for GitHub's checks at the stack: the cars wait as one train, none merged alone meanwhile.
+      if (t.waiting) {
+        const words = `${cars.map((c) => `#${c.pr.number}`).join(', ')} wait as one train: ${t.note}`;
+        ctx.log(`[${e.id}] ${words}`);
+        return { ...result(e, 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: cars.map((c) => heldOf(c.pr, CHECKS_RUNNING)), did: [], waits: [words], lookAgain: false };
+      }
       ctx.log(`[${e.id}] no train for ${cars.map((c) => `#${c.pr.number}`).join(', ')}: ${t.note}`);
       if (t.tested) trainLine = [`didn't merge ${cars.map((c) => `#${c.pr.number}`).join(', ')} as one train: ${t.note}`];
     }
