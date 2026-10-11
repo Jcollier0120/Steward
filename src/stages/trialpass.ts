@@ -60,7 +60,7 @@ function stewardClone(ctx: Ctx): string | null {
 const releasedTrees = new WeakMap<Ctx, Map<string, Promise<string | null>>>();
 
 /** The git tree of kit\ in the kit's release (the tag kit-v<kit> in the Steward's repository), fetched once a stage. */
-function releasedTree(ctx: Ctx, kit: string): Promise<string | null> {
+export function releasedTree(ctx: Ctx, kit: string): Promise<string | null> {
   let trees = releasedTrees.get(ctx);
   if (!trees) releasedTrees.set(ctx, (trees = new Map()));
   let tree = trees.get(kit);

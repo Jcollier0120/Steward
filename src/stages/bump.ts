@@ -4,7 +4,8 @@ import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
-import { affectedTests, nodeTestScript, scriptsIn } from '../affected.ts';
+import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
+import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
@@ -48,6 +49,11 @@ export interface BumpOptions {
    * own (never a bump's, which may be left for a look), nothing committed; trial.ts removes them after.
    */
   trial?: boolean;
+  /**
+   * A trial's: what the kit changes for the employee (kitreach.ts), given its pin and whether its tools/kit.ts changes.
+   * Nothing it takes: it isn't tried. Some files: only the tests they reach run.
+   */
+  reach?: (e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => Promise<KitReach>;
   /**
    * By employee id: its kit PR open for an older kit, which this kit goes onto (the rollout's fold): its branch bumped
    * again, at its version, with its changelog entry written again. Never with `base` or a trial.
@@ -125,15 +131,17 @@ export const needsNpmCi = (dir: string) =>
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  */
 export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
-  const steps: string[] = [];
-  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) steps.push('npm ci --no-audit --no-fund');
-  if (e.fill) steps.push(e.fill);
+  const before: string[] = [];
+  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) before.push('npm ci --no-audit --no-fund');
+  if (e.fill) before.push(e.fill);
+  // Each test step worked out once the dependencies and the kit are in place, so the kit's files are there to follow.
+  const steps: (string | (() => Promise<string[]>))[] = [...before];
   for (const step of e.test) {
     // Only the tests the change reaches (affected.ts), where the caller asks and `npm test` is a plain node --test.
-    if (o.affected && step.trim() === 'npm test') steps.push(...(await affectedSteps(ctx, dir, o.affected, o.say)));
+    if (o.affected && step.trim() === 'npm test') steps.push(() => affectedSteps(ctx, dir, o.affected!, o.say));
     else steps.push(step);
   }
-  for (const step of steps) {
+  for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
     const t0 = Date.now();
     const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
@@ -160,6 +168,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
  */
 export interface AffectedScope {
   base: string;
+  /** The change itself, in place of the worktree's HEAD against `base`: a kit's trial's (kitreach.ts). */
+  changed?: Changed[];
   chose?: string;
 }
 
@@ -178,15 +188,19 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
     const scripts = scriptsIn(dir);
     const plain = nodeTestScript(scripts.test);
     if (!plain) return whole("its test script isn't a plain node --test");
-    const names = await gitMaybe(ctx.run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
-    const patch = await gitMaybe(ctx.run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
-    if (names === null || patch === null) return whole(`git couldn't compare it with ${scope.base}`);
-    const changed = names
-      .split('\n')
-      .map((l) => l.trim().split('\t'))
-      .filter((p) => p.length >= 2)
-      .map(([status, file]) => ({ status, path: file }));
-    const patches = patchesByFile(patch);
+    let changed = scope.changed;
+    let patches = new Map<string, string>();
+    if (!changed) {
+      const names = await gitMaybe(ctx.run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
+      const patch = await gitMaybe(ctx.run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
+      if (names === null || patch === null) return whole(`git couldn't compare it with ${scope.base}`);
+      changed = names
+        .split('\n')
+        .map((l) => l.trim().split('\t'))
+        .filter((p) => p.length >= 2)
+        .map(([status, file]) => ({ status, path: file }));
+      patches = patchesByFile(patch);
+    }
     const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '' });
     if (a.all) return whole(a.why);
     if (!a.files.length) {
@@ -254,6 +268,12 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
+  // A trial of an agent the kit changes nothing for isn't tried: its checks would run its own main's code (kitreach.ts).
+  const reach = o.trial && o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
+  if (reach && 'none' in reach) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
+  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : undefined;
+  if (reach && 'all' in reach) say(`all its checks: ${reach.all}`);
+
   const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
   if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
   // A bump made here before and not pushed is made again, from scratch.
@@ -306,13 +326,15 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // the same checks on the same files but for the version, so they aren't run a second time.
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say });
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope });
   if (first) {
     say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say });
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope });
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
-  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit });
+  // Only some of its tests ran: its rollout's bump runs them all (no trial pass is kept for it).
+  const partial = !!scope?.chose && scope.chose !== 'the whole suite';
+  if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}) });
   const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';
 
   await git(run, dir, 'add', '--', 'kit.json', CHANGELOG, ...e.versionFiles, ...(toolChanged ? [TOOL] : []));

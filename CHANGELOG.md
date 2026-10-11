@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.20
+
+**A new kit's trial no longer holds up everything else, and takes far less time.**
+
+### What changed
+
+- Before a new kit is released, the Steward tries it on every agent. That trial used to take up a whole round, sometimes an hour, with no other pull request merged or released meanwhile. Now it goes a few agents at a time, at most 8 minutes each round, and the rest of the round's work goes on between. The kit's pull request waits meanwhile, its line says how far the trial has got, and the next round comes sooner.
+- An agent that takes none of the kit's changed parts (a change to the web pages, say, for an agent without a page) isn't tried at all: its checks would run the same code as before.
+- An agent the kit does change runs only the tests that reach the kit files that changed, rather than all of them. All of its tests still run once the kit is released, in the update the Steward opens for it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A kit trial already under way when it updates goes on as before; the next one goes the new way.
+
 ## 0.35.19
 
 **A new kit reaches your agents sooner: each agent is tested with it once, not twice.**

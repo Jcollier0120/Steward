@@ -16,7 +16,7 @@ import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { kitTrialHold, raisesKit } from './trial.ts';
+import { kitTrialHold, raisesKit, TRIAL_GOING } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -112,9 +112,11 @@ export const CAUGHT_UP = 'caught up by the Steward';
 
 /**
  * Whether a PR waits only on something that settles itself within minutes, so a round soon after can merge it: its checks
- * running, its head just caught up (checks starting there), GitHub working out whether it merges, or it being just opened.
+ * running, its head just caught up (checks starting there), GitHub working out whether it merges, it being just opened, or
+ * its kit being tried on the agents a few each round (trial.ts).
  */
-export const waitsBriefly = (why: string) => why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED);
+export const waitsBriefly = (why: string) =>
+  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING);
 
 /** How a PR's hold begins while it is younger than Settings' mergeMinAgeMinutes. */
 export const JUST_OPENED = 'opened ';
@@ -497,6 +499,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const notes = new Map<number, string>();
   const failed: string[] = [];
   let leftToAnother = false;
+  // A kit PR whose trial goes on over the rounds (trial.ts): the next round looks at this repository again.
+  let trialGoing = false;
   for (const pr of merge) {
     // A merge before this one moved the branch: what this one sets is checked again, against the branch as it is now.
     if (merged.length && pr.whose === 'team') {
@@ -542,7 +546,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     let trial: string | null;
     try {
       // An agent that moves with the kit in a PR of its own doesn't hold it, and its line says so ("Manor moves with it in #135").
-      trial = await kitTrialHold(ctx, e, pr, { note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
+      trial = await kitTrialHold(ctx, e, pr, { going: () => (trialGoing = true), note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
     } catch (err) {
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
@@ -615,7 +619,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const did = [...trainLine, ...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
   const parts = [...did, ...waits, ...caught.lines];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
-  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, lookAgain: !leftToAnother && lookAgainAfter({ merged: merged.length, held, testedHere: caught.testedHere }) };
+  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, lookAgain: !leftToAnother && !trialGoing && lookAgainAfter({ merged: merged.length, held, testedHere: caught.testedHere }), ...(trialGoing ? { again: true } : {}) };
 }
 
 /**

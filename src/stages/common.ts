@@ -33,6 +33,8 @@ export interface EmployeeResult {
   again?: boolean;
   /** Its branch's version is released already (by this stage or another way): no failed release of it stands. */
   released?: boolean;
+  /** A kit's trial ran only the tests the kit's change reaches (kitreach.ts): its rollout's bump runs them all. */
+  partial?: boolean;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
