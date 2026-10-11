@@ -8,9 +8,10 @@ import { appRoot } from '../app.ts';
  * repositories. Started with `KIT_DEMO=1` (the agent's own `demo` folder) or `KIT_DEMO=<folder>`, beside its `<ID>_HOME`
  * pointing at an empty folder and `<ID>_PORT` at a free port, so nothing of the installed copy is read or touched.
  *
- * Then the page server answers each GET from the demo folder where it has a file for it (`/api/state` from
- * `api/state.json`), the agent's own handler otherwise (with an empty data folder, it shows nothing yet), adds
- * `demo: true` to its ping (with `api/ping.json` laid over it), and refuses every button: nothing changes. An agent's
+ * Then the page server lays the demo folder's file for a GET over the agent's own answer, key by key at the top
+ * (`/api/page` with `api/page.json` holding `{ "body": … }`: the kit's frame kept, the body made up), answers the rest
+ * with the agent's own handlers (with an empty data folder, they show nothing yet), adds `demo: true` to its ping, shows
+ * no developer content (developer.ts), and refuses every button: nothing changes. An agent's
  * own background work (watchers, first scans) checks `isDemo()` and stays off.
  */
 

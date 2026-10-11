@@ -17,8 +17,9 @@ node src\cli.ts <the command that serves its page>
 
 In demo mode the page server (node/server.ts, node/demo.ts):
 
-- answers a GET from the demo folder where it has a file for it: `/api/state` from `demo/api/state.json`, `/api/findings` from `demo/api/findings.json`. The query is ignored.
+- lays the demo folder's file for a GET over the agent's own answer, key by key at the top: `/api/page` with `demo/api/page.json` holding `{ "body": … }` keeps the frame the kit builds (title, themes, tour) and shows the made-up body. A GET with no handler of its own is the file alone. The query is ignored.
 - answers the rest with the agent's own handlers, which see the empty data folder.
+- shows the page everyone sees: developer content is off, whatever the PC's own Developer options say.
 - says `demo: true` in `/api/ping`, with `demo/api/ping.json` laid over its own ping (a round under way, a summary).
 - refuses every button (`POST`, but `/api/stop`) with 403: nothing changes.
 

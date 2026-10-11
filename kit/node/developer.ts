@@ -1,3 +1,4 @@
+import { isDemo } from './demo.ts';
 import { developerOptions, manorHome, type ManorLink } from './manor.ts';
 import { dataFile, readJson } from './store.ts';
 
@@ -27,7 +28,9 @@ export function ownDeveloperOptions(file = dataFile('settings.json')): boolean {
 
 /** The switch now: Manor's when it says, else the agent's own (`own`, read from its settings.json unless given). */
 export function developer(o: { own?: boolean; home?: string; file?: string } = {}): Developer {
-  return developerOptions(o.own ?? ownDeveloperOptions(o.file), o.home ?? manorHome());
+  const d = developerOptions(o.own ?? ownDeveloperOptions(o.file), o.home ?? manorHome());
+  // A demo's page is the one everyone sees (demo.ts): its pictures ship to everyone, on whatever PC they're taken.
+  return isDemo() ? { ...d, on: false } : d;
 }
 
 /** Whether developer content may be shown now (developer().on). */

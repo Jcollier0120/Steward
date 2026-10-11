@@ -13,6 +13,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
 const { demoAnswer, demoDir, DEMO_NO, isDemo } = await import('./fixture/src/kit/demo.ts');
+const { isDeveloper } = await import('./fixture/src/kit/developer.ts');
 
 const demo = path.join(home, 'demo');
 mkdirSync(path.join(demo, 'api'), { recursive: true });
@@ -31,18 +32,19 @@ test('demo mode: only where KIT_DEMO says, the agent\'s own demo folder for 1', 
   assert.equal(demoAnswer('/api/state', null), undefined);
 });
 
-test('demo mode: GETs from the made-up data, its own handler otherwise, the ping marked, every button refused', async () => {
+test('demo mode: the made-up data laid over its own answers, the ping marked, the developer view off, every button refused', async () => {
   process.env.KIT_DEMO = demo;
   let pressed = false;
   const { token, close } = await serve({
     port,
     icon: '<svg/>',
-    get: { '/api/state': () => ({ json: { found: ['a real file'] } }), '/api/other': () => ({ json: { own: true } }) },
+    get: { '/api/state': () => ({ json: { frame: "the kit's", found: ['a real file'] } }), '/api/other': () => ({ json: { own: true } }) },
     post: { '/api/do': () => ((pressed = true), { json: { ok: true } }) },
   });
   try {
     const base = `http://127.0.0.1:${port}`;
-    assert.deepEqual(await (await fetch(`${base}/api/state`)).json(), { found: ['a made-up file'] });
+    assert.deepEqual(await (await fetch(`${base}/api/state`)).json(), { frame: "the kit's", found: ['a made-up file'] }, 'its own frame kept, its findings made up');
+    assert.equal(isDeveloper({ own: true }), false, 'a demo is the page everyone sees');
     assert.deepEqual(await (await fetch(`${base}/api/other`)).json(), { own: true });
     const ping = await (await fetch(`${base}/api/ping`)).json();
     assert.equal(ping.demo, true);

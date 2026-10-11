@@ -8,7 +8,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What's new
 
-- **node/demo.ts, and node/server.ts in demo mode.** With `KIT_DEMO=1` (the agent's `demo` folder) or `KIT_DEMO=<folder>`, the page server answers each GET from the demo folder where it has a file for it (`/api/state` from `demo/api/state.json`), the agent's own handlers otherwise, says `demo: true` in its ping (with `demo/api/ping.json` laid over it), and refuses every button with 403. Run beside `<ID>_HOME` (an empty folder) and `<ID>_PORT`, nothing of the installed copy is read or touched. `isDemo()` tells an agent's own background work to stay off.
+- **node/demo.ts, and node/server.ts in demo mode.** With `KIT_DEMO=1` (the agent's `demo` folder) or `KIT_DEMO=<folder>`, the page server lays the demo folder's file for a GET over the agent's own answer, key by key at the top (`demo/api/page.json` holding just `{ "body": … }` keeps the frame the kit builds), says `demo: true` in its ping, shows no developer content whatever the PC's Developer options, and refuses every button with 403. Run beside `<ID>_HOME` (an empty folder) and `<ID>_PORT`, nothing of the installed copy is read or touched. `isDemo()` tells an agent's own background work to stay off.
 - **spec/DEMO.md**: how to run one, and what the demo folder holds: made-up data only, and an optional `demo/hero.json` saying which view Manor's capture pictures.
 
 ### For an agent

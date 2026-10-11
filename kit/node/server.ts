@@ -213,14 +213,18 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
       const url = new URL(req.url ?? '/', `http://${HOST_NAME}:${opts.port}`);
       if (req.method === 'GET' || req.method === 'HEAD') {
         const demo = demoDir();
-        const made = demo && url.pathname !== '/api/ping' ? demoAnswer(url.pathname, demo) : undefined;
-        if (made !== undefined) return send({ json: made });
+        const made = demo ? demoAnswer(url.pathname, demo) : undefined;
         const h = get[url.pathname];
-        if (!h) return send({ json: { error: 'not found' }, status: 404 });
+        if (!h) return made === undefined ? send({ json: { error: 'not found' }, status: 404 }) : send({ json: made });
         const r = await h({ path: url.pathname, query: url.searchParams, body: {}, token });
-        // Its own ping, said to be a demo's, with the demo folder's laid over it (a round under way, say).
-        if (demo && url.pathname === '/api/ping' && 'json' in r) return send({ json: { ...(r.json as object), ...(demoAnswer('/api/ping', demo) as object | undefined), demo: true } });
-        return send(r);
+        if (!demo) return send(r);
+        // The demo's made-up answer laid over its own (the page's frame from the kit, its findings made up), and its ping
+        // said to be a demo's.
+        const own = 'json' in r && r.json && typeof r.json === 'object' && !Array.isArray(r.json) ? (r.json as object) : null;
+        const over = made && typeof made === 'object' && !Array.isArray(made) ? made : null;
+        if (url.pathname === '/api/ping' && own) return send({ json: { ...own, ...over, demo: true } });
+        if (made === undefined) return send(r);
+        return send({ json: own && over ? { ...own, ...over } : made });
       }
       if (req.method === 'POST') {
         if (!postAllowed(hosts, req.headers.origin, req.headers['x-token'], token)) return send({ json: { error: 'forbidden' }, status: 403 });
