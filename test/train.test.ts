@@ -172,7 +172,8 @@ test("a PR that needs the owner first (labelled owner-first, or changing a migra
   assert.match(holdReason(pr({ files: ['supabase/migrations/20261009_x.sql'] }), 'main')!, /^it changes supabase\/migrations\/20261009_x\.sql, which may need you to run it first/);
   assert.match(holdReason(pr({ files: ['db/fix.sql'] }), 'main')!, /label it owner-done$/);
   assert.equal(holdReason(pr({ files: ['db/fix.sql'], labels: ['owner-done'] }), 'main'), null, 'once the owner has run it');
-  assert.match(holdReason(pr({ files: ['db/fix.sql'], labels: ['owner-done', 'owner-first'] }), 'main')!, /^labelled owner-first/, 'owner-first wins');
+  assert.equal(holdReason(pr({ files: ['db/fix.sql'], labels: ['owner-done', 'owner-first'] }), 'main'), null, 'owner-done wins: the owner adds it without taking owner-first off');
+  assert.match(holdReason(pr({ labels: ['owner-first'] }), 'main')!, /^labelled owner-first: .* label it owner-done$/);
   assert.equal(canRide(pr({ labels: ['owner-first'] }), 'main'), false);
   assert.equal(canRide(pr({ files: ['supabase/migrations/1.sql'] }), 'main'), false);
   assert.equal(canRide(pr(), 'main'), true);
