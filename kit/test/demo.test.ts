@@ -12,7 +12,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const { port } = await import('./fixture/src/app.ts');
 const { serve } = await import('./fixture/src/kit/server.ts');
-const { demoAnswer, demoDir, DEMO_NO, isDemo, when } = await import('./fixture/src/kit/demo.ts');
+const { demoAnswer, demoDir, DEMO_NO, isDemo, shownDataDir, when } = await import('./fixture/src/kit/demo.ts');
 const { isDeveloper } = await import('./fixture/src/kit/developer.ts');
 
 const demo = path.join(home, 'demo');
@@ -48,6 +48,10 @@ test('demo mode: the made-up data laid over its own answers, the ping marked, th
     const base = `http://127.0.0.1:${port}`;
     assert.deepEqual(await (await fetch(`${base}/api/state`)).json(), { frame: "the kit's", found: ['a made-up file'] }, 'its own frame kept, its findings made up');
     assert.equal(isDeveloper({ own: true }), false, 'a demo is the page everyone sees');
+    writeFileSync(path.join(demo, 'hero.json'), '{"developer":true}');
+    assert.equal(isDeveloper({ own: false }), true, "a developer agent's demo, as developers see it");
+    rmSync(path.join(demo, 'hero.json'));
+    assert.equal(shownDataDir(), 'C:\\Users\\Alex\\.fixture', "no folder of the PC taking the picture, whose path names its owner");
     assert.deepEqual(await (await fetch(`${base}/api/other`)).json(), { own: true });
     const ping = await (await fetch(`${base}/api/ping`)).json();
     assert.equal(ping.demo, true);

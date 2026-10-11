@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { appRoot } from '../app.ts';
+import { APP, appRoot, dataDir } from '../app.ts';
 
 /**
  * Demo mode (kit 2.53.0): the agent's page shown with made-up data, for pictures of it (Manor's hero pictures, each
@@ -36,6 +36,27 @@ export function demoAnswer(pathname: string, dir = demoDir()): unknown {
   const file = `${path.join(dir, ...parts)}.json`;
   if (!existsSync(file)) return undefined;
   return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''), (_k, v) => (typeof v === 'string' ? when(v) : v));
+}
+
+/**
+ * Whether the demo shows the developer view (developer.ts): only where its hero.json says `"developer": true`, for a
+ * developer agent, whose pictures only developers see. Off otherwise, whatever this PC's own switch says.
+ */
+export function demoDeveloper(dir = demoDir()): boolean {
+  if (!dir) return false;
+  try {
+    return (JSON.parse(readFileSync(path.join(dir, 'hero.json'), 'utf8').replace(/^﻿/, '')) as { developer?: unknown }).developer === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The data folder the developer view's footer names: in a demo, a made-up one where it would be on Alex's PC, never the
+ * scratch folder on the PC taking the picture (whose path has its owner's name in it).
+ */
+export function shownDataDir(): string {
+  return isDemo() ? `C:\\Users\\Alex\\.${APP.id}` : dataDir;
 }
 
 /** "@now", "@now-300" (five minutes ago), "@now+3600": the time then, so a picture says "5 min ago" whenever it's taken. */

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { APP, appRoot, dataDir } from '../app.ts';
+import { APP, appRoot } from '../app.ts';
 import { developer } from './developer.ts';
 import { duty } from './duty.ts';
 import { trialEnded, trialEndedNote } from './license-check.ts';
@@ -9,7 +9,7 @@ import { manorLink, manorSettingsUrl } from './manor.ts';
 import type { Onboarding } from './onboarding.ts';
 import { loadEsbuild, type Esbuild } from './minify.ts';
 import { ago, CSS, esc, lookCss, pillOf, SETTLING_SVG, settlingText } from './page.ts';
-import { demoAnswer } from './demo.ts';
+import { demoAnswer, shownDataDir } from './demo.ts';
 import { AGENT_ONBOARDING, needsSettings, type NeedsSettings } from './required.ts';
 import { firstRoundNow, roundTimes } from './schedule.ts';
 import type { Handler } from './server.ts';
@@ -109,7 +109,7 @@ export function pageShell(o: { title?: string; busy?: boolean; refreshSec?: numb
     themeKey: `${APP.id}:theme`,
     developer: dev,
     work: workSection({ developer: dev }),
-    dataDir: dev ? dataDir : '',
+    dataDir: dev ? shownDataDir() : '',
     onboarding,
     needs,
   };

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { appRoot } from '../app.ts';
+import { isDemo } from './demo.ts';
 import { requiredText, unmetRequired, type Onboarding } from './onboarding.ts';
 import { readSettings, type Field, type SettingsSpec } from './settings-kit.ts';
 
@@ -36,7 +37,8 @@ export interface NeedsSettings {
  * settings file each time, so a save lets the rounds go at once; with no onboarding or settings, nothing is needed.
  */
 export function needsSettings(o: Onboarding | null = naming, spec: SettingsSpec | null = watched): NeedsSettings | null {
-  if (!o?.required?.length || !spec) return null;
+  // A demo (demo.ts) is the page as it is once set up: nothing held, whatever its empty data folder has.
+  if (!o?.required?.length || !spec || isDemo()) return null;
   let values: Record<string, unknown>;
   try {
     values = readSettings(spec) as Record<string, unknown>;
