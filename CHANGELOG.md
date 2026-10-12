@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.44
+
+**Releases can carry an agent's own native program, signed, for both kinds of Windows processor.**
+
+### What's new
+
+- The Steward's kit 2.62.0. An agent that needs a program of its own beside Node (Envoy's media host, which hears voice chat on the NPU) says so in its kit.json.
+  - Its release builds that program for Arm and x64 PCs and signs it with your code-signing certificate.
+  - The release carries both builds; each PC keeps its own.
+
+### What changed
+
+- Releasing such an agent needs your code-signing certificate's key, as Manor's setup does: connect SimplySign Desktop first. Without it, the release stops before building, and says so.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.40
 
 **An urgent fix can reach customers at once instead of waiting for the next release day.**
