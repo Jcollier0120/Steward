@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { NOT_PUBLISHED } from '../kit/exchequer.ts';
+import { NOT_PUBLISHED, type ExchequerOptions } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { commitOf, fetchBranch } from '../git.ts';
@@ -91,6 +91,8 @@ export interface Ctx {
   lease?: LeaseGuard | null;
   /** Waits this long before asking GitHub something again (merge.ts); tests stand in for it. Not given: the clock's. */
   pause?: (ms: number) => Promise<void>;
+  /** The Exchequer to let an urgent release out at (release.ts urgentNote); tests stand in for it. Not given: Castellan's. */
+  exchequer?: ExchequerOptions;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

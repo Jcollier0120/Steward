@@ -569,6 +569,13 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   r = release('--readable', '--publish');
   assert.equal(r.status, 2);
   assert.match(r.stderr, /a readable release is never published/);
+  // --urgent goes with a publish to the Exchequer, and --exchequer with nothing else but it.
+  r = release('--urgent');
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--urgent is for a release published to the Exchequer/);
+  r = release('--exchequer', '--install');
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /give it alone \(or with --urgent\)/);
   r = release();
   assert.equal(r.status, 0, r.stderr);
   assert.equal(readFileSync(path.join(out, ANNOUNCEMENT), 'utf8'), readFileSync(path.join(repo, ANNOUNCEMENT), 'utf8'), 'the checkout\'s file, as committed');

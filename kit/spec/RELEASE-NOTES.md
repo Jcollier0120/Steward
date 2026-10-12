@@ -30,6 +30,18 @@ Every release says what it brings. A release's notes come from its repository's 
 - **Before you update is always there.** "Nothing: it updates itself as usual." is an answer, and saying so is the point: a person reading the notes knows it was thought about.
 - The notes are public (they are published in Jcollier0120/Manor-releases with the release), so no secrets, private paths or another person's details, and no links into the private repositories.
 
+## An urgent fix
+
+Customers get Castellan's releases on its **release days**, Tuesdays and Fridays at 14:00 UTC (the Exchequer, from 0.8.0), so a week's work reaches them together. A fix that can't wait for that says so in its entry: its bold line starts with **`Urgent fix:`**, saying what it fixes, as a customer reads it.
+
+```markdown
+## 0.4.32
+
+**Urgent fix: updates no longer stop after a look for new releases that never ends.**
+```
+
+A release whose entry has a line starting `**Urgent fix:` (or one it brings, from a version never released on its own) is published to the Exchequer as **urgent**: out to customers at once, not on the next release day. `npm run release -- --publish --urgent` (or `--exchequer --urgent`) does the same for a release whose entry isn't marked. One published already is let out from the PC that releases Castellan with the Steward's `release-now <agent> [version]`; the Steward's round does that itself for a marked entry an older kit published. Keep the mark for what really can't wait: customers chose the calm of twice a week.
+
 ## What the release does with it
 
 The kit's `release.ts` (and Manor's and Reeve's own, with `notes.ts`) publishes these notes:
