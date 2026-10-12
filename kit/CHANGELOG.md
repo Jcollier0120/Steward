@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.61.0
+
+**A handler can stream its reply: a live recording sent to another PC as it is made.**
+
+### What's new
+
+- **A streamed reply** (node/server.ts): a handler can answer `{ stream, type, status? }` with a Node `Readable`, and the server pipes it to the client as it comes, for a reply too long to hold or one with no end until the client stops it. The stream is destroyed when the client goes away, and the reply is cut off when the stream fails. A HEAD gets the status and type, and the stream is destroyed unread.
+- **The request's `headers` and a `signal`**: a handler now gets the request's headers, and an `AbortSignal` that is aborted when the client goes away before the reply has ended, so long work for one caller stops when nobody waits for it. Both are optional in the `Request` type, so a test that builds a request without them still compiles; `serve()` always gives them.
+
+### For an agent
+
+- Nothing: take the kit as usual. The Chronicler uses the streamed reply to record a game played on another PC (Manor's Other PCs forward `/api/peer/*` to it).
+
 ## 2.59.0
 
 **An urgent fix reaches customers at once, not on the Exchequer's next release day.**

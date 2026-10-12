@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.43
+
+**The kit it hands out is 2.61.0: an employee's page can stream a reply.**
+
+### What changed
+
+- The Steward hands out kit 2.61.0. An employee's page can now send a long reply as it is made, which the Chronicler needs to record a game played on another of your PCs.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.40
 
 **An urgent fix can reach customers at once instead of waiting for the next release day.**
