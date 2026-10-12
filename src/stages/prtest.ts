@@ -5,7 +5,7 @@ import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
-import { checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
@@ -157,9 +157,13 @@ export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tes
   const before = testedBefore(e, pr);
   const newest = latestKit(ctx.kit);
   if (before && kitMayClear(e, before, newest)) ctx.log(`[${e.id}] #${pr.number} failed at its kit's fill before kit ${newest} was released: tested here again`);
+  // Its checks ended by Windows (the PC shutting down: common.ts's interrupted) didn't fail: tested again.
+  else if (before && !before.ok && interrupted(before.note)) ctx.log(`[${e.id}] #${pr.number}'s checks were ended by Windows before: tested here again`);
   else if (before) return before;
   if (!pr.headOid) return { ok: false, note: "GitHub didn't say its head commit, so it wasn't tested here", at: new Date().toISOString() };
   const tested = { ...(await test(ctx, e, pr)), ...(newest ? { kit: newest } : {}) };
+  // Ended by Windows: not kept, so the next round tests it again.
+  if (!tested.ok && interrupted(tested.note)) return tested;
   // Kept by commit, a "can't" too; the oldest go once there are more than 500.
   const kept = readJson<Record<string, Tested>>(prChecksFile(), {});
   kept[keyOf(e, pr)] = tested;

@@ -261,3 +261,29 @@ test('a train whose checks on GitHub are still running waits as one train, and t
   assert.equal(merge[merge.indexOf('--match-head-commit') + 1], stack, 'the same stack, not built anew');
   assert.match(ctx.lines.join('\n'), /its checks passed here at [0-9a-f]{7} already/);
 });
+
+test('a train whose checks Windows ended (the PC shutting down) is kept as nothing: the next round tries the same train again', async () => {
+  const q = queue('ended', 2);
+  const key = [sh(q.origin, 'rev-parse', 'refs/heads/main'), ...q.prs.map((p) => `${p.number}@${p.oid}`)].join(' ');
+  // As the Steward before 0.35.34 kept it: the reboot's exit, held as the train's failure.
+  writeFileSync(trainsFile(), JSON.stringify({ fake: { key, note: 'npm test failed (exit 1073807364)', at: '2026-10-12T15:40:00.000Z' } }));
+  const gh = github(q);
+  const { e, ctx } = ctxOf(q, gh.run);
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(r.outcome, 'done', r.message);
+  assert.deepEqual(r.merged.map((p) => p.number), [31, 32]);
+  assert.equal(JSON.parse(readFileSync(trainsFile(), 'utf8')).fake, undefined);
+});
+
+test('checks Windows ends hold nothing against the train or its PRs: the next round tests them again', { skip: process.platform !== 'win32' && 'an exit code over 255 is Windows only' }, async () => {
+  const q = queue('killed', 2);
+  const gh = github(q);
+  const { e, ctx } = ctxOf(q, gh.run, { test: ['node -e process.exit(1073807364)'] });
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.deepEqual(r.merged, []);
+  assert.match(ctx.lines.join('\n'), /#31, #32 stacked, but Windows ended its checks \(.*exit 1073807364.*\): the next round tries the train again/);
+  assert.equal(JSON.parse(readFileSync(trainsFile(), 'utf8')).fake, undefined);
+  const { prChecksFile } = await import('../src/stages/prtest.ts');
+  const kept = existsSync(prChecksFile()) ? JSON.parse(readFileSync(prChecksFile(), 'utf8')) : {};
+  for (const p of q.prs) assert.equal(kept[`fake#${p.number}@${p.oid}`], undefined, `#${p.number}'s ended checks aren't kept`);
+});
