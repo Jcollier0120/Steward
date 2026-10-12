@@ -145,6 +145,8 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.doesNotMatch(withSelf, /Merging and releasing for Steward/, 'said in its row, not under the table');
   assert.match(withSelf, /name="employees"[^>]*value="fake"/);
   assert.doesNotMatch(withSelf, /name="employees"[^>]*value="steward"/, 'its rounds merge and release it');
+  // One box ticks every repository, or none: the Steward's own row isn't counted.
+  assert.match(withSelf, /<label class="pick pick-all"><input type="checkbox"[^>]*aria-label="Tick every repository"[^>]*\/> All \(1 of 1\)<\/label>/);
   // Open PRs are a small table under their row's first three columns, not a column; Notes only once a row has one.
   assert.doesNotMatch(withOne, /<th>(Open PRs|Notes)<\/th>/);
   const pr = { number: 7, title: 'Fix the thing', url: 'https://github.com/octocat/fake/pull/7', head: 'claude/fix', base: 'main', author: 'octocat', whose: 'team', headOid: 'abc', after: null, afterError: null, afterText: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'passing', labels: [], changed: 3, files: [] };

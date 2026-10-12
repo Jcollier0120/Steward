@@ -22,6 +22,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. If you'd rather keep one stage at a time, set **Stages at once** to 1 in Settings.
 
+## 0.35.26
+
+**One box ticks every repository for a stage, or none.**
+
+### What's new
+
+- The repositories you pick for a stage on the Steward's page (the kit rollout, a release) now start with an **All** box, which says how many are ticked ("All (12 of 37)"). Tick it to pick every repository, untick it to clear them all, then tick the few you want. It shows half-ticked while only some are picked.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.25
 
 **An alarm about a failed release or refresh says why it failed, and what to do.**
