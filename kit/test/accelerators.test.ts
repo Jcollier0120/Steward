@@ -747,6 +747,40 @@ test('embeddings go to an accelerator that serves them, and a server can be left
 
 // ---------------------------------------------------------------- starting a server
 
+test("OpenVINO Model Server is ready once it lists its model: an empty /v1/models while it loads is busy; any other server's is ready", async () => {
+  assert.equal(A.listsWhenLoaded(['C:\\Users\\x\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms.exe', '--rest_port', '18183']), true);
+  assert.equal(A.listsWhenLoaded(['%USERPROFILE%\\servers\\OVMS.EXE']), true);
+  assert.equal(A.listsWhenLoaded(['C:\\llama\\llama-server.exe']), false);
+  assert.equal(A.listsWhenLoaded(undefined), false);
+  // As OpenVINO Model Server 2026.4.1 does (measured 2026-10-12): its port open at once, no model listed until loaded.
+  let listed = false;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: listed ? [{ id: 'OpenVINO/Qwen3-4B-int4-ov' }] : [], object: 'list' }));
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    assert.equal(await A.probe(baseUrl), 'ready', 'any other server: answering is ready, as before');
+    assert.equal(await A.probe(baseUrl, 1000, { listsWhenLoaded: true }), 'busy');
+    // Running already, loading: waited on (never started: its start would fail), then ready once it lists the model.
+    const ep = { baseUrl, model: 'OpenVINO/Qwen3-4B-int4-ov', startCommand: ['C:\\nowhere\\ovms.exe'] };
+    const t0 = Date.now();
+    const loaded = (async () => {
+      while (Date.now() - t0 < 600) await new Promise((r) => setTimeout(r, 50));
+      listed = true;
+    })();
+    assert.deepEqual(await A.ensureServer(ep, { readyMs: 10_000 }), { started: false, waited: true });
+    assert.ok(Date.now() - t0 >= 600);
+    await loaded;
+    listed = false;
+    await assert.rejects(A.ensureServer(ep, { readyMs: 500 }), (e: Error) => e instanceof A.AcceleratorDown && /still busy/.test(e.message));
+  } finally {
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+  }
+});
+
 test('a server that is not running is started from its startCommand: %NAME% expanded, detached, in the home folder', async () => {
   fresh();
   const port = await closedPort();
