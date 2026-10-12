@@ -24,6 +24,9 @@ import { hostFor, must } from '../hosts/index.ts';
  * (steward/…) and the Wright's (wright/…, which opens its own drafts for the Bailiff) are never taken.
  */
 
+/** What GitHub says when a PR is open from the branch already (`gh pr create`). */
+const ALREADY_OPEN = /pull request for branch .* already exists/i;
+
 /** The claims on an employee's repository that name a branch it would open a PR from: the highest version per branch. */
 export function claimedBranches(e: Employee, claims: Claim[] = claimsOn(e.repo)): Claim[] {
   const by = new Map<string, Claim>();
@@ -107,8 +110,23 @@ export async function openVouchedBranches(ctx: Ctx, e: Employee): Promise<{ open
       }
       // Another PC's turn here now (lease.ts): it opens it.
       if (ctx.lease && !(await ctx.lease.ok(e))) break;
+      // Opened since the round's glance (a long round: the Steward's own merges and releases come first), most often by
+      // the work itself: asked afresh just before opening one, and the PRs read afresh from here on.
+      const open = JSON.parse(must(await hostFor(ctx, e).listPrs(e.repo, { state: 'open', head: branch, fields: 'number' })) || '[]') as { number: number }[];
+      if (open.length) {
+        ctx.log(`[${e.id}] ${branch}: #${open[0].number} is open for it already, opened since the round looked`);
+        forgetGlance(ctx, e);
+        continue;
+      }
       const p = await proposal(ctx, e, c, head, { by });
-      const url = must(await hostFor(ctx, e).createPr(e.repo, { base: e.branch, head: branch, title: p.title, body: p.body })).trim().split('\n').pop() ?? '';
+      const made = await hostFor(ctx, e).createPr(e.repo, { base: e.branch, head: branch, title: p.title, body: p.body });
+      // Opened in the moment between: open is open, and the other branches are still looked at.
+      if (made.code !== 0 && ALREADY_OPEN.test(`${made.err}\n${made.out}`)) {
+        ctx.log(`[${e.id}] ${branch}: a PR is open for it already, opened just now`);
+        forgetGlance(ctx, e);
+        continue;
+      }
+      const url = must(made).trim().split('\n').pop() ?? '';
       const number = Number(/\/pull\/(\d+)/.exec(url)?.[1] ?? 0);
       const line = `opened #${number || '?'} from ${branch} (v${p.version}, vouched for by ${by} at ${head.slice(0, 7)})`;
       ctx.log(`[${e.id}] ${line}`);

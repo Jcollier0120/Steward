@@ -129,6 +129,46 @@ test('the round opens the PR for a claimed, pushed, vouched branch, titled by it
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '31', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', f.head]]);
 });
 
+test('a PR opened since the round looked is never opened again: asked afresh first, and "already exists" is open, not a failure', async () => {
+  const f = pushed('opened-since');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature:claude/other');
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  const look = async (o: { openNow: number[]; createSays?: string }) => {
+    writeJson(claimsFile(), [claim(), claim({ version: '0.4.2', branch: 'claude/other' })]);
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'list' && a.includes('closed')) return ok([]);
+      // Asked afresh at a head: what is open now.
+      if (a[0] === 'pr' && a[1] === 'list' && a.includes('--head')) return ok(a.includes('claude/feature') ? o.openNow.map((number) => ({ number })) : []);
+      if (a[0] === 'pr' && a[1] === 'create' && a.includes('claude/feature') && o.createSays) return { code: 1, out: '', err: o.createSays };
+      if (a[0] === 'pr' && a[1] === 'create') return ok('https://github.com/Jcollier0120/Fake/pull/32\n');
+      if (a[0] === 'api') return ok([byTeam]);
+      return ok('');
+    });
+    const e = employee(f.checkout);
+    // The round's glance, taken before the work opened its PR: no PRs at all.
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    ctx.glance = { at: new Date().toISOString(), stewardReleases: null, stewardMain: null, repos: { [e.id]: { head: f.head, prs: [], releases: [] } }, errors: {} };
+    const out = await openVouchedBranches(ctx, e);
+    return { out, r, lines: ctx.lines.join('\n'), glance: ctx.glance.repos[e.id] };
+  };
+
+  const since = await look({ openNow: [133] });
+  assert.ok(!since.r.gh.some((a) => a[1] === 'create' && a.includes('claude/feature')), 'not opened again');
+  assert.match(since.lines, /claude\/feature: #133 is open for it already, opened since the round looked/);
+  assert.equal(since.glance, undefined, 'its PRs are read afresh from here on');
+  assert.deepEqual(since.out.opened.map((x) => x.branch), ['claude/other'], 'the other branch is still opened');
+
+  const between = await look({ openNow: [], createSays: 'a pull request for branch "claude/feature" into branch "main" already exists:\nhttps://github.com/Jcollier0120/Fake/pull/133' });
+  assert.doesNotMatch(between.lines, /couldn't open the PRs/);
+  assert.match(between.lines, /claude\/feature: a PR is open for it already, opened just now/);
+  assert.deepEqual(between.out.opened.map((x) => x.branch), ['claude/other'], 'the other branch is still opened');
+
+  // Any other refusal still says why, as before.
+  const refused = await look({ openNow: [], createSays: 'GraphQL: Head sha can\'t be blank' });
+  assert.match(refused.lines, /couldn't open the PRs for its vouched branches: .*Head sha can't be blank/);
+});
+
 test("a claimed branch isn't opened while unvouched, merged already, closed at its head, or not on origin", async () => {
   const f = pushed('not-yet');
   sh(f.checkout, 'push', '--quiet', 'origin', 'claude/feature');
