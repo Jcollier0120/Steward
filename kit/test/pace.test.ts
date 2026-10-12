@@ -12,8 +12,10 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { FIRST_ROUND_WAITING, inFirstRoundTurn, pace, setPriorityFor } = await import('./fixture/src/kit/pace.ts');
-const { firstRoundDone, roundFile } = await import('./fixture/src/kit/schedule.ts');
+const { AGENTS_AT_ONCE, FIRST_ROUND_WAITING, LOAD, WORK_WAITING, agentsAtOnce, inFirstRoundTurn, inWorkTurn, measureLoad, pace, setPriorityFor, slotsFor } = await import('./fixture/src/kit/pace.ts');
+const { LockTimeout } = await import('./fixture/src/kit/npu-queue.ts');
+const { every, firstRoundDone, roundFile } = await import('./fixture/src/kit/schedule.ts');
+const { readJson } = await import('./fixture/src/kit/store.ts');
 const { pillOf, settlingText } = await import('./fixture/src/kit/page.ts');
 const { lookFor } = await import('./fixture/src/kit/look.ts');
 
@@ -141,5 +143,137 @@ test('on Windows, a process set gentle and back: efficiency mode, disk priority 
   } finally {
     child.kill();
     stopPowerShellWorker();
+  }
+});
+
+test("agents at once: Manor's agentsAtOnce, else two at a gentle pace and four at a full one; 0 lifts the line", () => {
+  const none = path.join(home, 'no-manor');
+  assert.deepEqual([agentsAtOnce('gentle', none, {}), agentsAtOnce('full', none, {})], [AGENTS_AT_ONCE.gentle, AGENTS_AT_ONCE.full]);
+  assert.deepEqual([AGENTS_AT_ONCE.gentle, AGENTS_AT_ONCE.full], [2, 4]);
+  assert.equal(agentsAtOnce('gentle', manorWith('a-3', { agentsAtOnce: 3 }), {}), 3);
+  assert.equal(agentsAtOnce('full', manorWith('a-0', { agentsAtOnce: 0 }), {}), null, 'no line, as before kit 2.56.0');
+  assert.equal(agentsAtOnce('full', manorWith('a-big', { agentsAtOnce: 40 }), {}), AGENTS_AT_ONCE.most);
+  assert.equal(agentsAtOnce('gentle', manorWith('a-odd', { agentsAtOnce: 'lots' }), {}), 2, 'anything else: as if unsaid');
+  assert.equal(agentsAtOnce('gentle', manorWith('a-g', { agentsAtOnce: 3 }), { NODE_TEST_CONTEXT: 'child' }), null, 'a test never waits in the real line');
+  assert.equal(agentsAtOnce('gentle', none, { NODE_TEST_CONTEXT: 'child', MANOR_AGENTS_AT_ONCE: '1' }), 1);
+  assert.equal(agentsAtOnce('gentle', manorWith('a-env', { agentsAtOnce: 3 }), { MANOR_AGENTS_AT_ONCE: '0' }), null, 'the variable says instead of Manor');
+});
+
+test('the load: every slot on a quiet PC, half on a fairly busy one, one on a busy one or short of memory', () => {
+  const quiet = { busy: 0.1, freeMemory: 0.5 };
+  assert.equal(slotsFor(4, quiet), 4);
+  assert.equal(slotsFor(4, { ...quiet, busy: LOAD.someBusy }), 2);
+  assert.equal(slotsFor(3, { ...quiet, busy: LOAD.someBusy }), 2);
+  assert.equal(slotsFor(2, { ...quiet, busy: LOAD.someBusy }), 1);
+  assert.equal(slotsFor(4, { ...quiet, busy: LOAD.busy }), 1);
+  assert.equal(slotsFor(4, { ...quiet, freeMemory: LOAD.lowMemory / 2 }), 1);
+  assert.equal(slotsFor(1, quiet), 1);
+});
+
+test("the load is measured from Node's own counters: shares between 0 and 1", async () => {
+  const l = await measureLoad(50);
+  assert.ok(l.busy >= 0 && l.busy <= 1, String(l.busy));
+  assert.ok(l.freeMemory > 0 && l.freeMemory <= 1, String(l.freeMemory));
+});
+
+test('the work line: rounds side by side up to its slots, the next when one ends; one at a time on a busy PC; none with no line', async () => {
+  const dir = path.join(home, 'locks', 'work');
+  mkdirSync(path.dirname(dir), { recursive: true });
+  const quiet = async () => ({ busy: 0.05, freeMemory: 0.6 });
+  const busy = async () => ({ busy: 0.9, freeMemory: 0.6 });
+  const order: string[] = [];
+  const gates = new Map<string, () => void>();
+  const round = (who: string, load = quiet, slots: number | null = 2) =>
+    inWorkTurn('gentle', async () => {
+      order.push(`${who} starts`);
+      await new Promise<void>((r) => gates.set(who, r));
+      order.push(`${who} ends`);
+    }, { who, limitMs: 60_000, waitMs: 30_000, dir, slots, load });
+  const settle = () => new Promise((r) => setTimeout(r, 500));
+  const a = round('a');
+  await settle();
+  const b = round('b');
+  await settle();
+  assert.deepEqual(order, ['a starts', 'b starts'], 'two side by side');
+  const c = round('c');
+  await settle();
+  assert.deepEqual(order, ['a starts', 'b starts'], 'the third waits its turn');
+  gates.get('a')!();
+  await settle();
+  assert.deepEqual(order.slice(2), ['a ends', 'c starts'], 'and takes the slot a gave up');
+  gates.get('b')!();
+  await settle();
+  // b's slot is free, but on a busy PC a round may take only the first slot, which c holds.
+  const d = round('d', busy);
+  await settle();
+  assert.ok(!order.includes('d starts'), 'a busy PC: one at a time');
+  // No line: at once, whatever it holds.
+  const e = round('e', quiet, null);
+  await settle();
+  assert.ok(order.includes('e starts'));
+  gates.get('e')!();
+  gates.get('c')!();
+  await settle();
+  assert.ok(order.includes('d starts'), 'd once c has ended');
+  gates.get('d')!();
+  await Promise.all([a, b, c, d, e]);
+});
+
+test("the work line: a round whose turn never comes throws the line's LockTimeout, which every() takes as a round that waited", async () => {
+  const dir = path.join(home, 'locks', 'work-timeout');
+  mkdirSync(path.dirname(dir), { recursive: true });
+  let release!: () => void;
+  const held = inWorkTurn('gentle', () => new Promise<void>((r) => (release = r)), { who: 'holder', limitMs: 60_000, waitMs: 30_000, dir, slots: 1 });
+  await new Promise((r) => setTimeout(r, 300));
+  await assert.rejects(inWorkTurn('gentle', async () => {}, { who: 'late', limitMs: 60_000, waitMs: 400, dir, slots: 1 }), LockTimeout);
+  release();
+  await held;
+});
+
+test("a scheduled round takes its turn in the work line, and round.json says how long it waited; a round asked for doesn't wait", async () => {
+  process.env.MANOR_AGENTS_AT_ONCE = '1';
+  const { setDuty } = await import('./fixture/src/kit/duty.ts');
+  setDuty(true);
+  let release!: () => void;
+  const held = inWorkTurn('full', () => new Promise<void>((r) => (release = r)), { who: 'another agent', limitMs: 60_000, waitMs: 30_000 });
+  const ran: string[] = [];
+  const job = every(3_600_000, async () => void ran.push('round'), { name: 'work-line', firstDelayMs: 50 });
+  try {
+    await new Promise((r) => setTimeout(r, 1_200));
+    assert.deepEqual([...ran], [], 'the one slot is held: it waits');
+    assert.equal(job.state.runningSince, null, 'not running while it waits');
+    assert.equal(job.state.waiting, WORK_WAITING, 'and says so: never taken for a schedule with nothing coming');
+    release();
+    while (ran.length === 0 || job.running) await new Promise((r) => setTimeout(r, 20));
+    const r = readJson<{ rounds: Record<string, { ok: boolean; waitedMs?: number }> }>(roundFile(), { rounds: {} }).rounds['work-line'];
+    assert.equal(r.ok, true);
+    assert.equal(job.state.waiting, null);
+    assert.ok((r.waitedMs ?? 0) >= 1000, `it waited about a second (${r.waitedMs})`);
+    // Run now never waits, whoever holds the slot.
+    let again!: () => void;
+    const holding = inWorkTurn('full', () => new Promise<void>((r2) => (again = r2)), { who: 'another agent', limitMs: 60_000, waitMs: 30_000 });
+    await new Promise((r2) => setTimeout(r2, 300));
+    assert.ok(job.runNow());
+    while (job.running) await new Promise((r2) => setTimeout(r2, 20));
+    assert.deepEqual([...ran], ['round', 'round']);
+    // Nor does a light schedule's round: light always, or as a function says before each round.
+    const light = every(3_600_000, async () => void ran.push('light'), { name: 'light', firstDelayMs: 20, light: true });
+    const lightNow = every(3_600_000, async () => void ran.push('light now'), { name: 'light-now', firstDelayMs: 20, light: () => true });
+    try {
+      const until = Date.now() + 5_000;
+      while ((!ran.includes('light') || light.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
+      assert.ok(ran.includes('light'), 'a light round runs while the slot is held');
+      while ((!ran.includes('light now') || lightNow.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
+      assert.ok(ran.includes('light now'));
+    } finally {
+      light.stop();
+      lightNow.stop();
+    }
+    again();
+    await holding;
+  } finally {
+    job.stop();
+    delete process.env.MANOR_AGENTS_AT_ONCE;
+    await held;
   }
 });

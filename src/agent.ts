@@ -248,12 +248,13 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it. The first comes within a minute of the
   // start, not the kit's 2 to 15 minutes at a gentle pace: the Steward starts again whenever Manor updates it, often
-  // halfway through a release and its rollout, which shouldn't stand still meanwhile (0.35.29).
+  // halfway through a release and its rollout, which shouldn't stand still meanwhile (0.35.29). Outside the kit's work
+  // line (`light`): its rounds keep their own limit, Settings' Stages at once, rather than queueing behind the agents'.
   let rounds: ReturnType<typeof every> | null = null;
   const arrange = () => {
     const s = loadSettings();
     const scheduled = s.byItself || s.tend;
-    if (scheduled && !rounds) rounds = every(() => sooner ?? loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round', firstDelayMs: FIRST_ROUND_MS + Math.random() * FIRST_ROUND_MS });
+    if (scheduled && !rounds) rounds = every(() => sooner ?? loadSettings().roundMinutes * 60_000, () => roundJob(), { name: 'round', firstDelayMs: FIRST_ROUND_MS + Math.random() * FIRST_ROUND_MS, light: true });
     else if (!scheduled && rounds) {
       rounds.stop();
       rounds = null;

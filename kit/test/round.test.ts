@@ -35,7 +35,7 @@ test('round.json is in the data folder', () => {
   assert.equal(roundFile(), path.join(dataDir, 'round.json'));
 });
 
-test('a round that goes through is recorded: started, finished, ok, no error, the interval and the next due', async () => {
+test('a round that goes through is recorded: started, finished, ok, no error, the interval, the next due, and what it used', async () => {
   setDuty(true);
   const before = Date.now();
   const job = every(60_000, async () => void (await new Promise((r) => setTimeout(r, 20))), { firstDelayMs: 50_000 });
@@ -43,7 +43,10 @@ test('a round that goes through is recorded: started, finished, ok, no error, th
     await oneRound(job);
     const r = file().rounds?.round;
     assert.ok(r, 'an unnamed schedule is "round"');
-    assert.deepEqual(Object.keys(r).sort(), ['error', 'everyMs', 'finished', 'next', 'ok', 'started']);
+    assert.deepEqual(Object.keys(r).sort(), ['cpuMs', 'error', 'everyMs', 'finished', 'memoryMb', 'next', 'ok', 'started'], 'no waitedMs: a round asked for never waits');
+    const used = r as unknown as { cpuMs: number; memoryMb: number };
+    assert.ok(Number.isInteger(used.cpuMs) && used.cpuMs >= 0, 'its processor time, in milliseconds');
+    assert.ok(Number.isInteger(used.memoryMb) && used.memoryMb > 10, 'its most memory, in megabytes');
     assert.ok(isIso(r.started) && isIso(r.finished) && isIso(r.next));
     assert.ok(Date.parse(r.started) >= before - 1);
     assert.ok(Date.parse(r.finished) - Date.parse(r.started) >= 15, 'finished is when the round ended');
