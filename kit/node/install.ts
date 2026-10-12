@@ -184,6 +184,29 @@ export function readRelease(root: string): Release | null {
 const norm = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
 const samePath = (a: string, b: string) => norm(a) === norm(b);
 const inside = (p: string, dir: string) => samePath(p, dir) || norm(p).startsWith(norm(dir) + path.sep);
+
+/**
+ * Why --purge won't remove `dataDir`, or null when it's the agent's own. `<ID>_HOME` can name any folder, and --purge
+ * deletes all it holds, so a mistaken one is refused rather than emptied:
+ * - a whole drive;
+ * - the profile, or one of Windows' own or the person's folders (Documents, Desktop, AppData, Program Files...), or a
+ *   folder holding one;
+ * - a git repository;
+ * - a folder neither named for the agent (`%USERPROFILE%\.<id>`, or a `<ID>_HOME` such as `D:\data\<id>`) nor holding its program.
+ */
+export function purgeRefusal(dataDir: string, home: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const dir = path.resolve(dataDir);
+  if (samePath(dir, path.parse(dir).root)) return 'it is a whole drive';
+  const profile = env.USERPROFILE || home;
+  const shared = [home, profile, env.LOCALAPPDATA, env.APPDATA, env.ProgramData, env.ProgramFiles, env['ProgramFiles(x86)'], env.SystemRoot, env.PUBLIC, env.OneDrive,
+    ...['Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music', 'OneDrive', 'source', 'Projects'].map((f) => (profile ? path.join(profile, f) : ''))];
+  for (const s of shared) if (s && inside(s, dir)) return samePath(s, dir) ? `it is ${s}` : `it holds ${s}`;
+  if (existsSync(path.join(dir, '.git'))) return 'it is a git repository';
+  const name = path.basename(dir).replace(/^\./, '').toLowerCase();
+  if (!name.includes(APP.id.toLowerCase()) && !existsSync(appFolder(dir))) return `it isn't named for ${APP.name}, and holds no copy of it`;
+  return null;
+}
+
 const quoted = (args: string[]) => args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ');
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -373,8 +396,9 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     return 2;
   }
   const app = appFolder(d.dataDir);
-  if (opts.purge && (samePath(d.dataDir, path.parse(path.resolve(d.dataDir)).root) || samePath(d.dataDir, d.home))) {
-    out(`${d.dataDir} is not a folder of ${APP.name}'s own, so --purge won't remove it.`);
+  const refused = opts.purge ? purgeRefusal(d.dataDir, d.home) : null;
+  if (refused) {
+    out(`${d.dataDir} is not a folder of ${APP.name}'s own (${refused}), so --purge won't remove it, nor anything else. Uninstall without --purge, and remove what you no longer want from it yourself.`);
     return 2;
   }
   if (opts.dryRun) {
