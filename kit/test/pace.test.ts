@@ -12,7 +12,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { AGENTS_AT_ONCE, FIRST_ROUND_WAITING, LOAD, agentsAtOnce, inFirstRoundTurn, inWorkTurn, measureLoad, pace, setPriorityFor, slotsFor } = await import('./fixture/src/kit/pace.ts');
+const { AGENTS_AT_ONCE, FIRST_ROUND_WAITING, LOAD, WORK_WAITING, agentsAtOnce, inFirstRoundTurn, inWorkTurn, measureLoad, pace, setPriorityFor, slotsFor } = await import('./fixture/src/kit/pace.ts');
 const { LockTimeout } = await import('./fixture/src/kit/npu-queue.ts');
 const { every, firstRoundDone, roundFile } = await import('./fixture/src/kit/schedule.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
@@ -242,10 +242,12 @@ test("a scheduled round takes its turn in the work line, and round.json says how
     await new Promise((r) => setTimeout(r, 1_200));
     assert.deepEqual([...ran], [], 'the one slot is held: it waits');
     assert.equal(job.state.runningSince, null, 'not running while it waits');
+    assert.equal(job.state.waiting, WORK_WAITING, 'and says so: never taken for a schedule with nothing coming');
     release();
     while (ran.length === 0 || job.running) await new Promise((r) => setTimeout(r, 20));
     const r = readJson<{ rounds: Record<string, { ok: boolean; waitedMs?: number }> }>(roundFile(), { rounds: {} }).rounds['work-line'];
     assert.equal(r.ok, true);
+    assert.equal(job.state.waiting, null);
     assert.ok((r.waitedMs ?? 0) >= 1000, `it waited about a second (${r.waitedMs})`);
     // Run now never waits, whoever holds the slot.
     let again!: () => void;
@@ -254,14 +256,18 @@ test("a scheduled round takes its turn in the work line, and round.json says how
     assert.ok(job.runNow());
     while (job.running) await new Promise((r2) => setTimeout(r2, 20));
     assert.deepEqual([...ran], ['round', 'round']);
-    // Nor does a light schedule's round.
+    // Nor does a light schedule's round: light always, or as a function says before each round.
     const light = every(3_600_000, async () => void ran.push('light'), { name: 'light', firstDelayMs: 20, light: true });
+    const lightNow = every(3_600_000, async () => void ran.push('light now'), { name: 'light-now', firstDelayMs: 20, light: () => true });
     try {
       const until = Date.now() + 5_000;
       while ((!ran.includes('light') || light.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
       assert.ok(ran.includes('light'), 'a light round runs while the slot is held');
+      while ((!ran.includes('light now') || lightNow.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
+      assert.ok(ran.includes('light now'));
     } finally {
       light.stop();
+      lightNow.stop();
     }
     again();
     await holding;

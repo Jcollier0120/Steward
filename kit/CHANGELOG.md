@@ -10,13 +10,15 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **The work line (node/pace.ts, `inWorkTurn()`).** Every scheduled round from `every()` now takes a slot in one line shared by every agent on the PC (`<locks>\work`, `work.2` …, the kit's line as the NPU's), at either pace. As many run side by side as Manor's settings.json `"agentsAtOnce"` says (1 to 6; 0 lifts the line), or 2 at a gentle pace and 4 at a full one when it doesn't. The rest wait their turn, first come, first served. A first round takes its first-round turn, then its work turn.
 - **Load-aware.** Before it joins, a round looks at the PC's load from Node's own counters over a second (`measureLoad()`, no program started): at 60% of the processor busy or more, or under 15% of memory free, it may take only the first slot, so a busy PC runs one round at a time; at 35% busy, half the slots (`slotsFor()`, `LOAD`).
-- **`every()`'s `light`**: a schedule whose rounds are light (a few requests, a look at a file) runs them at once, outside the line.
+- **`every()`'s `light`**: a schedule whose rounds are light (a few requests, a look at a file) runs them at once, outside the line. It may be a function, asked before each round, for a schedule that ticks often and only sometimes has work (light while nothing is due).
 - **round.json says what a round used** (spec/ROUND.md): `cpuMs`, the processor time of the agent's own process in the round; `memoryMb`, its most memory, sampled every five seconds; and `waitedMs`, how long it waited its turn, when that was a second or more.
 
 ### What changed
 
 - A round whose work turn doesn't come before its next is due (its interval, a minute at the least) is recorded as one that waited (`"ok": null`, `"waiting"`), as a first round's turn already was, and waits again at its next round. A holder keeps its slot for its round's time limit; one whose process has gone gives it up at once.
 - A round someone asked for (Run now) never waits, as before.
+- While a round waits in the work line, its state's `waiting` (`/api/ping`'s `rounds`) says so, so a reader never takes it for a schedule with nothing coming.
+- round.json's new `turn` (`"first"` or `"work"`) marks a round that waited its turn, beside `waiting`, so a reader can tell it from one held for the person's settings.
 - `MANOR_AGENTS_AT_ONCE` says instead of Manor (0 for no line). Under node --test there is no line unless it says.
 
 ### For an agent

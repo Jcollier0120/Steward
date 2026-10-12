@@ -38,6 +38,7 @@ Every agent that runs its rounds with the kit's scheduler leaves each round's ou
 | `error` | string or null | When it threw: the error's message, its first line, trimmed, at most 500 characters (`"it failed"` when that is empty). `null` when `ok`. |
 | `everyMs` | number | The interval between rounds, in milliseconds, as it was when the round ended. Each wait varies by ±10% about it. |
 | `next` | ISO 8601 (UTC) or null | When the next scheduled round is due. `null` when none is coming: the agent is off duty (only Run now runs a round then), or the schedule was stopped. The same as `/api/ping`'s `nextRunAt` just after the round. |
+| `turn` | `"first"`, `"work"`, or absent | Beside `waiting`, when the round waited its turn in a line (`first`: the first-round line; `work`: the work line) rather than for the person. A reader says it waited its turn, never that it waits for the person's settings. A first-round wait recorded before kit 2.56.0 has no `turn`; its `waiting` begins "its first round:". Since kit 2.56.0. |
 | `waitedMs` | number, or absent | How long the round waited its turn (the first-round line, the work line) before it ran, in milliseconds, when that was a second or more. `started` is when it began to run. Since kit 2.56.0. |
 | `cpuMs` | number, or absent | The processor time the agent's own process used in the round, in milliseconds; the programs it started (git, ffmpeg) aren't counted. Absent when the round never ran (it waited, or was held). Since kit 2.56.0. |
 | `memoryMb` | number, or absent | The most memory the agent's process held during the round, in megabytes, sampled every five seconds. Absent when it never ran. Since kit 2.56.0. |
@@ -58,7 +59,7 @@ Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 - Read the file with any JSON reader; a byte-order mark may be skipped. A missing file means no round has ended since the agent took kit 2.8.0 (or it doesn't run its rounds with the kit's scheduler).
 - Skip keys you don't know: later kit versions may add some, in an entry or beside `rounds`.
 - How long since `finished`, against `everyMs`, says whether the rounds are keeping up; `next` in the past while the agent is on duty says a round is overdue or under way.
-- An entry with `waiting` is an agent waiting for the person, not one that has stopped: say what it waits for, not that its rounds are late.
+- An entry with `waiting` is an agent waiting for the person, not one that has stopped: say what it waits for, not that its rounds are late. With `turn` (or a `waiting` that begins "its first round:" or "its turn:") it waited its turn behind other agents instead: nothing for the person to do.
 
 ## Pace (kit 2.43.3)
 
@@ -70,7 +71,8 @@ Manor's settings.json `"backgroundPace"` sets how every agent's scheduled rounds
 - **A few agents at a time** (kit 2.56.0, the work line). Every scheduled round, at either pace, takes a slot in one line shared by every agent on the PC (the lock folders `<locks>\work`, `work.2` …, the kit's line as the NPU's): as many side by side as Manor's settings.json `"agentsAtOnce"` says (1 to 6; 0 lifts the line), or 2 at a gentle pace and 4 at a full one when it doesn't. The rest wait their turn, first come, first served.
   - **Fewer on a busy PC.** Before it joins, a round looks at the PC's load, from Node's own counters over a second: with the processor 60% busy or more, or less than 15% of memory free, it may take only the first slot (one at a time); at 35% busy, half of them, rounded up. The other agents' rounds count in that load, which is the point.
   - A holder keeps its slot for its round's time limit, and one whose process has gone gives it up at once. A round whose turn doesn't come before its next is due (its interval, and a minute at the least) is recorded with `"ok": null` and `"waiting"`, and waits again at its next round. A first round takes its first-round turn, then its work turn.
-  - A schedule whose rounds are light (`every()`'s `light`: a few requests, a look at a file) runs them at once, outside the line, as a round asked for always does.
+  - While a round waits, its state's `waiting` (`/api/ping`'s `rounds`) says so, so a schedule waiting its turn is never taken for one with nothing coming.
+  - A schedule whose rounds are light (`every()`'s `light`: a few requests, a look at a file) runs them at once, outside the line, as a round asked for always does. `light` may be a function, asked before each round: light while nothing is due, say.
   - `MANOR_AGENTS_AT_ONCE` says instead of Manor (0 for no line). Under node --test there is no line unless it says.
 - **Below-normal priority.** A scheduled round runs at below-normal priority, and the programs it starts take that class too.
 - **Heiward's background pace** (kit 2.50.0, `node/gentle.ts`). On Windows the agent runs as Heiward does in the background, from its start and in its scheduled rounds:

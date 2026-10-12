@@ -52,6 +52,8 @@ export interface RoundRecord {
   waiting?: string;
   /** true when the round ran past its time limit and was let go (every()'s timeoutMs): `ok` is false then. */
   timedOut?: boolean;
+  /** Beside `waiting`, when the round waited its turn in a line (pace.ts: `first`, the first-round line; `work`, the work line) rather than for the person. Since kit 2.56.0. */
+  turn?: 'first' | 'work';
   /** How long it waited its turn before it ran (the first-round line, the work line), in milliseconds; absent when it didn't. Since kit 2.56.0. */
   waitedMs?: number;
   /** The processor time the agent's own process used in the round, in milliseconds (the programs it started aren't counted). Since kit 2.56.0. */
@@ -209,13 +211,14 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *   the signal (`job({ signal })`); one that can't is simply no longer waited for.
  *
  * A scheduled round takes its turn in the work line (pace.ts's inWorkTurn(), kit 2.56.0): a few agents' rounds at a
- * time on this PC, fewer while it is busy. A schedule whose rounds are `light` (a few requests, a look at a file: no
- * heavy work) runs them at once, outside the line, as a round asked for (Run now) always does.
+ * time on this PC, fewer while it is busy. While it waits, its state's `waiting` says so. A schedule whose rounds are
+ * `light` (a few requests, a look at a file: no heavy work) runs them at once, outside the line, as a round asked for
+ * (Run now) always does: `true`, or a function asked before each round (light while it has nothing due, say).
  */
 export function every(
   everyMs: number | (() => number),
   job: (round: { signal: AbortSignal }) => Promise<void>,
-  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean } = {},
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean) } = {},
 ) {
   let running = false;
   let timer: NodeJS.Timeout | undefined;
@@ -290,6 +293,7 @@ export function every(
     try {
       const run = async () => {
         inLine = null;
+        if (waiting === WORK_WAITING) waiting = null;
         started = Date.now();
         startedAt = started;
         firstNow = isFirst ? 'running' : null;
@@ -315,8 +319,10 @@ export function every(
       // A scheduled round takes its turn in the work line (pace.ts, kit 2.56.0), after its first-round turn if it
       // needs one; a round someone asked for never waits.
       const inTurn = () => {
-        if (asked || opts.light) return run();
+        if (asked || (typeof opts.light === 'function' ? opts.light() : opts.light)) return run();
         inLine = 'work';
+        // Said while it waits, so a reader of its state (the Surveyor) never takes it for a schedule with nothing coming.
+        waiting = WORK_WAITING;
         return inWorkTurn(p, run, { who: APP.id, doing: name, limitMs: limit, waitMs: Math.max(interval(), 60_000) });
       };
       await inFirstRoundTurn(p, !asked && isFirst, inTurn, {
@@ -349,6 +355,7 @@ export function every(
       }
     } finally {
       firstNow = null;
+      if (waiting === WORK_WAITING) waiting = null;
       clearTimeout(limitTimer);
       const u = used as { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null;
       if (u) clearInterval(u.sampler);
@@ -369,7 +376,7 @@ export function every(
         finished: new Date(ended).toISOString(),
         ok: offline || waitedTurn ? null : error === null,
         ...(offline ? { offline: true } : {}),
-        ...(waitedTurn ? { waiting: waitedTurn } : {}),
+        ...(waitedTurn ? { waiting: waitedTurn, turn: waitedTurn === WORK_WAITING ? ('work' as const) : ('first' as const) } : {}),
         ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
