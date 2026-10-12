@@ -4,6 +4,7 @@ import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { commitOf, fetchBranch, git, gitMaybe, unlinkModules } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
+import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
 import { checkoutOf, mapLimit, networkNote, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
@@ -81,12 +82,16 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
       say(`npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) say(`  ${line}`);
+        keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
         return done('failed', `npm ci failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
       }
     }
     const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) say(`  ${line}`);
-    if (r.code !== 0) return done('failed', `${command} failed (exit ${r.code}) at ${at}, so nothing was pushed${networkNote(`${r.out}\n${r.err}`)}`, { commit: at });
+    if (r.code !== 0) {
+      keepFailure(dir, command, r.code, `${r.out}\n${r.err}`);
+      return done('failed', `${command} failed (exit ${r.code}) at ${at}, so nothing was pushed${networkNote(`${r.out}\n${r.err}`)}`, { commit: at });
+    }
     if ((await commitOf(run, dir, 'HEAD')) !== commit) return done('failed', `${command} made commits of its own at ${at}: nothing was pushed, as the Steward commits a refresh itself`, { commit: at });
     const files = await changedFiles(ctx, dir);
     if (!files.length) return done('skipped', `${command} changed nothing at ${at}: nothing to push`, { commit: at });
