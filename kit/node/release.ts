@@ -12,6 +12,10 @@
  *                                    agent's own), at package.json's version, to the Exchequer from GitHub's own
  *                                    files (finishing a publish that reached GitHub but not the Exchequer);
  *                                    builds nothing
+ *   ... --publish --urgent           (or --exchequer --urgent) an urgent fix: out to customers at once, not on the
+ *                                    Exchequer's next release day (Tuesdays and Fridays). A version whose
+ *                                    CHANGELOG.md entry has a line starting "**Urgent fix:" is urgent without it
+ *                                    (spec/RELEASE-NOTES.md, exchequer.ts isUrgent)
  *
  * What a release carries is built, never the readable source (minify.ts, spec/RELEASES.md): each .ts file under
  * src\ minified to a .js beside it, src\cli.ts a stub that runs its .js, and the .js and .css minified. The
@@ -51,7 +55,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP } from '../app.ts';
 import type { Release } from './install.ts';
-import { NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
+import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
@@ -288,6 +292,7 @@ async function build(readable = false): Promise<Built> {
     const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
     for (const w of notes.warnings) console.warn(`  warning: ${w}`);
+    if (isUrgent(notes.notes)) console.log('  urgent: its entry is marked "**Urgent fix:", so once published it goes out to customers at once');
     return { release, zip, sums, announcement: announced ? announcement : null, notes };
   } finally {
     rmSync(stage, { recursive: true, force: true });
@@ -327,7 +332,7 @@ function released(gh: string, tag: string, repo: string): 'there' | 'none' | { e
  * there is one): as v<version> in the agent's own repository, and to the Exchequer; Heiward as <id>-v<version> in the
  * releases repository too. publishTo says where, and in what order.
  */
-async function publish(b: Built): Promise<number> {
+async function publish(b: Built, urgent = false): Promise<number> {
   const { release } = b;
   if (release.form !== 'minified') {
     console.error('Not published: a readable release stays on this PC. Release again without --readable.');
@@ -372,7 +377,7 @@ async function publish(b: Built): Promise<number> {
           const found = publisherKey();
           return 'missing' in found ? found.missing : null;
         },
-        exchequer: () => publishToExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets }),
+        exchequer: () => publishToExchequer({ id: release.id, version: release.version, commit: release.commit, notes: b.notes.notes, files: assets, urgent }),
         log: (line) => console.log(line),
         error: (line) => console.error(line),
       },
@@ -474,20 +479,27 @@ export async function publishTo(r: { id: string; version: string; repo: string; 
   return code;
 }
 
-/** Publishes to the Exchequer (exchequer.ts) and prints its one line, which never holds the key; true when it went, or needn't. */
+/**
+ * Publishes to the Exchequer (exchequer.ts) and prints its one line, which never holds the key; true when it went, or
+ * needn't. An urgent one published there already is let out to customers now (letOut).
+ */
 async function toExchequer(r: Parameters<typeof publishToExchequer>[0]): Promise<boolean> {
   const out = await publishToExchequer(r);
   (out.ok ? console.log : console.error)(out.line);
-  return out.ok;
+  if (out.outcome !== 'already' || !(r.urgent || isUrgent(r.notes))) return out.ok;
+  const now = await letOut(r.id, r.version);
+  (now.ok ? console.log : console.error)(now.line);
+  return now.ok;
 }
 
 /**
  * `--exchequer`: the release GitHub already has at package.json's version (in the releases repository as
  * <id>-v<version>, or with none, in the agent's own as v<version>), published to the Exchequer from
  * GitHub's own files (the bytes every Manor checked), with its notes and the commit its release.json names. For a
- * publish that reached GitHub and not the Exchequer; one there already is done. Exits 1 when it didn't go.
+ * publish that reached GitHub and not the Exchequer; one there already is done (and let out to customers now, when
+ * urgent). Exits 1 when it didn't go.
  */
-async function exchequerOnly(): Promise<number> {
+async function exchequerOnly(urgent = false): Promise<number> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   const version = String(pkg.version);
   const releases = releasesRepo();
@@ -534,25 +546,30 @@ async function exchequerOnly(): Promise<number> {
       const x = spawnSync(TAR, ['-x', '-f', zip, '-C', unpacked, 'release.json'], { windowsHide: true });
       if (x.status === 0) commit = String(JSON.parse(readFileSync(path.join(unpacked, 'release.json'), 'utf8')).commit ?? '');
     }
-    return (await toExchequer({ id: APP.id, version, commit, notes: body, files })) ? 0 : 1;
+    return (await toExchequer({ id: APP.id, version, commit, notes: body, files, urgent })) ? 0 : 1;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 async function main(args: string[]): Promise<number> {
-  const known = ['--install', '--publish', '--no-start', '--dry-run', '--readable', '--exchequer'];
+  const known = ['--install', '--publish', '--no-start', '--dry-run', '--readable', '--exchequer', '--urgent'];
   const unknown = args.filter((a) => !known.includes(a));
   if (unknown.length) {
-    console.error(`release: unknown ${unknown.join(' ')}\nUsage: npm run release [-- --install [--no-start] [--dry-run]] [-- --publish] [-- --readable] [-- --exchequer]`);
+    console.error(`release: unknown ${unknown.join(' ')}\nUsage: npm run release [-- --install [--no-start] [--dry-run]] [-- --publish [--urgent]] [-- --readable] [-- --exchequer [--urgent]]`);
+    return 2;
+  }
+  const urgent = args.includes('--urgent');
+  if (urgent && !args.includes('--publish') && !args.includes('--exchequer')) {
+    console.error('release: --urgent is for a release published to the Exchequer: give it with --publish or --exchequer');
     return 2;
   }
   if (args.includes('--exchequer')) {
-    if (args.length > 1) {
-      console.error('release: --exchequer publishes a release already on GitHub and builds nothing: give it alone');
+    if (args.some((a) => a !== '--exchequer' && a !== '--urgent')) {
+      console.error('release: --exchequer publishes a release already on GitHub and builds nothing: give it alone (or with --urgent)');
       return 2;
     }
-    return exchequerOnly();
+    return exchequerOnly(urgent);
   }
   if (args.includes('--readable') && args.includes('--publish')) {
     console.error('release: a readable release is never published: give --readable or --publish, not both');
@@ -566,7 +583,7 @@ async function main(args: string[]): Promise<number> {
     return 1;
   }
   if (args.includes('--publish')) {
-    const code = await publish(built);
+    const code = await publish(built, urgent);
     if (code !== 0) return code;
   }
   if (args.includes('--install')) return installRelease(built.zip, args.filter((a) => a === '--no-start' || a === '--dry-run'));

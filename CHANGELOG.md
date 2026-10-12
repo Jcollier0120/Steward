@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.40
+
+**An urgent fix can reach customers at once instead of waiting for the next release day.**
+
+### What's new
+
+- Castellan's releases reach customers on Tuesdays and Fridays. When a fix can't wait, start its changelog entry's bold line with "Urgent fix:". The Steward's round then lets that release out to customers as soon as it's published, whichever kit the agent has.
+- `release-now <agent> [version]` lets a release that's already published out to customers now, on the PC that releases Castellan. Without a version, it takes the agent's newest release.
+
+### What changed
+
+- The Steward's kit 2.59.0, which publishes an urgent release as urgent (`--urgent`, or an entry marked "Urgent fix:").
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.39
 
 **Fewer programs started for each round's fetches, and the branch heads it reads shared with your other agents.**

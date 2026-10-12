@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.59.0
+
+**An urgent fix reaches customers at once, not on the Exchequer's next release day.**
+
+### What's new
+
+- From Exchequer 0.8.0, customers get Castellan's releases on its release days, Tuesdays and Fridays at 14:00 UTC, so a week's work arrives together. An urgent fix goes out at once instead:
+  - **The entry says so**: a version whose `CHANGELOG.md` entry has a line starting `**Urgent fix:` (its bold line, saying what it fixes), or brings one from a version never released on its own, is published as urgent (node/exchequer.ts `isUrgent`, spec/RELEASE-NOTES.md "An urgent fix").
+  - **Or the release does**: `npm run release -- --publish --urgent`, and `--exchequer --urgent` for a release on GitHub already. One published to the Exchequer already is let out then too.
+- **node/exchequer.ts `letOut(id, version)`**: lets a release published already out to customers now, with the publisher's key (the Exchequer's `POST /api/v1/admin/releases/:id/:version/out`). It says when the release is out already, isn't published, or the Exchequer has no release days yet. The Steward's `release-now` uses it.
+
+### What changed
+
+- An urgent publish asks the Exchequer's `/done` with `{ urgent: true }`. A release that isn't urgent asks it with no body, as before. An Exchequer from before release days ignores the body and offers every release once it's published, so nothing changes there. One that couldn't let it out early publishes it all the same, and the line says it waits for its release day.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Mark an entry `**Urgent fix:` only for what can't wait.
+
 ## 2.58.0
 
 **Two pieces for agents that talk to git remotes a lot: git's sign-in asked once per host, and the branch heads another agent has just read.**

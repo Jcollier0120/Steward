@@ -22,6 +22,9 @@ import { askRoundSoon, vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
+import { letOut } from './kit/exchequer.ts';
+import { releasedOf } from './stages/common.ts';
+import { compareVersions } from './kitfiles.ts';
 import { type Change, entryLine, heldRecalls, parseVersions, readSigned, recallKey, sendChange } from './recalls.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
@@ -108,6 +111,10 @@ const USAGE = `${APP.id}: ${APP.role}
   lift-recall <agent id> [--dry-run]
                    take an employee's recalls and retirement off the list
   recalls [--json] the recall list every manor reads now
+  release-now <agent id> [<version>]
+                   an urgent fix: let a release published to the Exchequer out to customers now, not on its
+                   release day (Tuesdays and Fridays). No version: the agent's newest release. A release whose
+                   changelog entry starts "**Urgent fix:" goes out at once without it
   mine <employee> <#pr | v<version>> ...
                    mark a merge of one of the Steward's PRs, or a release, as yours, done by hand: on the PC
                    that releases Castellan, the alarm for merges and releases no round here made never
@@ -185,6 +192,7 @@ const MAKERS_COMMANDS: Record<string, string> = {
   retire: "Retiring an employee of Castellan's",
   'lift-recall': "Lifting a recall of Castellan's",
   recalls: "Castellan's recall list",
+  'release-now': "Letting a release of Castellan's out early",
 };
 
 async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Promise<number> {
@@ -486,6 +494,36 @@ switch (cmd) {
       console.error((e as Error).message);
       process.exitCode = 1;
     }
+    break;
+  }
+  case 'release-now': {
+    const [who, asked] = rest;
+    if (!who || who.startsWith('--') || rest.length > 2 || (asked !== undefined && !/^v?\d+\.\d+\.\d+$/.test(asked))) {
+      console.error('release-now takes an agent and, if not its newest release, a version: release-now porter, or release-now porter 0.4.26');
+      process.exitCode = 2;
+      break;
+    }
+    const ctx = await context({ glance: false, team: false });
+    const e = employeeFor(ctx.settings, who);
+    let version = asked?.replace(/^v/, '');
+    if (!version) {
+      if (!e) {
+        console.error(`No employee ${who} here to find its newest release: give the version (release-now ${who} 0.4.26).`);
+        process.exitCode = 2;
+        break;
+      }
+      const newest = (await releasedOf(ctx, e)).map((r) => r.version).sort(compareVersions).at(-1);
+      if (!newest) {
+        console.error(`${e.name} has no release yet.`);
+        process.exitCode = 1;
+        break;
+      }
+      version = newest;
+      console.log(`${e.name}'s newest release is ${version}.`);
+    }
+    const out = await letOut(e?.id ?? who, version);
+    console[out.ok ? 'log' : 'error'](out.line);
+    process.exitCode = out.ok ? 0 : 1;
     break;
   }
   case 'allow-update': {
