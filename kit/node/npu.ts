@@ -21,6 +21,7 @@ import {
   probe,
   readFailure,
   readGames,
+  READY_WAIT_MS,
   refOf,
   ServerNotRunning,
   servedRecently,
@@ -415,7 +416,8 @@ export class Npu {
         const value = await acceleratorTurn(
           acc,
           async () => {
-            const server = await ensureServer(ep, { start: opts.start });
+            // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
+            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, acc.timeouts?.coldLoadMs ?? 0) });
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));

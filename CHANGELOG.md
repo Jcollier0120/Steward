@@ -20,6 +20,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.41
+
+**The Steward's kit 2.60.0, with a check for trying an NPU on new hardware.**
+
+### What changed
+
+- The Steward's kit 2.60.0: a check that sets up the model server for an Intel or AMD NPU, measures how it runs, and suggests its limits from the numbers. Nothing changes on your PC unless someone runs it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.40
 
 **An urgent fix can reach customers at once instead of waiting for the next release day.**

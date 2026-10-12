@@ -39,7 +39,8 @@ export interface NpuRoute {
   server: string;
   version: string;
   arch: 'arm64' | 'x64';
-  generations: Record<string, { label: string; supported: boolean; verified: boolean; why?: string }>;
+  /** Each generation; its own driverMin, where one needs a later driver than the route's. */
+  generations: Record<string, { label: string; supported: boolean; verified: boolean; why?: string; driverMin?: string }>;
   driverMin?: string;
   requires?: string[];
   download: { file: string; url: string; size: number; sha256: string };
@@ -157,8 +158,9 @@ export function npuSupport(dev: NpuDevice, arch: string, catalog: NpuCatalog = N
   if (!gen) return { ...base, supported: false, why: `this ${MAKERS[vendor]} NPU ("${dev.device}"${pciDevice(dev.deviceId) ? `, device ${pciDevice(dev.deviceId)}` : ''}) isn't one setup knows yet` };
   if (!gen.supported) return { ...base, supported: false, why: `the ${gen.label} NPU can't run the manor's models: ${gen.why ?? 'no model server supports it'}` };
   if (arch && route.arch !== arch) return { ...base, supported: false, why: `${route.server} runs on ${route.arch} Windows, and this PC is ${arch}` };
-  if (route.driverMin && dev.driver && compareVersions(dev.driver, route.driverMin) < 0)
-    return { ...base, supported: false, why: `${route.server} needs ${MAKERS[vendor]}'s NPU driver ${route.driverMin} or later, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
+  const driverMin = gen.driverMin ?? route.driverMin;
+  if (driverMin && dev.driver && compareVersions(dev.driver, driverMin) < 0)
+    return { ...base, supported: false, why: `${route.server} needs ${MAKERS[vendor]}'s NPU driver ${driverMin} or later${gen.driverMin ? ` on the ${gen.label}` : ''}, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
   return { ...base, supported: true };
 }
 
