@@ -4,9 +4,12 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.57.1
 
-**Pages that answer at once: on ::1 too, and Manor's never slowed by its rounds' pace.**
+**Pages that answer at once: on ::1 too, at a normal pace while someone uses them, and Manor's always.**
 
 ### What's new
+
+- **A page in use runs at a normal pace** (node/gentle.ts `pageInUse()`). Every request a browser makes (it sends `Sec-Fetch-Site`; Manor's pings and the CLI's requests don't) lifts the agent's process to a normal pace, as for a round someone asked for, and it goes back to its pace a minute (`IN_USE_MS`) after the last. At a gentle pace a page waited behind every program at normal priority: under a full processor load a below-normal page took up to 11 s to answer where the same page at normal priority took under 1 s. The background work keeps its gentle pace whenever nobody is looking.
+- **A hidden tab doesn't ask** (react/page-data.ts): `usePageData()` skips its looks while `document.hidden`, and looks at once when the tab is shown again, so a tab left open doesn't hold its agent at a normal pace (and costs it nothing).
 
 - **`keepResponsive()`** (node/gentle.ts), for a process people wait on: its rounds never set it gentle, so it keeps normal priority, no efficiency mode and no processor cap at any pace, and a gentle pace already set is lifted. Manor calls it as it starts serving: at a gentle pace its page sat ready to run for up to half a minute at a time while Windows gave it no processor (its Open said "Opening…" all that while), and the programs it starts were held to its cap with it. An agent's own process keeps its pace.
 
@@ -17,6 +20,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### Before you update
 
 - Nothing: take it by pinning 2.57.1 in kit.json. Only a process people wait on calls `keepResponsive()`; an agent shouldn't.
+- An agent whose own page polls outside `usePageData()` should skip its polls while `document.hidden` too, or an open tab keeps it at a normal pace.
 
 ## 2.56.0
 

@@ -4,10 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.35.36
 
-**The Steward's page, and every agent's once it takes kit 2.57.1, opens without a short wait.**
+**The Steward's page, and every agent's once it takes kit 2.57.1, answers at once, even on a busy PC.**
 
 ### What changed
 
+- While you have an agent's page open, the agent works at normal speed, so the page answers at once even when its background work runs gently or the PC is busy with something else. A minute after you stop using it, it goes back to working gently. A tab left open in the background doesn't count.
 - Each page now also answers where browsers ask first (IPv6's ::1), so opening it, and its first request, no longer wait about a third of a second before the browser tries again.
 
 ### Before you update

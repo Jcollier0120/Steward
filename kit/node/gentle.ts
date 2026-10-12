@@ -70,14 +70,63 @@ export function keepResponsive(): Promise<void> {
   return back;
 }
 
+/** How long after a person's last request an agent's page keeps its process at a normal pace (kit 2.57.1). */
+export const IN_USE_MS = 60_000;
+
+/** The pace its rounds last asked for (none yet: as Windows started it), and until when its page is in use. */
+let wanted: { p: Pace; asked: boolean } | null = null;
+let usedUntil = 0;
+let usedTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Someone is using the page (kit 2.57.1): a browser asked for it (the kit's server.ts). For IN_USE_MS after the last
+ * such request the process runs at a normal pace, as for a round someone asked for, so its page answers at once
+ * even while a round works gently in the background or the PC is busy with something else; then back to its pace.
+ * At a gentle pace a page waited behind every program at normal priority, for seconds at a time on a busy PC. Manor's
+ * pings and the CLI's requests aren't a browser's, and a hidden tab stops asking (the kit's page-data.ts), so a page
+ * nobody looks at keeps the gentle pace.
+ */
+export function pageInUse(now = Date.now()): void {
+  if (responsive) return;
+  const lifting = usedUntil <= now;
+  usedUntil = now + IN_USE_MS;
+  if (lifting && wanted) void applyPace();
+  if (!usedTimer) {
+    const back = () => {
+      const left = usedUntil - Date.now();
+      if (left > 0) {
+        usedTimer = setTimeout(back, left);
+        usedTimer.unref?.();
+        return;
+      }
+      usedTimer = null;
+      if (wanted) void applyPace();
+    };
+    usedTimer = setTimeout(back, IN_USE_MS);
+    usedTimer.unref?.();
+  }
+}
+
+/** Whether a person is using the page now (pageInUse()). */
+export const pageIsInUse = (now = Date.now()) => usedUntil > now;
+
 /**
  * Sets this process for the pace (Windows only; KIT_GENTLE=0 leaves it to priority alone): gentle for a scheduled
- * round at a gentle pace, normal for a round someone asked for or a full pace. Priority is set at once (pace.ts);
- * the rest through the worker, in order, and only when it changes. Never throws: a PC that refuses keeps its
- * priority, and the log says once what didn't take. Nothing, once keepResponsive() was called.
+ * round at a gentle pace, normal for a round someone asked for, a full pace, or while its page is in use
+ * (pageInUse()). Priority is set at once (pace.ts); the rest through the worker, in order, and only when it changes.
+ * Never throws: a PC that refuses keeps its priority, and the log says once what didn't take. Nothing, once
+ * keepResponsive() was called.
  */
 export function paceProcess(p: Pace, asked = false): Promise<void> {
   if (responsive) return pending;
+  wanted = { p, asked };
+  return applyPace();
+}
+
+/** The pace its rounds want, normal while its page is in use. */
+function applyPace(): Promise<void> {
+  const { p, asked: roundAsked } = wanted ?? { p: 'full' as Pace, asked: false };
+  const asked = roundAsked || pageIsInUse();
   setPriorityFor(p, asked);
   const gentle = p === 'gentle' && !asked;
   if (process.platform !== 'win32' || process.env.KIT_GENTLE === '0') return pending;

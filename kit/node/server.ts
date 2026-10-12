@@ -5,6 +5,7 @@ import net from 'node:net';
 import { APP, HOST_NAME } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
+import { pageInUse } from './gentle.ts';
 import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
@@ -230,6 +231,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     };
     try {
       if (!hostAllowed(hosts, req.headers.host)) return send({ json: { error: 'wrong host' }, status: 421 });
+      // A browser asking (it says where from; Manor's pings and the CLI don't): someone is using the page, so the
+      // process leaves its gentle pace while they do (gentle.ts pageInUse()).
+      if (req.headers['sec-fetch-site']) pageInUse();
       const url = new URL(req.url ?? '/', `http://${HOST_NAME}:${opts.port}`);
       if (req.method === 'GET' || req.method === 'HEAD') {
         const demo = demoDir();
