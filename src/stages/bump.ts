@@ -15,6 +15,7 @@ import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { trialPassOf } from './trialpass.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
@@ -355,7 +356,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
 export async function bump(ctx: Ctx, employees: Employee[], o: BumpOptions): Promise<EmployeeResult[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      return await bumpOne(ctx, e, o);
+      return await withRepo(ctx.log, e.id, () => bumpOne(ctx, e, o));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       return result(e, 'failed', (err as Error).message);

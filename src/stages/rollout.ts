@@ -8,6 +8,7 @@ import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingF
 import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -46,6 +47,20 @@ export interface RolloutHold {
 }
 
 export const loadRolloutFailures = (): Record<string, RolloutHold> => readJson<Record<string, RolloutHold>>(rolloutFailedFile(), {});
+
+/**
+ * What a rollout changed in the holds since it read them (`before` to `after`), written over the file as it is now: a
+ * Bump or Push pressed while the round's rollout ran (stages/slots.ts) clears its holds, and keeps them cleared.
+ */
+function saveRolloutChanges(before: Record<string, RolloutHold>, after: Record<string, RolloutHold>): void {
+  const now = loadRolloutFailures();
+  for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (JSON.stringify(before[id]) === JSON.stringify(after[id])) continue;
+    if (after[id]) now[id] = after[id];
+    else delete now[id];
+  }
+  writeJson(rolloutFailedFile(), now);
+}
 
 /** What the decision needs of one employee: read from its checkout's origin/<branch> and the glance's PRs. */
 export interface RolloutFacts {
@@ -171,7 +186,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   if (!('why' in gate)) {
     for (const e of employees.filter((x) => x.usesKit)) {
       try {
-        facts[e.id] = await rolloutFacts(ctx, e, gate.kit);
+        facts[e.id] = await withRepo(ctx.log, e.id, () => rolloutFacts(ctx, e, gate.kit));
       } catch (err) {
         ctx.log(`[${e.id}] rollout: couldn't read its branch: ${(err as Error).message}`);
       }
@@ -180,7 +195,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   const plan = planRollout({ on: ctx.settings.rollout, kit: o.kit, ownKit: o.ownKit, employees, facts, failed });
   if (plan.why) {
     if (plan.waitsForSteward) ctx.log(`rollout: ${plan.why}`);
-    if (JSON.stringify(failed) !== before) writeJson(rolloutFailedFile(), failed);
+    if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
     return { results: [], plan };
   }
   const kit = plan.kit!;
@@ -227,6 +242,6 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       }
     }
   }
-  if (JSON.stringify(failed) !== before) writeJson(rolloutFailedFile(), failed);
+  if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
   return { results, plan };
 }

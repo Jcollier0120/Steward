@@ -10,6 +10,7 @@ import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * A new kit tried on every employee before it is released: when a team PR to the Steward's own repository raises
@@ -151,14 +152,16 @@ async function tryEach(ctx: Ctx, employees: Employee[], kit: string, dir: string
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     let r: EmployeeResult;
     try {
-      r = await bumpOne(ctx, e, {
-        kit,
-        kitFrom: path.join(dir, 'kit'),
-        tool: path.join(dir, 'tools', 'kit.ts'),
-        trial: true,
-        changelog,
-        ...(reachFrom ? { reach: (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => kitReach(ctx, { ...reachFrom, pin, toolChanged }) } : {}),
-      });
+      r = await withRepo(ctx.log, e.id, () =>
+        bumpOne(ctx, e, {
+          kit,
+          kitFrom: path.join(dir, 'kit'),
+          tool: path.join(dir, 'tools', 'kit.ts'),
+          trial: true,
+          changelog,
+          ...(reachFrom ? { reach: (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => kitReach(ctx, { ...reachFrom, pin, toolChanged }) } : {}),
+        }),
+      );
     } catch (err) {
       r = result(e, 'failed', (err as Error).message);
     }

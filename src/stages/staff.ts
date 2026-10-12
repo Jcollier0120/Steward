@@ -11,6 +11,7 @@ import { releasedHere, type Employee } from '../settings.ts';
 import { bumpBranch, checkoutOf, glanceOf, hostIs, mapLimit, NOT_ON_KIT, type Ctx } from './common.ts';
 import { gitGlance } from '../scm.ts';
 import { hostFor, must, type SourceHost } from '../hosts/index.ts';
+import { repoBusy } from './slots.ts';
 
 /**
  * The staff at a glance (`steward staff`, and the page's table): for each employee, its own checkout, its
@@ -247,9 +248,10 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
     row.checkout.branch = (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim() || '(detached)';
     row.checkout.changes = ((await gitMaybe(run, dir, '--no-optional-locks', 'status', '--porcelain')) ?? '').split('\n').filter((l) => l.trim()).length;
-    // Fetched, unless the glance at GitHub says the checkout has its branch's head already.
+    // Fetched, unless the glance at GitHub says the checkout has its branch's head already, or a stage running beside
+    // this one is working in it (stages/slots.ts): its own fetches bring the branch, and the next look shows it.
     let commit = g?.head ? await commitOf(run, dir, remote) : null;
-    if (opts.fetch && (!g?.head || commit !== g.head)) {
+    if (opts.fetch && (!g?.head || commit !== g.head) && !repoBusy(e.id)) {
       try {
         await fetchBranch(run, dir, e.branch);
       } catch (err) {

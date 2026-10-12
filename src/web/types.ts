@@ -66,7 +66,12 @@ export interface StewardView {
   /** The PRs that conflict with their branch the rounds looked at in the last two weeks, and what each did (conflicts.ts). */
   conflicts?: ConflictLook[];
   last: StageResult | null;
+  /** The first of `runs`, or null: for a page from before stages ran side by side. */
   running: { stage: string; since: string } | null;
+  /** Every stage running now, side by side (stages/slots.ts). */
+  runs?: { stage: string; since: string }[];
+  /** Every slot taken (Settings' stagesAtOnce): no other stage can start until one ends. */
+  full?: boolean;
   refreshing: boolean;
   /** The team the stages use: Settings' own, or the account gh is signed in as when they name none (ghuser.ts). */
   team: string[];

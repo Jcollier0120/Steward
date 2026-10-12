@@ -35,9 +35,9 @@ const githubReadyHere = (): boolean | undefined => {
 };
 
 /**
- * The Steward at work on its page: the staff's table, and a button for each stage. A stage runs in this
- * process, one at a time (and never beside one run from a terminal: the stage lock), and the page
- * refreshes itself while it runs.
+ * The Steward at work on its page: the staff's table, and a button for each stage. Stages run in this process, as
+ * many at once as Settings' stagesAtOnce allows (counting those run from a terminal: the stages' slots), each on a
+ * repository only while no other is (stages/slots.ts), one round at a time; the page refreshes itself while they run.
  *
  * Its duty (start and stop, from Manor) works as every agent's does. Its round (stages/round.ts) comes every
  * few minutes while it's on duty, through the kit's every() in schedule.ts: while Settings say it merges and releases
@@ -86,7 +86,7 @@ export const staffView = (s: Staff | null, host?: (r: StaffRow) => Host): StaffV
   s && { ...s, rows: s.rows.map((r) => ({ ...r, ...(host ? { host: host(r) } : {}), prs:r.prs.map((p) => ({ ...p, afterText: p.after ? afterWords(p.after) : null })) })) };
 
 /** /api/page's body with Developer options off, off the maker's laptop (maker.ts): the plain line, the rest empty. */
-export const offView = (): StewardView => ({ off: DEVELOPER_ONLY, staff: null, last: null, running: null, refreshing: false, team: [], round: { on: false, minutes: 0, onDuty: false, lastRunAt: null } });
+export const offView = (): StewardView => ({ off: DEVELOPER_ONLY, staff: null, last: null, running: null, runs: [], full: false, refreshing: false, team: [], round: { on: false, minutes: 0, onDuty: false, lastRunAt: null } });
 
 /** With Developer options off off the maker's laptop, what Manor's two reads answer: their usual shape, empty. */
 const OFF_GETS: Record<string, () => unknown> = {
@@ -110,36 +110,47 @@ export function gatePosts(posts: Record<string, Handler>, acts: () => boolean = 
 
 /** `run` stands in for git, gh and the employees' commands in a test; `owner`, for the account gh is signed in as (team.ts). */
 export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson; turns?: TurnsDeps } = {}) {
-  let running: { stage: string; since: string } | null = null;
+  /** The stages running in this process, side by side (stages/slots.ts): at most Settings' stagesAtOnce. */
+  let runs: { stage: string; since: string }[] = [];
+  /** A stage begun: it shows on the page until the returned end() is called, which starts what waited for a free slot. */
+  const begin = (stage: string) => {
+    const r = { stage, since: new Date().toISOString() };
+    runs = [...runs, r];
+    return () => {
+      runs = runs.filter((x) => x !== r);
+      afterRunning();
+    };
+  };
+  /** Every slot taken: a stage asked for now waits, or is refused. */
+  const slotsFull = () => runs.length >= loadSettings().stagesAtOnce;
+  const rounding = () => runs.some((r) => r.stage === 'round');
+  /** The stages running, in words: "round and release". */
+  const runningWords = () => runs.map((r) => r.stage).join(' and ');
+  const isAre = () => (runs.length === 1 ? 'is' : 'are');
   let refreshing: Promise<unknown> | null = null;
-  /** Jobs to approve once what's running ends (POST /api/jobs/approve while it ran): employee ids, none for all. */
+  /** Jobs to approve once a slot is free (POST /api/jobs/approve while all were taken): employee ids, none for all. */
   let approveAfter: string[] | null = null;
 
   /** The employees' jobs approved now (steward.ts's approveJobsNow), as the stage "jobs". */
   const approveNow = (ids: string[]) => {
-    running = { stage: 'jobs', since: new Date().toISOString() };
+    const end = begin('jobs');
     void approveJobsNow(ids, { run: o.run, owner: o.owner, log: (line) => console.log(`jobs: ${line}`) })
       .then((done) => done.forEach((r) => console.log(`jobs: [${r.id}] ${r.message}`)))
       .catch((e) => console.error(`${new Date().toISOString()} jobs: ${(e as Error).message}`))
-      .finally(() => {
-        running = null;
-        afterRunning();
-      });
+      .finally(end);
   };
-  /** A round asked for (POST /api/round/soon) while something ran: it comes once that ends. */
+  /** A round asked for (POST /api/round/soon) while one ran, or every slot was taken: it comes once it can. */
   let roundAfter = false;
   /** Employees the next round looks at whatever GitHub's glance says: a branch just vouched for with no PR (branchesin.ts). */
   let lookNext: string[] = [];
-  /** What waited for the stage that just ended: jobs to approve, then a round asked for. */
+  /** What waited for a stage to end: jobs to approve, then a round asked for, each once a slot is free. */
   const afterRunning = () => {
-    if (running) return;
-    if (approveAfter) {
+    if (approveAfter && !slotsFull()) {
       const ids = approveAfter;
       approveAfter = null;
       approveNow(ids);
-      return;
     }
-    if (roundAfter) {
+    if (roundAfter && !slotsFull() && !rounding()) {
       roundAfter = false;
       startRound();
     }
@@ -175,14 +186,11 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
 
   const start = (stage: 'bump' | 'push' | 'merge' | 'release', ask: StageAsk) => {
-    if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
-    running = { stage, since: new Date().toISOString() };
+    if (slotsFull()) return { json: { started: false, message: `${runningWords()} ${isAre()} running, as many stages as Settings allow at once (Stages at once); wait for one to finish.` } };
+    const end = begin(stage);
     void runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) })
       .catch((e) => console.error(`${new Date().toISOString()} ${stage}: ${(e as Error).message}`))
-      .finally(() => {
-        running = null;
-        afterRunning();
-      });
+      .finally(end);
     return { json: { started: true } };
   };
 
@@ -212,11 +220,11 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   /** The rounds in a row that came sooner: after SOON_IN_A_ROW, one at Settings' interval (soonAfter). */
   let soonRun = 0;
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
-  // release what isn't. It passes while a stage runs here or in a terminal (the stage lock).
+  // release what isn't. It passes while a round runs, here or in a terminal, or every stage's slot is taken (stages/slots.ts).
   const roundJob = async (full = false) => {
     // Off the maker's laptop with Developer options off, no round runs: a developer's work (maker.ts).
-    if (running || !stewardActs()) return;
-    running = { stage: 'round', since: new Date().toISOString() };
+    if (rounding() || slotsFull() || !stewardActs()) return;
+    const end = begin('round');
     sooner = null;
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
@@ -229,8 +237,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
     } finally {
-      running = null;
-      afterRunning();
+      end();
     }
   };
   /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
@@ -264,25 +271,25 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       return { shell: { ...shell, app: { ...shell.app, role: PLAIN_ROLE } }, body: offView() };
     }
     const s = loadSettings();
-    const busy = running !== null || refreshing !== null;
+    const busy = runs.length > 0 || refreshing !== null;
     const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running, refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
-    return { shell: pageShell({ busy, title: running ? `(${running.stage}) ${APP.name}` : APP.name }), body };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 
   const served = await serve({
     port,
     icon: ICON,
-    ping: () => ({ busy: running !== null, stage: running?.stage ?? null, tour: hasTour() }),
+    ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
     get: gateGets({
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
       // /api/page again every few seconds while a stage runs, and after each button.
       '/': ({ token }) => {
-        if (stewardActs() && !running && !roundsKeepIt() && staleTable()) void refresh();
+        if (stewardActs() && !runs.length && !roundsKeepIt() && staleTable()) void refresh();
         if (stewardActs() && foundStale(loadFound())) void find();
         return { html: reactPage({ token, data: pageData() }) };
       },
@@ -310,34 +317,35 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       '/api/stage/release': stagePost('release'),
       // A round now, as the schedule would run one (the button asks first), on duty or not.
       '/api/run': () => {
-        if (running) return { json: { started: false, message: `${running.stage} is running; wait for it to finish.` } };
+        if (rounding()) return { json: { started: false, message: 'A round is running; wait for it to finish.' } };
+        if (slotsFull()) return { json: { started: false, message: `${runningWords()} ${isAre()} running, as many stages as Settings allow at once (Stages at once); wait for one to finish.` } };
         void roundJob(true).catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
         return { json: { started: true } };
       },
       // `steward vouch`, once a PR's checks passed and GitHub has its status (stages/vouch.ts): a round now, as the schedule
       // runs one, so the PR merges in minutes when its turn has come, not at the next round. Its glance sees the status
-      // (the PR's checks are in what it compares), so the round looks at that repository. While something runs, once it
-      // ends. Only while the Steward merges by itself and is on duty: otherwise its rounds would merge nothing.
+      // (the PR's checks are in what it compares), so the round looks at that repository. While a round runs, or every
+      // slot is taken, once it can. Only while the Steward merges by itself and is on duty: otherwise its rounds would merge nothing.
       '/api/round/soon': ({ body }) => {
         // A branch vouched for with no PR yet: its employee is looked at, though nothing GitHub's glance shows has changed.
         const look: string[] = Array.isArray(body?.look) ? body.look.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 20) : [];
         lookNext = [...new Set([...lookNext, ...look])];
         if (!loadSettings().byItself) return { json: { started: false, message: "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now." } };
         if (!duty().onDuty) return { json: { started: false, message: 'The Steward is off duty: it merges the PR at its first round once it is back.' } };
-        if (running) {
+        if (rounding() || slotsFull()) {
           roundAfter = true;
-          return { json: { started: false, queued: true, message: `The Steward's ${running.stage} is running: a round comes as soon as it ends.` } };
+          return { json: { started: false, queued: true, message: `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
         }
         startRound();
         return { json: { started: true, message: "The Steward's round has started: it merges the PR now if its turn has come." } };
       },
       // Manor, right after it installs an update: the jobs whose scripts it changed, approved now when they are exactly
-      // what was merged (stages/jobs.ts), not at the next round's end. While a stage runs, once it ends.
+      // what was merged (stages/jobs.ts), not at the next round's end. While every slot is taken, once one is free.
       '/api/jobs/approve': ({ body }) => {
         const ids: string[] = Array.isArray(body?.ids) ? body.ids.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 100) : [];
-        if (running) {
+        if (slotsFull()) {
           approveAfter = approveAfter === null ? ids : !ids.length || !approveAfter.length ? [] : [...new Set([...approveAfter, ...ids])];
-          return { json: { started: false, queued: true, message: `${running.stage} is running; the jobs are approved once it ends.` } };
+          return { json: { started: false, queued: true, message: `${runningWords()} ${isAre()} running; the jobs are approved once one ends.` } };
         }
         approveNow(ids);
         return { json: { started: true } };
@@ -360,7 +368,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         if (!picks.length || picks.some((p) => !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(p.repo)))
           return { json: { error: 'Send { "repo": "owner/name" }, or { "repos": [{ "repo": "owner/name" }, …] }, of the repositories the page offers.' }, status: 400 };
         const r = lookAfterAll(picks);
-        if (r.employees.length && !running) void refresh();
+        if (r.employees.length && !runs.length) void refresh();
         if (!r.employees.length) return { json: { error: r.errors.join('\n') }, status: 409 };
         const ids = r.employees.map((e) => e.id);
         // Some added and some not: the page says which weren't, and why.
@@ -377,7 +385,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         const pin = body?.pin === true ? true : body?.pin === false ? false : undefined;
         const r = await handOver(e, { run: o.run ?? realRun, settings: s, deps: o.turns, pin });
         if (!r.ok) return { json: { error: r.message }, status: 409 };
-        if (!running && pin === undefined) void roundJob(true).catch((err) => console.error(`${new Date().toISOString()} round: ${(err as Error).message}`));
+        if (!rounding() && !slotsFull() && pin === undefined) void roundJob(true).catch((err) => console.error(`${new Date().toISOString()} round: ${(err as Error).message}`));
         return { json: { ok: true, message: r.message } };
       },
       '/api/repos/refresh': () => {
@@ -385,7 +393,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         return { json: { started: true } };
       },
       '/api/staff/refresh': () => {
-        if (running) return { json: { started: false, message: `${running.stage} is running; the table is refreshed when it's done.` } };
+        if (runs.length) return { json: { started: false, message: `${runningWords()} ${isAre()} running; the table is refreshed when ${runs.length === 1 ? "it's" : "they're"} done.` } };
         void refresh();
         return { json: { started: true } };
       },
@@ -396,7 +404,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   return {
     ...served,
     idle: async () => {
-      while (running || refreshing) await new Promise((r) => setTimeout(r, 25));
+      while (runs.length || refreshing) await new Promise((r) => setTimeout(r, 25));
     },
     close: async () => {
       rounds?.stop();

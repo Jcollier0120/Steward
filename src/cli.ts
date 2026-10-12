@@ -209,7 +209,12 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
     return printStage(await runStage(name, ask, { log: (line) => console.log(line) }));
   } catch (e) {
     if (e instanceof LockTimeout) {
-      console.error('Another stage is running (on the page, or in another terminal). Try again when it has finished.');
+      const n = loadSettings().stagesAtOnce;
+      console.error(
+        name === 'round'
+          ? 'A round is running already (on the page, or in another terminal). Try again when it has finished.'
+          : `${n === 1 ? 'Another stage is' : `${n} stages are`} running (on the page, or in other terminals), as many as "Stages at once" in Settings allows. Try again when one has finished.`,
+      );
       return 1;
     }
     throw e;

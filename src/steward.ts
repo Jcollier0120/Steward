@@ -1,11 +1,10 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './alarms.ts';
 import { portUses } from './ports.ts';
-import { dataDir } from './app.ts';
+import { APP, dataDir } from './app.ts';
 import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restReset, roundCost, saveBudget, waitLine } from './budget.ts';
 import { apiAsk, repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
-import { withLock } from './kit/lock.ts';
 import { online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
@@ -42,11 +41,12 @@ import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
+import { withRepo, withStageSlot } from './stages/slots.ts';
 
 /**
- * The stages, as the command line and the page both run them: one at a time on this PC (a lock in the data
- * folder), each recorded in last-stage.json and appended to stages.log, and the staff's table refreshed
- * after each. Each stage begins with one glance at GitHub (glance.ts) for every employee at once.
+ * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
+ * working on a repository only while it holds that repository's lock (stages/slots.ts), each recorded in
+ * last-stage.json and appended to stages.log, and the staff's table refreshed after each. Each stage begins with one glance at GitHub (glance.ts) for every employee at once.
  */
 
 export interface StageAsk {
@@ -78,7 +78,6 @@ export interface StageAsk {
 
 export const lastStageFile = () => dataFile('last-stage.json');
 export const staffFile = () => dataFile('staff.json');
-const stageLock = () => dataFile('locks', 'stage');
 const kitsPrunedFile = () => dataFile('kits-pruned.json');
 
 export const loadLastStage = () => readJson<StageResult | null>(lastStageFile(), null);
@@ -393,7 +392,8 @@ async function selfRound(ctx: Ctx, o: StageOptions, moved = false): Promise<Empl
   if (!ctx.settings.stewardRepo || !checkout) return [];
   try {
     const facts = ctx.glance && !moved ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
-    return await releaseSelf(ctx, { checkout, ...facts });
+    // Holding its own repository, as an employee's release holds its (stages/slots.ts).
+    return await withRepo(ctx.log, APP.id, () => releaseSelf(ctx, { checkout, ...facts }));
   } catch (e) {
     ctx.log(`[steward] its own releases: ${(e as Error).message}`);
     return [];
@@ -404,16 +404,17 @@ async function selfRound(ctx: Ctx, o: StageOptions, moved = false): Promise<Empl
  * The employees' jobs approved now, as a round approves them at its end (stages/jobs.ts: only a script that is exactly
  * the merged one), for Manor to ask right after it installs an update (POST /api/jobs/approve), so a job whose script
  * the update changed doesn't wait up to a round to run. `ids`: only these employees, all that approve jobs when empty.
- * Under the stages' lock; nothing is asked of GitHub but each one's branch, fetched. One line for each it approved.
+ * In one of the stages' slots, each repository under its lock (stages/slots.ts); nothing is asked of GitHub but each
+ * one's branch, fetched. One line for each it approved.
  */
 export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: Owner; log?: (line: string) => void } = {}): Promise<EmployeeResult[]> {
   const log = o.log ?? (() => {});
-  return withLock(stageLock(), async () => {
+  return withStageSlot('jobs', loadSettings().stagesAtOnce, async () => {
     const ctx = await context({ run: o.run, log, glance: false, owner: o.owner });
     const out: EmployeeResult[] = [];
     for (const e of ctx.settings.employees.filter((x) => x.approve && (!ids.length || ids.includes(x.id)))) {
       try {
-        const r = await approveMerged(ctx, e);
+        const r = await withRepo(log, e.id, () => approveMerged(ctx, e));
         if (r) out.push({ ...r, message: `jobs: ${r.message}` });
       } catch (err) {
         log(`[${e.id}] jobs: ${(err as Error).message}`);
@@ -423,7 +424,7 @@ export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: O
   });
 }
 
-/** Runs a stage under the lock, records it, and refreshes the staff's table; a round only when it did something. */
+/** Runs a stage in one of the stages' slots (stages/slots.ts), records it, and refreshes the staff's table; a round only when it did something. */
 export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk, o: StageOptions = {}): Promise<StageResult> {
   const lines: string[] = [];
   const log = (line: string) => {
@@ -436,8 +437,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
     log(DEVELOPER_ONLY);
     return { stage: name, started: at, finished: at, kit: null, asked: { ...ask }, results: [], log: lines, error: DEVELOPER_ONLY };
   }
-  return withLock(
-    stageLock(),
+  return withStageSlot(
+    name,
+    loadSettings().stagesAtOnce,
     async () => {
       // With no repositories to look after here, or Settings saying it doesn't merge and release by itself, a round
       // asks GitHub nothing (no glance, no team): it keeps the staff's pages up, and the alarms look.
@@ -583,7 +585,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             for (const e of picked.employees) {
               let r: EmployeeResult | null;
               try {
-                r = await approveMerged(ctx, e);
+                r = await withRepo(log, e.id, () => approveMerged(ctx, e));
               } catch (err) {
                 log(`[${e.id}] jobs: ${(err as Error).message}`);
                 r = null;
@@ -721,7 +723,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       }
       return out;
     },
-    // A bump can take a while; a holder whose process is gone is still seen at once.
-    { waitMs: 2000, staleMs: 3 * 3600_000 },
+    // All the slots taken: a moment, then it says so (LockTimeout).
+    { waitMs: 2000 },
   );
 }

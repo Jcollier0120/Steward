@@ -8,6 +8,7 @@ import { bumpBranch, checkoutOf, NOT_ON_KIT, result, type Ctx, type EmployeeResu
 import { readPin } from './staff.ts';
 import { noteOpened } from '../strangers.ts';
 import { hostFor, must } from '../hosts/index.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * Stage 2, `steward push`: each bump prepared here (the branch steward/kit-<version>) is pushed, never
@@ -100,7 +101,7 @@ export async function push(ctx: Ctx, employees: Employee[], o: PushOptions): Pro
   const out: EmployeeResult[] = [];
   for (const e of employees) {
     try {
-      out.push(await pushOne(ctx, e, o));
+      out.push(await withRepo(ctx.log, e.id, () => pushOne(ctx, e, o)));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       out.push(result(e, 'failed', (err as Error).message));

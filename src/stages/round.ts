@@ -4,6 +4,7 @@ import { mapLimit, networkFailure, result, type Ctx, type EmployeeResult } from 
 import { releaseOne } from './release.ts';
 import { clearTastingHold } from '../tasting.ts';
 import { takeFreshStart } from '../fresh-start.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * The Steward's round (`steward round`, and on duty every few minutes when Settings say it merges and releases
@@ -29,10 +30,12 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
   // A few employees at a time (Settings' parallel); what failed is kept once all are done.
   const out = await mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      return await releaseOne(ctx, e, {
-        kit: null,
-        unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) && !retry.has(e.id) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
-      });
+      return await withRepo(ctx.log, e.id, () =>
+        releaseOne(ctx, e, {
+          kit: null,
+          unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) && !retry.has(e.id) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
+        }),
+      );
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       return result(e, 'failed', (err as Error).message);
