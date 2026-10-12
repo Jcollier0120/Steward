@@ -17,6 +17,26 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing unless it fetches a lot: take the kit and release as usual. An agent that talks to remotes in a loop can wrap its runner in `signedIn`, and one that only checks whether a remote moved can try `freshRemoteHeads` before its `ls-remote`. Never rely on the file: no Steward, no GitHub, or an old read all mean asking the remote as before.
 
+## 2.57.1
+
+**Pages that answer at once: on ::1 too, at a normal pace while someone uses them, and Manor's always.**
+
+### What's new
+
+- **A page in use runs at a normal pace** (node/gentle.ts `pageInUse()`). Every request a browser makes (it sends `Sec-Fetch-Site`; Manor's pings and the CLI's requests don't) lifts the agent's process to a normal pace, as for a round someone asked for, and it goes back to its pace a minute (`IN_USE_MS`) after the last. At a gentle pace a page waited behind every program at normal priority: under a full processor load a below-normal page took up to 11 s to answer where the same page at normal priority took under 1 s. The background work keeps its gentle pace whenever nobody is looking.
+- **A hidden tab doesn't ask** (react/page-data.ts): `usePageData()` skips its looks while `document.hidden`, and looks at once when the tab is shown again, so a tab left open doesn't hold its agent at a normal pace (and costs it nothing).
+
+- **`keepResponsive()`** (node/gentle.ts), for a process people wait on: its rounds never set it gentle, so it keeps normal priority, no efficiency mode and no processor cap at any pace, and a gentle pace already set is lifted. Manor calls it as it starts serving: at a gentle pace its page sat ready to run for up to half a minute at a time while Windows gave it no processor (its Open said "Opening…" all that while), and the programs it starts were held to its cap with it. An agent's own process keeps its pace.
+
+### What changed
+
+- **`serve()` listens on ::1 as well as 127.0.0.1** (node/server.ts `alsoOnV6Loopback()`). A browser asks for `<agent>.localhost` on ::1 first, and where nothing listened there it waited about 300 ms before trying 127.0.0.1, on every new connection: each Open from Manor and each first request paid it. A second listener on ::1 hands its connections to the same server, so the host check and the token are the same; closing the page closes both. Loopback only, as before. On a PC without IPv6, or with ::1's port taken, it goes without and nothing changes.
+
+### Before you update
+
+- Nothing: take it by pinning 2.57.1 in kit.json. Only a process people wait on calls `keepResponsive()`; an agent shouldn't.
+- An agent whose own page polls outside `usePageData()` should skip its polls while `document.hidden` too, or an open tab keeps it at a normal pace.
+
 ## 2.57.0
 
 **An agent of Manor's staff no longer starts from a hidden sign-in task: Castellan, in Windows' Startup apps, starts Manor, and Manor starts its staff.**
