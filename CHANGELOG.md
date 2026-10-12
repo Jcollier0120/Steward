@@ -17,6 +17,46 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The commands work once the Exchequer 0.7.20 and Castellan 0.16.101 are out; they only work on the PC that holds the recall key.
 
+## 0.35.23
+
+**Settings you can read: each repository on one line, and only what's yours to choose.**
+
+### What's new
+
+- **Repositories have their own tab, and it opens first.** Each repository is one line: its name, its repository and branch, its note, what the Steward does for it (releases, or not released; no tests) and its **Merges PRs** switch, which you can flip right there. With more than eight, a box above the list finds one by name or repository.
+- A repository opens to just what you decide: whether and how it's released, and its note. What the Steward finds by itself from your clone (its name, repository, branch, clone, tests, version files, and the kit, install and job commands) isn't shown at all, so it can't be set wrong by hand. If the Steward can't find one of them, that setting shows, with a line saying what to set.
+- Everything else is on one more tab, **How it works**: your team, the rounds, merging and releasing, then **Alarms** and **The Wright's drafts** under headings of their own, in two columns in a wide window. On the PC that releases Castellan there's a **Castellan** tab too. Three tabs at most, where there were six.
+
+### What changed
+
+- Settings no longer has an Add button for repositories: they arrive by Hire, or by Look after on the Steward's page, with everything found from their clones. Each can still be removed here.
+- "Takes the Steward's kit" is gone from Settings: whether a repository takes the kit is the Steward's to decide, from the kit.json on its branch. Saving Settings keeps what the Steward decided.
+- Other settings the Steward works out for itself are gone from Settings too: the work folder, the .NET SDK, the Steward's own repository and clone, and where Castellan's releases go. Your settings.json keeps them, and one still shows if something is wrong with it.
+- The pages the Steward reads for alarms (Manor's, the Surveyor's, Reeve's, the Wright's and the Bailiff's) are no longer settings at all: the Steward asks Manor where each one is, every time, so a page that moves is followed. An address saved in settings.json by an earlier Steward is ignored.
+- Every setting's help is a line or two now, instead of a paragraph. A setting says its default, and offers Reset to default, only once you've changed it.
+- A repository with a warning (an installed copy that isn't there yet, say) says "needs a look" on its line instead of opening by itself; one with an error still opens.
+- Settings' tabs are underlined, and no longer filled with the accent colour, which was hard to read in the dark theme.
+- The Steward takes the kit 2.55.0, which brings all of this to the Settings form.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Your settings.json keeps its shape: nothing in it is moved or rewritten, though the alarm pages' addresses are dropped from it the next time you change an alarm setting.
+
+## 0.35.22
+
+**Every agent that carries the kit is looked after on it, however it was added.**
+
+### What changed
+
+- An agent added with **Look after** that carries the kit is now taken on as a hired one is: it takes each new kit, and the Steward's rounds test, merge, release and install it. Until now it was listed but left off the kit, unticked in **Roll out the kit**. Merging and releasing still follow what you ticked when you added it.
+- Agents added that way before this version go onto the kit by themselves within a few minutes of updating. Repositories without the kit, such as a website, stay as they are.
+- **Merge the team's PRs** shows only when Settings name a team. With no team set, the Steward's rounds still merge your ready PRs as before.
+- Settings' tabs (General, Alarms and the rest) are plain tabs again, underlined when chosen, instead of bright filled buttons that were hard to read in the dark theme. This comes with kit 2.54.0, which every agent takes in turn.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.21
 
 **The Steward no longer tries to open a pull request that is already open.**
