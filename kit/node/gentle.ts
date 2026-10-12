@@ -56,14 +56,28 @@ export function gentleScript(pid: number, gentle: boolean, cap: number, dll: str
 /** What this process was last set to: it starts as Windows starts every process, not gentle. */
 let applied: string = 'normal';
 let pending: Promise<void> = Promise.resolve();
+let responsive = false;
+
+/**
+ * For a process people wait on (Manor, whose page every Open and every agent's card goes through; kit 2.57.1): its
+ * rounds never set it gentle, so it keeps normal priority, no efficiency mode and no processor cap, whatever the pace.
+ * At a gentle pace its page sat ready to run for up to half a minute at a time while Windows gave it no processor, and
+ * the programs it starts were held to its cap with it. Undoes a gentle pace already set; the agents' own processes keep theirs.
+ */
+export function keepResponsive(): Promise<void> {
+  const back = paceProcess('full');
+  responsive = true;
+  return back;
+}
 
 /**
  * Sets this process for the pace (Windows only; KIT_GENTLE=0 leaves it to priority alone): gentle for a scheduled
  * round at a gentle pace, normal for a round someone asked for or a full pace. Priority is set at once (pace.ts);
  * the rest through the worker, in order, and only when it changes. Never throws: a PC that refuses keeps its
- * priority, and the log says once what didn't take.
+ * priority, and the log says once what didn't take. Nothing, once keepResponsive() was called.
  */
 export function paceProcess(p: Pace, asked = false): Promise<void> {
+  if (responsive) return pending;
   setPriorityFor(p, asked);
   const gentle = p === 'gentle' && !asked;
   if (process.platform !== 'win32' || process.env.KIT_GENTLE === '0') return pending;

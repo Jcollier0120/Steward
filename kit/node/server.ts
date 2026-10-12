@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import { APP, HOST_NAME } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
@@ -143,6 +144,25 @@ const HEADERS = {
   'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
 };
 
+/**
+ * The page on ::1 as well as 127.0.0.1 (kit 2.57.1). A browser asks for <agent>.localhost on ::1 first, and where nothing
+ * listens there it waits about 300 ms before it tries 127.0.0.1, on every new connection: each Open and each first
+ * request paid it. A second listener on ::1 hands what it accepts to the same server, so the host and token checks are
+ * the same. Loopback only, as before; on a PC without IPv6, or with ::1's port taken, it goes without and nothing changes.
+ */
+export function alsoOnV6Loopback(server: http.Server, port: number): net.Server {
+  const v6 = net.createServer((socket) => server.emit('connection', socket));
+  v6.on('error', () => v6.close());
+  v6.listen({ port, host: '::1', ipv6Only: true });
+  // Closing the page stops both at once: none taken on ::1 for a server that's closing.
+  const close = server.close.bind(server);
+  server.close = ((cb?: (err?: Error) => void) => {
+    v6.close();
+    return close(cb);
+  }) as typeof server.close;
+  return v6;
+}
+
 export async function serve(opts: ServeOptions): Promise<{ server: http.Server; token: string; close: () => Promise<void> }> {
   const token = randomBytes(24).toString('hex');
   const hosts = allowedHosts(opts.port);
@@ -245,6 +265,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     server.once('error', reject);
     server.listen(opts.port, '127.0.0.1', () => resolve());
   });
+  alsoOnV6Loopback(server, opts.port);
   writeJson(dataFile('server.json'), { pid: process.pid, port: opts.port, token, since: new Date().toISOString() });
   return { server, token, close: () => new Promise((r) => server.close(() => r())) };
 }

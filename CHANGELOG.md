@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.36
+
+**The Steward's page, and every agent's once it takes kit 2.57.1, opens without a short wait.**
+
+### What changed
+
+- Each page now also answers where browsers ask first (IPv6's ::1), so opening it, and its first request, no longer wait about a third of a second before the browser tries again.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.32
 
 **What the Steward did last is at the top of its page, and its settings are shorter.**

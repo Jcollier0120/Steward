@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.57.1
+
+**Pages that answer at once: on ::1 too, and Manor's never slowed by its rounds' pace.**
+
+### What's new
+
+- **`keepResponsive()`** (node/gentle.ts), for a process people wait on: its rounds never set it gentle, so it keeps normal priority, no efficiency mode and no processor cap at any pace, and a gentle pace already set is lifted. Manor calls it as it starts serving: at a gentle pace its page sat ready to run for up to half a minute at a time while Windows gave it no processor (its Open said "Opening…" all that while), and the programs it starts were held to its cap with it. An agent's own process keeps its pace.
+
+### What changed
+
+- **`serve()` listens on ::1 as well as 127.0.0.1** (node/server.ts `alsoOnV6Loopback()`). A browser asks for `<agent>.localhost` on ::1 first, and where nothing listened there it waited about 300 ms before trying 127.0.0.1, on every new connection: each Open from Manor and each first request paid it. A second listener on ::1 hands its connections to the same server, so the host check and the token are the same; closing the page closes both. Loopback only, as before. On a PC without IPv6, or with ::1's port taken, it goes without and nothing changes.
+
+### Before you update
+
+- Nothing: take it by pinning 2.57.1 in kit.json. Only a process people wait on calls `keepResponsive()`; an agent shouldn't.
+
 ## 2.56.0
 
 **A few agents' rounds at a time, fewer while the PC is busy.**
