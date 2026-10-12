@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.26
+
+**One box ticks every repository for a stage, or none.**
+
+### What's new
+
+- The repositories you pick for a stage on the Steward's page (the kit rollout, a release) now start with an **All** box, which says how many are ticked ("All (12 of 37)"). Tick it to pick every repository, untick it to clear them all, then tick the few you want. It shows half-ticked while only some are picked.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.23
 
 **Settings you can read: each repository on one line, and only what's yours to choose.**
