@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.58.0
+
+**Two pieces for agents that talk to git remotes a lot: git's sign-in asked once per host, and the branch heads another agent has just read.**
+
+### What's new
+
+- **node/git-auth.ts** (moved from the Steward's src/git-auth.ts, where it has run since Steward 0.35.31). Over https, every fetch, push or ls-remote of a private repository has git ask the credential helper for the sign-in, and Git Credential Manager answers in processes of its own. Measured on this PC for one `git ls-remote --heads origin` of a GitHub repository: 9 git processes and 2 of the manager's, against 3 git processes when the sign-in is handed over.
+  - `signedIn(run)` wraps an agent's own runner: its git commands that talk to a remote over https get the host's sign-in as an Authorization header, through git's environment config (`GIT_CONFIG_COUNT`…), never the command line. The sign-in is asked once per host (`git credential fill`) and kept 30 minutes in memory, never on disk. A host that refuses it is asked the helper's way, and its sign-in asked again after 10 minutes.
+  - `scriptEnv(origins, run)`: the same for a script (a PowerShell job). It asks once per host and gives back the environment to start the script with. The credential helpers are switched off only for those hosts (`credential.<origin>.helper`, empty), so any other host the script talks to signs in as before.
+- **node/remote-heads.ts**: branch heads one agent read, shared with the others in `remote-heads.json` in Manor's folder. `shareRemoteHeads` writes them (through a temporary file and a rename), and `freshRemoteHeads(url)` reads a remote's back when they're fresh (`FRESH_MS`, 20 minutes) and are all its branches. Otherwise it returns null, and the agent asks the remote itself. `remoteKey` makes one key of every way of writing a remote (https, scp-style, ssh://, owner/name). The Steward 0.35.39 writes the file after each glance.
+
+### For an agent
+
+- Nothing unless it fetches a lot: take the kit and release as usual. An agent that talks to remotes in a loop can wrap its runner in `signedIn`, and one that only checks whether a remote moved can try `freshRemoteHeads` before its `ls-remote`. Never rely on the file: no Steward, no GitHub, or an old read all mean asking the remote as before.
+
 ## 2.57.1
 
 **Pages that answer at once: on ::1 too, at a normal pace while someone uses them, and Manor's always.**

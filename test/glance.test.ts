@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GithubLimited } from '../src/budget.ts';
-import { glanceQuery, PER_QUERY, PR_PAGE, prFromGraph, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
+import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
 import type { Runner } from '../src/run.ts';
 import { appReleasesIn, parsePrs } from '../src/stages/staff.ts';
 import { employee, ok } from './helpers.ts';
@@ -135,4 +135,16 @@ test("a repository's signature changes with anything in it, and not with the ord
   assert.notEqual(repoSig({ ...g.repos.porter, head: 'd'.repeat(40) }), sig, 'its branch moved');
   assert.notEqual(repoSig({ ...g.repos.porter, prs: g.repos.porter.prs.map((p) => ({ ...p, isDraft: true })) }), sig, 'a PR changed');
   assert.notEqual(repoSig({ ...g.repos.porter, releases: [] }), sig, 'its releases changed');
+});
+
+test("every branch head is read at a glance, for other agents to share (kit 2.58.0's remote-heads.json); the rest as before", () => {
+  assert.match(glanceQuery([porter], null), /fragment R on Repository \{.*refs\(refPrefix: "refs\/heads\/", first: 100\) \{ totalCount nodes \{ name target \{ oid \} \} \}/);
+  const g = empty();
+  const refs = { totalCount: 2, nodes: [{ name: 'main', target: { oid: 'c'.repeat(40) } }, { name: 'claude/x', target: { oid: 'd'.repeat(40) } }] };
+  readGlance([porter, heiward], JSON.stringify({ data: { e0: graphRepo({ refs }), e1: graphRepo({ refs: { ...refs, totalCount: 101 } }) } }), null, g);
+  assert.deepEqual(g.heads, {
+    'Jcollier0120/Porter': { heads: { main: 'c'.repeat(40), 'claude/x': 'd'.repeat(40) }, complete: true },
+    'Jcollier0120/Heiward': { heads: { main: 'c'.repeat(40), 'claude/x': 'd'.repeat(40) }, complete: false },
+  }, "one with more branches than a glance reads isn't complete");
+  assert.equal(headsFromGraph(graphRepo()), null, 'an answer without them shares nothing');
 });

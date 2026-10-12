@@ -6,6 +6,7 @@ import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restRe
 import { apiAsk, repoSig, takeGlance, type Glance } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { online as kitOnline } from './kit/net.ts';
+import { shareRemoteHeads } from './kit/remote-heads.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
 import { run as realRun, useDotnet, type Runner } from './run.ts';
@@ -93,6 +94,14 @@ export async function tryGlance(run: Runner, settings: Settings, log: (line: str
     // The Steward's own runner asks GitHub from its process (no gh for each round); a test's runner, through gh.
     const g = await takeGlance(run, dataDir, settings, host, now, run === realRun && process.env.STEWARD_GLANCE_GH !== '1' ? apiAsk() : undefined);
     if (g.rates?.length || g.cost !== undefined) saveBudget(noteGlance(loadBudget(), g, now()));
+    // The branch heads it read, for other agents (Reeve) to skip their own ls-remote of these repositories.
+    if (g.heads && run === realRun) {
+      try {
+        shareRemoteHeads(g.heads, { now: now() });
+      } catch (e) {
+        log(`couldn't share the branch heads it read (${(e as Error).message})`);
+      }
+    }
     for (const [id, why] of Object.entries(g.errors)) {
       const e = settings.employees.find((x) => x.id === id);
       log(e && host?.(e) === 'git' ? `[${id}] git couldn't read ${e.repo}'s origin (${why}): it is asked on its own` : `[${id}] GitHub said nothing of ${e?.repo ?? id} at a glance (${why}): it is asked on its own`);

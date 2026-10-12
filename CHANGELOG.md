@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.39
+
+**Fewer programs started for each round's fetches, and the branch heads it reads shared with your other agents.**
+
+### What changed
+
+- The Steward's kit 2.58.0. The way the Steward hands git its sign-in up front (since 0.35.31) is now in the kit, so other agents can use it: Reeve's fetches and its scheduled jobs can sign in once per host instead of starting Git Credential Manager for every fetch.
+- Each round's glance at GitHub now also reads every branch head of your employees' repositories, in the same query, and leaves them in Castellan's folder (remote-heads.json). An agent that only wants to know whether a repository changed reads them there instead of asking GitHub itself. When the Steward hasn't read them lately, or isn't there, agents ask GitHub as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.38
 
 **A program missing for a moment, such as Git updating itself, no longer holds kit updates for you to push.**
