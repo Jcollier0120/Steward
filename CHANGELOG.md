@@ -14,6 +14,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.31
+
+**The Steward starts far fewer programs: about half as many for each fetch, and none for a pull request it already has.**
+
+### What changed
+
+- **Fewer programs for each fetch and push.** Fetching a private repository over HTTPS started nine programs, six of them only to look up your sign-in and store it again. The Steward now looks your sign-in up once every half hour and hands it to git itself, so a fetch starts five. Your sign-in stays where it was: the Steward keeps it in memory only, and never writes it anywhere or puts it on a command line.
+- **No fetch for a pull request that's already here.** Before reading a pull request, the Steward fetched it every round, even when the commit was already on your PC. Now it checks your clone first, from its files, and fetches only what's missing.
+- **Gentler on your PC's memory.** On some Windows PCs every program that ends leaves a little kernel memory behind until you restart. Fewer programs means it builds up more slowly.
+- **Safe with a stale sign-in.** If GitHub (or your git host) refuses the sign-in the Steward kept, it runs the command once more the usual way and looks the sign-in up again later. Your stored sign-in is never changed or erased.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.35.30
 
 **The Steward only ever clears its own work folders.**
