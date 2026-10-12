@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
-import { gitMaybe } from '../git.ts';
+import { gitMaybe, showFile } from '../git.ts';
 import { lf } from '../kitfiles.ts';
+import { TOOL } from '../kitsource.ts';
 import { dataFile, readJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { checkoutOf, type Ctx } from './common.ts';
@@ -75,6 +76,18 @@ export function releasedTree(ctx: Ctx, kit: string): Promise<string | null> {
     trees.set(kit, tree);
   }
   return tree;
+}
+
+/**
+ * The tools/kit.ts released with `kit` (at the tag kit-v<kit> in the Steward's repository, fetched as releasedTree
+ * fetches it), or null when it can't be read: what a bump hands out while this Steward carries an older kit, so the
+ * rollout needn't wait for Manor to install the Steward's new release (rollout.ts).
+ */
+export async function releasedTool(ctx: Ctx, kit: string): Promise<string | null> {
+  if (!(await releasedTree(ctx, kit))) return null;
+  const repo = stewardClone(ctx);
+  const text = repo ? await showFile(ctx.run, repo, `refs/tags/kit-v${kit}`, TOOL) : null;
+  return text ? lf(text) : null;
 }
 
 /**

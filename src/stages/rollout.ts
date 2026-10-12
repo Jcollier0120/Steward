@@ -1,14 +1,16 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { fetchBranch, showFile } from '../git.ts';
 import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bump } from './bump.ts';
-import { checkoutOf, freshBranch, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { checkoutOf, freshBranch, workRootOf, glanceOf, networkFailure, NOT_ON_KIT, passingFailure, result, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
+import { releasedTool } from './trialpass.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -30,9 +32,11 @@ import { withRepo } from './slots.ts';
  * alarm at once, and the rounds don't try that kit again until a new commit lands on the employee's branch, or a
  * person presses Bump or Push (or runs `steward bump` / `steward push`), which clears it.
  *
- * Nothing is rolled out while this Steward carries a kit older than the newest release: a bump hands out the
- * Steward's own tools/kit.ts, and that is the one released with the kit it carries. Manor installs the Steward's new
- * release (stages/self.ts releases it), and the rounds roll the kit out then.
+ * A bump hands out the Steward's own tools/kit.ts, the one released with the kit it carries. While this Steward carries
+ * a kit older than the newest release (it released the kit this very round, and Manor hasn't installed it yet), it
+ * hands out the tools/kit.ts released with the new kit instead, read from the kit's tag in its own clone (0.35.29): the
+ * kit goes out in the round that released it, not after Manor's update and the Steward's restart. Only when that can't
+ * be read does the rollout wait for Manor to install the Steward's new release.
  */
 
 export const rolloutFailedFile = () => dataFile('rollout-failed.json');
@@ -181,7 +185,20 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   const before = JSON.stringify(failed);
   // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx) is let go.
   for (const [id, h] of Object.entries(failed)) if (passingFailure(h.message)) delete failed[id];
-  const gate = rolloutGate({ on: ctx.settings.rollout, kit: o.kit, ownKit: o.ownKit });
+  // A kit newer than this Steward's: its tools/kit.ts read from the kit's release, so nothing waits for the Steward's update.
+  let ownKit = o.ownKit;
+  let tool: string | undefined;
+  if (o.kit && ownKit && ctx.settings.rollout && compareVersions(ownKit, o.kit) < 0) {
+    const text = await releasedTool(ctx, o.kit).catch(() => null);
+    if (text) {
+      tool = path.join(workRootOf(ctx.settings), `_kit-tool-${o.kit}.ts`);
+      mkdirSync(path.dirname(tool), { recursive: true });
+      writeFileSync(tool, text);
+      ctx.log(`rollout: this Steward carries kit ${ownKit}, so each bump hands out the tools/kit.ts released with kit ${o.kit}`);
+      ownKit = o.kit;
+    }
+  }
+  const gate = rolloutGate({ on: ctx.settings.rollout, kit: o.kit, ownKit });
   const facts: Record<string, RolloutFacts> = {};
   if (!('why' in gate)) {
     for (const e of employees.filter((x) => x.usesKit)) {
@@ -192,7 +209,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       }
     }
   }
-  const plan = planRollout({ on: ctx.settings.rollout, kit: o.kit, ownKit: o.ownKit, employees, facts, failed });
+  const plan = planRollout({ on: ctx.settings.rollout, kit: o.kit, ownKit, employees, facts, failed });
   if (plan.why) {
     if (plan.waitsForSteward) ctx.log(`rollout: ${plan.why}`);
     if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
@@ -217,7 +234,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       // The entry names the kit alone, and the PR's body points at the kit's changelog.
     }
     const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds });
+    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}) });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
       // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.

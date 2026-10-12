@@ -186,13 +186,14 @@ test('merge takes only PRs that merge cleanly with checks passing or none; the r
 test('a ready PR opened less than mergeMinAgeMinutes ago waits, so a small fix can still be pushed; then it merges', () => {
   const now = Date.parse('2026-10-10T12:00:00Z');
   const opened = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+  const team = (o: Partial<PrInfo>) => info({ head: 'claude/fix', whose: 'team', ...o });
   const { merge, hold } = mergeSelection(
     [
-      info({ number: 1, createdAt: opened(0.5) }),
-      info({ number: 2, createdAt: opened(4) }),
-      info({ number: 3, createdAt: opened(10) }),
-      info({ number: 4 }),
-      info({ number: 5, createdAt: opened(1), checks: 'failing' }),
+      team({ number: 1, createdAt: opened(0.5) }),
+      team({ number: 2, createdAt: opened(4) }),
+      team({ number: 3, createdAt: opened(10) }),
+      team({ number: 4 }),
+      team({ number: 5, createdAt: opened(1), checks: 'failing' }),
     ],
     'main',
     { minAgeMinutes: 10, now },
@@ -208,8 +209,12 @@ test('a ready PR opened less than mergeMinAgeMinutes ago waits, so a small fix c
     'any other reason is said first',
   );
   assert.ok(waitsBriefly(hold[0].why), 'the next round comes sooner for it');
-  assert.equal(holdReason(info({ createdAt: opened(1) }), 'main', { minAgeMinutes: 0, now }), null, '0: as soon as it is ready');
-  assert.equal(holdReason(info({ createdAt: opened(1) }), 'main'), null, 'no rule given: none');
+  assert.equal(holdReason(team({ createdAt: opened(1) }), 'main', { minAgeMinutes: 0, now }), null, '0: as soon as it is ready');
+  assert.equal(holdReason(team({ createdAt: opened(1) }), 'main'), null, 'no rule given: none');
+  // The Steward's own kit PR merges as soon as it is ready: nobody pushes fixes to it, and its checks passed here.
+  assert.equal(holdReason(info({ createdAt: opened(1) }), 'main', { minAgeMinutes: 10, now }), null);
+  assert.match(holdReason(team({ head: 'steward/kit-1.0.1', createdAt: opened(1) }), 'main', { minAgeMinutes: 10, now }) ?? '', /^opened 1 minute ago/, "a team's branch of that name still waits");
+  assert.match(holdReason(info({ fork: true, createdAt: opened(1) }), 'main', { minAgeMinutes: 10, now }) ?? '', /^opened /, 'and so does one from a fork');
   assert.equal(parsePrs(JSON.stringify([pr({ createdAt: '2026-10-10T11:58:00Z' })]), [])[0].createdAt, '2026-10-10T11:58:00Z');
   assert.equal('createdAt' in parsePrs(JSON.stringify([pr({})]), [])[0], false);
 });

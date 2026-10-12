@@ -347,3 +347,27 @@ test('the Steward carrying an older kit than the newest: the rollout waits, and 
   const watching = JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8')).watching;
   assert.ok('rollout:waits:1.0.4' in watching, 'watched: an alarm after a day');
 });
+
+test("the Steward carrying an older kit, with the new kit's tag in its clone: the rollout hands out that kit's tools/kit.ts at once, and the next round comes sooner", async () => {
+  // The Steward's clone: the kit's release tag carries its kit\ and its tools/kit.ts.
+  const steward = fakeEmployee(path.join(home, 'steward-clone'), { kit: null, files: { 'kit/VERSION': '1.0.5\n', 'tools/kit.ts': '// tools/kit.ts as released with kit 1.0.5\n' } });
+  sh(steward.checkout, 'tag', 'kit-v1.0.5');
+  sh(steward.checkout, 'push', '--quiet', 'origin', 'kit-v1.0.5');
+  const file = path.join(home, 'settings.json');
+  const before = readFileSync(file, 'utf8');
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(before), stewardCheckout: steward.checkout }));
+  try {
+    kits = ['1.0.5', ...kits];
+    gh = [];
+    const out = await runStage('round', { full: true }, { run, ownKit: '1.0.4' });
+    const log = out.log.join('\n');
+    assert.doesNotMatch(log, /waits for this Steward to carry it/);
+    assert.match(log, /rollout: this Steward carries kit 1\.0\.4, so each bump hands out the tools\/kit\.ts released with kit 1\.0\.5/);
+    assert.equal(readFileSync(path.join(home, 'work', '_kit-tool-1.0.5.ts'), 'utf8'), '// tools/kit.ts as released with kit 1.0.5\n');
+    assert.equal(created().length, 1, log);
+    assert.equal(out.soon, true, 'its PR merges in a round that comes sooner');
+    assert.match(log, /the next round comes sooner: kit 1\.0\.5's PRs for Fake merge and release then/);
+  } finally {
+    writeFileSync(file, before);
+  }
+});
