@@ -306,7 +306,7 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
  * passed here at abc1234", or its vouch), carried to the head it pushes where the catch-up touched only versions and
  * changelogs (keepsStanding), so it isn't tested again.
  */
-export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null }): Promise<CaughtUp> {
+export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null; repin?: string }): Promise<CaughtUp> {
   const { run } = ctx;
   const kitPr = isKitPr(pr);
   if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
@@ -343,7 +343,11 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
   const kFrom = start && kHead ? await kitAt(start) : null;
   const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: o.kit?.taken ?? [], asksRelease: false }) : null;
   const behind = await aheadOf(run, repo, branch, head);
-  if (!behind && !choice.why && !kit?.why) return { done: false, note: 'nothing to catch up' };
+  // `repin`: kit.json pins a kit that isn't released and never will be by itself (prtest.ts kitPinHold), moved to this
+  // released one. Only a pin it reads, and only upwards.
+  const pinnedAt = o.repin ? readPin(await showFile(run, repo, head, 'kit.json'))?.kit : undefined;
+  const repin = o.repin && pinnedAt && KIT_VERSION.test(pinnedAt) && compareVersions(o.repin, pinnedAt) > 0 ? o.repin : null;
+  if (!behind && !choice.why && !kit?.why && !repin) return { done: false, note: 'nothing to catch up' };
 
   const dir = catchUpDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
@@ -444,6 +448,17 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
       const kitWords = kit && kit.version !== kHead ? `, kit ${kit.version}` : '';
       await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}${kitWords}: a version of its own (${choice.why ?? kit?.why ?? `the branch's, after the merge`})`);
     }
+    // The re-pin, after any merge (whose kit.json may have kept the newer of the two pins): a commit of its own.
+    if (repin && existsSync(path.join(dir, 'kit.json'))) {
+      const now = readPin(readFileSync(path.join(dir, 'kit.json'), 'utf8'))?.kit;
+      const pinned = now && KIT_VERSION.test(now) && compareVersions(repin, now) > 0 ? repinKit(readFileSync(path.join(dir, 'kit.json'), 'utf8'), repin) : null;
+      if (pinned !== null) {
+        writeFileSync(path.join(dir, 'kit.json'), pinned);
+        await git(run, dir, 'add', '--', 'kit.json');
+        await git(run, dir, 'commit', '--quiet', '-m', `${e.name} ${choice.version}: kit ${repin}, since kit ${now} isn't released (re-pinned by the Steward)`);
+        did.push(`kit.json re-pinned from kit ${now}, which isn't released, to kit ${repin}`);
+      }
+    }
     if (choice.why) did.push(`v${choice.version}, since ${choice.why}`);
     // Its reason in the kit's words: "kit 2.36.0", never "v2.36.0", which is a Steward's tag.
     if (kit?.why) did.push(`kit ${kit.version}, since ${kit.why.replace(/\bv(\d)/g, 'kit $1')}`);
@@ -459,8 +474,9 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     const pushed = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
     // A kit PR's new head, whose checks passed here: the Surveyor's GET /api/tested (tested.ts).
     if (kitPr) recordTested(e.id, { commit: pushed, stage: 'catch-up', branch: pr.head, pr: pr.number, version: choice.version });
-    // What passed at its head before still holds, where the catch-up wrote only versions and entries.
-    const carried = !kitPr && !!o.carry && keepsStanding(conflictedFiles, e.versionFiles, !!kit);
+    // What passed at its head before still holds, where the catch-up wrote only versions and entries: never after a
+    // re-pin, since a different kit is different code.
+    const carried = !kitPr && !repin && !!o.carry && keepsStanding(conflictedFiles, e.versionFiles, !!kit);
     if (carried) {
       carryTested(e, pr, pushed, o.carry!);
       did.push(`its checks not run again (only version lines and the changelog changed since ${pr.headOid.slice(0, 7)})`);

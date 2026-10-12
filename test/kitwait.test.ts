@@ -11,7 +11,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-kitwait-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { kitMayClear, kitReleaseHold, KIT_WAIT } = await import('../src/stages/prtest.ts');
+const { kitMayClear, kitPinHold, kitReleaseHold, newerReleasedKit, KIT_WAIT } = await import('../src/stages/prtest.ts');
 const { ctxFor, ok } = await import('./helpers.ts');
 
 const e = { id: 'manor', name: 'Manor', usesKit: true, fill: 'node tools/kit.ts', checkout: home } as unknown as import('../src/settings.ts').Employee;
@@ -52,4 +52,32 @@ test("a PR whose kit.json pins a kit with no release waits for it, untested, nam
 
   assert.equal(await kitReleaseHold(ctx('2.42.0', ['2.42.0', '2.41.0']), e, pr), null);
   assert.equal(await kitReleaseHold(ctx('2.42.0', []), e, pr), null, "the kit's releases unread: tested as before");
+});
+
+// Kit releases are batched: kit 2.57.1 was merged but only ever released inside kit-v2.58.0, and Manor#224, which
+// pinned 2.57.1, waited for a release that would never come, with every PR above it.
+test('a PR pinning a kit no open Steward PR brings, below a released one, can be re-pinned to the newest released; one above every release still waits', async () => {
+  const pr = { number: 224, headOid: '7ab0097939a0c67033f4cada00b94c457014781e' } as unknown as import('../src/stages/staff.ts').PrInfo;
+  const pinned =
+    (kit: string, open: unknown[]): import('../src/run.ts').Runner =>
+    async (cmd, args) => {
+      if (cmd === 'git' && args.includes('show')) return ok(JSON.stringify({ kit }));
+      if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'list') return ok(open);
+      return ok('');
+    };
+  const ctx = (kit: string, released: string[], open: unknown[] = []) => ctxFor({ employees: [e], workRoot: path.join(home, 'work'), run: pinned(kit, open), neutralDir: home, released });
+  const stuck = "pins kit 2.57.1, which isn't released, and no open Steward PR brings it: release that kit, or pin a released one";
+
+  assert.deepEqual(await kitPinHold(ctx('2.57.1', ['2.58.0', '2.57.0']), e, pr), { why: stuck, repin: '2.58.0', pinned: '2.57.1' });
+  assert.equal(await kitReleaseHold(ctx('2.57.1', ['2.58.0', '2.57.0']), e, pr), stuck, 'its hold reads as before');
+  // Above every release: nothing to re-pin to, so it waits, with the words it always had.
+  const above = await kitPinHold(ctx('2.59.0', ['2.58.0', '2.57.0']), e, pr);
+  assert.deepEqual(above, { why: "pins kit 2.59.0, which isn't released, and no open Steward PR brings it: release that kit, or pin a released one" });
+  // An open Steward PR brings it: it waits for that PR, which has the code it was written with.
+  const brings = [{ ...stewardPrs[0], title: 'Steward 0.35.40, kit 2.57.1: something new' }];
+  assert.deepEqual(await kitPinHold(ctx('2.57.1', ['2.58.0'], brings), e, pr), { why: "waits for kit 2.57.1, which Steward#126 brings: it merges once that's released" });
+
+  assert.equal(newerReleasedKit(['2.57.0', '2.58.0', '2.10.0'], '2.57.1'), '2.58.0', 'the newest, whatever their order');
+  assert.equal(newerReleasedKit(['2.58.0'], '2.58.0'), null);
+  assert.equal(newerReleasedKit([], '2.57.1'), null);
 });

@@ -573,6 +573,92 @@ test('a PR that leaves the kit alone carries no kit version, so it claims none',
   assert.equal(c.kitVersion, undefined);
 });
 
+test('the round: a PR pinning a kit that will never be released by itself is re-pinned to the newest released, tested and merged, and the PR above it after', async () => {
+  const dir = path.join(home, 'repin');
+  const { origin, checkout } = fakeEmployee(dir, { kit: '2.57.0' });
+  const read = (f: string) => readFileSync(path.join(checkout, f), 'utf8');
+  const write = (f: string, t: string) => writeFileSync(path.join(checkout, f), t);
+  const branchOff = (name: string, version: string, files: Record<string, string>) => {
+    sh(checkout, 'switch', '--quiet', '-c', name, 'main');
+    for (const f of ['package.json', 'package-lock.json', 'src/app.ts']) write(f, read(f).split('0.4.0').join(version));
+    for (const [f, t] of Object.entries(files)) write(f, t);
+    sh(checkout, 'add', '-A');
+    sh(checkout, 'commit', '--quiet', '-m', `Fake ${version}`);
+    sh(checkout, 'push', '--quiet', 'origin', name);
+    sh(checkout, 'switch', '--quiet', 'main');
+  };
+  // #21 pins kit 2.57.1, merged into the kit but released only inside 2.58.0; #22 sets the version above it.
+  branchOff('claude/feature', '0.4.1', { 'kit.json': read('kit.json').replace('2.57.0', '2.57.1'), 'src/feature.ts': 'export const feature = 1;\n' });
+  branchOff('claude/other', '0.4.2', { 'src/other.ts': 'export const other = 2;\n' });
+  const first = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+  const mergedOnGitHub = new Set<string>();
+  const listed = () =>
+    [
+      [21, 'claude/feature', 'Fake 0.4.1: a feature'],
+      [22, 'claude/other', 'Fake 0.4.2: another'],
+    ]
+      .filter(([n]) => !mergedOnGitHub.has(String(n)))
+      .map(([n, head, title]) => {
+      const at = sh(origin, 'rev-parse', `refs/heads/${head}`);
+      sh(origin, 'update-ref', `refs/pull/${n}/head`, at);
+      return { number: n, title, url: `https://github.com/Jcollier0120/Fake/pull/${n}`, body: '', headRefName: head, headRefOid: at, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], labels: [], additions: 5, deletions: 5, files: [] };
+    });
+  // GitHub's merge, done on origin: main moves, so the PR above it is caught up and merged after it.
+  const gh = path.join(dir, 'gh');
+  sh(dir, 'clone', '--quiet', origin, gh);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(gh, 'config', k, v);
+  const ghMerge = (n: string) => {
+    sh(gh, 'fetch', '--quiet', 'origin', `+refs/pull/${n}/head:refs/remotes/origin/pr-${n}`, '+refs/heads/main:refs/remotes/origin/main');
+    sh(gh, 'reset', '--quiet', '--hard', 'origin/main');
+    sh(gh, 'merge', '--quiet', '--no-ff', '-m', `Merge #${n}`, `origin/pr-${n}`);
+    sh(gh, 'push', '--quiet', 'origin', 'HEAD:main');
+    mergedOnGitHub.add(n);
+    return ok('');
+  };
+  const r = runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(listed()) : a[0] === 'pr' && a[1] === 'merge' ? ghMerge(a[2]) : a[0] === 'release' && a[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }]) : ok('')));
+  const e = employee(checkout, { fill: 'node -e 0' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir, released: ['2.58.0', '2.57.0'] });
+  ctx.settings.catchUp = true;
+  const other = sh(origin, 'rev-parse', 'refs/heads/claude/other');
+  const [m] = await merge(ctx, [e], { yes: true, team: true });
+
+  const now = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+  assert.notEqual(now, first, 'pushed to');
+  assert.equal(JSON.parse(sh(origin, 'show', `${now}:kit.json`)).kit, '2.58.0');
+  assert.equal(sh(origin, 'show', `${now}:src/feature.ts`), 'export const feature = 1;', 'its own work kept');
+  assert.equal(m.outcome, 'done', m.message);
+  assert.match(m.message, /#21 caught up: kit\.json re-pinned from kit 2\.57\.1, which isn't released, to kit 2\.58\.0/);
+  assert.deepEqual(m.merged.map((p) => p.number), [21, 22], `in version order, nothing left waiting: ${JSON.stringify(m.held)} ${m.message}`);
+  assert.deepEqual(m.held, []);
+  // Tested here at its new head (the re-pin is different code), and merged there.
+  assert.match(ctx.lines.join('\n'), new RegExp(`#21 has no checks on GitHub: testing it here at ${now.slice(0, 7)}`));
+  assert.deepEqual(r.gh.filter((a) => a[1] === 'merge').map((a) => [a[2], a.at(-1)]), [['21', now], ['22', sh(origin, 'rev-parse', 'refs/heads/claude/other')]]);
+  assert.notEqual(sh(origin, 'rev-parse', 'refs/heads/claude/other'), other, '#22 caught up with main once #21 had merged');
+  assert.equal(JSON.parse(sh(origin, 'show', 'main:kit.json')).kit, '2.58.0', 'main pins the released kit');
+  assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /^Caught up by the Steward: kit\.json re-pinned .*It merges once its checks pass at the new head\.$/);
+});
+
+test('the round: a PR pinning a kit above every release still waits, untouched, with the words it always had', async () => {
+  const dir = path.join(home, 'repin-above');
+  const { origin, checkout } = fakeEmployee(dir, { kit: '2.58.0' });
+  sh(checkout, 'switch', '--quiet', '-c', 'claude/feature');
+  writeFileSync(path.join(checkout, 'kit.json'), readFileSync(path.join(checkout, 'kit.json'), 'utf8').replace('2.58.0', '2.59.0'));
+  sh(checkout, 'commit', '--quiet', '-am', 'Fake: kit 2.59.0');
+  sh(checkout, 'push', '--quiet', 'origin', 'claude/feature');
+  const head = sh(origin, 'rev-parse', 'refs/heads/claude/feature');
+  sh(origin, 'update-ref', 'refs/pull/21/head', head);
+  const listed = [{ number: 21, title: 'Fake 0.4.0: kit 2.59.0', url: '', body: '', headRefName: 'claude/feature', headRefOid: head, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], labels: [], additions: 1, deletions: 1, files: [] }];
+  const r = runner((a) => (a[0] === 'pr' && a[1] === 'list' ? ok(listed) : a[0] === 'release' && a[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false, publishedAt: '2026-10-03T00:00:00Z' }]) : ok('')));
+  const e = employee(checkout, { fill: 'node -e 0' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run: r.run, neutralDir: dir, released: ['2.58.0', '2.57.0'] });
+  ctx.settings.catchUp = true;
+  const [m] = await merge(ctx, [e], { yes: true, team: true });
+  assert.deepEqual(m.merged, []);
+  assert.equal(m.held[0]?.why, "pins kit 2.59.0, which isn't released, and no open Steward PR brings it: release that kit, or pin a released one");
+  assert.equal(sh(origin, 'rev-parse', 'refs/heads/claude/feature'), head, 'not pushed to');
+  assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/);
+});
+
 test('the round looks at a repository again while a look can merge more: a PR caught up to test here, or one waiting on a merge just made', async () => {
   const { lookAgainAfter, WORKING_OUT } = await import('../src/stages/merge.ts');
   const held = (why: string, draft = false) => [{ number: 2, url: '', title: 't', why, draft }];

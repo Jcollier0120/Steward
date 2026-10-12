@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.42
+
+**A pull request that pins a kit version that was never released on its own no longer waits forever, with every pull request after it.**
+
+### What changed
+
+- Kit versions are released in batches, so a kit version can be merged and only ever come out inside a later release. Before, an agent's pull request that pinned such a version waited for its release, and every pull request with a higher version waited behind it. Now, when no open Steward pull request brings that kit and a newer kit is released, the Steward points the pull request at the newest released kit itself. It then tests the pull request again (a different kit is different code) and merges it in its turn, and the ones after it follow.
+- A pull request that pins a kit newer than every release, which no open Steward pull request brings, still waits, and says so as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.39
 
 **Fewer programs started for each round's fetches, and the branch heads it reads shared with your other agents.**

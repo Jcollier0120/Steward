@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { commitOf, fetchBranch, fetchFor, git, removeWorktree, showFile } from '../git.ts';
+import { compareVersions } from '../kitfiles.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -132,6 +133,30 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
  * Null when the kit's releases couldn't be read, or its pin can't: then it is tested as before.
  */
 export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
+  return (await kitPinHold(ctx, e, pr))?.why ?? null;
+}
+
+/** A PR's wait for its kit (kitReleaseHold), and the released kit it can be re-pinned to instead, when it has one. */
+export interface KitPinHold {
+  why: string;
+  /**
+   * The newest kit released, above the one it pins, when no open Steward PR brings that one: kit releases are batched,
+   * so a kit merged but never released by itself (2.57.1) comes out only inside a later one (kit-v2.58.0), and a PR
+   * pinning it would wait for ever, with every PR above it. The round re-pins it to this (catchup.ts) and tests it.
+   */
+  repin?: string;
+  /** The kit it pins now, beside repin. */
+  pinned?: string;
+}
+
+/** The newest of the kit's releases above `pinned`, or null when none is. Pure. */
+export function newerReleasedKit(released: string[], pinned: string): string | null {
+  const newest = released.reduce<string | null>((a, v) => (!a || compareVersions(v, a) > 0 ? v : a), null);
+  return newest && compareVersions(newest, pinned) > 0 ? newest : null;
+}
+
+/** kitReleaseHold's wait, with the released kit it can be re-pinned to (KitPinHold.repin). */
+export async function kitPinHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<KitPinHold | null> {
   if (!e.usesKit || !e.fill || !pr.headOid || !ctx.kit?.released.length) return null;
   const repo = checkoutOf(e);
   await fetchFor(ctx.run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
@@ -142,15 +167,18 @@ export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise
     prs = await openKitPrs(ctx);
   } catch (err) {
     ctx.log(`[${e.id}] #${pr.number} pins kit ${pin.kit}, not released: couldn't list the Steward's open PRs to see which brings it: ${(err as Error).message}`);
-    return `${KIT_WAIT}${pin.kit}, which isn't released yet: it is tested here once it is`;
+    return { why: `${KIT_WAIT}${pin.kit}, which isn't released yet: it is tested here once it is` };
   }
   const where = ctx.settings.stewardRepo.split('/').pop() || 'Steward';
   const brings = prs.find((p) => p.kit === pin.kit);
-  if (!brings) return `pins kit ${pin.kit}, which isn't released, and no open ${where} PR brings it: release that kit, or pin a released one`;
+  if (!brings) {
+    const repin = newerReleasedKit(ctx.kit.released, pin.kit);
+    return { why: `pins kit ${pin.kit}, which isn't released, and no open ${where} PR brings it: release that kit, or pin a released one`, ...(repin ? { repin, pinned: pin.kit } : {}) };
+  }
   const pair = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})[`${brings.number}@${brings.headOid}`]?.pairs?.find((p) => p.id === e.id && p.number === pr.number && p.head === pr.headOid);
   const tried = pair?.ok ? ' (it passes with that kit here)' : '';
   const draft = brings.draft ? ` (#${brings.number} is a draft)` : '';
-  return `${KIT_WAIT}${pin.kit}, which ${where}#${brings.number} brings: it merges once that's released${tried}${draft}`;
+  return { why: `${KIT_WAIT}${pin.kit}, which ${where}#${brings.number} brings: it merges once that's released${tried}${draft}` };
 }
 
 export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {

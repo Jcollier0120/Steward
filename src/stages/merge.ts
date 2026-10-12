@@ -12,7 +12,7 @@ import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
 import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
-import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
+import { kitPinHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
@@ -409,6 +409,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   };
   // The ones a catch-up (stages/catchup.ts) could clear, after the merges.
   const catchable = new Map<number, PrInfo>(hold.filter((h) => behindItsBranch(h.pr, e.branch)).map((h) => [h.pr.number, h.pr]));
+  // The released kit each of them is re-pinned to, where it pins one that isn't released (prtest.ts kitPinHold).
+  const repins = new Map<number, string>();
   const failedHere: { pr: PrInfo; t: Tested }[] = [];
   const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
   for (const pr of mergeable) {
@@ -521,11 +523,18 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     if (vouched) notes.set(pr.number, `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
     else if (untested(pr)) {
       // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
-      // that brings that kit, or says none does (prtest.ts).
-      const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
+      // that brings that kit, or says none does (prtest.ts). When none does and a newer kit is released, the catch-up
+      // after the merges re-pins it to that one (catchup.ts), and it is tested at its new head.
+      const kitWaits = await kitPinHold(ctx, e, pr).catch(() => null);
       if (kitWaits) {
-        waits.push(`${describe(pr)} waits: ${kitWaits}`);
-        held.push(heldOf(pr, kitWaits));
+        const repin = kitWaits.repin && o.team && ctx.settings.catchUp && pr.whose === 'team' && !pr.fork && !pr.draft ? kitWaits.repin : null;
+        const why = repin ? `pins kit ${kitWaits.pinned}, which isn't released: the Steward re-pins it to kit ${repin}, the newest released` : kitWaits.why;
+        if (repin) {
+          catchable.set(pr.number, pr);
+          repins.set(pr.number, repin);
+        }
+        waits.push(`${describe(pr)} waits: ${why}`);
+        held.push(heldOf(pr, why));
         continue;
       }
       const before = testedBefore(e, pr);
@@ -617,7 +626,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     const pr = prs.find((p) => p.number === n)!;
     if (mergedNow.has(below) && !pr.fork && (pr.whose === 'team' || isKitPr(pr))) catchable.set(n, pr);
   }
-  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false };
+  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, repins, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false };
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
   const did = [...trainLine, ...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
   const parts = [...did, ...waits, ...caught.lines];
@@ -715,7 +724,7 @@ async function stampBefore(ctx: Ctx, e: Employee, pr: PrInfo, o: { ready: { pr: 
  * says what happened. One line each, for the stage's result; and whether it caught up a PR GitHub runs no checks on
  * (the Steward tests it itself, so it can be merged this round: mergeLooks).
  */
-async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean }> {
+async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; repins?: Map<number, string>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean }> {
   for (const { pr, t } of o.failedHere) if (pr.whose === 'team' && !pr.fork) o.catchable.set(pr.number, pr);
   if (!o.catchable.size) return { lines: [], testedHere: false };
   const { released } = await o.lookup();
@@ -738,7 +747,8 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
         ? { released: await kitReleased(), taken: [...kitTaken, ...kitTitleVersions(o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head).map((x) => x.version)] }
         : undefined;
-      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr) });
+      const repin = o.repins?.get(pr.number);
+      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr), ...(repin ? { repin } : {}) });
     } catch (err) {
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }
