@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.38
+
+**A program missing for a moment, such as Git updating itself, no longer holds kit updates for you to push.**
+
+### What changed
+
+- When a program the Steward runs can't be started for a moment (Git for Windows updating itself replaces it for about 20 seconds), the Steward waits for it to come back instead of counting the failure against the update it was working on. Before, a Git update in the middle of a round held each agent's kit update that the round was pushing, with a "push failed" alarm each, until you pressed Push.
+- An update held this way before is let go by itself in the first round after this update, and its alarm goes. If the program stays missing, the alarm stays, and goes once the program is back.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.35
 
 **Your staff start the usual way: Castellan, in Windows' Startup apps, starts them, not a hidden task each.**
