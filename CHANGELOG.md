@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.29
+
+**A new kit reaches the agents in one round and a few minutes, not an hour or more.**
+
+### What changed
+
+- **The kit goes out in the round that releases it.** Before, the rollout waited for Manor to install the Steward that carries the new kit, and for the Steward to restart: up to an hour. Now the round hands each agent the kit's own tools as released, read from the kit's release in the Steward's clone, so nothing waits for the update.
+- **Kit PRs merge a couple of minutes after they open.** A round that opened kit PRs brings the next round sooner, and the Steward's own kit PRs no longer wait to be 10 minutes old (**A PR merges once it is**, on the **How it works** tab, still holds every other PR). Their checks already passed here before they were opened.
+- **After a restart, the first round comes within a minute**, not 2 to 15 minutes later. Manor restarts the Steward whenever it updates it, often halfway through a release, and that work now picks up again at once.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.35.27
 
 **Two stages at once: press Release while a round is running, and it starts straight away.**

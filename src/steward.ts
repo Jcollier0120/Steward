@@ -572,12 +572,18 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // The Steward's own, released before the agents' merges (above).
             out.results.push(...selfReleases);
             // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
-            // merged and released by later rounds.
+            // merged and released by the next round, which comes sooner for them (their checks passed here, and a kit PR
+            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold).
             const newest = latestKit(ctx.kit);
             try {
               const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
               out.results.push(...rolled.results);
               if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
+              const opened = rolled.results.filter((r) => r.outcome === 'done');
+              if (opened.length && !out.soon) {
+                out.soon = true;
+                log(`the next round comes sooner: kit ${newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge and release then`);
+              }
             } catch (err) {
               log(`rollout: ${(err as Error).message}`);
             }

@@ -447,7 +447,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     help: "On duty, a round every few minutes merges each repository's ready PRs (where Merges PRs is on), then releases each new version. Off: only when you press a button.",
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'How it works', help: 'How often it looks, while on duty.' },
-  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: "Time to push a small fix to a PR before it merges. 0: as soon as it's ready." },
+  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: "Time to push a small fix to a PR before it merges; the Steward's own kit PRs don't wait. 0: as soon as it's ready." },
   { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', tab: 'How it works', help: 'Off: Release is a stage of its own.' },
   {
     key: 'catchUp',

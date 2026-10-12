@@ -130,9 +130,11 @@ export interface AgeRule {
 
 /**
  * Why a PR waits for being too young, or null: one opened less than `minAgeMinutes` ago waits, so a small fix can still
- * be pushed to it before it merges. One whose host doesn't say when it was opened never waits for this.
+ * be pushed to it before it merges. One whose host doesn't say when it was opened never waits for this, and nor does a
+ * kit PR of the Steward's own (steward/kit-…, 0.35.29): nobody pushes fixes to it, and its checks passed here already.
  */
 export function ageHold(pr: PrInfo, o: AgeRule = {}): string | null {
+  if (pr.whose === 'steward' && pr.head.startsWith('steward/kit-') && !pr.fork) return null;
   const min = o.minAgeMinutes ?? 0;
   const at = Date.parse(pr.createdAt ?? '');
   if (!(min > 0) || !Number.isFinite(at)) return null;
