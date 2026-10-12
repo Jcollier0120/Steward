@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.32
+
+**What the Steward did last is at the top of its page, and its settings are shorter.**
+
+### What changed
+
+- **Last stage** is on the Steward's page, above the staff, instead of in About: it's the quickest way to see what's going on. Its log stays folded unless the stage stopped or something in it failed.
+- The **How it works** tab is shorter. Settings that nearly always stay as they are now fold under Advanced: **Catches PRs up with their branch**, **Merges ready PRs together**, **Tests only what a change reaches**, **Release right after merging**, **Checked at once** and **Stages at once**. Their values are kept.
+- **Told after a release** is no longer shown: the Steward fills it in with Manor's update check itself. What's in it is kept.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.30
 
 **The Steward only ever clears its own work folders.**

@@ -448,10 +448,11 @@ export const SETTINGS_SCHEMA: Field[] = [
   },
   { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'How it works', help: 'How often it looks, while on duty.' },
   { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: "Time to push a small fix to a PR before it merges; the Steward's own kit PRs don't wait. 0: as soon as it's ready." },
-  { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', tab: 'How it works', help: 'Off: Release is a stage of its own.' },
+  { key: 'releaseAfterMerge', kind: 'switch', advanced: true, label: 'Release right after merging', tab: 'How it works', help: 'Off: Release is a stage of its own.' },
   {
     key: 'catchUp',
     kind: 'switch',
+    advanced: true,
     label: 'Catches PRs up with their branch',
     tab: 'How it works',
     help: "A ready PR held back only because its branch moved on is caught up (version lines and changelog settled), tested and merged. Any other conflict goes back to whoever wrote it.",
@@ -459,6 +460,7 @@ export const SETTINGS_SCHEMA: Field[] = [
   {
     key: 'mergeTrain',
     kind: 'switch',
+    advanced: true,
     label: 'Merges ready PRs together',
     tab: 'How it works',
     help: "Two or more of a repository's ready PRs are stacked lowest version first, tested once and merged together. Off: one at a time.",
@@ -466,6 +468,7 @@ export const SETTINGS_SCHEMA: Field[] = [
   {
     key: 'affectedTests',
     kind: 'switch',
+    advanced: true,
     label: 'Tests only what a change reaches',
     tab: 'How it works',
     help: "A PR's tests run only the test files its change reaches; a change to the setup runs them all. Off: the whole suite every time.",
@@ -500,6 +503,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     help: "Local addresses POSTed after something is released: Manor's update check, so it installs within minutes.",
     item: { label: 'Address', maxLength: 200, pattern: 'http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/[A-Za-z0-9/_.-]*', patternHint: 'a local address with its path, like http://127.0.0.1:18585/api/updates/check' },
     maxItems: 10,
+    // Manor's update check, written by the Steward (DEFAULT_AFTER_RELEASE): kept in the file, never drawn.
+    hidden: true,
   },
   { ...SOURCE_CONTROL, tab: 'How it works' },
   {
@@ -512,7 +517,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     path: { is: 'folder', missing: 'made', env: true },
     hidden: true,
   },
-  { key: 'parallel', kind: 'whole', tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
+  { key: 'parallel', kind: 'whole', advanced: true, tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
   {
     key: 'stagesAtOnce',
     kind: 'whole',
@@ -520,6 +525,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     min: 1,
     max: 4,
     unit: 'stages',
+    advanced: true,
     label: 'Stages at once',
     help: 'How many stages run at the same time: a round, and a Release or Bump you press, say. Each works on its own repositories: where two want the same one, the second waits for the first to finish with it. 1: one stage at a time.',
   },
