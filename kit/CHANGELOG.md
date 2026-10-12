@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.60.0
+
+**The NPU check: one command that tries a maker's NPU route on real hardware and measures it.**
+
+### What's new
+
+- **node/npu-check.ts**: `node <kit>\node\npu-check.ts --yes` on a PC whose NPU route hasn't run on hardware (Intel's OpenVINO Model Server, AMD's FastFlowLM). It does setup's NPU steps, timed, without writing config.json, then measures the server: its start and first load (OpenVINO compiles for the NPU), warm answers, tokens written and read a second, a request under and past the cap (refused plainly, the server still up), two at once, its memory, a start again from the compile cache, and the kit's own test request in the NPU's turn. It prints the caps and timeouts the numbers suggest for npu-vendors.json and keeps the whole report as JSON in the tools home. spec/NPU-VENDORS.md, "The NPU check", lists its steps.
+- `--route intel --device CPU` rehearses Intel's route on the processor of any PC that runs x64 programs, in a scratch REEVE_HOME.
+- **Intel's NPU route, checked against OpenVINO Model Server 2026.4.1's source and Intel's driver pages**: Intel's NPU driver minimum is now 32.0.100.4023 (Intel's own NPU model cards for OpenVINO 2026), and 32.0.100.5540 on Panther Lake (OpenVINO 2026.2–2026.4 may crash there with older drivers). A generation can carry its own `driverMin`. Wildcat Lake's NPU (`FD3E`) is known; `AD1D` is Arrow Lake-S.
+
+### For an agent
+
+- Nothing: it's a tool for trying a route, not something an agent calls. Take the kit and release as usual.
+
 ## 2.58.0
 
 **Two pieces for agents that talk to git remotes a lot: git's sign-in asked once per host, and the branch heads another agent has just read.**

@@ -16,20 +16,20 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
 | Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model, Qwen3-VL-4B) | its Inno Setup installer, silent, per user, no administrator |
-| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B INT4) | a zip, unpacked into the accelerators' folder |
+| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B INT4) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat (Qwen3-4B-Instruct-2507), vision (Qwen3-VL-4B) | a portable zip, unpacked into the accelerators' folder |
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
 
-**Embeddings** stay off the NPU everywhere for now. GenieX serves none. OpenVINO documents embeddings on the processor and graphics only. FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. So embeddings go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats and there is no card.
+**Embeddings** stay off the NPU everywhere for now. GenieX serves none. OpenVINO Model Server 2026 serves them on the NPU as a preview (Qwen3-Embedding-0.6B), not yet tried here: the Intel hardware decides. FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. So embeddings go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats and there is no card.
 
 ## Detection
 
 Detection asks Windows for the devices it lists as **Neural processors** (the `ComputeAccelerator` device class, as Heiward's `NpuHardware.cs` reads it), with their maker, PnP device id and driver (`DETECT_PS`, its `npu2|…` line). A PC whose Windows lists none is asked for a Hexagon driver as before.
 
 - **Maker**: Qualcomm (or a Hexagon name), Intel, or AMD ("Advanced Micro Devices", or AMD as a word), from the maker and the name.
-- **Generation**: a Snapdragon by its part number or name (`X1E`/`X1P`, "X Elite", "X Plus": `snapdragon-x`; `X2E`/`X2P`, "X2 Elite", "X2 Plus": `snapdragon-x2`); Intel and AMD by the PCI device id (`npu-vendors.json`'s `devices`: Intel `7D1D` Meteor Lake, `AD1D` Arrow Lake, `643E` Lunar Lake, `B03E` Panther Lake; AMD `1502` XDNA, the Ryzen 7040 and 8040, `17F0` XDNA 2).
-- **Supported** or not, and why, in plain words: a maker setup doesn't know, a generation no server runs language models on (AMD's first XDNA: no NPU server supports it, and AMD's own Lemonade says none plans to), an NPU driver older than the server needs (Intel 32.0.100.3104, AMD 32.0.203.311), or a server built for the other processor (GenieX is Arm64 only; OpenVINO Model Server and FastFlowLM are x64 only).
+- **Generation**: a Snapdragon by its part number or name (`X1E`/`X1P`, "X Elite", "X Plus": `snapdragon-x`; `X2E`/`X2P`, "X2 Elite", "X2 Plus": `snapdragon-x2`); Intel and AMD by the PCI device id (`npu-vendors.json`'s `devices`: Intel `7D1D` Meteor Lake (Arrow Lake H and U, the same NPU 3720, likely show this id too), `AD1D` Arrow Lake-S, `643E` Lunar Lake, `B03E` Panther Lake, `FD3E` Wildcat Lake, as Linux's ivpu driver lists them; AMD `1502` XDNA, the Ryzen 7040 and 8040, `17F0` XDNA 2).
+- **Supported** or not, and why, in plain words: a maker setup doesn't know, a generation no server runs language models on (AMD's first XDNA: no NPU server supports it, and AMD's own Lemonade says none plans to), an NPU driver older than the server needs (Intel 32.0.100.4023, as Intel's NPU model cards for OpenVINO 2026 state, and 32.0.100.5540 on Panther Lake and Wildcat Lake, where OpenVINO 2026.2–2026.4 may crash with older drivers (its known issue CVS-233822); AMD 32.0.203.311; a generation's own `driverMin` comes first), or a server built for the other processor (GenieX is Arm64 only; OpenVINO Model Server and FastFlowLM are x64 only).
 
 An NPU the manor can't use is still recorded in `hardware.json` as an NPU (so a model is never called the NPU on it falsely), and setup says why it isn't set up; its work goes to the graphics card or the processor. `accelerators` (the report) shows the maker, generation, driver and the reason.
 
@@ -90,6 +90,28 @@ Plus the server: GenieX 65 MB, OpenVINO Model Server 140 MB, FastFlowLM 40 MB.
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
 Each customer's PC downloads the servers and models from their makers (GitHub releases, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them.
+
+## The NPU check (on a new maker's hardware)
+
+`node <kit>\node\npu-check.ts --yes` (kit 2.60.0) runs everything below that hasn't run on real hardware, on the PC's own NPU, and measures it. It writes no config.json and leaves nothing running:
+
+1. **detect**: the NPU's name, maker, generation, PCI device id and driver, and whether the manor can use it (an unknown PCI id is printed, ready to add to `devices`).
+2. **requirements**: what the route needs that isn't there (the Visual C++ runtime for OpenVINO Model Server).
+3. **setup**: the server downloaded, checked and installed, and its models pulled, as setup does them, each step timed.
+4. **start**: the server started from its entry, and the time until it answers `/v1/models`.
+5. **first-answer**: the first chat answer, and the whole first load (OpenVINO's compile for the NPU) from the start.
+6. **warm**: three short answers.
+7. **speed**: an answer of about 120 tokens: tokens written a second.
+8. **read**: a prompt of 80% of the cap: tokens read a second.
+9. **cap**: a prompt just under the cap must be answered; one past it must be refused plainly, with the server still answering.
+10. **two-at-once**: two requests together both answered.
+11. **memory**: the server's working set and private bytes.
+12. **restart**: stopped and started again: the cold load from its compile cache, against the route's `coldLoadMs`.
+13. **kit-test**: the kit's own test request, the server started as every agent starts it, in the NPU's turn.
+
+It ends with the caps and timeouts the numbers suggest for the route (`requestBaseMs` twice a full-cap read and a warm answer, `requestPerTokenMs` twice the time a token took, `coldLoadMs` half again the slowest start), and keeps the whole report as `npu-check-<maker>-<time>.json` in the tools home. `--no-setup` checks only what's installed.
+
+`--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
 
 ## Verified, and not
 

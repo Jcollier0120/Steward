@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.41
+
+**The Steward's kit 2.60.0, with a check for trying an NPU on new hardware.**
+
+### What changed
+
+- The Steward's kit 2.60.0: a check that sets up the model server for an Intel or AMD NPU, measures how it runs, and suggests its limits from the numbers. Nothing changes on your PC unless someone runs it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.39
 
 **Fewer programs started for each round's fetches, and the branch heads it reads shared with your other agents.**

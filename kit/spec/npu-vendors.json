@@ -124,7 +124,7 @@
           "verified": false
         },
         "arrow-lake": {
-          "label": "Core Ultra 200H/U, Arrow Lake (NPU 3720)",
+          "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
           "supported": true,
           "verified": false
         },
@@ -136,10 +136,17 @@
         "panther-lake": {
           "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
           "supported": true,
-          "verified": false
+          "verified": false,
+          "driverMin": "32.0.100.5540"
+        },
+        "wildcat-lake": {
+          "label": "Core Series 3, Wildcat Lake (NPU 5)",
+          "supported": true,
+          "verified": false,
+          "driverMin": "32.0.100.5540"
         }
       },
-      "driverMin": "32.0.100.3104",
+      "driverMin": "32.0.100.4023",
       "requires": [
         "vcredist-x64"
       ],
@@ -207,7 +214,7 @@
       },
       "quirks": [],
       "recycle": false,
-      "embeddings": "none on the NPU yet (OpenVINO documents embeddings on the processor and graphics only): they go to the graphics card or the processor",
+      "embeddings": "not on the NPU yet: OpenVINO Model Server 2026 serves embeddings on the NPU as a preview (OpenVINO/Qwen3-Embedding-0.6B-int8-ov, --task embeddings --pooling LAST), untried here; until the NPU check has tried it on hardware they go to the graphics card or the processor",
       "vision": "none on the NPU yet: OpenVINO's Qwen3-VL-4B INT4 build is asymmetric, which the NPU doesn't take; vision goes to the graphics card or the processor",
       "licence": "OpenVINO Model Server: Apache-2.0",
       "notes": "A zip, unpacked into the tools home: no installer, no administrator. It needs the Microsoft Visual C++ Redistributable (x64), which an administrator installs once, and Intel's NPU driver 32.0.100.3104 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same)."
@@ -299,7 +306,8 @@
       "7D1D": "meteor-lake",
       "AD1D": "arrow-lake",
       "643E": "lunar-lake",
-      "B03E": "panther-lake"
+      "B03E": "panther-lake",
+      "FD3E": "wildcat-lake"
     },
     "amd": {
       "1502": "xdna",
