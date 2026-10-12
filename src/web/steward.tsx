@@ -975,6 +975,10 @@ export function StewardBody({ v }: { v: StewardView }) {
           </Text>
         </Card>
       )}
+      {/* What it did last, first: the quickest way to see what is going on. Its log stays folded unless it stopped. */}
+      <Section title="Last stage" tour="last">
+        <LastStage l={v.last} now={now} />
+      </Section>
       <TendingCard t={v.tending} r={v.round} now={now} />
       {foundOnPage(v.found) && <FoundCard f={v.found} finding={!!v.finding} now={now} tour="found" />}
       <Section title={castellan ? 'Staff' : 'Your repositories'} count={s?.rows.length}>
@@ -1008,8 +1012,8 @@ function conflictsOnPage(v: StewardView): boolean {
 
 /**
  * The About view, beside Settings in the title bar (the kit's Page about): what's read now and then rather than acted
- * on. The kit it hands out, Found on this PC with nothing to offer, the record of merge conflicts it settled, and the
- * last stage's log. No tour names: the tour shows the page.
+ * on. The kit it hands out, Found on this PC with nothing to offer, and the record of merge conflicts it settled (the
+ * last stage is on the page). No tour names: the tour shows the page.
  */
 export function StewardAbout({ v }: { v: StewardView }) {
   const now = useNow();
@@ -1031,9 +1035,6 @@ export function StewardAbout({ v }: { v: StewardView }) {
           <ConflictsCard looks={v.conflicts ?? []} s={s} now={now} />
         </Section>
       )}
-      <Section title="Last stage">
-        <LastStage l={v.last} now={now} />
-      </Section>
     </>
   );
 }
