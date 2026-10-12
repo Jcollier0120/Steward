@@ -65,6 +65,8 @@ A cap can differ per kind (`maxContextTokens` on an endpoint: the core's `capFor
 
 ## The keeper
 
+OpenVINO Model Server opens its port within a second of starting and answers `/v1/models` with an empty list while it loads (on the NPU, compiles) its model, refusing requests until then: a server started from `ovms.exe` is ready only once it lists a model (accelerators.ts' `listsWhenLoaded`), and a request waits for it as long as the accelerator's `coldLoadMs` allows. Found by the NPU check's rehearsal, 2026-10-12.
+
 The keeper (the Smith, else Reeve) starts and restarts each server from its entry, as it does llama.cpp's: it reads each server's address from its command line (GenieX's `--host`, OpenVINO Model Server's `--rest_port`, FastFlowLM's `--port`). It stops an orphan only when it is the manor's own: its program is in the manor's servers folders, or a record says the manor started that very process (`started.<pid>.json` beside the failure markers, written whenever a server is started). A program on one of the manor's ports for any other reason (a person's own GenieX on its default 18181, Ollama, a server whose program Windows won't name) is never stopped.
 
 ## Models and sizes
@@ -93,7 +95,7 @@ Each customer's PC downloads the servers and models from their makers (GitHub re
 
 ## The NPU check (on a new maker's hardware)
 
-`node <kit>\node\npu-check.ts --yes` (kit 2.60.0) runs everything below that hasn't run on real hardware, on the PC's own NPU, and measures it. It writes no config.json and leaves nothing running:
+`node <agent>\src\kit\npu-check.ts --yes` (kit 2.60.0; the kit as an agent carries it, e.g. Manor's `%USERPROFILE%\.manor\app\src\kit\npu-check.ts`) runs everything below that hasn't run on real hardware, on the PC's own NPU, and measures it. It writes no config.json and leaves nothing running:
 
 1. **detect**: the NPU's name, maker, generation, PCI device id and driver, and whether the manor can use it (an unknown PCI id is printed, ready to add to `devices`).
 2. **requirements**: what the route needs that isn't there (the Visual C++ runtime for OpenVINO Model Server).

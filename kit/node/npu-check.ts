@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatBody, serverEnv } from './accelerators.ts';
+import { chatBody, listsWhenLoaded, serverEnv } from './accelerators.ts';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, runProgram } from './npu-vendors.ts';
@@ -21,7 +21,7 @@ import { download, mb, type NpuIo, setUpNpu, testNpuEntry, unpack } from './setu
  * x64 programs on): its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only in
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
- *   node <kit>\node\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--out <file>]
+ *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--out <file>]
  */
 
 export interface CheckStep {
@@ -247,7 +247,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   report.rehearsal = rehearsal || report.device !== 'NPU';
   add({
     step: 'detect',
-    ok: npu ? !!npu.supported : rehearsal ? null : false,
+    ok: rehearsal ? null : npu ? !!npu.supported : false,
     say: npu
       ? `${npu.name} (${npu.label}), device ${pciDevice(npu.deviceId) ?? npu.deviceId}, driver ${npu.driver || '?'}${npu.driverDate ? ` of ${npu.driverDate}` : ''}: ${npu.supported ? 'the manor can use it' : `not used: ${npu.why}`}${npu.supported && !npu.verified ? " (its generation hasn't run on real hardware before this check)" : ''}`
       : `Windows lists no NPU${d.problems.length ? ` (${d.problems.join('; ')})` : ''}`,
@@ -326,10 +326,17 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const ep = { ...acc.chat!, baseUrl: acc.chat!.baseUrl! };
   const logFile = path.join(tools, 'servers', 'logs', `npu-check-${vendor}.log`);
   const start = o.io?.start ?? startServer;
+  // One chat request; never throws: a failure (a timeout, a refused connection) is its answer, ok false.
   const ask = async (prompt: string, maxTokens: number, timeoutMs: number) => {
     const t0 = now();
-    const res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chatBody(acc as unknown as Parameters<typeof chatBody>[0], ep as any, [{ role: 'user', content: prompt }], maxTokens)), signal: AbortSignal.timeout(timeoutMs) });
-    const text = await res.text();
+    let res: Response;
+    let text: string;
+    try {
+      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chatBody(acc as unknown as Parameters<typeof chatBody>[0], ep as any, [{ role: 'user', content: prompt }], maxTokens)), signal: AbortSignal.timeout(timeoutMs) });
+      text = await res.text();
+    } catch (e: any) {
+      return { status: 0, ok: false, ms: Math.round(now() - t0), raw: '', answer: '', usage: null, error: e?.name === 'TimeoutError' ? `no answer in ${Math.round(timeoutMs / 1000)} s` : String(e?.cause?.code ?? e?.message ?? e) };
+    }
     const ms = Math.round(now() - t0);
     let json: any = null;
     try {
@@ -338,10 +345,23 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     const raw = String(json?.choices?.[0]?.message?.content ?? '');
     return { status: res.status, ok: res.ok && typeof json?.choices?.[0]?.message?.content === 'string', ms, raw, answer: raw.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(), usage: json?.usage ?? null, error: res.ok ? null : text.slice(0, 300) };
   };
+  // Answering, and for a server that lists its model only once it's loaded (OpenVINO), listing it.
+  const lists = listsWhenLoaded(ep.startCommand);
   const answers = async (timeoutMs = 5_000) => {
     try {
       const res = await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) });
-      return res.ok;
+      if (!res.ok || !lists) return res.ok;
+      const j: any = await res.json().catch(() => null);
+      return !(Array.isArray(j?.data) && j.data.length === 0);
+    } catch {
+      return false;
+    }
+  };
+  // Taking connections at all: what a server stopped no longer does.
+  const listening = async (timeoutMs = 1_000) => {
+    try {
+      await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
+      return true;
     } catch {
       return false;
     }
@@ -354,16 +374,18 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     }
     return null;
   };
-  if (await answers()) {
+  if (await listening(5_000)) {
     add({ step: 'start', ok: false, say: `something already answers at ${ep.baseUrl} (the keeper's server?): stop it first, so the check measures a start of its own` });
     return finish(1);
   }
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;
+  // What a measured request may take: a slow device is measured, not cut off.
+  const stepMs = Math.max(10 * 60_000, coldMs * 2);
   // A first start on the NPU compiles the model: allow far more than the route's cold load.
   const firstStartLimit = Math.max(20 * 60_000, coldMs * 5);
   let server = await start(entry, logFile);
   const up = await untilAnswers(firstStartLimit);
-  add({ step: 'start', ok: up !== null, ms: up ?? undefined, say: up !== null ? `${route.server} answered /v1/models` : `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`, data: { pid: server.pid, logFile } });
+  add({ step: 'start', ok: up !== null, ms: up ?? undefined, say: up !== null ? `${route.server} answered /v1/models${lists ? ' with its model loaded' : ''}` : `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`, data: { pid: server.pid, logFile } });
   try {
     if (up === null) return finish(1);
     const first = await time('first', () => ask('Reply with the single word: ready', 16, firstStartLimit)).catch((e) => ({ ok: false, ms: 0, raw: '', answer: '', status: 0, usage: null, error: String(e?.message ?? e) }));
@@ -378,18 +400,18 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
 
     const warmMs: number[] = [];
     for (let i = 0; i < 3; i++) {
-      const w = await ask(`Reply with the single word: ready (${i + 1})`, 16, coldMs);
+      const w = await ask(`Reply with the single word: ready (${i + 1})`, 16, stepMs);
       if (w.ok) warmMs.push(w.ms);
     }
     add({ step: 'warm', ok: warmMs.length === 3, ms: median(warmMs), say: `a short answer, warm: ${warmMs.map((m) => `${(m / 1000).toFixed(2)} s`).join(', ')}`, data: { ms: warmMs } });
 
-    const sp = await ask('Write the numbers from one to one hundred in words, separated by commas.', 256, coldMs);
+    const sp = await ask('Write the numbers from one to one hundred in words, separated by commas.', 256, stepMs);
     const written = Number(sp.usage?.completion_tokens) || Math.round(sp.raw.length / 4);
     const tps = sp.ok ? written / (Math.max(1, sp.ms - (median(warmMs) || 0) / 2) / 1000) : 0;
     add({ step: 'speed', ok: sp.ok ? null : false, ms: sp.ms, say: sp.ok ? `wrote ${written} tokens${sp.usage ? '' : ' (estimated)'}: about ${tps.toFixed(1)} a second` : `failed: ${sp.error}`, data: { completionTokens: written, tokensPerSecond: Number(tps.toFixed(2)), usage: sp.usage } });
 
     const cap = route.maxContextTokens;
-    const rd = await ask(fillerPrompt(Math.round(cap * 0.8)), 4, coldMs);
+    const rd = await ask(fillerPrompt(Math.round(cap * 0.8)), 4, stepMs);
     const readTokens = Number(rd.usage?.prompt_tokens) || 0;
     add({ step: 'read', ok: rd.ok ? null : false, ms: rd.ms, say: rd.ok ? `read ${readTokens || 'about ' + Math.round(cap * 0.8)} tokens and answered in ${(rd.ms / 1000).toFixed(1)} s${readTokens ? ` (${(readTokens / (rd.ms / 1000)).toFixed(0)} a second)` : ''}` : `failed: ${rd.error}`, data: { promptTokens: readTokens || null, usage: rd.usage } });
 
@@ -399,7 +421,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     let largestOk = 0;
     let underCapFailed = false;
     for (const n of sizes) {
-      const c = await ask(fillerPrompt(n), 4, coldMs).catch((e) => ({ ok: false, status: 0, ms: 0, usage: null, error: String(e?.message ?? e), raw: '', answer: '' }));
+      const c = await ask(fillerPrompt(n), 4, stepMs).catch((e) => ({ ok: false, status: 0, ms: 0, usage: null, error: String(e?.message ?? e), raw: '', answer: '' }));
       const promptTokens = Number(c.usage?.prompt_tokens) || null;
       const stillUp = await answers(10_000);
       tried.push({ asked: n, promptTokens, ok: c.ok, status: c.status, ms: c.ms, error: c.error, stillUp });
@@ -422,7 +444,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     }
 
     const t0 = now();
-    const pair = await Promise.all([ask('Name one colour. One word.', 16, coldMs), ask('Name one animal. One word.', 16, coldMs)]);
+    const pair = await Promise.all([ask('Name one colour. One word.', 16, stepMs), ask('Name one animal. One word.', 16, stepMs)]);
     const both = Math.round(now() - t0);
     add({ step: 'two-at-once', ok: pair.every((p) => p.ok), ms: both, say: pair.every((p) => p.ok) ? `both answered in ${(both / 1000).toFixed(2)} s together (${pair.map((p) => (p.ms / 1000).toFixed(2)).join(' and ')} s each)` : `${pair.filter((p) => !p.ok).map((p) => p.error).join('; ')}`, data: { ms: pair.map((p) => p.ms) } });
 
@@ -434,7 +456,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     const gone = await (async () => {
       const t = now();
       while (now() - t < 30_000) {
-        if (!(await answers(1_000))) return true;
+        if (!(await listening())) return true;
         await new Promise((res) => setTimeout(res, 250));
       }
       return false;
@@ -449,7 +471,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     const loadMs = up2 === null || !again?.ok ? null : up2 + again.ms;
     add({ step: 'restart', ok: loadMs !== null && loadMs <= coldMs, ms: loadMs ?? undefined, say: loadMs !== null ? `started again and answered in ${(loadMs / 1000).toFixed(0)} s (the route allows ${coldMs / 1000} s for a cold load)` : 'it didn’t answer after a start again', data: { loadMs } });
     await server.stop();
-    await untilGone(answers, now);
+    await untilGone(listening, now);
 
     // The kit's own test request: the server started as every agent starts it, in the NPU's turn.
     const k0 = now();
@@ -459,7 +481,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   } finally {
     await server.stop();
   }
-  await stopKitStarted(ep.baseUrl, answers, now);
+  await stopKitStarted(ep.baseUrl, listening, now);
 
   report.suggest = suggestFrom(steps, route);
   if (report.suggest) {

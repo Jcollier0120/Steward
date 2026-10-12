@@ -8,13 +8,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What's new
 
-- **node/npu-check.ts**: `node <kit>\node\npu-check.ts --yes` on a PC whose NPU route hasn't run on hardware (Intel's OpenVINO Model Server, AMD's FastFlowLM). It does setup's NPU steps, timed, without writing config.json, then measures the server: its start and first load (OpenVINO compiles for the NPU), warm answers, tokens written and read a second, a request under and past the cap (refused plainly, the server still up), two at once, its memory, a start again from the compile cache, and the kit's own test request in the NPU's turn. It prints the caps and timeouts the numbers suggest for npu-vendors.json and keeps the whole report as JSON in the tools home. spec/NPU-VENDORS.md, "The NPU check", lists its steps.
+- **node/npu-check.ts**: `node <agent>\src\kit\npu-check.ts --yes` on a PC whose NPU route hasn't run on hardware (Intel's OpenVINO Model Server, AMD's FastFlowLM). It does setup's NPU steps, timed, without writing config.json, then measures the server: its start and first load (OpenVINO compiles for the NPU), warm answers, tokens written and read a second, a request under and past the cap (refused plainly, the server still up), two at once, its memory, a start again from the compile cache, and the kit's own test request in the NPU's turn. It prints the caps and timeouts the numbers suggest for npu-vendors.json and keeps the whole report as JSON in the tools home. spec/NPU-VENDORS.md, "The NPU check", lists its steps.
 - `--route intel --device CPU` rehearses Intel's route on the processor of any PC that runs x64 programs, in a scratch REEVE_HOME.
 - **Intel's NPU route, checked against OpenVINO Model Server 2026.4.1's source and Intel's driver pages**: Intel's NPU driver minimum is now 32.0.100.4023 (Intel's own NPU model cards for OpenVINO 2026), and 32.0.100.5540 on Panther Lake (OpenVINO 2026.2–2026.4 may crash there with older drivers). A generation can carry its own `driverMin`. Wildcat Lake's NPU (`FD3E`) is known; `AD1D` is Arrow Lake-S.
 
+### What changed
+
+- **OpenVINO Model Server is waited on until its model is loaded.** It answers `/v1/models` within a second of starting, with an empty list, and refuses requests (404) until its model is loaded, which on the NPU means compiled: minutes. Every agent's first request after it started would have failed. A server started from `ovms.exe` is now ready only once it lists a model (`listsWhenLoaded`, `probe(…, { listsWhenLoaded })`); every other server is ready once it answers, as before. Found by rehearsing Intel's route on the processor.
+- A request waits on a server loading its model as long as its accelerator's `coldLoadMs` allows, when that's longer than the rules' `readyWaitMs`.
+
 ### For an agent
 
-- Nothing: it's a tool for trying a route, not something an agent calls. Take the kit and release as usual.
+- Nothing: take the kit and release as usual. The check is a tool for trying a route, not something an agent calls.
 
 ## 2.58.0
 
