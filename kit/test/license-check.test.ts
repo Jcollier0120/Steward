@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
+import { until } from './until.ts';
 
 // The trial's end, checked by the agent itself (node/license-check.ts, kit 2.45.0): an agent the Exchequer sells reads
 // the license Manor holds (licence.json), verified offline, and holds its rounds only once a trial's runsUntil has
@@ -99,7 +100,7 @@ test('a trial that has ended holds it: its rounds, Run now, its ping and its pag
   let ran = 0;
   const job = every(60_000, async () => void ran++, { firstDelayMs: 0, name: 'trial' });
   try {
-    while (!readJson<any>(roundFile(), {}).rounds?.trial) await new Promise((r) => setTimeout(r, 5));
+    await until(() => readJson<any>(roundFile(), {}).rounds?.trial, 10_000, 'the trial round in round.json');
     const r = readJson<any>(roundFile(), {}).rounds.trial;
     assert.deepEqual([ran, r.ok, r.error, r.waiting], [0, null, null, 'The trial ended: a license brings it back']);
     assert.equal(job.runNow(), false);

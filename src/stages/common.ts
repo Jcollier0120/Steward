@@ -105,8 +105,10 @@ export const NO_PRS = 'worked with plain git (Source control, in Settings): ther
  * rollout-failed.json), and the next round tries again. A message rarely carries the command's output ("npm ci
  * failed (exit 1)"), so being offline right now counts too.
  */
-export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string): Promise<boolean> {
+export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string, back: (program: string) => Promise<boolean> = waitForProgram): Promise<boolean> {
   if (passingFailure(message)) return true;
+  const program = missingProgram(message);
+  if (program && (await back(program))) return true;
   const look = ctx.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : online);
   return !(await look().catch(() => true));
 }
@@ -116,7 +118,47 @@ export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string):
  * the next round tries again. On 2026-10-07 GitHub answered every push with "Internal Server Error" for a while, and
  * nine kit bumps were held for a person to press Push, an alarm each.
  */
-export const passingFailure = (message: string) => isNetworkError(message) || MORE_NET_WORDS.test(message) || SERVER_WORDS.test(message) || interrupted(message);
+export const passingFailure = (message: string) => isNetworkError(message) || MORE_NET_WORDS.test(message) || SERVER_WORDS.test(message) || interrupted(message) || backAgain(message);
+
+/**
+ * A program that couldn't be started, in Node's words: "spawn git ENOENT". On 2026-10-12 Git for Windows updated itself
+ * while a round ran (its installer replaces git.exe in some 20 s), every git the round started meanwhile failed so, and
+ * nine kit pushes were held for a person to press Push, an alarm each. Such a failure passes once the program can be
+ * found again: a round that meets it waits a while for it (`waitForProgram`), and a hold kept for it goes by itself
+ * once it's back. While it can't be found, the failure stands, an alarm that says so. (A missing working folder reads
+ * the same, with the program there: it passes, and the next round looks for the folder again.)
+ */
+export const missingProgram = (message: string): string | null => /\bspawn (.+?) ENOENT\b/.exec(message)?.[1] ?? null;
+
+/** Whether a program can be started now: a path that's there, or a name on PATH (with PATHEXT's endings on Windows). */
+export function programFound(name: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (/[\\/]/.test(name)) return existsSync(name);
+  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const ends = process.platform === 'win32' ? ['', ...(env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)] : [''];
+  return (env[key] ?? '').split(path.delimiter).filter(Boolean).some((dir) => ends.some((end) => existsSync(path.join(dir, name + end))));
+}
+
+const backAgain = (message: string) => {
+  const program = missingProgram(message);
+  return program !== null && programFound(program);
+};
+
+/** When a wait for a program last ended without it: the round's next failures for it look once, not wait again. */
+const gaveUp = new Map<string, number>();
+
+/**
+ * Waits up to `ms` for a program to be found again (an update replacing it), looking every `every` ms: true once it
+ * is. Within 10 minutes of a wait that ended without it, one look only, so a round of many failures isn't held up.
+ */
+export async function waitForProgram(program: string, ms = process.env.NODE_TEST_CONTEXT ? 0 : 90_000, found = programFound, every = 2_000): Promise<boolean> {
+  if (Date.now() - (gaveUp.get(program) ?? -Infinity) < 10 * 60_000) ms = 0;
+  for (const end = Date.now() + ms; ; await new Promise((r) => setTimeout(r, every))) {
+    if (found(program)) return true;
+    if (Date.now() >= end) break;
+  }
+  if (ms > 0) gaveUp.set(program, Date.now());
+  return false;
+}
 
 /**
  * Windows ending a program, not the program failing: 0x40010004 (DBG_TERMINATE_PROCESS: killed as the person signs out

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { until } from './until.ts';
 
 // The kit's Settings panel and its API, run with the fixture agent's schema. Each agent's own schema is
 // checked in that agent, by agent-checks.ts (test/agent.test.ts here).
@@ -169,12 +170,6 @@ test('a new interval applies to the wait under way', async () => {
   let rounds = 0;
   const job = every(() => ms, async () => void rounds++, { firstDelayMs: 1 });
   try {
-    const until = async (check: () => boolean) => {
-      for (const end = Date.now() + 5000; !check(); ) {
-        if (Date.now() > end) throw new Error('timed out waiting for the test condition');
-        await new Promise((r) => setTimeout(r, 5));
-      }
-    };
     await until(() => rounds === 1 && job.state.lastRunAt !== null);
     assert.ok(Date.parse(job.state.nextRunAt!) - Date.now() > 50_000, 'the first round ran; the next waits a minute');
     ms = 20;

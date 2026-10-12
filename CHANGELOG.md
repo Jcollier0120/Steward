@@ -2,6 +2,32 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.38
+
+**A program missing for a moment, such as Git updating itself, no longer holds kit updates for you to push.**
+
+### What changed
+
+- When a program the Steward runs can't be started for a moment (Git for Windows updating itself replaces it for about 20 seconds), the Steward waits for it to come back instead of counting the failure against the update it was working on. Before, a Git update in the middle of a round held each agent's kit update that the round was pushing, with a "push failed" alarm each, until you pressed Push.
+- An update held this way before is let go by itself in the first round after this update, and its alarm goes. If the program stays missing, the alarm stays, and goes once the program is back.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.37
+
+**The Steward's own tests wait for what they check instead of guessing how long it takes, so they no longer fail now and then on a busy PC.**
+
+### What changed
+
+- Tests that waited a fixed time before checking a result now wait for the result itself, with a deadline. A test that never sees it fails saying what it waited for, instead of hanging or passing by luck.
+- This changes nothing in the Steward or the kit it hands out: only how their tests run. Pull requests should be held back less often by a test that failed for no reason.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.35.36
 
 **The Steward's page, and every agent's once it takes kit 2.57.1, answers at once, even on a busy PC.**

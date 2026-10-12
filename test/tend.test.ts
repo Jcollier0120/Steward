@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
+import { until } from '../kit/test/until.ts';
 
 // The staff's pages kept up (tend.ts): an agent on duty whose page doesn't answer is opened again through Manor, a few
 // tries then one an hour, and an alarm once its tries are spent; and a round on a PC with no repositories asks GitHub
@@ -272,13 +273,20 @@ test('a tick that comes long after the last is the PC waking: a fresh start, and
   takeFreshStart('tend');
   let t = 0;
   let woke = 0;
-  const stop = watchWake(() => woke++, 5, () => t);
+  let looks = 0;
+  const stop = watchWake(() => woke++, 5, () => (looks++, t));
+  // Two ticks read the clock: the second one after the move is a tick that saw it.
+  const ticks = async (n: number) => {
+    const from = looks;
+    await until(() => looks >= from + n, 10_000, `${n} ticks`);
+  };
   t += 1_000;
-  await new Promise((r) => setTimeout(r, 30));
+  await ticks(2);
   assert.equal(woke, 0, 'ticks close together: awake');
   assert.equal(takeFreshStart('releases'), false);
   t += WOKE_AFTER_MS + 1;
-  await new Promise((r) => setTimeout(r, 30));
+  await until(() => woke === 1, 10_000, 'the tick that sees the PC woke');
+  await ticks(2);
   stop();
   assert.equal(woke, 1);
   assert.equal(takeFreshStart('releases'), true);

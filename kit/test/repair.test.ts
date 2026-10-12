@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 
 // Repairs another agent asks for (repair.ts): the kit's `round`, an agent's own, and the asker's side.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'repair-test-'));
@@ -26,7 +27,7 @@ test('the round repair starts a scheduled round now, and says when none could st
     const first = await repair({ kind: 'round', finding: 'agent.x.stale' });
     assert.equal(first.ok, true, first.did);
     assert.match(first.did, /started a round \(tidy\)/);
-    await new Promise((r) => setTimeout(r, 50));
+    await until(() => ran === 1, 10_000, 'the round it started');
     assert.equal(ran, 1);
     // One under way: nothing more starts.
     const again = await repair({ kind: 'round' });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -210,12 +210,15 @@ test("a GenieX on another port (--host) is not the one at the address", () => {
 test('the NPU was last used when its lock or line last changed', async () => {
   const lock = path.join(home, 'locks', 'npu');
   mkdirSync(path.join(home, 'locks', 'npu.queue'), { recursive: true });
+  // Each step's folders dated a minute back first, so the next change is later whatever the clock's resolution.
+  const ago = (Date.now() - 60_000) / 1000;
+  const age = (...dirs: string[]) => dirs.forEach((d) => utimesSync(d, ago, ago));
+  age(path.join(home, 'locks'), path.join(home, 'locks', 'npu.queue'));
   const before = lastActivityMs(lock);
-  await new Promise((r) => setTimeout(r, 30));
   mkdirSync(lock);
+  assert.ok(lastActivityMs(lock) > before, 'taking the lock');
+  age(path.join(home, 'locks'), path.join(home, 'locks', 'npu.queue'), lock);
   const taken = lastActivityMs(lock);
-  assert.ok(taken > before, 'taking the lock');
-  await new Promise((r) => setTimeout(r, 30));
   rmSync(lock, { recursive: true });
   assert.ok(lastActivityMs(lock) > taken, 'letting it go');
 });

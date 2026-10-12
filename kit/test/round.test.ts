@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 
 // round.json (spec/ROUND.md): each schedule's last round, in the agent's data folder, for the Surveyor.
 const home = mkdtempSync(path.join(os.tmpdir(), 'fixture-round-'));
@@ -28,7 +29,7 @@ const isIso = (s: unknown) => typeof s === 'string' && new Date(s).toISOString()
 /** Runs one round now and waits for it to end (and be recorded). */
 async function oneRound(job: ReturnType<typeof every>) {
   assert.ok(job.runNow());
-  while (job.running) await new Promise((r) => setTimeout(r, 5));
+  await until(() => !job.running, 10_000, 'the round to end');
 }
 
 test('round.json is in the data folder', () => {

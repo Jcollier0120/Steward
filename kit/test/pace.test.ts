@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { stillFor, until } from './until.ts';
 
 // The manor's pace (pace.ts, kit 2.43.3): first rounds one at a time, below-normal priority, and the page settling in.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-pace-'));
@@ -64,9 +65,9 @@ test('first rounds, one at a time: the second waits until the first has finished
     await held;
     order.push('a ends');
   }, { who: 'a', limitMs: 60_000, dir });
-  await new Promise((r) => setTimeout(r, 300));
+  await until(() => order.includes('a starts'));
   const b = inFirstRoundTurn('gentle', true, async () => void order.push('b starts'), { who: 'b', limitMs: 60_000, dir, onWait: (w) => waits.push(w) });
-  await new Promise((r) => setTimeout(r, 600));
+  await until(() => waits.length === 1, 10_000, 'b to wait in line');
   assert.deepEqual(order, ['a starts'], 'b waits in line');
   assert.deepEqual(waits, [true]);
   // Not a first round, or a full pace: at once, whatever the line.
@@ -189,32 +190,29 @@ test('the work line: rounds side by side up to its slots, the next when one ends
       await new Promise<void>((r) => gates.set(who, r));
       order.push(`${who} ends`);
     }, { who, limitMs: 60_000, waitMs: 30_000, dir, slots, load });
-  const settle = () => new Promise((r) => setTimeout(r, 500));
   const a = round('a');
-  await settle();
+  await until(() => order.includes('a starts'));
   const b = round('b');
-  await settle();
+  await until(() => order.includes('b starts'));
   assert.deepEqual(order, ['a starts', 'b starts'], 'two side by side');
   const c = round('c');
-  await settle();
+  await stillFor();
   assert.deepEqual(order, ['a starts', 'b starts'], 'the third waits its turn');
   gates.get('a')!();
-  await settle();
+  await until(() => order.includes('c starts'));
   assert.deepEqual(order.slice(2), ['a ends', 'c starts'], 'and takes the slot a gave up');
   gates.get('b')!();
-  await settle();
+  await until(() => order.includes('b ends'));
   // b's slot is free, but on a busy PC a round may take only the first slot, which c holds.
   const d = round('d', busy);
-  await settle();
-  assert.ok(!order.includes('d starts'), 'a busy PC: one at a time');
   // No line: at once, whatever it holds.
   const e = round('e', quiet, null);
-  await settle();
-  assert.ok(order.includes('e starts'));
+  await until(() => order.includes('e starts'));
+  await stillFor();
+  assert.ok(!order.includes('d starts'), 'a busy PC: one at a time');
   gates.get('e')!();
   gates.get('c')!();
-  await settle();
-  assert.ok(order.includes('d starts'), 'd once c has ended');
+  await until(() => order.includes('d starts'), 10_000, 'd once c has ended');
   gates.get('d')!();
   await Promise.all([a, b, c, d, e]);
 });
@@ -224,7 +222,7 @@ test("the work line: a round whose turn never comes throws the line's LockTimeou
   mkdirSync(path.dirname(dir), { recursive: true });
   let release!: () => void;
   const held = inWorkTurn('gentle', () => new Promise<void>((r) => (release = r)), { who: 'holder', limitMs: 60_000, waitMs: 30_000, dir, slots: 1 });
-  await new Promise((r) => setTimeout(r, 300));
+  await until(() => release, 10_000, 'the holder to take the slot');
   await assert.rejects(inWorkTurn('gentle', async () => {}, { who: 'late', limitMs: 60_000, waitMs: 400, dir, slots: 1 }), LockTimeout);
   release();
   await held;
@@ -239,37 +237,38 @@ test("a scheduled round takes its turn in the work line, and round.json says how
   const ran: string[] = [];
   const job = every(3_600_000, async () => void ran.push('round'), { name: 'work-line', firstDelayMs: 50 });
   try {
-    await new Promise((r) => setTimeout(r, 1_200));
+    await until(() => job.state.waiting === WORK_WAITING, 10_000, 'the round to wait for the slot');
+    const seenWaiting = Date.now();
+    // Held a second at least: round.json notes a wait of a second or more.
+    while (Date.now() - seenWaiting < 1_000) await stillFor(50);
     assert.deepEqual([...ran], [], 'the one slot is held: it waits');
     assert.equal(job.state.runningSince, null, 'not running while it waits');
     assert.equal(job.state.waiting, WORK_WAITING, 'and says so: never taken for a schedule with nothing coming');
+    const released = Date.now();
     release();
-    while (ran.length === 0 || job.running) await new Promise((r) => setTimeout(r, 20));
+    await until(() => ran.length > 0 && !job.running, 10_000, 'the round, once the slot is free');
     const r = readJson<{ rounds: Record<string, { ok: boolean; waitedMs?: number }> }>(roundFile(), { rounds: {} }).rounds['work-line'];
     assert.equal(r.ok, true);
     assert.equal(job.state.waiting, null);
-    assert.ok((r.waitedMs ?? 0) >= 1000, `it waited about a second (${r.waitedMs})`);
+    assert.ok((r.waitedMs ?? 0) >= released - seenWaiting, `it waited until the slot was free (${r.waitedMs})`);
     // Run now never waits, whoever holds the slot.
-    let again!: () => void;
+    let again: (() => void) | undefined;
     const holding = inWorkTurn('full', () => new Promise<void>((r2) => (again = r2)), { who: 'another agent', limitMs: 60_000, waitMs: 30_000 });
-    await new Promise((r2) => setTimeout(r2, 300));
+    await until(() => again, 10_000, 'the other agent to take the slot');
     assert.ok(job.runNow());
-    while (job.running) await new Promise((r2) => setTimeout(r2, 20));
+    await until(() => ran.length === 2 && !job.running, 10_000, 'the round asked for');
     assert.deepEqual([...ran], ['round', 'round']);
     // Nor does a light schedule's round: light always, or as a function says before each round.
     const light = every(3_600_000, async () => void ran.push('light'), { name: 'light', firstDelayMs: 20, light: true });
     const lightNow = every(3_600_000, async () => void ran.push('light now'), { name: 'light-now', firstDelayMs: 20, light: () => true });
     try {
-      const until = Date.now() + 5_000;
-      while ((!ran.includes('light') || light.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
-      assert.ok(ran.includes('light'), 'a light round runs while the slot is held');
-      while ((!ran.includes('light now') || lightNow.running) && Date.now() < until) await new Promise((r2) => setTimeout(r2, 20));
-      assert.ok(ran.includes('light now'));
+      await until(() => ran.includes('light') && !light.running, 10_000, 'a light round while the slot is held');
+      await until(() => ran.includes('light now') && !lightNow.running, 10_000, 'a round light as a function says');
     } finally {
       light.stop();
       lightNow.stop();
     }
-    again();
+    again!();
     await holding;
   } finally {
     job.stop();

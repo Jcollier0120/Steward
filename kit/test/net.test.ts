@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, test } from 'node:test';
+import { until } from './until.ts';
 
 // Offline (spec/OFFLINE.md): a failure that is only the network's, while this PC is offline, is waited out.
 // Nothing here reaches the internet: every look is a stand-in, or MANOR_OFFLINE.
@@ -116,9 +117,8 @@ test('the real look: any host answering is online; none answering, or none to as
     assert.equal(await probeHosts(['no-such-host.invalid'], port, 2000), false, 'a name that resolves to nothing');
     assert.equal(await probeHosts([], port), false);
   } finally {
-    server.close();
+    await new Promise((r) => server.close(r));
   }
-  await new Promise((r) => setTimeout(r, 20));
   assert.equal(await probeHosts(['127.0.0.1'], port, 2000), false, 'refused');
 });
 
@@ -131,7 +131,7 @@ const file = () => readJson<{ rounds?: Record<string, Entry> }>(roundFile(), {})
 
 async function oneRound(job: ReturnType<typeof every>) {
   assert.ok(job.runNow());
-  while (job.running) await new Promise((r) => setTimeout(r, 5));
+  await until(() => !job.running, 10_000, 'the round to end');
 }
 
 test('a round that fails because this PC is offline waited for the network: ok null, offline, never "run failed"; once online it fails as before', async () => {
