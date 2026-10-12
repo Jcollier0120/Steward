@@ -4,6 +4,7 @@ import path from 'node:path';
 import { commitOf, git, removeWorktree, showFile } from '../git.ts';
 import { readLsRemote } from '../scm.ts';
 import { combinedEntry } from '../kit/notes.ts';
+import { isUrgent, letOut, NEVER_SOLD } from '../kit/exchequer.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, splitCommand, tail } from '../run.ts';
 import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../settings.ts';
@@ -189,8 +190,9 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     noteReleased(e, version);
     // Released on GitHub; when it didn't reach the Exchequer too, the kit's line says why, as a note (never an alarm).
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
+    const urgent = exchequer ? '' : await urgentNote(ctx, e, { repo, commit, version, since });
     const after = byGit ? await afterReleaseNote(ctx, e, { repo, commit, version, since }) : '';
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}${urgent}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
@@ -198,6 +200,22 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
     }
   }
+}
+
+/**
+ * An urgent release let out to customers now, ahead of the Exchequer's release day (Tuesdays and Fridays): one whose
+ * CHANGELOG.md entry, or one it brings, has a line starting "**Urgent fix:" (kit/node/exchequer.ts isUrgent). A kit from
+ * 2.59.0 asked for it as it published; an older one didn't, so the Steward asks either way (out already is fine). Only
+ * for Castellan's own agents, published to the Exchequer from this PC (never Heiward, nor one built here alone). '' when
+ * it isn't urgent; else a note for the release's line. The release stands either way.
+ */
+export async function urgentNote(ctx: Ctx, e: Employee, o: { repo: string; commit: string; version: string; since: string | null }): Promise<string> {
+  if (!ctx.settings.releasesCastellan || releasedHere(e) || NEVER_SOLD.includes(e.id)) return '';
+  const entry = combinedEntry((await showFile(ctx.run, o.repo, o.commit, 'CHANGELOG.md').catch(() => null)) ?? '', o.version, o.since);
+  if (!isUrgent(entry)) return '';
+  const out = await letOut(e.id, o.version, ctx.exchequer);
+  ctx.log(`[${e.id}] an urgent fix: ${out.line}`);
+  return `; an urgent fix: ${out.line}`;
 }
 
 /** Why a repository isn't released: Settings name no way to. */

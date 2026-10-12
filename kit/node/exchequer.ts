@@ -17,6 +17,12 @@
  * Each step can be done again: a draft is made afresh, an upload replaces the file, and a release published already
  * (`409 already-published`, or `alreadyPublished` from /done) counts as published. So running it again finishes it:
  * `npm run release -- --exchequer` (release.ts) publishes a release already on GitHub from GitHub's own files.
+ *
+ * Release days (Exchequer 0.8.0): customers are offered a release from the first Tuesday or Friday at 14:00 UTC after
+ * it's published, so a week's work reaches them together. An urgent fix goes out at once: published with `urgent`
+ * (release.ts' `--urgent`, or its changelog entry marked urgent: `isUrgent`), /done is asked `{ urgent: true }`;
+ * one published already is let out with `letOut` (the Steward's `release-now`). An Exchequer from before release
+ * days ignores the body, and offers every release once it's published anyway.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -47,7 +53,18 @@ export interface ExchequerRelease {
   commit: string;
   notes: string;
   files: string[];
+  /** Out to customers at once, not on its release day. Its notes marked urgent (isUrgent) make it urgent too. */
+  urgent?: boolean;
 }
+
+/**
+ * The words that mark a changelog entry urgent (spec/RELEASE-NOTES.md): a line of its own starting with them, the
+ * entry's bold line as a rule, so customers read why it came early: "**Urgent fix: updates no longer stop.**"
+ */
+export const URGENT_MARK = '**Urgent fix:';
+
+/** Whether a release's notes (its changelog entry, with those it brings) are marked urgent: a line starting URGENT_MARK. */
+export const isUrgent = (notes: string | null | undefined): boolean => !!notes && /^[ \t]*\*\*Urgent fix:/im.test(notes);
 
 /** Where to publish, and with what: from the environment and the home folder unless a caller (a test) says. */
 export interface ExchequerOptions {
@@ -151,6 +168,49 @@ export async function saleOf(id: string, o: ExchequerOptions = {}): Promise<Sale
   }
 }
 
+/** What letting a release out early came to, in one line with no key in it. `ok` is false only when it should have gone out and didn't. */
+export interface OutOutcome {
+  ok: boolean;
+  outcome: 'out' | 'already' | 'not-published' | 'no-release-days' | 'no-key' | 'failed';
+  line: string;
+}
+
+/**
+ * Lets a release published already out to customers now, ahead of its release day: `POST
+ * /api/v1/admin/releases/:id/:version/out` with the publisher's key (Exchequer 0.8.0). An Exchequer from before release
+ * days hasn't the route, and needs none: every release is out once published. Never throws.
+ */
+export async function letOut(id: string, version: string, o: ExchequerOptions = {}): Promise<OutOutcome> {
+  const tag = tagOf({ id, version });
+  const found = publisherKey(o.env ?? process.env, o.home ?? os.homedir());
+  if ('missing' in found) return { ok: false, outcome: 'no-key', line: `${tag} wasn't let out: no publisher key at ${found.missing} (or EXCHEQUER_PUBLISHER_KEY). Only the PC that releases Castellan lets releases out.` };
+  const key = found.key;
+  const base = exchequerUrl(o.env ?? process.env);
+  const failed = (what: string): OutOutcome => ({ ok: false, outcome: 'failed', line: withoutKey(`${tag} wasn't let out: ${what}.`, key) });
+  try {
+    const res = await (o.fetch ?? fetch)(`${base}/api/v1/admin/releases/${encodeURIComponent(id)}/${encodeURIComponent(version)}/out`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(ASK_MS),
+    });
+    if (res.status === 404) {
+      const { code, text } = await errorCode(res);
+      if (code === 'not-found') return { ok: false, outcome: 'not-published', line: `${tag} isn't published to the Exchequer, so there's nothing to let out: publish it first (npm run release -- --publish, or --exchequer).` };
+      if (code === 'unknown-agent') return { ok: false, outcome: 'not-published', line: `${id} isn't one of the agents the Exchequer serves, so there's nothing to let out.` };
+      if (code === null) return { ok: true, outcome: 'no-release-days', line: `The Exchequer at ${base} has no release days yet: ${tag} is out to customers once it's published.` };
+      return failed(`${base} said ${withoutKey(text.slice(0, 200), key)}`);
+    }
+    if (!res.ok) return failed(await why(res));
+    const said = (await res.json().catch(() => ({}))) as { alreadyOut?: unknown; release?: { outAt?: unknown } };
+    const at = typeof said.release?.outAt === 'string' ? ` (since ${said.release.outAt})` : '';
+    if (said.alreadyOut === true) return { ok: true, outcome: 'already', line: `${tag} is out to customers already${at}.` };
+    return { ok: true, outcome: 'out', line: `${tag} is out to customers now${at}: every PC entitled to it is offered it at its next look.` };
+  } catch (e) {
+    const err = e as Error;
+    return failed(`couldn't reach ${base}: ${err.name === 'TimeoutError' ? 'it timed out' : err.message}`);
+  }
+}
+
 /** Whether a release reached the Exchequer: published by this call, or there already. */
 export const reachedExchequer = (out: Pick<ExchequerOutcome, 'outcome'>) => out.outcome === 'published' || out.outcome === 'already';
 const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -215,11 +275,29 @@ export async function publishToExchequer(r: ExchequerRelease, o: ExchequerOption
       const put = await go(u.url, { method: typeof u.method === 'string' ? u.method : 'PUT', headers, body: new Uint8Array(f.bytes), signal: AbortSignal.timeout(UPLOAD_MS) });
       if (!put.ok) return failed(`uploading ${f.name} failed: ${await why(put)}`);
     }
-    const done = await go(`${at}/done`, { method: 'POST', headers: auth, signal: AbortSignal.timeout(DONE_MS) });
+    // Urgent: out to customers at once. Otherwise no body, as before release days.
+    const urgent = r.urgent === true || isUrgent(r.notes);
+    const done = await go(`${at}/done`, {
+      method: 'POST',
+      headers: urgent ? { ...auth, 'content-type': 'application/json' } : auth,
+      ...(urgent ? { body: JSON.stringify({ urgent: true }) } : {}),
+      signal: AbortSignal.timeout(DONE_MS),
+    });
     if (!done.ok) return failed(`${tag} wasn't published after its upload: ${await why(done)}`);
-    const said = (await done.json().catch(() => ({}))) as { alreadyPublished?: unknown };
+    const said = (await done.json().catch(() => ({}))) as { alreadyPublished?: unknown; release?: { outAt?: unknown } };
     if (said.alreadyPublished === true) return { ok: true, outcome: 'already', line: `The Exchequer has ${tag} published already.` };
-    return { ok: true, outcome: 'published', line: `Published to the Exchequer: ${tag} (${files.map((f) => f.name).join(', ')}).` };
+    const published = `Published to the Exchequer: ${tag} (${files.map((f) => f.name).join(', ')})`;
+    if (!urgent) return { ok: true, outcome: 'published', line: `${published}.` };
+    // An Exchequer with release days says when it's out; one that couldn't let it out early has it wait for its day.
+    const outAt = typeof said.release?.outAt === 'string' ? Date.parse(said.release.outAt) : NaN;
+    const waits = outAt > Date.now() + 60_000;
+    return {
+      ok: true,
+      outcome: 'published',
+      line: waits
+        ? `${published}, urgent, but the Exchequer couldn't let it out early: it reaches customers on its release day (${new Date(outAt).toISOString()}). The Steward's release-now ${r.id} ${r.version} lets it out.`
+        : `${published}, urgent: out to customers now.`,
+    };
   } catch (e) {
     const err = e as Error & { cause?: { code?: string; message?: string } };
     const cause = err.cause?.code ?? err.cause?.message;
