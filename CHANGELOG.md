@@ -15,6 +15,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 Nothing: it updates itself as usual. A train held this way before the update is tried again in the first round after it.
 
+## 0.35.33
+
+**Uninstalling an employee with its data never removes a folder that isn't its own.**
+
+### What changed
+
+- The Steward's kit 2.56.1. When an employee is uninstalled together with its data, only its own data folder is removed. If its settings point that folder somewhere else (a drive, your profile, Documents, a projects folder, a repository), the uninstall stops and changes nothing, and says why. Employees take this kit as they update.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.32
 
 **What the Steward did last is at the top of its page, and its settings are shorter.**
