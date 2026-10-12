@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
@@ -29,6 +29,16 @@ export async function gh(run: Runner, cwd: string, ...args: string[]): Promise<s
   const r = await run('gh', args, { cwd, timeoutMs: 5 * 60_000 });
   if (r.code !== 0) throw new CommandFailed(`gh ${args.join(' ')}`, r);
   return r.out;
+}
+
+/**
+ * Fetches a ref from origin to read the commit `sha` it names, unless that commit is already in the clone (hasObject):
+ * a PR's head is fetched round after round to read it at the commit its host named, and each fetch started several
+ * processes and asked the network for nothing new (Steward 0.35.31). Without a commit to look for, it always fetches.
+ */
+export async function fetchFor(run: Runner, repo: string, sha: string | null | undefined, ref: string): Promise<void> {
+  if (sha && hasObject(repo, sha)) return;
+  await git(run, repo, 'fetch', '--quiet', 'origin', ref);
 }
 
 /** Fetches one branch from origin, so origin/<branch> is fresh. */
@@ -83,7 +93,7 @@ export function refOnDisk(repo: string, ref: string): string | null {
 }
 
 /** The folder a clone keeps its refs in: .git, or for a worktree the main clone's (its gitdir's commondir). */
-function commonDir(repo: string): string | null {
+export function commonDir(repo: string): string | null {
   const dotGit = path.join(repo, '.git');
   if (!existsSync(dotGit)) return null;
   if (lstatSync(dotGit).isDirectory()) return dotGit;
@@ -104,6 +114,57 @@ function readPacked(common: string): Map<string, string> {
     if (m) out.set(m[2], m[1]);
   }
   return out;
+}
+
+/**
+ * Whether the clone has an object, from its files alone (no git started): a loose object, or a name in a pack's index
+ * (version 2: a fan-out table of 256 counts, then the sorted names, searched by halves with small reads). False when
+ * the files don't say it plainly (another object format, an older index, alternates, anything unreadable): then the
+ * caller fetches, as before.
+ */
+export function hasObject(repo: string, sha: string): boolean {
+  try {
+    if (!SHA.test(sha)) return false;
+    const common = commonDir(repo);
+    if (!common) return false;
+    const objects = path.join(common, 'objects');
+    if (existsSync(path.join(objects, sha.slice(0, 2), sha.slice(2)))) return true;
+    const packs = path.join(objects, 'pack');
+    if (!existsSync(packs)) return false;
+    const want = Buffer.from(sha, 'hex');
+    return readdirSync(packs).some((f) => f.endsWith('.idx') && inPackIndex(path.join(packs, f), want));
+  } catch {
+    return false;
+  }
+}
+
+function inPackIndex(file: string, want: Buffer): boolean {
+  const fd = openSync(file, 'r');
+  try {
+    const at = (pos: number, len: number) => {
+      const b = Buffer.alloc(len);
+      return readSync(fd, b, 0, len, pos) === len ? b : null;
+    };
+    const head = at(0, 8);
+    if (!head || head.readUInt32BE(0) !== 0xff744f63 || head.readUInt32BE(4) !== 2) return false;
+    const first = want[0];
+    const fan = at(8 + Math.max(0, first - 1) * 4, first ? 8 : 4);
+    if (!fan) return false;
+    let lo = first ? fan.readUInt32BE(0) : 0;
+    let hi = first ? fan.readUInt32BE(4) : fan.readUInt32BE(0);
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const name = at(8 + 256 * 4 + mid * 20, 20);
+      if (!name) return false;
+      const c = name.compare(want);
+      if (c === 0) return true;
+      if (c < 0) lo = mid + 1;
+      else hi = mid;
+    }
+    return false;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export const branchExists = async (run: Runner, repo: string, branch: string) => (await commitOf(run, repo, `refs/heads/${branch}`)) !== null;

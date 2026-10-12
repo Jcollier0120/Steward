@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { commitOf, fetchBranch, git, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, fetchFor, git, removeWorktree, showFile } from '../git.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -106,7 +106,7 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
         let kit: string | null = trials[`${p.number}@${p.headOid}`]?.kit ?? null;
         if (!kit && checkout && p.headOid) {
           try {
-            await git(ctx.run, checkout, 'fetch', '--quiet', 'origin', `refs/pull/${p.number}/head`);
+            await fetchFor(ctx.run, checkout, p.headOid, `refs/pull/${p.number}/head`);
             kit = (await showFile(ctx.run, checkout, p.headOid, KIT_VERSION_FILE))?.trim() || null;
           } catch {
             kit = null;
@@ -134,7 +134,7 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
 export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!e.usesKit || !e.fill || !pr.headOid || !ctx.kit?.released.length) return null;
   const repo = checkoutOf(e);
-  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr));
+  await fetchFor(ctx.run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
   const pin = readPin(await showFile(ctx.run, repo, pr.headOid, 'kit.json'));
   if (!pin || ctx.kit.released.includes(pin.kit)) return null;
   let prs: KitPr[];
@@ -175,7 +175,7 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const { run } = ctx;
   const repo = checkoutOf(e);
   const sha = pr.headOid.slice(0, 7);
-  await git(run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr));
+  await fetchFor(run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
   await fetchBranch(run, repo, e.branch);
   const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);
