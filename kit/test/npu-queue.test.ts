@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 import { withLock } from './fixture/src/kit/lock.ts';
 import {
   LockTimeout,
@@ -26,14 +27,6 @@ function hold(lockDir: string): () => void {
   mkdirSync(lockDir, { recursive: true });
   writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, since: Date.now() }));
   return () => rmSync(lockDir, { recursive: true, force: true });
-}
-
-async function until(check: () => boolean, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error('timed out waiting for the test condition');
-    await sleep(20);
-  }
 }
 
 const tickets = (lockDir: string) => (existsSync(queueDirFor(lockDir)) ? readdirSync(queueDirFor(lockDir)).filter((n) => n.endsWith('.ticket')) : []);

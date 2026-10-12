@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 
 // The house kit: the parts every agent shares. A copy runs on its own port and data folder.
 const home = mkdtempSync(path.join(os.tmpdir(), 'fixture-test-'));
@@ -22,15 +23,6 @@ const { powershell, psQuote } = await import('./fixture/src/kit/ps.ts');
 const { duty, setDuty } = await import('./fixture/src/kit/duty.ts');
 const { every, rounds } = await import('./fixture/src/kit/schedule.ts');
 const { statusJson } = await import('./fixture/src/kit/service.ts');
-
-/** Waits until `check` holds, a little at a time: never a fixed sleep. */
-async function until(check: () => unknown, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > end) throw new Error('timed out waiting for the test condition');
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 test('only its own host names are answered', () => {
   const hosts = allowedHosts(18000);

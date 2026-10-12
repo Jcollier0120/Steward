@@ -15,6 +15,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.37
+
+**The Steward's own tests wait for what they check instead of guessing how long it takes, so they no longer fail now and then on a busy PC.**
+
+### What changed
+
+- Tests that waited a fixed time before checking a result now wait for the result itself, with a deadline. A test that never sees it fails saying what it waited for, instead of hanging or passing by luck.
+- This changes nothing in the Steward or the kit it hands out: only how their tests run. Pull requests should be held back less often by a test that failed for no reason.
+
+### Before you update
+
+Nothing: it updates itself as usual.
+
 ## 0.35.36
 
 **The Steward's page, and every agent's once it takes kit 2.57.1, answers at once, even on a busy PC.**
