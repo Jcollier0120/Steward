@@ -16,7 +16,7 @@ process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, MANOR_STARTUP, TASK_NAME, appFolder, homePageTaskXml, install, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, MANOR_STARTUP, TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -377,6 +377,38 @@ test('uninstall refuses in a development checkout, and --purge refuses a home fo
   assert.equal(await uninstall({ purge: true }, g.deps), 2);
   assert.deepEqual(g.calls, []);
   assert.ok(existsSync(p.dir));
+});
+
+test("--purge removes only a folder of the agent's own: never a drive, the profile, its folders or a repository", async () => {
+  const p = place();
+  const profile = path.join(p.dir, 'Users', 'jo');
+  const env = { USERPROFILE: profile, LOCALAPPDATA: path.join(profile, 'AppData', 'Local'), APPDATA: path.join(profile, 'AppData', 'Roaming'), ProgramFiles: path.join(p.dir, 'Program Files') };
+  const refused = (dir: string) => purgeRefusal(dir, profile, env);
+  assert.equal(refused(path.join(profile, `.${APP.id}`)), null, 'its own data folder');
+  assert.equal(refused(path.join(p.dir, 'data', APP.id)), null, `a <ID>_HOME named for it`);
+  assert.match(String(refused(path.parse(p.dir).root)), /whole drive/);
+  assert.match(String(refused(profile)), /it is /);
+  assert.match(String(refused(path.join(profile, 'Documents'))), /it is .*Documents/);
+  assert.match(String(refused(path.join(profile, 'AppData'))), /it holds .*Local/, 'a folder holding AppData\\Local');
+  assert.match(String(refused(path.join(p.dir, 'Program Files'))), /it is /);
+  const stuff = path.join(p.dir, 'stuff');
+  mkdirSync(stuff, { recursive: true });
+  assert.match(String(refused(stuff)), /isn't named for/, 'a folder of something else');
+  mkdirSync(appFolder(stuff), { recursive: true });
+  assert.equal(refused(stuff), null, 'unless it holds a copy of the agent');
+  const clone = path.join(p.dir, `${APP.id}-clone`);
+  mkdirSync(path.join(clone, '.git'), { recursive: true });
+  assert.match(String(refused(clone)), /git repository/);
+
+  // uninstall --purge with a <ID>_HOME that's someone's projects: nothing is removed, not even the program.
+  const projects = path.join(p.dir, 'projects');
+  mkdirSync(path.join(projects, 'mine'), { recursive: true });
+  writeFileSync(path.join(projects, 'mine', 'work.txt'), 'mine');
+  const f = fakes({ root: p.release, data: projects });
+  assert.equal(await uninstall({ purge: true }, f.deps), 2);
+  assert.match(f.lines.join('\n'), /won't remove it/);
+  assert.deepEqual(f.calls, []);
+  assert.ok(existsSync(path.join(projects, 'mine', 'work.txt')));
 });
 
 test('a mistyped option is refused before anything is done', async () => {

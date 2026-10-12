@@ -10,6 +10,41 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - The Steward's kit 2.57.0. Where Castellan is in Windows' Startup apps, an employee no longer starts from a hidden sign-in task of its own: Castellan starts at sign-in and starts your staff one at a time. Each employee moves over as it takes this kit. Turned off in Startup apps, Castellan and your staff start when you open Castellan instead.
 
+## 0.35.34
+
+**A restart in the middle of a test run no longer holds PRs back.**
+
+### What changed
+
+- When Windows ends the tests because the PC is restarting or shutting down, the Steward no longer counts that as the tests failing. The next round tests the train, or the pull request, again. Before, a restart in the middle of a merge train's tests made the Steward refuse that train afterwards, so its pull requests merged one at a time.
+- The same goes for a release or a kit update whose commands Windows ended while shutting down: nothing is held against that commit.
+
+### Before you update
+
+Nothing: it updates itself as usual. A train held this way before the update is tried again in the first round after it.
+
+## 0.35.33
+
+**Uninstalling an employee with its data never removes a folder that isn't its own.**
+
+### What changed
+
+- The Steward's kit 2.56.1. When an employee is uninstalled together with its data, only its own data folder is removed. If its settings point that folder somewhere else (a drive, your profile, Documents, a projects folder, a repository), the uninstall stops and changes nothing, and says why. Employees take this kit as they update.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.32
+
+**What the Steward did last is at the top of its page, and its settings are shorter.**
+
+### What changed
+
+- **Last stage** is on the Steward's page, above the staff, instead of in About: it's the quickest way to see what's going on. Its log stays folded unless the stage stopped or something in it failed.
+- The **How it works** tab is shorter. Settings that nearly always stay as they are now fold under Advanced: **Catches PRs up with their branch**, **Merges ready PRs together**, **Tests only what a change reaches**, **Release right after merging**, **Checked at once** and **Stages at once**. Their values are kept.
+- **Told after a release** is no longer shown: the Steward fills it in with Manor's update check itself. What's in it is kept.
+
 ### Before you update
 
 - Nothing: it updates itself as usual.

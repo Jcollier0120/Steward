@@ -15,6 +15,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: take the kit and release as usual.
 
+## 2.56.1
+
+**`uninstall --purge` removes only the agent's own data folder.**
+
+### What changed
+
+- **node/install.ts, `purgeRefusal()`.** `<ID>_HOME` can name any folder, and `--purge` deletes everything in it. The kit now refuses, and changes nothing, when that folder:
+  - is a whole drive, the profile, or one of Windows' or the person's own folders (Documents, Desktop, Downloads, Pictures, Videos, Music, OneDrive, source, Projects, AppData, Program Files, ProgramData, Windows), or holds one;
+  - is a git repository;
+  - isn't named for the agent (`%USERPROFILE%.<id>` or a `<ID>_HOME` such as `D:data<id>`) and holds no copy of it.
+- Before, only a drive and the home folder were refused.
+
+### Before you update
+
+- Nothing for an agent: take the new kit as usual. An uninstall that's refused says why, and leaves everything as it was.
+
 ## 2.56.0
 
 **A few agents' rounds at a time, fewer while the PC is busy.**

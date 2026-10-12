@@ -116,7 +116,19 @@ export async function networkFailure(ctx: Pick<Ctx, 'online'>, message: string):
  * the next round tries again. On 2026-10-07 GitHub answered every push with "Internal Server Error" for a while, and
  * nine kit bumps were held for a person to press Push, an alarm each.
  */
-export const passingFailure = (message: string) => isNetworkError(message) || MORE_NET_WORDS.test(message) || SERVER_WORDS.test(message);
+export const passingFailure = (message: string) => isNetworkError(message) || MORE_NET_WORDS.test(message) || SERVER_WORDS.test(message) || interrupted(message);
+
+/**
+ * Windows ending a program, not the program failing: 0x40010004 (DBG_TERMINATE_PROCESS: killed as the person signs out
+ * or the PC shuts down), 0xC0000142 (STATUS_DLL_INIT_FAILED: a program started while Windows shuts down can't load) and
+ * 0xC000013A (STATUS_CONTROL_C_EXIT: closed with its console). On 2026-10-12 a restart killed a train's npm test (exit
+ * 1073807364), and after the restart the Steward still held that train as failed.
+ */
+const INTERRUPTED_EXITS = [0x40010004, 0xc0000142, 0xc000013a];
+export const interruptedExit = (code: number | null | undefined) => typeof code === 'number' && INTERRUPTED_EXITS.some((x) => code === x || code === x - 2 ** 32);
+
+/** A failure message naming an exit code of Windows ending the program ("failed (exit 1073807364)", git's "failed (3221225794)"). */
+export const interrupted = (message: string) => [...message.matchAll(/\((?:exit )?(-?\d{9,10})\)/g)].some((m) => interruptedExit(Number(m[1])));
 
 /** Network failures the kit's words miss: Go's (gh's) TLS and HTTP client timeouts, and Windows' connect failure. */
 const MORE_NET_WORDS = /tls handshake timeout|net\/http: (?:request canceled|timeout)|client\.timeout exceeded|connection attempt failed|could not establish (?:a )?connection/i;
