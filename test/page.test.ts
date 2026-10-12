@@ -164,12 +164,14 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   assert.match(withLooks, /<table class="pr-table">.*title="it conflicts with main in LICENSE[^"]*"[^>]*>.*sent back/, "the PR's line says what was done");
   assert.match(withLooks, /<table class="conflicts">.*#7.*sent back.*back with the Claude Code session.*Conflicted in LICENSE, package\.json; LICENSE needed a person/);
   assert.match(withLooks, /#5.*caught up.*merged main into it.*no longer open/, 'one since merged or closed says so');
-  // Read now and then, in About: the kit, the last stage, and merge conflicts once none it lists is open. A PR it lists
-  // that is still open keeps them on the page. About carries no tour names: the tour shows the page.
+  // Read now and then, in About: the kit, and merge conflicts once none it lists is open. A PR it lists that is still
+  // open keeps them on the page. The last stage is on the page, above the staff. About carries no tour names: the tour
+  // shows the page.
   for (const [h, open] of [[withPr, false], [withLooks, true], [withOne, false]] as const) {
     const { page, about } = split(h);
     assert.ok(about.includes('The kit the Steward hands out') && !page.includes('The kit the Steward hands out'));
-    assert.ok(about.includes('Last stage') && !page.includes('Last stage'));
+    assert.ok(!about.includes('Last stage') && page.includes('Last stage'));
+    assert.ok(page.indexOf('Last stage') < page.indexOf('Staff') || !page.includes('Staff'), 'the last stage comes before the staff');
     assert.equal(page.includes('<table class="conflicts">') || page.includes('No PR the rounds looked at'), open);
     assert.doesNotMatch(about, /data-tour/);
   }
