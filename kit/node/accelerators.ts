@@ -487,14 +487,29 @@ export const READY_WAIT_MS = RULES.accelerators.readyWaitMs;
  */
 export type ServerState = 'ready' | 'busy' | 'down';
 
-export async function probe(baseUrl: string, ms = PROBE_MS): Promise<ServerState> {
+export async function probe(baseUrl: string, ms = PROBE_MS, o: { listsWhenLoaded?: boolean } = {}): Promise<ServerState> {
   try {
     const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(ms) });
-    await res.body?.cancel();
-    return res.ok ? 'ready' : res.status === 503 ? 'busy' : 'down';
+    if (!res.ok || !o.listsWhenLoaded) {
+      await res.body?.cancel();
+      return res.ok ? 'ready' : res.status === 503 ? 'busy' : 'down';
+    }
+    const j: any = await res.json().catch(() => null);
+    return Array.isArray(j?.data) && j.data.length === 0 ? 'busy' : 'ready';
   } catch (e: any) {
     return e?.name === 'TimeoutError' || e?.name === 'AbortError' ? 'busy' : 'down';
   }
+}
+
+/**
+ * Whether a server, by its program, answers /v1/models before its model is loaded and lists none until it is: OpenVINO
+ * Model Server opens its REST port within a second of starting and answers `{"data":[]}` while it loads (and, on the
+ * NPU, compiles) its model, refusing a request then with a 404 (measured 2026-10-12, 2026.4.1). For such a server an
+ * empty list is `busy`. Every other server is ready once it answers, as before.
+ */
+export function listsWhenLoaded(startCommand: string[] | undefined): boolean {
+  const exe = startCommand?.[0];
+  return !!exe && /^ovms(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
 }
 
 /** Whether an endpoint answers now, without starting it. */
@@ -592,10 +607,11 @@ export interface ServerReady {
  */
 export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
-  const state = await probe(ep.baseUrl);
+  const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
+  const state = await probe(ep.baseUrl, PROBE_MS, lists);
   if (state === 'ready') return { started: false, waited: false };
   if (state === 'busy') {
-    await untilReady(ep.baseUrl, readyMs);
+    await untilReady(ep.baseUrl, readyMs, lists);
     return { started: false, waited: true };
   }
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
@@ -609,11 +625,11 @@ export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs
 }
 
 /** Waits until a busy server answers /v1/models; AcceleratorDown when it stops answering, or is still busy after `ms`. */
-async function untilReady(baseUrl: string, ms: number): Promise<void> {
+async function untilReady(baseUrl: string, ms: number, o: { listsWhenLoaded?: boolean } = {}): Promise<void> {
   const deadline = Date.now() + ms;
   for (;;) {
     await new Promise((r) => setTimeout(r, 250));
-    const state = await probe(baseUrl, Math.max(250, Math.min(PROBE_MS, deadline - Date.now())));
+    const state = await probe(baseUrl, Math.max(250, Math.min(PROBE_MS, deadline - Date.now())), o);
     if (state === 'ready') return;
     if (state === 'down') throw new AcceleratorDown(core.say.connectionRefused('/v1/models', baseUrl, 'it stopped answering while busy'));
     if (Date.now() >= deadline) throw new AcceleratorDown(core.say.stillBusy(baseUrl, Math.round(ms / 1000)));
@@ -642,13 +658,14 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
     if (log !== undefined) closeSync(log);
   }
   const deadline = Date.now() + waitMs;
+  const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 250));
     if (spawnError) throw new AcceleratorDown(core.say.couldNotStart(cmd, spawnError.message));
-    const state = await probe(ep.baseUrl, 2000);
+    const state = await probe(ep.baseUrl, 2000, lists);
     if (state === 'ready') return { started: true, waited: false };
     if (state === 'busy') {
-      await untilReady(ep.baseUrl, readyMs);
+      await untilReady(ep.baseUrl, readyMs, lists);
       return { started: true, waited: true };
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
