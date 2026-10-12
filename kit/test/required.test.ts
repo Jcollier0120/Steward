@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 
 // Required settings (node/onboarding.ts's `required`, node/required.ts): what an agent can't work without. Until they're
 // filled in, its rounds wait, /api/ping and the page say so, and the tour's settings step holds.
@@ -85,7 +86,7 @@ test('its rounds wait for its required settings: Run now too, and no next round 
     assert.equal(job.state.nextRunAt, null);
     writeFileSync(spec.file(), JSON.stringify({ imapAccounts: ['me@example'] }));
     assert.equal(job.runNow(), true);
-    while (job.running) await new Promise((r) => setTimeout(r, 5));
+    await until(() => !job.running, 10_000, 'the round to end');
     assert.equal(ran, 1);
   } finally {
     job.stop();
@@ -99,7 +100,7 @@ test('a round held for its required settings is never silent: round.json and its
   let ran = 0;
   const job = every(60_000, async () => void ran++, { firstDelayMs: 0, name: 'held' });
   try {
-    while (!readJson<any>(roundFile(), {}).rounds?.held) await new Promise((r) => setTimeout(r, 5));
+    await until(() => readJson<any>(roundFile(), {}).rounds?.held, 10_000, 'round.json to say it was held');
     const r = readJson<any>(roundFile(), {}).rounds.held;
     assert.equal(ran, 0, 'the job had nothing to work with');
     assert.deepEqual([r.ok, r.waiting, r.error, r.next], [null, 'Thunderbird or Mail accounts', null, null]);

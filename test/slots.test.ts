@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { stillFor, until } from '../kit/test/until.ts';
 
 // Stages side by side: Settings' stagesAtOnce slots, one round at a time, and each repository held by one stage at once.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-slots-'));
@@ -13,11 +14,6 @@ const { repoBusy, withRepo, withStageSlot } = await import('../src/stages/slots.
 const { LockTimeout } = await import('../src/kit/lock.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** Until what a stage does next has happened (at most 10 s): a fixed sleep is too short on a busy PC. */
-const until = async (done: () => boolean) => {
-  for (const t0 = Date.now(); !done() && Date.now() - t0 < 10_000; ) await sleep(10);
-};
 /** A gate a test opens when it likes: the stage holding it runs until then. */
 const gate = () => {
   let open!: () => void;
@@ -36,7 +32,7 @@ test('as many stages run at once as there are slots; one more waits, then gives 
   assert.ok(!inside.includes('push'), 'every slot taken: the third never ran');
   // One slot: the second waits for the first, and runs once it ends.
   const c = withStageSlot('merge', 1, async () => inside.push('merge'), { waitMs: 5000 });
-  await sleep(50);
+  await stillFor();
   assert.ok(!inside.includes('merge'), 'its one slot is taken');
   g.open();
   await Promise.all([a, b, c]);
@@ -77,7 +73,7 @@ test('two stages never work on one repository at once: the second waits, saying 
     });
   });
   await until(() => order.includes('round porter') && lines.length > 0);
-  await sleep(50);
+  await stillFor();
   assert.deepEqual(order, ['release in', 'round porter'], 'the round waits for Manor, not for Porter');
   assert.deepEqual(lines, ['[manor] waits for the release running beside this one to finish with it']);
   g.open();

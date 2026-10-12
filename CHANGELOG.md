@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.37
+
+**The Steward's own tests wait for what they check instead of guessing how long it takes, so they no longer fail now and then on a busy PC.**
+
+### What changed
+
+- Tests that waited a fixed time before checking a result now wait for the result itself, with a deadline. A test that never sees it fails saying what it waited for, instead of hanging or passing by luck.
+- This changes nothing in the Steward or the kit it hands out: only how their tests run. Pull requests should be held back less often by a test that failed for no reason.
+
+### Before you update
+
+Nothing: it updates itself as usual.
 ## 0.35.34
 
 **A restart in the middle of a test run no longer holds PRs back.**

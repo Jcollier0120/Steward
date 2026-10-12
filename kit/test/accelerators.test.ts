@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { until } from './until.ts';
 
 // The kit's accelerators (Manor's docs/ACCELERATORS.md), the same in every agent: Reeve's config, the
 // order, the choosing, the slots, the failure markers, the game check, the fallback, the servers'
@@ -30,14 +31,6 @@ type Accelerator = import('./fixture/src/kit/accelerators.ts').Accelerator;
 type AcceleratorConfig = import('./fixture/src/kit/accelerators.ts').AcceleratorConfig;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > end) throw new Error('timed out waiting for the test condition');
-    await sleep(20);
-  }
-}
 
 /** A config as an agent reads it; `hw`, what this PC has (hardware.json), names its accelerators. */
 const config = (raw: unknown, hw: import('./fixture/src/kit/accelerators.ts').Hardware | null = null): AcceleratorConfig => {
