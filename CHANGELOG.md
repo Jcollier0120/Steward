@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.45
+
+**The Steward's kit 2.63.0: on a Snapdragon, search runs on the NPU.**
+
+### What changed
+
+- The Steward's kit 2.63.0: setting up local AI on a Snapdragon now puts the work behind search (embeddings) on the NPU, beside its chat. It finds the right files as well as the graphics card does, in about half the time, and leaves the graphics card free.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.41
 
 **The Steward's kit 2.60.0, with a check for trying an NPU on new hardware.**

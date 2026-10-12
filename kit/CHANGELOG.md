@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.63.0
+
+**On a Snapdragon, embeddings run on the Hexagon NPU: Qwen3-Embedding-0.6B through llama.cpp's own server over GenieX's libraries.**
+
+### What's new
+
+- **Qualcomm's route has an embedding server** (`embedServer` in spec/npu-vendors.json, `NpuEmbedServer` in node/npu-vendors.ts). GenieX serves no `/v1/embeddings`, but it carries llama.cpp b11125 with its Hexagon backend and Qualcomm's signed HTP libraries. Setup downloads llama.cpp's own b11125 release for Windows on Arm (13 MB), copies GenieX's 13 llama.cpp libraries over it (`overlay`, node/setup.ts `overlayFiles`), downloads Qwen3-Embedding-0.6B (Q8_0, 639 MB, the model the graphics card already uses, so an index carries over), and writes the NPU's entry with an `embed` endpoint on port 18182: `llama-server --device HTP0 -ngl 99 --embeddings --pooling last`, with `ADSP_LIBRARY_PATH` set to the server's folder in the endpoint's `env` (FastRPC finds the HTP library there; without it the session doesn't open).
+- **Measured on the Snapdragon X2 Elite** (search-eval over a real repository, 9 questions): the NPU 9/9 in the top five, warm queries 45–73 ms; the graphics card (Adreno, OpenCL) 9/9, 103–155 ms; npu-embed's nomic 8/9, 73–88 ms. Indexing: 124 ms a 1,600-character chunk on the NPU, 265 ms on the graphics card. The NPU's vectors match the graphics card's (cosine 0.999 or more). spec/NPU-VENDORS.md, "Embeddings on the Hexagon", has the table.
+- **The NPU check has an embed step**: when the route has an embedding server, `npu-check` starts it, times a query and a full-size chunk, and stops it again.
+- `testNpuEmbed(entry)` (node/setup.ts): the NPU's embedding server answers one embedding, in the NPU's turn. `planNpu`'s plan carries `embed` (the server and model downloads, null when there already), counted in `downloadBytes`; `describePlan` lists them.
+
+### What changed
+
+- A Snapdragon with no graphics card no longer gets embeddings on the processor: they go to the NPU.
+- The graphics card's download of the same model file is skipped when the NPU's setup fetches it.
+- The keeper reaps the NPU's llama-server embedding server in the NPU's lock, with its idle time, like the NPU's chat server; npu-embed is still left to stop itself.
+- When the embedding server fails its test, the NPU's entry is written without embeddings (they go to the graphics card or the processor), and setup says why.
+
+### For an agent
+
+- Nothing in the agent itself: take the kit and release as usual. An agent that starts servers from an endpoint on its own, not through the kit's `ensureServer` or keeper, must pass the endpoint's `env` (the kit's `serverEnv(ep)`) to the server it starts, or the NPU's embedding server exits at once. Reeve does so from 0.17.39, which must be out before this kit reaches a Snapdragon.
+
 ## 2.60.0
 
 **The NPU check: one command that tries a maker's NPU route on real hardware and measures it.**
