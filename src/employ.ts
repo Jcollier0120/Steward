@@ -2,7 +2,7 @@ import path from 'node:path';
 import { manorHome, originRepo } from './kit/manor.ts';
 import { readJson, writeJson } from './kit/store.ts';
 import { makersOwn } from './maker.ts';
-import { branchTree, employeeFromClone, folderTree, internalStaff } from './migrate.ts';
+import { branchTree, employeeFromClone, folderTree, internalStaff, isStewardClone } from './migrate.ts';
 import type { Employee } from './settings.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
 
@@ -114,4 +114,44 @@ export function addEmployee(file: string, e: Employee): void {
   const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const employees = Array.isArray(s.employees) ? s.employees : [];
   writeJson(file, { ...s, employees: [...employees, e] });
+}
+
+/** How often the employees off the kit are looked at again for one that has taken it (takeOntoKit). */
+const ONTO_KIT_MS = 5 * 60_000;
+let ontoKitAt = 0;
+
+/**
+ * Settings' employees that carry the kit but were taken on without it, taken onto it as a hire is (employeeFor): an
+ * agent looked after before Look after knew one (Steward 0.35.21 and older left every one off the kit, with nothing to
+ * fill), or a repository that has taken the kit since. One with no fill command whose branch has kit.json and says who it
+ * is gets the hire's fill, tests, version files, release, install and merging; its id, name, repository, clone, branch and
+ * anything else Settings keep for it stay as they are. The Steward's own clone, and a repository without the kit, are left
+ * alone. Only where the Steward releases Castellan (off it, Manor's Repositories are the employees, never on the kit).
+ * At most every few minutes; settings.json is written only when one changed. Returns the ids taken on. Never throws.
+ */
+export function takeOntoKit(o: { settingsFile: string; now?: number; internal?: Set<string>; staff?: Set<string>; origin?: (dir: string) => string | null; isSelf?: (dir: string) => boolean }): string[] {
+  const now = o.now ?? Date.now();
+  if (now - ontoKitAt < ONTO_KIT_MS) return [];
+  ontoKitAt = now;
+  try {
+    const raw = readJson<Record<string, unknown> | null>(o.settingsFile, null);
+    if (!raw || raw.releasesCastellan !== true || !Array.isArray(raw.employees)) return [];
+    const employees = raw.employees as Record<string, unknown>[];
+    const taken: string[] = [];
+    const next = employees.map((e) => {
+      if (!e || typeof e !== 'object' || e.fill || typeof e.checkout !== 'string' || !e.checkout || typeof e.id !== 'string') return e;
+      if (e.id === 'steward' || (o.isSelf ?? isStewardClone)(e.checkout)) return e;
+      const others = employees.filter((x) => x !== e && x && typeof x === 'object') as unknown as Employee[];
+      const repo = typeof e.repo === 'string' ? e.repo : null;
+      const hired = employeeFor(e.checkout, others, { branch: typeof e.branch === 'string' && e.branch ? e.branch : 'main', internal: o.internal, staff: o.staff, origin: o.origin ?? (() => repo), makers: true });
+      if ('error' in hired || hired.kitParts === null || !hired.employee.fill) return e;
+      const h = hired.employee;
+      taken.push(e.id);
+      return { ...e, merges: true, usesKit: h.usesKit, fill: h.fill, test: h.test, versionFiles: h.versionFiles, release: h.release, install: h.install, approve: h.approve, installed: h.installed };
+    });
+    if (taken.length) writeJson(o.settingsFile, { ...raw, employees: next });
+    return taken;
+  } catch {
+    return [];
+  }
 }

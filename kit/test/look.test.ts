@@ -164,6 +164,8 @@ test('the page uses the width of the window: no column for text, panels or Setti
   const sheetCaps = [...sheet.matchAll(/([^{}\n]+)\{[^{}]*?(?<![-\w])(max-width|width): ([^;]+);/g)].map((m) => `${m[1].trim()} ${m[2]}: ${m[3]}`);
   for (const c of sheetCaps) assert.match(c, /input\[type=(text|number|checkbox)\]|100%|^\.sf-table, /, `only a control or a guard: ${c}`);
   assert.doesNotMatch(sheet, /[\d.]+ch\b/, 'no measure in characters');
+  // Its filled buttons leave a long form's tabs alone: .sf-panel button outranks .tab, and filled every tab lime.
+  for (const m of sheet.matchAll(/^([^{}\n]*\bbutton\b[^{}\n]*)\{[^{}]*\bbackground: var\(--accent\)/gm)) assert.match(m[1], /:not\(\.tab\)/, `a tab keeps its look: ${m[1].trim()}`);
 });
 
 test('busy: the title bar moves, the pill says what it is doing, the page refreshes', () => {

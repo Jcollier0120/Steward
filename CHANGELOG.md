@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.22
+
+**Every agent that carries the kit is looked after on it, however it was added.**
+
+### What changed
+
+- An agent added with **Look after** that carries the kit is now taken on as a hired one is: it takes each new kit, and the Steward's rounds test, merge, release and install it. Until now it was listed but left off the kit, unticked in **Roll out the kit**. Merging and releasing still follow what you ticked when you added it.
+- Agents added that way before this version go onto the kit by themselves within a few minutes of updating. Repositories without the kit, such as a website, stay as they are.
+- **Merge the team's PRs** shows only when Settings name a team. With no team set, the Steward's rounds still merge your ready PRs as before.
+- Settings' tabs (General, Alarms and the rest) are plain tabs again, underlined when chosen, instead of bright filled buttons that were hard to read in the dark theme. This comes with kit 2.54.0, which every agent takes in turn.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.21
 
 **The Steward no longer tries to open a pull request that is already open.**

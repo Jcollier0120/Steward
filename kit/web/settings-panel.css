@@ -38,9 +38,10 @@
 .sf-msg { margin: 4px 0 0; font-size: 13px; }
 .sf-msg.error { color: var(--alert); font-weight: 600; }
 .sf-msg.warning { color: var(--warn); }
-/* The panel's buttons, for a page that doesn't style buttons the kit's way (page.ts has the same rules). */
-.sf-panel button { font: inherit; font-weight: 500; padding: 5px 14px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
-.sf-panel button:hover:not(:disabled) { filter: brightness(1.08); }
+/* The panel's buttons, for a page that doesn't style buttons the kit's way (page.ts has the same rules). Never a long
+   form's tabs (react/tabs.tsx): this rule outranks .tab, and would fill every tab with the accent. */
+.sf-panel button:not(.tab) { font: inherit; font-weight: 500; padding: 5px 14px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+.sf-panel button:not(.tab):hover:not(:disabled) { filter: brightness(1.08); }
 .sf-panel button.quiet { background: var(--surface, transparent); color: var(--fg); border-color: var(--line); }
 .sf-panel button.quiet:hover:not(:disabled) { background: var(--hover, transparent); filter: none; }
 .sf-panel button:disabled { opacity: .5; cursor: default; }
