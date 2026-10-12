@@ -5,7 +5,7 @@ import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
-import { checkoutOf, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
@@ -180,7 +180,7 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, pr.headOid);
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {

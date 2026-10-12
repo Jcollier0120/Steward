@@ -14,7 +14,7 @@ import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
-import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
@@ -143,7 +143,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
 
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { NOT_PUBLISHED } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
@@ -11,7 +11,7 @@ import { appReleasesIn, type ReleaseInfo } from './staff.ts';
 import type { KitInfo } from '../kitsource.ts';
 import type { LeaseGuard } from '../lease.ts';
 import type { Runner } from '../run.ts';
-import { releasedHere, type Employee, type Settings } from '../settings.ts';
+import { DEFAULT_SETTINGS, releasedHere, type Employee, type Settings } from '../settings.ts';
 import { hostFor, must } from '../hosts/index.ts';
 
 /** What a stage did for one employee. */
@@ -228,6 +228,19 @@ export function notHiredHere(e: Pick<Employee, 'installed' | 'name'>): string | 
   return existsSync(app) ? null : `${e.name} isn't installed on this PC (no ${e.installed}), and the Steward doesn't install it again by itself: hire it in Manor to have it back`;
 }
 export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
+/**
+ * Clears a work folder the Steward made, before it makes it again. Only a folder in the work folder itself, and only
+ * a git worktree (its .git a file, as git worktree add makes it) or, in the Steward's own work folder, what's left of
+ * one. A clone of someone's own (its .git a folder), or anything else in a work folder Settings point elsewhere (a
+ * folder of the person's projects, say), is never deleted: the worktree add after then fails on it, and says so.
+ */
+export function clearWorkDir(s: Settings, dir: string): void {
+  if (!existsSync(dir) || path.dirname(dir) !== workRootOf(s)) return;
+  const git = path.join(dir, '.git');
+  const worktree = existsSync(git) && statSync(git).isFile();
+  const ownRoot = workRootOf(s).toLowerCase() === path.resolve(DEFAULT_SETTINGS.workRoot).toLowerCase();
+  if (worktree || (ownRoot && !existsSync(git))) rmSync(dir, { recursive: true, force: true });
+}
 /** The Steward's worktree for an employee's bump, and the one for its release. */
 export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), e.id);
 export const releaseDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), `${e.id}-release`);

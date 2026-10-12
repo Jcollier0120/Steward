@@ -10,7 +10,7 @@ import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
@@ -280,7 +280,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // A bump made here before and not pushed is made again, from scratch.
   const dir = o.trial ? trialDirOf(ctx.settings, e) : bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, dir, base);
   say(`worktree ${dir} on ${branch}, from ${base} (${baseCommit.slice(0, 7)})`);

@@ -8,7 +8,7 @@ import { splitCommand, tail, type Ran } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import { claimedBranches, headsOnOrigin, proposal } from './branchesin.ts';
-import { checkoutOf, forgetGlance, hostIs, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, hostIs, clearWorkDir, workRootOf, type Ctx } from './common.ts';
 import { recordTested } from '../tested.ts';
 
 /**
@@ -80,7 +80,7 @@ async function testHead(ctx: Ctx, e: Employee, branch: string, head: string): Pr
   const repo = checkoutOf(e);
   const dir = handInDirOf(ctx.settings, e);
   await removeWorktree(ctx.run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await git(ctx.run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
   ctx.log(`[${e.id}] ${branch}: testing it here at ${sha}, in ${dir}, before it's handed in`);
   try {
