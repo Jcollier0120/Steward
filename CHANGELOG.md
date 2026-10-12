@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.34
+
+**A restart in the middle of a test run no longer holds PRs back.**
+
+### What changed
+
+- When Windows ends the tests because the PC is restarting or shutting down, the Steward no longer counts that as the tests failing. The next round tests the train, or the pull request, again. Before, a restart in the middle of a merge train's tests made the Steward refuse that train afterwards, so its pull requests merged one at a time.
+- The same goes for a release or a kit update whose commands Windows ended while shutting down: nothing is held against that commit.
+
+### Before you update
+
+Nothing: it updates itself as usual. A train held this way before the update is tried again in the first round after it.
+
 ## 0.35.33
 
 **Uninstalling an employee with its data never removes a folder that isn't its own.**

@@ -14,6 +14,10 @@ const { LockTimeout } = await import('../src/kit/lock.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Until what a stage does next has happened (at most 10 s): a fixed sleep is too short on a busy PC. */
+const until = async (done: () => boolean) => {
+  for (const t0 = Date.now(); !done() && Date.now() - t0 < 10_000; ) await sleep(10);
+};
 /** A gate a test opens when it likes: the stage holding it runs until then. */
 const gate = () => {
   let open!: () => void;
@@ -26,7 +30,7 @@ test('as many stages run at once as there are slots; one more waits, then gives 
   const inside: string[] = [];
   const a = withStageSlot('release', 2, async () => (inside.push('release'), g.opened));
   const b = withStageSlot('bump', 2, async () => (inside.push('bump'), g.opened));
-  await sleep(50);
+  await until(() => inside.length === 2);
   assert.deepEqual(inside.sort(), ['bump', 'release'], 'two slots: both run at once');
   await assert.rejects(withStageSlot('push', 2, async () => inside.push('push'), { waitMs: 100 }), LockTimeout);
   assert.ok(!inside.includes('push'), 'every slot taken: the third never ran');
@@ -44,7 +48,7 @@ test('one round at a time, whatever the slots; a round runs beside another stage
   const ran: string[] = [];
   const release = withStageSlot('release', 3, async () => (ran.push('release'), g.opened));
   const round = withStageSlot('round', 3, async () => (ran.push('round'), g.opened));
-  await sleep(50);
+  await until(() => ran.length === 2);
   assert.deepEqual(ran.sort(), ['release', 'round'], 'a round beside a release');
   await assert.rejects(withStageSlot('round', 3, async () => ran.push('round 2')), LockTimeout, 'a second round is refused at once');
   g.open();
@@ -62,7 +66,7 @@ test('two stages never work on one repository at once: the second waits, saying 
   const order: string[] = [];
   const lines: string[] = [];
   const release = withStageSlot('release', 2, () => withRepo(lines.push.bind(lines), 'manor', async () => (order.push('release in'), await g.opened, order.push('release out'))));
-  await sleep(50);
+  await until(() => repoBusy('manor'));
   assert.ok(repoBusy('manor'), 'busy, seen from outside it');
   const round = withStageSlot('round', 2, async () => {
     // Another repository at once; Manor once the release is done with it.
@@ -72,7 +76,8 @@ test('two stages never work on one repository at once: the second waits, saying 
       order.push('round manor');
     });
   });
-  await sleep(100);
+  await until(() => order.includes('round porter') && lines.length > 0);
+  await sleep(50);
   assert.deepEqual(order, ['release in', 'round porter'], 'the round waits for Manor, not for Porter');
   assert.deepEqual(lines, ['[manor] waits for the release running beside this one to finish with it']);
   g.open();

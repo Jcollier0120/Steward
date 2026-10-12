@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { networkFailure, networkLine, networkNote } from '../src/stages/common.ts';
+import { interrupted, interruptedExit, networkFailure, networkLine, networkNote } from '../src/stages/common.ts';
 
 // The Developer Herald's 0.5.6: built, then gh's publish timed out. The message said only "failed (exit 1)", the PC
 // was online again when the round asked, so the commit was held for a person to release.
@@ -46,4 +46,18 @@ test("GitHub's own failing (a 5xx, a dropped connection) passes like the network
     'HTTP 422: Validation Failed',
     'npm test failed (exit 1): 5003 tests',
   ]) assert.equal(await networkFailure(online, said), false, `still held: ${said}`);
+});
+
+test("Windows ending a program (the PC shutting down) isn't the program failing: it passes, and the next round tries again", async () => {
+  // 2026-10-12: a restart killed a train's npm test, and every git the round started while Windows shut down failed.
+  for (const m of [
+    'npm test failed (exit 1073807364): "the keeper asks again at once when hardware.json has an NPU but not its name"',
+    'git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main failed (3221225794): no output',
+    'npm test failed (exit -1073741510)',
+  ]) {
+    assert.equal(interrupted(m), true, m);
+    assert.equal(await networkFailure({ online: async () => true }, m), true, m);
+  }
+  for (const m of ['npm test failed (exit 1)', 'npm test failed (exit 1073807364000)', 'not ok 1073807364 - a test numbered so', 'tests 3221225794 passed (exit 1)']) assert.equal(interrupted(m), false, m);
+  assert.deepEqual([0x40010004, 0xc0000142, 0xc000013a, -1073741510, 1, null].map(interruptedExit), [true, true, true, true, false, false]);
 });

@@ -8,7 +8,7 @@ import { noteMerged } from '../strangers.ts';
 import { recordTested } from '../tested.ts';
 import { runChecks } from './bump.ts';
 import { isChangelog, isKitPin, lockBeside, mergeChangelogs, mergeKitPins, resolveVersionConflicts, settledFiles, settleVersion } from './catchup.ts';
-import { checkoutOf, forgetGlance, clearWorkDir, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { checksOf, type PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
@@ -199,6 +199,8 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
   }
   if (listed.length < 2) return { merged: [], note: 'fewer than two of its PRs can ride as they are now', tested: false };
   const failed = readJson<Failed>(trainsFile(), {});
+  // A train whose checks Windows cut short (the PC shutting down) didn't fail: it is tried again.
+  if (failed[e.id] && interrupted(failed[e.id].note)) delete failed[e.id];
   const failedBefore = (cars: Car[]) => (failed[e.id]?.key === trainKey(base, cars) ? failed[e.id].note : null);
   if (failedBefore(listed)) return { merged: [], note: `the same train failed before: ${failedBefore(listed)}`, tested: false };
 
@@ -251,6 +253,7 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
       }
       if (!checks) writeJson(trainsPassedFile(), { ...passed, [e.id]: at });
     }
+    if (checks && interrupted(checks)) return { merged: [], note: `${numbers} stacked, but Windows ended its checks (${checks}): the next round tries the train again${stopped}`, tested: false };
     if (checks) {
       failed[e.id] = { key: trainKey(base, rode), note: checks, at: new Date().toISOString() };
       writeJson(trainsFile(), failed);
