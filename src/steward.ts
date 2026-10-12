@@ -11,7 +11,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { NO_TEAM, teamOf, type Owner } from './team.ts';
 import { run as realRun, useDotnet, type Runner } from './run.ts';
 import { expandEnv } from './kit/settings-kit.ts';
-import { loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
+import { agentPages, loadSettings, selfRepoOf, settingsFile, type Employee, type Settings } from './settings.ts';
 import { pendingMigration } from './migrate.ts';
 import { DEVELOPER_ONLY, makersPc, stewardActs } from './maker.ts';
 import { bump } from './stages/bump.ts';
@@ -314,11 +314,11 @@ export function reposHere(settings: Settings, o: Pick<StageOptions, 'self'> = {}
   return !!checkout && existsSync(checkout);
 }
 
-/** The round's look at the staff's pages (tend.ts), through Settings' Manor page; nothing when Settings switch it off. */
+/** The round's look at the staff's pages (tend.ts), through Manor's page; nothing when Settings switch it off. */
 async function tendRound(settings: Settings, o: StageOptions, log: (line: string) => void): Promise<EmployeeResult[]> {
   if (!settings.tend) return [];
   if (process.env.NODE_TEST_CONTEXT && !o.tend) return [];
-  const manorUrl = o.tend?.manorUrl ?? settings.alarms.manorUrl;
+  const manorUrl = o.tend?.manorUrl ?? agentPages().manor;
   if (!manorUrl) return [];
   return tend({ manorUrl, getJson: o.tend?.getJson ?? getJson, open: o.tend?.open, startManor: o.tend?.startManor, wait: o.tend?.wait, now: o.now, log });
 }
@@ -686,7 +686,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         try {
           const queues = await keepVersionQueues(ctx);
           // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
-          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: ctx.settings.alarms.bailiffUrl })) log(line);
+          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
         } catch (e) {
           log(`couldn't keep the version queues: ${(e as Error).message}`);
         }

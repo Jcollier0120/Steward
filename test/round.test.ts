@@ -57,7 +57,8 @@ const r = runner((args) => {
   if (args[0] === 'release' && args[1] === 'list') return ok([...released().map((v) => ({ tagName: `v${v}`, isDraft: false })), { tagName: 'v0.4.0', isDraft: false }]);
   if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: prSha });
 });
-const round = () => runStage('round', {}, { run: r.run });
+// Manor's page, which doesn't answer here (settings.ts's agentPages would read this PC's Manor for it).
+const round = () => runStage('round', {}, { run: r.run, alarms: { manorUrl: 'http://127.0.0.1:9' } });
 const last = () => JSON.parse(readFileSync(lastStageFile(), 'utf8'));
 
 test("a round merges the team's ready PR and does what it asks: its release", async () => {

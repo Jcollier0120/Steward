@@ -97,3 +97,8 @@
   .sf-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
   .sf-panel input[type=text] { width: 100%; }
 }
+/* A long form's tab of plain settings, in a wide window: two columns, no setting split between them. A tab of records stays one to a line. */
+@media (min-width: 1100px) {
+  .sf-panel .tab-panel:not(:has(.sf-record)) { column-count: 2; column-gap: 40px; }
+  .sf-panel .tab-panel:not(:has(.sf-record)) > * { break-inside: avoid; }
+}

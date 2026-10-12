@@ -18,6 +18,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - A setting at its default no longer says "Default: … Reset to default" under it; one you've changed still does.
 - A record with a warning in it says "needs a look" on its line, and stays folded; one with an error opens, as before.
+- **web/settings-panel.css:** in a window 1100 pixels wide or more, a long form's tab of plain settings is in two columns, no setting split between them; a tab of records stays one to a line.
 - **web/settings-panel.css:** the panel's filled-button rule no longer reaches a long form's tabs. It outranked `.tab`, so every tab was filled with the accent: hard to read in the dark theme.
 
 ### For an agent

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { dataDir } from './app.ts';
 import { developerPro } from './kit/developer-pro.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
-import { manorHome, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
+import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
@@ -173,16 +173,6 @@ export interface AlarmSettings {
   waitingHours: number;
   /** A problem the Surveyor has reported this long is an alarm. */
   problemHours: number;
-  /** Manor's page, read for updates it couldn't install; empty: not read. */
-  manorUrl: string;
-  /** The Surveyor's page, read for its problems; empty: not read. */
-  surveyorUrl: string;
-  /** The Wright's page, read for the issues it got stuck on and its PRs a person reviews; empty: not read. */
-  wrightUrl: string;
-  /** The Bailiff's page, read for reviews it can't do (Claude Code unusable, a review failing); empty: not read. */
-  bailiffUrl: string;
-  /** Reeve's page, read for his jobs' open alerts (GET /api/alerts) where Reeve is installed; empty: not read. */
-  reeveUrl: string;
   /** A release the Aletaster's tasting has held this long is an alarm. */
   tastingHours: number;
 }
@@ -214,7 +204,6 @@ export const blankEmployee = (id: string, name: string): Employee => ({
  * looks after the Wright's own code only when Settings name it as an employee, as any other.
  */
 export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
-export const WRIGHT_URL = 'http://127.0.0.1:19797';
 
 /** Reeve is installed here when his home (%USERPROFILE%\.reeve, or REEVE_HOME) has an app folder: only then are his alerts read. */
 export const reeveInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.REEVE_HOME ?? path.join(os.homedir(), '.reeve'), 'app'));
@@ -227,7 +216,34 @@ export const REEVE_URL = 'http://127.0.0.1:18383';
  * it isn't, or Developer Pro isn't here, the Wright's drafts wait for a person: the manor takes on no new work without both.
  */
 export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
-export const BAILIFF_URL = 'http://127.0.0.1:19999';
+
+/** The other pages the Steward reads; empty: not read. */
+export interface AgentPages {
+  /** Manor's: updates it couldn't install, the manor-wide alarms, and the staff's pages to keep up. */
+  manor: string;
+  /** The Surveyor's problems. */
+  surveyor: string;
+  /** The issues the Wright got stuck on, and its PRs a person reviews: only where the Wright is installed. */
+  wright: string;
+  /** The reviews the Bailiff can't do: only where the Bailiff is installed. */
+  bailiff: string;
+  /** Reeve's jobs' open alerts, and the repositories he finds. */
+  reeve: string;
+}
+
+/**
+ * Each page as Manor says it (the kit's manorLink and agentUrl), read afresh: never from settings.json, where an
+ * address saved by an older Steward is ignored. An agent Manor doesn't know isn't read, as one that isn't installed.
+ */
+export function agentPages(): AgentPages {
+  return {
+    manor: manorLink()?.url ?? '',
+    surveyor: agentUrl('surveyor') ?? '',
+    wright: wrightInstalled() ? (agentUrl('wright') ?? '') : '',
+    bailiff: bailiffInstalled() ? (agentUrl('bailiff') ?? '') : '',
+    reeve: agentUrl('reeve') ?? '',
+  };
+}
 
 /**
  * The Surveyor is installed here when its home (%USERPROFILE%\.surveyor, or SURVEYOR_HOME) has an app folder: only then is
@@ -269,7 +285,7 @@ export const DEFAULT_SETTINGS: Settings = {
   byItself: false,
   roundMinutes: 10,
   mergeMinAgeMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, manorUrl: 'http://127.0.0.1:18585', surveyorUrl: 'http://127.0.0.1:19595', wrightUrl: '', bailiffUrl: '', reeveUrl: REEVE_URL, tastingHours: 6 },
+  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
   mergeTrain: true,
@@ -414,7 +430,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'team',
     kind: 'list',
     label: 'Team',
-    tab: 'Repositories',
+    tab: 'How it works',
     help: "GitHub accounts whose ready PRs are merged with yours. Empty: the account gh is signed in as, which covers Claude Code's PRs. Named here, they are the whole team, so name yours too.",
     item: { label: 'GitHub account', maxLength: 60, pattern: '(app/)?[A-Za-z0-9][A-Za-z0-9-]*', patternHint: 'a GitHub account, like octocat, or app/<name> for a GitHub App' },
     maxItems: 20,
@@ -423,45 +439,45 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'byItself',
     kind: 'switch',
     label: 'Merges and releases by itself',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "On duty, a round every few minutes merges each repository's ready PRs (where Merges PRs is on), then releases each new version. Off: only when you press a button.",
   },
-  { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'Merging and releasing', help: 'How often it looks, while on duty.' },
-  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'Merging and releasing', help: "Time to push a small fix to a PR before it merges. 0: as soon as it's ready." },
-  { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', tab: 'Merging and releasing', help: 'Off: Release is a stage of its own.' },
+  { key: 'roundMinutes', kind: 'whole', min: 2, max: 240, unit: 'minutes', label: 'A round every', tab: 'How it works', help: 'How often it looks, while on duty.' },
+  { key: 'mergeMinAgeMinutes', kind: 'whole', min: 0, max: 1440, unit: 'minutes', label: 'A PR merges once it is', tab: 'How it works', help: "Time to push a small fix to a PR before it merges. 0: as soon as it's ready." },
+  { key: 'releaseAfterMerge', kind: 'switch', label: 'Release right after merging', tab: 'How it works', help: 'Off: Release is a stage of its own.' },
   {
     key: 'catchUp',
     kind: 'switch',
     label: 'Catches PRs up with their branch',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "A ready PR held back only because its branch moved on is caught up (version lines and changelog settled), tested and merged. Any other conflict goes back to whoever wrote it.",
   },
   {
     key: 'mergeTrain',
     kind: 'switch',
     label: 'Merges ready PRs together',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "Two or more of a repository's ready PRs are stacked lowest version first, tested once and merged together. Off: one at a time.",
   },
   {
     key: 'affectedTests',
     kind: 'switch',
     label: 'Tests only what a change reaches',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "A PR's tests run only the test files its change reaches; a change to the setup runs them all. Off: the whole suite every time.",
   },
   {
     key: 'tasteBeforeRelease',
     kind: 'switch',
     label: "Waits for the Aletaster's tasting",
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "A release is published once the Aletaster's tasting of its commit lets it through. Released without one where the Aletaster isn't there to ask.",
   },
   {
     key: 'fileWork',
     kind: 'switch',
     label: 'Hands failures to the Wright',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     ...WRIGHT,
     help: "A bump or release that fails, or one of Reeve's alerts that is code work, is filed for the Wright to fix. Its alarm is raised only if the Wright can't. Off: an alarm at once.",
   },
@@ -469,21 +485,22 @@ export const SETTINGS_SCHEMA: Field[] = [
     key: 'tend',
     kind: 'switch',
     label: "Keeps the staff's pages up",
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped.",
   },
   {
     key: 'afterRelease',
     kind: 'list',
     label: 'Told after a release',
-    tab: 'Merging and releasing',
+    tab: 'How it works',
     help: "Local addresses POSTed after something is released: Manor's update check, so it installs within minutes.",
     item: { label: 'Address', maxLength: 200, pattern: 'http://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/[A-Za-z0-9/_.-]*', patternHint: 'a local address with its path, like http://127.0.0.1:18585/api/updates/check' },
     maxItems: 10,
   },
-  SOURCE_CONTROL,
+  { ...SOURCE_CONTROL, tab: 'How it works' },
   {
     key: 'workRoot',
+    tab: 'How it works',
     kind: 'text',
     label: 'Work folder',
     help: 'Where the Steward makes its worktrees, one folder per repository.',
@@ -491,9 +508,10 @@ export const SETTINGS_SCHEMA: Field[] = [
     path: { is: 'folder', missing: 'made', env: true },
     hidden: true,
   },
-  { key: 'parallel', kind: 'whole', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
+  { key: 'parallel', kind: 'whole', tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
   {
     key: 'dotnetRoot',
+    tab: 'How it works',
     kind: 'text',
     label: '.NET SDK',
     help: "A folder with dotnet.exe and an SDK, for a .NET repository's tests and release.",
@@ -505,6 +523,7 @@ export const SETTINGS_SCHEMA: Field[] = [
   {
     key: 'alarms',
     kind: 'group',
+    tab: 'How it works',
     label: 'Alarms',
     help: 'What needs you, raised once, at the top of this page and in Manor until it clears.',
     fields: [
@@ -513,17 +532,12 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
-      // Where the other pages are: found by the Steward, there to fix.
-      { key: 'manorUrl', kind: 'text', label: "Manor's page", help: "For updates it couldn't install, and the staff's pages to keep up.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18585', hidden: true },
-      { key: 'surveyorUrl', kind: 'text', label: "The Surveyor's page", help: 'For its problems.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19595', hidden: true },
-      { key: 'reeveUrl', kind: 'text', label: "Reeve's page", help: "For his jobs' open alerts.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:18383', hidden: true },
-      { key: 'wrightUrl', kind: 'text', label: "The Wright's page", help: 'For the issues it got stuck on, and its PRs a person reviews.', empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19797', ...WRIGHT, hidden: true },
-      { key: 'bailiffUrl', kind: 'text', label: "The Bailiff's page", help: "For the reviews it can't do.", empty: 'Not read', maxLength: 100, pattern: 'https?://(127\\.0\\.0\\.1|localhost|[a-z0-9-]+\\.localhost)(:\\d+)?/?', patternHint: 'a local address, like http://127.0.0.1:19999', ...WRIGHT, hidden: true },
     ],
   },
   {
     key: 'wrightReview',
     kind: 'group',
+    tab: 'How it works',
     label: "The Wright's drafts",
     ...WRIGHT,
     help: "Each of the Wright's drafts the Steward looks at: one that passes (small enough, nothing a person reviews, the Bailiff's approval where it is installed) is marked ready and merged; one that doesn't says why.",
@@ -533,7 +547,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file matching one of these waits for you (* any part of a name, ** any folders). Claude Code's settings, secrets and the guards always wait too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
   },
-  { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC.', readOnly: true, tab: "The Wright's drafts", ...WRIGHT, hidden: true },
+  { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC.', readOnly: true, tab: 'How it works', ...WRIGHT, hidden: true },
   {
     key: 'rollout',
     kind: 'switch',
@@ -613,8 +627,6 @@ function normalizeEmployee(e: any): Employee | null {
   };
 }
 
-const LOCAL_URL = /^https?:\/\/(127\.0\.0\.1|localhost|[a-z0-9-]+\.localhost)(:\d+)?\/?$/;
-
 function normalizeAlarms(raw: unknown): AlarmSettings {
   const a = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS.alarms;
@@ -622,20 +634,11 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : Number.NaN;
     return Number.isInteger(n) ? Math.min(max, Math.max(min, n)) : fallback;
   };
-  const url = (v: unknown, fallback: string) => (typeof v === 'string' && (v.trim() === '' || LOCAL_URL.test(v.trim())) ? v.trim() : fallback);
   return {
     on: typeof a.on === 'boolean' ? a.on : d.on,
     toast: typeof a.toast === 'boolean' ? a.toast : d.toast,
     waitingHours: whole(a.waitingHours, 1, 168, d.waitingHours),
     problemHours: whole(a.problemHours, 1, 168, d.problemHours),
-    manorUrl: url(a.manorUrl, d.manorUrl),
-    surveyorUrl: url(a.surveyorUrl, d.surveyorUrl),
-    // Not named in settings.json: the Wright's page where it is installed, else none (it is ours alone).
-    // Read only where it is installed: a page Settings still name after it's removed would be "down" for ever.
-    wrightUrl: !wrightInstalled() ? '' : a.wrightUrl === undefined ? WRIGHT_URL : url(a.wrightUrl, d.wrightUrl),
-    // The same for the Bailiff's.
-    bailiffUrl: !bailiffInstalled() ? '' : a.bailiffUrl === undefined ? BAILIFF_URL : url(a.bailiffUrl, d.bailiffUrl),
-    reeveUrl: url(a.reeveUrl, d.reeveUrl),
     tastingHours: whole(a.tastingHours, 1, 168, d.tastingHours),
   };
 }

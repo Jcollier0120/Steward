@@ -166,10 +166,10 @@ test("a round on the person's PC: their PRs merged only where they said yes, a n
 test('no Surveyor installed: no alarm that its page is down, however long', async () => {
   const s = loadSettings();
   const now = new Date(Date.now() + 48 * 3600_000);
-  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null });
+  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' } });
   assert.ok(!Object.keys(state.watching).some((id) => id.startsWith('surveyor:')), JSON.stringify(state.watching));
   // Where it is installed, its page down is watched as before.
-  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, surveyorInstalled: () => true });
+  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true });
   assert.ok('surveyor:down' in watched.watching);
 });
 
