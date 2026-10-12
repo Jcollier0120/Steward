@@ -14,6 +14,28 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 Nothing: it updates itself as usual.
+
+## 0.35.36
+
+**The Steward's page, and every agent's once it takes kit 2.57.1, answers at once, even on a busy PC.**
+
+### What changed
+
+- While you have an agent's page open, the agent works at normal speed, so the page answers at once even when its background work runs gently or the PC is busy with something else. A minute after you stop using it, it goes back to working gently. A tab left open in the background doesn't count.
+- Each page now also answers where browsers ask first (IPv6's ::1), so opening it, and its first request, no longer wait about a third of a second before the browser tries again.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.35
+
+**Your staff start the usual way: Castellan, in Windows' Startup apps, starts them, not a hidden task each.**
+
+### What changed
+
+- The Steward's kit 2.57.0. Where Castellan is in Windows' Startup apps, an employee no longer starts from a hidden sign-in task of its own: Castellan starts at sign-in and starts your staff one at a time. Each employee moves over as it takes this kit. Turned off in Startup apps, Castellan and your staff start when you open Castellan instead.
+
 ## 0.35.34
 
 **A restart in the middle of a test run no longer holds PRs back.**

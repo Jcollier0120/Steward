@@ -89,7 +89,8 @@ export async function post(path: string, body?: unknown): Promise<{ ok: boolean;
 /**
  * The page's data, kept current: every few seconds while busy, every `refreshSec` otherwise (0: never), at once after a
  * button (`reload`), and when /api/ping says a round started or ended. A look that fails keeps what the page has; the
- * next one tries again.
+ * next one tries again. While its tab is hidden it doesn't look at all (kit 2.57.1): a page someone is using keeps its
+ * agent at a normal pace (the kit's gentle.ts pageInUse()), and one nobody sees shouldn't; shown again, it looks at once.
  */
 export function usePageData<Body>(): { data: PageData<Body>; reload: () => Promise<void> } {
   const [data, setData] = useState<PageData<Body>>(initialData<Body>);
@@ -109,14 +110,24 @@ export function usePageData<Body>(): { data: PageData<Body>; reload: () => Promi
   const every = data.shell.busy ? BUSY_LOOK_MS : data.shell.refreshSec * 1000;
   useEffect(() => {
     if (!every) return;
-    const t = setInterval(() => void reload(), every);
+    const t = setInterval(() => {
+      if (!document.hidden) void reload();
+    }, every);
     return () => clearInterval(t);
   }, [every, reload]);
+  useEffect(() => {
+    const shown = () => {
+      if (!document.hidden) void reload();
+    };
+    document.addEventListener('visibilitychange', shown);
+    return () => document.removeEventListener('visibilitychange', shown);
+  }, [reload]);
   // A round that starts or ends by itself: news, whatever the page is doing (nothing here reloads it, so typing,
   // Settings and the Theme menu are safe). So is the manor's Developer options flipped in Manor (ping's `developer`).
   useEffect(() => {
     let seen: string | null = null;
     const look = async () => {
+      if (document.hidden) return;
       try {
         const r = await fetch('/api/ping', { cache: 'no-store' });
         if (!r.ok) return;

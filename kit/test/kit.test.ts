@@ -72,6 +72,25 @@ test('the server pings as this app, guards hosts and actions, and records its to
   }
 });
 
+test('the page answers on ::1 too, with the same host check, and stops there when it closes', async () => {
+  const http = await import('node:http');
+  const onV6 = (host: string) =>
+    new Promise<number | string>((resolve) => {
+      const req = http.get({ host: '::1', port, path: '/api/ping', headers: { host }, timeout: 2000 }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+      req.on('error', (e: NodeJS.ErrnoException) => resolve(e.code ?? 'error'));
+    });
+  const { close } = await serve({ port, icon: '<svg/>' });
+  try {
+    const status = await onV6(`localhost:${port}`);
+    if (status === 'EADDRNOTAVAIL' || status === 'EAFNOSUPPORT') return; // a PC without IPv6: nothing to show
+    assert.equal(status, 200, 'a browser asking ::1 first is answered at once');
+    assert.equal(await onV6(`elsewhere.example:${port}`), 421, 'another host is refused there as on 127.0.0.1');
+  } finally {
+    await close();
+  }
+  assert.match(String(await onV6(`localhost:${port}`)), /^ECONN(REFUSED|RESET)$/, 'closed on both: nothing answers there');
+});
+
 test("rounds are recorded: the last to end and whether it went through, the next due, one under way; ping gives them", async () => {
   setDuty(true);
   let fail = false;
