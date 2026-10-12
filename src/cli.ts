@@ -22,6 +22,7 @@ import { askRoundSoon, vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
+import { type Change, entryLine, heldRecalls, parseVersions, readSigned, recallKey, sendChange } from './recalls.ts';
 
 const USAGE = `${APP.id}: ${APP.role}
 
@@ -97,6 +98,16 @@ const USAGE = `${APP.id}: ${APP.role}
   release-port <agent id>
                    give a claimed port back (the agent was dropped)
   ports [--json]   every port in use or claimed, by whom and where it says so, and any two agents on one
+  recall <agent id> --why "<words>" [--versions 0.4.26 | 0.4.20..0.4.26 | ..0.4.26 | 0.4.20..] [--instead <agent id>] [--dry-run]
+                   take versions of an employee back from every manor: each stops it at once, updates it to a
+                   version outside them where there is one, else takes its program off (its settings and data
+                   kept), and never installs them again. --why is what the person whose PC it is reads.
+                   No --versions: every version (it's retired too). Signed with .stewardecall-signing-key.pem
+  retire <agent id> --why "<words>" [--instead <agent id>] [--dry-run]
+                   stop offering an employee in every manor; one at work goes on, its card saying why
+  lift-recall <agent id> [--dry-run]
+                   take an employee's recalls and retirement off the list
+  recalls [--json] the recall list every manor reads now
   mine <employee> <#pr | v<version>> ...
                    mark a merge of one of the Steward's PRs, or a release, as yours, done by hand: on the PC
                    that releases Castellan, the alarm for merges and releases no round here made never
@@ -170,6 +181,10 @@ const MAKERS_COMMANDS: Record<string, string> = {
   'release-port': "Giving back a port of Castellan's agents",
   ports: "The ports of Castellan's agents",
   mine: "Marking Castellan's merges and releases as done by hand",
+  recall: "Recalling an employee of Castellan's",
+  retire: "Retiring an employee of Castellan's",
+  'lift-recall': "Lifting a recall of Castellan's",
+  recalls: "Castellan's recall list",
 };
 
 async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Promise<number> {
@@ -419,6 +434,52 @@ switch (cmd) {
         console.error(r.error);
         process.exitCode = 2;
       } else console.log(`${e.name} ${ref}: yours, never counted as someone else's.`);
+    }
+    break;
+  }
+  case 'recall':
+  case 'retire':
+  case 'lift-recall': {
+    const id = rest[0] && !rest[0].startsWith('--') ? rest[0] : '';
+    const why = opt(rest, '--why') ?? '';
+    const known = cmd === 'lift-recall' ? ['--dry-run'] : cmd === 'retire' ? ['--why', '--instead', '--dry-run'] : ['--why', '--versions', '--instead', '--dry-run'];
+    const bad = rest.slice(1).filter((a, i, all) => a.startsWith('--') && !known.includes(a) && !['--why', '--versions', '--instead'].includes(all[i - 1] ?? ''));
+    if (!id || bad.length) {
+      console.error(`${cmd} takes an agent id, then ${known.join(' ')}${bad.length ? `; not ${bad.join(' ')}` : ''}: ${cmd === 'lift-recall' ? 'lift-recall porter' : `${cmd} porter --why "It could delete files it should have kept."`}`);
+      process.exitCode = 2;
+      break;
+    }
+    try {
+      const versions = opt(rest, '--versions');
+      const instead = opt(rest, '--instead');
+      const change: Change =
+        cmd === 'lift-recall' ? { kind: 'lift', id } : cmd === 'retire' ? { kind: 'retire', id, why, ...(instead ? { instead } : {}) } : { kind: 'recall', id, why, ...(versions ? { versions: parseVersions(versions) } : {}), ...(instead ? { instead } : {}) };
+      const { list, sent } = await sendChange(change, { dryRun: rest.includes('--dry-run') });
+      console.log(sent ? `The recall list is number ${list.seq} now; every manor has it within about 10 minutes:` : `Not sent (--dry-run). List number ${list.seq} would be:`);
+      for (const e of list.entries) console.log(`  ${entryLine(e)}`);
+      if (!list.entries.length) console.log('  (empty: nothing retired or recalled)');
+    } catch (e) {
+      console.error((e as Error).message);
+      process.exitCode = 1;
+    }
+    break;
+  }
+  case 'recalls': {
+    try {
+      const held = await heldRecalls();
+      const k = recallKey();
+      const list = held && !('missing' in k) ? readSigned(held, k.key) : null;
+      if (rest.includes('--json')) console.log(JSON.stringify(list, null, 2));
+      else if (!held) console.log('The Exchequer holds no recall list yet: nothing is retired or recalled.');
+      else if (!list) console.log("The Exchequer holds a recall list, but there's no recall key on this PC to check it with.");
+      else {
+        console.log(`Recall list number ${list.seq}, signed ${new Date(list.iat * 1000).toISOString()}:`);
+        for (const e of list.entries) console.log(`  ${entryLine(e)}`);
+        if (!list.entries.length) console.log('  (empty: nothing retired or recalled)');
+      }
+    } catch (e) {
+      console.error((e as Error).message);
+      process.exitCode = 1;
     }
     break;
   }
