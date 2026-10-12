@@ -16,7 +16,7 @@ process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, TASK_NAME, appFolder, homePageTaskXml, install, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, MANOR_STARTUP, TASK_NAME, appFolder, homePageTaskXml, install, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -135,6 +135,31 @@ test('the sign-in task runs open from app at sign-in, hidden, with no time limit
 });
 
 // ---------------------------------------------------------------- install
+
+test("with Castellan in Startup apps, Manor starts the staff: the task has no sign-in trigger, and runs only when asked", async () => {
+  const xml = homePageTaskXml({ node: 'C:\\node.exe', app: 'C:\\Users\\pat\\.agent\\app', user: 'PC\\pat', pageUrl: 'http://agent.localhost:1/', atSignIn: false });
+  assert.doesNotMatch(xml, /LogonTrigger/);
+  assert.match(xml, /<Triggers><\/Triggers>/);
+  assert.match(xml, /Castellan starts it at sign-in/);
+  assert.equal(MANOR_STARTUP.key, 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run');
+  assert.equal(MANOR_STARTUP.value, 'Castellan', "Manor's install.ts STARTUP_VALUE");
+
+  const p = place();
+  const f = fakes({ root: p.release, data: p.data });
+  f.deps.manorStarts = async () => true;
+  assert.equal(await install({}, f.deps), 0);
+  const registered = readFileSync(taskXmlFile(p.data)).subarray(2).toString('utf16le');
+  assert.doesNotMatch(registered, /LogonTrigger/, 'Manor starts it at sign-in');
+  assert.deepEqual(verbs(f.calls), ['/Create', '/Run'], 'the install still starts it through its task');
+  assert.ok(f.lines.some((l) => /task: .+ \(open, when asked: Manor starts it at sign-in\)/.test(l)));
+
+  // Without Manor's entry: at sign-in, as before.
+  const q = place();
+  const g = fakes({ root: q.release, data: q.data });
+  g.deps.manorStarts = async () => false;
+  assert.equal(await install({}, g.deps), 0);
+  assert.match(readFileSync(taskXmlFile(q.data)).subarray(2).toString('utf16le'), /<LogonTrigger>/);
+});
 
 test('a fresh install copies the release to app, goes on duty, registers the task and runs it', async () => {
   const p = place();

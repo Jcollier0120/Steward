@@ -8,10 +8,11 @@ import { pageAt, ping, shutdown } from './service.ts';
 
 /**
  * Installing from a release, as each of Manor's agents does on its own (Manor's docs/INSTALLING.md):
- * - install copies the release it runs from to <data folder>\app, and registers one sign-in task,
+ * - install copies the release it runs from to <data folder>\app, and registers one task,
  *   \<Name>\Home page, that runs `open`. `open` never changes duty, so an agent stopped in Manor stays
  *   stopped after a restart. It's the only task: the rounds still run inside the page process, so
- *   Stop in Manor still stops the work.
+ *   Stop in Manor still stops the work. It runs at sign-in only where Manor doesn't start its staff: with Castellan in
+ *   Windows' Startup apps (MANOR_STARTUP, kit 2.57.0) Manor starts it, and the task runs only when an install asks.
  * - uninstall ends the page process, deletes the task and removes app; --purge also removes the data.
  * A development checkout does neither: its own data is the -dev folder, and code reaches app only
  * through a release.
@@ -23,6 +24,15 @@ export const TASK_NAME = `\\${APP.name}\\Home page`;
 /** conhost --headless gives node its console without a window; the task's "Hidden" only hides it in the UI. */
 export const CONHOST = 'C:\\Windows\\System32\\conhost.exe';
 const SCHTASKS = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'schtasks.exe');
+const REG = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+
+/**
+ * Manor's entry in Windows' Startup apps (Manor's install.ts STARTUP_KEY and STARTUP_VALUE, from Manor 0.16.120): there,
+ * Castellan starts Manor at sign-in and Manor starts its staff, one at a time, so an agent's own task has no sign-in
+ * trigger. Turned off in Startup apps, the value stays (Windows keeps that choice apart), and nothing starts: the
+ * person's choice.
+ */
+export const MANOR_STARTUP = { key: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', value: 'Castellan' };
 
 export const DEV_CHECKOUT = 'This is a development checkout. Build a release and install that: npm run release -- --install';
 
@@ -70,6 +80,8 @@ export interface InstallDeps {
   running?(): Promise<boolean>;
   /** Ends the installed copy's page process (the kit's shutdown). */
   shutdown(): Promise<number>;
+  /** Whether Manor starts its staff at sign-in (MANOR_STARTUP is there). Unset: no, and the task starts it as before. */
+  manorStarts?(): Promise<boolean>;
   onDuty(): boolean;
   setDuty(on: boolean): void;
   sleep(ms: number): Promise<void>;
@@ -112,22 +124,28 @@ export function signInDelaySeconds(id: string): number {
  * Reeve's task (its src/jobs/schedule.ts), at this user's sign-in: only while the user is logged on
  * (an interactive token needs no stored password or admin), on battery too, one instance at a time,
  * hidden, below-normal priority, and no time limit. It waits signInDelaySeconds after sign-in, and a start that
- * fails is tried again every minute, five times (kit 2.51.0).
+ * fails is tried again every minute, five times (kit 2.51.0). With `atSignIn: false` (Manor starts its staff,
+ * MANOR_STARTUP) it has no trigger: it runs only when asked (schtasks /Run).
  */
-export function homePageTaskXml(o: { node: string; app: string; user: string; pageUrl: string; id?: string }): string {
-  return `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>${xmlEscape(`Brings ${APP.name}'s home page up at ${o.pageUrl} when you sign in. It runs open, which never changes duty. Remove with: node ${cliIn(o.app)} uninstall`)}</Description>
-    <URI>${xmlEscape(TASK_NAME)}</URI>
-  </RegistrationInfo>
-  <Triggers>
+export function homePageTaskXml(o: { node: string; app: string; user: string; pageUrl: string; id?: string; atSignIn?: boolean }): string {
+  const atSignIn = o.atSignIn ?? true;
+  const when = atSignIn ? 'when you sign in' : 'when an install asks (Castellan starts it at sign-in)';
+  const trigger = atSignIn
+    ? `
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>${xmlEscape(o.user)}</UserId>
       <Delay>PT${signInDelaySeconds(o.id ?? APP.id)}S</Delay>
     </LogonTrigger>
-  </Triggers>
+  `
+    : '';
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>${xmlEscape(`Brings ${APP.name}'s home page up at ${o.pageUrl} ${when}. It runs open, which never changes duty. Remove with: node ${cliIn(o.app)} uninstall`)}</Description>
+    <URI>${xmlEscape(TASK_NAME)}</URI>
+  </RegistrationInfo>
+  <Triggers>${trigger}</Triggers>
   <Principals>
     <Principal id="Author">
       <UserId>${xmlEscape(o.user)}</UserId>
@@ -261,11 +279,14 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
   const create = ['/Create', '/TN', TASK_NAME, '/XML', xmlFile, '/F'];
   const what = `${APP.name} ${release.version}${release.dirty ? ' (built with uncommitted changes)' : ''}`;
 
+  // Manor starts its staff at sign-in (Castellan in Startup apps): the task then runs only when asked.
+  const manorStarts = (await d.manorStarts?.()) ?? false;
+
   if (opts.dryRun) {
     out(`${what} from ${d.root}: ${update ? `would update the installed copy${before ? ` (${before.version})` : ''}` : 'would install it'}.`);
     out(`  1. End its page process, if it's running (${d.pageUrl}).`);
     out(`  2. Copy the release to ${app}.new, then swap it in for ${app}.`);
-    out(`  3. Register the sign-in task ${TASK_NAME} for ${d.user}: ${SCHTASKS} ${quoted(create)}`);
+    out(`  3. Register the task ${TASK_NAME} for ${d.user}, ${manorStarts ? 'run only when asked: Manor starts it at sign-in (Castellan is in Startup apps)' : 'at sign-in'}: ${SCHTASKS} ${quoted(create)}`);
     out(`     It runs: ${CONHOST} ${taskArguments(d.node, app)}`);
     out(`     In: ${app}`);
     out(opts.noStart ? '  4. Leave it stopped (--no-start).' : `  4. ${update ? 'Keep its duty' : 'Put it on duty'}, run the task, and wait for its page at ${d.pageUrl}.`);
@@ -336,7 +357,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     }
   }
 
-  writeFileSync(xmlFile, utf16(homePageTaskXml({ node: d.node, app, user: d.user, pageUrl: d.pageUrl })));
+  writeFileSync(xmlFile, utf16(homePageTaskXml({ node: d.node, app, user: d.user, pageUrl: d.pageUrl, atSignIn: !manorStarts })));
   const created = await d.schtasks(create);
   if (created.code !== 0) {
     out(`${app} is in place, but schtasks couldn't register ${TASK_NAME}:\n${created.out}`);
@@ -360,7 +381,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
   out(`${what} ${update ? `updated${before && before.version !== release.version ? ` from ${before.version}` : ''}` : 'installed'}.`);
   out(`  app:  ${app}`);
   out(`  data: ${d.dataDir}`);
-  out(`  task: ${TASK_NAME} (at sign-in: open)`);
+  out(`  task: ${TASK_NAME} (${manorStarts ? 'open, when asked: Manor starts it at sign-in' : 'at sign-in: open'})`);
   out(`  page: ${d.pageUrl} (${started})`);
   out(`  duty: ${d.onDuty() ? 'on duty' : 'off duty'}${update ? ', as it was' : ''}`);
   return opts.noStart || up ? 0 : 1;
@@ -450,6 +471,7 @@ export function defaultDeps(): InstallDeps {
     ping: async () => (await ping()) !== null,
     running: async () => (await pageAt()) !== null,
     shutdown,
+    manorStarts: async () => (await run(REG, ['query', MANOR_STARTUP.key, '/v', MANOR_STARTUP.value])).code === 0,
     onDuty: () => duty().onDuty,
     setDuty: (on) => void setDuty(on),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),

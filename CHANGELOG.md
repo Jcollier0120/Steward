@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.35
+
+**Your staff start the usual way: Castellan, in Windows' Startup apps, starts them, not a hidden task each.**
+
+### What changed
+
+- The Steward's kit 2.57.0. Where Castellan is in Windows' Startup apps, an employee no longer starts from a hidden sign-in task of its own: Castellan starts at sign-in and starts your staff one at a time. Each employee moves over as it takes this kit. Turned off in Startup apps, Castellan and your staff start when you open Castellan instead.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.31
 
 **The Steward starts far fewer programs: about half as many for each fetch, and none for a pull request it already has.**
