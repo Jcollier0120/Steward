@@ -101,8 +101,13 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const rows = [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', parts: ['node'], usesKit: true, branch: 'main', checkout: { path: home, exists: true, branch: 'main', changes: 0 }, main: null, release: null, releaseNeeded: false, prs: [], prepared: null, notes: [] }];
   const withOne = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true } });
   assert.match(withOne, /The kit the Steward hands out: <strong>1\.0\.0<\/strong>/);
-  for (const stage of ['bump', 'push', 'merge', 'release', 'merge-team']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
-  assert.match(withOne, />Merge the team(&#x27;|')s PRs</);
+  for (const stage of ['bump', 'push', 'merge', 'release']) assert.match(withOne, new RegExp(`data-post="/api/stage/${stage}"[^>]*>`));
+  // Merge the team's PRs only once Settings name a team: the account gh is signed in as alone is none.
+  assert.doesNotMatch(withOne, /data-post="\/api\/stage\/merge-team"/);
+  assert.doesNotMatch((await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['me'], teamNote: 'Team is empty in Settings: the account gh is signed in as (me).' }), /merge-team/);
+  const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
+  assert.match(withTeam, /data-post="\/api\/stage\/merge-team"[^>]*>/);
+  assert.match(withTeam, />Merge the team(&#x27;|')s PRs</);
   // By itself (Settings' default): its rounds; and Run now, in the title bar.
   assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);

@@ -6,6 +6,7 @@ import type { GetJson } from './alarms.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { manorHome, manorOwn, manorProjects, originRepo, projectsFrom } from './kit/manor.ts';
 import { originUrl, repoFromUrl } from './scm.ts';
+import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
@@ -275,7 +276,14 @@ export function lookAfter(repo: string, o: { merges: boolean; release: boolean; 
     return { error: `${repo} isn't one Reeve found here that you can push to. Refresh the list, or add it in Settings.` };
   }
   // Its id never one of Castellan's agents' (porter-2 for a repository of yours called porter), off the maker's laptop.
-  const employee = employeeFromFound(r, { taken: [...current.map((e) => e.id), ...(makers ? [] : makersIds())], merges: o.merges, release: o.release });
+  // An agent with the kit (kit.json and who it is, on its branch) is taken on as a hire is (employ.ts): on the kit's
+  // stages, filled, tested, released and installed, merging and releasing only as asked. Only where the Steward releases
+  // Castellan: elsewhere its employees are never on the kit (settings.ts). Anything else, as it is.
+  const hired = own.releasesCastellan ? employeeFor(r.path, current, { branch: r.branch, makers, origin: () => r.repo }) : null;
+  const employee =
+    hired && 'employee' in hired && hired.kitParts !== null
+      ? { ...hired.employee, merges: o.merges, release: o.release ? hired.employee.release : '' }
+      : employeeFromFound(r, { taken: [...current.map((e) => e.id), ...(makers ? [] : makersIds())], merges: o.merges, release: o.release });
   if (intoManor) {
     const refused = addToManor(employee, home);
     return refused ? { error: refused } : { employee };

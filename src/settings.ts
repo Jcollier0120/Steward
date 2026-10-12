@@ -7,6 +7,7 @@ import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { manorHome, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
+import { takeOntoKit } from './employ.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
@@ -807,6 +808,8 @@ export function loadSettings(): Settings {
   migrateSettings({ settingsFile: settingsFile(), staffFile: dataFile('staff.json') });
   // And until Settings are saved, what it couldn't fill in is looked for again, every few minutes.
   fillMigrationGaps({ settingsFile: settingsFile() });
+  // And every few minutes, an employee that carries the kit but was taken on without it goes onto it (employ.ts).
+  takeOntoKit({ settingsFile: settingsFile() });
   // Once, for an install from before the Steward looked after anyone's repositories: today's behaviour, written out.
   migrateToOwnRepos({ settingsFile: settingsFile(), dataDir });
   // Off the maker's laptop releasesCastellan reads as off whatever the file says (normalizeSettings); the file itself is
