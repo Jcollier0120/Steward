@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.28
+
+**Your agents now take turns: a few at a time, and fewer while the PC is busy.**
+
+### What's new
+
+- **A few agents at a time.** Agents that take this kit (2.56.0) run their scheduled rounds a few at a time instead of all at once: two at a time at a gentle background pace, four at full power. The rest wait their turn and follow as soon as one finishes. While your PC is busy or short of memory, they go one at a time.
+- Each round now notes how much processor time and memory it used, and how long it waited its turn, so it's easy to see which agents are the heavy ones.
+
+### What changed
+
+- Run now still starts a round straight away, whatever else is running.
+- The Steward hands out kit 2.56.0. Each agent changes once it takes the new kit and is released.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor's Settings will get a setting for how many agents work at once; until then, the defaults above apply.
+
 ## 0.35.27
 
 **Two stages at once: press Release while a round is running, and it starts straight away.**

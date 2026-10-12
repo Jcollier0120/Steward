@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { lockDirFor } from './lock.ts';
 import { manorHome } from './manor.ts';
-import { withAcceleratorTurn } from './npu-queue.ts';
+import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 
 /**
  * The manor's pace (kit 2.43.3, spec/ROUND.md's "Pace"): how the agents' scheduled rounds share this PC, so they never
@@ -18,7 +18,11 @@ import { withAcceleratorTurn } from './npu-queue.ts';
  *     come, first served, and a holder whose process has gone gives up its place at once.
  *   - **Below-normal priority.** A scheduled round runs at below-normal priority, and so does every program it starts
  *     (Windows gives a below-normal process's children its class), so it gives way to whatever the person is doing.
- * - **full**: as before kit 2.43.3: normal priority, and no line.
+ * - **full**: as before kit 2.43.3: normal priority, and no first-round line.
+ *
+ * Either way, the agents' scheduled rounds share **the work line** (kit 2.56.0): as many run side by side as Manor's
+ * `"agentsAtOnce"` says (2 at a gentle pace, 4 at a full one, unless it says), and only one at a time while the PC is
+ * busy or short of memory; the rest wait their turn, first come, first served.
  *
  * A round the person asked for (Run now) never waits in the line, and runs at normal priority: someone is waiting on it.
  * What Heiward adds in the background (Windows' efficiency mode, a very low disk priority, a hard cap on the processor)
@@ -48,13 +52,18 @@ export const FIRST_ROUND_WAITING = "its first round: the agents before it are do
 export function pace(own: Pace = 'gentle', home = manorHome(), env: NodeJS.ProcessEnv = process.env): Pace {
   if (env.MANOR_PACE === 'gentle' || env.MANOR_PACE === 'full') return env.MANOR_PACE;
   if (env.NODE_TEST_CONTEXT) return 'full';
+  const v = manorSetting(home, 'backgroundPace');
+  return v === 'gentle' || v === 'full' ? v : own;
+}
+
+/** One key of Manor's settings.json, when Manor is installed and the file can be read; undefined otherwise. */
+function manorSetting(home: string, key: string): unknown {
   const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return own;
+  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return undefined;
   try {
-    const v = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''))?.backgroundPace;
-    return v === 'gentle' || v === 'full' ? v : own;
+    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''))?.[key];
   } catch {
-    return own;
+    return undefined;
   }
 }
 
@@ -99,4 +108,103 @@ export async function inFirstRoundTurn<T>(p: Pace, first: boolean, fn: () => Pro
   } finally {
     if (inLine) o.onWait?.(false);
   }
+}
+
+/**
+ * How many agents' scheduled rounds may run side by side on this PC (kit 2.56.0) when Manor doesn't say: two at a
+ * gentle pace, four at a full one. Manor's `"agentsAtOnce"` says otherwise, from 1 to `most`; 0 lifts the line.
+ */
+export const AGENTS_AT_ONCE = { gentle: 2, full: 4, most: 6 } as const;
+
+/** What a round that waited its turn in the work line until its next was due says it waited for (round.json's waiting). */
+export const WORK_WAITING = 'its turn: as many agents as the manor allows at once were working already';
+
+/** The work line's lock folder (`<locks>\work`, its other slots `work.2` …), beside the accelerators'. */
+export const workLockDir = () => lockDirFor('work');
+
+/**
+ * How many slots the work line has now: Manor's settings.json `"agentsAtOnce"` (a whole number, 1 to
+ * AGENTS_AT_ONCE.most) when Manor is installed and says, else the pace's default. Null when there is no line: Manor
+ * says 0, or `MANOR_AGENTS_AT_ONCE` does (which, when set, says instead of Manor), or under node --test unless it says.
+ * Read afresh each round, so a change in Manor's Settings applies from the next one.
+ */
+export function agentsAtOnce(p: Pace, home = manorHome(), env: NodeJS.ProcessEnv = process.env): number | null {
+  const slots = (v: unknown): number | null | undefined => {
+    const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+    return n < 0.5 ? null : Math.min(AGENTS_AT_ONCE.most, Math.round(n));
+  };
+  const own = slots(env.MANOR_AGENTS_AT_ONCE);
+  if (own !== undefined) return own;
+  if (env.NODE_TEST_CONTEXT) return null;
+  const said = slots(manorSetting(home, 'agentsAtOnce'));
+  return said !== undefined ? said : AGENTS_AT_ONCE[p];
+}
+
+/** How busy this PC is: the share of the processor in use (0 to 1) over the last moment, and of memory free. */
+export interface Load {
+  busy: number;
+  freeMemory: number;
+}
+
+/**
+ * When the work line offers fewer slots than it has: one at a time once the processor is `busy` or memory is short
+ * (`lowMemory` free), and half of them (rounded up) once it is `someBusy`.
+ */
+export const LOAD = { busy: 0.6, someBusy: 0.35, lowMemory: 0.15 };
+
+/** The slots of `slots` a round may take at `load`: all of them on a quiet PC, fewer on a busy one, and one at least. */
+export function slotsFor(slots: number, load: Load): number {
+  if (slots <= 1 || load.busy >= LOAD.busy || load.freeMemory < LOAD.lowMemory) return 1;
+  return load.busy >= LOAD.someBusy ? Math.ceil(slots / 2) : slots;
+}
+
+interface CpuTimes {
+  idle: number;
+  total: number;
+}
+
+const cpuTimes = (): CpuTimes => {
+  let idle = 0;
+  let total = 0;
+  for (const { times: t } of os.cpus()) {
+    idle += t.idle;
+    total += t.user + t.nice + t.sys + t.idle + t.irq;
+  }
+  return { idle, total };
+};
+
+/**
+ * This PC's load now, from Node's own counters (no program started): the processor's use over `sampleMs`, and the
+ * memory free. Every agent on the PC counts, those in the work line's other slots too, which is the point.
+ */
+export async function measureLoad(sampleMs = 1000): Promise<Load> {
+  const before = cpuTimes();
+  await new Promise((r) => setTimeout(r, sampleMs));
+  const after = cpuTimes();
+  const total = after.total - before.total;
+  const busy = total > 0 ? 1 - (after.idle - before.idle) / total : 0;
+  return { busy: Math.min(1, Math.max(0, busy)), freeMemory: os.freemem() / Math.max(1, os.totalmem()) };
+}
+
+/**
+ * Runs a scheduled round in its turn in the work line (kit 2.56.0): at once when one of the slots it may take is free,
+ * else when one is, first come, first served with the other agents' rounds. It may take every slot (agentsAtOnce())
+ * on a quiet PC, and fewer on a busy one (slotsFor()), so a busy PC runs one round at a time. The holder keeps its slot
+ * for its round's time limit (`limitMs`), and one whose process has gone gives it up at once (the kit's lock rules).
+ * After `waitMs` in line it throws the line's LockTimeout, which every() takes as a round that waited. `slots` and
+ * `load` are for tests.
+ */
+export async function inWorkTurn<T>(p: Pace, fn: () => Promise<T>, o: { who: string; limitMs: number; waitMs: number; doing?: string; dir?: string; slots?: number | null; load?: () => Promise<Load> }): Promise<T> {
+  const slots = o.slots !== undefined ? o.slots : agentsAtOnce(p);
+  if (slots === null) return fn();
+  const load = slots > 1 ? await (o.load ?? measureLoad)().catch(() => null) : null;
+  const offered = load ? slotsFor(slots, load) : slots;
+  return withAcceleratorTurn(slotDirs(o.dir ?? workLockDir(), offered), () => fn(), {
+    lane: 'background',
+    who: o.who,
+    ...(o.doing ? { doing: o.doing.slice(0, 80) } : {}),
+    waitMs: o.waitMs,
+    staleMs: o.limitMs,
+  });
 }

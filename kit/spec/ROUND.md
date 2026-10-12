@@ -33,11 +33,14 @@ Every agent that runs its rounds with the kit's scheduler leaves each round's ou
 | `finished` | ISO 8601 (UTC) | When it ended, whether or not it went through. |
 | `ok` | boolean or null | `true` when the round went through, `false` when it threw or ran past its time limit. `null` when it threw only because this PC was offline (kit 2.15.0, OFFLINE.md): it waited for the network, and is no failure; or when it was held for the agent's required settings (`waiting`, kit 2.34.0). |
 | `offline` | true, or absent | `true` when `ok` is null: the round waited for the network. Absent otherwise. Since kit 2.15.0. |
-| `waiting` | string, or absent | The round was held for the agent's required settings (onboarding's `required`), and ran nothing: what it waits for, in words ("Thunderbird or Mail accounts"), as `/api/ping`'s `needsSettings.text`. `ok` is null, `error` null and `next` null; `started` and `finished` are when it was held. Absent otherwise. Since kit 2.34.0. |
+| `waiting` | string, or absent | The round was held for the agent's required settings (onboarding's `required`), and ran nothing: what it waits for, in words ("Thunderbird or Mail accounts"), as `/api/ping`'s `needsSettings.text`. `ok` is null, `error` null and `next` null; `started` and `finished` are when it was held. Absent otherwise. Since kit 2.34.0. Also a round whose turn didn't come in the first-round line (kit 2.43.3) or the work line (kit 2.56.0) before its next was due: see Pace. |
 | `timedOut` | true, or absent | `true` when the round ran past its time limit (three intervals and at least two hours, unless the agent gives its own) and was let go: `ok` is false and `error` says so, and the next round tries again. Absent otherwise. Since kit 2.34.0. |
 | `error` | string or null | When it threw: the error's message, its first line, trimmed, at most 500 characters (`"it failed"` when that is empty). `null` when `ok`. |
 | `everyMs` | number | The interval between rounds, in milliseconds, as it was when the round ended. Each wait varies by ±10% about it. |
 | `next` | ISO 8601 (UTC) or null | When the next scheduled round is due. `null` when none is coming: the agent is off duty (only Run now runs a round then), or the schedule was stopped. The same as `/api/ping`'s `nextRunAt` just after the round. |
+| `waitedMs` | number, or absent | How long the round waited its turn (the first-round line, the work line) before it ran, in milliseconds, when that was a second or more. `started` is when it began to run. Since kit 2.56.0. |
+| `cpuMs` | number, or absent | The processor time the agent's own process used in the round, in milliseconds; the programs it started (git, ffmpeg) aren't counted. Absent when the round never ran (it waited, or was held). Since kit 2.56.0. |
+| `memoryMb` | number, or absent | The most memory the agent's process held during the round, in megabytes, sampled every five seconds. Absent when it never ran. Since kit 2.56.0. |
 
 Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 
@@ -64,6 +67,11 @@ Manor's settings.json `"backgroundPace"` sets how every agent's scheduled rounds
 - **First rounds one at a time.** A schedule whose round has never gone through waits for its first round in one line with the other agents' first rounds (the lock folder `<locks>irst-rounds`, one slot, the kit's line as the NPU's), and runs it once the one before it has finished. The first round is the heavy one; the rounds after it only catch up on what changed, so nothing else waits.
   - round.json's `"wentThrough": { "<schedule>": "<ISO time>" }` says which have gone through. A round.json from before 2.43.3, with rounds but no `wentThrough`, counts every schedule it names as through: updating an agent never puts it in the line.
   - A round that waited six hours without its turn is recorded with `"ok": null` and `"waiting"`, and waits again at its next round. A holder keeps its turn for its round's time limit, and 12 hours at the least (a first scan of every drive takes hours); one whose process has gone gives up its place at once.
+- **A few agents at a time** (kit 2.56.0, the work line). Every scheduled round, at either pace, takes a slot in one line shared by every agent on the PC (the lock folders `<locks>\work`, `work.2` …, the kit's line as the NPU's): as many side by side as Manor's settings.json `"agentsAtOnce"` says (1 to 6; 0 lifts the line), or 2 at a gentle pace and 4 at a full one when it doesn't. The rest wait their turn, first come, first served.
+  - **Fewer on a busy PC.** Before it joins, a round looks at the PC's load, from Node's own counters over a second: with the processor 60% busy or more, or less than 15% of memory free, it may take only the first slot (one at a time); at 35% busy, half of them, rounded up. The other agents' rounds count in that load, which is the point.
+  - A holder keeps its slot for its round's time limit, and one whose process has gone gives it up at once. A round whose turn doesn't come before its next is due (its interval, and a minute at the least) is recorded with `"ok": null` and `"waiting"`, and waits again at its next round. A first round takes its first-round turn, then its work turn.
+  - A schedule whose rounds are light (`every()`'s `light`: a few requests, a look at a file) runs them at once, outside the line, as a round asked for always does.
+  - `MANOR_AGENTS_AT_ONCE` says instead of Manor (0 for no line). Under node --test there is no line unless it says.
 - **Below-normal priority.** A scheduled round runs at below-normal priority, and the programs it starts take that class too.
 - **Heiward's background pace** (kit 2.50.0, `node/gentle.ts`). On Windows the agent runs as Heiward does in the background, from its start and in its scheduled rounds:
   - Windows' efficiency mode (EcoQoS);
@@ -75,7 +83,7 @@ Manor's settings.json `"backgroundPace"` sets how every agent's scheduled rounds
 - **A round asked for** (Run now) never waits, and runs at normal priority with the cap, efficiency mode and disk priority lifted until it ends. `runSoon()` starts a scheduled round now, at the pace: for an agent's own reasons (something changed), never the person's.
 - **Settling into the manor.** While a first round waits its turn, or a long one runs (a look's `firstRound`: Reeve's, Heiward's), the status pill says "Settling in" and the page shows a banner in the role's colour: the manor's door, with footsteps walking up to it, and a line saying it is new and takes longer this once. Its state's `firstRound` is `waiting` or `running`.
 
-An agent that doesn't run its rounds with every() (Heiward's .NET scans) takes the same line through the kit's .NET lock on the same folder.
+An agent that doesn't run its rounds with every() (Heiward's .NET scans) takes the same first-round line through the kit's .NET lock on the same folder. It doesn't take the work line yet; it keeps its own pace.
 
 ## Where it is implemented
 
