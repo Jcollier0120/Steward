@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.24
+
+**On the PC Castellan is made on, the Steward retires or recalls an employee from every manor, with your reason.**
+
+### What's new
+
+- `recall <agent> --why "..." [--versions 0.4.26]` takes versions of an employee back from every Castellan: each one stops it, updates it to a fixed version where there is one, or else takes its program off the PC with its settings and data kept, and never installs those versions again. Your words in `--why` are what the person whose PC it is reads.
+- `retire <agent> --why "..." [--instead <agent>]` stops offering an employee; one already at work goes on, and its card says why.
+- `lift-recall <agent>` takes it off the list, and `recalls` shows the list every Castellan reads now.
+- Each list is signed on this PC with the recall key, so neither the Exchequer nor anything between it and a Castellan can make one.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The commands work once the Exchequer 0.7.20 and Castellan 0.16.101 are out; they only work on the PC that holds the recall key.
+
 ## 0.35.21
 
 **The Steward no longer tries to open a pull request that is already open.**
