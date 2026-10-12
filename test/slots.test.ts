@@ -14,6 +14,10 @@ const { LockTimeout } = await import('../src/kit/lock.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Waits until `done` says so (a stage takes its locks in its own time, slower on a busy PC), up to 5 s. */
+const until = async (done: () => boolean) => {
+  for (const end = Date.now() + 5000; !done() && Date.now() < end; ) await sleep(20);
+};
 /** A gate a test opens when it likes: the stage holding it runs until then. */
 const gate = () => {
   let open!: () => void;
@@ -72,7 +76,9 @@ test('two stages never work on one repository at once: the second waits, saying 
       order.push('round manor');
     });
   });
-  await sleep(100);
+  // Porter's turn comes at once, Manor's never while the release holds it: wait for the line that says so.
+  await until(() => order.includes('round porter') && lines.length > 0);
+  await sleep(50);
   assert.deepEqual(order, ['release in', 'round porter'], 'the round waits for Manor, not for Porter');
   assert.deepEqual(lines, ['[manor] waits for the release running beside this one to finish with it']);
   g.open();
