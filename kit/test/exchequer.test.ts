@@ -10,7 +10,7 @@ import { after, test } from 'node:test';
 // The release's last step (exchequer.ts): the same files as GitHub's, to the Exchequer, Castellan's release service.
 // Nothing here reaches the internet: a fake Exchequer answers on this PC, and every call names its env and home, so the
 // publisher's key of the PC the tests run on is never read.
-const { EXCHEQUER_URL, KEY_FILE, NEVER_SOLD, NOT_PUBLISHED, exchequerUrl, publishToExchequer, publisherKey, withoutKey } = await import('./fixture/src/kit/exchequer.ts');
+const { EXCHEQUER_URL, KEY_FILE, NEVER_SOLD, NOT_PUBLISHED, URGENT_MARK, exchequerUrl, isUrgent, letOut, publishToExchequer, publisherKey, withoutKey } = await import('./fixture/src/kit/exchequer.ts');
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'fixture-exchequer-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -29,20 +29,27 @@ interface Draft {
   commit: string;
   notes: string;
   status: 'draft' | 'published';
+  /** When it's out to customers: on its release day, or when let out early. */
+  outAt?: string;
 }
+
+/** A Tuesday or Friday well ahead: the release day a release published now waits for, in the fake. */
+const RELEASE_DAY = '2099-01-02T14:00:00.000Z';
 
 /** A fake Exchequer: the agents list, drafts, signed uploads (to itself), and /done checking every file as the real one does. */
 async function fakeExchequer() {
   const drafts = new Map<string, Draft>();
   const stored = new Map<string, Buffer>();
-  const seen: { method: string; url: string; auth: string | null }[] = [];
-  const o = { down: false, failUploads: 0, doneSaysAlready: false, echoAuth: false };
+  const seen: { method: string; url: string; auth: string | null; body: string }[] = [];
+  // releaseDays: false is an Exchequer from before 0.8.0 (no outAt, the body ignored, no "out" route); cantLetOut one
+  // whose database hasn't the release-days migration yet.
+  const o = { down: false, failUploads: 0, doneSaysAlready: false, echoAuth: false, releaseDays: true, cantLetOut: false };
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);
     const body = Buffer.concat(chunks);
     const auth = req.headers.authorization ?? null;
-    seen.push({ method: req.method!, url: req.url!, auth });
+    seen.push({ method: req.method!, url: req.url!, auth, body: body.toString('utf8') });
     const send = (status: number, j: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json' });
       res.end(JSON.stringify(j));
@@ -58,6 +65,17 @@ async function fakeExchequer() {
       stored.set(`${up[1]}/${decodeURIComponent(up[2])}`, body);
       res.writeHead(200);
       return res.end();
+    }
+    const out = /^\/api\/v1\/admin\/releases\/([^/]+)\/([^/]+)\/out$/.exec(req.url!);
+    if (out && req.method === 'POST' && o.releaseDays) {
+      if (auth !== `Bearer ${KEY}`) return send(401, { error: 'unauthorized', message: "Letting a release out needs the publisher's key." });
+      if (!SOLD.some((a) => a.id === out[1])) return send(404, { error: 'unknown-agent', message: `${out[1]} isn't one of the agents the Exchequer serves.` });
+      const d = drafts.get(`${out[1]}-v${out[2]}`);
+      if (d?.status !== 'published') return send(404, { error: 'not-found', message: `${out[1]}-v${out[2]} isn't published.` });
+      if (Date.parse(d.outAt!) <= Date.now()) return send(200, { release: { outAt: d.outAt }, alreadyOut: true });
+      if (o.cantLetOut) return send(500, { error: 'internal', message: 'column releases.out_at does not exist' });
+      d.outAt = new Date().toISOString();
+      return send(200, { release: { outAt: d.outAt } });
     }
     const m = /^\/api\/v1\/publish\/([^/]+)\/([^/]+)(\/done)?$/.exec(req.url!);
     if (m && req.method === 'POST') {
@@ -80,9 +98,14 @@ async function fakeExchequer() {
       });
       if (problems.length) return send(422, { error: 'upload-mismatch', message: `${problems.map((p) => `${p.name}: not uploaded`).join('; ')}. Upload again, then ask once more.` });
       d.status = 'published';
-      return send(200, { release: { tag } });
+      if (!o.releaseDays) return send(200, { release: { tag } });
+      const urgent = body.length ? JSON.parse(body.toString('utf8')).urgent === true : false;
+      d.outAt = urgent && !o.cantLetOut ? new Date().toISOString() : RELEASE_DAY;
+      return send(200, { release: { tag, outAt: d.outAt } });
     }
-    send(404, { error: 'not-found', message: 'no such route' });
+    // As Next.js answers a route it hasn't: a page, not the Exchequer's JSON.
+    res.writeHead(404, { 'content-type': 'text/html' });
+    res.end('<!DOCTYPE html><title>404: This page could not be found.</title>');
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -250,6 +273,100 @@ test("the Exchequer down, or refusing, fails nothing: it says so in a line, and 
   }
 
   for (const line of lines) assert.ok(!line.includes(KEY), `no line holds the key: ${line}`);
+});
+
+test('an entry marked urgent: a line of its own starting **Urgent fix:', () => {
+  assert.equal(URGENT_MARK, '**Urgent fix:');
+  assert.equal(isUrgent('## 0.4.32\n\n**Urgent fix: updates no longer stop.**\n\n### What changed'), true);
+  assert.equal(isUrgent('Porter 0.4.33, built from abc.\n\n**Faster.**\n\nThis release brings v0.4.32 too:\n\n## 0.4.32\n\n**Urgent fix: updates.**'), true, 'one it brings counts');
+  assert.equal(isUrgent('**Faster.** Not an urgent fix: **Urgent fix: in the middle of a line.'), false);
+  assert.equal(isUrgent('- **Urgent fix:** in a list'), false);
+  assert.equal(isUrgent(''), false);
+  assert.equal(isUrgent(null), false);
+});
+
+test('a release that is not urgent asks /done with no body, and waits for its release day', async () => {
+  const x = await fakeExchequer();
+  try {
+    const out = await run(release('porter', '0.5.1'), { env: { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY }, home: homeWith(null) });
+    assert.equal(out.line, 'Published to the Exchequer: porter-v0.5.1 (Porter-0.5.1.zip, SHA256SUMS.txt, manor-agent.json).');
+    const done = x.seen.find((s) => s.url.endsWith('/done'))!;
+    assert.equal(done.body, '', 'no body: never urgent: false');
+    assert.equal(x.drafts.get('porter-v0.5.1')!.outAt, RELEASE_DAY);
+  } finally {
+    await x.close();
+  }
+});
+
+test('urgent, by --urgent or by its entry: /done is asked { urgent: true } and it is out to customers now', async () => {
+  const x = await fakeExchequer();
+  const env = { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY };
+  try {
+    const flagged = await run({ ...release('porter', '0.5.2'), urgent: true }, { env, home: homeWith(null) });
+    assert.deepEqual([flagged.ok, flagged.outcome], [true, 'published']);
+    assert.equal(flagged.line, 'Published to the Exchequer: porter-v0.5.2 (Porter-0.5.2.zip, SHA256SUMS.txt, manor-agent.json), urgent: out to customers now.');
+    assert.deepEqual(JSON.parse(x.seen.find((s) => s.url === '/api/v1/publish/porter/0.5.2/done')!.body), { urgent: true });
+    assert.ok(Date.parse(x.drafts.get('porter-v0.5.2')!.outAt!) <= Date.now());
+
+    const marked = await run({ ...release('porter', '0.5.3'), notes: 'Porter 0.5.3, built from abc1234.\n\n**Urgent fix: updates no longer stop.**\n' }, { env, home: homeWith(null) });
+    assert.match(marked.line, /urgent: out to customers now\.$/);
+    assert.deepEqual(JSON.parse(x.seen.find((s) => s.url === '/api/v1/publish/porter/0.5.3/done')!.body), { urgent: true });
+
+    // An Exchequer that couldn't let it out early (its database without the release-days migration): published, waiting.
+    x.o.cantLetOut = true;
+    const waits = await run({ ...release('porter', '0.5.4'), urgent: true }, { env, home: homeWith(null) });
+    assert.deepEqual([waits.ok, waits.outcome], [true, 'published']);
+    assert.equal(waits.line, `Published to the Exchequer: porter-v0.5.4 (Porter-0.5.4.zip, SHA256SUMS.txt, manor-agent.json), urgent, but the Exchequer couldn't let it out early: it reaches customers on its release day (${RELEASE_DAY}). The Steward's release-now porter 0.5.4 lets it out.`);
+
+    // An Exchequer from before release days ignores the body, and has every release out once published.
+    x.o.cantLetOut = false;
+    x.o.releaseDays = false;
+    const old = await run({ ...release('porter', '0.5.5'), urgent: true }, { env, home: homeWith(null) });
+    assert.deepEqual([old.ok, old.outcome], [true, 'published']);
+    assert.match(old.line, /urgent: out to customers now\.$/);
+  } finally {
+    await x.close();
+  }
+});
+
+test('letOut: a published release out to customers now; out already, not published, an older Exchequer, no key', async () => {
+  const x = await fakeExchequer();
+  const env = { EXCHEQUER_URL: x.url, EXCHEQUER_PUBLISHER_KEY: KEY };
+  try {
+    await run(release('porter', '0.5.6'), { env, home: homeWith(null) });
+    assert.equal(x.drafts.get('porter-v0.5.6')!.outAt, RELEASE_DAY);
+    const now = await letOut('porter', '0.5.6', { env, home: homeWith(null) });
+    assert.deepEqual([now.ok, now.outcome], [true, 'out'], now.line);
+    assert.match(now.line, /^porter-v0\.5\.6 is out to customers now \(since \d{4}-.*\): every PC entitled to it is offered it at its next look\.$/);
+    assert.equal(x.seen.at(-1)!.auth, `Bearer ${KEY}`);
+    const again = await letOut('porter', '0.5.6', { env, home: homeWith(null) });
+    assert.deepEqual([again.ok, again.outcome], [true, 'already']);
+
+    const none = await letOut('porter', '9.9.9', { env, home: homeWith(null) });
+    assert.deepEqual([none.ok, none.outcome], [false, 'not-published']);
+    assert.match(none.line, /^porter-v9\.9\.9 isn't published to the Exchequer/);
+    const stranger = await letOut('stranger', '0.1.0', { env, home: homeWith(null) });
+    assert.deepEqual([stranger.ok, stranger.outcome], [false, 'not-published']);
+
+    await run(release('porter', '0.5.7'), { env, home: homeWith(null) });
+    x.o.cantLetOut = true;
+    const broken = await letOut('porter', '0.5.7', { env, home: homeWith(null) });
+    assert.deepEqual([broken.ok, broken.outcome], [false, 'failed']);
+    assert.equal(broken.line, "porter-v0.5.7 wasn't let out: column releases.out_at does not exist (500 internal).");
+
+    x.o.releaseDays = false;
+    const old = await letOut('porter', '0.5.7', { env, home: homeWith(null) });
+    assert.deepEqual([old.ok, old.outcome], [true, 'no-release-days']);
+    assert.equal(old.line, `The Exchequer at ${x.url} has no release days yet: porter-v0.5.7 is out to customers once it's published.`);
+
+    const home = homeWith(null);
+    const noKey = await letOut('porter', '0.5.7', { env: { EXCHEQUER_URL: x.url }, home });
+    assert.deepEqual([noKey.ok, noKey.outcome], [false, 'no-key']);
+    assert.ok(noKey.line.includes(path.join(home, KEY_FILE)));
+    for (const o of [now, again, none, broken, old, noKey]) assert.ok(!o.line.includes(KEY));
+  } finally {
+    await x.close();
+  }
 });
 
 test("the Exchequer's address: EXCHEQUER_URL, else Castellan's", () => {

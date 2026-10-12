@@ -157,6 +157,54 @@ test("a release that reached GitHub but not the Exchequer is done, with the kit'
   assert.ok(done.message.endsWith(`, with kit 2.30.0; ${said}`), done.message);
 });
 
+test('a release whose entry, or one it brings, starts "**Urgent fix:" is let out to customers at once; any other is left for its release day', async () => {
+  const origin = path.join(tmp, 'urgent-origin.git');
+  const checkout = path.join(tmp, 'Clerk-urgent');
+  sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
+  sh(tmp, 'clone', '--quiet', origin, checkout);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(checkout, 'config', k, v);
+  const commit = (version: string, changelog: string) => {
+    writeFileSync(path.join(checkout, 'package.json'), `{\n  "name": "clerk",\n  "version": "${version}",\n  "scripts": { "release": "node tools/kit.ts && node src/kit/release.ts" }\n}\n`);
+    writeFileSync(path.join(checkout, 'kit.json'), '{\n  "kit": "2.58.0",\n  "parts": ["node", "web", "spec"]\n}\n');
+    writeFileSync(path.join(checkout, 'CHANGELOG.md'), changelog);
+    sh(checkout, 'add', '-A');
+    sh(checkout, 'commit', '--quiet', '-m', `Clerk ${version}`);
+    sh(checkout, 'push', '--quiet', 'origin', 'main');
+  };
+  const clerk = DEFAULT_EMPLOYEES.find((x) => x.id === 'clerk')!;
+  const e: Employee = { ...clerk, checkout, versionFiles: ['package.json'] };
+  let released = ['v0.3.3'];
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(released.map((tagName) => ({ tagName, isDraft: false }))) : undefined));
+  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? ok('Published to the Exchequer: clerk-v0.3.5.\n') : r.run(cmd, args, opts));
+  const asked: string[] = [];
+  const exchequer = {
+    env: { EXCHEQUER_URL: 'http://exchequer.invalid', EXCHEQUER_PUBLISHER_KEY: 'test-key' },
+    home: tmp,
+    fetch: (async (url: string, init?: RequestInit) => {
+      asked.push(`${init?.method} ${url} ${(init?.headers as Record<string, string>)?.authorization}`);
+      return new Response(JSON.stringify({ release: { outAt: '2026-10-12T20:00:00.000Z' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch,
+  };
+  const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-urgent'), run, neutralDir: tmp }), exchequer };
+
+  // 0.3.4, never released on its own, was the urgent one: 0.3.5 brings it, so it goes out at once.
+  const entry = (v: string, line: string) => `## ${v}\n\n${line}\n\n### Before you update\n\n- Nothing: it updates itself as usual.\n`;
+  commit('0.3.5', `# Clerk\n\n${entry('0.3.5', '**Faster lists.**')}\n${entry('0.3.4', '**Urgent fix: files are kept again.**')}\n${entry('0.3.3', '**Before.**')}`);
+  const done = await releaseOne(ctx, e, { kit: '2.58.0' });
+  assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
+  assert.deepEqual(asked, ['POST http://exchequer.invalid/api/v1/admin/releases/clerk/0.3.5/out Bearer test-key']);
+  assert.ok(done.message.endsWith('; an urgent fix: clerk-v0.3.5 is out to customers now (since 2026-10-12T20:00:00.000Z): every PC entitled to it is offered it at its next look.'), done.message);
+
+  // Not marked: nothing asked, it waits for its release day.
+  released = ['v0.3.3', 'v0.3.5'];
+  asked.length = 0;
+  commit('0.3.6', `# Clerk\n\n${entry('0.3.6', '**Calmer.**')}\n${entry('0.3.5', '**Faster lists.**')}\n${entry('0.3.4', '**Urgent fix: files are kept again.**')}`);
+  const calm = await releaseOne(ctx, e, { kit: '2.58.0' });
+  assert.equal(calm.outcome, 'done', calm.message);
+  assert.deepEqual(asked, [], 'the urgent 0.3.4 went out with 0.3.5 already');
+  assert.doesNotMatch(calm.message, /urgent/);
+});
+
 test("the Exchequer's line: a note when it says the release didn't get there, and never the network's reason a release failed", () => {
   assert.equal(exchequerNote('Published to the Exchequer: porter-v0.4.26 (Porter-0.4.26.zip).'), '');
   assert.equal(exchequerNote("The Exchequer: heiward isn't sold there, so heiward-v1.7.2 is on GitHub alone."), '');
