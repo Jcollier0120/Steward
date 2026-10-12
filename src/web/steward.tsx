@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ago, Badge, Card, Notes, PostButton, Section, Text, useNow, type BadgeTone } from '../kit/react/index.ts';
 import type { Alarm, AlarmState } from '../alarms.ts';
 import type { ConflictLook, ConflictOutcome } from '../conflicts.ts';
@@ -679,6 +679,19 @@ function TurnLine({ x }: { x: TurnRow }) {
   );
 }
 
+/** One box for every pick: ticks them all, or none once all are; half-ticked while only some are, with how many. */
+function PickAll({ count, of, onChange }: { count: number; of: number; onChange: (on: boolean) => void }) {
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.indeterminate = count > 0 && count < of;
+  }, [count, of]);
+  return (
+    <label className="pick pick-all">
+      <input ref={box} type="checkbox" checked={count === of && of > 0} onChange={(e) => onChange(e.target.checked)} aria-label="Tick every repository" /> {`All (${count} of ${of})`}
+    </label>
+  );
+}
+
 /**
  * The stages, for the ticked employees: one that doesn't take the kit starts unticked. The Steward's own row isn't one:
  * its rounds merge and release it (stages/selfmerge.ts, stages/self.ts).
@@ -690,6 +703,7 @@ function Stages({ v }: { v: StewardView }) {
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
   const castellan = v.castellan !== false;
   const isTicked = (r: StaffRowView) => ticked[r.id] ?? (castellan ? r.usesKit : true);
+  const all = <PickAll count={rows.filter(isTicked).length} of={rows.length} onChange={(on) => setTicked(Object.fromEntries(rows.map((r) => [r.id, on])))} />;
   const ask = () => ({ kit: kit ?? '', employees: rows.filter(isTicked).map((r) => r.id) });
   const onKit = rows.filter((r) => r.usesKit);
   const offKit = rows.filter((r) => !r.usesKit);
@@ -709,6 +723,7 @@ function Stages({ v }: { v: StewardView }) {
     return (
       <Card tour="stages">
         <div className="picks">
+          {all}
           {rows.map((r) => (
             <label key={r.id} className="pick">
               <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
@@ -732,6 +747,7 @@ function Stages({ v }: { v: StewardView }) {
   return (
     <Card tour="stages">
       <div className="picks">
+        {all}
         {rows.map((r) => (
           <label key={r.id} className="pick" title={r.usesKit ? undefined : teamSet ? "Doesn't take the kit yet: only the team's PRs are merged for it" : "Doesn't take the kit yet"}>
             <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
@@ -850,6 +866,7 @@ const STYLE = `
 .notes { margin: 0; padding-left: 16px; color: var(--muted); font-size: 13px; }
 .picks { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pick { display: inline-flex; gap: 6px; align-items: center; }
+.pick-all { font-weight: 600; padding-right: 12px; border-right: 1px solid var(--line); }
 .pick-bar { gap: 12px; align-items: center; margin: 8px 0; }
 td.pick-cell { width: 1%; padding-right: 0; }
 .stages { margin-bottom: 6px; }
