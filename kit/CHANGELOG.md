@@ -22,6 +22,19 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing: take it by pinning 2.57.1 in kit.json. Only a process people wait on calls `keepResponsive()`; an agent shouldn't.
 - An agent whose own page polls outside `usePageData()` should skip its polls while `document.hidden` too, or an open tab keeps it at a normal pace.
 
+## 2.57.0
+
+**An agent of Manor's staff no longer starts from a hidden sign-in task: Castellan, in Windows' Startup apps, starts Manor, and Manor starts its staff.**
+
+### What changed
+
+- **node/install.ts: no sign-in trigger where Manor starts the staff.** `install` looks for Manor's entry in Windows' Startup apps (`MANOR_STARTUP`: the value `Castellan` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which Manor 0.16.120 and later writes). Where it's there, the agent's task `\<Name>\Home page` is registered without its logon trigger (`homePageTaskXml`'s `atSignIn: false`): Manor's first round opens each agent on duty, one at a time, and the task still runs when an install asks (`schtasks /Run`), outside whatever started the install. An update replaces the task, so an agent's hidden sign-in start goes at its next update. Where it isn't (no Manor, or an older one), the task starts the agent at sign-in as before.
+- Turned off in Startup apps, the value stays and nothing starts at sign-in: the person's choice, which an update keeps.
+
+### For an agent
+
+- Nothing: take the kit and release as usual.
+
 ## 2.56.1
 
 **`uninstall --purge` removes only the agent's own data folder.**
