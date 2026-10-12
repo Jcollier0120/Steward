@@ -9,6 +9,7 @@ import { runLine, splitCommand, tail } from '../run.ts';
 import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../settings.ts';
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
+import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { readPin } from './staff.ts';
@@ -151,7 +152,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-        keepOutput(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
+        keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
         return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
       }
     }
@@ -159,7 +160,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
-      keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
+      keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
       return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
     }
     // Its releases have changed: the glance no longer says how they are.
@@ -177,7 +178,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     else if (!byGit && !ctx.settings.releasesCastellan && !releasedHere(e)) {
       const now = await releasedOf(ctx, e).catch(() => null);
       if (now && !now.some((x) => x.version === version)) {
-        keepOutput(dir, e.release, r.code, `${r.out}\n${r.err}`);
+        keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
         return result(e, 'failed', `${e.release} finished, but ${hostFor(ctx, e).name} has no release v${version} in ${e.repo}: a release command must make it (or set Release it to tag, and the Steward makes it)`, { version, commit: commit.slice(0, 7) });
       }
     }
@@ -195,18 +196,6 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
     } catch (err) {
       ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
     }
-  }
-}
-
-/**
- * A failed release's whole output, kept beside its worktree (<worktree>.log, as a bump's checks are) once the worktree
- * is gone: for a person's look, and for the issue the Steward files for the Wright (work.ts).
- */
-function keepOutput(dir: string, step: string, code: number, output: string): void {
-  try {
-    writeFileSync(checksLogOf(dir), `${step} (exit ${code})\n\n${output}`);
-  } catch {
-    // Only the round's log has it then.
   }
 }
 

@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.25
+
+**An alarm about a failed release or refresh says why it failed, and what to do.**
+
+### What changed
+
+- When a release, a refresh or a kit update fails, its alarm now quotes the end of what the command printed: the line that says what went wrong ("couldn't sign the setup: no certificate was found", say, or the check that failed), instead of only "failed (exit 1)". It names the file that holds the whole output, and it still says why in later rounds, not only in the round that failed.
+- Where the Steward knows the cure, the alarm says it: a release that couldn't sign for want of its certificate tells you to sign in to the certificate's app (SimplySign, say) and release it again.
+- A refresh whose own command fails now keeps its output too, as a failed release always did.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.22
 
 **Every agent that carries the kit is looked after on it, however it was added.**

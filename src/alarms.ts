@@ -3,11 +3,13 @@ import path from 'node:path';
 import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import { failureDetail, keptFailure } from './failure.ts';
 import { BAILIFF_WAIT } from './review.ts';
 import { reeveInstalled, surveyorInstalled, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
-import type { StageResult } from './stages/common.ts';
+import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
+import { refreshDirOf } from './stages/refresh.ts';
 import type { Runner } from './run.ts';
 import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
@@ -205,7 +207,8 @@ export function roundConditions(o: {
       id: `release:${id}:${commit}`,
       who: id,
       title: `${e?.name ?? id}'s release failed at ${commit}, and the rounds won't try it again`,
-      detail: [...(said ? [said] : []), "Release it on the Steward's page once it's fixed, or push a new commit: the next round tries that."],
+      // Why, from its kept output: the round's line says only which command failed, and only in the round it failed.
+      detail: [...(said ? [said] : []), ...failureDetail(e ? keptFailure(releaseDirOf(o.settings, e)) : null, said ?? ''), "Release it on the Steward's page once it's fixed, or push a new commit: the next round tries that."],
       afterMs: 0,
     });
   }
@@ -219,6 +222,7 @@ export function roundConditions(o: {
         title: `${e.name}'s ${f.stage} to kit ${f.kit} failed, and the rounds won't try it again until its branch moves`,
         detail: [
           f.message,
+          ...(f.stage === 'bump' ? failureDetail(keptFailure(bumpDirOf(o.settings, e)), f.message) : []),
           f.stage === 'bump'
             ? `Its worktree is left in the Steward's work folder for a look. Once it's fixed, push to ${e.branch} (the next round bumps it again), or press Bump on the Steward's page.`
             : "The bump is ready on its branch here. Press Push on the Steward's page once GitHub takes it, or push a new commit: the next round bumps again.",
@@ -285,7 +289,7 @@ export function roundConditions(o: {
       id: `refresh:${id}:${f.commit || 'none'}`,
       who: id,
       title: `${e.name}'s refresh after ${f.after} failed, and nothing was pushed`,
-      detail: [f.message, `Run ${e.refresh} in a clone of ${e.branch} once it's fixed, then commit and push; or the next release tries again.`],
+      detail: [f.message, ...failureDetail(keptFailure(refreshDirOf(o.settings, e)), f.message), `Run ${e.refresh} in a clone of ${e.branch} once it's fixed, then commit and push; or the next release tries again.`],
       afterMs: 0,
     });
   }
