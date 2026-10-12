@@ -697,8 +697,10 @@ function Stages({ v }: { v: StewardView }) {
   const noKit = !!v.running || !kit;
   const team = v.team;
   const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
+  // Settings name a team (teamNote is null only then): the account gh is signed in as alone is no team to merge for.
+  const teamSet = team.length > 0 && !v.teamNote;
   const one = offKit.length === 1;
-  const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}, but the team's PRs to ${one ? 'it' : 'them'} can be merged.` : '';
+  const offKitNote = offKit.length ? ` ${offKit.map((r) => r.name).join(' and ')} ${one ? "doesn't" : "don't"} take the kit yet: the stages pass over ${one ? 'it' : 'them'}${teamSet ? `, but the team's PRs to ${one ? 'it' : 'them'} can be merged` : ''}.` : '';
   const stage = (label: string, path: string, confirm: string, disabled: boolean, tooltip?: string) => (
     <PostButton title={label} path={`/api/stage/${path}`} body={ask} confirm={confirm} disabled={disabled} tooltip={tooltip} />
   );
@@ -731,7 +733,7 @@ function Stages({ v }: { v: StewardView }) {
     <Card tour="stages">
       <div className="picks">
         {rows.map((r) => (
-          <label key={r.id} className="pick" title={r.usesKit ? undefined : "Doesn't take the kit yet: only the team's PRs are merged for it"}>
+          <label key={r.id} className="pick" title={r.usesKit ? undefined : teamSet ? "Doesn't take the kit yet: only the team's PRs are merged for it" : "Doesn't take the kit yet"}>
             <input type="checkbox" name="employees" value={r.id} checked={isTicked(r)} onChange={(e) => setTicked({ ...ticked, [r.id]: e.target.checked })} /> {r.name}
           </label>
         ))}
@@ -741,11 +743,11 @@ function Stages({ v }: { v: StewardView }) {
         {stage('2. Push', 'push', `Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`, noKit)}
         {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", !!v.running)}
         {stage('4. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
-        {stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running || !team.length, v.teamNote ?? (team.length ? undefined : 'No team in Settings'))}
+        {teamSet && stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running)}
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
-        Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs; Merge the team's PRs takes those the team opened as well (Team, in Settings).{v.teamNote ? ` ${v.teamNote}` : ''}{offKitNote}
+        Each stage asks first, works through the ticked employees, and reports for each below. Merge takes only the Steward's PRs{teamSet ? "; Merge the team's PRs takes those the team opened as well (Team, in Settings)" : ''}.{offKitNote}
       </Text>
       <div className="row round">
         <Text variant="muted">{roundWords(v.round).when}</Text>

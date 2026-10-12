@@ -25,6 +25,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: take the kit and release as usual. A schema can use `tab`, `line`, `chip`, `inline`, `hidden`, `noAdd`, `advancedLabel` and `missing: 'made'` where they help; web/settings-panel.js leaves out `hidden` fields and ignores the rest.
 
+## 2.54.0
+
+**Settings' tabs read as tabs again.**
+
+### What changed
+
+- **web/settings-panel.css: its filled buttons leave the tabs alone.** `.sf-panel button` outranked react/styles.ts' `.tab`, so a long form's tabs (react/settings-form.tsx) were drawn as accent-filled buttons, unreadable in the dark theme. The panel's base and hover button rules now skip `.tab`; look.test.ts checks it.
+
+### For an agent
+
+- Nothing: take the kit and release as usual.
+
 ## 2.53.0
 
 **Demo mode: an agent's page with made-up data, for Manor's pictures of each employee.**
