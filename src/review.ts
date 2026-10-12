@@ -1,4 +1,4 @@
-import { git, gitMaybe, showFile } from './git.ts';
+import { fetchFor, gitMaybe, showFile } from './git.ts';
 import type { Employee, Settings } from './settings.ts';
 import { checkoutOf, type Ctx } from './stages/common.ts';
 import type { PrInfo } from './stages/staff.ts';
@@ -123,7 +123,7 @@ export function dependenciesOf(text: string | null): string | null {
 export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!pr.files.some((f) => /(^|\/)package\.json$/i.test(f))) return null;
   const repo = checkoutOf(e);
-  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr));
+  await fetchFor(ctx.run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
   const head = pr.headOid || 'FETCH_HEAD';
   const start = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, head))?.trim();
   if (!start) return "the Steward couldn't find where it started, to compare its dependencies";
