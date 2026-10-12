@@ -976,7 +976,7 @@ export function StewardBody({ v }: { v: StewardView }) {
         </Card>
       )}
       {/* What it did last, first: the quickest way to see what is going on. Its log stays folded unless it stopped. */}
-      <Section title="Last stage">
+      <Section title="Last stage" tour="last">
         <LastStage l={v.last} now={now} />
       </Section>
       <TendingCard t={v.tending} r={v.round} now={now} />
