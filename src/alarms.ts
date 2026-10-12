@@ -4,7 +4,7 @@ import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { BAILIFF_WAIT } from './review.ts';
-import { reeveInstalled, surveyorInstalled, type Employee, type Settings } from './settings.ts';
+import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
 import type { StageResult } from './stages/common.ts';
@@ -562,16 +562,18 @@ export async function watchAlarms(
     run?: Runner;
     neutralDir?: string;
   },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
+  // The other agents' pages, as Manor says them.
+  const p = { ...agentPages(), ...deps.pages };
   const filing = o.settings.fileWork && !!o.run;
   if (!a.on && !filing) return loadAlarms();
   const get = deps.getJson ?? getJson;
   const now = deps.now ?? new Date();
   // The Wright's work and Reeve's alerts are read for the work filed (work.ts) as well as for the alarms.
-  const wright = a.wrightUrl ? await get(new URL('/api/work', a.wrightUrl).href) : null;
-  const reeve = a.reeveUrl && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', a.reeveUrl).href) : null;
+  const wright = p.wright ? await get(new URL('/api/work', p.wright).href) : null;
+  const reeve = p.reeve && (deps.reeveInstalled ?? reeveInstalled)() ? await get(new URL('/api/alerts', p.reeve).href) : null;
   // Failed bumps and releases, and Reeve's alerts that are code work, filed for the Wright: their alarms wait.
   let items: WorkItem[] = [];
   let states = new Map<string, WorkState>();
@@ -587,7 +589,7 @@ export async function watchAlarms(
   }
   if (!a.on) return loadAlarms();
   const conditions = roundConditions(o);
-  const manor = deps.manorUrl === undefined ? a.manorUrl : deps.manorUrl;
+  const manor = deps.manorUrl === undefined ? p.manor : deps.manorUrl;
   // The manor-wide alarms are Manor's once it says it keeps them (tend.ts's manorKeeps): then only the repositories' are the Steward's.
   let manorWide = true;
   if (manor) {
@@ -602,9 +604,9 @@ export async function watchAlarms(
     } else o.log("alarms: Manor keeps the manor-wide alarms itself; the Steward raises only its repositories' own");
   }
   // The Surveyor's page only where the Surveyor is installed: without it, there is nothing to watch, and no alarm.
-  if (manorWide && a.surveyorUrl && (deps.surveyorInstalled ?? surveyorInstalled)()) conditions.push(...surveyorConditions(await get(new URL('/api/survey', a.surveyorUrl).href), o.settings));
+  if (manorWide && p.surveyor && (deps.surveyorInstalled ?? surveyorInstalled)()) conditions.push(...surveyorConditions(await get(new URL('/api/survey', p.surveyor).href), o.settings));
   if (wright !== null) conditions.push(...wrightConditions(wright));
-  if (a.bailiffUrl) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', a.bailiffUrl).href)));
+  if (p.bailiff) conditions.push(...bailiffConditions(await get(new URL('/api/reviews', p.bailiff).href)));
   let reeveJobs: Set<string> | null = null;
   if (reeve !== null && manorWide) {
     const r = reeveConditions(reeve);

@@ -166,10 +166,10 @@ test("a round on the person's PC: their PRs merged only where they said yes, a n
 test('no Surveyor installed: no alarm that its page is down, however long', async () => {
   const s = loadSettings();
   const now = new Date(Date.now() + 48 * 3600_000);
-  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null });
+  const state = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' } });
   assert.ok(!Object.keys(state.watching).some((id) => id.startsWith('surveyor:')), JSON.stringify(state.watching));
   // Where it is installed, its page down is watched as before.
-  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, surveyorInstalled: () => true });
+  const watched = await watchAlarms({ settings: s, round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, employees: s.employees, log: () => {} }, { getJson: async () => ({ error: 'down' }), toast: async () => {}, now, manorUrl: null, pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true });
   assert.ok('surveyor:down' in watched.watching);
 });
 
@@ -189,7 +189,8 @@ test("the held-back wording: on the person's PC the page and Settings speak of t
   for (const key of ['stewardRepo', 'stewardCheckout', 'rollout', 'releaseSelf', 'mergeSelf', 'releasesRepo']) assert.deepEqual(shown(key), { key: 'releasesCastellan', is: ['true'] }, key);
   for (const key of ['fileWork', 'wrightReview', 'wrightHere']) assert.deepEqual(shown(key), { key: 'wrightHere', is: ['true'] }, key);
   const employees = fields.find((f) => f.key === 'employees') as any;
-  for (const key of ['usesKit', 'fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
+  assert.equal(employees.fields.find((f: any) => f.key === 'usesKit').hidden, true, 'whether it takes the kit: the Steward decides, never shown');
+  for (const key of ['fill', 'install', 'approve', 'installed']) assert.deepEqual(employees.fields.find((f: any) => f.key === key).shownWhen, { key: 'releasesCastellan', is: ['true'] }, key);
   assert.equal(employees.blank.merges, false, 'a repository added by hand merges nothing until the person says yes');
   assert.match(employees.fields.find((f: any) => f.key === 'merges').help, /^Off until you say yes/);
   assert.doesNotMatch(JSON.stringify(ONBOARDING), /kit|Wright|Bailiff|Castellan|employee/i, 'the onboarding is about their repositories');

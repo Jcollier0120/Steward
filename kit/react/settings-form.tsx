@@ -41,12 +41,14 @@ function useShown(fields: SettingsField[], path: (f: SettingsField) => string): 
 }
 
 /** Seldom-changed fields, folded after the rest; a message about one of them unfolds it. */
-function Advanced({ count, open, children }: { count: number; open: boolean; children: ReactNode }) {
+function Advanced({ count, open, label = 'Advanced', children }: { count: number; open: boolean; label?: string; children: ReactNode }) {
   const [opened, setOpened] = useState(false);
   if (!count) return null;
   return (
     <details className="sf-advanced" open={opened || open} onToggle={(e) => setOpened(e.currentTarget.open)}>
-      <summary>Advanced ({count})</summary>
+      <summary>
+        {label} ({count})
+      </summary>
       {children}
     </details>
   );
@@ -258,6 +260,8 @@ function MapEd({ f, value, onChange, path }: EdProps) {
 
 function Records({ f, value, onChange, path }: EdProps) {
   const [added, setAdded] = useState(-1);
+  const [find, setFind] = useState('');
+  const msgs = useContext(MsgContext);
   if (f.kind !== 'records') return null;
   const recs = Array.isArray(value) ? value.map(asObj) : [];
   const noun = (f.noun || 'entry').toLowerCase();
@@ -269,7 +273,8 @@ function Records({ f, value, onChange, path }: EdProps) {
   const remove = (i: number) => (
     <Button title="Remove" variant="secondary" size="sm" accessibilityLabel={`Remove ${noun} ${i + 1}`} onPress={() => onChange(recs.filter((_, j) => j !== i))} />
   );
-  const add = <Button title={`Add ${noun}`} variant="secondary" size="sm" disabled={f.maxItems !== undefined && recs.length >= f.maxItems} onPress={() => (setAdded(recs.length), onChange([...recs, clone(f.blank) ?? Object.fromEntries(f.fields.map((g) => [g.key, blank(g)]))]))} />;
+  // None when records arrive another way (noAdd): only changed or removed here.
+  const add = f.noAdd ? null : <Button title={`Add ${noun}`} variant="secondary" size="sm" disabled={f.maxItems !== undefined && recs.length >= f.maxItems} onPress={() => (setAdded(recs.length), onChange([...recs, clone(f.blank) ?? Object.fromEntries(f.fields.map((g) => [g.key, blank(g)]))]))} />;
   if (flat)
     return (
       <div>
@@ -292,39 +297,100 @@ function Records({ f, value, onChange, path }: EdProps) {
         {add}
       </div>
     );
+  // A long list has a box to find one by: its title, or any text in it. A record with a message shows anyway.
+  const found = (r: Obj, i: number) => !find.trim() || under(msgs, `${path}.${i}`) || Object.values(r).some((v) => typeof v === 'string' && v.toLowerCase().includes(find.trim().toLowerCase()));
+  const shownCount = recs.filter(found).length;
   return (
     <div>
+      {recs.length > FIND_AFTER && (
+        <div className="sf-find">
+          <input type="search" value={find} placeholder={`Find a ${noun}`} aria-label={`Find a ${noun}`} onChange={(e) => setFind(e.target.value)} />
+          <Text variant="muted">{find.trim() ? `${shownCount} of ${recs.length}` : `${recs.length} ${plural(noun)}`}</Text>
+        </div>
+      )}
       {recs.map((r, i) => (
-        <RecordBox key={i} f={f} r={r} i={i} path={`${path}.${i}`} isNew={i === added} noun={noun} onChange={(x) => set(i, x)} remove={remove(i)} />
+        <RecordBox key={i} f={f} r={r} i={i} path={`${path}.${i}`} isNew={i === added} noun={noun} hidden={!found(r, i)} onChange={(x) => set(i, x)} remove={remove(i)} />
       ))}
       {add}
     </div>
   );
 }
 
+/** How many records a list holds before it has a box to find one by. */
+const FIND_AFTER = 8;
+
+/** A noun's plural, for "38 repositories". */
+const plural = (noun: string) => (/[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : /(s|x|ch|sh)$/.test(noun) ? `${noun}es` : `${noun}s`);
+
+/** Whether a record's field is set, for its chip: a switch on, a text, list or number not empty. */
+const isSet = (v: unknown) => (Array.isArray(v) ? v.length > 0 : typeof v === 'string' ? v.trim() !== '' : v === true || (typeof v === 'number' && v !== 0));
+
 /**
- * A record folded to one line, its title (which follows its title field as it's typed), opened by a click: one with a
- * list or a group in it, or more fields than a table row holds well. Its advanced fields fold inside it.
+ * A record folded to one line, opened by its title (which follows its title field as it's typed): one with a list or a
+ * group in it, or more fields than a table row holds well. The line also carries what says the most about it without
+ * opening it: the records' `line` fields' values, each field's chip, and its `inline` switches, which work right there.
+ * Its advanced fields fold inside it.
  */
-function RecordBox({ f, r, i, path, isNew, noun, onChange, remove }: { f: SettingsField & { kind: 'records' }; r: Obj; i: number; path: string; isNew: boolean; noun: string; onChange: (r: Obj) => void; remove: ReactNode }) {
-  const [open, setOpen] = useState(isNew);
+function RecordBox({ f, r, i, path, isNew, noun, hidden, onChange, remove }: { f: SettingsField & { kind: 'records' }; r: Obj; i: number; path: string; isNew: boolean; noun: string; hidden?: boolean; onChange: (r: Obj) => void; remove: ReactNode }) {
+  const [opened, setOpen] = useState(isNew);
+  const id = useId();
   const msgs = useContext(MsgContext);
+  const top = useContext(TopContext);
   const shown = useShown(f.fields, (g) => `${path}.${g.key}`);
+  // An error in it opens it, and keeps it open; a warning only says so on its line, so a long list stays folded.
+  const said = Object.entries(msgs).filter(([p]) => p === path || p.startsWith(`${path}.`));
+  const open = opened || said.some(([, m]) => m.kind === 'error');
+  const warned = said.filter(([, m]) => m.kind === 'warning').map(([, m]) => m.text);
   const title = f.title && r[f.title] ? String(r[f.title]) : `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1}`;
   const block = (g: SettingsField) => <FieldBlock key={g.key} f={g} value={r[g.key]} path={`${path}.${g.key}`} onChange={(v) => onChange({ ...r, [g.key]: v })} />;
-  const advanced = shown.filter((g) => g.advanced);
+  const inline = shown.filter((g) => g.inline && g.kind === 'switch' && !g.readOnly);
+  const rest = shown.filter((g) => !inline.includes(g));
+  const advanced = rest.filter((g) => g.advanced);
+  const line = (f.line ?? []).map((k) => r[k]).filter((v): v is string => typeof v === 'string' && v.trim() !== '');
+  // What it does: each shown field's chip while it is set, or its chipOff while it isn't; a hidden field's too, whose
+  // value the agent keeps (no tests, say), while its shownWhen holds.
+  const kept = f.fields.filter((g) => g.hidden && !rest.includes(g) && shownNow({ ...g, hidden: false }, top));
+  const chips = [...rest, ...kept].flatMap((g) => {
+    const word = isSet(r[g.key]) ? g.chip : g.chipOff;
+    return word ? [{ key: g.key, word, on: isSet(r[g.key]) }] : [];
+  });
   return (
-    <details className="sf-record" open={open || under(msgs, path)} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>{title}</summary>
-      <div role="group" aria-label={title}>
-        {shown.filter((g) => !g.advanced).map(block)}
-        <Advanced count={advanced.length} open={advanced.some((g) => under(msgs, `${path}.${g.key}`))}>
+    <div className={cx('sf-record', open && 'is-open')} hidden={hidden}>
+      <div className="sf-record-line">
+        <button type="button" className="sf-record-title" aria-expanded={open} aria-controls={`${id}-body`} onClick={() => setOpen(!open)}>
+          {title}
+        </button>
+        <span className="sf-record-info" title={line.join(' · ') || undefined}>
+          {line.join(' · ')}
+        </span>
+        <span className="sf-chips">
+          {!open && warned.length > 0 && (
+            <span className="sf-chip warn" title={warned.join(' ')}>
+              needs a look
+            </span>
+          )}
+          {chips.map((c) => (
+            <span key={c.key} className={cx('sf-chip', !c.on && 'off')}>
+              {c.word}
+            </span>
+          ))}
+        </span>
+        {inline.map((g) => (
+          <SwitchLabel key={g.key} control={<Scalar f={g} value={r[g.key]} path={`${path}.${g.key}`} aria={`${g.label}, ${title}`} onChange={(v) => onChange({ ...r, [g.key]: v })} />} label={g.label} />
+        ))}
+      </div>
+      <div id={`${id}-body`} className="sf-record-body" role="group" aria-label={title} hidden={!open}>
+        {rest.filter((g) => !g.advanced).map(block)}
+        <Advanced label={f.advancedLabel} count={advanced.length} open={advanced.some((g) => under(msgs, `${path}.${g.key}`))}>
           {advanced.map(block)}
         </Advanced>
+        <div className="row">{remove}</div>
       </div>
-      <div className="row">{remove}</div>
+      {inline.map((g) => (
+        <Msg key={g.key} path={`${path}.${g.key}`} />
+      ))}
       <Msg path={path} />
-    </details>
+    </div>
   );
 }
 
@@ -370,7 +436,8 @@ const SwitchLabel = ({ control, label }: { control: ReactNode; label: ReactNode 
 function FieldMeta({ f, value, def, top, onChange }: { f: SettingsField; value: unknown; def?: unknown; top: boolean; onChange: (v: unknown) => void }) {
   const meta: ReactNode[] = [];
   if (f.kind === 'text' && (f.nullable || f.empty)) meta.push(<span key="empty">Empty: {f.nullable || f.empty}.</span>);
-  if (def !== undefined && f.kind !== 'group' && !f.readOnly) {
+  // Its default, and the way back to it, only once it differs: a setting as it came says nothing more.
+  if (def !== undefined && f.kind !== 'group' && !f.readOnly && !same(f, value, def)) {
     meta.push(<span key="default">Default: {words(f, def)}.</span>);
     meta.push(<LinkButton key="reset" title="Reset to default" disabled={same(f, value, def)} onPress={() => onChange(clone(def))} />);
   }
@@ -574,31 +641,56 @@ function useFormGuards(root: RefObject<HTMLDivElement | null>, dirty: boolean, m
   }, [msgs, refused, root]);
 }
 
+/** One tab of a long form: its settings, then its advanced ones folded. */
+interface Panel {
+  id: string;
+  label: string;
+  fields: SettingsField[];
+  advanced: SettingsField[];
+}
+
+/** The tab a top-level setting is in: its own `tab`, a group's label, else General (the id a group's key, or tab-<name>). */
+function tabOf(f: SettingsField, schema: SettingsField[]): { id: string; label: string } {
+  const name = f.tab ?? (f.kind === 'group' && !f.advanced ? f.label : undefined);
+  if (!name || name === 'General') return { id: 'general', label: 'General' };
+  const group = schema.find((g) => g.kind === 'group' && !g.advanced && g.label === name);
+  return { id: group ? group.key : `tab-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, label: name };
+}
+
 /**
- * A long form's tabs: General (the settings in no group, then Advanced), then each group. Every panel is drawn and kept
- * while hidden, so one Save sends them all; a tab with a problem in it has a mark.
+ * A long form's panels: General (the settings in no group and no tab, then Advanced), then each group and each named
+ * tab. With no `tab` in the schema General comes first, as it always has; with one, the tabs follow the schema's order.
  */
-function FormTabs({ sections, general, advanced, tab, onChoose, block }: { sections: SettingsField[]; general: SettingsField[]; advanced: SettingsField[]; tab: string; onChoose: (id: string) => void; block: (f: SettingsField) => ReactNode }) {
-  const msgs = useContext(MsgContext);
+function panelsOf(ordinary: SettingsField[], advanced: SettingsField[], schema: SettingsField[]): Panel[] {
+  const panels: Panel[] = schema.some((f) => f.tab) ? [] : [{ id: 'general', label: 'General', fields: [], advanced: [] }];
+  const at = (f: SettingsField) => {
+    const t = tabOf(f, schema);
+    let p = panels.find((x) => x.id === t.id);
+    if (!p) panels.push((p = { ...t, fields: [], advanced: [] }));
+    return p;
+  };
+  for (const f of schema) {
+    if (ordinary.includes(f)) at(f).fields.push(f);
+    else if (advanced.includes(f)) at(f).advanced.push(f);
+  }
   // General only when something's in it: a form of groups alone opens on its first.
-  const panels = [{ id: 'general', label: 'General', fields: [...general, ...advanced] }, ...sections.map((f) => ({ id: f.key, label: f.label, fields: [f] }))].filter((p) => p.fields.length);
+  return panels.filter((p) => p.fields.length || p.advanced.length);
+}
+
+/** A long form's tabs. Every panel is drawn and kept while hidden, so one Save sends them all; a tab with a problem in it has a mark. */
+function FormTabs({ panels, tab, onChoose, block }: { panels: Panel[]; tab: string; onChoose: (id: string) => void; block: (f: SettingsField) => ReactNode }) {
+  const msgs = useContext(MsgContext);
   const shown = panels.some((p) => p.id === tab) ? tab : panels[0].id;
-  const marked = (p: (typeof panels)[number]) => (p.fields.some((f) => under(msgs, f.key)) ? 'Something here needs a look' : undefined);
+  const marked = (p: Panel) => ([...p.fields, ...p.advanced].some((f) => under(msgs, f.key)) ? 'Something here needs a look' : undefined);
   return (
     <>
       <Tabs tabs={panels.map((p) => ({ id: p.id, label: p.label, mark: marked(p) }))} tab={shown} onChoose={onChoose} label="Settings sections" prefix="sf" />
       {panels.map((p) => (
         <div key={p.id} className="tab-panel" role="tabpanel" id={`sf-panel-${p.id}`} aria-labelledby={`sf-tab-${p.id}`} hidden={p.id !== shown}>
-          {p.id === 'general' ? (
-            <>
-              {general.map(block)}
-              <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
-                {advanced.map(block)}
-              </Advanced>
-            </>
-          ) : (
-            p.fields.map(block)
-          )}
+          {p.fields.map(block)}
+          <Advanced count={p.advanced.length} open={p.advanced.some((f) => under(msgs, f.key))}>
+            {p.advanced.map(block)}
+          </Advanced>
         </div>
       ))}
     </>
@@ -621,14 +713,14 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
   const s = useSettings(initial, onSaved);
   const { data, draft, saved, msgs } = s;
   const [opened, setOpened] = useState<Record<string, boolean>>({});
-  // A long form's tab (in tabs: see above): 'general', or a group's key.
-  const [tab, setTab] = useState('general');
+  // A long form's tab (in tabs: see above): its panel's id; none yet, its first.
+  const [tab, setTab] = useState('');
   const root = useRef<HTMLDivElement>(null);
   // A save refused in a long form: the tab with the first problem, and the problem in it, shown.
   useEffect(() => {
     if (!s.status.error || !data) return;
-    const bad = data.schema.find((f) => f.kind === 'group' && !f.advanced && under(msgs, f.key));
-    setTab(bad ? bad.key : 'general');
+    const bad = data.schema.find((f) => under(msgs, f.key));
+    setTab(bad ? tabOf(bad, data.schema).id : 'general');
     requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[aria-invalid="true"], .sf-general')?.focus());
   }, [msgs, s.status.error]); // eslint-disable-line react-hooks/exhaustive-deps
   const fields = data ? (keys ? keys.map((k) => data.schema.find((f) => f.key === k)).filter((f): f is SettingsField => !!f && !f.advanced) : data.schema) : [];
@@ -655,7 +747,10 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
   const ordinary = visible.filter((f) => !f.advanced);
   const advanced = visible.filter((f) => f.advanced);
   const sections: SettingsField[] = keys ? [] : ordinary.filter((f) => f.kind === 'group');
-  const tabbed = sections.length >= 2 && ordinary.length >= TAB_FIELDS;
+  // Tabs: two or more groups or named tabs, in a long form.
+  const named = new Set(keys ? [] : ordinary.flatMap((f) => (f.kind === 'group' || f.tab ? [tabOf(f, data.schema).id] : [])));
+  named.delete('general');
+  const tabbed = named.size >= 2 && ordinary.length >= TAB_FIELDS;
   const open = (key: string) => sections.length === 1 || !!opened[key] || under(msgs, key);
   const jump = (key: string) => {
     setOpened({ ...opened, [key]: true });
@@ -670,7 +765,8 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
     s.setStatus({ text: 'Changes undone.' });
   };
   const defaults = () => {
-    s.setDraft({ ...draft, ...Object.fromEntries(fields.filter((f) => !f.readOnly).map((f) => [f.key, clone(data.defaults[f.key])])) });
+    // Never a hidden one: the agent's own to set.
+    s.setDraft({ ...draft, ...Object.fromEntries(fields.filter((f) => !f.readOnly && !f.hidden).map((f) => [f.key, clone(data.defaults[f.key])])) });
     s.setStatus({ text: 'Every field shows its default now. Save to keep them, or Cancel.' });
   };
   return (
@@ -687,7 +783,7 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
           <FormHead data={data} later={laterNotes(fields)} general={msgs['']} />
           <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
             {tabbed ? (
-              <FormTabs sections={sections} general={ordinary.filter((f) => !sections.includes(f))} advanced={advanced} tab={tab} onChoose={setTab} block={block} />
+              <FormTabs panels={panelsOf(ordinary, advanced, data.schema)} tab={tab} onChoose={setTab} block={block} />
             ) : (
               <>
                 {ordinary.map(block)}

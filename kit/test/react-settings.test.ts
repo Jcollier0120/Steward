@@ -54,7 +54,7 @@ test('every field kind, drawn as settings-panel.js draws it, class for class', (
   assert.match(h, /<div class="sf-choices"><label><input type="checkbox"\/><span>A<\/span><\/label><label><input type="checkbox" checked=""\/><span>B<\/span>/);
   assert.match(h, /<table class="sf-table"><thead><tr><th scope="col">Port<\/th><th scope="col">Agent<\/th><th><\/th><\/tr><\/thead>/, 'records of plain fields: a table');
   assert.match(h, /aria-label="Port, agent 1"/);
-  assert.match(h, /<details class="sf-record"><summary>build<\/summary>/, 'records with a list in them: folded to their titles');
+  assert.match(h, /<div class="sf-record"><div class="sf-record-line"><button type="button" class="sf-record-title" aria-expanded="false"[^>]*>build<\/button>/, 'records with a list in them: folded to their titles');
   assert.match(h, /<th scope="col">Name<\/th><th scope="col">Value<\/th>/, 'a map: its two columns');
   assert.match(h, /<span class="sf-name">Since<\/span>.*<span class="muted">2026-10-05<\/span>/, 'read-only: the value, a time as its day');
   assert.match(h, /aria-label="Remove agent 1"/);
@@ -79,9 +79,69 @@ test('the short page: groups are sections with jump links, the advanced folded, 
 test('a record wider than a table row, or with an advanced field, folds to one line; its advanced fields fold inside it', () => {
   const wide = { key: 'projects', kind: 'records', label: 'Projects', noun: 'project', title: 'name', fields: ['name', 'a', 'b', 'c', 'd'].map((k) => ({ key: k, kind: 'text', label: k.toUpperCase(), advanced: k === 'd' })) };
   const h = m.form({ schema: [wide], values: { projects: [{ name: 'Porter', a: '', b: '', c: '', d: 'x' }] }, defaults: { projects: [] }, problems: [], warnings: {}, file: 'f' });
-  assert.match(h, /<details class="sf-record"><summary>Porter<\/summary>/, 'one line, its title');
+  assert.match(h, /<button type="button" class="sf-record-title" aria-expanded="false"[^>]*>Porter<\/button>/, 'one line, its title');
   assert.doesNotMatch(h, /sf-table/, 'not a table of five columns');
-  assert.match(h, /<summary>Porter<\/summary>.*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*data-key="d"/, "the record's advanced field, folded in it");
+  assert.match(h, /<div [^>]*class="sf-record-body" role="group" aria-label="Porter" hidden="">.*<details class="sf-advanced"><summary>Advanced \(1\)<\/summary>.*data-key="d"/, "folded: its fields drawn but hidden, the advanced one folded in it");
+});
+
+test("a long list of records: each line says what it is and does, its inline switch works there, a box finds one", () => {
+  const repos = {
+    key: 'repos',
+    kind: 'records',
+    label: 'Repositories',
+    noun: 'repository',
+    title: 'name',
+    line: ['repo', 'branch'],
+    advancedLabel: 'Found by the agent',
+    noAdd: true,
+    fields: [
+      { key: 'merges', kind: 'switch', label: 'Merges PRs', inline: true },
+      { key: 'release', kind: 'text', label: 'Release it', chip: 'releases', chipOff: 'not released' },
+      { key: 'test', kind: 'list', label: 'Test it', item: { label: 'Command' }, chipOff: 'no tests' },
+      { key: 'kit', kind: 'switch', label: 'Takes the kit', hidden: true },
+      { key: 'name', kind: 'text', label: 'Name', advanced: true },
+      { key: 'repo', kind: 'text', label: 'Repository', advanced: true },
+      { key: 'branch', kind: 'text', label: 'Branch', advanced: true },
+    ],
+  };
+  const rec = (n: number) => ({ name: `App${n}`, repo: `me/app${n}`, branch: 'main', merges: n === 1, release: n === 1 ? 'npm run release' : '', test: n === 1 ? ['npm test'] : [], kit: true });
+  const values = { repos: Array.from({ length: 9 }, (_, i) => rec(i + 1)) };
+  const h = m.form({ schema: [repos], values, defaults: { repos: [] }, problems: [], warnings: { 'repos.1.repo': 'No such folder.' }, file: 'f' });
+  assert.match(h, /<input type="search" placeholder="Find a repository" aria-label="Find a repository" value=""\/><span class="muted">9 repositories<\/span>/, 'more than eight: a box to find one by');
+  assert.match(h, />App1<\/button><span class="sf-record-info" title="me\/app1 · main">me\/app1 · main<\/span><span class="sf-chips"><span class="sf-chip">releases<\/span><\/span><label class="sf-switch"><input type="checkbox" role="switch"[^>]*aria-label="Merges PRs, App1"[^>]*checked=""\/><span>Merges PRs<\/span><\/label>/, 'its repository and branch, a chip for what is set, its switch on the line');
+  assert.match(h, />App2<\/button>.*?<span class="sf-chips"><span class="sf-chip warn" title="No such folder\.">needs a look<\/span><span class="sf-chip off">not released<\/span><span class="sf-chip off">no tests<\/span><\/span>/, "what isn't set, and a warning, said on the line; a warning doesn't open it");
+  assert.doesNotMatch(h, /aria-expanded="true"/, 'every record folded');
+  assert.doesNotMatch(h, /Takes the kit|data-key="kit"/, 'a hidden field is never drawn');
+  assert.match(h, /<details class="sf-advanced"><summary>Found by the agent \(3\)<\/summary>/, 'what the agent found, folded under its own words');
+  assert.equal(h.match(/data-key="merges"/g), null, 'the inline switch is on the line, not again inside');
+  assert.doesNotMatch(h, /Add repository/, 'noAdd: records arrive another way');
+  assert.match(h, /Remove repository 1/, 'and can still be removed');
+});
+
+test('a setting at its default says nothing more; one that differs says its default, and the way back', () => {
+  const f = { key: 'every', kind: 'whole', min: 1, max: 60, unit: 'minutes', label: 'A round every' };
+  const at = m.form({ schema: [f], values: { every: 10 }, defaults: { every: 10 }, problems: [], warnings: {}, file: 'f' });
+  assert.doesNotMatch(at, /Default: |Reset to default</);
+  const off = m.form({ schema: [f], values: { every: 5 }, defaults: { every: 10 }, problems: [], warnings: {}, file: 'f' });
+  assert.match(off, /Default: 10 minutes\..*Reset to default/);
+});
+
+test("tabs named in the schema: a long list split up without changing the file's shape, in the schema's order", () => {
+  const sw = (key: string, tab?: string) => ({ key, kind: 'switch', label: key, ...(tab ? { tab } : {}) });
+  const schema = [
+    { key: 'repos', kind: 'list', label: 'Repos', tab: 'Repositories', item: { label: 'Repo' } },
+    ...['a', 'b', 'c', 'd'].map((k) => sw(k, 'Rounds')),
+    ...['e', 'f', 'g', 'h', 'i'].map((k) => sw(k)),
+    { key: 'alarms', kind: 'group', label: 'Alarms', fields: [sw('on')] },
+    { ...sw('here', 'Alarms'), readOnly: true },
+  ];
+  const values = Object.fromEntries(schema.map((f) => [f.key, f.kind === 'list' ? [] : f.kind === 'group' ? { on: true } : false]));
+  const h = m.form({ schema, values, defaults: values, problems: [], warnings: {}, file: 'f' });
+  const tabs = [...h.matchAll(/role="tab"[^>]*id="sf-tab-([^"]+)"[^>]*>([^<]+)</g)].map((x) => `${x[1]}:${x[2]}`);
+  assert.deepEqual(tabs, ['tab-repositories:Repositories', 'tab-rounds:Rounds', 'general:General', 'alarms:Alarms']);
+  assert.match(h, /id="sf-tab-tab-repositories" aria-selected="true"/, 'the first tab open');
+  assert.match(h, /id="sf-panel-alarms"[^>]*hidden="">.*data-key="alarms".*data-key="here"/, "a field naming a group's label is in that group's tab");
+  assert.match(h, /id="sf-panel-tab-rounds"[^>]*hidden="">(?:(?!sf-panel).)*data-key="d"/, 'and the rest in theirs');
 });
 
 test('onboarding: only the keys asked for, never an advanced one; none at all says so', () => {

@@ -16,7 +16,7 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { DEFAULT_SETTINGS, SETTINGS_SPEC, loadSettings, normalizeSettings, settingsFile } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, SETTINGS_SPEC, agentPages, loadSettings, normalizeSettings, settingsFile } = await import('../src/settings.ts');
 const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
 const { pick } = await import('../src/stages/common.ts');
 const { fillMigrationGaps, migrateSettings, migrationFile, pendingMigration } = await import('../src/migrate.ts');
@@ -111,22 +111,31 @@ test('an employee without a usable id is left out, and said so; the stages take 
   assert.match((pick(STAFF, ['porter', 'reve']) as { error: string }).error, /no employee called reve/);
 });
 
-test("the Wright's and the Bailiff's pages are read for alarms where each is installed, but neither is taken on as an employee by itself", () => {
-  assert.deepEqual([normalizeSettings({}).settings.alarms.wrightUrl, normalizeSettings({}).settings.alarms.bailiffUrl], ['', ''], 'not installed: not read');
-  mkdirSync(path.join(process.env.WRIGHT_HOME!, 'app'), { recursive: true });
-  mkdirSync(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true });
+test("the other agents' pages are Manor's to say, never Settings'; the Wright's and the Bailiff's only where each is installed, neither taken on by itself", () => {
+  const before = process.env.MANOR_HOME;
+  process.env.MANOR_HOME = path.join(home, 'no-manor');
+  assert.deepEqual(agentPages(), { manor: '', surveyor: '', wright: '', bailiff: '', reeve: '' }, 'no Manor here: none read');
+  const manor = path.join(home, 'pages-manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port: 18585 }));
+  const agents = ['surveyor', 'reeve', 'wright', 'bailiff'].map((id) => ({ id, home: `http://${id}.localhost:1900${id.length}/` }));
+  writeFileSync(path.join(manor, 'agents.json'), JSON.stringify({ agents }));
+  process.env.MANOR_HOME = manor;
   try {
-    const s = normalizeSettings({}).settings;
-    assert.deepEqual([s.alarms.wrightUrl, s.alarms.bailiffUrl], ['http://127.0.0.1:19797', 'http://127.0.0.1:19999']);
+    assert.deepEqual(agentPages(), { manor: 'http://manor.localhost:18585/', surveyor: 'http://surveyor.localhost:19008/', wright: '', bailiff: '', reeve: 'http://reeve.localhost:19005/' }, "the Wright and the Bailiff not installed: not read, though Manor knows them");
+    mkdirSync(path.join(process.env.WRIGHT_HOME!, 'app'), { recursive: true });
+    mkdirSync(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true });
+    assert.deepEqual([agentPages().wright, agentPages().bailiff], ['http://wright.localhost:19006/', 'http://bailiff.localhost:19007/']);
+    const s = normalizeSettings({ alarms: { manorUrl: 'http://127.0.0.1:1', wrightUrl: '', bailiffUrl: 'http://127.0.0.1:2' } }).settings;
     assert.deepEqual(s.employees, [], 'installed, but not an employee until Settings name it');
-    assert.equal(normalizeSettings({ alarms: { wrightUrl: '' } }).settings.alarms.wrightUrl, '', 'Settings still decide when they say');
+    assert.ok(!('wrightUrl' in s.alarms), 'a page an older Steward saved is ignored');
+    assert.equal(agentPages().wright, 'http://wright.localhost:19006/');
   } finally {
     rmSync(process.env.WRIGHT_HOME!, { recursive: true, force: true });
     rmSync(process.env.BAILIFF_HOME!, { recursive: true, force: true });
+    if (before === undefined) delete process.env.MANOR_HOME;
+    else process.env.MANOR_HOME = before;
   }
-  // Removed: a page Settings still name isn't read, so it can't be "down" for ever.
-  const named = normalizeSettings({ alarms: { wrightUrl: 'http://127.0.0.1:19797', bailiffUrl: 'http://127.0.0.1:19999' } }).settings.alarms;
-  assert.deepEqual([named.wrightUrl, named.bailiffUrl], ['', '']);
 });
 
 // The migration: an install that ran on the old built-in employees keeps them, read from its staff table and its clones.

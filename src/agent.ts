@@ -10,7 +10,7 @@ import { afterWords } from './after.ts';
 import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
-import { loadSettings, SETTINGS_SPEC } from './settings.ts';
+import { agentPages, loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff, StaffRow } from './stages/staff.ts';
 import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
 import { loadTending } from './tend.ts';
@@ -151,7 +151,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // Under node --test only with a stand-in for the pages: a test never reads this PC's Reeve.
     process.env.NODE_TEST_CONTEXT && !o.getJson
       ? Promise.resolve()
-      : (finding ??= findRepos({ run: o.run ?? realRun, cwd: dataDir, getJson: o.getJson ?? getJson, reeveUrl: loadSettings().alarms.reeveUrl, githubReady: githubReadyHere() })
+      : (finding ??= findRepos({ run: o.run ?? realRun, cwd: dataDir, getJson: o.getJson ?? getJson, reeveUrl: agentPages().reeve, githubReady: githubReadyHere() })
       .catch((e) => console.error(`${new Date().toISOString()} finding the repositories: ${(e as Error).message}`))
       .finally(() => {
         finding = null;
@@ -265,7 +265,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     }
     const s = loadSettings();
     const busy = running !== null || refreshing !== null;
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!s.alarms.manorUrl, repos: reposHere(s), castellan: s.releasesCastellan };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
