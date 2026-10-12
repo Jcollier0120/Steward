@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.55.0
+
+**The Settings form for a long list: records on one line that says what each does, tabs by name, less said.**
+
+### What's new
+
+- **A record's line (react/settings-form.tsx).** A folded record is a line now, not a bare title: after its title, the values of the records' `line` fields (its repository and branch, say), muted; a chip for each field with a `chip` while it is set, or its `chipOff` while it isn't; and each switch marked `inline`, working right there. Its advanced fields fold under `advancedLabel` (default Advanced). More than eight records: a box finds one by any text in it.
+- **`tab` on a top-level setting** puts it in a tab of that name in a long form, so a long list of settings is split up without changing settings.json's shape; a group's label puts it in that group's tab. A form that names any tab has its tabs in the schema's order, the first one open; one that names none is as before (General first).
+- **`missing: 'made'` on a path rule (node/settings-kit.ts)**: a path the agent makes itself, such as a work folder, is kept with no warning while it doesn't exist yet. A warning makes a hidden field show, so a folder the agent makes shouldn't carry one.
+- **`noAdd` on records**: no Add button, for records that arrive another way; each can still be changed or removed.
+- **`hidden` on a field**: kept in the file and carried through every save, and drawn only when the agent has something to say about it (an error or warning), so it can ask for the value it couldn't find. For a value the agent decides itself. A hidden field's `chip` still shows on its record's line, and "Set every field to its default" leaves it alone.
+
+### What changed
+
+- A setting at its default no longer says "Default: … Reset to default" under it; one you've changed still does.
+- A record with a warning in it says "needs a look" on its line, and stays folded; one with an error opens, as before.
+- **web/settings-panel.css:** the panel's filled-button rule no longer reaches a long form's tabs. It outranked `.tab`, so every tab was filled with the accent: hard to read in the dark theme.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. A schema can use `tab`, `line`, `chip`, `inline`, `hidden`, `noAdd`, `advancedLabel` and `missing: 'made'` where they help; web/settings-panel.js leaves out `hidden` fields and ignores the rest.
+
 ## 2.53.0
 
 **Demo mode: an agent's page with made-up data, for Manor's pictures of each employee.**

@@ -85,3 +85,11 @@ test('knownFolders: where Windows has them, OneDrive moves included; the usual p
   assert.deepEqual([none.documents, none.downloads, none.oneDrive], [path.join(home, 'Documents'), path.join(home, 'Downloads'), null]);
   assert.deepEqual(uniqueFolders(['C:\A', 'c:\a', null, '', 'C:\B']), ['C:\A', 'C:\B']);
 });
+
+test("a path the agent makes (missing: 'made') is kept with no warning while it's missing; one that's a file is still refused", () => {
+  const f = { key: 'work', kind: 'text', label: 'Work', help: 'h', maxLength: 260, path: { is: 'folder', missing: 'made' } } as any;
+  const gone = path.join(process.cwd(), 'no-such-folder-' + Date.now());
+  assert.deepEqual(checkValues([f], { work: gone }), { errors: {}, warnings: {} });
+  assert.match(checkValues([{ ...f, path: { is: 'folder', missing: 'warn' } }], { work: gone }).warnings.work ?? '', /no such folder/);
+  assert.match(checkValues([f], { work: path.join(process.cwd(), 'package.json') }).errors.work ?? '', /a file, not a folder/);
+});

@@ -2,6 +2,30 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.23
+
+**Settings you can read: each repository on one line, and only what's yours to choose.**
+
+### What's new
+
+- **Repositories have their own tab, and it opens first.** Each repository is one line: its name, its repository and branch, its note, what the Steward does for it (releases, or not released; no tests) and its **Merges PRs** switch, which you can flip right there. With more than eight, a box above the list finds one by name or repository.
+- A repository opens to just what you decide: whether and how it's released, and its note. What the Steward finds by itself from your clone (its name, repository, branch, clone, tests, version files, and the kit, install and job commands) isn't shown at all, so it can't be set wrong by hand. If the Steward can't find one of them, that setting shows, with a line saying what to set.
+- The rest of Settings is in tabs of its own: **Merging and releasing**, **General**, **Alarms**, **The Wright's drafts**, and on the PC that releases Castellan, **Castellan**.
+
+### What changed
+
+- Settings no longer has an Add button for repositories: they arrive by Hire, or by Look after on the Steward's page, with everything found from their clones. Each can still be removed here.
+- "Takes the Steward's kit" is gone from Settings: whether a repository takes the kit is the Steward's to decide, from the kit.json on its branch. Saving Settings keeps what the Steward decided.
+- Other settings the Steward works out for itself are gone from Settings too: the Wright's, the Bailiff's and Manor's pages for alarms, the work folder, the .NET SDK, the Steward's own repository and clone, and where Castellan's releases go. Your settings.json keeps them, and one still shows if something is wrong with it.
+- Every setting's help is a line or two now, instead of a paragraph. A setting says its default, and offers Reset to default, only once you've changed it.
+- A repository with a warning (an installed copy that isn't there yet, say) says "needs a look" on its line instead of opening by itself; one with an error still opens.
+- Settings' tabs are underlined, and no longer filled with the accent colour, which was hard to read in the dark theme.
+- The Steward takes the kit 2.55.0, which brings all of this to the Settings form.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Your settings.json keeps its shape: nothing in it is moved or rewritten.
+
 ## 0.35.21
 
 **The Steward no longer tries to open a pull request that is already open.**
