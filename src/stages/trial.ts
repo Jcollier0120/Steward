@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
-import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchBranch, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump.ts';
@@ -210,7 +210,7 @@ export async function pinningPrs(ctx: Ctx, e: Employee, kit: string): Promise<Pr
   const out: PrInfo[] = [];
   for (const p of prs) {
     if (p.fork || p.base !== e.branch || !p.headOid) continue;
-    await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${p.number}/head`);
+    await fetchFor(ctx.run, repo, p.headOid, `refs/pull/${p.number}/head`);
     if (readPin(await showFile(ctx.run, repo, p.headOid, 'kit.json'))?.kit === kit) out.push(p);
   }
   return out;
@@ -228,7 +228,7 @@ async function tryPair(ctx: Ctx, e: Employee, p: PrInfo, kitDir: string): Promis
   await removeWorktree(run, repo, dir);
   clearWorkDir(ctx.settings, dir);
   rmSync(checksLogOf(dir), { force: true });
-  await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${p.number}/head`);
+  await fetchFor(run, repo, p.headOid, `refs/pull/${p.number}/head`);
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, p.headOid);
   const sha = p.headOid.slice(0, 7);
   try {
@@ -275,7 +275,7 @@ async function pairUp(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial): Pro
   let cut: string | null = null;
   if (found.length) {
     ctx.log(`[${APP.id}] #${pr.number}: ${found.map(({ e, p }) => `${e.name}'s #${p.number}`).join(', ')} ${found.length === 1 ? 'pins' : 'pin'} kit ${t.kit}: trying ${found.length === 1 ? 'it' : 'them'} with it`);
-    await git(ctx.run, checkoutOf(steward), 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+    await fetchFor(ctx.run, checkoutOf(steward), pr.headOid, `refs/pull/${pr.number}/head`);
     const tried = await withKitTree(ctx, steward, pr, (dir) =>
       mapLimit(found, ctx.settings.parallel, async ({ e, p }) => {
         let r: { ok: boolean; message: string };
@@ -315,7 +315,7 @@ const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fr
  */
 async function trySlice(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial, sliceMs: number, save: () => void): Promise<string | null> {
   const repo = checkoutOf(steward);
-  await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+  await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
   const t0 = Date.now();
   return withKitTree(ctx, steward, pr, async (dir) => {
     while (t.pending?.length) {
@@ -388,7 +388,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   // Tried just now: no branch has moved since.
   let fresh = false;
   if (!t) {
-    await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+    await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
     const kit = (await showFile(ctx.run, repo, pr.headOid, 'kit/VERSION'))?.trim();
     if (!kit || !/^\d+\.\d+\.\d+$/.test(kit)) return `its kit/VERSION at ${pr.headOid.slice(0, 7)} isn't a version, so its kit wasn't tried on the agents`;
     const tried = await triedAt(ctx, repo, pr.headOid);
@@ -429,7 +429,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     const moved = await movedOn(ctx, t);
     if (moved.length) {
       ctx.log(`[${APP.id}] #${pr.number}: ${moved.map((e) => e.name).join(', ')} moved on since kit ${t.kit} failed their checks: trying ${moved.length === 1 ? 'it' : 'them'} again`);
-      await git(ctx.run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${pr.number}/head`);
+      await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
       const results = await tryAtHead(ctx, steward, pr, t.kit, moved);
       // Cut short by the network: the kept verdict stands, and the next round tries them again (their main still moved).
       for (const r of results) if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) return `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;

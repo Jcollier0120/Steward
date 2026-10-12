@@ -1,6 +1,7 @@
 import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { signedIn } from './git-auth.ts';
 
 /** What a command did: its exit code, and what it printed. */
 export interface Ran {
@@ -120,7 +121,7 @@ const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
-export const run: Runner = (cmd, args, opts = {}) => {
+const runPlain: Runner = (cmd, args, opts = {}) => {
   const [file, argv] = resolveCommand(cmd, args);
   const env = { ...process.env, ...opts.env };
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
@@ -144,6 +145,9 @@ export const run: Runner = (cmd, args, opts = {}) => {
     if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 };
+
+/** The real runner, its git fetches and pushes over https carrying their sign-in themselves (git-auth.ts). */
+export const run: Runner = signedIn(runPlain);
 
 /** A command line from an employee's settings, run in its folder. */
 export const runLine = (runner: Runner, line: string, opts: RunOptions = {}) => {

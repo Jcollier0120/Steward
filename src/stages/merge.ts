@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterWords } from '../after.ts';
-import { commitOf, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { commitOf, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
@@ -192,7 +192,7 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
   const { run } = ctx;
   const repo = checkoutOf(e);
   // The PR's head, fetched by its number (a fork's too), read at the commit its host named.
-  await git(run, repo, 'fetch', '--quiet', 'origin', hostFor(ctx, e).prRef(pr));
+  await fetchFor(run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
   const at = pr.headOid || 'FETCH_HEAD';
   const read = async (ref: string) => {
     const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, ref, f)] as [string, string | null])));
