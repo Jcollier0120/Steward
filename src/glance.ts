@@ -57,6 +57,11 @@ export interface Glance {
   /** What its queries cost, in GraphQL points, and what GitHub said is left: each query's `rateLimit` (budget.ts). */
   cost?: number;
   rates?: RateReading[];
+  /**
+   * Every branch head of each repository read (owner/name → branch → commit), and whether that's all its branches: for
+   * other agents, shared in remote-heads.json (kit/remote-heads.ts) so they need no ls-remote of their own.
+   */
+  heads?: Record<string, { heads: Record<string, string>; complete: boolean }>;
 }
 
 /** How many repositories one query asks about: GitHub allows 500,000 nodes a query, and each takes about 22,000. */
@@ -77,6 +82,9 @@ const PRS = `pullRequests(states: OPEN, first: ${PR_PAGE}, orderBy: {field: CREA
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state context } } } } } } }
 } }`;
 const RELEASES = 'releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft publishedAt tagCommit { oid } } }';
+/** How many branch heads a glance reads of each repository, for kit 2.58.0's remote-heads.json. */
+export const HEADS_PAGE = 100;
+const HEADS = `refs(refPrefix: "refs/heads/", first: ${HEADS_PAGE}) { totalCount nodes { name target { oid } } }`;
 
 const ownerName = (repo: string) => {
   const [owner, name] = repo.split('/');
@@ -95,7 +103,7 @@ export function glanceQuery(employees: Employee[], stewardRepo: string | null): 
   }
   // What it costs and what's left (budget.ts), asked in the query itself: free.
   parts.unshift('rateLimit { cost limit remaining used resetAt }');
-  const fragment = employees.length ? `fragment R on Repository { ${PRS} ${RELEASES} } ` : '';
+  const fragment = employees.length ? `fragment R on Repository { ${PRS} ${RELEASES} ${HEADS} } ` : '';
   return `${fragment}query { ${parts.join(' ')} }`.replace(/\s+/g, ' ');
 }
 
@@ -135,6 +143,14 @@ function repoFromGraph(r: any): RepoGlance {
       commit: typeof x?.tagCommit?.oid === 'string' ? x.tagCommit.oid : null,
     })),
   };
+}
+
+/** A repository's branch heads as the glance read them, and whether they're all of them; null when they weren't asked. */
+export function headsFromGraph(r: any): { heads: Record<string, string>; complete: boolean } | null {
+  if (!Array.isArray(r?.refs?.nodes)) return null;
+  const heads: Record<string, string> = {};
+  for (const n of r.refs.nodes) if (typeof n?.name === 'string' && typeof n?.target?.oid === 'string') heads[n.name] = n.target.oid;
+  return { heads, complete: Number(r.refs.totalCount) === Object.keys(heads).length };
 }
 
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -184,6 +200,8 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     if (r && open > PR_PAGE) into.errors[e.id] = `${open} open PRs, more than a glance reads (${PR_PAGE})`;
     else if (r) into.repos[e.id] = repoFromGraph(r);
     else into.errors[e.id] = why(`e${i}`);
+    const heads = r ? headsFromGraph(r) : null;
+    if (heads) (into.heads ??= {})[e.repo] = heads;
   });
 }
 
