@@ -8,7 +8,7 @@ import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { exchequerNote, networkFailure, networkNote, passingFailure, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { exchequerNote, networkFailure, networkNote, passingFailure, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -114,7 +114,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   const at = step.commit.slice(0, 7);
   const dir = selfDirOf(ctx);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   if (!(await commitOf(run, repo, step.commit))) await fetchBranch(run, repo, STEWARD_BRANCH);
   // Only a commit on origin's main, which the scripts need too ("HEAD isn't on origin yet").
   if ((await gitMaybe(run, repo, 'merge-base', '--is-ancestor', step.commit, `origin/${STEWARD_BRANCH}`)) === null) {

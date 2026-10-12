@@ -8,7 +8,7 @@ import { noteMerged } from '../strangers.ts';
 import { recordTested } from '../tested.ts';
 import { runChecks } from './bump.ts';
 import { isChangelog, isKitPin, lockBeside, mergeChangelogs, mergeKitPins, resolveVersionConflicts, settledFiles, settleVersion } from './catchup.ts';
-import { checkoutOf, forgetGlance, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, clearWorkDir, workRootOf, type Ctx } from './common.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { checksOf, type PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
@@ -204,7 +204,7 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
 
   const dir = trainDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, base);
   try {
     const rode: Car[] = [];

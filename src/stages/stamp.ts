@@ -6,7 +6,7 @@ import { CHANGELOG } from '../kit/notes.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { settledFiles, settleVersion } from './catchup.ts';
-import { checkoutOf, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
 import { KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, repinKit } from './kitpart.ts';
 import { carryTested } from './prtest.ts';
 import type { PrInfo } from './staff.ts';
@@ -86,7 +86,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
   if (pr.headOid && (await git(run, repo, 'rev-parse', head)).trim() !== pr.headOid) return { done: false, note: 'its branch moved since this round listed it' };
   const dir = stampDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
   try {
     const kitRepo = existsSync(path.join(dir, KIT_VERSION_FILE));

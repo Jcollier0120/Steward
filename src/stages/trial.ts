@@ -5,7 +5,7 @@ import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '
 import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump.ts';
-import { checkoutOf, glanceOf, mapLimit, networkFailure, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, glanceOf, mapLimit, networkFailure, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { kitReach } from './kitreach.ts';
@@ -181,7 +181,7 @@ async function withKitTree<T>(ctx: Ctx, steward: Employee, pr: PrInfo, use: (dir
   const repo = checkoutOf(steward);
   const dir = kitTrialDirOf(ctx);
   await removeWorktree(ctx.run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await git(ctx.run, repo, 'worktree', 'add', '--quiet', '--detach', dir, pr.headOid!);
   try {
     return await use(dir);
@@ -226,7 +226,7 @@ async function tryPair(ctx: Ctx, e: Employee, p: PrInfo, kitDir: string): Promis
   const dir = trialDirOf(ctx.settings, e);
   const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
   await removeWorktree(run, repo, dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   rmSync(checksLogOf(dir), { force: true });
   await git(run, repo, 'fetch', '--quiet', 'origin', `refs/pull/${p.number}/head`);
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, p.headOid);

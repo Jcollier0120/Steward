@@ -6,7 +6,7 @@ import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
-import { checkoutOf, mapLimit, networkNote, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { withRepo } from './slots.ts';
 
@@ -127,7 +127,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
  */
 async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> {
   unlinkModules(dir);
-  if (existsSync(dir) && path.dirname(dir) === workRootOf(ctx.settings)) rmSync(dir, { recursive: true, force: true });
+  clearWorkDir(ctx.settings, dir);
   await gitMaybe(ctx.run, repo, 'worktree', 'prune');
 }
 

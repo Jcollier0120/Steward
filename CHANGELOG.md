@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.30
+
+**The Steward only ever clears its own work folders.**
+
+### What changed
+
+- Before it makes a work folder again, the Steward removes only what it made there: a git worktree, or what's left of one in its own work folder. If Settings point the work folder somewhere else, such as your projects folder, a clone or any other folder there is never deleted. The Steward stops on it and says so.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.29
 
 **A new kit reaches the agents in one round and a few minutes, not an hour or more.**
