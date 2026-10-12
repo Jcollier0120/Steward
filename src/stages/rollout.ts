@@ -183,7 +183,8 @@ export function clearRolloutHolds(ids: string[]): void {
 export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string | null; ownKit: string | null; changelog: (kit: string) => Promise<string | null> }): Promise<{ results: EmployeeResult[]; plan: RolloutPlan }> {
   const failed = loadRolloutFailures();
   const before = JSON.stringify(failed);
-  // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx) is let go.
+  // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx), or for a program
+  // missing for a moment that is back (Git updating itself), is let go.
   for (const [id, h] of Object.entries(failed)) if (passingFailure(h.message)) delete failed[id];
   // A kit newer than this Steward's: its tools/kit.ts read from the kit's release, so nothing waits for the Steward's update.
   let ownKit = o.ownKit;

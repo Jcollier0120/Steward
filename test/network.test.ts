@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { interrupted, interruptedExit, networkFailure, networkLine, networkNote } from '../src/stages/common.ts';
+import { interrupted, interruptedExit, missingProgram, networkFailure, networkLine, networkNote, passingFailure, programFound, waitForProgram } from '../src/stages/common.ts';
 
 // The Developer Herald's 0.5.6: built, then gh's publish timed out. The message said only "failed (exit 1)", the PC
 // was online again when the round asked, so the commit was held for a person to release.
@@ -60,4 +60,37 @@ test("Windows ending a program (the PC shutting down) isn't the program failing:
   }
   for (const m of ['npm test failed (exit 1)', 'npm test failed (exit 1073807364000)', 'not ok 1073807364 - a test numbered so', 'tests 3221225794 passed (exit 1)']) assert.equal(interrupted(m), false, m);
   assert.deepEqual([0x40010004, 0xc0000142, 0xc000013a, -1073741510, 1, null].map(interruptedExit), [true, true, true, true, false, false]);
+});
+
+test("a program missing for a moment (Git updating itself) isn't the commit failing: it passes once the program is back", async () => {
+  // 2026-10-12: Git for Windows replaced git.exe while a round ran, and nine kit pushes were held, an alarm each.
+  const said = (program: string) => `git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main failed (1): spawn ${program} ENOENT`;
+  assert.equal(missingProgram(said('git')), 'git');
+  assert.equal(missingProgram(said('C:\\Program Files\\Git\\cmd\\git.exe')), 'C:\\Program Files\\Git\\cmd\\git.exe', 'a path with spaces');
+  assert.equal(missingProgram('npm test failed (exit 1): ENOENT: no such file or directory, open \'x.pid\''), null, "a test's own ENOENT isn't a program missing");
+  // Found again (node runs these tests): a hold kept for it goes by itself, as rollout.ts lets go of passing ones.
+  assert.equal(programFound('node'), true);
+  assert.equal(passingFailure(said('node')), true);
+  assert.equal(passingFailure(said(process.execPath)), true, 'a path that is there');
+  // Still missing: the failure stands, an alarm that says so.
+  assert.equal(programFound('no-such-program-anywhere'), false);
+  assert.equal(passingFailure(said('no-such-program-anywhere')), false);
+  // A round that meets it waits for it, and holds nothing if it comes back.
+  const online = { online: async () => true };
+  assert.equal(await networkFailure(online, said('git-being-replaced'), async () => true), true);
+  assert.equal(await networkFailure(online, said('git-being-replaced'), async () => false), false, 'gone for good: held');
+  assert.equal(await networkFailure(online, 'npm test failed (exit 1)', async () => assert.fail('only for a program missing')), false);
+});
+
+test('a wait for a program looks until it is back, up to its limit; after a wait in vain, one look only for a while', async () => {
+  let looks = 0;
+  assert.equal(await waitForProgram('git-back-soon', 5_000, () => ++looks >= 3, 1), true);
+  assert.equal(looks, 3, 'it looked until the program was back');
+  looks = 0;
+  assert.equal(await waitForProgram('git-gone', 30, () => (looks++, false), 1), false);
+  assert.ok(looks >= 2, 'it looked more than once before giving up');
+  looks = 0;
+  assert.equal(await waitForProgram('git-gone', 5_000, () => (looks++, false), 1), false);
+  assert.equal(looks, 1, 'the next failure for it looks once: a round of many failures is not held up');
+  assert.equal(await waitForProgram('git-gone', 5_000, () => true, 1), true, 'and finds it once it is back');
 });
