@@ -259,7 +259,7 @@
   function records(f, v) {
     const noun = (f.noun || 'entry').toLowerCase();
     // A record's handle (settings-kit.ts's KEPT, in place of its developer-only fields) goes with it, never drawn.
-    const drawn = f.fields.filter((g) => !g.kept);
+    const drawn = f.fields.filter((g) => !g.kept && !g.hidden);
     const flat = drawn.every((g) => SCALAR.includes(g.kind));
     const add = h('button', { type: 'button', class: 'quiet small', text: `Add ${noun}` });
     const tbody = h('tbody');
@@ -268,7 +268,7 @@
       ? h('div', {}, h('div', { class: 'sf-scroll' }, h('table', { class: 'sf-table' }, h('thead', {}, h('tr', {}, drawn.map((g) => h('th', { scope: 'col', text: g.label })), h('th', {}))), tbody)), add)
       : h('div', {}, stack, add);
     let rows = [];
-    const values = () => rows.map((r) => Object.fromEntries(f.fields.map((g) => [g.key, g.kept ? r.rec[g.key] : r.parts[g.key].ed.get()]).filter(([, x]) => x !== undefined)));
+    const values = () => rows.map((r) => Object.fromEntries(f.fields.map((g) => [g.key, g.kept || g.hidden ? r.rec[g.key] : r.parts[g.key].ed.get()]).filter(([, x]) => x !== undefined)));
     const title = (rec, i) => (f.title && rec[f.title] ? String(rec[f.title]) : `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${i + 1}`);
     // A record of many fields is folded to its title; which are open survives adding and removing.
     const opened = () => rows.map((r) => !!r.node.open);

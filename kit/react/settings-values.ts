@@ -28,7 +28,7 @@ export interface TextRules {
   pattern?: string;
   patternHint?: string;
   regex?: boolean;
-  path?: { is: 'folder' | 'file' | 'either'; missing: 'warn' | 'refuse'; missingNote?: string; env?: boolean };
+  path?: { is: 'folder' | 'file' | 'either'; missing: 'warn' | 'refuse' | 'made'; missingNote?: string; env?: boolean };
   empty?: string;
   placeholder?: string;
 }
@@ -48,6 +48,15 @@ interface Common {
   developerOnly?: boolean;
   /** A record's handle (settings-kit.ts's KEPT), in place of its developer-only fields: carried through a save, never drawn. */
   kept?: boolean;
+  /** A top-level setting's tab, by name, in a long form (a group's label puts it in that group's tab). */
+  tab?: string;
+  /** A record's field: a word on the record's folded line while it is set (on, or not empty), and while it isn't. */
+  chip?: string;
+  chipOff?: string;
+  /** A record's switch: on the record's folded line, working there. */
+  inline?: boolean;
+  /** Kept in the file and carried through a save, never drawn: the agent sets it itself. */
+  hidden?: boolean;
 }
 export type SettingsField =
   | (Common & { kind: 'switch' })
@@ -56,7 +65,7 @@ export type SettingsField =
   | (Common & { kind: 'choice'; options: SettingsOption[] })
   | (Common & { kind: 'choices'; options: SettingsOption[] })
   | (Common & { kind: 'list'; item: TextRules & { label: string; options?: SettingsOption[] }; matchCase?: boolean; minItems?: number; maxItems?: number })
-  | (Common & { kind: 'records'; fields: SettingsField[]; noun?: string; blank?: Record<string, unknown>; title?: string; unique?: string; minItems?: number; maxItems?: number })
+  | (Common & { kind: 'records'; fields: SettingsField[]; noun?: string; blank?: Record<string, unknown>; title?: string; unique?: string; minItems?: number; maxItems?: number; advancedLabel?: string; line?: string[]; noAdd?: boolean })
   | (Common & { kind: 'group'; fields: SettingsField[] })
   | (Common & { kind: 'map'; keyLabel: string; valueLabel: string; keyRules?: TextRules; valueRules?: TextRules; maxItems?: number });
 
@@ -207,7 +216,7 @@ export function tidy(f: SettingsField, v: unknown): unknown {
 }
 
 /** Whether a field shows, by its `shownWhen`, given the form's top-level values now. */
-export const shownNow = (f: SettingsField, top: Record<string, unknown>) => !f.kept && (!f.shownWhen || f.shownWhen.is.includes(String(top[f.shownWhen.key] ?? '')));
+export const shownNow = (f: SettingsField, top: Record<string, unknown>) => !f.kept && !f.hidden && (!f.shownWhen || f.shownWhen.is.includes(String(top[f.shownWhen.key] ?? '')));
 
 /** A time (an ISO string) as its day, for a read-only field; nothing as a dash. */
 export const shown = (v: unknown) => (v === undefined || v === null || v === '' ? '—' : String(v).replace(/^(\d{4}-\d\d-\d\d)T[\d:.]+Z$/, '$1'));

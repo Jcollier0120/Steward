@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import type { AgentPages } from '../src/settings.ts';
 
 // What needs the person: conditions from the round, Manor and the Surveyor; an alarm once one lasts its while,
 // raised once with one toast, kept until it clears; dismissed until it clears and comes back.
@@ -11,11 +12,13 @@ process.env.STEWARD_HOME = home;
 // The Wright is installed on the PC these tests run on, or not: neither may decide the defaults here.
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
+// Nor may this PC's Manor say where the other pages are (settings.ts's agentPages).
+process.env.MANOR_HOME = path.join(home, 'no-manor');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const alarmsModule = await import('../src/alarms.ts');
 const { alarmsFile, dismiss, loadAlarms, manorConditions, portConditions, reconcile, roundConditions, surveyorConditions, toastWords, watchAlarms, wrightConditions } = await import('../src/alarms.ts');
-const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
+const { DEFAULT_SETTINGS, agentPages, normalizeSettings } = await import('../src/settings.ts');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { bundleForNode, importPath } = await import('../kit/test/react-render.ts');
 
@@ -154,8 +157,9 @@ test('after a round: everything reconciled into alarms.json, and one toast for w
 
 test("the alarms' settings: on with a toast by default, and what they refuse", () => {
   assert.deepEqual(normalizeSettings({}).settings.alarms, DEFAULT_SETTINGS.alarms);
-  const a = normalizeSettings({ alarms: { on: false, waitingHours: 1000, problemHours: 'many', manorUrl: 'https://example.com', surveyorUrl: '' } }).settings.alarms;
-  assert.deepEqual([a.on, a.toast, a.waitingHours, a.problemHours, a.manorUrl, a.surveyorUrl], [false, true, 168, 6, 'http://127.0.0.1:18585', '']);
+  const a = normalizeSettings({ alarms: { on: false, waitingHours: 1000, problemHours: 'many', manorUrl: 'http://127.0.0.1:18585', surveyorUrl: '' } }).settings.alarms;
+  assert.deepEqual([a.on, a.toast, a.waitingHours, a.problemHours], [false, true, 168, 6]);
+  assert.ok(!('manorUrl' in a) && !('surveyorUrl' in a), 'a page saved by an older Steward is ignored: Manor says where each one is');
 });
 
 test('the page: what needs you at the top, each with Dismiss; the dismissed and the cleared folded away', async () => {
@@ -211,15 +215,16 @@ test("from the Bailiff: Claude Code unusable, or a review failing twice, at once
   assert.equal(c[1].title, "The Bailiff's review of Porter #31 failed twice: Porter 0.4.11: x");
   assert.deepEqual(bailiffConditions({ error: 'ECONNREFUSED' }).map((x) => [x.id, x.afterMs / HOUR]), [['bailiff:down', 2]]);
   assert.deepEqual(bailiffConditions({ at: 'x', needsYou: [], error: null }), []);
-  // watchAlarms reads /api/reviews only where Settings name the Bailiff's page (by default, only where it is installed).
+  // watchAlarms reads /api/reviews only where Manor names the Bailiff's page, and only where it is installed.
   rmSync(alarmsFile(), { force: true });
   const asked: string[] = [];
   const s = structuredClone(settings);
-  const watch = () => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => (asked.push(u), u.endsWith('/api/reviews') ? { needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }] } : { error: 'none' }), toast: async () => {}, now: at(0), manorUrl: null });
-  assert.equal(s.alarms.bailiffUrl, '', 'not installed here: not read');
+  const pages: Partial<AgentPages> = {};
+  const watch = () => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { pages, getJson: async (u: string) => (asked.push(u), u.endsWith('/api/reviews') ? { needsYou: [{ id: 'claude:blocked', kind: 'blocked', repo: '', number: 0, title: 'not signed in', url: 'u' }] } : { error: 'none' }), toast: async () => {}, now: at(0), manorUrl: null });
+  assert.equal(agentPages().bailiff, '', 'not installed here: not read');
   await watch();
   assert.ok(!asked.some((u) => u.includes('19999')));
-  s.alarms.bailiffUrl = 'http://127.0.0.1:19999';
+  pages.bailiff = 'http://127.0.0.1:19999';
   const st = await watch();
   assert.ok(asked.includes('http://127.0.0.1:19999/api/reviews'));
   assert.ok(st.open.some((a) => a.id === 'bailiff:claude:blocked'));
@@ -284,10 +289,7 @@ test("watching: Reeve's alerts are read only where he is installed, raised at on
   const toasts: [string, string][] = [];
   const asked: string[] = [];
   const s = structuredClone(settings);
-  s.alarms.manorUrl = '';
-  s.alarms.surveyorUrl = '';
-  s.alarms.wrightUrl = '';
-  const deps = (installed: boolean, answer: unknown = REEVE_ALERTS) => ({ getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18383/api/alerts' ? answer : { error: 'none' }), toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(12), reeveInstalled: () => installed });
+  const deps = (installed: boolean, answer: unknown = REEVE_ALERTS) => ({ pages: { manor: '', surveyor: '', wright: '', reeve: 'http://127.0.0.1:18383' }, getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18383/api/alerts' ? answer : { error: 'none' }), toast: async (t: string, b: string) => void toasts.push([t, b]), now: at(12), reeveInstalled: () => installed });
   const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
   let st = await watch(deps(false));
   assert.deepEqual([asked, st.open, toasts], [[], [], []], 'not installed: not read');
@@ -298,8 +300,6 @@ test("watching: Reeve's alerts are read only where he is installed, raised at on
   assert.deepEqual(toasts, [['Steward: 2 things need you', "Reeve's npu-health job: NPU driver changed\nReeve's fast-forward job: exited 1"]]);
   st = await watch(deps(true, { ...REEVE_ALERTS, alerts: [] }));
   assert.deepEqual([st.open.length, st.cleared.slice(0, 2).map((a) => a.id).sort()], [0, ['reeve:fast-forward:0123456789ab', 'reeve:npu-health:3f9a1c0b7d2e']], 'cleared once Reeve no longer lists them');
-  assert.equal(normalizeSettings({}).settings.alarms.reeveUrl, 'http://127.0.0.1:18383');
-  assert.equal(normalizeSettings({ alarms: { reeveUrl: '' } }).settings.alarms.reeveUrl, '', 'empty: not read');
 });
 
 test("while this PC is offline, what is only the network's is no alarm; everything else is as ever, and the toast too", async () => {
@@ -321,7 +321,7 @@ test("while this PC is offline, what is only the network's is no alarm; everythi
     { id: 'herald.round', subject: 'herald', severity: 'problem', title: "Herald's round failed 4 times", evidence: ['getaddrinfo ENOTFOUND www.nvidia.com'], since: at(-24).toISOString() },
     { id: 'pc.disk.C', subject: 'pc', severity: 'problem', title: 'Drive C: has 4.0 GB free (1%)', evidence: ['C: 4.0 GB free'], since: at(-24).toISOString() },
   ] } } as Record<string, unknown>;
-  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', online: async () => online });
+  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', pages: { surveyor: 'http://127.0.0.1:19595' }, online: async () => online });
   let state = await watch(false, 0);
   assert.deepEqual(state.open.map((a) => a.id), ['survey:pc.disk.C'], 'offline: only the disk');
   assert.equal(toasts.length, 1);

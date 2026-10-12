@@ -49,8 +49,8 @@ export interface Option {
 /** What a path must be. */
 export interface PathRule {
   is: 'folder' | 'file' | 'either';
-  /** A path that doesn't exist: saved with a warning (used once it exists), or refused. */
-  missing: 'warn' | 'refuse';
+  /** A path that doesn't exist: saved with a warning (used once it exists), refused, or kept quietly because the agent makes it. */
+  missing: 'warn' | 'refuse' | 'made';
   /** The warning for a missing path, when the agent does something about it ("The Miller makes it"). */
   missingNote?: string;
   /** %NAME% is expanded from the environment (%USERPROFILE%\Mill), as Windows does. */
@@ -111,6 +111,24 @@ interface Common {
   plain?: { label?: string; help?: string; patternHint?: string; placeholder?: string };
   /** Set by the kit on a record's handle (KEPT): carried through the panel, never drawn. */
   kept?: boolean;
+  /**
+   * A top-level setting's tab, by name, in a form long enough for tabs: a long list of settings split up without
+   * changing the file's shape. A group's label puts it in that group's tab. Tabs follow the schema's order.
+   */
+  tab?: string;
+  /**
+   * A record's field: a word on the record's folded line while it is set (a switch on, a text or list not empty),
+   * and `chipOff` while it isn't, so a long list of records says what each does without opening one.
+   */
+  chip?: string;
+  chipOff?: string;
+  /** A record's switch: drawn on the record's folded line, and working there, so the one that matters most is a click away. */
+  inline?: boolean;
+  /**
+   * Kept in the file and carried through every save, but never drawn: a value the agent decides itself (the Steward's
+   * usesKit, from each repository's kit.json), which a person needn't see or set. The panel sends it back as it came.
+   */
+  hidden?: boolean;
 }
 
 export type Field =
@@ -142,6 +160,12 @@ export type Field =
       unique?: string;
       minItems?: number;
       maxItems?: number;
+      /** What a record's advanced fields are folded under (default "Advanced"): "Found by the Steward". */
+      advancedLabel?: string;
+      /** No Add button: records arrive another way (the Steward's Look after and Hire), and are only changed or removed here. */
+      noAdd?: boolean;
+      /** Fields whose values are said on a record's folded line, muted, after its title: its repository and branch. */
+      line?: string[];
     })
   /** A few settings kept together as one object. */
   | (Common & { kind: 'group'; fields: Field[] })
@@ -219,6 +243,7 @@ function checkPath(p: string, rule: PathRule, at: string, out: Out): void {
   try {
     st = statSync(full);
   } catch {
+    if (rule.missing === 'made') return;
     if (rule.missing === 'refuse') out.errors[at] = `There's no such ${what} on this PC.`;
     else out.warnings[at] = rule.missingNote ?? `There's no such ${what} on this PC (yet). It's kept, and used once it exists.`;
     return;

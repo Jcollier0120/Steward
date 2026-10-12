@@ -276,11 +276,10 @@ test("the alarm waits a day from when it was filed; at once when the Wright is s
 
 test('watching: a failed release is filed and its alarm waits a day; stuck, it is raised at once; filing off, at once as before', async () => {
   const s = structuredClone(settings);
-  Object.assign(s.alarms, { manorUrl: '', surveyorUrl: '', wrightUrl: 'http://127.0.0.1:29797', reeveUrl: '' });
   let work: unknown = WORK();
   const g = gh();
   const watch = (h: number, more: Partial<typeof s> = {}) =>
-    watchAlarms({ settings: { ...s, ...more }, round: roundResult(), held: [], failedReleases: { porter: 'abc1234' }, employees, log: () => {}, run: g.run, neutralDir: home }, { getJson: async (u: string) => (u === 'http://127.0.0.1:29797/api/work' ? work : { error: 'none' }), toast: async () => {}, now: at(h) });
+    watchAlarms({ settings: { ...s, ...more }, round: roundResult(), held: [], failedReleases: { porter: 'abc1234' }, employees, log: () => {}, run: g.run, neutralDir: home }, { pages: { manor: '', surveyor: '', wright: 'http://127.0.0.1:29797', reeve: '' }, getJson: async (u: string) => (u === 'http://127.0.0.1:29797/api/work' ? work : { error: 'none' }), toast: async () => {}, now: at(h) });
   let st = await watch(0);
   assert.deepEqual(st.open.map((a) => a.id), [], 'filed: no alarm yet');
   assert.equal(g.creates().length, 1);

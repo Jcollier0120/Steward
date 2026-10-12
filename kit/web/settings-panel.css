@@ -63,6 +63,24 @@
 .sf-record > summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
 .sf-record[open] > summary { margin-bottom: 4px; }
 .sf-record > .row { margin-top: 6px; }
+/* The React form's record (settings-form.tsx): one line that says what it is and does, opened by its title. */
+.sf-panel div.sf-record { padding: 0 12px; margin-top: 6px; }
+.sf-record-line { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; min-height: 40px; }
+.sf-panel button.sf-record-title, .sf-panel button.sf-record-title:hover:not(:disabled) { flex: 0 0 200px; background: none; border: 0; border-radius: 4px; padding: 6px 0; color: var(--fg); font-weight: 600; filter: none; text-align: left; overflow-wrap: anywhere; }
+.sf-record-title::before { content: '\25B8'; display: inline-block; min-width: 1.1em; color: var(--muted); transition: transform .12s; }
+.sf-record.is-open .sf-record-title::before { transform: rotate(90deg); }
+.sf-record-info { flex: 1 1 260px; min-width: 0; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sf-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.sf-chips:empty { display: none; }
+.sf-chip { font-size: 12px; line-height: 1.6; padding: 0 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--fg); background: var(--hover, transparent); white-space: nowrap; }
+.sf-chip.off { color: var(--muted); background: none; border-style: dashed; }
+.sf-chip.warn { color: var(--warn); border-color: var(--warn); background: none; cursor: help; }
+.sf-record-line > .sf-switch { align-items: center; font-size: 13px; white-space: nowrap; }
+.sf-record-line > .sf-switch input[type=checkbox] { margin-top: 0; }
+.sf-record-body { border-top: 1px solid var(--line); padding-bottom: 10px; }
+.sf-record-body > .row { margin-top: 6px; }
+.sf-find { display: flex; gap: 12px; align-items: center; margin: 6px 0; }
+.sf-panel .sf-find input[type=search] { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface, var(--bg)); color: var(--fg); width: min(100%, 320px); }
 .sf-scroll { overflow-x: auto; }
 .sf-table { margin-top: 4px; }
 .sf-table th, .sf-table td { padding: 4px 6px 4px 0; border-bottom: 0; }
@@ -78,4 +96,9 @@
   .sf-table tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
   .sf-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
   .sf-panel input[type=text] { width: 100%; }
+}
+/* A long form's tab of plain settings, in a wide window: two columns, no setting split between them. A tab of records stays one to a line. */
+@media (min-width: 1100px) {
+  .sf-panel .tab-panel:not(:has(.sf-record)) { column-count: 2; column-gap: 40px; }
+  .sf-panel .tab-panel:not(:has(.sf-record)) > * { break-inside: avoid; }
 }
