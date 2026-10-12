@@ -90,6 +90,8 @@ export interface Settings {
   releaseAfterMerge: boolean;
   stewardRepo: string;
   parallel: number;
+  /** How many stages run at the same time (stages/slots.ts), each on its own repositories; 1: one at a time. */
+  stagesAtOnce: number;
   /** A vouch and a PR tested here run only the tests its change reaches (affected.ts); false: the whole suite. Absent: on. */
   affectedTests?: boolean;
   /** On duty, a round every `roundMinutes`: merge what's ready (the Steward's and the team's), then release what isn't. */
@@ -281,6 +283,7 @@ export const DEFAULT_SETTINGS: Settings = {
   releaseAfterMerge: false,
   stewardRepo: '',
   parallel: 2,
+  stagesAtOnce: 2,
   affectedTests: true,
   // It merges and releases by itself only once the person says yes: here, and for each repository (Employee.merges).
   byItself: false,
@@ -511,6 +514,16 @@ export const SETTINGS_SCHEMA: Field[] = [
   },
   { key: 'parallel', kind: 'whole', tab: 'How it works', min: 1, max: 10, unit: 'repositories', label: 'Checked at once', help: 'How many repositories a bump tests at the same time.' },
   {
+    key: 'stagesAtOnce',
+    kind: 'whole',
+    tab: 'How it works',
+    min: 1,
+    max: 4,
+    unit: 'stages',
+    label: 'Stages at once',
+    help: 'How many stages run at the same time: a round, and a Release or Bump you press, say. Each works on its own repositories: where two want the same one, the second waits for the first to finish with it. 1: one stage at a time.',
+  },
+  {
     key: 'dotnetRoot',
     tab: 'How it works',
     kind: 'text',
@@ -674,6 +687,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       if (why) problems.push(why);
     }
   const parallel = Number(r.parallel);
+  const stagesAtOnce = Number(r.stagesAtOnce);
   const roundMinutes = Number(r.roundMinutes);
   const mergeMinAge = r.mergeMinAgeMinutes == null || r.mergeMinAgeMinutes === '' ? NaN : Number(r.mergeMinAgeMinutes);
   return {
@@ -684,6 +698,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       releaseAfterMerge: typeof r.releaseAfterMerge === 'boolean' ? r.releaseAfterMerge : d.releaseAfterMerge,
       stewardRepo: str(r.stewardRepo, d.stewardRepo),
       parallel: Number.isInteger(parallel) ? Math.min(10, Math.max(1, parallel)) : d.parallel,
+      stagesAtOnce: Number.isInteger(stagesAtOnce) ? Math.min(4, Math.max(1, stagesAtOnce)) : d.stagesAtOnce,
       affectedTests: typeof r.affectedTests === 'boolean' ? r.affectedTests : d.affectedTests,
       byItself: typeof r.byItself === 'boolean' ? r.byItself : d.byItself,
       roundMinutes: Number.isInteger(roundMinutes) ? Math.min(240, Math.max(2, roundMinutes)) : d.roundMinutes,

@@ -26,6 +26,7 @@ import { openPrs, parsePrs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
 import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
 import { hostFor, must } from '../hosts/index.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -825,7 +826,7 @@ export async function retargetStacked(ctx: Ctx, e: Employee, prs: PrInfo[]): Pro
 export async function merge(ctx: Ctx, employees: Employee[], o: { yes: boolean; team?: boolean }): Promise<MergeLook[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      return await mergeLooks(ctx, e, o);
+      return await withRepo(ctx.log, e.id, () => mergeLooks(ctx, e, o));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       return { ...result(e, 'failed', (err as Error).message), merged: [], held: [] };

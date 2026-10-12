@@ -17,6 +17,7 @@ import { noteReleased } from '../strangers.ts';
 import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -288,7 +289,7 @@ export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; c
 export async function release(ctx: Ctx, employees: Employee[], o: { kit: string | null; hire?: boolean }): Promise<EmployeeResult[]> {
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
-      return await releaseOne(ctx, e, o);
+      return await withRepo(ctx.log, e.id, () => releaseOne(ctx, e, o));
     } catch (err) {
       ctx.log(`[${e.id}] ${(err as Error).message}`);
       return result(e, 'failed', (err as Error).message);

@@ -212,7 +212,7 @@ test('a stage needs the token, from its own origin or none: without it nothing s
   assert.equal(JSON.parse(readFileSync(path.join(home, 'last-stage.json'), 'utf8')).stage, 'merge', 'a round with nothing done is not recorded');
 });
 
-test("Manor's ask after an install: the jobs approved now, with the token as the CLI sends it; while a round runs, once it ends", async () => {
+test("Manor's ask after an install: the jobs approved now, with the token as the CLI sends it; while every slot is taken, once one is free", async () => {
   const html = await (await fetch(`${base()}/`)).text();
   const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
   await served.idle();
@@ -221,18 +221,18 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   const now = await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve'] });
   assert.deepEqual(await now.json(), { started: true });
   await served.idle();
-  // During a round: queued, and approved once it ends, nothing left running after. The round has a repository to look
-  // at (a clone here), so it asks GitHub, and waits while the commands are held.
+  // During a round, with one stage at a time: queued, and approved once it ends, nothing left running after. The round
+  // has a repository to look at (a clone here), so it asks GitHub, and waits while the commands are held.
   const settingsFile = path.join(home, 'settings.json');
   const was = readFileSync(settingsFile, 'utf8');
-  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), stagesAtOnce: 1, employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
   let letGo = () => {};
   hold = new Promise((done) => (letGo = done));
   const round = await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` });
   assert.deepEqual(await round.json(), { started: true });
   const queued = await (await post('/api/jobs/approve', { 'x-token': token }, { ids: ['reeve', '../x', 7] })).json();
   assert.equal(queued.queued, true);
-  assert.match(queued.message, /round is running; the jobs are approved once it ends/);
+  assert.match(queued.message, /round is running; the jobs are approved once one ends/);
   letGo();
   hold = Promise.resolve();
   await served.idle();
@@ -241,7 +241,7 @@ test("Manor's ask after an install: the jobs approved now, with the token as the
   assert.equal(ping.busy, false);
 });
 
-test("a vouch's ask for a round: one now while it merges by itself; while something runs, once that ends; none when it doesn't merge by itself", async () => {
+test("a vouch's ask for a round: one now while it merges by itself; while a round runs, once it can; none when it doesn't merge by itself", async () => {
   const html = await (await fetch(`${base()}/`)).text();
   const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
   await served.idle();
@@ -267,13 +267,50 @@ test("a vouch's ask for a round: one now while it merges by itself; while someth
   hold = new Promise((done) => (letGo = done));
   assert.deepEqual(await (await post('/api/run', { 'x-token': token, origin: `http://steward.localhost:${port}` })).json(), { started: true });
   const queued = await (await post('/api/round/soon', { 'x-token': token }, {})).json();
-  assert.deepEqual([queued.started, queued.queued, queued.message], [false, true, "The Steward's round is running: a round comes as soon as it ends."]);
+  assert.deepEqual([queued.started, queued.queued, queued.message], [false, true, "The Steward's round is running: a round comes as soon as it can."]);
   letGo();
   hold = Promise.resolve();
   await served.idle();
   assert.equal(glances(), before + 3 * each, 'Run now, then the round asked for');
   writeFileSync(settingsFile, was);
   assert.equal((await (await fetch(`${base()}/api/ping`)).json()).busy, false);
+});
+
+test('stages side by side: a release beside a round, a third refused while both slots are taken, one round at a time', async () => {
+  const html = await (await fetch(`${base()}/`)).text();
+  const token = /<meta name="page-token" content="([0-9a-f]{48})">/.exec(html)![1];
+  await served.idle();
+  const settingsFile = path.join(home, 'settings.json');
+  const was = readFileSync(settingsFile, 'utf8');
+  // Stages at once left as it comes: 2.
+  writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(was), employees: [{ id: 'fake', name: 'Fake', repo: 'octocat/fake', checkout: home }] }));
+  const page = { 'x-token': token, origin: `http://steward.localhost:${port}` };
+  let letGo = () => {};
+  hold = new Promise((done) => (letGo = done));
+  try {
+    assert.deepEqual(await (await post('/api/run', page)).json(), { started: true });
+    assert.deepEqual(await (await post('/api/stage/release', page, { employees: ['fake'] })).json(), { started: true }, 'a release beside the round');
+    const both = await (await fetch(`${base()}/api/page`)).json();
+    assert.deepEqual(both.body.runs.map((r: { stage: string }) => r.stage), ['round', 'release']);
+    assert.equal(both.body.full, true);
+    assert.equal(both.body.running.stage, 'round', 'the first, for a page from before');
+    assert.equal((await (await fetch(`${base()}/api/ping`)).json()).stage, 'round, release');
+    const third = await (await post('/api/stage/bump', page, { employees: ['fake'], kit: '1.0.0' })).json();
+    assert.deepEqual(third, { started: false, message: 'round and release are running, as many stages as Settings allow at once (Stages at once); wait for one to finish.' });
+    assert.deepEqual(await (await post('/api/run', page)).json(), { started: false, message: 'A round is running; wait for it to finish.' });
+    // The page: a Working card for each.
+    const drawn = (await renderStewardBody())(both.body);
+    assert.equal(drawn.match(/Working/g)?.length, 2);
+    assert.match(drawn, /<span>round, started just now\./);
+    assert.match(drawn, /<span>release, started just now\./);
+  } finally {
+    letGo();
+    hold = Promise.resolve();
+    await served.idle();
+    writeFileSync(settingsFile, was);
+  }
+  const done = await (await fetch(`${base()}/api/page`)).json();
+  assert.deepEqual([done.body.runs, done.body.full, done.body.running], [[], false, null]);
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {

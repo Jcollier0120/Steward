@@ -8,6 +8,7 @@ import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
 import { checkoutOf, mapLimit, networkNote, result, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * After a stage released something, each repository whose Settings name a refresh (Refresh after releases) runs it: a
@@ -143,7 +144,7 @@ export async function refreshAfterReleases(ctx: Ctx, released: EmployeeResult[])
   ctx.log(`after ${what}: ${which.map((e) => `${e.name}'s ${e.refresh}`).join(', ')}`);
   const out = await mapLimit(which, ctx.settings.parallel, async (e) => {
     try {
-      return await refreshOne(ctx, e, what);
+      return await withRepo(ctx.log, e.id, () => refreshOne(ctx, e, what));
     } catch (err) {
       ctx.log(`[${e.id}] refresh: ${(err as Error).message}`);
       return result(e, 'failed', `${REFRESH}${(err as Error).message}`);

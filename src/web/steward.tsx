@@ -542,10 +542,15 @@ function TendingCard({ t, r, now }: { t: TendState | undefined; r: RoundView; no
 }
 
 /** Run now, in the title bar: a round now, on duty or not, asked first. */
+/** The stages running now, side by side; a page from a Steward before that gives only `running`. */
+const runsOf = (v: StewardView) => v.runs ?? (v.running ? [v.running] : []);
+/** No stage can start now: every slot taken (Settings' Stages at once); before slots, any one running. */
+const noSlot = (v: StewardView) => v.full ?? !!v.running;
+
 export function RunNow({ v }: { v: StewardView }) {
   if (v.off) return null;
   return (
-    <PostButton title="Run now" variant="secondary" path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={!!v.running} />
+    <PostButton title="Run now" variant="secondary" path="/api/run" confirm={`A round now: it ${roundWords(v.round).what}?`} disabled={noSlot(v) || runsOf(v).some((r) => r.stage === 'round')} />
   );
 }
 
@@ -708,7 +713,7 @@ function Stages({ v }: { v: StewardView }) {
   const onKit = rows.filter((r) => r.usesKit);
   const offKit = rows.filter((r) => !r.usesKit);
   const who = `the ticked employees (${onKit.length} take the kit)`;
-  const noKit = !!v.running || !kit;
+  const noKit = noSlot(v) || !kit;
   const team = v.team;
   const teamAsk = `Merge the open PRs the team opened (${team.join(', ')}), and the Steward's, for the ticked employees: those that merge cleanly into the employee's branch and have no failing or running checks, with merge commits? Then each merged PR's steps from its steward block: release, install, and approving the jobs it names (merging counts as reading their scripts). The team's branches are left as they are.`;
   // Settings name a team (teamNote is null only then): the account gh is signed in as alone is no team to merge for.
@@ -731,8 +736,8 @@ function Stages({ v }: { v: StewardView }) {
           ))}
         </div>
         <div className="row stages">
-          {stage('Merge your ready PRs', 'merge-team', mine, !!v.running || !team.length, v.teamNote ?? (team.length ? undefined : 'No team in Settings'))}
-          {stage('Release', 'release', 'Release each ticked repository whose branch carries a version with no release yet, the way Settings say for it?', !!v.running)}
+          {stage('Merge your ready PRs', 'merge-team', mine, noSlot(v) || !team.length, v.teamNote ?? (team.length ? undefined : 'No team in Settings'))}
+          {stage('Release', 'release', 'Release each ticked repository whose branch carries a version with no release yet, the way Settings say for it?', noSlot(v))}
           <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
         </div>
         <Text variant="muted" as="p">
@@ -757,9 +762,9 @@ function Stages({ v }: { v: StewardView }) {
       <div className="row stages">
         {stage('1. Bump', 'bump', `Bump ${who} to kit ${kit}? For each: a worktree of its branch, kit.json pinned to ${kit}, its patch version up, its kit filled and its checks run, then a commit. Nothing is pushed.`, noKit)}
         {stage('2. Push', 'push', `Push the bumps to kit ${kit} and open their PRs? Nothing is force-pushed.`, noKit)}
-        {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", !!v.running)}
+        {stage('3. Merge', 'merge', "Merge the Steward's PRs that merge cleanly and have no failing or running checks, with merge commits? Then any steps a merged PR's steward block asks for.", noSlot(v))}
         {stage('4. Release', 'release', `Release each ticked employee whose branch has kit ${kit} and an unreleased version, from that branch?`, noKit)}
-        {teamSet && stage("Merge the team's PRs", 'merge-team', teamAsk, !!v.running)}
+        {teamSet && stage("Merge the team's PRs", 'merge-team', teamAsk, noSlot(v))}
         <PostButton title={v.refreshing ? 'Refreshing…' : 'Refresh'} variant="secondary" icon="refresh" path="/api/staff/refresh" disabled={!!v.running || v.refreshing} />
       </div>
       <Text variant="muted" as="p">
@@ -954,14 +959,14 @@ export function StewardBody({ v }: { v: StewardView }) {
   return (
     <>
       <style>{STYLE}</style>
-      {v.running && (
-        <Card className="row">
+      {runsOf(v).map((r) => (
+        <Card key={`${r.stage} ${r.since}`} className="row">
           <Badge tone="caution" label="Working" />{' '}
           <span>
-            {v.running.stage}, started {ago(v.running.since, now)}. This page keeps itself current until it's done.
+            {r.stage}, started {ago(r.since, now)}. This page keeps itself current until it's done.
           </span>
         </Card>
-      )}
+      ))}
       <AlarmsCard a={v.alarms} now={now} />
       {v.round.repos === false && (
         <Card>

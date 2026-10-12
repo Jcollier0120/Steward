@@ -2,6 +2,26 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.27
+
+**Two stages at once: press Release while a round is running, and it starts straight away.**
+
+### What's new
+
+- **Stages run side by side.** A round no longer greys out the stage buttons: a Release, Bump, Push or Merge you press starts beside it, and so does Manor's ask to approve jobs after an install. The page shows a **Working** card for each stage running.
+- **Stages at once**, a new setting on the **How it works** tab, says how many stages may run at the same time: 2 to start with, up to 4. Set it to 1 to go back to one stage at a time.
+- Two stages never work on the same repository at once. Where both want one (you release Manor while the round is merging Manor's PRs, say), the second waits for the first to finish with it, and its log says so. The other repositories carry on meanwhile.
+
+### What changed
+
+- Still one round at a time. Run now is refused while a round runs, and a round asked for then comes once it can.
+- With every slot taken, a button says which stages are running and to wait for one to finish. A stage started in a terminal counts too.
+- The staff table's refresh leaves alone a repository that another stage is working in, and catches up with it at its next look.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you'd rather keep one stage at a time, set **Stages at once** to 1 in Settings.
+
 ## 0.35.26
 
 **One box ticks every repository for a stage, or none.**

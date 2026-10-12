@@ -9,6 +9,7 @@ import { installedHash, noteApproved, runApprove } from './jobs.ts';
 import { releaseOne } from './release.ts';
 import { appReleasesIn, type PrInfo } from './staff.ts';
 import { hostFor, must } from '../hosts/index.ts';
+import { withRepo } from './slots.ts';
 
 /**
  * The steps a merged PR asks for (src/after.ts reads them from its description), run for its employee and
@@ -131,7 +132,8 @@ export async function afterMerge(ctx: Ctx, employees: Employee[], merged: { id: 
     const step = async (name: string, fn: () => Promise<EmployeeResult>): Promise<EmployeeResult> => {
       let r: EmployeeResult;
       try {
-        r = await fn();
+        // Each step holding its repository (slots.ts): a stage running beside this one waits for it there.
+        r = await withRepo(ctx.log, e.id, fn);
       } catch (err) {
         ctx.log(`[${e.id}] ${name}: ${(err as Error).message}`);
         r = result(e, 'failed', (err as Error).message);
