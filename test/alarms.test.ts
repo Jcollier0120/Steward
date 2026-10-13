@@ -321,7 +321,7 @@ test("while this PC is offline, what is only the network's is no alarm; everythi
     { id: 'herald.round', subject: 'herald', severity: 'problem', title: "Herald's round failed 4 times", evidence: ['getaddrinfo ENOTFOUND www.nvidia.com'], since: at(-24).toISOString() },
     { id: 'pc.disk.C', subject: 'pc', severity: 'problem', title: 'Drive C: has 4.0 GB free (1%)', evidence: ['C: 4.0 GB free'], since: at(-24).toISOString() },
   ] } } as Record<string, unknown>;
-  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', pages: { surveyor: 'http://127.0.0.1:19595' }, online: async () => online });
+  const watch = (online: boolean, h: number) => watchAlarms({ settings: structuredClone(settings), round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, { getJson: async (u: string) => pages[u] ?? { error: 'none' }, toast: async (t: string) => void toasts.push(t), now: at(h), manorUrl: 'http://m', pages: { surveyor: 'http://127.0.0.1:19595' }, surveyorInstalled: () => true, online: async () => online });
   let state = await watch(false, 0);
   assert.deepEqual(state.open.map((a) => a.id), ['survey:pc.disk.C'], 'offline: only the disk');
   assert.equal(toasts.length, 1);
