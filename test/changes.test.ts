@@ -193,3 +193,20 @@ test("with repositories, a round does their work and keeps the staff's pages up 
   assert.deepEqual(opened, ['porter']);
   assert.ok(out.results.some((r) => r.id === 'porter' && r.outcome === 'done' && r.message.startsWith('tend: ')));
 });
+
+test("a quiet round keeps the staff's table while GitHub says what it said of everyone, the Steward's own repository too", async () => {
+  const { markStaffChecked, staffFile: file } = await import('../src/steward.ts');
+  const { repoSig } = await import('../src/glance.ts');
+  const { APP } = await import('../src/app.ts');
+  const e = { id: 'quiet' } as any;
+  const theirs = { head: 'a'.repeat(40), prs: [], releases: [] };
+  const own = { head: 'b'.repeat(40), prs: [{ number: 1 }], releases: [] };
+  const table = { rows: [{ id: 'quiet' }, { id: APP.id, self: true }], seen: { quiet: repoSig(theirs), [APP.id]: repoSig(own) } };
+  const glance = (o: any) => ({ at: '', stewardReleases: null, errors: {}, repos: { quiet: theirs, ...o } });
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({ [APP.id]: own }) as any, [e]), true);
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({}) as any, [e]), true, "its repository not read: as before, the employees' alone");
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({ [APP.id]: { ...own, prs: [{ number: 1 }, { number: 2 }] } }) as any, [e]), false, 'a new PR to the Steward: the table is made again');
+});

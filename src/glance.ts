@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { APP } from './app.ts';
 import { expandEnv } from './kit/settings-kit.ts';
 import { GithubLimited, LIMITED, readingFrom, type RateReading } from './budget.ts';
 import { GitHubApi, type GitHubApiError } from './kit/github.ts';
@@ -51,7 +52,10 @@ export interface Glance {
   stewardReleases: { tagName: string; isDraft: boolean }[] | null;
   /** The Steward's own main, or null when it couldn't be read (left out: an older glance). */
   stewardMain?: StewardMain | null;
-  /** By employee id. One GitHub gave no answer for is left out, and `errors` says why. */
+  /**
+   * By employee id. One GitHub gave no answer for is left out, and `errors` says why. The Steward's own repository is
+   * here too, by its own id (APP.id), on a PC that merges its PRs or shows it in the staff's table (stewardPrsAsked).
+   */
   repos: Record<string, RepoGlance>;
   errors: Record<string, string>;
   /** What its queries cost, in GraphQL points, and what GitHub said is left: each query's `rateLimit` (budget.ts). */
@@ -98,13 +102,26 @@ const ownerName = (repo: string) => {
   return `owner: ${JSON.stringify(owner ?? '')}, name: ${JSON.stringify(name ?? '')}`;
 };
 
-/** The query for these employees (aliased e0, e1, …, in order), and the Steward's releases when `stewardRepo` is given. */
-export function glanceQuery(employees: Employee[], stewardRepo: string | null): string {
+/**
+ * Whether the glance reads the Steward's own open PRs, as an employee's: on a PC that merges them (Settings' mergeSelf,
+ * selfmerge.ts) or shows its repository in the staff's table (releasesCastellan), with its clone named. Its merge asked
+ * `gh pr list` of it every round, and its row in the table three gh calls each time the table was made. One point more a
+ * round (GitHub's cost of a query of 5 repositories and the Steward's went from 5 to 6, 2026-10-13), and no process.
+ */
+export const stewardPrsAsked = (s: Partial<Pick<Settings, 'stewardRepo' | 'stewardCheckout' | 'mergeSelf' | 'releasesCastellan'>>): boolean =>
+  !!s.stewardRepo && !!s.stewardCheckout && (!!s.mergeSelf || !!s.releasesCastellan);
+
+/**
+ * The query for these employees (aliased e0, e1, …, in order), and the Steward's releases when `stewardRepo` is given:
+ * with its open PRs too when `stewardPrs` (stewardPrsAsked).
+ */
+export function glanceQuery(employees: Employee[], stewardRepo: string | null, stewardPrs = false): string {
   const parts = employees.map((e, i) => `e${i}: repository(${ownerName(e.repo)}) { ...R ref(qualifiedName: ${JSON.stringify(`refs/heads/${e.branch}`)}) { target { oid } } }`);
   if (stewardRepo) {
     const main = (file: string) => `object(expression: ${JSON.stringify(`${STEWARD_BRANCH}:${file}`)}) { ... on Blob { text } }`;
+    const releases = stewardPrs ? `${PRS} ${RELEASES}` : 'releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } }';
     parts.unshift(
-      `steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } } ` +
+      `steward: repository(${ownerName(stewardRepo)}) { ${releases} ` +
         `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} }`,
     );
   }
@@ -176,9 +193,10 @@ export function stewardMainFrom(s: any): StewardMain {
 
 /**
  * GitHub's answer to a glanceQuery, read: `gh api graphql` exits 1 when any part of the query failed (a repository
- * that isn't there, say), but still prints what it could answer, with `errors` for the rest.
+ * that isn't there, say), but still prints what it could answer, with `errors` for the rest. `self`: the Steward's own
+ * id, when its open PRs were asked (glanceQuery's stewardPrs), to file its repository under.
  */
-export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance, now = new Date()): void {
+export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance, now = new Date(), self: string | null = null): void {
   let j: any;
   try {
     j = JSON.parse(answer);
@@ -200,6 +218,9 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
   if (stewardRepo) {
     into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true })) : null;
     into.stewardMain = data.steward ? stewardMainFrom(data.steward) : null;
+    // Its main and open PRs, as an employee's; with more open than a glance reads, left out, and asked of GitHub as before.
+    const open = Number(data.steward?.pullRequests?.totalCount ?? 0);
+    if (self && Array.isArray(data.steward?.pullRequests?.nodes) && open <= PR_PAGE) into.repos[self] = repoFromGraph({ ...data.steward, ref: data.steward.main });
   }
   employees.forEach((e, i) => {
     const r = data[`e${i}`];
@@ -225,7 +246,7 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
 export async function takeGlance(
   run: Runner,
   cwd: string,
-  settings: Pick<Settings, 'employees' | 'stewardRepo'>,
+  settings: Pick<Settings, 'employees' | 'stewardRepo'> & Partial<Pick<Settings, 'stewardCheckout' | 'mergeSelf' | 'releasesCastellan'>>,
   host: (e: Employee) => Host = () => 'github',
   now: () => Date = () => new Date(),
   ask: GlanceAsk = ghAsk(run, cwd),
@@ -244,9 +265,10 @@ export async function takeGlance(
   if (!all.length && !settings.stewardRepo) return glance;
   // A query GitHub gives up on as too slow is asked again in halves, down to one repository: a busy week's PRs can take
   // a few repositories past GitHub's 10 seconds. A failure of any other kind, or of one repository alone, is the glance's.
+  const self = stewardPrsAsked(settings) ? APP.id : null;
   const asked = async (chunk: Employee[], stewardRepo: string | null): Promise<void> => {
     try {
-      readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now());
+      readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo, !!self)), stewardRepo, glance, now(), self);
     } catch (e) {
       if (chunk.length < 2 || !queryTimedOut(e)) throw e;
       const half = Math.ceil(chunk.length / 2);

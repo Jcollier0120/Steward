@@ -248,7 +248,8 @@ function selfForStaff(ctx: Ctx): Employee | null {
 
 /**
  * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
- * still right, and is only marked as checked; true then. False when it needs making again.
+ * still right, and is only marked as checked; true then. False when it needs making again. The Steward's own row too,
+ * when the glance reads its repository (glance.ts's stewardPrsAsked).
  */
 export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
   const s = loadStaff();
@@ -257,6 +258,8 @@ export function markStaffChecked(glance: Glance, employees: Employee[], now = ne
     const g = glance.repos[e.id];
     if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;
   }
+  const own = glance.repos[APP.id];
+  if (own && s.rows.some((r) => r.self) && s.seen[APP.id] !== repoSig(own)) return false;
   writeJson(staffFile(), { ...s, checked: now.toISOString() });
   return true;
 }
@@ -412,7 +415,10 @@ async function selfRound(ctx: Ctx, o: StageOptions, moved = false): Promise<Empl
   try {
     const facts = ctx.glance && !moved ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
     // Holding its own repository, as an employee's release holds its (stages/slots.ts).
-    return await withRepo(ctx.log, APP.id, () => releaseSelf(ctx, { checkout, ...facts }));
+    const out = await withRepo(ctx.log, APP.id, () => releaseSelf(ctx, { checkout, ...facts }));
+    // Released: the glance no longer says how its repository is (its row in the staff's table reads it).
+    if (ctx.glance && out.some((r) => r.outcome === 'done')) delete ctx.glance.repos[APP.id];
+    return out;
   } catch (e) {
     ctx.log(`[steward] its own releases: ${(e as Error).message}`);
     return [];

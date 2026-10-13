@@ -401,3 +401,27 @@ test("the table is made again only where something moved: a row that didn't stan
   assert.deepEqual(third.rows[0].prs.map((p) => p.number), [9]);
   assert.notEqual(third.keys?.fake, second.keys?.fake);
 });
+
+test("the Steward's own row reads its repository from the glance, as an employee's (no gh), and stands while nothing in it moved", async () => {
+  const { staff } = await import('../src/stages/staff.ts');
+  const { APP } = await import('../src/app.ts');
+  const f = fakeEmployee(path.join(tmp, 'own'), { version: '0.35.1', kit: '1.0.0' });
+  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
+  const git: string[][] = [];
+  const r = runner(() => undefined);
+  const self = employee(f.checkout, { id: APP.id, name: APP.name });
+  const ctx = ctxFor({ employees: [], workRoot: path.join(tmp, 'own', 'work'), run: (cmd, args, opts) => (cmd === 'git' && git.push(args), r.run(cmd, args, opts)), neutralDir: tmp });
+  ctx.glance = { at: '', stewardReleases: null, repos: { [APP.id]: { head: sha, prs: [pr({ number: 4, headRefOid: sha })], releases: [{ tagName: 'v0.35.1', isDraft: false, publishedAt: null, commit: sha }] } }, errors: {} };
+  const first = await staff(ctx, { fetch: true, kit: null, self });
+  assert.equal(first.rows.length, 1);
+  assert.ok(first.rows[0].self);
+  assert.deepEqual(first.rows[0].prs.map((p) => p.number), [4]);
+  assert.equal(first.rows[0].release?.version, '0.35.1');
+  assert.equal(r.gh.length, 0, 'its PRs and releases from the glance');
+  assert.ok(first.keys?.[APP.id]);
+  git.length = 0;
+  const second = await staff(ctx, { fetch: true, kit: null, self, before: first });
+  assert.deepEqual(second.rows[0], first.rows[0]);
+  assert.deepEqual(git, [['--no-optional-locks', 'status', '--porcelain', '-uno']], 'nothing read again but its status');
+  assert.equal(r.gh.length, 0);
+});

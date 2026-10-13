@@ -12,6 +12,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A PC that has seen no other PC for a month takes its turns for half a day, so it renews them twice a day instead of every few rounds.
 - Version queues fetch a repository only when GitHub says its main branch has moved.
 - The staff table rebuilds only the rows whose repository changed, and checking a checkout for uncommitted work no longer lists untracked files.
+- On a PC that merges the Steward's own pull requests, the round reads them in the same GitHub query as everyone else's, so merging them and showing the Steward's row in the staff table no longer ask GitHub separately. A new pull request to the Steward now refreshes its row in the table, too.
 - Ports are read from each clone again only after its branch has moved.
 - Your PC should be noticeably quieter: far fewer git windows and credential checks in the background.
 
