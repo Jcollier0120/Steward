@@ -40,6 +40,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. On an Intel PC, running Set up again applies the new checks.
+## 0.35.59
+
+**The Steward's tests pass on any PC, not only on its maker's laptop.**
+
+### What changed
+
+- Eleven tests took part of their setup from the PC they ran on, and failed elsewhere (on the Intel test laptop, say). The pieces they took were these:
+  - whether this is the PC with Developer Pro;
+  - Manor's Developer options switch;
+  - whether the Surveyor is installed.
+- Each test now says what it means. Nothing in the Steward itself changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.35.58
 

@@ -141,10 +141,15 @@ test('the keeper asks again at once when hardware.json has an NPU but not its na
 
 test('Settings\' "Where its work runs" on a PC without an NPU names no NPU', () => {
   const cfg = core.parseAccelerators(RULES, { chatEndpoint: { ...LLAMA, device: 'Npu' } }, DESKTOP);
-  const html = workSection({ id: 'herald', name: 'Herald', config: cfg });
+  // A developer's view, with the accelerators' details: said, not left to this PC's Developer options.
+  const html = workSection({ id: 'herald', name: 'Herald', config: cfg, developer: true });
   assert.doesNotMatch(html, /NPU/);
   assert.match(html, /Graphics cards with 2 GB or more of their own memory come first/);
   assert.match(html, /the NVIDIA GeForce RTX 4080 SUPER \(chat\)/);
+  // Everyone else's, in plain words: no NPU either.
+  const plain = workSection({ id: 'herald', name: 'Herald', config: cfg, developer: false });
+  assert.doesNotMatch(plain, /NPU/);
+  assert.match(plain, /the local AI uses the NVIDIA GeForce RTX 4080 SUPER/);
 });
 
 test('every page watches its ping, so a round that starts or ends after it was drawn shows without a reload by hand', async () => {
