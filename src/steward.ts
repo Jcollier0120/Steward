@@ -593,7 +593,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               const opened = rolled.results.filter((r) => r.outcome === 'done');
               if (opened.length && !out.soon) {
                 out.soon = true;
-                log(`the next round comes sooner: kit ${newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge and release then`);
+                log(`the next round comes sooner: kit ${rolled.plan.kit ?? newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge and release then`);
               }
             } catch (err) {
               log(`rollout: ${(err as Error).message}`);
