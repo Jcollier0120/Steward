@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.35.51
+## 0.35.53
 
 **The Steward unpacks a project's packages once for all the staff that use them, and one install at a time.**
 
