@@ -308,7 +308,7 @@ export interface StageOptions {
    * updates.json, its log, its install's dry run and its Update, and the agents' rolled-back versions. Under node --test
    * they're looked at only when this is given.
    */
-  unstick?: { manorUrl?: string; getJson?: GetJson; readUpdates?: () => ManorUpdates | null; rolledBack?: (id: string) => RolledBack; allow?: AllowAgain; manorLog?: () => string; dryRun?: DryRun; press?: PressUpdate };
+  unstick?: { manorUrl?: string; getJson?: GetJson; readUpdates?: () => ManorUpdates | null; rolledBack?: (id: string) => RolledBack; allow?: AllowAgain; manorLog?: () => string; slots?: () => number | null; dryRun?: DryRun; press?: PressUpdate };
   /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
   scm?: ScmLook | null;
   /**
@@ -350,7 +350,7 @@ async function unstickRound(settings: Settings, o: StageOptions, run: Runner, lo
   if (process.env.NODE_TEST_CONTEXT && !o.unstick) return [];
   const manorUrl = o.unstick?.manorUrl ?? agentPages().manor;
   if (!manorUrl) return [];
-  return unstick({ manorUrl, getJson: o.unstick?.getJson ?? getJson, readUpdates: o.unstick?.readUpdates, rolledBack: o.unstick?.rolledBack, allow: o.unstick?.allow, manorLog: o.unstick?.manorLog, dryRun: o.unstick?.dryRun ?? manorDryRun(run), press: o.unstick?.press, now: o.now, log });
+  return unstick({ manorUrl, getJson: o.unstick?.getJson ?? getJson, readUpdates: o.unstick?.readUpdates, rolledBack: o.unstick?.rolledBack, allow: o.unstick?.allow, manorLog: o.unstick?.manorLog, slots: o.unstick?.slots, dryRun: o.unstick?.dryRun ?? manorDryRun(run), press: o.unstick?.press, now: o.now, log });
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */

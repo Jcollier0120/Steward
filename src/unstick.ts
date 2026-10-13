@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { manorHome } from './kit/manor.ts';
+import { AGENTS_AT_ONCE, agentsAtOnce, pace } from './kit/pace.ts';
 import type { Condition, GetJson } from './alarms.ts';
 import type { Runner } from './run.ts';
 import type { EmployeeResult } from './stages/common.ts';
@@ -23,8 +24,9 @@ import { pageToken, request, tokenHeaders } from './upkeep.ts';
  * offline or the Exchequer unreachable within WINDOW_MS of it, or other agents were rolled back the same way within
  * WINDOW_MS. If so, once the PC has been quiet a while (QUIET_MS since the rollback, no update running, Manor online
  * and answering), the Steward allows that version again, as the agent's own `install --allow-unsafe` does (its flag
- * taken out of unsafe-updates.json), and presses Update for it on Manor's page: one agent a round, GAP_MS apart, once
- * for each (agent, version) ever, kept in unstick.json. The install is the usual one, probation and all: a release that
+ * taken out of unsafe-updates.json), and presses Update on Manor's page for as many such agents a round as the work line
+ * has slots (the kit's agentsAtOnce: 2 at a gentle pace, or Manor's "agentsAtOnce"), all in one Update, and once for
+ * each (agent, version) ever, kept in unstick.json. The install is the usual one, probation and all: a release that
  * truly fails is rolled back again, and is then an alarm. One whose cause doesn't look like the PC's is an alarm at
  * once, with the flag's own why and when.
  *
@@ -42,8 +44,6 @@ export const RECHECK_MS = 30 * 60_000;
 export const WINDOW_MS = 10 * 60_000;
 /** A rolled-back version is allowed again only this long after its rollback: past the blip. */
 export const QUIET_MS = 30 * 60_000;
-/** Between two versions allowed again, at least this long: one agent's install and probation at a time. */
-export const GAP_MS = 10 * 60_000;
 /** Manor's dry run asks the Exchequer or GitHub for each agent's latest release: a little time for each. */
 const DRY_RUN_MS = 120_000;
 /** Manor's install POST waits for its task to start. */
@@ -289,6 +289,8 @@ export async function unstick(o: {
   allow?: AllowAgain;
   /** The end of Manor's serve.log (readManorLog). */
   manorLog?: () => string;
+  /** The work line's slots (the kit's agentsAtOnce); null or 0, no line: AGENTS_AT_ONCE.most. */
+  slots?: () => number | null;
   now?: () => Date;
   log: (line: string) => void;
 }): Promise<EmployeeResult[]> {
@@ -360,29 +362,34 @@ export async function unstick(o: {
   const press = o.press ?? pressUpdate(o.manorUrl);
   const results: EmployeeResult[] = [];
 
-  // A false rollback: one agent a round, GAP_MS after the last, QUIET_MS after its rollback.
-  const lastAllowed = Math.max(0, ...Object.values(was.allowed ?? {}).map((a) => Date.parse(a.at)));
+  // False rollbacks, QUIET_MS after each: as many a round as the work line has slots, all in one Update.
   const due = toAllow.filter((f) => now().getTime() - Date.parse(f.flag.at) >= QUIET_MS).sort((a, b) => Date.parse(a.flag.at) - Date.parse(b.flag.at));
-  if (due.length && now().getTime() - lastAllowed >= GAP_MS) {
-    const f = due[0];
-    if (!(o.allow ?? allowAgain)(f.id, f.version)) {
+  if (due.length) {
+    const n = Math.max(1, Math.min(AGENTS_AT_ONCE.most, (o.slots ?? (() => agentsAtOnce(pace())))() || AGENTS_AT_ONCE.most));
+    const batch = due.slice(0, n).filter((f) => {
+      if ((o.allow ?? allowAgain)(f.id, f.version)) return true;
       block(f, 'rolledBack', `${f.name} ${f.version} was rolled back at ${minute(f.flag.at)} (${f.flag.why}), and the Steward couldn't take its flag out of ${f.id}'s unsafe-updates.json`);
+      return false;
+    });
+    if (!batch.length) {
       save();
       return [];
     }
-    state.allowed[keyOf(f)] = { at, rolledBackAt: f.flag.at, why: f.flag.why, cause: f.cause };
-    const r = await press([f.id]).catch((e: Error) => ({ ok: false, said: e.message }));
-    const what = `${f.version} was rolled back at ${minute(f.flag.at)} (${f.flag.why}), when ${f.cause}`;
-    if (!r.ok) {
-      // Allowed all the same: Manor's own next update installs it.
-      o.log(`[${f.id}] ${what}: the Steward allowed it again, but Manor didn't take its Update (${r.said}); Manor's next update installs it`);
-      save();
-      return [];
+    for (const f of batch) state.allowed[keyOf(f)] = { at, rolledBackAt: f.flag.at, why: f.flag.why, cause: f.cause };
+    const r = await press(batch.map((f) => f.id)).catch((e: Error) => ({ ok: false, said: e.message }));
+    for (const f of batch) {
+      const what = `${f.version} was rolled back at ${minute(f.flag.at)} (${f.flag.why}), when ${f.cause}`;
+      if (!r.ok) {
+        // Allowed all the same: Manor's own next update installs it.
+        o.log(`[${f.id}] ${what}: the Steward allowed it again, but Manor didn't take its Update (${r.said}); Manor's next update installs it`);
+        continue;
+      }
+      state.settled = [{ id: f.id, name: f.name, version: f.version, at, how: 'allowed' as const }, ...state.settled].slice(0, KEEP_SETTLED);
+      o.log(`[${f.id}] ${what}: the Steward allowed it again and pressed Update for it, once`);
+      results.push({ id: f.id, name: f.name, outcome: 'done', message: `unstick: ${what}, so the Steward allowed it again and pressed Update for it, once`, version: f.version });
     }
-    state.settled = [{ id: f.id, name: f.name, version: f.version, at, how: 'allowed' as const }, ...state.settled].slice(0, KEEP_SETTLED);
-    o.log(`[${f.id}] ${what}: the Steward allowed it again and pressed Update for it, once`);
     save();
-    return [{ id: f.id, name: f.name, outcome: 'done', message: `unstick: ${what}, so the Steward allowed it again and pressed Update for it, once`, version: f.version }];
+    return results;
   }
   if (!left.length || toAllow.length) {
     // A false rollback waits its turn first: one action at a time.
