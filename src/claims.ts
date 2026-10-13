@@ -14,7 +14,7 @@ import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './stages/kitpar
 import { kitInfo } from './kitsource.ts';
 import { CLAIMS_FILE, CLAIMS_REF, remoteFor } from './lease.ts';
 export { CLAIMS_FILE, CLAIMS_REF };
-import { fileAt, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
+import { readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
 import { hostFor, must } from './hosts/index.ts';
 
@@ -54,6 +54,8 @@ export interface Claim {
   source?: 'shared' | 'exchequer';
   /** Set when another PC claimed the same version while this PC couldn't reach the remote: what the page says. */
   clash?: string;
+  /** A copy's: when it was copied here from the claims ref (keepCopies), in ms. Never shared. */
+  copied?: number;
 }
 
 export const claimsFile = () => dataFile('version-claims.json');
@@ -163,7 +165,7 @@ export function parseClaims(text: string | null | undefined): Claim[] {
   }
 }
 
-const sharedText = (list: Claim[]) => `${JSON.stringify(list.map(({ source: _s, clash: _c, ...c }) => c), null, 2)}\n`;
+const sharedText = (list: Claim[]) => `${JSON.stringify(list.map(({ source: _s, clash: _c, copied: _k, ...c }) => c), null, 2)}\n`;
 /** Whether a claim is this repository's: its own, or its kit's. */
 const belongs = (c: Pick<Claim, 'repo'>, repo: string) => same(c.repo, repo) || same(c.repo, kitClaimKey(repo));
 /** The repository a claim's key names (a kit's key is `<repo>#kit`). */
@@ -176,6 +178,7 @@ const repoOfKey = (key: string) => key.replace(/#kit$/i, '');
  */
 async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ claim: Claim; again: boolean } | null> {
   for (let i = 0; i < 8; i++) {
+    const readAt = Date.now();
     const read = await readRef(run, remote, CLAIMS_REF, CLAIMS_FILE);
     if (read.kind === 'unreachable') return null;
     const there = read.kind === 'found' ? parseClaims(read.text) : [];
@@ -195,26 +198,32 @@ async function claimShared(run: Runner, remote: RemoteRepo, a: Ask): Promise<{ c
       }
       if (w.kind !== 'ok') return null;
     }
-    await keepCopies(repoOfKey(a.key), list);
+    await keepCopies(repoOfKey(a.key), list, readAt);
     const { source: _s, ...claim } = r.claim;
     return { claim: { ...claim, source: 'shared' }, again: r.again };
   }
   return null;
 }
 
-/** A repository's shared claims, copied here in place of the copies before; this PC's own that went up become copies. */
-async function keepCopies(repo: string, shared: Claim[], clashes: Claim[] = []): Promise<void> {
+/**
+ * A repository's shared claims, copied here in place of the copies before; this PC's own that went up become copies.
+ * `readAt`: when `shared` was read from the ref. A copy made since (another process here claiming meanwhile, which
+ * wrote the ref after this read) isn't in it yet, and stays.
+ */
+async function keepCopies(repo: string, shared: Claim[], readAt: number, clashes: Claim[] = []): Promise<void> {
   await withLock(claimsLock(), async () => {
+    const copied = Date.now();
     const mine = shared.filter((c) => belongs(c, repo));
-    // This PC's own stay, unless they went up (the same version, for the same branch).
-    const rest = loadClaims().filter((c) => !belongs(c, repo) || (c.source !== 'shared' && !mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch)));
+    const went = (c: Claim) => mine.some((s) => same(s.repo, c.repo) && s.version === c.version && s.branch === c.branch);
+    // This PC's own stay, unless they went up (the same version, for the same branch); so do copies newer than the read.
+    const rest = loadClaims().filter((c) => !belongs(c, repo) || (!went(c) && (c.source !== 'shared' || (c.copied ?? 0) >= readAt)));
     const marked = rest.map((c) => {
       const clash = clashes.find((x) => same(x.repo, c.repo) && x.version === c.version && x.branch === c.branch);
       if (!clash) return c;
       const what = c.repo.endsWith('#kit') ? `The kit ${c.version}` : `${c.repo} ${c.version}`;
       return { ...c, clash: `${what} was claimed on another PC too (for ${clash.clash}) while this PC couldn't reach the remote: ${c.branch ?? 'this work'} gets a new version when it merges` };
     });
-    writeJson(claimsFile(), [...marked, ...mine.map((c) => ({ ...c, source: 'shared' as const }))]);
+    writeJson(claimsFile(), [...marked, ...mine.map((c) => ({ ...c, source: 'shared' as const, copied }))]);
   });
 }
 
@@ -287,9 +296,14 @@ export async function shareClaims(run: Runner, rows: Row[], repos: { repo: strin
     const mineOnly = loadClaims().filter((c) => belongs(c, repo) && c.source !== 'shared' && !c.clash);
     if (k in seen && seen[k] === sha && !mineOnly.length) continue;
     try {
-      const text = sha ? await fileAt(run, remote, CLAIMS_REF, sha, CLAIMS_FILE) : '[]';
-      if (text === null) continue;
-      const there = parseClaims(text);
+      // Read as it is now, not at `sha`: that is the ref as the round's turns found it when it began, and a claim made
+      // since (a worker's claim-version, mid-round) would be missing from it, and from the copies kept here after it.
+      // Missing here, a catch-up handed its version to another PR.
+      const readAt = Date.now();
+      const read = await readRef(run, remote, CLAIMS_REF, CLAIMS_FILE);
+      if (read.kind === 'unreachable' || (read.kind === 'found' && read.text === null)) continue;
+      const current = read.kind === 'found' ? read.sha : null;
+      const there = read.kind === 'found' ? parseClaims(read.text) : [];
       const live = there.filter((c) => !belongs(c, repo) || holdsBy(rows, c, now));
       const clashes: Claim[] = [];
       const going: Claim[] = [];
@@ -299,13 +313,13 @@ export async function shareClaims(run: Runner, rows: Row[], repos: { repo: strin
         else if (other.branch !== c.branch) clashes.push({ ...c, clash: other.for || other.branch || 'other work' });
       }
       const list = [...live, ...going];
-      let at = sha;
+      let at = current;
       if (going.length || live.length !== there.length) {
-        const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(list), sha, `${repo}: claims shared`);
+        const w = await writeRef(run, remote, CLAIMS_REF, CLAIMS_FILE, sharedText(list), current, `${repo}: claims shared`);
         if (w.kind !== 'ok') continue;
         at = w.sha;
       }
-      await keepCopies(repo, list, clashes);
+      await keepCopies(repo, list, readAt, clashes);
       seen[k] = at;
     } catch {
       // Left for the next round.

@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.55
+
+**Two pieces of work on the same repository no longer end up with the same version.**
+
+### What changed
+
+- A version claimed for new work while a round was running could be forgotten at the end of that round, so the next catch-up handed the same version to another pull request. Claims made mid-round are now kept, and catch-ups skip them.
+- The Steward reads the shared list of claimed versions as it is when it copies it, not as it was when the round began.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.53
 
 **The Steward unpacks a project's packages once for all the staff that use them, and one install at a time.**
