@@ -26,7 +26,7 @@ const { RULES } = await import('./fixture/src/kit/rules.ts');
 const intelPins = V.NPU_CATALOG.routes.intel.models[0].pinned!;
 delete V.NPU_CATALOG.routes.intel.models[0].pinned;
 // Its embedding model's too (428 MB).
-const intelEmbed = V.NPU_CATALOG.routes.intel.embedServer!.model as import('../node/npu-vendors.ts').NpuEmbedPull;
+const intelEmbed = V.NPU_CATALOG.routes.intel.embedServer!.model as import('./fixture/src/kit/npu-vendors.ts').NpuEmbedPull;
 const intelEmbedPins = intelEmbed.pinned!;
 delete intelEmbed.pinned;
 
