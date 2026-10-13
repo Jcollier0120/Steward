@@ -89,6 +89,30 @@ test('the first round looks at everyone; the next, with nothing new, asks GitHub
   assert.notEqual(staff.checked, staff.at, "the table is only marked as checked: GitHub said nothing new");
 });
 
+test('a round takes its turn (lease.ts) only in a repository it looks at: a quiet one is asked nothing, not even that', async () => {
+  const { loadTurns } = await import('../src/lease.ts');
+  const { lsRemote } = await import('../src/remote-ref.ts');
+  const asked: string[] = [];
+  const turns = {
+    device: { id: 'aaaaaaaa-0000-4000-8000-000000000001', name: 'LAPTOP' },
+    remote: async () => ({ key: 'jcollier0120/fake', url: f.origin, scratch: path.join(home, 'turns.git') }),
+    refs: async (r: { key: string; url: string; scratch: string }, refs: string[]) => (asked.push(r.key), lsRemote(realRun, r, refs)),
+  };
+  const go = (full: boolean) => {
+    calls = [];
+    return runStage('round', full ? { full: true } : {}, { run, tell, turns });
+  };
+  const looked = await go(true);
+  assert.equal(looked.error, undefined);
+  assert.deepEqual(asked, ['jcollier0120/fake'], 'looked at: its turn read, and taken');
+  assert.equal(loadTurns().repos['jcollier0120/fake']?.status, 'here');
+  asked.length = 0;
+  const quiet = await go(false);
+  assert.deepEqual(asked, [], 'quiet: its turn not read');
+  assert.deepEqual(git(), [], 'and no git at all');
+  assert.deepEqual(quiet.results.map((r) => r.message), ['nothing new on GitHub since the last round']);
+});
+
 test('a version pushed to the branch is new: that round looks, releases it, and tells the pages that want to know', async () => {
   raise('0.4.0', '0.4.1');
   const out = await round();

@@ -273,13 +273,16 @@ export const ghAsk = (run: Runner, cwd: string): GlanceAsk => async (query) => {
 
 let api: GitHubApi | null = null;
 
+/** The Steward's one client of GitHub's API: its token asked of gh once, and each GET's ETag kept (kit/github.ts). */
+export const githubApi = (): GitHubApi => (api ??= new GitHubApi());
+
 /**
  * Through GitHub's API from the Steward's own process (kit/github.ts, Steward 0.35.11): no gh process for each round,
  * only once for its token. A partial answer comes back as gh's did, with `errors`; a refusal for the rate limit is
  * GithubLimited, as gh's was.
  */
 export const apiAsk = (o?: ConstructorParameters<typeof GitHubApi>[0]): GlanceAsk => async (query) => {
-  const client = o ? new GitHubApi(o) : (api ??= new GitHubApi());
+  const client = o ? new GitHubApi(o) : githubApi();
   try {
     return JSON.stringify(await client.rest('POST', 'graphql', { body: { query } }));
   } catch (e) {

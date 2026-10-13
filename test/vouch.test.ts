@@ -68,7 +68,45 @@ test('a team PR vouched for by a team member at its head is merged without being
     // Tested here (the first time; then the same commit's result, kept), so it fails, and waits.
     assert.match(t.m.message, /its checks failed here at/, why);
     assert.ok(!t.r.gh.some((a) => a[1] === 'merge'), why);
+    assert.ok(!t.r.gh.some((a) => a.includes('POST')), `${why}: failed here, so no vouch is set`);
   }
+});
+
+test("a team PR whose checks pass here gets this PC's vouch on its head, so the Assayer doesn't test it again; the next look reads its pass, not GitHub", async () => {
+  const f = fakeEmployee(path.join(tmp, 'passes'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/passes');
+  writeFileSync(path.join(f.checkout, 'thing.txt'), 'a thing\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'a thing');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, 'push', '--quiet', 'origin', `${head}:refs/pull/8/head`);
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  const e = employee(f.checkout, { id: 'passes', fill: '', test: ['node -e process.exit(0)'] });
+  // GitHub turns the merge down, so the PR is looked at again with its head unchanged.
+  const look = async (o: Record<string, unknown> = {}) => {
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'list') return ok([{ number: 8, title: 'a thing', url: 'https://github.com/Jcollier0120/Fake/pull/8', headRefName: 'claude/passes', headRefOid: head, baseRefName: 'main', isCrossRepository: false, author: { login: 'Jcollier0120' }, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', isDraft: false, statusCheckRollup: [], body: '', labels: [], ...o }]);
+      if (a[0] === 'release' && a[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+      if (a[0] === 'api' && a[1] === `repos/Jcollier0120/Fake/commits/${head}/statuses?per_page=100`) return ok([]);
+      if (a[0] === 'api' && a.includes('POST')) return ok({});
+      if (a[0] === 'pr' && a[1] === 'merge') return { code: 1, out: '', err: 'GraphQL: Base branch was modified (mergePullRequest)' };
+    });
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    const m = await mergeOne(ctx, e, { yes: true, team: true });
+    return { m, r, lines: ctx.lines.join('\n') };
+  };
+  const first = await look();
+  assert.match(first.lines, /testing it here/);
+  const posts = first.r.gh.filter((a) => a.includes('POST'));
+  assert.equal(posts.length, 1, first.lines);
+  assert.deepEqual(posts[0].slice(0, 8), ['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`]);
+  assert.match(posts[0][9], /^description=the Steward's round: checks passed here at /);
+
+  const again = await look();
+  assert.ok(again.r.gh.some((a) => a[1] === 'merge'), 'looked at again, and merged');
+  assert.doesNotMatch(again.lines, /testing it here/);
+  assert.ok(!again.r.gh.some((a) => String(a[1]).endsWith('/statuses?per_page=100')), "its pass here is read from pr-checks.json, so GitHub's statuses aren't asked");
+  assert.ok(!again.r.gh.some((a) => a.includes('POST')), 'nor set again');
 });
 
 test('steward vouch: the checks run at the PR\'s head, and only once they pass is the status set; a dirty clone, another head or a failure sets none', async () => {

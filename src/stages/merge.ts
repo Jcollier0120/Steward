@@ -537,8 +537,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         continue;
       }
     }
-    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
-    const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
+    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again. One that
+    // passed here already carries this PC's own vouch (prtest.ts), and its note says where it passed: GitHub isn't asked.
+    const vouched = untested(pr) && !testedBefore(e, pr)?.ok ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
     if (vouched) notes.set(pr.number, `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
     else if (untested(pr)) {
       // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
@@ -692,16 +693,17 @@ export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?
 
 /**
  * What passed at a team PR's head as it is now, for its catch-up to carry to the head it pushes (catchup.ts
- * keepsStanding): its author's vouch (vouch.ts), else its checks passing here (prtest.ts); null when neither, or when
+ * keepsStanding): its checks passing here (prtest.ts), else its author's vouch (vouch.ts); null when neither, or when
  * GitHub runs its checks (they run again at the new head whatever the Steward says). Never throws.
  */
 export async function standingOf(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
   if (!untested(pr) || pr.fork) return null;
-  const vouched = await vouchedBy(ctx, e, pr, ctx.settings.team).catch(() => null);
-  if (vouched) return `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`;
+  // Passed here (whose vouch on GitHub is this PC's own, prtest.ts): one carried already says where it came from once,
+  // and caught up again, it is carried on from there.
   const t = testedBefore(e, pr);
-  // One carried already says where it came from once: caught up again, it is carried on from there.
-  return t?.ok ? t.note.split('; carried to ')[0] : null;
+  if (t?.ok) return t.note.split('; carried to ')[0];
+  const vouched = await vouchedBy(ctx, e, pr, ctx.settings.team).catch(() => null);
+  return vouched ? `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for` : null;
 }
 
 /**

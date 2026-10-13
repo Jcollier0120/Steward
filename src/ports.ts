@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { showFile } from './git.ts';
+import { refOnDisk, showFile } from './git.ts';
 import { withLock } from './kit/lock.ts';
 import { manorHome } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
@@ -95,7 +95,14 @@ export function manorUses(home = manorHome()): PortUse[] {
   ];
 }
 
-/** What each employee's clone says on its branch (as origin had it at the last fetch): src/app.ts, else manor-agent.json. */
+/** Each clone's port as last read, by its folder and branch: the commit origin's branch was at then, and the port. */
+const portAt = new Map<string, { head: string; port: number | null }>();
+
+/**
+ * What each employee's clone says on its branch (as origin had it at the last fetch): src/app.ts, else manor-agent.json.
+ * Read again only once origin's branch there has moved (its ref file says so: no git started), as a commit's files never
+ * change; every round read every clone, one git each.
+ */
 export async function cloneUses(run: Runner, employees: Employee[]): Promise<PortUse[]> {
   const out: PortUse[] = [];
   for (const e of employees) {
@@ -103,11 +110,19 @@ export async function cloneUses(run: Runner, employees: Employee[]): Promise<Por
     try {
       const repo = checkoutOf(e);
       const ref = `origin/${e.branch}`;
-      // Both asked at once, so git reads them in one command (showFile).
-      const [app, announce] = await Promise.all([showFile(run, repo, ref, 'src/app.ts'), showFile(run, repo, ref, 'manor-agent.json')]);
-      let port = appPort(app);
-      if (port === null) {
-        port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
+      const head = refOnDisk(repo, `refs/remotes/${ref}`);
+      const k = `${repo.toLowerCase()}|${e.branch}`;
+      const kept = head ? portAt.get(k) : undefined;
+      let port: number | null;
+      if (kept?.head === head) port = kept.port;
+      else {
+        // Both asked at once, so git reads them in one command (showFile).
+        const [app, announce] = await Promise.all([showFile(run, repo, ref, 'src/app.ts'), showFile(run, repo, ref, 'manor-agent.json')]);
+        port = appPort(app);
+        if (port === null) {
+          port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
+        }
+        if (head) portAt.set(k, { head, port });
       }
       if (port !== null) out.push({ port, id: e.id, source: 'clone' });
     } catch {

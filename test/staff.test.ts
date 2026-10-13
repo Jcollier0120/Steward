@@ -363,3 +363,41 @@ test('release takes an employee whose branch has the kit and an unreleased versi
   assert.deepEqual(releaseDecision({ ...c, usesKit: false }, '1.0.1'), { release: false, why: 'not using the kit yet' });
   assert.deepEqual(releaseDecision({ ...c, version: null }, '1.0.1'), { release: false, why: 'no version found on its branch' });
 });
+
+test("the table is made again only where something moved: a row that didn't stands, its checkout looked at again (HEAD's file, status without untracked files)", async () => {
+  const { staff } = await import('../src/stages/staff.ts');
+  const { writeFileSync } = await import('node:fs');
+  const f = fakeEmployee(path.join(tmp, 'again'), { version: '0.4.0', kit: '1.0.0' });
+  const sha = sh(f.checkout, 'rev-parse', 'HEAD');
+  const git: string[][] = [];
+  const r = runner(() => undefined);
+  const e = employee(f.checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'again', 'work'), run: (cmd, args, opts) => (cmd === 'git' && git.push(args), r.run(cmd, args, opts)), neutralDir: tmp });
+  const g = { head: sha, prs: [] as any[], releases: [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null, commit: sha }] };
+  ctx.glance = { at: '', stewardReleases: null, repos: { fake: g }, errors: {} };
+  const first = await staff(ctx, { fetch: true, kit: '1.0.0' });
+  assert.equal(first.rows[0].main?.version, '0.4.0');
+  assert.equal(first.rows[0].release?.kit, '1.0.0');
+  assert.ok(first.keys?.fake, 'made without a failure: kept with what it rests on');
+  assert.ok(!git.some((a) => a.includes('branch') && a.includes('--show-current')), "its branch read from HEAD's file");
+
+  writeFileSync(path.join(f.checkout, 'untracked.txt'), 'not counted\n');
+  writeFileSync(path.join(f.checkout, 'README.md'), 'changed\n');
+  sh(f.checkout, 'add', 'README.md');
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/other');
+  git.length = 0;
+  const second = await staff(ctx, { fetch: true, kit: '1.0.0', before: first });
+  assert.deepEqual(second.rows[0].main, first.rows[0].main);
+  assert.deepEqual(second.rows[0].release, first.rows[0].release);
+  assert.deepEqual([second.rows[0].checkout.branch, second.rows[0].checkout.changes], ['claude/other', 1]);
+  assert.deepEqual(git, [['--no-optional-locks', 'status', '--porcelain', '-uno']], 'nothing read again but its status');
+  assert.equal(r.gh.length, 0);
+
+  // GitHub says something new of it (a PR): made again.
+  ctx.glance.repos.fake = { ...g, prs: [pr({ number: 9, headRefName: 'claude/nine', headRefOid: sha })] };
+  git.length = 0;
+  const third = await staff(ctx, { fetch: true, kit: '1.0.0', before: second });
+  assert.ok(git.length > 1, 'its row made again');
+  assert.deepEqual(third.rows[0].prs.map((p) => p.number), [9]);
+  assert.notEqual(third.keys?.fake, second.keys?.fake);
+});
