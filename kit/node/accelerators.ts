@@ -626,18 +626,27 @@ export interface ServerReady {
  * everyone after) and given 30 s to take connections: once per server, however many requests wait on it.
  * `logFile` takes what a server it starts prints (appended), and `env` is that server's environment: the keeper's
  * restarts (keeper.ts) keep a log per server; a request's start keeps none, as before.
+ * `onWaking` is told, before any waiting, that the server is being started (it wasn't running: the keeper stopped it
+ * when nobody used it) or is busy loading: the request will wait for its model to load. A throw from it is ignored.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   const state = await probe(ep.baseUrl, PROBE_MS, lists);
   if (state === 'ready') return { started: false, waited: false };
+  const waking = (how: 'starting' | 'loading') => {
+    try {
+      opts.onWaking?.(how);
+    } catch {}
+  };
   if (state === 'busy') {
+    waking('loading');
     await untilReady(ep.baseUrl, readyMs, lists);
     return { started: false, waited: true };
   }
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
+  waking('starting');
   let pending = starting.get(ep.baseUrl);
   if (!pending) {
     pending = start(ep, opts.waitMs ?? START_WAIT_MS, readyMs, opts).finally(() => starting.delete(ep.baseUrl));

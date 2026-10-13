@@ -6,6 +6,7 @@ import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } f
 import { type Detection, detect } from './detect.ts';
 import { calibrate, CALIBRATION, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
@@ -23,7 +24,11 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * x64 programs on): its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only in
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
- *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]
+ *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]
+ *
+ * `--idle` runs the NPU's idle stop instead of the measurements (npu-idle.ts): the keeper stops the servers once the NPU
+ * goes unused, a person's request after that is told the local AI is waking and answers, and a request in flight is
+ * never stopped. Each a step that passes or fails.
  */
 
 export interface CheckStep {
@@ -77,6 +82,10 @@ export interface NpuCheckOptions {
    * against what it measured. Each a step that passes or fails; instead of the measurements.
    */
   harden?: boolean;
+  /** The NPU's idle stop, run for real (npu-idle.ts' idleSteps), instead of the measurements. */
+  idle?: boolean;
+  /** --idle's idle time for the keeper (a minute by default). */
+  idleMs?: number;
   /** Install the server and models when they're missing (default); false checks only what's there. */
   setup?: boolean;
   /** Download without asking. */
@@ -99,6 +108,8 @@ export interface NpuCheckOptions {
     embedTest?: (entry: AcceleratorEntry) => Promise<string[]>;
     /** --harden's test requests (its cases: timeout, nonsense, calibrate), in place of setup's own. */
     hardenTest?: (kase: string, entry: AcceleratorEntry) => Promise<string[]>;
+    /** --idle's PC: the kit's requests, the keeper's looks, the servers' memory (npu-idle.ts' realIdleDeps). */
+    idle?: IdleDeps;
     /** Whether a port is free (portFree): the route's own, or one a rehearsal moves to. */
     portFree?: (port: number) => Promise<boolean>;
     now?: () => number;
@@ -363,6 +374,19 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   // 3. The server on the NPU, measured.
   const acc = readAccelerator(entry) as Accelerator;
   const client = serverClient(acc, { http, now });
+
+  // Or, asked for, the NPU's idle stop run for real instead.
+  if (o.idle) {
+    const logDir = path.join(tools, 'servers', 'logs');
+    try {
+      await idleSteps({ entry, route, vendor, deps: o.io?.idle ?? realIdleDeps(entry, { logFile: path.join(logDir, 'npu-check-idle.log') }), add, log, idleMs: o.idleMs, logDir });
+    } finally {
+      await client.stopKitStarted();
+      const eb = acc.embed?.baseUrl;
+      if (eb && eb !== client.ep.baseUrl) await stopStartedAt(eb, serverClient({ ...acc, chat: { ...acc.chat!, baseUrl: eb } } as Accelerator, { http, now }).listening, now);
+    }
+    return finish(steps.some((s) => s.ok === false) ? 1 : 0);
+  }
   const { ep, lists, ask, answers, listening, untilAnswers } = client;
   const logFile = path.join(tools, 'servers', 'logs', `npu-check-${vendor}.log`);
   const start = o.io?.start ?? startServer;
@@ -721,6 +745,7 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
       if (!v) return { error: '--generation takes a generation of the route (meteor-lake, lunar-lake…)' };
       o.generation = v;
     } else if (a === '--harden') o.harden = true;
+    else if (a === '--idle') o.idle = true;
     else if (a === '--out') o.out = argv[++i];
     else return { error: `unknown argument ${a}` };
   }
@@ -730,7 +755,7 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const o = parseCheckArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]`);
+    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]`);
     process.exit(2);
   }
   const { code } = await npuCheck(o);

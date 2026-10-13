@@ -70,6 +70,8 @@ export interface NpuRoute {
   quirks: Quirk[];
   /** The keeper restarts it when it holds too much (GenieX's kept memory). */
   recycle: boolean;
+  /** How soon the keeper stops its servers on a PC with little memory, per kind, and why (npuIdleStopMinutes). */
+  idleStop?: NpuRouteIdleStop;
   embeddings?: string;
   /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
   embedServer?: NpuEmbedServer;
@@ -163,7 +165,25 @@ export type NpuEmbedPull = Omit<NpuModel, 'kinds'>;
 /** Whether the embedding server's model is pulled by the route's program (else it's a file downloaded). */
 export const isPulled = (m: NpuEmbedServer['model']): m is NpuEmbedPull => 'pull' in m;
 
+/** A route's cold start per kind (stopped to its first answer, in ms), the minutes it may sit unused on a small PC, and why. */
+export interface NpuRouteIdleStop {
+  coldStartMs: Partial<Record<ServeKind, number>>;
+  minutes: Partial<Record<ServeKind, number>>;
+  basis: string;
+  /** How to verify the numbers on this maker's hardware, where they aren't yet: npu-check --idle, which passes or fails. */
+  verify?: string;
+}
+
+/** The rule for every route (npu-vendors.json's idleStop): a PC under `smallPcGb` stops a route's servers after its own minutes. */
+export interface NpuIdleStop {
+  smallPcGb: number;
+  floorMinutes: number;
+  coldStartTimes: number;
+  about: string;
+}
+
 export interface NpuCatalog {
+  idleStop: NpuIdleStop;
   routes: Record<NpuVendor, NpuRoute>;
   /** PCI device ids (4 hex digits, upper case) to generations, for the makers whose name doesn't say it. */
   devices: Partial<Record<NpuVendor, Record<string, string>>>;
@@ -398,6 +418,49 @@ export function npuMemoryFit(route: NpuRoute, ramBytes: number | null | undefine
   if (chatGb > budgetGb) return { chat: false, embed: false, budgetGb, why: `${ram} hasn't room for the NPU's chat model (${chatGb} GB) beside everything else` };
   if (chatGb + embedGb > budgetGb) return { chat: true, embed: false, budgetGb, why: `${ram} hasn't room for the NPU's embedding model (${embedGb} GB) beside its chat model` };
   return { chat: true, embed: true, budgetGb };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Stopped when unused (npu-vendors.json's idleStop)
+
+/** The minutes a route's server may sit unused on a small PC, from its cold start: coldStartTimes times it, never under floorMinutes. */
+export function idleMinutesFor(coldStartMs: number, rule: NpuIdleStop = NPU_CATALOG.idleStop): number {
+  return Math.max(rule.floorMinutes, Math.ceil((rule.coldStartTimes * Math.max(0, coldStartMs)) / 60_000));
+}
+
+/** Whether this PC has little memory, for the idle stop: under the rule's smallPcGb. Unknown memory isn't small (as before). */
+export const smallPc = (ramBytes: number | null | undefined, rule: NpuIdleStop = NPU_CATALOG.idleStop) => !!ramBytes && ramBytes < rule.smallPcGb * 1024 ** 3;
+
+/**
+ * The route a configured NPU server runs, by its program and kind: the route's own program (GenieX, ovms, flm), or for
+ * embeddings its embedding server's (llama-server on the Snapdragon; Intel's is ovms again). Null for a program no route
+ * runs (npu-embed's Python, a server set up by hand).
+ */
+export function routeOfServer(program: string, kind: ServeKind, catalog: NpuCatalog = NPU_CATALOG): NpuRoute | null {
+  const name = (p: string) => path.win32.basename(p).toLowerCase();
+  const wanted = name(program);
+  for (const r of Object.values(catalog.routes)) {
+    const own = name(r.install.exe);
+    if (kind === 'embed' && r.embedServer ? name(r.embedServer.exe ?? r.install.exe) === wanted : own === wanted) return r;
+  }
+  return null;
+}
+
+/** A route's cold start for a kind (its chat's when the kind has none of its own), or null when the route gives none. */
+export function coldStartMsOf(route: NpuRoute | null, kind: ServeKind): number | null {
+  return route?.idleStop?.coldStartMs[kind] ?? route?.idleStop?.coldStartMs.chat ?? null;
+}
+
+/**
+ * The minutes an NPU server may sit unused before the keeper stops it, when config.json gives no npuIdleStopMinutes: on a
+ * PC with little memory (smallPc), its route's own minutes for its kind (its chat's when the kind has none); on a bigger
+ * PC, or for a server no route runs, `otherwise` (rules.json's keeper.npuIdleStopMinutes, as before).
+ */
+export function npuIdleStopMinutes(o: { program: string; kind: ServeKind; ramBytes: number | null | undefined; otherwise: number; catalog?: NpuCatalog }): number {
+  const catalog = o.catalog ?? NPU_CATALOG;
+  if (!smallPc(o.ramBytes, catalog.idleStop)) return o.otherwise;
+  const stop = routeOfServer(o.program, o.kind, catalog)?.idleStop;
+  return stop?.minutes[o.kind] ?? stop?.minutes.chat ?? o.otherwise;
 }
 
 /** What setup measured on the NPU: the first start to an answer (its compile included), a short answer warm, and writing speed. */

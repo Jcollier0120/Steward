@@ -9,6 +9,7 @@ import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
+import { npuIdleStopMinutes } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { RULES } from './rules.ts';
 
@@ -33,7 +34,10 @@ import { RULES } from './rules.ts';
  * use" meaning someone holds or waits on its accelerator's lock:
  * - **Idle**: when nobody has used its accelerator for `npuIdleStopMinutes` (the NPU) or `gpuIdleStopMinutes` (a
  *   graphics card, or the processor), both 10 by default (rules.json's keeper), it is stopped. The next request
- *   starts it again (ensureServer).
+ *   starts it again (ensureServer). With no `npuIdleStopMinutes` in config.json, a PC with little memory (under
+ *   npu-vendors.json's idleStop.smallPcGb) stops each NPU server after its route's own minutes, from its cold start
+ *   (npu-vendors.ts' npuIdleStopMinutes: 5 for GenieX and OpenVINO Model Server, 10 for FastFlowLM). An idle stop
+ *   gives way when the keeper's turn wasn't had at once (TURN_AT_ONCE_MS): someone took the accelerator after the look.
  * - **A game**: when a game is using its graphics card (games.json) and nobody has used the card for 2 minutes, it
  *   is stopped, so the game gets the card's memory.
  * - **The graphics card is kept out**: when Manor's settings say `"gpuWithNpu": false` (kit 2.10.0) and an NPU serves here, a
@@ -98,6 +102,11 @@ export const GAME_GRACE_MS = RULES.keeper.gameGraceMs;
 export const REAP_EVERY_MS = RULES.keeper.lookEveryMs;
 /** How long an orphan is seen before it is stopped; 0 never stops one. */
 export const ORPHAN_GRACE_MS = RULES.keeper.orphanGraceMs;
+/**
+ * An idle stop's turn taken later than this after it was asked for was waited for: someone held the accelerator after
+ * the look found it unused, so it was used, and the stop waits for a later look. A free turn is taken in milliseconds.
+ */
+export const TURN_AT_ONCE_MS = 2_000;
 
 /** A model server this looks after: where it answers, the program that serves it, and the accelerator it runs on. */
 export interface ReapedServer {
@@ -178,6 +187,7 @@ export interface ReaperOptions {
   recycleBytes?: number;
   gameGraceMs?: number;
   orphanGraceMs?: number;
+  turnAtOnceMs?: number;
 }
 
 export class Reaper {
@@ -237,7 +247,11 @@ export class Reaper {
     const idleMs = d.now() - lastUse;
     const idleStopMs = s.idleMs ?? this.o.idleMs ?? 0;
     if (idleStopMs > 0 && idleMs >= idleStopMs) {
-      const pids = await this.inTurn(s, false);
+      const pids = await this.inTurn(s, false, true);
+      if (pids === 'used') {
+        this.lastInUse.set(s.acc.id, d.now());
+        return { base: s.base, did: 'in-use' };
+      }
       if (!pids) return taken;
       d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: ${theAcc(s)} unused for ${Math.round(idleMs / 60_000)} min`);
       return { base: s.base, did: 'stopped', pids, idleMs };
@@ -280,12 +294,17 @@ export class Reaper {
 
   /**
    * Stops the server's processes (and starts it again) holding its accelerator's slots. Null when
-   * someone took one since the look: then it waits for the next.
+   * someone took one since the look: then it waits for the next. With `atOnce` (an idle stop), 'used' when the turn
+   * wasn't had at once: someone held the accelerator in the meantime, so it isn't idle, and nothing is stopped.
    */
-  private async inTurn(s: ReapedServer, restart: boolean): Promise<number[] | null> {
+  private async inTurn(s: ReapedServer, restart: false, atOnce: true): Promise<number[] | null | 'used'>;
+  private async inTurn(s: ReapedServer, restart: boolean): Promise<number[] | null>;
+  private async inTurn(s: ReapedServer, restart: boolean, atOnce = false): Promise<number[] | null | 'used'> {
     const d = this.deps;
+    const asked = d.now();
     return d
-      .withTurn(s, async () => {
+      .withTurn(s, async (): Promise<number[] | 'used'> => {
+        if (atOnce && d.now() - asked > (this.o.turnAtOnceMs ?? TURN_AT_ONCE_MS)) return 'used';
         const procs = await d.processes(s.program, s.base);
         for (const p of procs) d.stop(p.pid);
         for (let i = 0; i < 40 && (await d.processes(s.program, s.base)).length; i++) await sleep(250);
@@ -382,25 +401,26 @@ export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): strin
 
 /**
  * The model servers the keeper can start again, each with its accelerator's idle time: an NPU's chat, vision and
- * embedding endpoints (the embedding one when llama-server runs it, Qualcomm's on the Hexagon; npu-embed exits by
- * itself), and a graphics card's or the processor's chat, vision, embedding and
+ * embedding endpoints (the embedding one when llama-server runs it, Qualcomm's on the Hexagon, or OpenVINO Model
+ * Server, Intel's; npu-embed exits by itself), and a graphics card's or the processor's chat, vision, embedding and
  * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
  * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out.
+ * `idle.npuMsFor`, when given, is an NPU server's own idle time by its program and kind, over `idle.npuMs`.
  */
 export function reapedServers(
   accelerators: Accelerator[],
   logDir = path.join(toolsHome(), 'servers', 'logs'),
-  idle: { npuMs?: number; otherMs?: number } = {},
+  idle: { npuMs?: number; otherMs?: number; npuMsFor?: (program: string, kind: EndpointKind) => number } = {},
   lockDirs: ((a: Accelerator) => string[]) | string = lockDirsOf,
   o: { keepGpuOut?: boolean } = {},
 ): ReapedServer[] {
   const out = new Map<string, ReapedServer>();
   for (const a of accelerators) {
     if (a.enabled === false) continue;
-    // An NPU's embed endpoint is looked after when llama-server runs it (Qualcomm's on the Hexagon); npu-embed exits by itself.
-    const npuEmbed = /^llama-server(\.exe)?$/i.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
+    // An NPU's embed endpoint is looked after when llama-server (Qualcomm's, on the Hexagon) or OpenVINO Model Server
+    // (Intel's: 1.7 GB, kept until it was stopped, before kit 2.71.0) runs it; npu-embed exits by itself.
+    const npuEmbed = /^(llama-server|ovms)(\.exe)?$/i.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
     const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision', ...(npuEmbed ? (['embed'] as const) : [])] : ['chat', 'vision', 'embed', 'rerank'];
-    const idleMs = a.kind === 'npu' ? idle.npuMs : idle.otherMs;
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;
       let ep: ReturnType<typeof endpointFor>;
@@ -410,6 +430,7 @@ export function reapedServers(
         continue;
       }
       if (!ep.startCommand?.length || out.has(ep.baseUrl)) continue;
+      const idleMs = a.kind === 'npu' ? (idle.npuMsFor?.(expandEnv(ep.startCommand[0]), kind) ?? idle.npuMs) : idle.otherMs;
       out.set(ep.baseUrl, {
         base: ep.baseUrl,
         program: expandEnv(ep.startCommand[0]),
@@ -582,11 +603,19 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
   );
 }
 
-/** The servers as config.json has them now, each with its accelerator's idle time, and the card kept out when Manor says so. */
-export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; logDir?: string } = {}): ReapedServer[] {
+/**
+ * The servers as config.json has them now, each with its accelerator's idle time, and the card kept out when Manor says so.
+ * The NPU's: config.json's npuIdleStopMinutes for every NPU server when it gives one (0 never stops them), on any PC;
+ * without it, each server's own by this PC's memory (`ramBytes`, os.totalmem() when not given): its route's minutes on
+ * a PC with little memory, rules.json's elsewhere (npu-vendors.ts' npuIdleStopMinutes).
+ */
+export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; logDir?: string; ramBytes?: number | null } = {}): ReapedServer[] {
   const k = keeperSettings(raw);
   const accs = configuredAccelerators(raw);
-  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000 }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
+  const given = raw?.npuIdleStopMinutes === k.npuIdleStopMinutes;
+  const ramBytes = o.ramBytes === undefined ? os.totalmem() : o.ramBytes;
+  const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'chat' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
+  return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
 }
 
 /** How old hardware.json may get before the keeper asks this PC again: a card or an NPU driver can come and go. */
