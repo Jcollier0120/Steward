@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { expandEnv } from './kit/settings-kit.ts';
 import { GithubLimited, LIMITED, readingFrom, type RateReading } from './budget.ts';
-import { GitHubApi } from './kit/github.ts';
+import { GitHubApi, type GitHubApiError } from './kit/github.ts';
 import type { Runner } from './run.ts';
 import { gitGlance, type Host } from './scm.ts';
 import type { Employee, Settings } from './settings.ts';
@@ -64,8 +64,15 @@ export interface Glance {
   heads?: Record<string, { heads: Record<string, string>; complete: boolean }>;
 }
 
-/** How many repositories one query asks about: GitHub allows 500,000 nodes a query, and each takes about 22,000. */
-export const PER_QUERY = 15;
+/**
+ * How many repositories one query asks about. GitHub allows 500,000 nodes a query, and each takes about 22,000, but it
+ * also gives a query 10 seconds: on 2026-10-12, 15 repositories with their PRs' files and checks took longer, GitHub
+ * answered 502 and every round asked each employee on its own. 8 took up to 8 seconds, 5 up to 5, at the same cost.
+ */
+export const PER_QUERY = 5;
+
+/** GitHub giving up on a query that took too long: 502 or 504 from the API, gh's "HTTP 502", or GraphQL's own words. */
+export const queryTimedOut = (e: unknown) => [502, 504].includes((e as GitHubApiError)?.status) || /\b(?:HTTP |graphql: )50[24]\b|may be the result of a timeout/i.test(String((e as Error)?.message ?? e));
 
 /**
  * The open PRs a glance reads of each repository. GitHub charges a query by the nodes it may return, and each PR's
@@ -206,8 +213,8 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
 }
 
 /**
- * Every employee's repository, and the Steward's releases, from GitHub: one query (one more for each 15 employees
- * past the first 15). Throws when GitHub can't be asked at all (gh signed out, no network); an employee GitHub
+ * Every employee's repository, and the Steward's releases, from GitHub: one query (one more for each 5 employees
+ * past the first 5). Throws when GitHub can't be asked at all (gh signed out, no network); an employee GitHub
  * couldn't answer for is in `errors`.
  *
  * A repository worked with plain git (`host`, scm.ts) isn't asked of GitHub: its branch head and its v<x.y.z> tags come
@@ -235,11 +242,19 @@ export async function takeGlance(
   const all = settings.employees.filter((e) => host(e) === 'github');
   // Nothing to ask GitHub about: no employee on it, and no repository of its own.
   if (!all.length && !settings.stewardRepo) return glance;
-  for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) {
-    const chunk = all.slice(i, i + PER_QUERY);
-    const stewardRepo = i === 0 ? settings.stewardRepo : null;
-    readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now());
-  }
+  // A query GitHub gives up on as too slow is asked again in halves, down to one repository: a busy week's PRs can take
+  // a few repositories past GitHub's 10 seconds. A failure of any other kind, or of one repository alone, is the glance's.
+  const asked = async (chunk: Employee[], stewardRepo: string | null): Promise<void> => {
+    try {
+      readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now());
+    } catch (e) {
+      if (chunk.length < 2 || !queryTimedOut(e)) throw e;
+      const half = Math.ceil(chunk.length / 2);
+      await asked(chunk.slice(0, half), stewardRepo);
+      await asked(chunk.slice(half), null);
+    }
+  };
+  for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) await asked(all.slice(i, i + PER_QUERY), i === 0 ? settings.stewardRepo : null);
   return glance;
 }
 
