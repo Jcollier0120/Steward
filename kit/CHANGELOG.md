@@ -16,6 +16,19 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Start git through `gitExe()` where you start it yourself (`execFile(gitExe(), …)`), and run your git through `signedIn` to get the in-process `ls-remote`. Nothing else: take the kit and release as usual.
 
+## 2.61.0
+
+**A handler can stream its reply: a live recording sent to another PC as it is made.**
+
+### What's new
+
+- **A streamed reply** (node/server.ts): a handler can answer `{ stream, type, status? }` with a Node `Readable`, and the server pipes it to the client as it comes, for a reply too long to hold or one with no end until the client stops it. The stream is destroyed when the client goes away, and the reply is cut off when the stream fails. A HEAD gets the status and type, and the stream is destroyed unread.
+- **The request's `headers` and a `signal`**: a handler now gets the request's headers, and an `AbortSignal` that is aborted when the client goes away before the reply has ended, so long work for one caller stops when nobody waits for it. Both are optional in the `Request` type, so a test that builds a request without them still compiles; `serve()` always gives them.
+
+### For an agent
+
+- Nothing: take the kit as usual. The Chronicler uses the streamed reply to record a game played on another PC (Manor's Other PCs forward `/api/peer/*` to it).
+
 ## 2.60.0
 
 **The NPU check: one command that tries a maker's NPU route on real hardware and measures it.**
