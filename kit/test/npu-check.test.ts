@@ -451,8 +451,40 @@ test('--generation on a real NPU of another generation: the NPU plays it, with i
   assert.deepEqual(cal.data.written, V.calibrate(cal.data.measured, meteorRoute).timeouts);
   assert.equal(h.report.patch, null);
 
-  // Its own generation, named: an ordinary run on its own values.
+  // Its own generation, named: an ordinary run on its own values (the ports' check passing first).
   const own = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, { warmMs: 830, tokensPerSecond: 17 }, { generation: 'lunar-lake' });
   assert.equal(own.report.rehearsal, false);
   assert.equal(own.report.generation, 'lunar-lake');
+});
+
+test('a server already on the route\'s port: on the NPU the check refuses, in a rehearsal its servers move beside it', async () => {
+  // The manor's own local AI on Intel's port: never measured in the check's place.
+  const s = await scene();
+  const { code, report } = await C.npuCheck({ ...s.opts, io: { ...s.opts.io, portFree: async (p: number) => p !== s.port } });
+  assert.equal(code, 2);
+  const last = report.steps.at(-1)!;
+  assert.equal(last.step, 'ports');
+  assert.ok(last.say.startsWith(`a server already answers on ${s.port} (the manor's local AI, most likely): stop it first`), last.say);
+  assert.ok(!s.ran.length, 'nothing set up');
+
+  // Off the NPU, the chat and embedding servers each move 100 up, past a held one there too.
+  const route = { ...V.NPU_CATALOG.routes.intel, port: 18183, embedServer: { ...V.NPU_CATALOG.routes.intel.embedServer!, port: 18184 } };
+  const held = new Set([18183, 18184, 18283]);
+  const r = await C.routeOnFreePorts(route, false, async (p) => !held.has(p));
+  assert.ok('route' in r);
+  assert.equal(r.route.port, 18284);
+  assert.equal(r.route.embedServer!.port, 18285, 'not the port the chat server took');
+  assert.deepEqual(r.moved, ['18183 to 18284', '18184 to 18285']);
+  assert.deepEqual(await C.routeOnFreePorts(route, true, async (p) => !held.has(p)), { held: [18183, 18184] });
+  // Nothing held: the route as it is.
+  assert.equal(((await C.routeOnFreePorts(route, true, async () => true)) as any).route, route);
+});
+
+test('portFree: a port something listens on is not free; once closed it is', async () => {
+  const srv = createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const p = (srv.address() as { port: number }).port;
+  assert.equal(await C.portFree(p), false);
+  await new Promise((r) => srv.close(r));
+  assert.equal(await C.portFree(p), true);
 });

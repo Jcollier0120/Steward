@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
@@ -98,6 +99,8 @@ export interface NpuCheckOptions {
     embedTest?: (entry: AcceleratorEntry) => Promise<string[]>;
     /** --harden's test requests (its cases: timeout, nonsense, calibrate), in place of setup's own. */
     hardenTest?: (kase: string, entry: AcceleratorEntry) => Promise<string[]>;
+    /** Whether a port is free (portFree): the route's own, or one a rehearsal moves to. */
+    portFree?: (port: number) => Promise<boolean>;
     now?: () => number;
   };
 }
@@ -128,6 +131,45 @@ export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   }
   const es = route.embedServer;
   return { ...route, serve: on(route.serve), ...(es?.serve.includes('--target_device') ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
+}
+
+/** Whether nothing answers or listens on 127.0.0.1's port. */
+export async function portFree(port: number): Promise<boolean> {
+  const answers = await new Promise<boolean>((res) => {
+    const s = net.connect({ host: '127.0.0.1', port });
+    s.setTimeout(1_000, () => (s.destroy(), res(false)));
+    s.once('connect', () => (s.destroy(), res(true)));
+    s.once('error', () => res(false));
+  });
+  if (answers) return false;
+  return new Promise((res) => {
+    const srv = net.createServer();
+    srv.once('error', () => res(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => res(true)));
+  });
+}
+
+/**
+ * The route on ports nothing else holds. A server already on one (the manor's own local AI, most likely) is never
+ * measured in the check's place: on the NPU the check refuses, as two servers on one NPU would skew every number; off
+ * it (a rehearsal) its servers move to free ports beside it.
+ */
+export async function routeOnFreePorts(route: NpuRoute, onNpu: boolean, free: (port: number) => Promise<boolean> = portFree): Promise<{ route: NpuRoute; moved: string[] } | { held: number[] }> {
+  const want = [route.port, ...(route.embedServer ? [route.embedServer.port] : [])];
+  const held: number[] = [];
+  for (const p of want) if (!(await free(p))) held.push(p);
+  if (!held.length) return { route, moved: [] };
+  if (onNpu) return { held };
+  const taken = new Set(want);
+  const moved: string[] = [];
+  const pick = async (p: number) => {
+    if (!held.includes(p)) return p;
+    for (let q = p + 100; q < p + 200; q++) if (!taken.has(q) && (await free(q))) return (taken.add(q), moved.push(`${p} to ${q}`), q);
+    throw new Error(`no free port from ${p + 100} to ${p + 199}`);
+  };
+  const port = await pick(route.port);
+  const es = route.embedServer;
+  return { route: { ...route, port, ...(es ? { embedServer: { ...es, port: await pick(es.port) } } : {}) }, moved };
 }
 
 /** A prompt of about `tokens` tokens (about four characters a token, as the kit's estimate): plain sentences, numbered so no two are alike. */
@@ -266,6 +308,18 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     route = routeOnDevice(routeFor(catalog.routes[vendor], generation), report.device);
   } catch (e: any) {
     add({ step: 'route', ok: false, say: e.message });
+    return finish(2);
+  }
+  try {
+    const ports = await routeOnFreePorts(route, report.device === 'NPU', o.io?.portFree);
+    if ('held' in ports) {
+      add({ step: 'ports', ok: false, say: `a server already answers on ${ports.held.join(' and ')} (the manor's local AI, most likely): stop it first, as two servers on one NPU would skew every number`, data: { held: ports.held } });
+      return finish(2);
+    }
+    route = ports.route;
+    if (ports.moved.length) log(`A server already answers on the route's port (the manor's local AI, most likely): the rehearsal's moved from ${ports.moved.join(', ')}.`);
+  } catch (e: any) {
+    add({ step: 'ports', ok: false, say: e.message });
     return finish(2);
   }
   report.server = `${route.server} ${route.version}`;
