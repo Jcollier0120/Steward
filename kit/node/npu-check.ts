@@ -87,21 +87,27 @@ export interface NpuCheckOptions {
 
 /**
  * The route with its server pointed at another device (OpenVINO's --target_device): off the NPU its NPU-only
- * arguments (--max_prompt_len) go. A route without a device argument runs on its NPU only.
+ * arguments (--max_prompt_len, and its embedding server's --max_length) go. Its embedding server goes with it when
+ * it has a device argument too; one without stays on the NPU. A route without a device argument runs on its NPU only.
  */
 export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
-  const i = route.serve.indexOf('--target_device');
-  if (i < 0) {
+  const on = (args: string[]) => {
+    const serve = [...args];
+    serve[serve.indexOf('--target_device') + 1] = device.toUpperCase();
+    if (device.toUpperCase() !== 'NPU') {
+      for (const flag of ['--max_prompt_len', '--max_length']) {
+        const j = serve.indexOf(flag);
+        if (j >= 0) serve.splice(j, 2);
+      }
+    }
+    return serve;
+  };
+  if (!route.serve.includes('--target_device')) {
     if (device.toUpperCase() !== 'NPU') throw new Error(`${route.server} runs on the NPU only: it has no device to choose`);
     return route;
   }
-  const serve = [...route.serve];
-  serve[i + 1] = device.toUpperCase();
-  if (device.toUpperCase() !== 'NPU') {
-    const j = serve.indexOf('--max_prompt_len');
-    if (j >= 0) serve.splice(j, 2);
-  }
-  return { ...route, serve };
+  const es = route.embedServer;
+  return { ...route, serve: on(route.serve), ...(es?.serve.includes('--target_device') ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
 }
 
 /** A prompt of about `tokens` tokens (about four characters a token, as the kit's estimate): plain sentences, numbered so no two are alike. */

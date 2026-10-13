@@ -41,7 +41,7 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 - `temperature: 0` and a fixed `max_tokens` per request, as the kit's own `chatBody` sends, and the model's thinking turned off where it has any.
 - **Streamed** (`stream: true`, with usage in the last chunk), so the time to the first token (reading the prompt) and the time between tokens (writing) are measured separately. The NPU check doesn't stream, so it estimates writing speed by taking off half a short answer's time. That is close enough for a timeout, but not for a ranking. A server that can't stream is measured without it and the run is marked: its job times still count, its reading and writing speeds are shown as estimates and not ranked.
 - Token counts come from the server's own usage numbers. A server that doesn't report them is marked the same way.
-- Every prompt fits under 1,280 tokens, prompt and answer together, so it runs under every route's cap (the smallest is Intel's 1,536). A route whose cap is lower can't run the suite, and the website says so rather than leaving it out silently.
+- Every prompt fits under 1,280 tokens, prompt and answer together, so it runs under every route's cap (the smallest chat cap is Qualcomm's 2,400). A route whose cap is lower can't run the suite, and the website says so rather than leaving it out silently.
 
 ### What it measures
 
@@ -135,6 +135,8 @@ A quick run on the Lunar Lake (Core Ultra 7 256V, HP OmniBook X 17, plugged in, 
 
 The same model on the Arc 140V, measured with the experiment harness rather than the benchmark: 38.8 tokens a second, 0.08 s for the short answer, 0.28–0.31 s to start reading, 7.8 s to load.
 
+**Intel's prompt cap.** The NPU reads in pieces of about 1,024 tokens, so a bigger cap doesn't slow short prompts much. At 2,048 nothing changed (short answer 0.72 s, load 28 s, 3.6 GB). So Intel's cap is now 4,096 (kit 2.67.0), three times the text an agent may send. Its quick run, 2026-10-13: first load 41.2 s, cached 4.5 s, short answer 0.80 s, writing 27.9 tokens a second, reading 512 / 1,024 tokens 0.83 / 0.83 s, near the cap (3,492 of 4,096) 4.54 s, the jobs 1.30 / 4.97 / 4.72 s, **job time 10.99 s**, quality 23 of 24, 4.3 GB.
+
 ## What's built
 
 1. **Shared parts out of the NPU check**: starting and stopping a server, asking, waiting for it to answer, and reading its memory move into `npu-server.ts`. The NPU check uses them as it does now and behaves the same.
@@ -160,5 +162,4 @@ Later, not in the first version: a **Measure this PC** button in Manor's Acceler
 
 - **The jobs' mix.** The three jobs' sizes are a guess at the agents' work. The token tally counts what agents send from kit 2.66.0 on; a week of it on the owner's PCs (`--mix 7`) sets the sizes before the suite's first release. They are the ranking, so this matters most.
 - **Energy.** To be published (decided), but how steady the battery reading is under load still has to be seen on battery, on the Lunar Lake and the Snapdragon. A reading that swings too much is shown as noisy and kept off the board.
-- **Intel's prompt cap.** Measured on the Lunar Lake: because the NPU reads in pieces of about 1,024 tokens, a bigger cap doesn't slow short prompts much. At 2,048 nothing changed (short answer 0.72 s, load 28 s, 3.6 GB). At 4,096 the short answer took 0.77 s instead of 0.72, the first load 41 s instead of 31, and the memory 4.3 GB instead of 3.6. Raising Intel's cap to 4,096 would let agents send three times the text, for about 50 ms on every answer. That is a change to npu-vendors.json to propose, with the timeouts that a 3,300-token prompt (4.4 s to start) needs.
 - **The gate's calibration** needs the three known-good routes measured first. AMD's route can't join the calibration until there's AMD hardware.
