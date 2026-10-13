@@ -283,8 +283,9 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
       entry = e;
       return [];
     },
-    // Its embedding server is measured by the caller, in a step of its own.
+    // Its embedding server is measured by the caller, in a step of its own; so is the server (setup's calibration).
     testEmbed: async () => [],
+    measure: io.measure ?? (async () => null),
   });
   return { entry, problems: r.problems, timed };
 }

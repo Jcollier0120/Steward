@@ -2,6 +2,47 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.68.0
+
+**Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
+
+This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which it needs.
+
+### What's new
+
+- **Starting values for each Intel generation** in `npu-vendors.json` (`generations.<id>`: `timeouts`, `maxContextTokens`, `caps`, `args`, `memoryGb`, `basis`; the route with them is `routeFor(route, generation)`).
+  - The NPU 3720 (Meteor Lake and Arrow Lake, about a quarter of Lunar Lake's compute): prompts of up to 2,048 tokens, 60 s plus 400 ms a token, and a 6-minute cold load.
+  - NPU 5 (Panther Lake and Wildcat Lake): Lunar Lake's values with a 4-minute cold load.
+  - Lunar Lake keeps its measured values. Every generation but Lunar Lake stays `verified: false`.
+- **Setup calibrates an unverified generation on the PC.** After the test request, two short requests more (a warm "ready", and a count to twenty) measure it. `calibrate` turns the measurements into that PC's timeouts in its NPU entry, never under the starting values and never past `CALIBRATION`'s bounds. Under 2 tokens a second the NPU isn't used for chat. `setUpNpu` returns `measured`, and `NpuIo.measure` replaces the measuring requests in tests (null skips them).
+- **Sanity, not just an answer.**
+  - The chat test refuses the same few characters five times over (`repetitive`), as well as an answer without "ready". The measuring count must count (`countsSensibly`).
+  - The embedding test sends three sentences (`EMBED_TEST`). `embedSanity` checks the dimensions (`dims` on the embedding server's model: Qwen3-Embedding-0.6B's 1,024), that the values are numbers and not all zero, and that "a cat" lands nearer "a kitten" than "an invoice".
+- **A memory check before choosing the NPU.** `npuMemoryFit` gives the NPU at most 40% of the PC's memory (`NPU_MEMORY_SHARE`), against the route's `memoryGb` (Intel: chat 4.3 GB, embeddings 1.74 GB; 3.6 GB at the NPU 3720's 2,048):
+  - 16 GB keeps both;
+  - 12 GB keeps chat;
+  - 8 GB keeps the NPU out.
+- **The NPU check names the generation, and gives the patch that verifies it.** The report's `generation`, and `patch`: on an unverified generation, with every step passing, the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts and what they were measured on. `--generation <id>` runs a rehearsal with a generation's starting values.
+- **`npu-check.ts --harden`** forces setup's failures on a real NPU, then checks its calibration against what it measured. Each step passes or fails:
+  - a driver minimum above the driver;
+  - a 1-second test;
+  - `OpenVINO/Qwen3-4B-int4-ov`, which answers nonsense there;
+  - the calibration itself.
+
+### What changed
+
+- **The NPU failing is no longer an error.** `setupCommand` logs the NPU's failures as `note:` lines and leaves them out of its exit code.
+  - Chat and embeddings fall back separately. What the NPU doesn't serve goes to a card set up beside it; with no card, the processor is set up for it in the same run.
+  - Why the NPU, or its embeddings, isn't used is kept in plain words (`npu-note.json`, via `rememberNpuNote`/`readNpuNote`). The accelerators' report shows it (`npuNote`).
+  - `setUpNpu` returns that note (`note`, built by `npuNoteFor`).
+- `planNpu` takes `noEmbed`, and `planSetup` takes `skipNpu` and `cpuKinds`. The plan's `npuPlain` says why the NPU, or its embeddings, isn't used.
+- A test request that times out says "didn't answer in time (N s)". `testNpuEntry` takes `timeoutMs`.
+- An NPU driver too old now reads "the NPU's driver needs an update: …".
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Setup no longer fails when the NPU does, so a Set up that showed an NPU error now finishes, with the graphics card or the processor doing that work and a note saying why.
+
 ## 2.67.0
 
 **Intel's NPU: three times the text a request may carry, and embeddings on the NPU, so a PC with default settings can search its code.**

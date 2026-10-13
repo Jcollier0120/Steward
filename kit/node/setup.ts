@@ -5,12 +5,12 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { chatBody, ensureServer, expandEnv, lockDirsOf, postJson, rememberHardware, serverEnv, visionBody } from './accelerators.ts';
+import { chatBody, ensureServer, expandEnv, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { withAcceleratorTurn } from './npu-queue.ts';
-import { checkPinned, expandRoute, isPulled, type NpuPlan, npuEntry, planNpu, routeEnv, runProgram, testImage } from './npu-vendors.ts';
+import { calibrate, checkPinned, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -449,6 +449,8 @@ export interface SetupPlan {
   npu: NpuPlan | null;
   /** Why the NPU isn't set up this time, when this PC has one: unsupported, already configured, or missing something. */
   npuNote?: string;
+  /** Why the NPU, or its embeddings, won't be used, in words for the person (npuNoteFor), when the plan already knows. */
+  npuPlain?: string;
   build: string | null;
   /** config.json's `npu` is install's GenieX default and this PC has no NPU: setup drops it (withoutNpu). */
   dropNpu: boolean;
@@ -482,6 +484,10 @@ export interface PlanInput {
   localAppData?: string;
   exists?: (p: string) => boolean;
   fileSize?: (p: string) => number;
+  /** Leave the NPU out of this plan (setup's second pass, after the NPU failed: the processor takes its work). */
+  skipNpu?: boolean;
+  /** Exactly what the processor serves (setup's second pass), over its defaults. */
+  cpuKinds?: EndpointKind[];
 }
 
 /** What setup would do: for which accelerators, which build and models, how much to download. Downloads nothing. */
@@ -505,10 +511,27 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const askedNpu = o.ids.includes('npu');
   let npu: NpuPlan | null = null;
   let npuNote: string | undefined;
-  if (det && !det.supported) npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
+  let npuPlain: string | undefined;
+  if (det && !det.supported) {
+    npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
+    npuPlain = npuNoteFor(det.label, 'chat', det.why ?? 'the manor can\'t run its models on it');
+  }
   // A reranker alone is no reason to set the NPU up: none of its servers reranks.
-  else if (det && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
-    npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists });
+  else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
+    // Only what fits in this PC's memory beside everything else (npuMemoryFit, at this generation's sizes): the rest
+    // goes to the card or the processor.
+    const route = det.vendor ? routeFor(NPU_CATALOG.routes[det.vendor], det.generation) : null;
+    const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
+    if (!fit.chat) {
+      npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
+      npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
+    } else {
+      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed });
+      if (!fit.embed && route?.embedServer) {
+        npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
+        npuPlain = npuNoteFor(det.label, 'embed', fit.why!);
+      }
+    }
   } else if (det && configuredNpu) npuNote = `${det.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
   if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
   // What the NPU will serve (set up now, or configured before).
@@ -530,7 +553,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     }
     const kind = card ? 'gpu' : 'cpu';
     // The processor chats (and reranks, when asked): a 0.6B reranker runs well enough on it, a vision model doesn't.
-    const cpuKinds = o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'rerank') : cpuDefault;
+    const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'rerank') : cpuDefault;
     const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : kinds, keepKinds: !!o.kinds?.length });
     const v = variantFor({ kind, vendor: card?.vendor, arch });
     const t: SetupTarget = {
@@ -612,7 +635,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     npu.port = next;
   }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
-  return { npu, ...(npuNote ? { npuNote } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -735,14 +758,15 @@ export interface SetupIo extends NpuIo {
  * Downloads what the plan lacks, finds each card's llama.cpp device, and returns config.json's new
  * content (mergeEntries) with an entry per accelerator it set up. The caller writes it.
  */
-export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[] }> {
+export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: SetupIo): Promise<{ raw: Record<string, any>; entries: Accelerator[]; problems: string[]; npu?: NpuSetup }> {
   const problems: string[] = [];
   const entries: Accelerator[] = [];
   // The NPU first: its entry is written only once its server has answered a test request.
+  let npu: NpuSetup | undefined;
   if (plan.npu) {
-    const r = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
-    problems.push(...r.problems);
-    if (r.entry) entries.push({ ...r.entry, name: core.deviceName(plan.npu.support.label) });
+    npu = await setUpNpu(plan.npu, path.dirname(plan.modelsDir), io);
+    problems.push(...npu.problems);
+    if (npu.entry) entries.push({ ...npu.entry, name: core.deviceName(plan.npu.support.label) });
   }
   for (const d of plan.downloads.filter((d) => !d.have)) {
     io.log(`downloading ${d.what} (${mb(d.size)})`);
@@ -783,7 +807,14 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     entries.push({ ...keepingAddOns(made, had, t.kinds), name: core.deviceName(t.name) });
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
-  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems };
+  return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}) };
+}
+
+/** What the NPU was set up to serve (chat, embeddings) and its entry lacks: its test failed for them. */
+export function npuMissing(plan: SetupPlan, entries: Pick<Accelerator, 'id' | 'kind' | EndpointKind>[]): EndpointKind[] {
+  if (!plan.npu) return [];
+  const got = entries.find((e) => e.kind === 'npu');
+  return plan.npu.kinds.filter((k) => (k === 'chat' || k === 'embed') && !got?.[k]) as EndpointKind[];
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -806,6 +837,10 @@ export interface NpuIo {
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
   copy?: (from: string, to: string) => void;
+  /** The measuring requests on a generation nobody has measured (measureNpu); null skips them (the NPU check measures its own). */
+  measure?: (entry: AcceleratorEntry) => Promise<{ warmMs: number; tokensPerSecond: number } | { problems: string[] } | null>;
+  /** The clock the first start is timed by. */
+  now?: () => number;
 }
 
 /**
@@ -904,15 +939,50 @@ async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.P
 const tail = (out: string) => out.trim().split(/\r?\n/).slice(-3).join(' / ').slice(0, 300);
 
 /**
+ * Why the NPU, or only its embeddings, isn't used, in words for the person: setup's note, kept beside config.json
+ * (rememberNpuNote) and shown with the accelerators. Never an alarm: its work goes to the graphics card or the processor.
+ */
+export function npuNoteFor(label: string, what: 'chat' | 'embed', reason: string): string {
+  return what === 'chat'
+    ? `The NPU (${label}) isn't used: ${reason}. The graphics card or the processor does its work instead.`
+    : `The NPU (${label}) makes no embeddings: ${reason}. The graphics card or the processor makes them instead.`;
+}
+
+/** A failed test's problems as the reason a person reads. */
+export function plainReason(problems: string[], what: 'chat' | 'embed'): string {
+  const s = problems.join('; ');
+  if (/nonsense|dimensions|all zero|not a number|unrelated/i.test(s)) return what === 'chat' ? "its chat model doesn't run properly on it" : "its embedding model doesn't run properly on it";
+  if (/timed? ?out|in time|aborted|didn't answer in/i.test(s)) return "it didn't answer its test in time";
+  return what === 'chat' ? "its model server didn't pass its test" : "its embedding server didn't pass its test";
+}
+
+/** What setting the NPU up came to: its entry (none when it failed), what went wrong, the note for the person, and what was measured. */
+export interface NpuSetup {
+  entry?: AcceleratorEntry;
+  problems: string[];
+  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't. */
+  note?: string;
+  /** What setup measured, on a generation nobody had (calibrate): its timeouts come from it. */
+  measured?: NpuMeasured;
+}
+
+/**
  * Sets the NPU up on its route: its server downloaded (checked against the pinned SHA-256) and installed for this user
  * unless it's there, each model pulled unless it's there (and, where pinned for this generation, checked file by file),
- * then a test request of each kind it serves. Its entry comes back only when every step worked; otherwise the problems
- * say which step failed, and config.json gets no NPU entry from it.
+ * then a test request of each kind it serves, whose answers must make sense. On a generation nobody has measured, two
+ * short requests more measure it, and its entry gets this PC's timeouts (calibrate); one too slow for the chat model
+ * isn't used. Its entry comes back only when every step worked; otherwise the problems say which step failed, the note
+ * says why in plain words, and config.json gets no NPU entry from it: its work goes to the graphics card or the processor.
  */
-export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ entry?: AcceleratorEntry; problems: string[] }> {
+export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
   const exists = io.exists ?? existsSync;
   const run = io.run ?? runProgram;
-  const fail = (what: string) => ({ problems: [`npu: ${what}. config.json gets no NPU entry; its work goes to the graphics card or the processor`] });
+  const now = io.now ?? (() => performance.now());
+  const label = n.support.label;
+  const fail = (what: string, reason = "its model server couldn't be set up"): NpuSetup => ({
+    problems: [`npu: ${what}. config.json gets no NPU entry; its work goes to the graphics card or the processor`],
+    note: npuNoteFor(label, 'chat', reason),
+  });
   if (!n.installed && n.download) {
     const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
     io.log(`downloading ${n.route.server} ${n.route.version} (${mb(d.size)})`);
@@ -948,42 +1018,98 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ 
     if (!m.have) {
       io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
       const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
-      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`);
+      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, "its model couldn't be downloaded");
     }
     const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
-    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`);
+    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, "its model couldn't be downloaded whole");
   }
   // Its own embedding server, where the route has one: a failure there leaves the NPU's chat as it is, and its
   // embeddings go where they went before.
   const later: string[] = [];
-  const noEmbed = (what: string) => later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
+  let note: string | undefined;
+  const noEmbed = (what: string, reason: string) => {
+    later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
+    note = npuNoteFor(label, 'embed', reason);
+  };
   let embedAt: { exe: string; model: string } | undefined;
   if (n.embed) {
     const why = await setUpNpuEmbed(n, tools, io, env);
-    if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`);
+    if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`, "its embedding server couldn't be set up");
     else embedAt = { exe: n.embed.exe, model: n.embed.model };
   }
   const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt });
   io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);
+  const t0 = now();
   const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e)))(entry);
-  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`);
+  const coldMs = Math.round(now() - t0);
+  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, plainReason(problems, 'chat'));
+  // A generation nobody has measured: this PC's own numbers, rather than the route's guess.
+  let measured: NpuMeasured | undefined;
+  if (!n.support.verified) {
+    io.log(`measuring ${n.route.server} on this NPU (this kind hasn't been measured before): two short requests`);
+    const m = await (io.measure ?? ((e: AcceleratorEntry) => measureNpu(e)))(entry);
+    if (m && 'problems' in m) return fail(`${n.route.server} failed its measuring requests: ${m.problems.join('; ')}`, plainReason(m.problems, 'chat'));
+    if (m) {
+      measured = { coldMs, warmMs: m.warmMs, tokensPerSecond: m.tokensPerSecond };
+      const c = calibrate(measured, n.route);
+      if (c.tooSlow) return { ...fail(`${n.route.server} is too slow on this NPU: ${c.tooSlow}`, 'it is too slow for the chat model'), measured };
+      entry.timeouts = c.timeouts;
+      io.log(
+        `measured: the first answer ${(coldMs / 1000).toFixed(0)} s after the start, a short one warm in ${(m.warmMs / 1000).toFixed(1)} s, ${m.tokensPerSecond.toFixed(1)} tokens a second; ` +
+          `this PC's timeouts: ${c.timeouts.requestBaseMs / 1000} s and ${c.timeouts.requestPerTokenMs} ms a token, a cold load ${c.timeouts.coldLoadMs / 1000} s`,
+      );
+    }
+  }
   if (embedAt && n.embed) {
     io.log(`asking ${n.embed.server.server} for a test embedding on the NPU`);
-    const bad = await (io.testEmbed ?? ((e: AcceleratorEntry) => testNpuEmbed(e)))(entry);
+    const bad = await (io.testEmbed ?? ((e: AcceleratorEntry) => testNpuEmbed(e, { dims: n.embed!.server.model.dims })))(entry);
     if (bad.length) {
       delete entry.embed;
-      noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${bad.join('; ')}`);
+      noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${bad.join('; ')}`, plainReason(bad, 'embed'));
     }
   }
   io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
-  return { entry, problems: later };
+  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}) };
+}
+
+/** Three sentences, two about the same thing: an embedding model that runs properly puts those two closer. */
+export const EMBED_TEST = ['The cat sat on the mat.', 'A kitten was sleeping on the rug.', 'Please pay the attached invoice by Friday.'];
+
+const cosine = (a: number[], b: number[]) => {
+  let ab = 0;
+  let aa = 0;
+  let bb = 0;
+  for (let i = 0; i < a.length; i++) {
+    ab += a[i] * b[i];
+    aa += a[i] * a[i];
+    bb += b[i] * b[i];
+  }
+  return ab / Math.sqrt(aa * bb);
+};
+
+/**
+ * Whether EMBED_TEST's vectors make sense: one each, of one length (`dims`, the model's, when known), numbers, not all
+ * zero, and the cat closer to the kitten than to the invoice. Problems in words; none when they do.
+ */
+export function embedSanity(vectors: unknown, dims?: number): string[] {
+  if (!Array.isArray(vectors) || vectors.length !== EMBED_TEST.length || !vectors.every((v) => Array.isArray(v) && v.length)) return [`embeddings gave no vector for each of ${EMBED_TEST.length} sentences`];
+  const vs = vectors as number[][];
+  const len = vs[0].length;
+  if (vs.some((v) => v.length !== len)) return [`embeddings gave vectors of different dimensions (${vs.map((v) => v.length).join(', ')})`];
+  if (dims && len !== dims) return [`embeddings gave ${len} dimensions, not the model's ${dims}`];
+  if (vs.some((v) => v.some((x) => typeof x !== 'number' || !Number.isFinite(x)))) return ['embeddings gave a vector with something not a number in it'];
+  if (vs.some((v) => v.every((x) => x === 0))) return ['embeddings gave a vector of all zero'];
+  const near = cosine(vs[0], vs[1]);
+  const far = cosine(vs[0], vs[2]);
+  if (!(near > far + 0.02)) return [`embeddings put unrelated sentences as close as related ones (cat and kitten ${near.toFixed(3)}, cat and invoice ${far.toFixed(3)}): nonsense`];
+  return [];
 }
 
 /**
  * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
- * then one embedding. Problems in words; none when it gave a vector.
+ * then EMBED_TEST's three sentences, whose vectors must make sense (embedSanity). Problems in words; none when they do.
  */
-export async function testNpuEmbed(e: AcceleratorEntry): Promise<string[]> {
+export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number } = {}): Promise<string[]> {
   const ep = readAccelerator(e)?.embed;
   if (!ep?.baseUrl) return ['the entry has no embedding server'];
   const problems: string[] = [];
@@ -992,9 +1118,12 @@ export async function testNpuEmbed(e: AcceleratorEntry): Promise<string[]> {
     async () => {
       const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
       await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000 });
-      const r = await postJson(s, '/v1/embeddings', { model: ep.model, input: 'ready' }, 5 * 60_000, { loading: true });
-      const v = r.json?.data?.[0]?.embedding;
-      if (!Array.isArray(v) || !v.length) problems.push(`embeddings gave no vector (${JSON.stringify(r.json).slice(0, 160)})`);
+      const r = await postJson(s, '/v1/embeddings', { model: ep.model, input: EMBED_TEST }, 5 * 60_000, { loading: true });
+      const rows = Array.isArray(r.json?.data) ? (r.json.data as { index?: number; embedding?: unknown }[]) : [];
+      const vectors: unknown[] = [];
+      rows.forEach((row, i) => (vectors[typeof row?.index === 'number' ? row.index : i] = row?.embedding));
+      const bad = embedSanity(rows.length ? vectors : null, o.dims);
+      if (bad.length) problems.push(...bad.map((b) => (rows.length ? b : `${b} (${JSON.stringify(r.json).slice(0, 160)})`)));
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
   ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
@@ -1004,41 +1133,97 @@ export async function testNpuEmbed(e: AcceleratorEntry): Promise<string[]> {
 /** An answer without its think block (a Qwen3 that thinks writes one, empty when told not to think). */
 export const withoutThinking = (s: string) => s.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
 
-/**
- * Whether an answer to "Reply with the single word: ready" says it. Answering isn't enough: OpenVINO's Qwen3-4B
- * INT4 export on a Lunar Lake NPU answered every question with "?option?option?option…" (2026-10-12).
- */
-export const saysReady = (s: string) => /\bready\b/i.test(withoutThinking(s));
+/** The same few characters over and over ("?option?option?option…"): what a model that doesn't run properly writes. */
+export const repetitive = (s: string) => /(\S[\s\S]{0,15}?)\1{4,}/.test(s);
 
 /**
- * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
- * then one short chat answer, which must say "ready" as asked, and one about a picture when it serves vision.
- * Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take
- * minutes, so it is given 15.
+ * Whether an answer to "Reply with the single word: ready" says it, and nothing degenerate. Answering isn't enough:
+ * OpenVINO's Qwen3-4B INT4 export on a Lunar Lake NPU answered every question with "?option?option?option…" (2026-10-12).
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string } = {}): Promise<string[]> {
+export const saysReady = (s: string) => {
+  const t = withoutThinking(s);
+  return /\bready\b/i.test(t) && !repetitive(t);
+};
+
+/** setup's measuring request: an answer of a known shape, long enough to time the writing. */
+export const COUNT_PROMPT = 'Count from one to twenty in words, separated by commas.';
+
+/** Whether an answer to COUNT_PROMPT counts: the numbers in it, and nothing degenerate. */
+export const countsSensibly = (s: string) => {
+  const t = withoutThinking(s);
+  return /\bthree\b/i.test(t) && /\bseven\b/i.test(t) && !repetitive(t.replace(/[\s,.-]+/g, ' '));
+};
+
+/**
+ * Measures the NPU's chat server for calibrate, in the NPU's turn, once its test request has loaded it: a short answer
+ * warm, then a count to twenty (its tokens over its time: writing speed, taken low). Both answers must make sense.
+ */
+export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number; tokensPerSecond: number } | { problems: string[] }> {
   const acc = readAccelerator(e);
-  if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
+  if (!acc?.chat?.baseUrl) return { problems: ['the entry has no chat server'] };
   const problems: string[] = [];
-  const text = (j: any) => j?.choices?.[0]?.message?.content;
+  const text = (j: any): string => (typeof j?.choices?.[0]?.message?.content === 'string' ? j.choices[0].message.content : '');
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
+  let out: { warmMs: number; tokensPerSecond: number } | null = null;
   await withAcceleratorTurn(
     lockDirsOf({ id: 'npu', slots: 1 }),
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
       await ensureServer(chat, { waitMs: 120_000, readyMs: 15 * 60_000 });
-      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), 15 * 60_000, { loading: true });
+      const w = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 16), 5 * 60_000);
+      if (!saysReady(text(w.json))) {
+        problems.push(`chat answered nonsense ("${withoutThinking(text(w.json)).slice(0, 40)}"), not "ready"`);
+        return;
+      }
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: COUNT_PROMPT }], 96), 10 * 60_000);
+      const said = withoutThinking(text(c.json));
+      if (!countsSensibly(said)) {
+        problems.push(`chat answered nonsense ("${said.slice(0, 40)}") when asked to count to twenty`);
+        return;
+      }
+      const tokens = Number(c.json?.usage?.completion_tokens) || Math.max(1, Math.round(said.length / 4));
+      out = { warmMs: Math.round(w.ms), tokensPerSecond: Math.round((tokens / (Math.max(1, c.ms) / 1000)) * 100) / 100 };
+    },
+    { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
+  ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
+  return out && !problems.length ? out : { problems: problems.length ? problems : ['the NPU gave no measurement'] };
+}
+
+/**
+ * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
+ * then one short chat answer, which must say "ready" as asked (and nothing degenerate), and one about a picture when it
+ * serves vision. Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it)
+ * may take minutes, so it is given 15, or `timeoutMs` (the NPU check's forced timeout).
+ */
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number } = {}): Promise<string[]> {
+  const acc = readAccelerator(e);
+  if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
+  const problems: string[] = [];
+  const text = (j: any) => j?.choices?.[0]?.message?.content;
+  const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
+  const limit = o.timeoutMs ?? 15 * 60_000;
+  const t0 = Date.now();
+  await withAcceleratorTurn(
+    lockDirsOf({ id: 'npu', slots: 1 }),
+    async () => {
+      const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
+      await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit });
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
       if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
       else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
-        const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, img, 'What colour is this picture? One word.', 8), 15 * 60_000, { loading: true });
+        const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, img, 'What colour is this picture? One word.', 8), limit, { loading: true });
         if (typeof text(r.json) !== 'string') problems.push(`vision gave no answer (${JSON.stringify(r.json).slice(0, 160)})`);
       }
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
-  ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
+  ).catch((err: any) => {
+    const said = String(err?.message ?? err).split(/\r?\n/)[0];
+    // Out of time, however the server put it: the note says so plainly (plainReason).
+    problems.push(Date.now() - t0 >= limit * 0.9 ? `didn't answer in time (${Math.round(limit / 1000)} s): ${said}` : said);
+  });
   return problems;
 }
 
@@ -1148,6 +1333,8 @@ export interface SetupOptions {
   io?: Omit<SetupIo, 'log'>;
   /** The environment the NPU route's paths are expanded from (tests give one). */
   env?: Record<string, string | undefined>;
+  /** Where the NPU's note is kept (npuNoteFile(); tests give their own, and a given detection keeps none). */
+  npuNoteFile?: string;
 }
 
 /** Accelerator setup as a command: plan, ask, download, find devices, write config.json. Exit code. */
@@ -1164,7 +1351,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const hw = o.detection ? null : hardwareOf(detection);
   if (hw) rememberHardware(hw);
   log("Looking up llama.cpp's newest build and the models...");
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases: await (o.releases ?? llamaReleases)(), hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
+  const releases = await (o.releases ?? llamaReleases)();
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
   for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
   if (!settingUp && !plan.dropNpu) {
@@ -1183,18 +1371,45 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     }
   }
   const r = await runSetup(plan, file.raw, { log, ...o.io });
-  for (const p of r.problems) log(`problem: ${p}`);
-  if (!r.entries.length && !plan.dropNpu) return { code: 1, plan };
-  const saved = writeConfigFile(configFile, r.raw, o.validate ?? validateKeeperConfig);
+  // The NPU failing is no error: its work goes to the card or the processor, and its note says why, quietly.
+  const npuDetails = new Set(r.npu?.problems ?? []);
+  for (const p of r.problems) log(`${npuDetails.has(p) ? 'note' : 'problem'}: ${p}`);
+  const problems = r.problems.filter((p) => !npuDetails.has(p));
+  let raw = r.raw;
+  let entries = r.entries;
+  // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had.
+  const missing = npuMissing(plan, entries);
+  if (missing.length && !entries.some((e) => e.kind === 'gpu') && detection.cpu) {
+    const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
+    const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
+    log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);
+    const plan2 = await planSetup({ detection, ids: ['cpu'], skipNpu: true, cpuKinds, raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
+    for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
+    const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the processor? [y/N] `) : false);
+    if (go) {
+      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      for (const p of r2.problems) log(`problem: ${p}`);
+      problems.push(...r2.problems);
+      raw = r2.raw;
+      entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
+    } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
+  }
+  // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole.
+  const plain = plan.npu ? (r.npu?.note ?? plan.npuPlain ?? null) : plan.npuPlain;
+  const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
+  if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
+  if (plain) log(`note: ${plain}`);
+  if (!entries.length && !plan.dropNpu) return { code: 1, plan };
+  const saved = writeConfigFile(configFile, raw, o.validate ?? validateKeeperConfig);
   if (saved.problems.length) {
     log(`config.json not written: ${saved.problems.join('; ')}`);
     return { code: 1, plan };
   }
-  const read = readAccelerators(r.raw);
+  const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
-  const changed = [...r.entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
+  const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
   log(`Wrote ${configFile}: ${changed.join(', ')}. Order: ${order.join(' > ') || (o.noneConfigured ?? 'none configured')}.`);
-  return { code: r.problems.length || (settingUp && !r.entries.length) ? 1 : 0, plan, entries: r.entries };
+  return { code: problems.length || (settingUp && !entries.length) ? 1 : 0, plan, entries };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1213,10 +1428,13 @@ export interface AcceleratorReport {
   acceleratorOrder: 'auto' | string[];
   legacy: boolean;
   configFile: string;
+  /** Why the NPU, or its embeddings, isn't used, as setup last found it (npu-note.json): for the person, never an alarm. */
+  npuNote?: string;
 }
 
-export function reportFrom(detection: Detection, raw: Record<string, any>, configFile = acceleratorConfigFile()): AcceleratorReport {
+export function reportFrom(detection: Detection, raw: Record<string, any>, configFile = acceleratorConfigFile(), noteFile = npuNoteFile()): AcceleratorReport {
   const read = readAccelerators(raw);
+  const note = detection.npu ? readNpuNote(noteFile)?.note : undefined;
   return {
     detected: detection,
     recommendedOrder: detectedAccelerators(detection).map((a) => a.id),
@@ -1226,6 +1444,7 @@ export function reportFrom(detection: Detection, raw: Record<string, any>, confi
     acceleratorOrder: read.order,
     legacy: read.legacy,
     configFile,
+    ...(note ? { npuNote: note } : {}),
   };
 }
 
@@ -1245,6 +1464,7 @@ export function printReport(r: AcceleratorReport, out: (s: string) => void = con
       ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${n.verified ? '' : ' (not yet tried on this kind of NPU)'}` : `not used: ${n.why}`}`
       : "  no NPU (Windows lists no Neural processor)",
   );
+  if (r.npuNote) out(`    ${r.npuNote}`);
   if (d.cpu) out(`  ${d.cpu.name}  (cpu)\n    ${d.cpu.arch}, ${d.cpu.cores} threads, ${Math.round(d.ramBytes / 1024 ** 3)} GB of memory`);
   for (const p of d.problems) out(`  (couldn't ask: ${p})`);
   out(`Recommended order: ${r.recommendedOrder.join(', ') || '(nothing found)'}`);

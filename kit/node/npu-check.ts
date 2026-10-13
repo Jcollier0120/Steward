@@ -3,9 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu } from './npu-vendors.ts';
+import { calibrate, CALIBRATION, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
-import { mb, type NpuIo, saysReady, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
 
@@ -48,8 +48,15 @@ export interface NpuCheckReport {
   server: string | null;
   device: string;
   rehearsal: boolean;
+  /** The generation it ran on (npu-vendors.json's id: `meteor-lake`, `lunar-lake`…), or a rehearsal's --generation. */
+  generation: string | null;
   steps: CheckStep[];
   suggest: Suggestion | null;
+  /**
+   * The change to npu-vendors.json this run supports (checkPatch), as a JSON merge patch: on a generation not yet
+   * verified, every step passing on its NPU flips it to verified with the timeouts measured. Null otherwise.
+   */
+  patch: Record<string, unknown> | null;
   ok: boolean;
 }
 
@@ -58,6 +65,14 @@ export interface NpuCheckOptions {
   vendor?: NpuVendor;
   /** The device the route's server targets (OpenVINO's --target_device): NPU unless rehearsing. */
   device?: string;
+  /** A rehearsal's generation, whose starting values (routeFor) it runs with; on an NPU, its own. */
+  generation?: string;
+  /**
+   * Setup's hardening, on this PC's NPU (hardenCheck): the failures setup must fall back from quietly, forced (a model
+   * that answers nonsense, an impossible timeout, a driver below the minimum), and setup's calibration checked
+   * against what it measured. Each a step that passes or fails; instead of the measurements.
+   */
+  harden?: boolean;
   /** Install the server and models when they're missing (default); false checks only what's there. */
   setup?: boolean;
   /** Download without asking. */
@@ -78,6 +93,8 @@ export interface NpuCheckOptions {
     kitTest?: (entry: AcceleratorEntry) => Promise<string[]>;
     /** The embedding server's test request (setup.ts' testNpuEmbed). */
     embedTest?: (entry: AcceleratorEntry) => Promise<string[]>;
+    /** --harden's test requests (its cases: timeout, nonsense, calibrate), in place of setup's own. */
+    hardenTest?: (kase: string, entry: AcceleratorEntry) => Promise<string[]>;
     now?: () => number;
   };
 }
@@ -193,8 +210,10 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     server: null,
     device: (o.device ?? 'NPU').toUpperCase(),
     rehearsal: false,
+    generation: null,
     steps,
     suggest: null,
+    patch: null,
     ok: false,
   };
   const finish = (code: number) => {
@@ -229,16 +248,23 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'rehearsal', ok: false, say: 'a rehearsal off the NPU runs only in a scratch home: set REEVE_HOME to an empty folder, so this PC’s servers, models and locks are left alone' });
     return finish(2);
   }
+  // The generation it runs on: the NPU's own, or the one a rehearsal is given (--generation), whose starting values it takes.
+  const generation = rehearsal ? (o.generation ?? null) : (npu?.generation ?? null);
+  if (generation && !catalog.routes[vendor].generations[generation]) {
+    add({ step: 'route', ok: false, say: `${vendor} has no generation ${generation} (it has ${Object.keys(catalog.routes[vendor].generations).join(', ')})` });
+    return finish(2);
+  }
+  report.generation = generation;
   let route: NpuRoute;
   try {
-    route = routeOnDevice(catalog.routes[vendor], report.device);
+    route = routeOnDevice(routeFor(catalog.routes[vendor], generation), report.device);
   } catch (e: any) {
     add({ step: 'route', ok: false, say: e.message });
     return finish(2);
   }
   report.server = `${route.server} ${route.version}`;
   const tools = o.tools ?? toolsHome(env);
-  const support: NpuSupport = rehearsal ? { vendor, generation: null, label: `${route.server} rehearsal`, supported: true, verified: false } : npu!;
+  const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : npu!;
   const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
   add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
@@ -266,6 +292,12 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     data: { timed, downloadBytes: needs, exe: plan.exe },
   });
   if (!entry) return finish(1);
+
+  // Or, asked for, setup's hardening instead of the measurements.
+  if (o.harden) {
+    await hardenSteps({ o, add, log, now, http, env, tools, vendor, route, support, catalog, rehearsal, device: report.device, npu });
+    return finish(steps.some((s) => s.ok === false) ? 1 : 0);
+  }
 
   // 3. The server on the NPU, measured.
   const acc = readAccelerator(entry) as Accelerator;
@@ -428,7 +460,182 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     log(`  ${JSON.stringify({ ...(report.suggest.maxContextTokens ? { maxContextTokens: report.suggest.maxContextTokens } : {}), timeouts: report.suggest.timeouts })}`);
     for (const w of report.suggest.why) log(`  - ${w}`);
   }
+  report.patch = checkPatch({ vendor, generation, rehearsal: report.rehearsal, steps, suggest: report.suggest, route: catalog.routes[vendor], pc: report.pc.cpu, driver: npu?.driver ?? null, at: report.at });
+  const gen = generation ? catalog.routes[vendor].generations[generation] : undefined;
+  if (report.patch) {
+    log(`The change to npu-vendors.json this run supports (it flips ${generation} to verified):`);
+    log(JSON.stringify(report.patch, null, 2));
+  } else if (!report.rehearsal) log(gen?.verified ? `${generation} is verified already: npu-vendors.json keeps its values.` : `No change to npu-vendors.json: ${steps.some((s) => s.ok === false) ? 'a step failed' : 'its generation is unknown'}.`);
   return finish(steps.some((s) => s.ok === false) ? 1 : 0);
+}
+
+// ------------------------------------------------------------------------------------------------
+// What the run supports for npu-vendors.json
+
+/**
+ * The change to npu-vendors.json a run on a real NPU supports, as a JSON merge patch: on a generation not yet verified
+ * (its starting values guessed), every step passing flips it to verified, with the timeouts the measurements suggest in
+ * place of the guess (and the cap, where a request under it failed), and what they were measured on. Null for a
+ * rehearsal, a failed step, an unknown generation, or one verified already (the Lunar Lake keeps its values).
+ */
+export function checkPatch(o: {
+  vendor: NpuVendor;
+  generation: string | null;
+  rehearsal: boolean;
+  steps: CheckStep[];
+  suggest: Suggestion | null;
+  route: NpuRoute;
+  pc: string | null;
+  driver: string | null;
+  at: string;
+}): Record<string, unknown> | null {
+  if (o.rehearsal || !o.generation || o.steps.some((s) => s.ok === false)) return null;
+  const gen = o.route.generations[o.generation];
+  if (!gen || gen.verified) return null;
+  const g: Record<string, unknown> = { verified: true };
+  if (o.suggest && Object.keys(o.suggest.timeouts).length) g.timeouts = { ...gen.timeouts, ...o.suggest.timeouts };
+  if (o.suggest?.maxContextTokens) {
+    g.maxContextTokens = o.suggest.maxContextTokens;
+    g.caps = { chat: o.suggest.maxContextTokens };
+    if (o.route.serve.includes('--max_prompt_len')) g.args = { ...gen.args, '--max_prompt_len': String(o.suggest.maxContextTokens) };
+  }
+  g.basis = `Measured by the NPU check on ${o.pc ?? 'a PC'}${o.driver ? `, NPU driver ${o.driver}` : ''}, ${o.at.slice(0, 10)}, every step passing${o.suggest?.why.length ? `: ${o.suggest.why.join('; ')}` : ''}.`;
+  return { routes: { [o.vendor]: { generations: { [o.generation]: g } } } };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Setup's hardening, on the NPU
+
+/** The group-wise AWQ export that answers nonsense on a Lunar Lake NPU (2026-10-12): the nonsense case's model. */
+export const NONSENSE_MODEL = 'OpenVINO/Qwen3-4B-int4-ov';
+
+/** The route with another chat model in its place (its pull and the file that says it's here, renamed). */
+function withChatModel(route: NpuRoute, id: string, size: number): NpuRoute {
+  const m = route.models.find((x) => x.kinds.includes('chat'))!;
+  const swap = (s: string) => s.split(m.id).join(id).split(m.id.replace(/\//g, '\\')).join(id.replace(/\//g, '\\'));
+  return { ...route, models: [{ id, kinds: ['chat'], pull: m.pull.map(swap), size, licence: 'Apache-2.0', ...(m.present ? { present: swap(m.present) } : {}) }], embedServer: undefined };
+}
+
+/**
+ * Setup's hardening on this PC's NPU (or a rehearsal's device): what setup must fall back from quietly, each forced,
+ * then its calibration. Each case runs setup's own NPU step (setUpNpu) as setup runs it, servers started by the kit and
+ * stopped after, and is a step that passes or fails:
+ * - harden-driver: a driver minimum above this PC's driver: the NPU isn't used, and its note says the driver needs an update;
+ * - harden-timeout: a test request given 1 s, where the first load takes seconds: no entry, and its note says it didn't answer in time;
+ * - harden-nonsense (on the NPU only): the AWQ export that answers "?option?option…" there: no entry, and its note says
+ *   the chat model doesn't run properly (where it answers sensibly, nothing was forced: not counted);
+ * - harden-calibrate: setup's measuring requests on this NPU as on a generation nobody has measured: the timeouts it
+ *   writes are calibrate's from what it measured, cover what it measured, and stay inside CALIBRATION's bounds.
+ */
+async function hardenSteps(c: {
+  o: NpuCheckOptions;
+  add: (s: CheckStep) => CheckStep;
+  log: (l: string) => void;
+  now: () => number;
+  http: typeof fetch;
+  env: NodeJS.ProcessEnv;
+  tools: string;
+  vendor: NpuVendor;
+  route: NpuRoute;
+  support: NpuSupport;
+  catalog: NpuCatalog;
+  rehearsal: boolean;
+  device: string;
+  npu: Detection['npu'];
+}): Promise<void> {
+  const { o, add, log, now, http, tools, vendor, route } = c;
+  const forced = o.io?.hardenTest;
+  const downloadsDir = path.join(tools, 'servers', 'downloads');
+  const planOf = (r: NpuRoute, support: NpuSupport) => planNpu({ support, tools, downloadsDir, env: c.env, catalog: { ...c.catalog, routes: { ...c.catalog.routes, [vendor]: r } }, noEmbed: true })!;
+  const answersAt = (base: string) => async (timeoutMs = 1_000) => {
+    try {
+      await (await http(`${base}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const chatBase = `http://127.0.0.1:${route.port}${route.baseUrlPath ?? ''}`;
+  const stopAll = () => stopStartedAt(chatBase, answersAt(chatBase), now);
+  const setUp = (plan: NpuPlan, io: Partial<NpuIo>) => setUpNpu(plan, tools, { ...o.io?.setup, log: (l) => log(`  ${l}`), measure: async () => null, ...io });
+  const realTest = (name: string, e: AcceleratorEntry, real: () => Promise<string[]>) => (forced ? forced(name, e) : real());
+
+  // A driver below the minimum: decided before anything runs, on this NPU (or one of the route's devices in a rehearsal).
+  const firstId = Object.keys(c.catalog.devices[vendor] ?? {})[0];
+  const dev: NpuDevice | null = !c.rehearsal && c.npu
+    ? { device: c.npu.name, manufacturer: c.npu.manufacturer, deviceId: c.npu.deviceId, driver: c.npu.driver, driverDate: c.npu.driverDate }
+    : firstId
+      ? { device: `${vendor} NPU`, manufacturer: vendor === 'intel' ? 'Intel Corporation' : vendor === 'amd' ? 'Advanced Micro Devices, Inc.' : 'Qualcomm', deviceId: `PCI\\VEN_0000&DEV_${firstId}`, driver: '32.0.100.4512', driverDate: '' }
+      : null;
+  if (!dev?.driver) add({ step: 'harden-driver', ok: null, say: 'no NPU driver to compare: not run' });
+  else {
+    const raised: NpuCatalog = structuredClone(c.catalog);
+    const above = `${Number(dev.driver.split('.')[0]) + 1}.0.0.0`;
+    raised.routes[vendor].driverMin = above;
+    for (const g of Object.values(raised.routes[vendor].generations)) if (g.driverMin) g.driverMin = above;
+    const s = npuSupport(dev, raised.routes[vendor].arch, raised);
+    const note = s.why ? npuNoteFor(s.label, 'chat', s.why) : '';
+    const ok = !s.supported && /driver needs an update/.test(note);
+    add({ step: 'harden-driver', ok, say: ok ? `a minimum of ${above} over driver ${dev.driver}${c.rehearsal ? ' (a rehearsal: one of the route\'s devices)' : ''}: not used, noted "${note}"` : `a minimum of ${above} over driver ${dev.driver}: ${s.supported ? 'still used' : `not used, but noted "${note}"`}`, data: { driver: dev.driver, driverMin: above, supported: s.supported, note } });
+  }
+
+  // A test request given 1 s: the first load takes seconds anywhere.
+  await stopAll();
+  const t = await setUp(planOf(route, c.support), { testNpu: (e) => realTest('timeout', e, () => testNpuEntry(e, { timeoutMs: 1_000 })) });
+  await stopAll();
+  const tOk = !t.entry && /in time/.test(t.note ?? '');
+  add({ step: 'harden-timeout', ok: tOk, say: tOk ? `given 1 s, no NPU entry, noted "${t.note}"` : t.entry ? 'given 1 s, setup still wrote an NPU entry' : `given 1 s, no NPU entry, but noted "${t.note ?? 'nothing'}" (${t.problems.join('; ')})`, data: { note: t.note ?? null, problems: t.problems } });
+
+  // The model that answers nonsense on the NPU: only the NPU answers nonsense with it.
+  if (c.device !== 'NPU') add({ step: 'harden-nonsense', ok: null, say: `${NONSENSE_MODEL} answers properly off the NPU: not run in a rehearsal` });
+  else {
+    const bad = withChatModel(route, NONSENSE_MODEL, 2_400_000_000);
+    const plan = planOf(bad, c.support);
+    if (plan.downloadBytes && !o.yes && !(o.confirm && (await o.confirm(`Download ${mb(plan.downloadBytes)} (${NONSENSE_MODEL}, the model that answers nonsense)? [y/N] `)))) {
+      add({ step: 'harden-nonsense', ok: false, say: `it would download ${mb(plan.downloadBytes)}: run again with --yes` });
+    } else {
+      await stopAll();
+      const r = await setUp(plan, { testNpu: (e) => realTest('nonsense', e, () => testNpuEntry(e)) });
+      await stopAll();
+      const ok = r.entry ? null : /doesn't run properly/.test(r.note ?? '');
+      add({ step: 'harden-nonsense', ok, say: r.entry ? `${NONSENSE_MODEL} answered sensibly on this NPU: there was no nonsense to reject` : ok ? `${NONSENSE_MODEL}: no NPU entry, noted "${r.note}"` : `${NONSENSE_MODEL}: no NPU entry, but noted "${r.note ?? 'nothing'}" (${r.problems.join('; ')})`, data: { note: r.note ?? null, problems: r.problems } });
+    }
+  }
+
+  // Calibration: setup's measuring requests, and the timeouts it writes from them.
+  await stopAll();
+  const cal = await setUp(planOf(route, { ...c.support, verified: false }), {
+    testNpu: (e) => realTest('calibrate', e, () => testNpuEntry(e)),
+    measure: o.io?.setup?.measure ?? ((e) => measureNpu(e)),
+  });
+  await stopAll();
+  const m = cal.measured;
+  if (!m) add({ step: 'harden-calibrate', ok: false, say: `nothing measured: ${cal.problems.join('; ') || 'no measurement'}`, data: { problems: cal.problems } });
+  else {
+    const want = calibrate(m, planOf(route, c.support).route);
+    const wrote = cal.entry?.timeouts;
+    const why: string[] = [];
+    if (!wrote) {
+      if (!want.tooSlow) why.push(`no entry: ${cal.problems.join('; ')}`);
+    } else {
+      for (const k of ['requestBaseMs', 'requestPerTokenMs', 'coldLoadMs'] as const) if (wrote[k] !== want.timeouts[k]) why.push(`${k} written ${wrote[k]}, calibrate gives ${want.timeouts[k]}`);
+      if ((wrote.requestPerTokenMs ?? 0) < 1000 / m.tokensPerSecond) why.push(`${wrote.requestPerTokenMs} ms a token is under the ${Math.round(1000 / m.tokensPerSecond)} measured`);
+      if ((wrote.coldLoadMs ?? 0) < m.coldMs) why.push(`a ${wrote.coldLoadMs} ms cold load is under the ${m.coldMs} ms measured`);
+      if ((wrote.requestBaseMs ?? 0) < m.warmMs) why.push(`a ${wrote.requestBaseMs} ms base is under the ${m.warmMs} ms warm answer measured`);
+      if ((wrote.requestPerTokenMs ?? 0) > CALIBRATION.maxPerTokenMs || (wrote.requestBaseMs ?? 0) > CALIBRATION.maxBaseMs || (wrote.coldLoadMs ?? 0) > CALIBRATION.maxColdLoadMs) why.push('a timeout past its bound');
+    }
+    // Too slow is right when it is: on the NPU that's a failure of the NPU, off it (a rehearsal) only what was measured.
+    const ok = why.length ? false : want.tooSlow ? (c.rehearsal ? null : false) : true;
+    add({
+      step: 'harden-calibrate',
+      ok,
+      ms: m.coldMs,
+      say: `measured the first answer ${(m.coldMs / 1000).toFixed(0)} s after the start, ${(m.warmMs / 1000).toFixed(2)} s warm, ${m.tokensPerSecond.toFixed(1)} tokens a second; ${
+        wrote ? `wrote ${(wrote.requestBaseMs ?? 0) / 1000} s, ${wrote.requestPerTokenMs} ms a token, cold load ${(wrote.coldLoadMs ?? 0) / 1000} s` : want.tooSlow ? `not used: ${want.tooSlow}` : 'wrote nothing'
+      }${why.length ? `: ${why.join('; ')}` : ''}`,
+      data: { measured: m, written: wrote ?? null, expected: want.timeouts, startingValues: planOf(route, c.support).route.timeouts, tooSlow: want.tooSlow ?? null, note: cal.note ?? null },
+    });
+  }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -448,7 +655,12 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
       const v = (argv[++i] ?? '').toUpperCase();
       if (!/^(NPU|CPU|GPU)$/.test(v)) return { error: '--device takes NPU, CPU or GPU' };
       o.device = v;
-    } else if (a === '--out') o.out = argv[++i];
+    } else if (a === '--generation') {
+      const v = argv[++i];
+      if (!v) return { error: '--generation takes a generation of the route (meteor-lake, lunar-lake…)' };
+      o.generation = v;
+    } else if (a === '--harden') o.harden = true;
+    else if (a === '--out') o.out = argv[++i];
     else return { error: `unknown argument ${a}` };
   }
   return o;

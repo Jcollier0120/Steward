@@ -78,8 +78,13 @@ Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' 
    - **Its runtime**, where the route names one (`runtime` in `npu-vendors.json`): OpenVINO Model Server needs the Microsoft Visual C++ runtime, which a PC may not have and which only an administrator can install for everyone. So setup downloads Microsoft's own package of those DLLs (the Visual Studio catalog's CRT redist, 3 MB, size and SHA-256 pinned) and copies its five DLLs beside `ovms.exe`, where Windows looks first. A server that has them all beside it isn't given them again. Until kit 2.65.0 the route was refused on a PC without the runtime, with "administrator installs once": nothing the person could act on, and the NPU never showed.
 3. **The models**: each pulled with the server's own command, unless it is already there. Where `npu-vendors.json` pins a model's files for this generation (GenieX's Qwen3-VL-4B on the X2 Elite, measured on the owner's laptop), each file's size and SHA-256 are checked after the pull.
 4. **Its embedding server**, where the route has one (the Snapdragon's): its zip downloaded and checked against its pinned SHA-256, unpacked into the tools home's `servers\llama.cpp\`, the route's server's files copied over it, and its model downloaded into `models\` (checked the same way) unless it's there. When a graphics card is set up too, the card uses that same file rather than downloading it again.
-5. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, which must say "ready" as asked (a model that doesn't run properly on an NPU answers fast, with nonsense: kit 2.65.0), and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15. Then one embedding from its embedding server, started the same way.
-6. **Only then** is the `npu` entry written into config.json, beside the cards'. Any failure (download, installer, pull, checksum, test) leaves no NPU entry, says which step failed, and the rest of setup goes on. A failure of the embedding server alone leaves the entry without embeddings, and says why.
+5. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, which must say "ready" as asked and nothing degenerate (a model that doesn't run properly on an NPU answers fast, with nonsense: "?option?option…", kit 2.65.0; the same few characters five times over is refused since kit 2.68.0), and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15. Then its embedding server, started the same way, embeds three sentences (kit 2.68.0): their vectors must have the model's dimensions where the route names them, be numbers and not all zero, and put "a cat" nearer "a kitten" than "an invoice".
+6. **Calibration**, on a generation nobody has run the NPU check on (`verified: false`, kit 2.68.0): two short requests more, a warm "ready" and a count to twenty (which must count), and the entry gets this PC's own timeouts from them and from how long the test request's first load took (Calibration below). One that writes under 2 tokens a second is too slow for the chat model, and isn't used.
+7. **Only then** is the `npu` entry written into config.json, beside the cards'. Any failure (download, installer, pull, checksum, test, calibration) leaves no NPU entry, and the rest of setup goes on. A failure of the embedding server alone leaves the entry without embeddings.
+
+**The NPU failing is never an error** (kit 2.68.0). Setup logs what failed as a `note:`, not a `problem:`, and its exit code doesn't count it: Manor shows nothing red, and nothing raises an alarm. Chat and embeddings fall back separately: what the NPU doesn't serve goes to a graphics card set up beside it, else setup sets the processor up for it in the same run (asking first, for its download, unless `--yes`). Why the NPU, or its embeddings, isn't used is kept in plain words (`npu-note.json` in the tools home, cleared once the NPU is set up whole) and shown with the accelerators (`smith accelerators`, the report's `npuNote`), e.g. "The NPU (Core Ultra Series 1, Meteor Lake (NPU 3720)) isn't used: it didn't answer its test in time. The graphics card or the processor does its work instead."
+
+**Memory first** (kit 2.68.0). The NPU has no memory of its own: its models sit in the PC's, beside Windows, the browser and the manor's agents. Setup gives the NPU at most 40% of the PC's memory (`NPU_MEMORY_SHARE`), against the route's measured sizes (`memoryGb`: on Intel, chat 4.3 GB at the 4,096 cap and embeddings 1.74 GB, measured on the Lunar Lake; chat 3.6 GB at the NPU 3720's 2,048). A 16 GB PC (about 15.6 GB to Windows: 6.2 GB) keeps both, with over 9 GB left; a 12 GB PC (4.6 GB) keeps chat and makes embeddings elsewhere; an 8 GB PC (3 GB) keeps the NPU out. 40% because it lets the common 16 GB laptop keep both models with over 9 GB for everything else, while on an 8 GB PC chat alone (3.6 to 4.3 GB, half the PC) would leave Windows, a browser and the agents under 4 GB and paging. Memory that can't be read never keeps the NPU out.
 
 An NPU entry a person configured is left alone unless `npu` is asked for by name; the GenieX entry an older install wrote by default is replaced by a set-up one, and dropped on a PC whose NPU the manor can't use.
 
@@ -100,6 +105,24 @@ Conservative where nothing has been measured. The NPU always has one slot.
 | AMD | 4,096 tokens, chat and vision | 20 s + 0.4 s a token | 120 s | FastFlowLM takes long contexts, but unmeasured here |
 
 A cap can differ per kind (`maxContextTokens` on an endpoint: the core's `capFor`), and an accelerator's own `timeouts` take the rules' place (the core's `requestTimeoutMs`). Only GenieX is restarted for holding too much memory (the keeper's 9 GB recycle); the others aren't known to leak.
+
+### Per generation, where nothing has been measured
+
+A generation in `npu-vendors.json` can carry its own `timeouts`, `maxContextTokens`, `caps`, `args` (replacing the value of a flag the route's command already has) and `memoryGb` over the route's (`routeFor`). Intel's, from the Lunar Lake's numbers and how the others compare (kit 2.68.0):
+
+| Generation | NPU | Prompt cap | Background request | Cold load | Why |
+|---|---|---|---|---|---|
+| Lunar Lake | NPU 4, 48 TOPS | 4,096 | 30 s + 0.3 s a token | 180 s | measured (the route's own values, unchanged) |
+| Meteor Lake, Arrow Lake | NPU 3720, about 11 TOPS | 2,048 (`--max_prompt_len 2048`) | 60 s + 0.4 s a token | 360 s | Compile and reading scale with compute, about 4 times slower: a first compile at 4,096 would take 2–3 minutes and a full 4,096 read 20–27 s. At 2,048 the compile, the full-cap read and the KV cache are halved (3.6 GB measured at 2,048 against 4.3 GB at 4,096, which matters on the 16 GB laptops these come in), and Reeve's and the agents' requests fit in it. Writing is held by memory bandwidth more than compute: 10–18 tokens a second expected, 5–8 allowed for (0.4 s a token covers 2.5). |
+| Panther Lake, Wildcat Lake | NPU 5 | 4,096 | 30 s + 0.3 s a token | 240 s | Lunar Lake's, the cold load with a third more room for a new compiler. |
+
+Embeddings keep `--max_length 2048` on every generation: the kit's 680-token estimate of a chunk (3 characters a token) undercounts hex, base64 and ids, whose 1,500-character chunks reach about 1,338 real tokens, so a shorter `max_length` would need a pessimistic estimate of about a character a token.
+
+These are starting values only: setup's calibration replaces them on the PC, and the NPU check on one of each verifies them.
+
+### Calibration
+
+On a generation still `verified: false`, setup measures the NPU it has just set up and writes that PC's timeouts into its entry (`calibrate`): a token's time twice what writing one took; the base twice a full-cap read (reading taken as 10 times faster than writing: 27 times on the Lunar Lake, nearer 12 expected on the NPU 3720) and a warm answer; the cold load half again the first load it timed. Never under the generation's starting values (a busy moment doesn't shrink them), never over 1.5 s a token, a 180 s base or a 30-minute cold load. Under 2 tokens a second the NPU isn't used for chat.
 
 ## The keeper
 
@@ -157,7 +180,15 @@ Each customer's PC downloads the servers, runtimes and models from their makers 
 
 It ends with the caps and timeouts the numbers suggest for the route (`requestBaseMs` twice a full-cap read and a warm answer, `requestPerTokenMs` twice the time a token took, `coldLoadMs` half again the slowest start), and keeps the whole report as `npu-check-<maker>-<time>.json` in the tools home. `--no-setup` checks only what's installed.
 
-`--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
+The report names the NPU's generation (`generation`) and runs it with that generation's starting values. On a generation still `verified: false`, every step passing gives `patch` (kit 2.68.0): the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts (and cap, where a request under it failed) and what they were measured on, printed and kept in the JSON report, ready to merge into the generation. A verified generation (the Lunar Lake) gets none: its values stay.
+
+`--harden` (kit 2.68.0) checks setup's own handling on the NPU instead of measuring it: after the setup step, four steps, each passing or failing:
+- **harden-driver**: a driver minimum above the installed driver: the NPU isn't used, and its note says the driver needs an update;
+- **harden-timeout**: setup's test request given 1 s: no NPU entry, and its note says it didn't answer in time;
+- **harden-nonsense** (on the NPU only): `OpenVINO/Qwen3-4B-int4-ov`, the group-wise export that answers nonsense on the Lunar Lake's NPU, pulled and set up in the route's model's place: no NPU entry, and its note says the chat model doesn't run properly (where it answers sensibly, nothing was forced, and the step isn't counted);
+- **harden-calibrate**: setup's measuring requests, as on a generation nobody has measured: the timeouts it writes must be calibrate's from what it measured, cover what it measured, and stay inside the bounds; too slow fails on the NPU.
+
+`--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. `--generation <id>` rehearses with a generation's starting values (e.g. `meteor-lake`). A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone, and never gives a patch. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
 
 ## Verified, and not
 
@@ -182,7 +213,7 @@ It ends with the caps and timeouts the numbers suggest for the route (`requestBa
 
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones), and on a first-generation Snapdragon X (its model build and its speed);
-- Intel beyond Lunar Lake: Meteor Lake, Arrow Lake, Panther Lake and Wildcat Lake (their PCI ids, speed, and the driver minimum);
+- Intel beyond Lunar Lake: Meteor Lake, Arrow Lake, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);
 - everything on AMD: FastFlowLM on XDNA 2, its models' names and sizes, the 4,096-token cap and timeouts, the PCI ids, the driver minimum;
 - that AMD's XDNA (Phoenix, Hawk Point) is refused with the right words on a real PC;
 - the keeper's restarts and idle stops of OpenVINO Model Server and FastFlowLM.

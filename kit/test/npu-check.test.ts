@@ -328,3 +328,110 @@ test('a model that answers nonsense on the NPU fails the check at its first answ
   const { saysReady } = await import('./fixture/src/kit/setup.ts');
   assert.deepEqual(['<think>\n\n</think>\n\nready', 'Ready.', '?option?option', 'hydrated hydrated', '<think>ready'].map(saysReady), [true, true, false, false, false]);
 });
+// ------------------------------------------------------------------------------------------------
+// The report's generation and its patch; --harden, setup's failures forced and its calibration checked
+
+const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
+const METEOR_CPU = 'cpu|9|22|Intel(R) Core(TM) Ultra 7 155H\nram|34359738368\n';
+
+test('the arguments: --generation names a rehearsal\'s generation, --harden runs the hardening', () => {
+  assert.deepEqual(C.parseCheckArgs(['--route', 'intel', '--device', 'CPU', '--generation', 'meteor-lake', '--harden']), { vendor: 'intel', device: 'CPU', generation: 'meteor-lake', harden: true });
+  assert.match((C.parseCheckArgs(['--generation']) as any).error, /--generation takes/);
+});
+
+test('the report names the generation, and on one not yet verified, every step passing gives the patch that verifies it', async () => {
+  // Lunar Lake: verified already, so nothing to change.
+  const lunar = await scene({ cap: 1536 });
+  const l = await C.npuCheck(lunar.opts);
+  assert.equal(l.report.generation, 'lunar-lake');
+  assert.equal(l.report.patch, null);
+  assert.ok(lunar.lines.some((x) => /lunar-lake is verified already/.test(x)), lunar.lines.join('\n'));
+
+  // A Meteor Lake (NPU 3720): its starting values run (a 2048-token prompt), and its patch flips it to verified.
+  const s = await scene({ cap: 2048 });
+  const { code, report } = await C.npuCheck({ ...s.opts, detection: parseDetection(`${METEOR_CPU}${METEOR}\n`) });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.generation, 'meteor-lake');
+  assert.deepEqual(s.ran.find((a) => a.includes('--pull')) !== undefined, true);
+  const g = (report.patch as any).routes.intel.generations['meteor-lake'];
+  assert.equal(g.verified, true);
+  assert.deepEqual(g.timeouts, { ...V.NPU_CATALOG.routes.intel.generations['meteor-lake'].timeouts, ...report.suggest!.timeouts });
+  assert.match(g.basis, /^Measured by the NPU check on Intel Core Ultra 7 155H, NPU driver 32\.0\.100\.4023, \d{4}-\d\d-\d\d, every step passing/);
+  assert.equal(JSON.parse(readFileSync(s.opts.out, 'utf8')).patch.routes.intel.generations['meteor-lake'].verified, true, 'kept in the JSON report');
+  assert.ok(s.lines.some((x) => /^The change to npu-vendors.json this run supports \(it flips meteor-lake to verified\)/.test(x)), s.lines.join('\n'));
+});
+
+test('the patch: none for a rehearsal, a failed step, a verified generation; a cap that failed under the route\'s goes in with it', () => {
+  const route = V.NPU_CATALOG.routes.intel;
+  const base = { vendor: 'intel' as const, generation: 'panther-lake', rehearsal: false, steps: [{ step: 'detect', ok: true, say: '' }], suggest: { timeouts: { requestBaseMs: 20_000 }, why: ['measured'] }, route, pc: 'Intel(R) Core(TM) Ultra X7 358H', driver: '32.0.100.5540', at: '2026-11-02T10:00:00.000Z' };
+  assert.equal(C.checkPatch({ ...base, rehearsal: true }), null);
+  assert.equal(C.checkPatch({ ...base, steps: [{ step: 'cap', ok: false, say: '' }] }), null);
+  assert.equal(C.checkPatch({ ...base, generation: 'lunar-lake' }), null);
+  assert.equal(C.checkPatch({ ...base, generation: null }), null);
+  const p = C.checkPatch({ ...base, suggest: { timeouts: {}, maxContextTokens: 3072, why: ['4096 tokens failed'] } }) as any;
+  const g = p.routes.intel.generations['panther-lake'];
+  assert.deepEqual([g.verified, g.maxContextTokens, g.caps, g.args['--max_prompt_len']], [true, 3072, { chat: 3072 }, '3072']);
+  assert.equal(g.basis, 'Measured by the NPU check on Intel(R) Core(TM) Ultra X7 358H, NPU driver 32.0.100.5540, 2026-11-02, every step passing: 4096 tokens failed.');
+});
+
+/** --harden on the scene: its test requests answered by `answers` (by case), setup's measuring by `measured`. */
+async function harden(answers: Record<string, string[]>, measured: { warmMs: number; tokensPerSecond: number } | null, more: Record<string, unknown> = {}) {
+  const s = await scene({ cap: 1536 });
+  const asked: string[] = [];
+  const r = await C.npuCheck({
+    ...s.opts,
+    harden: true,
+    ...more,
+    io: { ...s.opts.io, setup: { ...s.opts.io.setup, measure: async () => measured }, hardenTest: async (kase: string) => (asked.push(kase), answers[kase] ?? []) },
+  });
+  return { ...r, s, asked, by: Object.fromEntries(r.report.steps.map((x: any) => [x.step, x])) as Record<string, any> };
+}
+
+test('--harden: a driver below the minimum, a test given 1 s and the model that answers nonsense each leave the NPU out with a plain note; calibration writes what it measured', async () => {
+  const h = await harden({ timeout: ["didn't answer in time (1 s): This operation was aborted"], nonsense: ['chat answered nonsense ("?option?option?opt"), not "ready" as asked'] }, { warmMs: 800, tokensPerSecond: 25 });
+  assert.deepEqual(h.report.steps.map((x: any) => x.step), ['detect', 'requirements', 'setup', 'harden-driver', 'harden-timeout', 'harden-nonsense', 'harden-calibrate']);
+  assert.equal(h.code, 0, h.s.lines.join('\n'));
+  assert.deepEqual(h.asked, ['timeout', 'nonsense', 'calibrate']);
+  assert.match(h.by['harden-driver'].say, /a minimum of 33\.0\.0\.0 over driver 32\.0\.100\.4239: not used, noted "The NPU \(.*\) isn't used: the NPU's driver needs an update/);
+  assert.match(h.by['harden-timeout'].say, /given 1 s, no NPU entry, noted ".*didn't answer its test in time/);
+  assert.match(h.by['harden-nonsense'].say, /OpenVINO\/Qwen3-4B-int4-ov: no NPU entry, noted ".*its chat model doesn't run properly on it/);
+  // The nonsense model was pulled as the route's own is, under its own name.
+  assert.ok(h.s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-4B-int4-ov')), JSON.stringify(h.s.ran));
+  const cal = h.by['harden-calibrate'];
+  assert.equal(cal.ok, true, cal.say);
+  assert.deepEqual(cal.data.written, V.calibrate(cal.data.measured, h.s.catalog.routes.intel).timeouts);
+  assert.equal(cal.data.measured.tokensPerSecond, 25);
+  assert.equal(h.report.patch, null, 'no patch from the hardening');
+});
+
+test('--harden fails where setup would have kept the NPU, or written timeouts short of what it measured; too slow fails on the NPU', async () => {
+  // Setup took the answers: nothing was forced, so the case fails.
+  const kept = await harden({ timeout: [], nonsense: [] }, { warmMs: 800, tokensPerSecond: 25 });
+  assert.equal(kept.code, 1);
+  assert.equal(kept.by['harden-timeout'].ok, false);
+  assert.match(kept.by['harden-timeout'].say, /setup still wrote an NPU entry/);
+  // The nonsense model answering sensibly here isn't a failure of setup: nothing to reject.
+  assert.equal(kept.by['harden-nonsense'].ok, null);
+  // An NPU too slow for the chat model: setup leaves it out, but on the NPU that is a FAIL to report.
+  const slow = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, { warmMs: 9_000, tokensPerSecond: 1.2 });
+  assert.equal(slow.by['harden-calibrate'].ok, false);
+  assert.match(slow.by['harden-calibrate'].say, /not used: it wrote 1\.2 tokens a second/);
+  // Nothing measured at all: a failure.
+  const none = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, null);
+  assert.equal(none.by['harden-calibrate'].ok, false);
+});
+
+test('--harden in a rehearsal: the driver case on one of the route\'s devices, no nonsense case off the NPU, calibration as measured', async () => {
+  const h = await harden({ timeout: ["didn't answer in time (1 s): aborted"] }, { warmMs: 2_000, tokensPerSecond: 6 }, { vendor: 'intel', device: 'CPU', generation: 'meteor-lake', detection: parseDetection('cpu|12|12|Snapdragon(R) X2 Elite\nram|34359738368\n') });
+  assert.equal(h.code, 0, h.s.lines.join('\n'));
+  assert.equal(h.report.generation, 'meteor-lake');
+  assert.equal(h.by['harden-driver'].ok, true, h.by['harden-driver'].say);
+  assert.match(h.by['harden-driver'].say, /a rehearsal: one of the route's devices/);
+  assert.equal(h.by['harden-nonsense'].ok, null);
+  assert.deepEqual(h.asked, ['timeout', 'calibrate']);
+  // Meteor Lake's starting values, raised where the measurements need more.
+  const meteorRoute = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  assert.deepEqual(h.by['harden-calibrate'].data.written, V.calibrate({ ...h.by['harden-calibrate'].data.measured }, meteorRoute).timeouts);
+  assert.ok(h.by['harden-calibrate'].data.written.requestPerTokenMs >= 400);
+  assert.equal(h.report.patch, null, 'a rehearsal verifies nothing');
+});
