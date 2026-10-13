@@ -839,8 +839,8 @@ export interface NpuIo {
   copy?: (from: string, to: string) => void;
   /** The measuring requests on a generation nobody has measured (measureNpu); null skips them (the NPU check measures its own). */
   measure?: (entry: AcceleratorEntry) => Promise<{ warmMs: number; tokensPerSecond: number } | { problems: string[] } | null>;
-  /** The clock the first start is timed by. */
-  now?: () => number;
+  /** The clock the first start is timed by, in milliseconds. Not `now`: an agent's own io that extends NpuIo may have a `now` of its own (the Smith's trial does, returning a Date). */
+  clockMs?: () => number;
 }
 
 /**
@@ -977,7 +977,7 @@ export interface NpuSetup {
 export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<NpuSetup> {
   const exists = io.exists ?? existsSync;
   const run = io.run ?? runProgram;
-  const now = io.now ?? (() => performance.now());
+  const now = io.clockMs ?? (() => performance.now());
   const label = n.support.label;
   const fail = (what: string, reason = "its model server couldn't be set up"): NpuSetup => ({
     problems: [`npu: ${what}. config.json gets no NPU entry; its work goes to the graphics card or the processor`],
