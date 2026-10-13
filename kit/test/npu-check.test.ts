@@ -193,7 +193,7 @@ test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; a missi
   assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /needs the Microsoft Visual C\+\+ runtime 14\.44, which setup puts beside it \(3 MB, no administrator\)/);
   assert.deepEqual(got, [rt.file]);
   for (const f of rt.files) assert.equal(readFileSync(path.join(dir, f), 'utf8'), 'from Microsoft', f);
-  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
+  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
   assert.equal(r.code, 0, s.lines.join('\n'));
 });
 

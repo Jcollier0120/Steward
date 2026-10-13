@@ -212,6 +212,7 @@
             "text_generation"
           ],
           "size": 2231646000,
+          "present": "{tools}\\models\\openvino\\Castellan-AI\\Qwen3-4B-Instruct-2507-int4-cw-ov\\graph.pbtxt",
           "licence": "Qwen3-4B-Instruct-2507: Apache-2.0; Castellan-AI's channel-wise INT4 export of it carries the base model's licence, with its LICENSE and a note of what was changed",
           "pinned": {
             "*": {

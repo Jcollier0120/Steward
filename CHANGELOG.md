@@ -2,6 +2,15 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.43
+
+**The Steward's kit 2.62.0, with a benchmark for ranking chips and models.**
+
+### What changed
+
+- The Steward's kit 2.62.0: a benchmark that measures how fast and how well a PC's NPU (or graphics card) does Castellan's work, for the website's rankings. Nothing changes on your PC unless someone runs it.
+- Agents now count how many tokens they send to their local models each day, so the benchmark can weigh its jobs the way agents really work. Only the counts are kept, on your PC, for 60 days, and nothing is sent anywhere.
+
 ## 0.35.42
 
 **The Steward's kit 2.61.0: an Intel NPU that works, run on a real Lunar Lake.**

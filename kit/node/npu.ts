@@ -38,6 +38,7 @@ import {
 } from './accelerators.ts';
 import { npuLockDir } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
+import { tallyRequest } from './token-tally.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
 
@@ -351,6 +352,8 @@ export class Npu {
     send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<Omit<NpuAnswer, 'accelerator' | 'fellBackFrom'>>,
   ): Promise<NpuAnswer> {
     const r = await this.route(work, promptTokens, maxTokens, opts, send);
+    // The server's count where it gives one, the kit's estimate where it doesn't.
+    tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, promptTokens: r.value.promptTokens || promptTokens, answerTokens: r.value.completionTokens, ms: r.value.ms });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
   }
 
