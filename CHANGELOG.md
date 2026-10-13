@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.47
+
+**The Steward starts far fewer programs each round.**
+
+### What changed
+
+- git starts on its own, without Git for Windows' launcher and a console host for it: a third of the programs each git command started.
+- Checking which PC releases each repository asks the remote over https from the Steward itself, not through git, and reads the turn record again only when it changed. On one PC that was about 140 git commands in 22 minutes, each two programs or more.
+- A checkout's remote address is read from its config file instead of asking git.
+- gh no longer starts a copy of itself after each command to send telemetry, nor looks for its own updates.
+- The Steward's kit 2.64.0, which brings the first two to every agent that takes it.
+- Still to come: reading several files from git in one command instead of one each.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.41
 
 **The Steward's kit 2.60.0, with a check for trying an NPU on new hardware.**

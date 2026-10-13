@@ -20,6 +20,7 @@ type Settings = import('../src/settings.ts').Settings;
 type RemoteRepo = import('../src/remote-ref.ts').RemoteRepo;
 type Employee = import('../src/settings.ts').Employee;
 type TurnRecord = import('../src/lease.ts').TurnRecord;
+type Runner = import('../src/run.ts').Runner;
 
 const A = { id: 'aaaaaaaa-0000-4000-8000-000000000001', name: 'LAPTOP' };
 const B = { id: 'bbbbbbbb-0000-4000-8000-000000000002', name: 'DESKTOP-ABC' };
@@ -325,4 +326,31 @@ test('a throwaway ref against a real remote, when STEWARD_REAL_REMOTE names one'
     assert.equal(await R.deleteRef(realRun, r, ref), true);
   }
   assert.equal((await R.readRef(realRun, r, ref, 'test.json')).kind, 'absent');
+});
+
+test("an unchanged turn record isn't read again, and a checkout's remote is read from its config without git", async () => {
+  const r = remote();
+  await write(r, { pc: B.id });
+  const asked: string[][] = [];
+  const counting: Runner = (cmd, args, opts) => (asked.push(args), realRun(cmd, args, opts));
+  const o = { me: A, checkout: false, now: T0, ttlMs: TTL };
+  const first = await L.turnOne(counting, r, emp('clerk', r), o);
+  assert.equal(first.status, 'elsewhere');
+  const reads = asked.filter((a) => a.includes('show') || a.includes('cat-file')).length;
+  assert.ok(reads > 0, 'the record is read the first time');
+  asked.length = 0;
+  const again = await L.turnOne(counting, r, emp('clerk', r), { ...o, kept: first });
+  assert.deepEqual([again.status, again.sha, again.record], [first.status, first.sha, first.record]);
+  assert.deepEqual(asked.filter((a) => a.includes('show') || a.includes('cat-file') || a.includes('fetch')), [], 'the same commit: its record is the one kept');
+  await write(r, { pc: B.id, name: 'DESKTOP-NEW' });
+  const changed = await L.turnOne(counting, r, emp('clerk', r), { ...o, kept: first });
+  assert.equal(changed.record?.name, 'DESKTOP-NEW', 'a new commit is read');
+
+  const checkout = path.join(home, 'clerk-checkout');
+  sh(home, 'init', '--quiet', checkout);
+  sh(checkout, 'remote', 'add', 'origin', 'https://example.test/o/clerk.git');
+  asked.length = 0;
+  const found = await L.remoteFor(counting, settings, emp('clerk', r, { checkout }));
+  assert.equal(found?.url, 'https://example.test/o/clerk.git');
+  assert.deepEqual(asked, [], 'no git config --get');
 });
