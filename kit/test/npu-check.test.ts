@@ -68,12 +68,15 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean; answer?:
 }
 
 /** The catalog on a free port, and a scratch tools home with the server's program and its C++ runtime "installed". */
-async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string } = {}) {
+async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string; embed?: boolean } = {}) {
   const port = await freePort();
   const catalog = structuredClone(V.NPU_CATALOG);
   catalog.routes.intel.port = port;
   if (o.cap) catalog.routes.intel.maxContextTokens = o.cap;
   delete catalog.routes.intel.models[0].pinned; // its pull is a fake that leaves no files to check
+  // Its embedding server is measured in tests of its own.
+  if (o.embed) delete (catalog.routes.intel.embedServer!.model as { pinned?: unknown }).pinned;
+  else delete catalog.routes.intel.embedServer;
   const tools = mkdtempSync(path.join(home, 'tools-'));
   const exe = V.serverExe(catalog.routes.intel, tools);
   mkdirSync(path.dirname(exe), { recursive: true });
@@ -110,6 +113,11 @@ test('the route on another device: OpenVINO gets its --target_device, and off th
   assert.equal(cpu.serve[cpu.serve.indexOf('--target_device') + 1], 'CPU');
   assert.ok(!cpu.serve.includes('--max_prompt_len'));
   assert.deepEqual(C.routeOnDevice(intel, 'NPU').serve, intel.serve);
+  // Its embedding server, OpenVINO too, goes with it, and loses the NPU's fixed --max_length.
+  const es = cpu.embedServer!.serve;
+  assert.equal(es[es.indexOf('--target_device') + 1], 'CPU');
+  assert.ok(!es.includes('--max_length') && es.includes('--pooling'));
+  assert.deepEqual(C.routeOnDevice(intel, 'NPU').embedServer, intel.embedServer);
   assert.throws(() => C.routeOnDevice(V.NPU_CATALOG.routes.qualcomm, 'CPU'), /NPU only/);
   assert.equal(C.routeOnDevice(V.NPU_CATALOG.routes.qualcomm, 'NPU'), V.NPU_CATALOG.routes.qualcomm);
 });
@@ -209,7 +217,39 @@ test("a route's own embedding server: set up beside the server, started by the k
   assert.match(embed.say, /the kit started llama\.cpp and had a vector in .* a query took \d+ ms and a chunk of code \d+ ms \(1024 dimensions\)/);
   assert.equal(inputs[0], 'where is the push notification token registered');
   assert.ok(inputs[1].length > 1500, 'a chunk about the size Reeve indexes');
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download.size + q.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download!.size + q.model.size);
+});
+
+test("Intel's embedding server: a second OpenVINO Model Server, nothing downloaded for it but its model, which it pulls", async () => {
+  const s = await scene({ cap: 1536, embed: true });
+  const ePort = await freePort();
+  s.catalog.routes.intel.embedServer!.port = ePort;
+  let embedServer: Server | null = null;
+  const inputs: string[] = [];
+  const startEmbed = async () => {
+    embedServer = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov"}]}');
+        inputs.push(JSON.parse(body).input);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ embedding: new Array(1024).fill(0.01) }] }));
+        if (inputs.length === 2) setImmediate(() => (embedServer!.closeAllConnections(), embedServer!.close()));
+      });
+    });
+    await new Promise<void>((r) => embedServer!.listen(ePort, '127.0.0.1', r));
+  };
+  const downloads: string[] = [];
+  const opts = { ...s.opts, io: { ...s.opts.io, setup: { ...s.opts.io.setup, download: async (d: { what: string }) => void downloads.push(d.what) }, embedTest: async () => (await startEmbed(), [] as string[]) } };
+  const { code, report } = await C.npuCheck(opts);
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
+  assert.deepEqual(downloads, [], 'the program is the route\'s, already here');
+  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov') && a.includes('embeddings')), JSON.stringify(s.ran));
+  const embed = report.steps.at(-1) as any;
+  assert.equal(embed.ok, true);
+  assert.match(embed.say, /the kit started OpenVINO Model Server and had a vector in .* \(1024 dimensions\)/);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + V.NPU_CATALOG.routes.intel.embedServer!.model.size);
 });
 
 test('a server that dies on a request past its cap fails the cap step, and is started again for the rest', async () => {

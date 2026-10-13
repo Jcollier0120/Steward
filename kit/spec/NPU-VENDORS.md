@@ -21,7 +21,27 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
 
-**Embeddings** run on the Snapdragon's NPU, through a server of their own (below). Elsewhere they stay off the NPU for now: OpenVINO Model Server 2026 serves them on the NPU as a preview (Qwen3-Embedding-0.6B), not yet tried here (the Intel hardware decides), and FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. There they go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats but makes none and there is no card.
+**Embeddings** run on the Snapdragon's and Intel's NPUs, each through a server of its own (below). AMD's stay off the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. There they go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats but makes none and there is no card.
+
+### Embeddings on Intel's NPU
+
+OpenVINO Model Server started from the command line serves one model for one task, so the route's `embedServer` is a second one: the route's own program and environment (no download of its own) on port 18186, `--task embeddings --target_device NPU --pooling LAST --max_length 2048`, sharing the chat server's compile cache. Its model, OpenVINO's channel-wise INT4 Qwen3-Embedding-0.6B (`OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov`, 428 MB), is pulled as the chat model is and its files pinned. The pull writes a graph without pooling, device or length; serving with `--source_model` and those flags rewrites it with them.
+
+- **Last-token pooling** (`--pooling LAST`) is Qwen3-Embedding's. Without it the vectors are wrong.
+- **2,048 tokens.** The NPU compiles a fixed shape: every request costs the whole `--max_length`, and a longer one is refused (400; `--truncate` only cuts to the model's own 32k). Reeve's chunks are 1,500 characters, and a dense one runs past 1,024 tokens: UUIDs 1,338, hex 1,184, base64 1,179, JSON 1,100, against 775 for code and 830 for Chinese. At 2,048 every one is taken, for about 15% more time than at 1,024. Its cap (`caps.embed`, 680) is in the kit's estimate of 3 characters a token, so a request under it stays under 2,048 real tokens even at nearly one token a character.
+- **Its own index.** Its model's name isn't the graphics card's (`qwen3-embedding-0.6b-gguf`), so Reeve keeps a separate index for it, and each model's vectors stay with their own.
+
+Measured on the Lunar Lake (Core Ultra 7 256V, 2026-10-13), with the same inputs on each:
+
+| | NPU (this server) | Arc 140V, OpenVINO | Arc 140V, llama.cpp Vulkan (setup's card) |
+|---|---|---|---|
+| A query | 166 ms | 22 ms | 25 ms |
+| 16 sentences at once | 2.6 s | 41 ms | 619 ms |
+| 16 of Reeve's chunks at once | 2.6 s | 1.2 s | 5.9 s |
+| Cat/kitten similarity | 0.748 | 0.748 | 0.705 |
+| Memory | 1.7 GB | 1.3 GB | — |
+
+The first load compiles it in 13 s. The NPU's results are the card's for the same model. It indexes faster than the card does as setup gives it, for less power, and it runs beside the chat server on the NPU. A short query is slower than on the card, because it costs the full 2,048 tokens.
 
 ### Embeddings on the Hexagon
 
@@ -76,7 +96,7 @@ Conservative where nothing has been measured. The NPU always has one slot.
 | Maker | Cap (prompt and answer) | Background request | Cold load | Why |
 |---|---|---|---|---|
 | Qualcomm | 2,400 tokens, chat and vision | the rules' 15 s + 0.3 s a token | the rules' 90 s | measured on the X2 Elite: an ~8K prompt bluescreened it; GenieX writes ~34 tokens a second |
-| Intel | 1,536 tokens | 15 s + 0.3 s a token | 120 s | OpenVINO's NPU pipeline is compiled for a prompt length (`--max_prompt_len 1536`); measured on a Lunar Lake: about 25 tokens a second, a first load with its compile 31 s; room left for Meteor Lake's slower NPU, unmeasured |
+| Intel | 4,096 tokens, chat; 680 for embeddings (by the kit's estimate: 2,048 real tokens) | 30 s + 0.3 s a token | 180 s | OpenVINO's NPU pipeline is compiled for a prompt length (`--max_prompt_len 4096`); measured on a Lunar Lake: about 25–28 tokens a second, a first load with its compile 41 s, 3,492 tokens read in 4.5 s; room left for Meteor Lake's slower NPU, unmeasured. The embedding server is compiled for 2,048 tokens (Embeddings on Intel's NPU) |
 | AMD | 4,096 tokens, chat and vision | 20 s + 0.4 s a token | 120 s | FastFlowLM takes long contexts, but unmeasured here |
 
 A cap can differ per kind (`maxContextTokens` on an endpoint: the core's `capFor`), and an accelerator's own `timeouts` take the rules' place (the core's `requestTimeoutMs`). Only GenieX is restarted for holding too much memory (the keeper's 9 GB recycle); the others aren't known to leak.
@@ -94,6 +114,7 @@ The keeper (the Smith, else Reeve) starts and restarts each server from its entr
 | Qualcomm | `qualcomm/Qwen3-VL-4B-Instruct:W4A16` (Qualcomm AI Hub's NPU build) | chat, vision | 4.4 GB |
 | Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
 | Intel | `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (Castellan's channel-wise INT4 export, the kind the NPU runs properly; its files pinned) | chat | 2.2 GB |
+| Intel | `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` (OpenVINO's channel-wise INT4 export; its files pinned) | embeddings | 428 MB |
 | AMD | `qwen3-it:4b` (Qwen3-4B-Instruct-2507), `qwen3vl-it:4b` (Qwen3-VL-4B-Instruct) | chat, vision | about 3.3 GB and 4.1 GB |
 
 Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB), FastFlowLM 40 MB.
@@ -151,6 +172,9 @@ It ends with the caps and timeouts the numbers suggest for the route (`requestBa
 **Run on an Intel Lunar Lake** (Core Ultra 7 256V, PCI `643E`, NPU driver 32.0.100.4512, 2026-10-12), the NPU check passing every step:
 - setup from nothing: OpenVINO Model Server 2026.4.1's zip, the Visual C++ runtime beside it (the PC had it in System32 too, from Office; Windows loaded the copies beside `ovms.exe`), the model's pull;
 - `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` on the NPU, downloaded by setup from Hugging Face into an empty folder, its pinned files checked: a first load with its compile 31 s, 5 s from its cache; about 24–26 tokens written and 650–670 read a second; a short answer warm in 0.7 s; 1,395 tokens answered and 1,792 refused plainly at the 1,536 cap; two at once; 3.6 GB working set; the kit's test request in the NPU's turn;
+- the cap at 4,096 (2026-10-13), the NPU check passing every step: a first load 41 s, 3,112 tokens read in 4.6 s, 3,827 answered and 4,352 refused plainly, 4.3 GB;
+- `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` on the NPU (2026-10-13), pulled by OpenVINO Model Server and served as the route's `embedServer` serves it: the card's results, beside the chat server, at `--max_length` 512, 1,024, 1,536 and 2,048 (refusing plainly what's past it);
+- OpenVINO's Qwen3-VL-4B on the NPU failing in OpenVINO Model Server 2026.4.1 (`prompt_ids.get_size() >= tokenized_history.size()`), answering on the Arc: why vision stays off Intel's NPU;
 - OpenVINO's `Qwen3-8B-int4-cw-ov` there too, before Castellan's 4B was made: right, at 14.8 tokens a second, a 51 s first load and 5.5 GB;
 - `OpenVINO/Qwen3-4B-int4-ov`, the route's first model, answering nonsense on the NPU (right on the processor and the Arc 140V): why setup's test request now checks its answer says "ready".
 

@@ -18,6 +18,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.58
+
+**The Steward's kit 2.67.0: Intel's NPU takes longer requests, and makes embeddings.**
+
+### What changed
+
+- The Steward's kit 2.67.0. On a PC with an Intel NPU, a request to the NPU may now be up to 4,096 tokens (it was 1,536). The NPU also makes embeddings, so code search works on such a PC with Manor's default settings; before, nothing there made them.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.57
 
 **Two pieces of work on the same repository no longer end up with the same version.**

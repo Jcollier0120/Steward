@@ -172,8 +172,11 @@ test('the suite: 24 graded questions, six of each kind, three must-pass, ids uni
   const ids = [...SUITE.quality, ...SUITE.jobs, ...SUITE.vision].map((q: any) => q.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(SUITE.jobs.map((j: any) => j.id), ['triage', 'reply', 'summary']);
-  // About four characters a token, as the kit estimates: prompt and answer together under the suite's limit, so
-  // under every route's cap (Intel's 1,536 the smallest).
+  // About four characters a token, as the kit estimates: prompt and answer together under the suite's limit, and the
+  // limit under every route's cap.
+  // Chat's and vision's caps: the suite asks questions, never for embeddings.
+  const smallest = Math.min(...Object.values(V.NPU_CATALOG.routes).flatMap((r: any) => [r.maxContextTokens, r.caps.chat ?? Infinity, r.caps.vision ?? Infinity]));
+  assert.ok(SUITE.maxTokensAll <= smallest, `the suite's ${SUITE.maxTokensAll} under the smallest cap, ${smallest}`);
   for (const item of [...SUITE.quality, ...SUITE.jobs]) {
     const tokens = Math.ceil(B.promptOf(SUITE, item).length / 4) + item.maxTokens;
     assert.ok(tokens <= SUITE.maxTokensAll, `${item.id}: about ${tokens} tokens`);
@@ -269,7 +272,7 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.equal(report.run.streamed, true);
   assert.equal(report.run.usageReported, true);
   assert.equal(report.run.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
-  assert.equal(report.run.cap, 1536);
+  assert.equal(report.run.cap, V.NPU_CATALOG.routes.intel.maxContextTokens, "the route's own cap");
   assert.equal(report.pc.chip, 'Core Ultra 200V, Lunar Lake (NPU 4)');
   assert.equal(report.pc.make, 'HP');
   assert.equal(report.quality.passed, 24);
