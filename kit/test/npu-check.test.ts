@@ -435,3 +435,24 @@ test('--harden in a rehearsal: the driver case on one of the route\'s devices, n
   assert.ok(h.by['harden-calibrate'].data.written.requestPerTokenMs >= 400);
   assert.equal(h.report.patch, null, 'a rehearsal verifies nothing');
 });
+
+test('--generation on a real NPU of another generation: the NPU plays it, with its starting values, and verifies nothing', async () => {
+  // The Lunar Lake standing in for an NPU 3720: Meteor Lake's values, its 2048-token prompt, and no patch.
+  const h = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, { warmMs: 830, tokensPerSecond: 17 }, { generation: 'meteor-lake' });
+  assert.equal(h.code, 0, h.s.lines.join('\n'));
+  assert.equal(h.report.generation, 'meteor-lake');
+  assert.equal(h.report.rehearsal, true);
+  assert.equal(h.report.device, 'NPU');
+  assert.ok(h.s.lines.some((x) => /^Running meteor-lake's starting values on this lunar-lake/.test(x)), h.s.lines.join('\n'));
+  const meteorRoute = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  assert.equal(meteorRoute.maxContextTokens, 2048);
+  const cal = h.by['harden-calibrate'];
+  assert.deepEqual(cal.data.startingValues, meteorRoute.timeouts);
+  assert.deepEqual(cal.data.written, V.calibrate(cal.data.measured, meteorRoute).timeouts);
+  assert.equal(h.report.patch, null);
+
+  // Its own generation, named: an ordinary run on its own values.
+  const own = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, { warmMs: 830, tokensPerSecond: 17 }, { generation: 'lunar-lake' });
+  assert.equal(own.report.rehearsal, false);
+  assert.equal(own.report.generation, 'lunar-lake');
+});

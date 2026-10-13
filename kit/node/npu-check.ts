@@ -22,7 +22,7 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * x64 programs on): its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only in
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
- *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--out <file>]
+ *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]
  */
 
 export interface CheckStep {
@@ -65,7 +65,10 @@ export interface NpuCheckOptions {
   vendor?: NpuVendor;
   /** The device the route's server targets (OpenVINO's --target_device): NPU unless rehearsing. */
   device?: string;
-  /** A rehearsal's generation, whose starting values (routeFor) it runs with; on an NPU, its own. */
+  /**
+   * The generation whose starting values (routeFor) it runs with: a rehearsal's, or on an NPU another generation of its
+   * maker's played by this one (the Lunar Lake standing in for an NPU 3720), which verifies nothing. Unset, the NPU's own.
+   */
   generation?: string;
   /**
    * Setup's hardening, on this PC's NPU (hardenCheck): the failures setup must fall back from quietly, forced (a model
@@ -249,7 +252,10 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     return finish(2);
   }
   // The generation it runs on: the NPU's own, or the one a rehearsal is given (--generation), whose starting values it takes.
-  const generation = rehearsal ? (o.generation ?? null) : (npu?.generation ?? null);
+  // Given on an NPU of another generation, that NPU plays it: its values run on real hardware, and the run verifies nothing.
+  const generation = rehearsal ? (o.generation ?? null) : (o.generation ?? npu?.generation ?? null);
+  const playing = !rehearsal && !!o.generation && o.generation !== npu?.generation;
+  if (playing) report.rehearsal = true;
   if (generation && !catalog.routes[vendor].generations[generation]) {
     add({ step: 'route', ok: false, say: `${vendor} has no generation ${generation} (it has ${Object.keys(catalog.routes[vendor].generations).join(', ')})` });
     return finish(2);
@@ -264,7 +270,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   }
   report.server = `${route.server} ${route.version}`;
   const tools = o.tools ?? toolsHome(env);
-  const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : npu!;
+  const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : playing ? { ...npu!, generation, verified: false } : npu!;
+  if (playing) log(`Running ${generation}'s starting values on this ${npu!.generation ?? 'NPU'}: a rehearsal, so npu-vendors.json is left as it is.`);
   const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
   add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
@@ -669,7 +676,7 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const o = parseCheckArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--out <file>]`);
+    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]`);
     process.exit(2);
   }
   const { code } = await npuCheck(o);
