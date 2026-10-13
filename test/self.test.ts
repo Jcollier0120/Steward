@@ -50,7 +50,7 @@ test('never a version at or below the newest release; a Steward version waits fo
 });
 
 test("the glance reads the Steward's main with its releases: head, kit/VERSION, package.json's version", () => {
-  assert.match(glanceQuery([], 'Jcollier0120/Steward'), /steward: repository\(owner: "Jcollier0120", name: "Steward"\) \{ releases\(.*\) \{ nodes \{ tagName isDraft \} \} main: ref\(qualifiedName: "refs\/heads\/main"\) \{ target \{ oid \} \} kitVersion: object\(expression: "main:kit\/VERSION"\) \{ \.\.\. on Blob \{ text \} \} packageJson: object\(expression: "main:package\.json"\)/);
+  assert.match(glanceQuery([], 'Jcollier0120/Steward'), /steward: repository\(owner: "Jcollier0120", name: "Steward"\) \{ releases\(.*\) \{ nodes \{ tagName isDraft publishedAt \} \} main: ref\(qualifiedName: "refs\/heads\/main"\) \{ target \{ oid \} \} kitVersion: object\(expression: "main:kit\/VERSION"\) \{ \.\.\. on Blob \{ text \} \} packageJson: object\(expression: "main:package\.json"\)/);
   const g = { at: '', stewardReleases: null, repos: {}, errors: {} };
   readGlance([], JSON.stringify({ data: { steward: { releases: { nodes: [{ tagName: 'v0.8.0', isDraft: false }] }, main: { target: { oid: H1 } }, kitVersion: { text: '2.9.1\r\n' }, packageJson: { text: '{ "name": "steward", "version": "0.8.1" }' } } } }), 'Jcollier0120/Steward', g);
   assert.deepEqual((g as any).stewardMain, main('2.9.1', '0.8.1'));
