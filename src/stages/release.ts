@@ -19,6 +19,7 @@ import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit,
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
+import { linkSharedModules } from './modules.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -151,7 +152,9 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
-    if (releaseNeedsPackages(dir, e.release)) {
+    // Its packages linked from the set installed once for its lockfile (modules.ts), as a bump's are; npm ci only where
+    // that can't be done (0.35.61). The release only reads them, and never packs node_modules (the kit's release.ts).
+    if (releaseNeedsPackages(dir, e.release) && !(await linkSharedModules(ctx, dir, (line) => ctx.log(`[${e.id}] ${line}`)))) {
       const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {

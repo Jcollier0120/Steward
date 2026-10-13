@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -10,7 +10,7 @@ import { exchequerNote, networkLine } from '../src/stages/common.ts';
 import { releaseNeedsPackages, releaseOne } from '../src/stages/release.ts';
 import { ctxFor, ok, runner, sh } from './helpers.ts';
 
-// A Node agent's release needs its packages: Reeve's builds its dashboard with vite. The release worktree is
+// fresh, so the Steward links the packages installed once for its lockfile there first (modules.ts), else npm ci, as bump does.
 // fresh, so the Steward runs npm ci there first, as bump does.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-release-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -21,7 +21,7 @@ if (!existsSync('node_modules')) { console.error("'vite' is not recognized"); pr
 writeFileSync(process.argv[2], JSON.stringify({ cwd: process.cwd() }));
 `;
 
-test("a Node agent's release worktree gets npm ci before its release command; a failed npm ci stops it", async () => {
+test("a Node agent's release worktree gets the packages installed once for its lockfile before its release command; a failed npm ci stops it", async () => {
   const origin = path.join(tmp, 'origin.git');
   const checkout = path.join(tmp, 'Reeve');
   sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
@@ -60,15 +60,27 @@ test("a Node agent's release worktree gets npm ci before its release command; a 
 
   const done = await releaseOne(ctx, e, { kit: '1.2.1' });
   assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
-  assert.deepEqual(npm, [['ci', '--no-audit', '--no-fund']]);
+  assert.deepEqual(npm, [['ci', '--prefer-offline', '--no-audit', '--no-fund']], 'once, for the shared set (modules.ts)');
   assert.equal(path.resolve(JSON.parse(readFileSync(released, 'utf8')).cwd).toLowerCase(), path.join(work, 'reeve-release').toLowerCase());
   assert.ok(!existsSync(path.join(work, 'reeve-release')), 'the release worktree is removed');
+  const sets = readdirSync(path.join(work, '_modules'));
+  assert.equal(sets.length, 1, 'its packages are kept for the next release, and the bumps');
+  assert.ok(existsSync(path.join(work, '_modules', sets[0], 'node_modules')), 'not removed with the worktree');
 
+  // The next release links them: no npm at all.
+  rmSync(released);
+  assert.equal((await releaseOne(ctx, e, { kit: '1.2.1' })).outcome, 'done');
+  assert.equal(npm.length, 1);
+
+  // No set, and npm ci failing: for the set, then in the worktree itself.
+  rmSync(path.join(work, '_modules'), { recursive: true, force: true });
   npmFails = true;
+  npm.length = 0;
   rmSync(released);
   const failed = await releaseOne(ctx, e, { kit: '1.2.1' });
   assert.equal(failed.outcome, 'failed');
   assert.match(failed.message, /^npm ci failed \(exit 1\), so its release wasn't built$/);
+  assert.deepEqual(npm, [['ci', '--prefer-offline', '--no-audit', '--no-fund'], ['ci', '--no-audit', '--no-fund']]);
   assert.ok(!existsSync(released), 'its release command never ran');
 });
 
