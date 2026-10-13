@@ -14,6 +14,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.43
+
+**The kit it hands out is 2.61.0: an employee's page can stream a reply.**
+
+### What changed
+
+- The Steward hands out kit 2.61.0. An employee's page can now send a long reply as it is made, which the Chronicler needs to record a game played on another of your PCs.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.41
 
 **The Steward's kit 2.60.0, with a check for trying an NPU on new hardware.**
