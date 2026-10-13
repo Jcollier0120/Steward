@@ -28,6 +28,8 @@ This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which
   - a 1-second test;
   - `OpenVINO/Qwen3-4B-int4-ov`, which answers nonsense there;
   - the calibration itself.
+- **`npu-check.ts --generation <id>`** on a real NPU runs as that generation of its maker's, with that generation's starting values and prompt cap. For example, a Lunar Lake can stand in for an NPU 3720. The run counts as a rehearsal and changes nothing in npu-vendors.json.
+- **npu-check never measures someone else's server.** On the NPU, if a server already answers on the route's port (the manor's own local AI, most likely), it refuses and says to stop that server first. In a rehearsal off the NPU, its servers move to free ports instead.
 
 ### What changed
 

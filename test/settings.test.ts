@@ -15,6 +15,9 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 // The owner's PC, which holds the Exchequer's publisher key: settings from before releasesCastellan migrate to it (migrate.ts).
 process.env.EXCHEQUER_PUBLISHER_KEY ??= 'steward-test-publisher-key';
 after(() => rmSync(home, { recursive: true, force: true }));
+// The owner's PC as every test sees it, wherever these run (helpers.ts): the maker's laptop, Developer Pro, and never this
+// PC's own Manor.
+await import('./helpers.ts');
 
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, agentPages, loadSettings, normalizeSettings, settingsFile } = await import('../src/settings.ts');
 const { saveSettingsReply } = await import('../src/kit/settings-kit.ts');
@@ -23,7 +26,9 @@ const { fillMigrationGaps, migrateSettings, migrationFile, pendingMigration } = 
 const { employeeFor } = await import('../src/claims.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { STAFF } = await import('./fixtures/staff.ts');
-const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values })) as { status?: number; json: any };
+// The Steward's form is a developer's (SETTINGS_SPEC.developerOnly): saved with Developer options on, as the owner's are,
+// rather than as this PC's Manor says.
+const save = async (values: Record<string, unknown>) => (await saveSettingsReply(SETTINGS_SPEC, { values }, true)) as { status?: number; json: any };
 
 test("nobody's employees, repository or clone are built in: they start empty, and Settings name yours", () => {
   assert.deepEqual(DEFAULT_SETTINGS.employees, []);
