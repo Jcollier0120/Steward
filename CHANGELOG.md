@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.46
+
+**The round's one look at GitHub works again, and shares every branch it read with the rest of the staff.**
+
+### What changed
+
+- The round asks GitHub about every repository in one go, then looks closer only at those that changed. With many repositories that question took GitHub longer than the 10 seconds it allows, so GitHub gave up, and every round fell back to asking about each repository on its own: many more questions to GitHub and many more programs started. The Steward now asks about 5 repositories at a time, which takes a few seconds each. If GitHub still gives up on one of these questions, it asks again in halves.
+- With that look working, the branch heads it reads now reach the rest of the staff, as kit 2.58.0 meant them to. Reeve's hourly round uses them instead of asking each repository's origin itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.45
 
 **The Steward's kit 2.63.0: on a Snapdragon, search runs on the NPU.**

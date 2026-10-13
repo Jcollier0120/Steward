@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GithubLimited } from '../src/budget.ts';
-import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
+import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, queryTimedOut, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
 import type { Runner } from '../src/run.ts';
 import { appReleasesIn, parsePrs } from '../src/stages/staff.ts';
 import { employee, ok } from './helpers.ts';
@@ -81,7 +81,7 @@ test("GitHub's answer is read even when part of it failed: a repository it could
   assert.throws(() => readGlance([porter], JSON.stringify({ errors: [{ message: 'Bad credentials' }] }), null, empty()), /Bad credentials/);
 });
 
-test('one gh call for up to 15 employees, one more for each 15 after; nothing printed is a failure', async () => {
+test(`one gh call for up to ${PER_QUERY} employees, one more for each ${PER_QUERY} after; nothing printed is a failure`, async () => {
   const calls: string[][] = [];
   const many = Array.from({ length: PER_QUERY + 2 }, (_, i) => employee('C:\\nowhere', { id: `e${i}x`, repo: `Jcollier0120/E${i}` }));
   const run: Runner = async (cmd, args) => {
@@ -109,6 +109,24 @@ test("each query's rateLimit is kept: what the glance cost, summed, and what Git
   const g = await takeGlance(run, '.', { employees: many, stewardRepo: '' });
   assert.equal(g.cost, PER_QUERY + 1);
   assert.deepEqual(g.rates?.map((r) => [r.limit, r.remaining, r.resetAt]), [[5000, 4000 - PER_QUERY, '2026-10-09T22:06:17.000Z'], [5000, 4000 - PER_QUERY - 1, '2026-10-09T22:06:17.000Z']]);
+});
+
+test("only GitHub giving up on a slow query splits it: any other failure, or one repository's alone, is the glance's", async () => {
+  assert.ok(queryTimedOut(Object.assign(new Error('GitHub POST graphql: 502 <html>'), { status: 502 })));
+  assert.ok(queryTimedOut(new Error('GitHub POST graphql: 504 <!DOCTYPE html>')));
+  assert.ok(queryTimedOut(new Error('gh api graphql failed (1): HTTP 502: Bad Gateway (https://api.github.com/graphql)')));
+  assert.ok(queryTimedOut(new Error('Something went wrong while executing your query. This may be the result of a timeout, or it could be a GitHub bug.')));
+  assert.ok(!queryTimedOut(new Error('GitHub POST graphql: 401 Bad credentials')));
+  assert.ok(!queryTimedOut(new Error('dial tcp 192.168.1.254:443: i/o timeout')), "the network's own failure isn't split: it fails the same in halves");
+  const asked: number[] = [];
+  const failing = (why: Error) => async (q: string) => {
+    asked.push((q.match(/ e\d+: repository/g) ?? []).length);
+    throw why;
+  };
+  await assert.rejects(takeGlance(async () => assert.fail('no gh'), '.', { employees: [porter, heiward], stewardRepo: '' }, undefined, undefined, failing(new Error('GitHub POST graphql: 401 Bad credentials'))), /401/);
+  assert.deepEqual(asked.splice(0), [2]);
+  await assert.rejects(takeGlance(async () => assert.fail('no gh'), '.', { employees: [porter, heiward], stewardRepo: '' }, undefined, undefined, failing(new Error('GitHub POST graphql: 502 <html>'))), /502/);
+  assert.deepEqual(asked.splice(0), [2, 1], 'halves down to one repository, which fails the glance');
 });
 
 test(`a repository with more than ${PR_PAGE} open PRs is asked on its own, as one GitHub didn't answer for`, () => {
