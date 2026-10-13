@@ -11,6 +11,36 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's kit 2.66.0: a benchmark that measures how fast and how well a PC's NPU (or graphics card) does Castellan's work, for the website's rankings. Nothing changes on your PC unless someone runs it.
 - Agents now count how many tokens they send to their local models each day, so the benchmark can weigh its jobs the way agents really work. Only the counts are kept, on your PC, for 60 days, and nothing is sent anywhere.
 
+## 0.35.53
+
+**The Steward unpacks a project's packages once for all the staff that use them, and one install at a time.**
+
+### What changed
+
+- Staff whose packages are the same now share one copy, even when their own project details differ (the command they install, the version ranges they ask for). Before, six agents with the very same packages each had a copy of their own, about 50 MB and 800 files unpacked six times.
+- Only one package install runs at a time on the PC, whichever part of the Steward asks for it: its page, a round in a terminal, or a check before a merge. Several installs side by side were the heaviest bursts of disk and memory work the PC saw.
+- Packages already in npm's own cache are taken from there without asking the registry again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first checks after updating install the packages once more into the new shared copy. The old copies are cleared away as they go unused.
+
+## 0.35.52
+
+**A new kit is tried on the staff in one go, beside the rounds, instead of a few each round.**
+
+### What changed
+
+- When the Steward's own PR brings a new kit, its trial on the staff now runs on its own from the Steward's page, start to finish, while the rounds go on merging and releasing the rest. Before, each round tried the staff for 8 minutes and then waited for the next round, so a trial took many rounds.
+- Up to 4 staff are tried at once on a PC with enough processors (more if Settings ask for more), but never more than its free memory holds, at about 3 GB each.
+- As soon as a trial ends, a round comes to merge the PR or say which staff it fails, without waiting for the next scheduled one.
+- A second kit's trial waits for the first to end, and a trial another Steward process is already running is left to it.
+- A round run from a terminal still tries a few each round, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.50
 
 **The Steward's kit 2.65.0: an Intel NPU that works, run on a real Lunar Lake.**

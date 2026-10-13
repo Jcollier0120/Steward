@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { commitOf, fetchBranch, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
@@ -10,7 +11,7 @@ import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
-import { withRepo } from './slots.ts';
+import { apart, withRepo } from './slots.ts';
 
 /**
  * A new kit tried on every employee before it is released: when a team PR to the Steward's own repository raises
@@ -84,7 +85,42 @@ export interface KitTrial extends TrialPasses {
   pairs?: KitPair[];
   /** The words of the "moves with it" comment (pairWords), once it was left. */
   pairsSaid?: string;
+  /** While it is tried on its own (trialsOnTheirOwn): the process trying it, and when it last saved. */
+  by?: { pid: number; at: string };
 }
+
+/**
+ * Called when a trial tried on its own ends (`cut`: what cut it short, or null): set by the Steward's page (agent.ts),
+ * whose rounds then try a kit PR's agents on their own, beside the rounds, instead of a slice each round. Unset (a round
+ * in a terminal, the tests), a trial goes in slices as before.
+ */
+let onTheirOwn: ((ended: { pr: number; cut: string | null }) => void) | null = null;
+export const trialsOnTheirOwn = (ended: typeof onTheirOwn) => void (onTheirOwn = ended);
+
+/** The trial being tried on its own in this process: one at a time, so two never try the same agent's folder. */
+let running: { key: string; pr: number; kit: string } | null = null;
+
+/** How long a trial's process may go without saving before another counts it gone: longer than any one agent's try. */
+const BY_QUIET_MS = 30 * 60_000;
+
+/** Whether another process is trying `t` on its own now: alive, and saved within BY_QUIET_MS. */
+function triedElsewhere(t: KitTrial, now = Date.now()): boolean {
+  if (!t.by || t.by.pid === process.pid || now - Date.parse(t.by.at) > BY_QUIET_MS) return false;
+  try {
+    process.kill(t.by.pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** The hold of a PR whose trial goes on: how far it got. Pure. */
+const goingWords = (t: KitTrial): string => {
+  const pending = t.pending?.length ?? 0;
+  const total = t.passed + t.failed.length + (t.untouched ?? 0) + pending;
+  const failing = t.failed.length ? `, ${t.failed.length} failing (${t.failed.map((f) => f.name).join(', ')})` : '';
+  return `${TRIAL_GOING}: ${total - pending} of ${total} so far${failing}; the rounds go on meanwhile`;
+};
 
 export interface KitPair {
   id: string;
@@ -308,38 +344,56 @@ const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
  */
 const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base && !r.partial).map((r) => [r.id, r.base!]));
 
+/** The memory one agent's try may take at its peak: its install, a type check and a test run side by side. */
+const TRY_BYTES = 3 * 1024 ** 3;
+
 /**
- * A slice of a trial (KitTrial's `pending`): its agents tried a few at a time, each only as far as the kit changes it,
- * until none are left or `sliceMs` has passed; `save` after each few. A try the network cut short leaves its agent to
- * try again, and says so (the slice ends there).
+ * How many agents a trial tries at once: Settings' parallel, or a quarter of this PC's processors up to 4, whichever is
+ * more; never more than the memory free now holds at TRY_BYTES each (at least one). A try is an agent's install, its kit
+ * filled and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
+ * average, and two at a time left the trial waiting on itself. Pure.
+ */
+export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem()): number =>
+  Math.max(1, Math.min(Math.max(parallel, Math.min(4, Math.floor(cpus / 4))), Math.floor(free / TRY_BYTES)));
+
+/**
+ * A slice of a trial (KitTrial's `pending`): its agents tried trialParallel at a time, each only as far as the kit
+ * changes it, the next one started as soon as one ends, until none are left or `sliceMs` has passed (those in flight
+ * finish); `save` after each. A try the network cut short leaves its agent to try again, and says so (no more are
+ * started).
  */
 async function trySlice(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial, sliceMs: number, save: () => void): Promise<string | null> {
   const repo = checkoutOf(steward);
   await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
   const t0 = Date.now();
   return withKitTree(ctx, steward, pr, async (dir) => {
-    while (t.pending?.length) {
-      const ids = t.pending.slice(0, Math.max(1, ctx.settings.parallel));
-      const employees = ids.map((id) => ctx.settings.employees.find((e) => e.id === id)).filter((e): e is Employee => !!e && e.usesKit && existsSync(checkoutOf(e)));
-      const results = await tryEach(ctx, employees, t.kit, dir, { repo, head: pr.headOid! });
-      let cut: string | null = null;
-      const counted: EmployeeResult[] = [];
-      for (const r of results) {
-        if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) cut ??= `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
-        else counted.push(r);
+    let cut: string | null = null;
+    const queue = [...(t.pending ?? [])];
+    // The first of each slice always starts, so every round gets on with it.
+    let started = 0;
+    const next = async (): Promise<void> => {
+      while (queue.length && !cut && (!started || Date.now() - t0 < sliceMs)) {
+        started++;
+        const id = queue.shift()!;
+        const e = ctx.settings.employees.find((x) => x.id === id);
+        const results = e && e.usesKit && existsSync(checkoutOf(e)) ? await tryEach(ctx, [e], t.kit, dir, { repo, head: pr.headOid! }) : [];
+        const counted: EmployeeResult[] = [];
+        for (const r of results) {
+          if (r.outcome === 'failed' && (await networkFailure(ctx, r.message))) cut ??= `its kit's trial on ${r.name} was cut short by the network: the next round tries again`;
+          else counted.push(r);
+        }
+        // Cut short: still pending. Tried, or gone from the staff meanwhile: no longer.
+        if (results.length && !counted.length) continue;
+        t.pending = (t.pending ?? []).filter((x) => x !== id);
+        t.failed = [...t.failed, ...failuresOf(counted)];
+        t.passed += counted.filter((r) => r.outcome === 'done').length;
+        t.untouched = (t.untouched ?? 0) + counted.filter((r) => r.outcome === 'skipped' && r.message.includes(': not tried, ')).length;
+        t.mains = { ...t.mains, ...mainsOf(counted) };
+        save();
       }
-      // Tried, or gone from the staff meanwhile: no longer pending.
-      const settled = new Set([...ids.filter((id) => !employees.some((e) => e.id === id)), ...counted.map((r) => r.id)]);
-      t.pending = t.pending.filter((id) => !settled.has(id));
-      t.failed = [...t.failed, ...failuresOf(counted)];
-      t.passed += counted.filter((r) => r.outcome === 'done').length;
-      t.untouched = (t.untouched ?? 0) + counted.filter((r) => r.outcome === 'skipped' && r.message.includes(': not tried, ')).length;
-      t.mains = { ...t.mains, ...mainsOf(counted) };
-      save();
-      if (cut) return cut;
-      if (Date.now() - t0 >= sliceMs) break;
-    }
-    return null;
+    };
+    await Promise.all(Array.from({ length: trialParallel(ctx.settings.parallel) }, next));
+    return cut;
   });
 }
 
@@ -375,6 +429,34 @@ async function movedOn(ctx: Ctx, t: KitTrial): Promise<Employee[]> {
 const sameFailures = (a: KitTrial['failed'], b: KitTrial['failed']) => a.length === b.length && a.every((f) => b.some((g) => g.id === f.id && g.message === f.message));
 
 /**
+ * A trial's pending agents tried on their own, to the end, beside the rounds (trialsOnTheirOwn): `t` saved after each
+ * agent with this process as its `by`, and onTheirOwn told when it ends, so a round then settles the PR at once.
+ */
+function tryOnItsOwn(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial, save: () => void): void {
+  running = { key: keyOf(pr), pr: pr.number, kit: t.kit };
+  const saving = () => {
+    t.by = { pid: process.pid, at: new Date().toISOString() };
+    save();
+  };
+  saving();
+  ctx.log(`[${APP.id}] #${pr.number}: trying kit ${t.kit} on ${t.pending!.length} agents, ${trialParallel(ctx.settings.parallel)} at a time, beside the rounds`);
+  let cut: string | null = null;
+  void apart('kit trial', () => trySlice(ctx, steward, pr, t, Number.POSITIVE_INFINITY, saving))
+    .then(
+      (c) => void (cut = c),
+      (err: Error) => void (cut = `couldn't try its kit on the agents: ${err.message}`),
+    )
+    .finally(() => {
+      running = null;
+      delete t.by;
+      save();
+      if (cut) ctx.log(`[${APP.id}] #${pr.number}: ${cut}`);
+      else ctx.log(`[${APP.id}] #${pr.number}: kit ${t.kit}'s trial ended: a round settles it now`);
+      onTheirOwn?.({ pr: pr.number, cut });
+    });
+}
+
+/**
  * Why a Steward PR that raises the kit waits for its trial, or null when it doesn't (no new kit in it, every employee
  * passing, each one failing moving with it in a PR of its own (pairUp), or labelled KIT_BREAKS_LABEL). `steward`: the
  * Steward as the merge stage's employee. `o.note`: given the pairs' words when they are why it merges, for its line.
@@ -400,27 +482,50 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       t = { ...before[1] };
     } else {
       const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
-      ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, a few each round`);
+      ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, ${onTheirOwn ? `${trialParallel(ctx.settings.parallel)} at a time, beside the rounds` : 'a few each round'}`);
       t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id) };
     }
   }
-  const save = () => {
-    kept[keyOf(pr)] = t;
-    writeJson(kitTrialsFile(), Object.fromEntries(Object.entries(kept).slice(-100)));
+  const key = keyOf(pr);
+  // Written over the file as it is now, not as this round read it: a trial tried on its own saves beside the rounds.
+  const saveOf = (x: KitTrial) => () => {
+    const all = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
+    all[key] = x;
+    writeJson(kitTrialsFile(), Object.fromEntries(Object.entries(all).slice(-100)));
   };
+  const save = () => saveOf(t)();
+  // Another kit's trial going on its own: this one's tries wait for it, so two trials never fill one agent's folder.
+  const otherGoing = () => {
+    if (!running || running.key === key) return null;
+    o.going?.();
+    return `${TRIAL_GOING}: it waits for kit ${running.kit}'s trial (#${running.pr}) to end first; the rounds go on meanwhile`;
+  };
+  if (t.pending?.length && (running?.key === key || triedElsewhere(t))) {
+    // Being tried on its own, here or by another process: how far it got.
+    o.going?.();
+    return goingWords(t);
+  }
+  if (t.pending?.length && onTheirOwn) {
+    const waits = otherGoing();
+    if (waits) return waits;
+    tryOnItsOwn(ctx, steward, pr, t, saveOf(t));
+    o.going?.();
+    return goingWords(t);
+  }
   if (t.pending) {
     // Still being tried: this round's slice, kept as it goes. Refused (no kit.json on its main, say) isn't the kit's
     // doing, and isn't held against it; one the network cut short is no verdict on the kit, and is tried again.
-    const cut = await trySlice(ctx, steward, pr, t, o.sliceMs ?? TRIAL_SLICE_MS, save);
+    const cut = t.pending.length ? await trySlice(ctx, steward, pr, t, o.sliceMs ?? TRIAL_SLICE_MS, save) : null;
     if (cut || t.pending.length) {
       o.going?.();
       if (cut) return cut;
-      const total = t.passed + t.failed.length + (t.untouched ?? 0) + t.pending.length;
-      const failing = t.failed.length ? `, ${t.failed.length} failing (${t.failed.map((f) => f.name).join(', ')})` : '';
-      return `${TRIAL_GOING}: ${total - t.pending.length} of ${total} so far${failing}; the rounds go on meanwhile`;
+      return goingWords(t);
     }
     fresh = true;
     delete t.pending;
+    // Tried side by side, they ended in any order: named in the staff's.
+    const order = (id: string) => ctx.settings.employees.findIndex((e) => e.id === id) >>> 0;
+    t.failed = [...t.failed].sort((a, b) => order(a.id) - order(b.id));
     t.at = new Date().toISOString();
     ctx.log(`[${APP.id}] #${pr.number}: kit ${t.kit} tried on every agent: ${t.passed} passed, ${t.failed.length} failed, ${t.untouched ?? 0} not tried (nothing they take from the kit changes)`);
   }
@@ -428,6 +533,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
     const moved = await movedOn(ctx, t);
     if (moved.length) {
+      const waits = otherGoing();
+      if (waits) return waits;
       ctx.log(`[${APP.id}] #${pr.number}: ${moved.map((e) => e.name).join(', ')} moved on since kit ${t.kit} failed their checks: trying ${moved.length === 1 ? 'it' : 'them'} again`);
       await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
       const results = await tryAtHead(ctx, steward, pr, t.kit, moved);
@@ -453,6 +560,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   // once the PR is labelled, which merges it anyway.
   let cut: string | null = null;
   if (t.failed.length && !labelled) {
+    const waits = otherGoing();
+    if (waits) return waits;
     const p = await pairUp(ctx, steward, pr, t);
     t.pairs = p.pairs;
     cut = p.cut;

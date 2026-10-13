@@ -38,10 +38,62 @@ function project(dir: string, name: string, version: string, deps?: Record<strin
   writeFileSync(path.join(dir, 'package-lock.json'), lock(name, version, deps));
 }
 
-test("a lockfile's packages are one key: its own name and version aside, so the hires share one set", () => {
+test("a lockfile's packages are one key: what it installs, so the hires share one set whatever their own entry says", () => {
   assert.equal(packagesKey(lock('porter', '0.4.1')), packagesKey(lock('pinder', '0.5.0')));
-  assert.notEqual(packagesKey(lock('porter', '0.4.1')), packagesKey(lock('porter', '0.4.1', { typescript: '^7.1.0' })));
+  // The project's own entry installs nothing: its bin, and a range the same package still meets, share the set.
+  const own = (text: string, more: Record<string, unknown>) => {
+    const l = JSON.parse(text);
+    Object.assign(l.packages[''], more);
+    return JSON.stringify(l);
+  };
+  assert.equal(packagesKey(own(lock('porter', '0.4.1'), { bin: { porter: 'src/cli.ts' } })), packagesKey(own(lock('wright', '0.5.8'), { bin: { wright: 'src/cli.ts' }, license: 'UNLICENSED' })));
+  assert.equal(packagesKey(lock('porter', '0.4.1', { typescript: '^7.0.0' })), packagesKey(lock('porter', '0.4.1')));
+  // Another package installed, or another version of one: its own set.
+  const other = JSON.parse(lock('porter', '0.4.1'));
+  other.packages['node_modules/typescript'].version = '7.1.0';
+  assert.notEqual(packagesKey(JSON.stringify(other)), packagesKey(lock('porter', '0.4.1')));
+  other.packages['node_modules/@types/node'] = { version: '22.20.4', dev: true };
+  assert.notEqual(packagesKey(JSON.stringify(other)), packagesKey(lock('porter', '0.4.1')));
+  // The order npm wrote them in doesn't matter.
+  const turned = JSON.parse(JSON.stringify(other));
+  turned.packages = Object.fromEntries(Object.entries(other.packages).reverse());
+  assert.equal(packagesKey(JSON.stringify(turned)), packagesKey(JSON.stringify(other)));
+  // A lockfile before `packages` (npm 6): keyed whole, its name and version aside.
+  const v1 = (name: string, ts: string) => JSON.stringify({ name, version: '1.0.0', lockfileVersion: 1, dependencies: { typescript: { version: ts } } });
+  assert.equal(packagesKey(v1('a', '7.0.2')), packagesKey(v1('b', '7.0.2')));
+  assert.notEqual(packagesKey(v1('a', '7.0.2')), packagesKey(v1('a', '7.1.0')));
   assert.match(packagesKey(lock('porter', '0.4.1')), /^[0-9a-f]{16}$/);
+});
+
+test('sets for different packages asked for at once install one after the other', async () => {
+  let now = 0;
+  let most = 0;
+  const r = runner();
+  const run: Runner = async (cmd, args, opts) => {
+    if (cmd !== 'npm') return r.run(cmd, args, opts);
+    now++;
+    most = Math.max(most, now);
+    // Each install waits for the others to have asked: were two let in at once, both would be in here together.
+    await new Promise((res) => setImmediate(res));
+    mkdirSync(path.join(opts!.cwd!, 'node_modules'), { recursive: true });
+    now--;
+    return ok('');
+  };
+  const e = employee(tmp, { fill: '' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-one-at-a-time'), run, neutralDir: tmp });
+  const { linkSharedModules } = await import('../src/stages/modules.ts');
+  const dirs = ['7.0.2', '7.1.0', '7.2.0'].map((v) => {
+    const d = path.join(tmp, `one-${v}`);
+    project(d, 'porter', '0.4.1');
+    const l = JSON.parse(lock('porter', '0.4.1'));
+    l.packages['node_modules/typescript'].version = v;
+    writeFileSync(path.join(d, 'package-lock.json'), JSON.stringify(l));
+    return d;
+  });
+  const said: string[] = [];
+  assert.deepEqual(await Promise.all(dirs.map((d) => linkSharedModules(ctx, d, (l) => said.push(l)))), [true, true, true], said.join('\n'));
+  assert.equal(most, 1, 'never two installs at once');
+  assert.equal(said.filter((l) => l.startsWith('npm ci, once')).length, 3);
 });
 
 test('two worktrees with the same packages: npm ci once, in the shared set, and each linked to it', async () => {

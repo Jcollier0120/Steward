@@ -10,7 +10,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-trial-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit } = await import('../src/stages/trial.ts');
+const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit, TRIAL_GOING, trialParallel, trialsOnTheirOwn } = await import('../src/stages/trial.ts');
 const { writeJson } = await import('../src/kit/store.ts');
 const { bumpOne, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -212,4 +212,68 @@ test("the rollout's bump of an agent the trial passed, from the same commit and 
   const moved = await bumpOne(c3, good, { kit: '1.0.1', tool });
   assert.ok(!moved.message.includes('not run again'), moved.message);
   assert.ok(ran(c3.lines).length > 0, c3.lines.join('\n'));
+});
+
+test("beside the rounds (the Steward's page): the PR waits at once while its agents are tried, a second kit's waits its turn, and a round is asked for when it ends", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  let ended!: (e: { pr: number; cut: string | null }) => void;
+  const done = new Promise<{ pr: number; cut: string | null }>((r) => (ended = r));
+  trialsOnTheirOwn((e) => ended(e));
+  try {
+    const first = ctx();
+    let going = 0;
+    const why = await kitTrialHold(first.c, me, pr(), { going: () => going++ });
+    assert.equal(why, `${TRIAL_GOING}: 0 of 2 so far; the rounds go on meanwhile`, first.c.lines.join('\n'));
+    assert.equal(going, 1);
+    assert.match(first.c.lines.join('\n'), /at a time, beside the rounds/);
+
+    // Asked again while it goes: how far it got, and nothing tried twice.
+    const again = ctx();
+    assert.match((await kitTrialHold(again.c, me, pr())) ?? '', new RegExp(`^${TRIAL_GOING}: [0-2] of 2 so far`));
+    assert.ok(!again.c.lines.some((l) => l.includes('beside the rounds')), again.c.lines.join('\n'));
+
+    // Another kit PR with agents to try: it waits for this one, rather than filling the same agents' folders.
+    const other = pr({ number: 8 });
+    writeJson(kitTrialsFile(), { ...JSON.parse(readFileSync(kitTrialsFile(), 'utf8')), [`8@${head}`]: { kit: '1.0.1', failed: [], passed: 0, at: new Date().toISOString(), mains: {}, pending: ['good'] } });
+    const second = ctx();
+    assert.match((await kitTrialHold(second.c, me, other)) ?? '', /waits for kit 1\.0\.1's trial \(#7\) to end first/);
+
+    assert.deepEqual(await done, { pr: 7, cut: null });
+    const kept = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`];
+    assert.deepEqual(kept.pending, []);
+    assert.equal(kept.by, undefined, 'no process holds it once it ended');
+    // Bad was fixed on its side by a test above: both pass.
+    assert.equal(kept.passed, 2);
+
+    // The round it asked for settles it: every agent passed, so it merges.
+    const settled = ctx();
+    assert.equal(await kitTrialHold(settled.c, me, pr()), null, settled.c.lines.join('\n'));
+    assert.match(settled.c.lines.join('\n'), /kit 1\.0\.1 tried on every agent: 2 passed, 0 failed/);
+  } finally {
+    trialsOnTheirOwn(null);
+  }
+});
+
+test('a trial another live process is trying on its own is left to it; one whose process went quiet is tried here', async () => {
+  const at = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const trial = (by: { pid: number; at: string }) => writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [], passed: 1, at: at(0), mains: {}, pending: ['good'], by } });
+  trial({ pid: process.ppid, at: at(0) });
+  const left = ctx();
+  assert.equal(await kitTrialHold(left.c, me, pr()), `${TRIAL_GOING}: 1 of 2 so far; the rounds go on meanwhile`);
+  assert.equal(left.c.lines.length, 0, left.c.lines.join('\n'));
+
+  trial({ pid: process.ppid, at: at(60 * 60_000) });
+  const quiet = ctx();
+  assert.equal(await kitTrialHold(quiet.c, me, pr()), null, quiet.c.lines.join('\n'));
+  assert.ok(quiet.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')), quiet.c.lines.join('\n'));
+});
+
+test("how many agents a trial tries at once: Settings' parallel or a quarter of the processors up to 4, within free memory", () => {
+  const GB = 1024 ** 3;
+  assert.equal(trialParallel(2, 18, 40 * GB), 4);
+  assert.equal(trialParallel(2, 4, 40 * GB), 2, 'never fewer than Settings say, memory allowing');
+  assert.equal(trialParallel(6, 18, 40 * GB), 6);
+  assert.equal(trialParallel(2, 64, 40 * GB), 4, 'at most 4 by processors');
+  assert.equal(trialParallel(4, 18, 7 * GB), 2, 'what free memory holds');
+  assert.equal(trialParallel(2, 18, 0), 1, 'at least one');
 });
