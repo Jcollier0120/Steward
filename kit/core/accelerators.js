@@ -428,6 +428,19 @@ export function withoutGpuBesideNpu(list, gpuWithNpu) {
 }
 
 /**
+ * Of a graphics card's kinds, those it does beside an NPU that serves `npu`, with Manor's gpuWithNpu off: the routed
+ * work (chat, vision, embeddings) no NPU serves. The one rule requests (withoutGpuBesideNpu), the keeper and setup
+ * follow; a reranker is never among them.
+ * @template {string} K
+ * @param {readonly K[]} kinds
+ * @param {readonly string[]} npu
+ * @returns {K[]}
+ */
+export function cardWorkBesideNpu(kinds, npu) {
+  return kinds.filter((k) => WORKS.some((w) => w === k) && !npu.includes(k));
+}
+
+/**
  * A graphics card with only the work `npu` doesn't cover; null when that leaves it nothing. The same object when it
  * serves only such work already.
  * @template {{ kind: AcceleratorKind, chat?: unknown, vision?: unknown, embed?: unknown }} A
@@ -438,7 +451,7 @@ export function withoutGpuBesideNpu(list, gpuWithNpu) {
 function cardBesideNpu(a, npu) {
   /** @type {Record<string, any>} */
   const card = a;
-  const keep = WORKS.filter((w) => !!card[w] && !npu.includes(w));
+  const keep = cardWorkBesideNpu(WORKS.filter((w) => !!card[w]), npu);
   if (!keep.length) return null;
   if (!npu.some((w) => !!card[w]) && !card.rerank) return a;
   /** @type {Record<string, any>} */

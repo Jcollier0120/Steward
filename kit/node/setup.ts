@@ -9,6 +9,7 @@ import { chatBody, ensureServer, expandEnv, lockDirsOf, npuNoteFile, postJson, r
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
+import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { calibrate, checkPinned, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
 
@@ -349,19 +350,25 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
 /**
  * An entry just set up, with what its accelerator had that this setup didn't set up kept: a reranker is an add-on, so
  * setting one up keeps the rest of the accelerator's entry (its servers, slots and cap), and setting the others up again
- * keeps its reranker. Anything else is set up afresh, as before.
+ * keeps its reranker. A card's kinds left to the NPU (`leftToNpu`, Manor's gpuWithNpu off) keep what it had for them:
+ * an install set up before keeps its servers and files, never removed. Anything else is set up afresh, as before.
  */
-export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | AcceleratorEntry | undefined, kinds: readonly EndpointKind[]): AcceleratorEntry {
+export function keepingAddOns(made: AcceleratorEntry, had: Accelerator | AcceleratorEntry | undefined, kinds: readonly EndpointKind[], leftToNpu: readonly EndpointKind[] = []): AcceleratorEntry {
   if (!had) return made;
   if (kinds.every((k) => k === 'rerank')) return { ...entryOf(had), ...(made.rerank ? { rerank: made.rerank } : {}) };
-  return had.rerank && !made.rerank && !kinds.includes('rerank') ? { ...made, rerank: had.rerank } : made;
+  const out: AcceleratorEntry = had.rerank && !made.rerank && !kinds.includes('rerank') ? { ...made, rerank: had.rerank } : made;
+  const keep = leftToNpu.filter((k) => had[k] && !out[k]);
+  if (!keep.length) return out;
+  const was = entryOf(had);
+  return { ...out, ...Object.fromEntries(keep.map((k) => [k, was[k]])) };
 }
 
 /** The kinds of an accelerator's entry that a setup of `kinds` keeps (keepingAddOns): their ports stay theirs. */
-export function keptKinds(had: Accelerator | undefined, kinds: readonly EndpointKind[]): EndpointKind[] {
+export function keptKinds(had: Accelerator | undefined, kinds: readonly EndpointKind[], leftToNpu: readonly EndpointKind[] = []): EndpointKind[] {
   if (!had) return [];
   if (kinds.every((k) => k === 'rerank')) return ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had[k]?.baseUrl);
-  return had.rerank?.baseUrl && !kinds.includes('rerank') ? ['rerank'] : [];
+  const rerank: EndpointKind[] = had.rerank?.baseUrl && !kinds.includes('rerank') ? ['rerank'] : [];
+  return [...rerank, ...leftToNpu.filter((k) => !kinds.includes(k) && had[k]?.baseUrl)];
 }
 
 /** Ports already taken by configured endpoints. */
@@ -439,6 +446,11 @@ export interface SetupTarget {
   kinds: EndpointKind[];
   /** Asked for, but left off: they wouldn't fit on the card beside the others (sizing). */
   left?: EndpointKind[];
+  /**
+   * Left to the NPU beside it (Manor's gpuWithNpu off, kit 2.69.0): the card isn't set up for them, and an entry it
+   * had for them is kept as it was (keepingAddOns), never removed.
+   */
+  leftToNpu?: EndpointKind[];
   /** Filled in once its build is here (llama-server --list-devices). */
   device?: string | null;
   problem?: string;
@@ -451,6 +463,8 @@ export interface SetupPlan {
   npuNote?: string;
   /** Why the NPU, or its embeddings, won't be used, in words for the person (npuNoteFor), when the plan already knows. */
   npuPlain?: string;
+  /** Each graphics card's work left to the NPU (gpuWithNpu off): not set up on it. A card the NPU would leave nothing (a Snapdragon's) is set up whole, as before, so isn't here. */
+  leftToNpu?: { id: string; name: string; kinds: EndpointKind[] }[];
   build: string | null;
   /** config.json's `npu` is install's GenieX default and this PC has no NPU: setup drops it (withoutNpu). */
   dropNpu: boolean;
@@ -488,6 +502,12 @@ export interface PlanInput {
   skipNpu?: boolean;
   /** Exactly what the processor serves (setup's second pass), over its defaults. */
   cpuKinds?: EndpointKind[];
+  /**
+   * Manor's "Use the graphics card for models when there's an NPU" (manor.ts's gpuWithNpu(); setupCommand reads it).
+   * False: a card beside an NPU is set up only for the work no NPU serves (the core's cardWorkBesideNpu, the rule
+   * requests and the keeper follow), unless kinds are asked for by name. Left out, or true: every card as before.
+   */
+  gpuWithNpu?: boolean;
 }
 
 /** What setup would do: for which accelerators, which build and models, how much to download. Downloads nothing. */
@@ -543,6 +563,9 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const cards = o.detection.cards;
   let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
   const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
+  // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card.
+  const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
+  const leftToNpu: NonNullable<SetupPlan['leftToNpu']> = [];
   if (!o.ids.length && !cards.length && o.detection.cpu && cpuDefault.length) wanted = ['cpu'];
   const targets: SetupTarget[] = [];
   for (const id of wanted) {
@@ -554,7 +577,13 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     const kind = card ? 'gpu' : 'cpu';
     // The processor chats (and reranks, when asked): a 0.6B reranker runs well enough on it, a vision model doesn't.
     const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'rerank') : cpuDefault;
-    const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : kinds, keepKinds: !!o.kinds?.length });
+    // A card the NPU leaves nothing to (a Snapdragon's, whose NPU serves all three) is set up whole, as before: the
+    // switch is offered only beside a configured card, and the person can't turn on a card that has no entry.
+    const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(kinds, [...npuServes]) : kinds;
+    const cardKinds = besideKinds.length ? besideKinds : kinds;
+    const left = card ? kinds.filter((k) => !cardKinds.includes(k)) : [];
+    if (left.length) leftToNpu.push({ id, name: card!.name, kinds: left });
+    const size = sizing({ kind, memoryGb: card?.memoryGb, ramGb, kinds: kind === 'cpu' ? cpuKinds : cardKinds, keepKinds: !!o.kinds?.length });
     const v = variantFor({ kind, vendor: card?.vendor, arch });
     const t: SetupTarget = {
       id,
@@ -564,6 +593,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       vendor: card?.vendor,
       ...size,
       ports: {},
+      ...(left.length ? { leftToNpu: left } : {}),
     };
     if ('none' in v) t.problem = v.none;
     else t.variant = v;
@@ -613,12 +643,14 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // What a target keeps (a reranker set up alone keeps the rest; the rest set up again keep the reranker) keeps its ports.
   for (const t of targets) {
     const mine = current.find((a) => a.id === t.id);
-    for (const k of keptKinds(mine, t.kinds)) taken.add(Number(new URL(serverBase(mine![k]!.baseUrl!)).port));
+    for (const k of keptKinds(mine, t.kinds, t.leftToNpu)) taken.add(Number(new URL(serverBase(mine![k]!.baseUrl!)).port));
   }
   let next = FIRST_PORT;
   for (const t of targets.filter((t) => t.variant)) {
     const mine = current.find((a) => a.id === t.id);
-    for (const k of t.kinds) {
+    // The kinds it had first, so one it gains (the switch turned on) never takes the port of one it keeps.
+    const hadOne = (k: EndpointKind) => (mine?.[k]?.baseUrl ? 1 : 0);
+    for (const k of [...t.kinds].sort((a, b) => hadOne(b) - hadOne(a))) {
       const had = mine?.[k]?.baseUrl ? Number(new URL(serverBase(mine[k]!.baseUrl!)).port) : 0;
       if (had && !taken.has(had)) {
         t.ports[k] = had;
@@ -635,7 +667,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     npu.port = next;
   }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
-  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -669,6 +701,7 @@ export function describePlan(p: SetupPlan): string[] {
     lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}`);
     if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
   }
+  for (const l of p.leftToNpu ?? []) lines.push(`${l.name} (${l.id}): ${l.kinds.join(' and ')} not set up on it: the NPU does ${l.kinds.length === 1 ? 'that' : 'those'}, and "Use the graphics card for models when there's an NPU" is off`);
   for (const d of p.downloads) lines.push(`  ${d.have ? 'have' : 'get '} ${d.what} (${mb(d.size)})${d.sha256 ? '' : ', no published checksum'}`);
   lines.push(p.downloadBytes ? `Download: ${mb(p.downloadBytes)} into ${path.dirname(p.serversDir)} and ${p.modelsDir}.` : 'Nothing to download.');
   for (const x of p.problems) lines.push(`note: ${x}`);
@@ -804,7 +837,7 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
     const made = acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens });
     const had = readAccelerators(raw).accelerators.find((a) => a.id === t.id);
-    entries.push({ ...keepingAddOns(made, had, t.kinds), name: core.deviceName(t.name) });
+    entries.push({ ...keepingAddOns(made, had, t.kinds, t.leftToNpu), name: core.deviceName(t.name) });
     io.log(`${t.name}: ${device ? `device ${device}, ` : ''}${Object.keys(models).join(', ')} on ${Object.values(t.ports).join(', ')}`);
   }
   return { raw: mergeEntries(plan.dropNpu ? withoutNpu(raw, plan.localAppData) : raw, entries), entries, problems, ...(npu ? { npu } : {}) };
@@ -1335,6 +1368,8 @@ export interface SetupOptions {
   env?: Record<string, string | undefined>;
   /** Where the NPU's note is kept (npuNoteFile(); tests give their own, and a given detection keeps none). */
   npuNoteFile?: string;
+  /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
+  gpuWithNpu?: boolean;
 }
 
 /** Accelerator setup as a command: plan, ask, download, find devices, write config.json. Exit code. */
@@ -1352,7 +1387,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   if (hw) rememberHardware(hw);
   log("Looking up llama.cpp's newest build and the models...");
   const releases = await (o.releases ?? llamaReleases)();
-  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists });
+  const withNpu = o.gpuWithNpu ?? gpuWithNpu().on;
+  const plan = await planSetup({ detection, ids: o.ids, kinds: o.kinds, raw: file.raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
   for (const l of describePlan(plan)) log(l);
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
   if (!settingUp && !plan.dropNpu) {
@@ -1377,9 +1413,25 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const problems = r.problems.filter((p) => !npuDetails.has(p));
   let raw = r.raw;
   let entries = r.entries;
-  // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had.
+  // What the NPU couldn't do after all goes to a card that left it to the NPU: set up again now, for the work the NPU
+  // turned out not to serve (the NPU's entry as written decides, as for requests), beside what the card does already.
   const missing = npuMissing(plan, entries);
-  if (missing.length && !entries.some((e) => e.kind === 'gpu') && detection.cpu) {
+  const cardsFor = (plan.leftToNpu ?? []).filter((l) => l.kinds.some((k) => missing.includes(k))).map((l) => l.id);
+  if (missing.length && cardsFor.length) {
+    log(`The graphics card takes the NPU's ${missing.join(' and ')} instead: setting it up for that too.`);
+    const plan2 = await planSetup({ detection, ids: cardsFor, skipNpu: true, raw, releases, hfFiles: o.hfFiles ?? hfFiles, home: o.home ?? toolsHome(), env: o.env, exists: o.io?.exists, gpuWithNpu: withNpu });
+    for (const l of describePlan(plan2).filter((l) => !/\(npu\)/.test(l))) log(l);
+    const go = !plan2.downloadBytes || o.yes || (o.confirm ? await o.confirm(`Download ${mb(plan2.downloadBytes)} for the graphics card? [y/N] `) : false);
+    if (go) {
+      const r2 = await runSetup(plan2, raw, { log, ...o.io });
+      for (const p of r2.problems) log(`problem: ${p}`);
+      problems.push(...r2.problems);
+      raw = r2.raw;
+      entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
+    } else log(`Not downloading for the graphics card: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
+  }
+  // With no card to take it, what the NPU couldn't do goes to the processor: set up now, beside what it had.
+  else if (missing.length && !entries.some((e) => e.kind === 'gpu') && detection.cpu) {
     const had = readAccelerators(raw).accelerators.find((a) => a.id === 'cpu');
     const cpuKinds = [...new Set([...ENDPOINT_KINDS.filter((k) => k !== 'rerank' && had && serves(had, k)), ...missing])];
     log(`The processor takes the NPU's ${missing.join(' and ')} instead: setting it up for ${cpuKinds.join(' and ')}.`);

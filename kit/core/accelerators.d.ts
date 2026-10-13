@@ -365,6 +365,16 @@ export declare function withoutGpuBesideNpu<A extends {
     embed?: unknown;
 }>(list: A[], gpuWithNpu: boolean): A[];
 /**
+ * Of a graphics card's kinds, those it does beside an NPU that serves `npu`, with Manor's gpuWithNpu off: the routed
+ * work (chat, vision, embeddings) no NPU serves. The one rule requests (withoutGpuBesideNpu), the keeper and setup
+ * follow; a reranker is never among them.
+ * @template {string} K
+ * @param {readonly K[]} kinds
+ * @param {readonly string[]} npu
+ * @returns {K[]}
+ */
+export declare function cardWorkBesideNpu<K extends string>(kinds: readonly K[], npu: readonly string[]): K[];
+/**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).
  * On a PC known to have no NPU (`hw`, hardware.json), an entry said to be the NPU is read as what the PC has

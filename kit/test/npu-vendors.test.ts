@@ -10,6 +10,8 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(tmpdir(), 'kit-npu-vendors-'));
 process.env.REEVE_HOME = home;
 delete process.env.REEVE_CONFIG;
+// No Manor here: its "Use the graphics card for models when there's an NPU" switch reads as the agent's own default.
+process.env.MANOR_HOME = path.join(process.env.REEVE_HOME!, 'no-manor');
 delete process.env.ACCELERATORS_CONFIG;
 delete process.env.ACCELERATORS_HOME;
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'npu-agent', 'locks', 'npu');
@@ -722,4 +724,116 @@ test("setup as a command, with no card: the NPU failing is no error; the process
   const good = fakeNpuIo();
   await setupCommand({ ...base, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' } });
   assert.equal(A.readNpuNote(noteFile), null);
+});
+
+// Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu, off by default): a card beside an NPU is
+// set up only for the work no NPU serves, the rule requests and the keeper follow (core.cardWorkBesideNpu), so its chat
+// and embedding models (about 3.1 GB on an Intel PC) aren't downloaded to sit unused.
+const LUNAR = () => parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
+const ARC = 'gpu-intel-r-arc-tm-140v-gpu-16gb';
+const ARC_VK = '  Vulkan0: Intel(R) Arc(TM) 140V GPU (16GB) (16384 MiB, 15000 MiB free)\n';
+const CHAT_GGUF = /Qwen3-4B-Instruct-2507-Q4_K_M\.gguf/;
+const EMBED_GGUF = /Qwen3-Embedding-0\.6B-Q8_0\.gguf/;
+/** What a setup run downloaded, by file. */
+const downloaded = (did: string[]) => did.filter((d) => d.startsWith('download '));
+/** setupCommand on an Intel PC with its Arc, on fakes: the config written and what it downloaded. */
+async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Parameters<typeof fakeNpuIo>[0] }) {
+  const file = path.join(home, `${name}-config.json`);
+  if (!existsSync(file)) writeFileSync(file, '{}');
+  const npu = fakeNpuIo(o.npu);
+  const log: string[] = [];
+  const r = await setupCommand({ ids: [], detection: LUNAR(), releases: async () => RELEASES, hfFiles: hf, configFile: file, home: path.join(home, name), env: ENV, yes: true, npuNoteFile: path.join(home, `${name}-note.json`), gpuWithNpu: o.gpuWithNpu, log: (l: string) => log.push(l), io: { ...npu.io, exists: (p: string) => disk()(p) || npu.io.exists(p), listDevices: async () => ARC_VK } });
+  const written = JSON.parse(readFileSync(file, 'utf8'));
+  const arc = written.accelerators?.find((a: any) => a.id === ARC);
+  const npuEntry = written.accelerators?.find((a: any) => a.kind === 'npu');
+  return { r, log, written, arc, npuEntry, did: npu.did };
+}
+const kindsOf = (a: any) => (['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => a?.[k]);
+
+test('beside an Intel NPU, with the switch off, the card is planned for vision alone: only its model and mmproj are downloaded', async () => {
+  const tools = path.join(home, 'beside');
+  const off = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
+  assert.deepEqual(off.npu?.kinds, ['chat', 'embed']);
+  assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['vision'], ['chat', 'embed']]]);
+  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'embed'] }]);
+  const files = off.downloads.map((d) => path.win32.basename(d.dest));
+  assert.ok(files.includes('Qwen3VL-4B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf'), files.join());
+  assert.ok(!files.some((f) => CHAT_GGUF.test(f) || EMBED_GGUF.test(f)), `no chat or embedding model for the card: ${files.join()}`);
+  assert.ok(describePlan(off).includes(`Intel(R) Arc(TM) 140V GPU (16GB) (${ARC}): chat and embed not set up on it: the NPU does those, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
+  // The switch on (or left out, as for an agent with no Manor): the card is set up for everything, as before.
+  const on = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: true });
+  assert.deepEqual(on.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['chat', 'vision', 'embed'], undefined]]);
+  assert.equal(on.leftToNpu, undefined);
+  assert.ok(on.downloadBytes - off.downloadBytes >= 2497281120 + 639150592, "the card's chat and embedding models: 3.1 GB more");
+  // Kinds asked for by name are set up as asked.
+  const asked = await planSetup({ detection: LUNAR(), ids: [ARC], kinds: ['chat', 'vision'], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
+  assert.deepEqual(asked.targets.map((t) => t.kinds), [['chat', 'vision']]);
+
+  const run = await intelSetup('beside-run', { gpuWithNpu: false });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
+  assert.deepEqual(kindsOf(run.arc), ['vision']);
+  const got = downloaded(run.did);
+  assert.ok(got.some((d) => /Qwen3VL-4B-Instruct-Q4_K_M\.gguf/.test(d)) && got.some((d) => /mmproj-Qwen3VL/.test(d)), got.join('\n'));
+  assert.ok(!got.some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), got.join('\n'));
+});
+
+test('the NPU failing its embeddings at setup: the card takes them, beside its vision; the NPU keeps its chat', async () => {
+  const run = await intelSetup('beside-noembed', { gpuWithNpu: false, npu: { embeds: false } });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat']);
+  assert.deepEqual(kindsOf(run.arc), ['vision', 'embed']);
+  assert.ok(run.log.some((l) => /^The graphics card takes the NPU's embed instead/.test(l)), run.log.join('\n'));
+  const got = downloaded(run.did);
+  assert.ok(got.some((d) => EMBED_GGUF.test(d)) && !got.some((d) => CHAT_GGUF.test(d)), got.join('\n'));
+  // The NPU failing outright: no NPU entry, and the card does everything, as before.
+  const none = await intelSetup('beside-nonpu', { gpuWithNpu: false, npu: { answers: false } });
+  assert.equal(none.npuEntry, undefined);
+  assert.deepEqual(kindsOf(none.arc), ['chat', 'vision', 'embed']);
+});
+
+test('the switch on: the card is set up for everything beside the NPU', async () => {
+  const run = await intelSetup('beside-on', { gpuWithNpu: true });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
+  assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed']);
+  assert.ok(downloaded(run.did).some((d) => CHAT_GGUF.test(d)));
+});
+
+test("the switch turned on later: setting up again fills in the card's chat and embeddings, and keeps the NPU as it was", async () => {
+  const first = await intelSetup('beside-later', { gpuWithNpu: false });
+  assert.deepEqual(kindsOf(first.arc), ['vision']);
+  const later = await intelSetup('beside-later', { gpuWithNpu: true });
+  assert.equal(later.r.code, 0, later.log.join('\n'));
+  assert.deepEqual(kindsOf(later.arc), ['chat', 'vision', 'embed']);
+  assert.deepEqual(later.npuEntry, first.npuEntry, 'the NPU set up before is left as it is');
+  assert.equal(later.arc.vision.baseUrl, first.arc.vision.baseUrl, 'the card keeps its vision port');
+  assert.ok(!later.did.some((d) => /OpenVINO|ovms/i.test(d)), later.did.join('\n'));
+});
+
+test('an install whose card already has its chat and embeddings keeps them when set up again with the switch off: nothing removed', async () => {
+  const before = await intelSetup('beside-kept', { gpuWithNpu: true });
+  assert.deepEqual(kindsOf(before.arc), ['chat', 'vision', 'embed']);
+  const again = await intelSetup('beside-kept', { gpuWithNpu: false });
+  assert.equal(again.r.code, 0, again.log.join('\n'));
+  assert.deepEqual(kindsOf(again.arc), ['chat', 'vision', 'embed']);
+  assert.deepEqual(again.arc.chat, before.arc.chat, 'its chat entry as it was');
+  assert.deepEqual(again.arc.embed, before.arc.embed, 'its embeddings entry as it was');
+  assert.notEqual(again.arc.vision.baseUrl, again.arc.chat.baseUrl);
+  assert.ok(!downloaded(again.did).some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), 'not downloaded again');
+  assert.deepEqual(validateAccelerators(again.written), []);
+});
+
+test('a Snapdragon, whose NPU serves all three: its card is set up whole, as before, with the switch off too', async () => {
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const M = 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json';
+  const card = 'adapter|0|20803|4294967296|17179869184|0x00000000_0x0000c3c3|0|Qualcomm(R) Adreno(TM) X2-90 GPU\n';
+  const plan = (gpuWithNpu: boolean) => planSetup({ detection: parseDetection(`${card}${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: path.join(home, 'snap-beside'), env: ENV, exists: disk([G, M]), gpuWithNpu });
+  const off = await plan(false);
+  const on = await plan(true);
+  assert.deepEqual(off.npu?.kinds, ['chat', 'vision', 'embed']);
+  assert.deepEqual(off.targets.map((t) => [t.kinds, t.leftToNpu]), on.targets.map((t) => [t.kinds, t.leftToNpu]));
+  assert.equal(off.targets.length, 1);
+  assert.equal(off.leftToNpu, undefined);
+  assert.equal(off.downloadBytes, on.downloadBytes);
 });
