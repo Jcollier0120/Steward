@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.51
+
+**The Steward unpacks a project's packages once for all the staff that use them, and one install at a time.**
+
+### What changed
+
+- Staff whose packages are the same now share one copy, even when their own project details differ (the command they install, the version ranges they ask for). Before, six agents with the very same packages each had a copy of their own, about 50 MB and 800 files unpacked six times.
+- Only one package install runs at a time on the PC, whichever part of the Steward asks for it: its page, a round in a terminal, or a check before a merge. Several installs side by side were the heaviest bursts of disk and memory work the PC saw.
+- Packages already in npm's own cache are taken from there without asking the registry again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first checks after updating install the packages once more into the new shared copy. The old copies are cleared away as they go unused.
+
 ## 0.35.49
 
 **A pull request stuck on a conflict no longer holds up the pull requests queued behind it.**
