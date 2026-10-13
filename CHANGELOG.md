@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.59
+
+**The Steward's tests pass on any PC, not only on its maker's laptop.**
+
+### What changed
+
+- Eleven tests took part of their setup from the PC they ran on, and failed elsewhere (on the Intel test laptop, say). The pieces they took were these:
+  - whether this is the PC with Developer Pro;
+  - Manor's Developer options switch;
+  - whether the Surveyor is installed.
+- Each test now says what it means. Nothing in the Steward itself changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.57
 
 **Two pieces of work on the same repository no longer end up with the same version.**
