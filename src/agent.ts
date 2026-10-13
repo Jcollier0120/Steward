@@ -23,6 +23,7 @@ import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
+import { trialsOnTheirOwn } from './stages/trial.ts';
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
@@ -245,6 +246,13 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
   const startRound = () => void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  // A kit trial runs beside the rounds here (stages/trial.ts): once it ends, a round settles its PR at once, rather than
+  // at the next tick. One the network cut short waits for the next tick, as before.
+  trialsOnTheirOwn(({ cut }) => {
+    if (cut || !loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
+    if (rounding() || slotsFull()) roundAfter = true;
+    else startRound();
+  });
   // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it. The first comes within a minute of the
   // start, not the kit's 2 to 15 minutes at a gentle pace: the Steward starts again whenever Manor updates it, often

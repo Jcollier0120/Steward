@@ -2,6 +2,22 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.48
+
+**A new kit is tried on the staff in one go, beside the rounds, instead of a few each round.**
+
+### What changed
+
+- When the Steward's own PR brings a new kit, its trial on the staff now runs on its own from the Steward's page, start to finish, while the rounds go on merging and releasing the rest. Before, each round tried the staff for 8 minutes and then waited for the next round, so a trial took many rounds.
+- Up to 4 staff are tried at once on a PC with enough processors (more if Settings ask for more), but never more than its free memory holds, at about 3 GB each.
+- As soon as a trial ends, a round comes to merge the PR or say which staff it fails, without waiting for the next scheduled one.
+- A second kit's trial waits for the first to end, and a trial another Steward process is already running is left to it.
+- A round run from a terminal still tries a few each round, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.47
 
 **The Steward starts far fewer programs each round.**
