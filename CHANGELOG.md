@@ -10,7 +10,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Tests, type checks, installs and release builds that the Steward runs use at most half your processor, at low priority, so your PC stays quiet and responsive while they run. That covers `vouch`, the kit's trials on every agent, the checks before a merge, rollouts and releases. Several running at once share that half rather than taking half each.
 - To change the share, set `"checksPace"` in Manor's settings.json: a percentage from 10 to 100, or `"full"` for no limit. `steward vouch --fast` runs one vouch at full speed.
-- When the Steward tests a pull request itself and it passes, it marks that commit as tested on GitHub, as `vouch` does. The Assayer then doesn't install and test the same pull request a second time, which used to double the work on your PC (and Windows Defender's scanning of every file each install wrote).
+- When the Steward tests a pull request itself and it passes, it marks that commit as tested on GitHub, as `vouch` does. So does a pull request it catches up or stamps where only version lines and changelogs changed, since it isn't tested again. The Assayer then doesn't install and test the same pull request a second time, which used to double the work on your PC (and Windows Defender's scanning of every file each install wrote).
 
 ### What changed
 

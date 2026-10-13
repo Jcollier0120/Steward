@@ -175,6 +175,21 @@ export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tes
 }
 
 /**
+ * carryTested, and the vouch set on the new head too (a team PR from the repository itself), as vouchedHere does for a
+ * pass here: a catch-up's or a stamp's head that changed only version lines and changelogs carries this PC's standing,
+ * and without the vouch on GitHub the Assayer would install and test it again. A status GitHub won't take is only a line
+ * in the log.
+ */
+export async function carryVouched(ctx: Ctx, e: Employee, pr: PrInfo, head: string, why: string): Promise<Tested> {
+  const tested = carryTested(e, pr, head, why);
+  if (pr.whose !== 'team' || pr.fork) return tested;
+  const description = `checks passed at ${pr.headOid.slice(0, 7)}, carried to ${head.slice(0, 7)} (only versions and changelogs changed)`;
+  const refused = await setVouch(ctx, e, e.repo, head, description);
+  ctx.log(`[${e.id}] #${pr.number}: ${refused ?? `its new head ${head.slice(0, 7)} has the vouch (${VOUCH_CONTEXT}) carried from ${pr.headOid.slice(0, 7)}`}`);
+  return tested;
+}
+
+/**
  * A team PR from the repository itself that passed here gets the vouch on its head, as `steward vouch` sets it
  * (vouch.ts's setVouch): the Assayer vouches for any team PR head without one, and would otherwise install and test it a
  * second time. A failure sets nothing, and a status GitHub won't take is only a line in the log: the result stands.

@@ -8,7 +8,7 @@ import { agreedVersion } from '../versions.ts';
 import { settledFiles, settleVersion } from './catchup.ts';
 import { checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
 import { KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, repinKit } from './kitpart.ts';
-import { carryTested } from './prtest.ts';
+import { carryVouched } from './prtest.ts';
 import type { PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 
@@ -136,7 +136,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
     const pushed = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
     // Only versions and entries changed since the head it stood at: what passed there holds.
-    if (o.carry) carryTested(e, pr, pushed, o.carry);
+    if (o.carry) await carryVouched({ ...ctx, run }, e, pr, pushed, o.carry);
     const note = `stamped ${did.join('; ')}`;
     ctx.log(`[${e.id}] #${pr.number}: ${note}`);
     // Its title says the version it merges with.

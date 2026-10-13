@@ -458,6 +458,9 @@ test("the round: a vouched PR caught up only in its version lines merges in the 
   assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/, 'no checks run');
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '21', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
   assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges without being tested again\.$/);
+  // Its new head has the vouch too, so the Assayer doesn't install and test it again.
+  const vouches = r.gh.filter((a) => a[0] === 'api' && a.includes('POST'));
+  assert.deepEqual(vouches, [['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${now}`, '-f', 'state=success', '-f', 'context=steward/tested', '-f', `description=checks passed at ${pr.headOid.slice(0, 7)}, carried to ${now.slice(0, 7)} (only versions and changelogs changed)`]]);
 });
 
 test('the round: a PR with no vouch and never tested here is caught up as before, and tested at its new head', async () => {
@@ -470,6 +473,7 @@ test('the round: a PR with no vouch and never tested here is caught up as before
   assert.equal(c.done, true, c.note);
   assert.equal(c.carried, undefined);
   assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges once its checks pass at the new head\.$/);
+  assert.ok(!r.gh.some((a) => a[0] === 'api' && a.includes('POST')), 'nothing carried, so no vouch');
 });
 
 test("a kit PR whose branch already carries that kit, or a newer one, is closed: it has nothing left to do", async () => {
