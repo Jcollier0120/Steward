@@ -56,6 +56,32 @@ const INSTALL_MS = 20 * 60_000;
 /** The sets being installed in this process, by key, so two worktrees wanting one set install it once. */
 const installing = new Map<string, Promise<string | null>>();
 
+/** Windows' answers while something else has a file in a folder open: Defender or the indexer reading what was just written. */
+const IN_USE = new Set(['EPERM', 'EACCES', 'EBUSY']);
+/** How long a rename waits for that: a scan of a fresh install's files takes a few seconds at most. */
+const RENAME_MS = 15_000;
+
+/**
+ * A folder just written, renamed to `to`; again, a little later each time, while Windows says it's in use (as npm's own
+ * graceful-fs does), until RENAME_MS. Renaming a set the moment npm ci finished failed now and then with EPERM: one in
+ * fifteen of the test's three installs, the folder's new files still open in Defender's scan. A `to` another process
+ * finished meanwhile isn't waited for: the caller takes theirs.
+ */
+export async function renameWhenFree(from: string, to: string, o: { rename?: (a: string, b: string) => void; budgetMs?: number } = {}): Promise<void> {
+  const rename = o.rename ?? renameSync;
+  const end = Date.now() + (o.budgetMs ?? RENAME_MS);
+  for (let wait = 25; ; wait = Math.min(wait * 2, 1000)) {
+    try {
+      rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? '';
+      if (!IN_USE.has(code) || existsSync(path.join(to, '.ready')) || Date.now() + wait > end) throw err;
+      await new Promise((res) => setTimeout(res, wait));
+    }
+  }
+}
+
 /** The set's node_modules, installed (once) if it isn't yet; null when npm ci failed there. */
 async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) => void): Promise<string | null> {
   const root = modulesRootOf(ctx.settings);
@@ -86,10 +112,10 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
       mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
       writeFileSync(path.join(tmp, '.ready'), new Date().toISOString());
       try {
-        renameSync(tmp, set);
-      } catch {
+        await renameWhenFree(tmp, set);
+      } catch (err) {
         // Another process made it meanwhile: theirs is as good.
-        if (!existsSync(path.join(set, '.ready'))) throw new Error(`couldn't put the packages in ${set}`);
+        if (!existsSync(path.join(set, '.ready'))) throw new Error(`couldn't put the packages in ${set} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message})`);
       }
       return path.join(set, 'node_modules');
     } finally {

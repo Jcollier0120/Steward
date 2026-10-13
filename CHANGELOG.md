@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.35.55
+## 0.35.57
 
 **Two pieces of work on the same repository no longer end up with the same version.**
 
@@ -10,6 +10,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - A version claimed for new work while a round was running could be forgotten at the end of that round, so the next catch-up handed the same version to another pull request. Claims made mid-round are now kept, and catch-ups skip them.
 - The Steward reads the shared list of claimed versions as it is when it copies it, not as it was when the round began.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.56
+
+**Installing a project's packages no longer falls back to a slow install of its own now and then.**
+
+### What changed
+
+- Once the Steward has installed a set of packages to share, it moves the finished folder into place. Windows sometimes refuses that for a moment while Defender or the indexer is still reading the new files, and the Steward then gave up on sharing and installed the packages again in that worktree. It now waits briefly and tries again, for up to 15 seconds.
 
 ### Before you update
 
