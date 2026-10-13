@@ -10,6 +10,9 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * moves only `lookedAt`, so `at` says when it last did something new. Looks older than two weeks go.
  */
 
+/** How the hold of a PR that conflicts with its branch begins (stages/merge.ts holdReason). */
+export const CONFLICTS = 'conflicts with its branch';
+
 export type ConflictOutcome = 'caught-up' | 'sent-back' | 'closed' | 'couldnt';
 
 export interface ConflictLook {
@@ -61,4 +64,16 @@ export function loadConflicts(now = Date.now()): ConflictLook[] {
   return Object.values(readJson<Record<string, ConflictLook>>(conflictsFile(), {}))
     .filter((l) => fresh(l, now))
     .sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/**
+ * A PR's last look, where it found the PR at `headOid` conflicting beyond what the Steward resolves and handed that on
+ * (sent back to its author, stages/kickback.ts); else null. Such a PR gives up its turn in the version queue
+ * (stages/merge.ts): nothing it holds up merges until a person or the Wright resolves it, and once they have, its
+ * catch-up gives it a version of its own above the PRs that merged meanwhile.
+ */
+export function handedOn(repo: string, number: number, headOid: string, now = Date.now()): ConflictLook | null {
+  if (!headOid) return null;
+  const l = readJson<Record<string, ConflictLook>>(conflictsFile(), {})[keyOf({ repo, number })];
+  return l && fresh(l, now) && l.outcome === 'sent-back' && l.headOid === headOid && l.needs.length ? l : null;
 }

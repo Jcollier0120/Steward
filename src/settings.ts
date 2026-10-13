@@ -174,6 +174,11 @@ export interface AlarmSettings {
   toast: boolean;
   /** A PR held this long is an alarm. */
   waitingHours: number;
+  /**
+   * A PR that conflicts with its branch while others wait their turn behind it, held this long, is an alarm; and a
+   * conflict its author was told about and left this long goes to the Wright (work.ts).
+   */
+  blockingHours: number;
   /** A problem the Surveyor has reported this long is an alarm. */
   problemHours: number;
   /** A release the Aletaster's tasting has held this long is an alarm. */
@@ -289,7 +294,7 @@ export const DEFAULT_SETTINGS: Settings = {
   byItself: false,
   roundMinutes: 10,
   mergeMinAgeMinutes: 10,
-  alarms: { on: true, toast: true, waitingHours: 24, problemHours: 6, tastingHours: 6 },
+  alarms: { on: true, toast: true, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
   catchUp: true,
   mergeTrain: true,
@@ -550,6 +555,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
+      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A conflicting PR holding others up for', help: 'The lowest version merges first, so the PRs behind it wait. A conflict its author was told about and left this long goes to the Wright.' },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
     ],
@@ -658,6 +664,7 @@ function normalizeAlarms(raw: unknown): AlarmSettings {
     on: typeof a.on === 'boolean' ? a.on : d.on,
     toast: typeof a.toast === 'boolean' ? a.toast : d.toast,
     waitingHours: whole(a.waitingHours, 1, 168, d.waitingHours),
+    blockingHours: whole(a.blockingHours, 1, 168, d.blockingHours),
     problemHours: whole(a.problemHours, 1, 168, d.problemHours),
     tastingHours: whole(a.tastingHours, 1, 168, d.tastingHours),
   };

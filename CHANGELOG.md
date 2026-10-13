@@ -15,6 +15,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.49
+
+**A pull request stuck on a conflict no longer holds up the pull requests queued behind it.**
+
+### What's new
+
+- A new alarm, **A conflicting PR holding others up for** (in Settings, under Alarms, 1 hour by default). It goes off when the lowest-version PR in a repository conflicts with its branch and other ready PRs are waiting their turn behind it. It names the PR, the files it conflicts in, and the PRs it holds up. Before, nothing showed for a whole day (the "A PR waiting for" alarm), however many PRs were held up meanwhile.
+- When a conflict has been left unresolved for that hour after its author was told, it is handed to the Wright (where the Wright works) as a work issue. The Wright opens a draft that carries the PR's change with the conflict resolved. The PR gets one comment saying the Wright has it. If its author resolves it first, the issue closes by itself.
+
+### What changed
+
+- A ready PR whose conflict needs a person, and whose author has been told, now gives up its turn. The ready PRs above it merge without waiting for it. Once it is resolved, it is caught up and given a version above theirs, as a PR overtaken by a lower one already was. A draft still keeps its place. So does a conflict the Steward couldn't tell anyone about, and the new alarm goes off for that one within the hour.
+- The comment telling an author about a conflict is posted once. It is posted again only if the PR gets a new push or the conflict moves to other files, not each time another PR merges.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.47
 
 **The Steward starts far fewer programs each round.**
