@@ -305,7 +305,7 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
 });
 
 /** A setUpNpu world: what it ran, downloaded and unpacked, and whether its test request answers. */
-function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean } = {}) {
+function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean; measured?: { warmMs: number; tokensPerSecond: number } | { problems: string[] } } = {}) {
   const did: string[] = [];
   const present = new Set<string>();
   const io = {
@@ -333,6 +333,8 @@ function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boole
     copy: (_from: string, to: string) => void did.push(`copy ${to}`),
     testNpu: async () => (o.answers === false ? ['chat gave no answer ({"error":"model failed to load"})'] : []),
     hash: async () => 'none pinned in these tests',
+    // A generation nobody has measured (the X1's): its measuring requests, or none (it keeps the route's starting values).
+    measure: async () => o.measured ?? null,
   };
   return { io, did };
 }
@@ -505,8 +507,11 @@ test('setup as a command: asks with the size first; the NPU entry is written onl
   const failed = await setupCommand({ ...base, yes: true, log: (l: string) => log.push(l), io: { ...silent.io, exists: (p: string) => disk()(p) || silent.io.exists(p), listDevices: async () => vk } });
   const after1 = JSON.parse(readFileSync(file, 'utf8'));
   assert.deepEqual(after1.accelerators.map((a: any) => a.id), ['gpu-intel-r-arc-tm-140v-gpu-16gb'], 'the NPU never answered: only the card is written');
-  assert.equal(failed.code, 1);
-  assert.ok(log.some((l) => /problem: npu: OpenVINO Model Server didn't answer its test request/.test(l)), log.join('\n'));
+  // The NPU failing is no error: the card takes its work, and the note says why, in plain words.
+  assert.equal(failed.code, 0);
+  assert.ok(log.some((l) => /^note: npu: OpenVINO Model Server didn't answer its test request/.test(l)), log.join('\n'));
+  assert.ok(!log.some((l) => /^problem:/.test(l)), log.join('\n'));
+  assert.ok(log.includes("note: The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) isn't used: its model server didn't pass its test. The graphics card or the processor does its work instead."), log.join('\n'));
 
   const good = fakeNpuIo();
   const done = await setupCommand({ ...base, yes: true, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => vk } });
@@ -546,4 +551,192 @@ test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, 
   } finally {
     rmSync(tools, { recursive: true, force: true });
   }
+});
+
+// ------------------------------------------------------------------------------------------------
+// The generations nobody has measured: their starting values, setup's calibration on the PC, sanity, and falling back quietly
+
+const S = await import('./fixture/src/kit/setup.ts');
+const A = await import('./fixture/src/kit/accelerators.ts');
+const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
+const GiB = 1024 ** 3;
+
+test("each Intel generation's starting values: the NPU 3720 at a 2048-token prompt and generous timeouts, NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
+  const intel = V.NPU_CATALOG.routes.intel;
+  const g = intel.generations;
+  assert.equal(g['lunar-lake'].verified, true);
+  for (const id of ['meteor-lake', 'arrow-lake', 'panther-lake', 'wildcat-lake']) {
+    assert.equal(g[id].verified, false, `${id} stays unverified until the NPU check passes on one`);
+    assert.ok(g[id].basis, `${id} says where its values come from`);
+  }
+  const meteor = V.routeFor(intel, 'meteor-lake');
+  assert.equal(meteor.serve[meteor.serve.indexOf('--max_prompt_len') + 1], '2048');
+  assert.equal(meteor.maxContextTokens, 2048);
+  assert.equal(meteor.caps.chat, 2048);
+  assert.deepEqual(meteor.timeouts, { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 });
+  assert.equal(meteor.memoryGb?.chat, 3.6);
+  assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
+  // A token every 400 ms covers 2.5 tokens a second; Lunar Lake's 24–26 and the NPU 3720's expected 5–8 are well inside.
+  assert.ok(1000 / meteor.timeouts.requestPerTokenMs! < 5);
+  const panther = V.routeFor(intel, 'panther-lake');
+  assert.ok(panther.timeouts.coldLoadMs! > intel.timeouts.coldLoadMs! && panther.timeouts.requestPerTokenMs! >= intel.timeouts.requestPerTokenMs!);
+  assert.equal(panther.serve[panther.serve.indexOf('--max_prompt_len') + 1], intel.serve[intel.serve.indexOf('--max_prompt_len') + 1], "NPU 5 keeps Lunar Lake's prompt length");
+  assert.equal(V.routeFor(intel, 'lunar-lake'), intel, 'Lunar Lake: the route as measured, untouched');
+  // A generation's arguments replace the route's, never add one it hasn't (off the NPU, --max_prompt_len is gone).
+  const offNpu = { ...intel, serve: intel.serve.filter((a, i, s) => a !== '--max_prompt_len' && s[i - 1] !== '--max_prompt_len') };
+  assert.ok(!V.routeFor(offNpu, 'meteor-lake').serve.includes('--max_prompt_len'));
+  // An NPU 3720 is planned with them.
+  const plan = planFor(NPU.meteor, 'x64', 'C:\\t');
+  assert.equal(plan.route.maxContextTokens, 2048);
+  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 360_000);
+});
+
+test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
+  const intel = V.NPU_CATALOG.routes.intel;
+  assert.equal(V.NPU_MEMORY_SHARE, 0.4);
+  // A "16 GB" laptop shows Windows about 15.6 GB (the rest reserved for the graphics).
+  assert.deepEqual(V.npuMemoryFit(intel, 15.6 * GiB), { chat: true, embed: true, budgetGb: 6.2 });
+  const twelve = V.npuMemoryFit(intel, 11.6 * GiB);
+  assert.deepEqual([twelve.chat, twelve.embed], [true, false]);
+  assert.match(twelve.why!, /hasn't room for the NPU's embedding model \(1\.74 GB\)/);
+  const eight = V.npuMemoryFit(intel, 7.6 * GiB);
+  assert.deepEqual([eight.chat, eight.embed], [false, false]);
+  assert.match(eight.why!, /this PC's 8 GB of memory hasn't room for the NPU's chat model \(4\.3 GB\)/);
+  // The NPU 3720's chat at 2048 (3.6 GB) doesn't fit 8 GB either.
+  assert.equal(V.npuMemoryFit(V.routeFor(intel, 'meteor-lake'), 7.6 * GiB).chat, false);
+  assert.deepEqual(V.npuMemoryFit(intel, null), { chat: true, embed: true, budgetGb: 0 }, "memory unknown: the NPU isn't kept out on a guess");
+
+  const tools = path.join(home, 'memory-rule');
+  const planAt = (gb: number) => planSetup({ detection: parseDetection(`${NPU.lunar}\n${at16(Math.round(gb * GiB))}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
+  const p16 = await planAt(15.6);
+  assert.deepEqual(p16.npu?.kinds, ['chat', 'embed']);
+  assert.equal(p16.npuPlain, undefined);
+  const p12 = await planAt(11.6);
+  assert.deepEqual(p12.npu?.kinds, ['chat']);
+  assert.match(p12.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) makes no embeddings: this PC's 12 GB of memory hasn't room/);
+  assert.deepEqual(p12.targets.map((t) => [t.id, t.kinds]), [['cpu', ['embed']]], 'the processor makes the embeddings');
+  const p8 = await planAt(7.6);
+  assert.equal(p8.npu, null);
+  assert.match(p8.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: this PC's 8 GB of memory hasn't room for the NPU's chat model/);
+  assert.deepEqual(p8.targets.map((t) => [t.id, t.kinds]), [['cpu', ['chat']]], 'the processor chats');
+});
+
+test("calibration: this PC's timeouts from setup's measurements, never under the starting values, never past the bounds; too slow under 2 tokens a second", () => {
+  const meteor = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  // Fast enough for the starting values: they stay.
+  assert.deepEqual(V.calibrate({ coldMs: 150_000, warmMs: 1_500, tokensPerSecond: 8 }, meteor), { timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 } });
+  // Slower: a token twice its writing time, the base twice a full 2048-token read (at a tenth of the writing speed's time) and a warm answer, the cold load half again.
+  assert.deepEqual(V.calibrate({ coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 }, meteor), { timeouts: { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 } });
+  // Past the bounds: held at them.
+  const slow = V.calibrate({ coldMs: 40 * 60_000, warmMs: 60_000, tokensPerSecond: 2.1 }, meteor);
+  assert.deepEqual(slow, { timeouts: { requestBaseMs: V.CALIBRATION.maxBaseMs, requestPerTokenMs: 1_000, coldLoadMs: V.CALIBRATION.maxColdLoadMs } });
+  assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, meteor).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
+  assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, meteor).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
+});
+
+test("sanity, not just an answer: nonsense chat (the same few characters over and over, or not what was asked) and embeddings that don't tell a cat from an invoice", () => {
+  assert.equal(S.saysReady('<think>\n\n</think>\n\nready'), true);
+  assert.equal(S.saysReady('Ready.'), true);
+  assert.equal(S.saysReady('?option?option?option?option?option?option'), false);
+  assert.equal(S.saysReady('ready ready ready ready ready ready ready'), false, 'repeated: degenerate even when it says it');
+  assert.equal(S.saysReady(''), false, 'no answer');
+  assert.equal(S.countsSensibly('One, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve.'), true);
+  assert.equal(S.countsSensibly('one one one one one one one three seven'), false);
+  assert.equal(S.countsSensibly('I cannot do that.'), false);
+  const v = (...xs: number[]) => xs;
+  assert.deepEqual(S.embedSanity([v(1, 0.1, 0), v(0.9, 0.2, 0), v(0, 0.1, 1)], 3), []);
+  assert.match(S.embedSanity([v(1, 0), v(1, 0), v(0, 1)], 3).join(), /2 dimensions, not the model's 3/);
+  assert.match(S.embedSanity([v(1, 0.1, 0), v(0, 0, 0), v(0, 0.1, 1)]).join(), /all zero/);
+  assert.match(S.embedSanity([v(1, 0, 0), v(0, 0, 1), v(1, 0, 0)]).join(), /unrelated sentences as close as related ones .*nonsense/);
+  assert.match(S.embedSanity([v(1, NaN, 0), v(1, 0, 0), v(0, 0, 1)]).join(), /not a number/);
+  assert.match(S.embedSanity(null).join(), /no vector/);
+  assert.equal(S.EMBED_TEST.length, 3);
+  // Each failure's reason, as a person reads it.
+  assert.equal(S.plainReason(['chat answered nonsense ("?option?op"), not "ready"'], 'chat'), "its chat model doesn't run properly on it");
+  assert.equal(S.plainReason(["didn't answer in time (1 s): aborted"], 'chat'), "it didn't answer its test in time");
+  assert.equal(S.plainReason(['embeddings gave a vector of all zero'], 'embed'), "its embedding model doesn't run properly on it");
+  assert.equal(S.plainReason(['connection refused'], 'chat'), "its model server didn't pass its test");
+});
+
+test("setup on a generation nobody has measured: two more requests, and its entry gets this PC's timeouts; each failure leaves no entry and a plain note", async () => {
+  const tools = path.join(home, 'calibrate');
+  let clock = 0;
+  const world = (o: Parameters<typeof fakeNpuIo>[0], first: () => string[] = () => []) => {
+    const f = fakeNpuIo(o);
+    // The test request takes the first load's time on this fake clock: 300 s.
+    return { ...f.io, clockMs: () => clock, testNpu: async () => ((clock += 300_000), first()) };
+  };
+  const meteor = () => planFor(NPU.meteor, 'x64', tools);
+  const r = await setUpNpu(meteor(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.measured, { coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 });
+  assert.deepEqual(r.entry?.timeouts, { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 });
+  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, meteor().route).timeouts);
+  assert.equal(r.note, undefined);
+  // Lunar Lake's measured already: no measuring requests, the route's own timeouts.
+  let asked = 0;
+  const lunar = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), measure: async () => (asked++, null) });
+  assert.equal(asked, 0);
+  assert.equal(lunar.entry?.timeouts?.requestPerTokenMs, V.NPU_CATALOG.routes.intel.timeouts.requestPerTokenMs);
+
+  // Each failure: no entry, and a note in plain words for the accelerators' page.
+  const label = parseNpus(NPU.meteor, 'x64')[0].label;
+  const cases: [string, ReturnType<typeof world>, RegExp][] = [
+    ['nonsense to the test request', world({}, () => ['chat answered nonsense ("?option?option?opt"), not "ready" as asked']), /its chat model doesn't run properly on it/],
+    ['no answer in time', world({}, () => ["didn't answer in time (360 s): This operation was aborted"]), /it didn't answer its test in time/],
+    ['nonsense when counting', world({ measured: { problems: ['chat answered nonsense ("?option?") when asked to count to twenty'] } }), /its chat model doesn't run properly on it/],
+    ['too slow', world({ measured: { warmMs: 9_000, tokensPerSecond: 1.2 } }), /it is too slow for the chat model/],
+  ];
+  for (const [what, io, re] of cases) {
+    const f = await setUpNpu(meteor(), tools, io);
+    assert.equal(f.entry, undefined, what);
+    assert.match(f.note!, re, what);
+    assert.ok(f.note!.startsWith(`The NPU (${label}) isn't used: `), f.note);
+    assert.match(f.note!, /The graphics card or the processor does its work instead\.$/, what);
+  }
+  // Its embeddings failing their sanity check: chat stays on the NPU, embeddings go elsewhere, and the note says so.
+  const e = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), testEmbed: async () => ['embeddings gave a vector of all zero'] });
+  assert.ok(e.entry?.chat && !e.entry.embed);
+  assert.equal(e.note, "The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) makes no embeddings: its embedding model doesn't run properly on it. The graphics card or the processor makes them instead.");
+});
+
+// An agent's own io may extend NpuIo with members of its own. Kit 2.68.0's first draft named the clock `now`, and the
+// Smith's trial, whose io has `now: () => Date`, stopped compiling: this keeps the kit off that name.
+type KitNpuIo = import('./fixture/src/kit/setup.ts').NpuIo;
+interface AgentIo extends KitNpuIo {
+  now: () => Date;
+}
+
+test("an agent's io that extends NpuIo with a `now` of its own (a Date, as the Smith's trial has) is taken, and setup never calls it", async () => {
+  const tools = path.join(home, 'agent-io');
+  let called = 0;
+  const io: AgentIo = { ...fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }).io, now: () => (called++, new Date()) };
+  const r = await setUpNpu(planFor(NPU.meteor, 'x64', tools), tools, io);
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.entry);
+  assert.equal(called, 0);
+});
+
+test("setup as a command, with no card: the NPU failing is no error; the processor takes its work, and the note is kept for the accelerators' page", async () => {
+  const tools = path.join(home, 'cmd-nocard');
+  const file = path.join(home, 'cmd-nocard-config.json');
+  const noteFile = path.join(home, 'cmd-nocard-npu-note.json');
+  writeFileSync(file, '{}');
+  const detection = parseDetection(`${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
+  const base = { ids: [], detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: noteFile };
+  const silent = fakeNpuIo({ answers: false });
+  const log: string[] = [];
+  const r = await setupCommand({ ...base, log: (l: string) => log.push(l), io: { ...silent.io, exists: (p: string) => disk()(p) || silent.io.exists(p), listDevices: async () => '' } });
+  assert.equal(r.code, 0, log.join('\n'));
+  assert.ok(!log.some((l) => /^problem:/.test(l)), log.join('\n'));
+  assert.ok(log.some((l) => /^The processor takes the NPU's chat and embed instead/.test(l)), log.join('\n'));
+  const written = JSON.parse(readFileSync(file, 'utf8'));
+  const cpu = written.accelerators.find((a: any) => a.id === 'cpu');
+  assert.ok(cpu?.chat && cpu?.embed, JSON.stringify(written));
+  assert.ok(!written.accelerators.some((a: any) => a.kind === 'npu'));
+  assert.match(A.readNpuNote(noteFile)!.note, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: its model server didn't pass its test\./);
+  // Set up whole the next time: the note goes.
+  const good = fakeNpuIo();
+  await setupCommand({ ...base, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' } });
+  assert.equal(A.readNpuNote(noteFile), null);
 });

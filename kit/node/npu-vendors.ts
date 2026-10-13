@@ -42,8 +42,16 @@ export interface NpuRoute {
   server: string;
   version: string;
   arch: 'arm64' | 'x64';
-  /** Each generation; its own driverMin, where one needs a later driver than the route's. */
-  generations: Record<string, { label: string; supported: boolean; verified: boolean; why?: string; driverMin?: string }>;
+  /**
+   * Each generation; its own driverMin, where one needs a later driver than the route's, and its own starting values
+   * where it differs from the generation the route was measured on (routeFor): timeouts, caps, and server arguments.
+   */
+  generations: Record<string, NpuGeneration>;
+  /**
+   * What the NPU's models hold of the PC's memory while they're loaded, in GB, per kind (measured; the NPU shares the
+   * PC's memory): setup leaves a kind off the NPU on a PC that hasn't room for it beside everything else (npuMemoryFit).
+   */
+  memoryGb?: Partial<Record<ServeKind, number>>;
   driverMin?: string;
   /** A runtime its programs need that its download doesn't carry, put beside its program (OpenVINO Model Server's C++ runtime). */
   runtime?: NpuRuntime;
@@ -68,6 +76,27 @@ export interface NpuRoute {
   vision?: string;
   licence: string;
   notes: string;
+}
+
+/** One generation of a maker's NPU. */
+export interface NpuGeneration {
+  label: string;
+  supported: boolean;
+  /** Its server and models have run on this generation (the NPU check passed on one). */
+  verified: boolean;
+  why?: string;
+  driverMin?: string;
+  /** Its own starting timeouts, over the route's (a slower NPU's), until setup measures the PC's own. */
+  timeouts?: NpuRoute['timeouts'];
+  /** Its own cap (with the server argument that compiles it, in `args`). */
+  maxContextTokens?: number;
+  caps?: NpuRoute['caps'];
+  /** Server arguments that differ on it: each flag's value in the route's `serve` replaced (OpenVINO's --max_prompt_len). */
+  args?: Record<string, string>;
+  /** What its models hold of the PC's memory, where it differs from the route's (a shorter compiled prompt holds less). */
+  memoryGb?: NpuRoute['memoryGb'];
+  /** Why its values are what they are, in a sentence. */
+  basis?: string;
 }
 
 /**
@@ -113,7 +142,8 @@ export interface NpuEmbedServer {
    * ADSP_LIBRARY_PATH or the working folder, and the keeper starts servers in the home folder.
    */
   env?: Record<string, string>;
-  model: NpuEmbedFile | NpuEmbedPull;
+  /** Its model; `dims`, its vectors' length, is checked by setup's test (embedSanity). */
+  model: (NpuEmbedFile | NpuEmbedPull) & { dims?: number };
   licence: string;
 }
 
@@ -229,7 +259,7 @@ export function npuSupport(dev: NpuDevice, arch: string, catalog: NpuCatalog = N
   if (arch && route.arch !== arch) return { ...base, supported: false, why: `${route.server} runs on ${route.arch} Windows, and this PC is ${arch}` };
   const driverMin = gen.driverMin ?? route.driverMin;
   if (driverMin && dev.driver && compareVersions(dev.driver, driverMin) < 0)
-    return { ...base, supported: false, why: `${route.server} needs ${MAKERS[vendor]}'s NPU driver ${driverMin} or later${gen.driverMin ? ` on the ${gen.label}` : ''}, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
+    return { ...base, supported: false, why: `the NPU's driver needs an update: ${route.server} needs ${MAKERS[vendor]}'s NPU driver ${driverMin} or later${gen.driverMin ? ` on the ${gen.label}` : ''}, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
   return { ...base, supported: true };
 }
 
@@ -330,6 +360,86 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
 }
 
 // ------------------------------------------------------------------------------------------------
+// Per generation, memory and calibration
+
+/**
+ * The route as it runs on one generation: the generation's own timeouts, caps and server arguments over the route's
+ * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt). The
+ * route itself when the generation has none, or isn't known.
+ */
+export function routeFor(route: NpuRoute, generation: string | null | undefined): NpuRoute {
+  const g = generation ? route.generations[generation] : undefined;
+  if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.memoryGb)) return route;
+  const serve = [...route.serve];
+  for (const [flag, value] of Object.entries(g.args ?? {})) {
+    const i = serve.indexOf(flag);
+    if (i >= 0) serve[i + 1] = value;
+  }
+  return { ...route, serve, maxContextTokens: g.maxContextTokens ?? route.maxContextTokens, caps: { ...route.caps, ...g.caps }, timeouts: { ...route.timeouts, ...g.timeouts }, ...(route.memoryGb || g.memoryGb ? { memoryGb: { ...route.memoryGb, ...g.memoryGb } } : {}) };
+}
+
+/**
+ * The share of the PC's memory the NPU's models may hold: the NPU has no memory of its own (Intel's, AMD's and
+ * Qualcomm's share the PC's), and Windows, the browser and the manor's agents need the rest. On a 16 GB PC that is
+ * 6.4 GB, room for Intel's chat (4.27 GB) and embeddings (1.74 GB) with 9.6 GB left; a 12 GB PC keeps chat alone; an
+ * 8 GB PC (some Meteor Lake laptops) keeps the NPU out, and the processor or the card takes its work.
+ */
+export const NPU_MEMORY_SHARE = 0.4;
+
+/** Whether the route's chat, and its embeddings beside it, fit in this PC's memory (route.memoryGb): yes when unmeasured or unknown. */
+export function npuMemoryFit(route: NpuRoute, ramBytes: number | null | undefined): { chat: boolean; embed: boolean; budgetGb: number; why?: string } {
+  const ramGb = (ramBytes ?? 0) / 1024 ** 3;
+  const budgetGb = Math.round(ramGb * NPU_MEMORY_SHARE * 10) / 10;
+  const m = route.memoryGb;
+  if (!m || !ramGb) return { chat: true, embed: true, budgetGb };
+  const chatGb = m.chat ?? 0;
+  const embedGb = m.embed ?? 0;
+  const ram = `this PC's ${Math.round(ramGb)} GB of memory`;
+  if (chatGb > budgetGb) return { chat: false, embed: false, budgetGb, why: `${ram} hasn't room for the NPU's chat model (${chatGb} GB) beside everything else` };
+  if (chatGb + embedGb > budgetGb) return { chat: true, embed: false, budgetGb, why: `${ram} hasn't room for the NPU's embedding model (${embedGb} GB) beside its chat model` };
+  return { chat: true, embed: true, budgetGb };
+}
+
+/** What setup measured on the NPU: the first start to an answer (its compile included), a short answer warm, and writing speed. */
+export interface NpuMeasured {
+  coldMs: number;
+  warmMs: number;
+  tokensPerSecond: number;
+}
+
+/**
+ * Calibration's bounds: an NPU writing under 2 tokens a second is too slow for the chat model (a 300-token answer
+ * would take minutes), and no timeout grows past these, whatever was measured.
+ */
+export const CALIBRATION = { minTokensPerSecond: 2, maxPerTokenMs: 1_500, maxBaseMs: 180_000, maxColdLoadMs: 30 * 60_000, readPerWrite: 10 };
+
+const roundUpTo = (n: number, step: number) => Math.ceil(n / step) * step;
+
+/**
+ * This PC's timeouts from what setup measured on its NPU, for a generation nobody has measured (npu-check's rules,
+ * from two requests rather than its dozen): a token's time twice what writing one took; a background request's base
+ * twice a full-cap read (reading taken as 10 times writing: about 27 times on the Lunar Lake, 650–750 read and 24–28
+ * written a second, and nearer 12 expected on the NPU 3720, whose compute falls further than its memory bandwidth)
+ * and a warm answer; a cold load half again the first start's. Never under the route's starting values (a busy moment
+ * doesn't shrink them), never over CALIBRATION's bounds; too slow when it writes under minTokensPerSecond.
+ */
+export function calibrate(m: NpuMeasured, route: Pick<NpuRoute, 'maxContextTokens' | 'timeouts'>): { timeouts: Required<NpuRoute['timeouts']>; tooSlow?: string } {
+  const tps = Math.max(0.01, m.tokensPerSecond);
+  const guess = route.timeouts;
+  const perToken = roundUpTo((1000 / tps) * 2, 50);
+  const base = roundUpTo(((route.maxContextTokens / (tps * CALIBRATION.readPerWrite)) * 1000 + m.warmMs) * 2, 5_000);
+  const cold = roundUpTo(m.coldMs * 1.5, 30_000);
+  const timeouts = {
+    requestBaseMs: Math.min(CALIBRATION.maxBaseMs, Math.max(guess.requestBaseMs ?? 0, base)),
+    requestPerTokenMs: Math.min(CALIBRATION.maxPerTokenMs, Math.max(guess.requestPerTokenMs ?? 0, perToken)),
+    coldLoadMs: Math.min(CALIBRATION.maxColdLoadMs, Math.max(guess.coldLoadMs ?? 0, cold)),
+  };
+  return m.tokensPerSecond < CALIBRATION.minTokensPerSecond
+    ? { timeouts, tooSlow: `it wrote ${m.tokensPerSecond.toFixed(1)} tokens a second, under the ${CALIBRATION.minTokensPerSecond} the chat model needs` }
+    : { timeouts };
+}
+
+// ------------------------------------------------------------------------------------------------
 // The plan for the NPU
 
 export interface NpuDownload {
@@ -378,10 +488,14 @@ export function planNpu(o: {
   exists?: (p: string) => boolean;
   catalog?: NpuCatalog;
   port?: number;
+  /** Leave its embeddings off the NPU (too little memory for them beside its chat: npuMemoryFit). */
+  noEmbed?: boolean;
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
-  const route = (o.catalog ?? NPU_CATALOG).routes[o.support.vendor];
+  // The generation's own starting values (routeFor); its embedding server left out when asked.
+  const generic = routeFor((o.catalog ?? NPU_CATALOG).routes[o.support.vendor], o.support.generation);
+  const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);
   const dest = path.join(o.downloadsDir, route.download.file);
