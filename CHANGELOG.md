@@ -4,11 +4,10 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.35.69
 
-**A quiet round starts about two git processes instead of over a hundred, and a pull request the Steward has tested isn't tested again elsewhere.**
+**A quiet round starts about two git processes instead of over a hundred.**
 
 ### What changed
 
-- When a pull request's checks pass in the Steward's round, the Steward marks its commit as tested on GitHub (the same mark `steward vouch` gives), so the Assayer doesn't run the same tests again for it.
 - Turns are read only for the repositories the round looks at, through GitHub's API from the Steward's own process, instead of one `git ls-remote` per repository every round.
 - A PC that has seen no other PC for a month takes its turns for half a day, so it renews them twice a day instead of every few rounds.
 - Version queues fetch a repository only when GitHub says its main branch has moved.

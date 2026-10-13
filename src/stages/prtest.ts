@@ -7,7 +7,7 @@ import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import { checkoutOf, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
-import { openPrs, parsePrs, readPin, VOUCH_CONTEXT, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -168,29 +168,9 @@ export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tes
   const kept = readJson<Record<string, Tested>>(prChecksFile(), {});
   kept[keyOf(e, pr)] = tested;
   writeJson(prChecksFile(), Object.fromEntries(Object.entries(kept).slice(-500)));
-  // Passed here before it merges: the Surveyor's GET /api/tested (tested.ts), and the head's vouch on its host.
-  if (tested.ok) {
-    recordTested(e.id, { commit: pr.headOid, stage: 'merge', branch: pr.head, pr: pr.number, at: tested.at });
-    await vouchHere(ctx, e, pr, tested);
-  }
+  // Passed here before it merges: the Surveyor's GET /api/tested (tested.ts).
+  if (tested.ok) recordTested(e.id, { commit: pr.headOid, stage: 'merge', branch: pr.head, pr: pr.number, at: tested.at });
   return tested;
-}
-
-/**
- * A pass here, set on the PR's head as `steward vouch` sets one (stages/vouch.ts: VOUCH_CONTEXT, success), so what else
- * tests the team's PRs sees it was tested: the Assayer's manor-prs job tested every such head again, in a worktree and
- * an install of its own, as pr-checks.json is this PC's alone. Not on a fork's head, which isn't the repository's to
- * mark. A host that won't take it is a line in the log: the pass stands here either way.
- */
-async function vouchHere(ctx: Ctx, e: Employee, pr: PrInfo, tested: Tested): Promise<void> {
-  if (pr.fork) return;
-  const host = hostFor(ctx, e);
-  try {
-    const s = await host.setStatus(e.repo, pr.headOid, { state: 'success', context: VOUCH_CONTEXT, description: `the Steward's round: ${tested.note}`.slice(0, 140) });
-    if (s.code !== 0) ctx.log(`[${e.id}] #${pr.number} passed here, but ${host.name} wouldn't take ${VOUCH_CONTEXT}: ${(s.err || s.out).trim().split('\n').pop()}`);
-  } catch (err) {
-    ctx.log(`[${e.id}] #${pr.number} passed here, but ${VOUCH_CONTEXT} couldn't be set: ${(err as Error).message}`);
-  }
 }
 
 async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
