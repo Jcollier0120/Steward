@@ -13,7 +13,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-unstick-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { GIVEN_UP, RECHECK_MS, dryRunFinds, loadUnstick, pressUpdate, stuckUpdates, unstick, unstickConditions, unstickFile } = await import('../src/unstick.ts');
+const { GAP_MS, GIVEN_UP, RECHECK_MS, dryRunFinds, rollbackCause, loadUnstick, pressUpdate, stuckUpdates, unstick, unstickConditions, unstickFile } = await import('../src/unstick.ts');
 const { runStage } = await import('../src/steward.ts');
 const { loadAlarms } = await import('../src/alarms.ts');
 const { runner } = await import('./helpers.ts');
@@ -169,36 +169,160 @@ test('a dry run that names no release, or an Update Manor refuses, is an alarm t
   assert.deepEqual(loadUnstick().pressed, {}, 'not pressed, so it may be tried again');
 });
 
-test("a version the agent's own install rolled back is left to the person, with no dry run or Update spent on it", async () => {
-  let u = updates({ more: [{ id: 'miller', name: 'Miller', installed: '0.6.26', latest: '0.6.27', available: true }] });
-  u.failures!.miller = { version: '0.6.27', at: '2026-10-13T15:00:00Z', count: GIVEN_UP };
-  const dryRuns: string[][] = [];
+// 2026-10-13: six agents' kit-2.66.0 updates rolled back in one pass, 14:16–14:18Z, as the PC's network blinked.
+const BLIP: [id: string, name: string, from: string, version: string, at: string][] = [
+  ['aletaster', 'Aletaster', '0.8.34', '0.8.35', '2026-10-13T14:16:32.830Z'],
+  ['miller', 'Miller', '0.6.26', '0.6.27', '2026-10-13T14:16:46.149Z'],
+  ['pinder', 'Pinder', '0.5.43', '0.5.44', '2026-10-13T14:16:58.982Z'],
+  ['lamplighter', 'Lamplighter', '0.4.37', '0.4.38', '2026-10-13T14:17:24.133Z'],
+  ['chamberlain', 'Chamberlain', '0.3.25', '0.3.26', '2026-10-13T14:17:37.125Z'],
+  ['assayer', 'Assayer', '0.3.23', '0.3.24', '2026-10-13T14:18:02.172Z'],
+];
+const MANOR_LOG = [
+  '2026-10-13T14:10:00.000Z Looked for new releases: 7 to update.',
+  "2026-10-13T14:18:18.697Z This PC is offline: Manor looks for new releases again once it's back (every 5 minutes it looks whether it is).",
+  '2026-10-13T14:18:54.729Z This PC is back online (offline since 2026-10-13T14:18:18.697Z): Manor looked for new releases again.',
+  "2026-10-13T14:18:54.729Z The Exchequer can't answer now: Manor looks again every 5 minutes until it does, keeping what it knew.",
+  "2026-10-13T14:24:05.699Z The Exchequer answers again (it couldn't since 2026-10-13T14:18:54.729Z).",
+].join('\r\n');
+const flagOf = (from: string, version: string, at: string, why = "its home page didn't answer"): RolledBack => ({ [version]: { version, from, why, at, kept: `C:\\x\\app.unsafe-${version}` } });
+
+test("a rollback is weighed: no answer at all, with the PC offline or other agents rolled back beside it, is the PC's doing", () => {
+  const r = { why: "its home page didn't answer", at: '2026-10-13T14:17:24.133Z' };
+  const offline = rollbackCause(r, [], MANOR_LOG);
+  assert.equal(offline.environmental, true);
+  assert.match(offline.words, /Manor's log says the PC offline at 2026-10-13 14:18Z/);
+  assert.match(offline.words, /, and the Exchequer can't answer now at 2026-10-13 14:18Z$/);
+  assert.doesNotMatch(offline.words, /back online/);
+  const together = rollbackCause(r, [{ name: 'Miller', why: "its home page didn't answer", at: '2026-10-13T14:16:46.149Z' }, { name: 'Surveyor', why: 'its page stopped answering 20 s into its probation', at: '2026-10-13T14:17:11.766Z' }], '');
+  assert.equal(together.environmental, true);
+  assert.match(together.words, /Miller, Surveyor were rolled back the same way within 10 minutes/);
+  // Alone, with the PC online: the release's.
+  const alone = rollbackCause(r, [{ name: 'Miller', why: "its home page didn't answer", at: '2026-10-13T11:00:00.000Z' }], '2026-10-13T11:00:00.000Z This PC is offline: x');
+  assert.equal(alone.environmental, false);
+  assert.match(alone.words, /PC online then, and no other agent was rolled back near it/);
+  // An answer that was wrong is never the network's, whatever happened around it.
+  assert.equal(rollbackCause({ why: 'its home page answered 500', at: r.at }, [], MANOR_LOG).environmental, false);
+  assert.equal(rollbackCause({ why: 'its page answers as 0.4.37, not 0.4.38', at: r.at }, [], MANOR_LOG).environmental, false);
+  assert.equal(rollbackCause({ why: 'its install failed (exit 1) once it was in place', at: r.at }, [], MANOR_LOG).environmental, false);
+});
+
+test('versions a blip rolled back are allowed again one agent at a time, once each, on a quiet PC', async () => {
+  let now = Date.parse('2026-10-13T14:30:00Z');
+  const flags = new Map(BLIP.map(([id, , from, version, at]) => [id, flagOf(from, version, at)]));
+  let running = false;
+  const allowed: string[] = [];
   const pressed: string[][] = [];
+  const u = (): ManorUpdates => ({
+    offline: null,
+    exchequerDown: null,
+    items: BLIP.map(([id, name, from, version]) => ({ id, name, installed: from, latest: version, available: true })),
+    run: { finishedAt: running ? null : '2026-10-13T14:20:00Z' },
+    failures: Object.fromEntries(BLIP.map(([id, , , version]) => [id, { version, at: '2026-10-13T15:00:00Z', count: GIVEN_UP }])),
+  });
   const look = () =>
     unstick({
       manorUrl: MANOR,
       getJson: async () => ({ roles: [] }),
-      readUpdates: () => u,
-      // As on 2026-10-13: Lamplighter 0.4.38 was installed while the Exchequer was away, its page didn't answer, and it was rolled back.
-      rolledBack: (id): RolledBack => (id === 'lamplighter' ? { '0.4.38': { version: '0.4.38', why: "its home page didn't answer", at: '2026-10-13T14:17:24.133Z' } } : {}),
-      dryRun: async (ids) => (dryRuns.push(ids), { code: 0, out: dryLine('Miller', 'its latest release in owner/Manor-releases, miller-v0.6.27 in the Exchequer') }),
-      press: async (ids) => (pressed.push(ids), { ok: true, said: 'HTTP 200' }),
-      now: () => new Date(T0),
+      readUpdates: u,
+      rolledBack: (id) => flags.get(id) ?? {},
+      allow: (id, version) => {
+        const f = flags.get(id)!;
+        if (!f[version]) return false;
+        delete f[version];
+        allowed.push(`${id}@${version}`);
+        return true;
+      },
+      manorLog: () => MANOR_LOG,
+      dryRun: async () => assert.fail('no dry run while a rollback waits its turn'),
+      press: async (ids) => (pressed.push(ids), (running = true), { ok: true, said: 'HTTP 200' }),
+      now: () => new Date(now),
+      log: () => {},
+    });
+  // Too soon after the blip: nothing yet, and no alarm (they wait their turn).
+  assert.deepEqual(await look(), []);
+  assert.deepEqual(allowed, []);
+  assert.deepEqual(unstickConditions(loadUnstick()), []);
+
+  // Half an hour on: the first one rolled back, alone.
+  now = Date.parse('2026-10-13T15:50:00Z');
+  const r = await look();
+  assert.deepEqual(allowed, ['aletaster@0.8.35']);
+  assert.deepEqual(pressed, [['aletaster']]);
+  assert.deepEqual(r.map((x) => [x.id, x.outcome]), [['aletaster', 'done']]);
+  assert.match(r[0].message, /0\.8\.35 was rolled back at 2026-10-13 14:16Z \(its home page didn't answer\), when Manor's log says the PC offline/);
+  assert.equal(loadUnstick().allowed['aletaster@0.8.35'].rolledBackAt, '2026-10-13T14:16:32.830Z');
+
+  // Its install runs: nothing more meanwhile. Once it's done, GAP_MS after the first, the next.
+  now += 60_000;
+  await look();
+  assert.equal(allowed.length, 1);
+  running = false;
+  await look();
+  assert.equal(allowed.length, 1, 'GAP_MS between two');
+  now += GAP_MS;
+  await look();
+  assert.deepEqual(allowed, ['aletaster@0.8.35', 'miller@0.6.27']);
+  for (let i = 0; i < 10 && allowed.length < BLIP.length; i++) {
+    running = false;
+    now += GAP_MS;
+    await look();
+  }
+  assert.deepEqual(allowed, BLIP.map(([id, , , version]) => `${id}@${version}`));
+  assert.deepEqual(pressed, BLIP.map(([id]) => [id]), 'one agent at a time');
+  assert.deepEqual(unstickConditions(loadUnstick()), []);
+});
+
+test('a version allowed once and rolled back again is an alarm with the real reason, and never allowed twice', async () => {
+  let now = Date.parse('2026-10-13T15:50:00Z');
+  const flags: Record<string, RolledBack> = { lamplighter: flagOf('0.4.37', '0.4.38', '2026-10-13T14:17:24.133Z'), miller: flagOf('0.6.26', '0.6.27', '2026-10-13T14:16:46.149Z') };
+  const allowed: string[] = [];
+  const look = () =>
+    unstick({
+      manorUrl: MANOR,
+      getJson: async () => ({ roles: [] }),
+      readUpdates: () => updates({ failures: false, more: [{ id: 'miller', name: 'Miller', installed: '0.6.28', latest: '0.6.28', available: false }] }),
+      rolledBack: (id) => flags[id] ?? {},
+      allow: (id, version) => (allowed.push(id), delete flags[id][version], true),
+      manorLog: () => '',
+      dryRun: async () => assert.fail('no dry run'),
+      press: async () => ({ ok: true, said: 'HTTP 200' }),
+      now: () => new Date(now),
       log: () => {},
     });
   await look();
-  assert.deepEqual(dryRuns, [['miller']], 'Miller alone is dry-run');
-  assert.deepEqual(pressed, [['miller']]);
+  assert.deepEqual(allowed, ['lamplighter'], "Miller's rollback beside it counts, though Miller has moved on since");
+  // Its probation failed again, a little later.
+  flags.lamplighter = flagOf('0.4.37', '0.4.38', '2026-10-13T15:51:40.000Z', 'its home page answered 500');
+  now += 4 * GAP_MS;
+  await look();
+  assert.deepEqual(allowed, ['lamplighter'], 'never twice');
   const [c] = unstickConditions(loadUnstick());
   assert.equal(c.id, 'unstick:lamplighter');
-  assert.match(c.detail[0], /^Its own installer refuses 0\.4\.38: Lamplighter 0\.4\.38 was rolled back on 2026-10-13 \(its home page didn't answer\)/);
-  assert.match(c.detail[1], /--allow-unsafe/);
-  assert.match(c.detail[1], /next version installs as usual/);
+  assert.equal(c.title, 'Lamplighter 0.4.38 was rolled back again, after the Steward allowed it once');
+  assert.match(c.detail[0], /allowed 0\.4\.38 again at 2026-10-13 15:50Z.*rolled back again at 2026-10-13 15:51Z: its home page answered 500/);
+  assert.match(c.detail[1], /won't allow it again.*--allow-unsafe/);
+});
 
-  // Its next version came out: Manor tries it afresh, and the alarm goes.
-  u = updates({ latest: '0.4.39', failures: false });
-  await look();
-  assert.deepEqual(unstickConditions(loadUnstick()), []);
+test("a rollback that doesn't look like the PC's is an alarm at once with its why and when, and is never allowed", async () => {
+  const allowed: string[] = [];
+  await unstick({
+    manorUrl: MANOR,
+    getJson: async () => ({ roles: [] }),
+    readUpdates: () => updates(),
+    rolledBack: (id): RolledBack => (id === 'lamplighter' ? flagOf('0.4.37', '0.4.38', '2026-10-13T09:02:00.000Z', 'its home page answered 500') : {}),
+    allow: (id) => (allowed.push(id), true),
+    manorLog: () => MANOR_LOG,
+    dryRun: async () => assert.fail('no dry run: it stopped for its rollback'),
+    press: async () => assert.fail('not pressed'),
+    now: () => new Date(T0),
+    log: () => {},
+  });
+  assert.deepEqual(allowed, []);
+  const [c] = unstickConditions(loadUnstick());
+  assert.equal(c.title, "Lamplighter 0.4.38 was rolled back, so Manor can't update it");
+  assert.match(c.detail[0], /^Lamplighter 0\.4\.38 was rolled back to 0\.4\.37 at 2026-10-13 09:02Z: its home page answered 500\. "its home page answered 500" is the release's own answer/);
+  assert.match(c.detail[1], /refuses 0\.4\.38 until it is allowed, so Lamplighter stays on 0\.4\.37\. Its next version installs as usual/);
 });
 
 test('nothing is run while nothing is stuck, an update is running, Manor knows it is offline, or its page is down', async () => {

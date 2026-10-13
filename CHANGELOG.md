@@ -4,14 +4,14 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.35.62
 
-**An agent update Manor gave up on is tried again by itself, once what stopped it has passed.**
+**An agent update that stopped for a moment's trouble on this PC is finished by itself.**
 
 ### What's new
 
-- When Manor gives up updating an agent after three failed tries, the Steward now checks, in its rounds, whether Manor's install would take the new version now (a dry run, which changes nothing). If it would, the Steward presses Update for that agent on Manor's page, as you would, so an update that failed only because a release wasn't yet everywhere (on release day, say, or while the license service was briefly away) finishes without you.
-- The Steward presses Update only once for each agent and version. If that install fails too, or Manor's install would still take an older release, it raises an alarm that says why in the install's own words, and clears it once the agent is on the new version.
-- A version the agent's own install rolled back (its page didn't answer after it) is never pressed: its installer refuses it until you allow it. The alarm says so, and how to allow it; its next version installs as usual.
-- It works under "Keeps the staff's pages up" in Settings: switched off, the Steward leaves Manor's updates alone.
+- When an agent's update was rolled back only because this PC's network dropped for a moment (its page gave no answer while the PC was offline, or while several agents were rolled back together), the Steward now allows that version again by itself and asks Manor to install it. It does this once the PC has been quiet for half an hour, one agent at a time, and only once for each version. The install still goes through its usual checks, so a release that really fails is rolled back again.
+- A rollback that doesn't look like the PC's doing, or one that happens again after the Steward allowed the version, raises an alarm that gives the real reason and when it happened, instead of Manor's "failed 3 times".
+- When Manor gives up on an update for another reason, the Steward checks whether Manor's install would take the new version now (a dry run, which changes nothing). If it would, the Steward presses Update for it once; if not, it raises an alarm in the install's own words.
+- All of this comes under "Keeps the staff's pages up" in Settings: switched off, the Steward leaves Manor's updates alone.
 
 ### Before you update
 

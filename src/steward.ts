@@ -35,7 +35,7 @@ import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent, type StartManor } from './tend.ts';
-import { loadUnstick, manorDryRun, unstick, type DryRun, type ManorUpdates, type PressUpdate, type RolledBack } from './unstick.ts';
+import { loadUnstick, manorDryRun, unstick, type DryRun, type ManorUpdates, type AllowAgain, type PressUpdate, type RolledBack } from './unstick.ts';
 import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
@@ -304,10 +304,11 @@ export interface StageOptions {
    */
   tend?: { manorUrl?: string; getJson?: GetJson; open?: OpenAgent; startManor?: StartManor; wait?: (ms: number) => Promise<void> };
   /**
-   * Stands in for Manor in the round's look at the updates it gave up on (unstick.ts): its page, its updates.json, its
-   * install's dry run and its Update. Under node --test they're looked at only when this is given.
+   * Stands in for Manor and the agents in the round's look at the updates that stopped (unstick.ts): Manor's page, its
+   * updates.json, its log, its install's dry run and its Update, and the agents' rolled-back versions. Under node --test
+   * they're looked at only when this is given.
    */
-  unstick?: { manorUrl?: string; getJson?: GetJson; readUpdates?: () => ManorUpdates | null; rolledBack?: (id: string) => RolledBack; dryRun?: DryRun; press?: PressUpdate };
+  unstick?: { manorUrl?: string; getJson?: GetJson; readUpdates?: () => ManorUpdates | null; rolledBack?: (id: string) => RolledBack; allow?: AllowAgain; manorLog?: () => string; dryRun?: DryRun; press?: PressUpdate };
   /** Stands in for what this PC has installed (scm.ts): which repositories are worked with plain git. Tests only. */
   scm?: ScmLook | null;
   /**
@@ -340,15 +341,16 @@ async function tendRound(settings: Settings, o: StageOptions, log: (line: string
 }
 
 /**
- * The round's look at the agent updates Manor gave up on (unstick.ts): each whose install would take it now pressed once
- * through Manor's page. Part of keeping the staff going, so under the same switch as tending.
+ * The round's look at the agent updates that stopped (unstick.ts): a version rolled back by a blip of the PC's allowed
+ * again, and an update Manor gave up on pressed once its install would take it. Part of keeping the staff going, so under
+ * the same switch as tending.
  */
 async function unstickRound(settings: Settings, o: StageOptions, run: Runner, log: (line: string) => void): Promise<EmployeeResult[]> {
   if (!settings.tend) return [];
   if (process.env.NODE_TEST_CONTEXT && !o.unstick) return [];
   const manorUrl = o.unstick?.manorUrl ?? agentPages().manor;
   if (!manorUrl) return [];
-  return unstick({ manorUrl, getJson: o.unstick?.getJson ?? getJson, readUpdates: o.unstick?.readUpdates, rolledBack: o.unstick?.rolledBack, dryRun: o.unstick?.dryRun ?? manorDryRun(run), press: o.unstick?.press, now: o.now, log });
+  return unstick({ manorUrl, getJson: o.unstick?.getJson ?? getJson, readUpdates: o.unstick?.readUpdates, rolledBack: o.unstick?.rolledBack, allow: o.unstick?.allow, manorLog: o.unstick?.manorLog, dryRun: o.unstick?.dryRun ?? manorDryRun(run), press: o.unstick?.press, now: o.now, log });
 }
 
 /** The Steward's own repository for the merge stage, when Settings say it merges its own PRs and it has a checkout. */
