@@ -16,7 +16,7 @@ import { withRepo } from './slots.ts';
  * site's `npm run sync`, say, which writes every product's release notes and newest downloads into a file the site is
  * built from. In a worktree of its branch on origin, in the work folder (<id>-refresh), never the person's own clone,
  * with its packages (shared where they can be: modules.ts) and gh at hand, as every command the Steward runs. The
- * worktree lasts from one refresh to the next (0.35.61): reset to the branch's head, its packages installed again only
+ * worktree lasts from one refresh to the next (0.35.68): reset to the branch's head, its packages installed again only
  * when its lockfile changed. A site's are its own (a Next.js build refuses linked ones): 440 packages npm ci unpacked
  * afresh for every refresh, 49 times in a day and a half.
  *

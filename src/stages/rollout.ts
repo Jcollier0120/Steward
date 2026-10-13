@@ -39,7 +39,7 @@ import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
  * kit goes out in the round that released it, not after Manor's update and the Steward's restart. Only when that can't
  * be read does the rollout wait for Manor to install the Steward's new release.
  *
- * A new kit settles before it goes out (0.35.61): kits came in bursts, fifteen in a day and a half, and each one was
+ * A new kit settles before it goes out (0.35.68): kits came in bursts, fifteen in a day and a half, and each one was
  * rolled out to every agent (a bump, its checks, a PR, a merge, a release, a Manor install and a site refresh each),
  * though the next kit came an hour later and did it all again. Now only the newest kit goes, once it has gone Settings'
  * rolloutQuietHours without a newer one, and never later than rolloutMaxWaitHours after the oldest kit released since

@@ -22,7 +22,7 @@ import { workRootOf, type Ctx } from './common.ts';
 export const modulesRootOf = (s: Settings) => path.join(workRootOf(s), '_modules');
 
 /**
- * How many sets are kept, the most lately used. Six was too few (0.35.61): the agents' lockfiles make seven sets or more
+ * How many sets are kept, the most lately used. Six was too few (0.35.68): the agents' lockfiles make seven sets or more
  * (a patch of @types/node apart splits them), so a set was pruned and installed again within the same round.
  */
 export const KEEP_SETS = 12;

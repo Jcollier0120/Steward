@@ -153,7 +153,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
     // Its packages linked from the set installed once for its lockfile (modules.ts), as a bump's are; npm ci only where
-    // that can't be done (0.35.61). The release only reads them, and never packs node_modules (the kit's release.ts).
+    // that can't be done (0.35.68). The release only reads them, and never packs node_modules (the kit's release.ts).
     if (releaseNeedsPackages(dir, e.release) && !(await linkSharedModules(ctx, dir, (line) => ctx.log(`[${e.id}] ${line}`)))) {
       const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);

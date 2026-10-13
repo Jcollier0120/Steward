@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.68
+
+**New kits roll out once they settle, and releases take far less of the PC's time.**
+
+### What's new
+
+- A new kit goes out to the agents once two hours pass with no newer kit, not as soon as it's released. When kits come in a burst, only the newest goes out, so each agent gets one update instead of one per kit. No kit waits more than 12 hours, counted from the oldest kit still waiting. A kit whose changelog entry starts with "Urgent" goes out at once.
+- Two new settings on the Castellan tab, under advanced: **A new kit settles for** (2 hours by default; 0 sends each kit at once) and **A new kit waits at most** (12 hours).
+- While a kit settles, the round's log says until when. The kit rolled out last still reaches any agent that's behind it.
+
+### What changed
+
+- A kit update now runs only the tests the kit's changes reach, as the kit's trial does, not each agent's whole suite. An agent the kit changes nothing for still gets its update, with its build and type checks but no tests. When the trial already passed an agent at the same commit, its checks aren't run again, even if the trial ran only some of its tests.
+- Releases use the packages already installed for the same lockfile, as kit updates do, instead of installing them afresh every time.
+- The site refresh keeps its folder from one refresh to the next, and installs the site's packages again only when they change. While a rollout is merging and releasing round after round, one refresh covers all of those releases, and none waits more than an hour.
+- Twelve sets of shared packages are kept instead of six, so a set is no longer removed and installed again within the same round. A half-finished install is cleared as soon as the process that started it has stopped, instead of after a day.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To roll out each kit at once, as before, set **A new kit settles for** to 0.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

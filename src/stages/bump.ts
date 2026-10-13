@@ -270,7 +270,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  // What the kit changes for it (kitreach.ts): a trial's, and the rollout's (0.35.61). A trial of an agent the kit
+  // What the kit changes for it (kitreach.ts): a trial's, and the rollout's (0.35.68). A trial of an agent the kit
   // changes nothing for isn't tried: its checks would run its own main's code. The rollout still bumps it, with its fill,
   // typecheck and pretest but no tests; one whose kit files change runs the tests they reach, as its trial did.
   const reach = o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;

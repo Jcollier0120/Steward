@@ -47,7 +47,7 @@ import { apart, withRepo } from './slots.ts';
  * for at most TRIAL_SLICE_MS, keeps what it found (KitTrial's `pending`: the ones still to try), and goes on with the
  * rest of its work; the PR waits meanwhile (TRIAL_GOING, a brief wait: the next round comes sooner). And each agent is
  * tried only as far as the kit changes it (kitreach.ts): one none of whose kit files change isn't tried at all, and one
- * whose files change runs only the tests they reach. Its rollout's bump runs the same ones (0.35.61).
+ * whose files change runs only the tests they reach. Its rollout's bump runs the same ones (0.35.68).
  */
 
 /** How long a round tries agents for before it goes on with the rest of its work (the agents in flight finish). */
@@ -340,7 +340,7 @@ const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
 
 /**
  * Each employee that passed its checks, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). One
- * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones (0.35.61).
+ * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones (0.35.68).
  */
 const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base).map((r) => [r.id, r.base!]));
 
