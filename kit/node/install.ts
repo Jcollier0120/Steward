@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
+import { endProcesses, keepOwnArch, nativeRelease, processesUnder, type NativeRelease } from './native.ts';
 import { pageAt, ping, shutdown } from './service.ts';
 
 /**
@@ -48,6 +49,8 @@ export interface Release {
   kit?: string;
   /** Built (minified: minify.ts, kit 2.16.0), or readable (--readable, never published); none before kit 2.16.0. */
   form?: 'minified' | 'readable';
+  /** The native files it carries (native.ts, kit 2.62.0): where, for which processors, and whether they're signed. */
+  native?: NativeRelease;
 }
 
 export interface Ran {
@@ -88,6 +91,12 @@ export interface InstallDeps {
   out(line: string): void;
   /** Moves a folder (default: fs.renameSync); a test can make it fail. */
   rename?(from: string, to: string): void;
+  /** This PC's processor, as Node names it (default: process.arch): which native files are kept. */
+  arch?: string;
+  /** The processes running a program from under a folder (default: native.ts processesUnder). */
+  programsIn?(dir: string): Promise<number[]>;
+  /** Ends processes by id (default: native.ts endProcesses). */
+  endPrograms?(ids: number[]): Promise<void>;
 }
 
 export const appFolder = (data: string) => path.join(data, 'app');
@@ -193,7 +202,10 @@ export const utf16 = (xml: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), 
 export function readRelease(root: string): Release | null {
   try {
     const r = JSON.parse(readFileSync(path.join(root, 'release.json'), 'utf8').replace(/^\uFEFF/, ''));
-    return r && typeof r.version === 'string' ? (r as Release) : null;
+    if (!r || typeof r.version !== 'string') return null;
+    const native = nativeRelease(r.native);
+    const { native: _, ...rest } = r;
+    return { ...(rest as Release), ...(native ? { native } : {}) };
   } catch {
     return null;
   }
@@ -242,6 +254,26 @@ async function endPage(d: InstallDeps): Promise<{ ended: boolean; wasUp: boolean
   if (!(await running())) return { ended: true, wasUp: false };
   await d.shutdown();
   return { ended: await waitFor(async () => !(await running()), 10_000, d), wasUp: true };
+}
+
+/**
+ * Ends the programs an installed copy runs from its app folder (its native files: Envoy's media host), which Windows
+ * won't let the folder be moved from under. Its page has ended by now, and a program it started is meant to end with it
+ * (an agent's host leaves when its page says bye): it's given 5 seconds to, then ended. Only for a copy whose release
+ * carries native files, so every other agent's update asks Windows nothing more.
+ */
+async function endNative(app: string, before: Release | null, d: InstallDeps): Promise<void> {
+  if (!before?.native) return;
+  const list = d.programsIn ?? (async (dir: string) => processesUnder(dir));
+  let ids = await list(app);
+  for (let waited = 0; ids.length && waited < 5000; waited += 500) {
+    await d.sleep(500);
+    ids = await list(app);
+  }
+  if (!ids.length) return;
+  d.out(`Ending ${ids.length === 1 ? 'a program' : `${ids.length} programs`} still running from ${app} (process ${ids.join(', ')}), so it can be replaced.`);
+  await (d.endPrograms ?? (async (x: number[]) => endProcesses(x)))(ids);
+  await waitFor(async () => !(await list(app)).length, 10_000, d);
 }
 
 /**
@@ -308,7 +340,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
   if (opts.dryRun) {
     out(`${what} from ${d.root}: ${update ? `would update the installed copy${before ? ` (${before.version})` : ''}` : 'would install it'}.`);
     out(`  1. End its page process, if it's running (${d.pageUrl}).`);
-    out(`  2. Copy the release to ${app}.new, then swap it in for ${app}.`);
+    out(`  2. Copy the release to ${app}.new${release.native ? ` (its native files for this PC's processor only)` : ''}, then swap it in for ${app}.`);
     out(`  3. Register the task ${TASK_NAME} for ${d.user}, ${manorStarts ? 'run only when asked: Manor starts it at sign-in (Castellan is in Startup apps)' : 'at sign-in'}: ${SCHTASKS} ${quoted(create)}`);
     out(`     It runs: ${CONHOST} ${taskArguments(d.node, app)}`);
     out(`     In: ${app}`);
@@ -334,6 +366,8 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     return 1;
   };
 
+  await endNative(app, before, d);
+
   // The release goes in beside app first; until the swap, the installed copy is as it was.
   const next = `${app}.new`;
   const old = `${app}.old`;
@@ -342,6 +376,8 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     rmSync(old, { recursive: true, force: true });
     mkdirSync(d.dataDir, { recursive: true });
     cpSync(d.root, next, { recursive: true });
+    const noNative = keepOwnArch(next, release.native, d.arch);
+    if (noNative) out(noNative);
   } catch (e) {
     rmSync(next, { recursive: true, force: true });
     return unchanged(`Couldn't copy the release to ${next} (${message(e)}). Nothing was changed.`);
@@ -444,6 +480,7 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     out(`${APP.name}'s page is still running, so ${app} was left in place.`);
     return 1;
   }
+  await endNative(app, readRelease(app), d);
 
   const gone = opts.purge ? d.dataDir : app;
   if (inside(process.cwd(), gone)) process.chdir(d.home);

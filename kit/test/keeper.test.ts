@@ -197,6 +197,29 @@ test("the servers it looks after: an NPU's chat and vision, a card's chat, visio
   assert.equal(list[3].spec.logFile, 'C:\\logs\\gpu-a.embed.log');
 });
 
+test("an NPU's own embedding server (llama-server on the Hexagon) is looked after with the NPU's lock and idle time, and never recycled", () => {
+  const list = reapedServers(
+    [
+      {
+        id: 'npu',
+        kind: 'npu',
+        name: 'NPU',
+        slots: 1,
+        maxContextTokens: 2400,
+        quirks: [],
+        chat: { baseUrl: BASE, model: 'c', startCommand: ['%LOCALAPPDATA%\\GenieX CLI\\geniex.exe', 'serve'] },
+        embed: { baseUrl: 'http://127.0.0.1:18182', model: 'qwen3-embedding-0.6b-gguf', startCommand: ['%USERPROFILE%\\.manor\\accelerators\\servers\\llama.cpp\\b11125-hexagon\\llama-server.exe', '--port', '18182', '--device', 'HTP0'] },
+      },
+    ] as any,
+    'C:\\logs',
+    { npuMs: 10 * MIN, otherMs: 5 * MIN },
+    'C:\\locks\\npu',
+  );
+  assert.deepEqual(list.map((s) => s.base), [BASE, 'http://127.0.0.1:18182']);
+  assert.match(list[1].program, /\\b11125-hexagon\\llama-server\.exe$/);
+  assert.deepEqual([list[1].lockDirs, list[1].idleMs, list[1].recycle, list[1].spec.logFile], [['C:\\locks\\npu'], 10 * MIN, undefined, 'C:\\logs\\npu.embed.log']);
+});
+
 test("a GenieX on another port (--host) is not the one at the address", () => {
   assert.equal(servesBase('"C:\\g\\geniex.exe" serve --skip-update', BASE), true, 'the default host');
   assert.equal(servesBase('geniex.exe serve --host 127.0.0.1:18199 --keepalive 20', BASE), false);

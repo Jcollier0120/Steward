@@ -15,6 +15,36 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.45
+
+**The Steward's kit 2.63.0: on a Snapdragon, search runs on the NPU.**
+
+### What changed
+
+- The Steward's kit 2.63.0: setting up local AI on a Snapdragon now puts the work behind search (embeddings) on the NPU, beside its chat. It finds the right files as well as the graphics card does, in about half the time, and leaves the graphics card free.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.44
+
+**Releases can carry an agent's own native program, signed, for both kinds of Windows processor.**
+
+### What's new
+
+- The Steward's kit 2.62.0. An agent that needs a program of its own beside Node (Envoy's media host, which hears voice chat on the NPU) says so in its kit.json.
+  - Its release builds that program for Arm and x64 PCs and signs it with your code-signing certificate.
+  - The release carries both builds; each PC keeps its own.
+
+### What changed
+
+- Releasing such an agent needs your code-signing certificate's key, as Manor's setup does: connect SimplySign Desktop first. Without it, the release stops before building, and says so.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.43
 
 **The kit it hands out is 2.61.0: an employee's page can stream a reply.**
@@ -945,7 +975,6 @@ Nothing: it updates itself as usual.
 
 - Nothing: it updates itself as usual.
 
-
 ## 0.27.39
 
 **Your repositories in one list, in Manor: the Steward looks after the ones there.**
@@ -1213,6 +1242,7 @@ Nothing: it updates itself as usual. Each agent takes the new kit as the Steward
 ### Before you update
 
 - Nothing: it updates itself as usual. The old parts in settings.json are left there and no longer read.
+
 ## 0.27.2
 
 **It installs one of your own agents the first time, when Manor's Hire asks.**
@@ -1229,6 +1259,7 @@ Nothing: it updates itself as usual. Each agent takes the new kit as the Steward
 ### Before you update
 
 - Nothing: it updates itself as usual. Manor shows Hire for your own agents once it is updated too.
+
 ## 0.27.0
 
 **Your PCs agree among themselves which one merges and releases each repository, through the repository itself: no licence or Castellan service needed.**
@@ -1279,6 +1310,7 @@ Nothing: it updates itself as usual. Each agent takes the new kit as the Steward
 - `claim-port <agent id>` gives a new agent its page's port before anyone writes one: the next free one after every port Manor's staff, this PC's own staff, the agents announced on GitHub, each repository's src/app.ts and every earlier claim use, with its development port (+10000) free too. A new agent needs no repository yet. Asking again for the same agent gives the same port; an agent that has one keeps it. `release-port` gives one back.
 - `ports` lists every port in use, by whom and where each says so.
 - When two agents have the same port, a round raises an alarm naming both, before either is installed. Manor offers only one of two such agents for hire, so the other's role used to sit empty with no word why: the Assayer and the Shepherd both had 20707.
+
 ## 0.25.1
 
 **A Castellan release service that can't be reached never stops a Steward that works alone.**
@@ -2071,6 +2103,7 @@ Nothing: it updates itself as usual.
 - Where `%USERPROFILE%\.bailiff\app` (or `BAILIFF_HOME`'s) exists, a draft that passes the Steward's code-only look is marked ready only when it carries `bailiff:approved` and the Bailiff's last marked comment by the team approves its current head. Otherwise it stays a draft, and its hold says why (`a draft from the Wright, with the Bailiff: …`). Without the Bailiff, nothing changes.
 - The Bailiff is an employee, and its `GET /api/reviews` an alarm source (Claude Code unusable, a review failing twice, its page down), only where it is installed: new setting **The Bailiff's page** (`alarms.bailiffUrl`).
 - Numbered 0.8.6, after 0.8.5 (kit 2.10.0) on main.
+
 ## 0.8.5
 
 **Kit 2.10.0: Manor's gpuWithNpu keeps the graphics card out of model work beside an NPU.** The Steward hands out kit 2.10.0 (kit/CHANGELOG.md): with Manor's "Use the graphics card for models when there's an NPU" off and an NPU configured, no graphics card is chosen for a request, not even as the fallback. On by default. (0.8.4 is the Bailiff PR's.)
