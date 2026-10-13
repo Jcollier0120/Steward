@@ -192,11 +192,11 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
     // Only the tests its change reaches (affected.ts), unless Settings say the whole suite.
     const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
-    const failed = await runChecks(ctx, e, dir, { say, ...affected });
+    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
     const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
     if (!failed) return { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch };
     say(`#${pr.number}: its checks once more (${failed})`);
-    const again = await runChecks(ctx, e, dir, { say, ...affected });
+    const again = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
     return again
       ? { ok: false, note: `its checks failed here at ${sha}, twice: ${again}`, at: now(), branch }
       : { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch };

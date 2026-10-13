@@ -157,7 +157,7 @@ test('a set that fails to install leaves the worktree to npm ci itself, as befor
   const c = path.join(tmp, 'c');
   project(c, 'clerk', '0.4.0', { typescript: '^7.9.9' });
   const lines: string[] = [];
-  assert.equal(await runChecks(ctx, e, c, { say: (l) => lines.push(l) }), 'npm ci --no-audit --no-fund failed (exit 1)');
+  assert.equal(await runChecks(ctx, e, c, { say: (l) => lines.push(l) }), 'npm ci --ignore-scripts --no-audit --no-fund failed (exit 1)');
   assert.equal(ci.length, 2, 'once for the set, once in the worktree');
   assert.equal(path.resolve(ci[1]).toLowerCase(), path.resolve(c).toLowerCase());
 });

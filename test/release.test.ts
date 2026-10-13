@@ -60,7 +60,7 @@ test("a Node agent's release worktree gets npm ci before its release command; a 
 
   const done = await releaseOne(ctx, e, { kit: '1.2.1' });
   assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
-  assert.deepEqual(npm, [['ci', '--no-audit', '--no-fund']]);
+  assert.deepEqual(npm, [['ci', '--ignore-scripts', '--no-audit', '--no-fund']]);
   assert.equal(path.resolve(JSON.parse(readFileSync(released, 'utf8')).cwd).toLowerCase(), path.join(work, 'reeve-release').toLowerCase());
   assert.ok(!existsSync(path.join(work, 'reeve-release')), 'the release worktree is removed');
 

@@ -13,6 +13,7 @@ import { agreedVersion } from '../versions.ts';
 import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
+import { guardPackages, installPackages } from './modules.ts';
 import { readPin } from './staff.ts';
 import { noteReleased } from '../strangers.ts';
 import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit, networkNote, NOT_ON_KIT, notHiredHere, releasedOf, releaseDirOf, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
@@ -152,12 +153,17 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
     if (releaseNeedsPackages(dir, e.release)) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) {
+      // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
+      const g = await guardPackages(ctx, e, dir, `the release of v${version}`);
+      if (g.held) {
+        ctx.log(`[${e.id}] packages held: ${g.held}`);
+        return result(e, 'failed', `${g.held}, so its release wasn't built`, { version, commit: commit.slice(0, 7) });
+      }
+      const ci = await installPackages(ctx, dir, g.plan, (line) => ctx.log(`[${e.id}] ${line}`));
+      if (ci) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
-        keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
-        return result(e, 'failed', `npm ci failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
+        keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
+        return result(e, 'failed', `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code}), so its release wasn't built${networkNote(`${ci.out}\n${ci.err}`)}`, { version, commit: commit.slice(0, 7) });
       }
     }
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).

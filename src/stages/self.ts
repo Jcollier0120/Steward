@@ -9,6 +9,7 @@ import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts'
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import { exchequerNote, networkFailure, networkNote, passingFailure, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { guardPackages, installPackages } from './modules.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -126,9 +127,11 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   try {
     // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
     if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      ctx.log(`[${APP.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
+      // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
+      const g = await guardPackages(ctx, { id: APP.id, name: APP.name, repo: ctx.settings.stewardRepo }, dir, `the release of ${step.tag}`);
+      if (g.held) return selfResult('failed', `${g.held}, so ${step.tag} wasn't released`, { version: step.version, commit: at });
+      const ci = await installPackages(ctx, dir, g.plan, (line) => ctx.log(`[${APP.id}] ${line}`));
+      if (ci) return selfResult('failed', `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
     }
     const commands = SELF_COMMANDS[step.what];
     let exchequer = '';

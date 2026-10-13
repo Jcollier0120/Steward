@@ -449,7 +449,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (kit?.why) did.push(`kit ${kit.version}, since ${kit.why.replace(/\bv(\d)/g, 'kit $1')}`);
     if (kitPr) {
       // No one tests the Steward's own PRs on their way in: its bump did, and so does its catch-up, here.
-      const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`) });
+      const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`), doing: `#${pr.number}'s checks after its catch-up` });
       if (failed) return said({ done: false, note: `${did.join('; ')}, but then ${failed}, so it wasn't pushed` });
       did.push('its checks passed');
     }

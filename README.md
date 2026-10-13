@@ -381,6 +381,16 @@ One that passes is marked ready, with a comment saying what was looked at, and g
 
 **With the Bailiff.** Where the Bailiff is installed (`%USERPROFILE%\.bailiff\app`, or `BAILIFF_HOME`'s; the same rule as the Wright's), a draft that passes the look above is marked ready only once the Bailiff has approved its current head commit: the PR is labelled `bailiff:approved`, and the Bailiff's last review comment by the team's account ends with `<!-- bailiff-review {"head":"<sha>","verdict":"approved"} -->` naming exactly the head the round listed, which is still the PR's head (one `gh pr view --json headRefOid,comments`, only for drafts labelled approved that passed the look). Until then it stays a draft, and the round says why: `a draft from the Wright, with the Bailiff: waiting for the Bailiff's review` (or that it asked for changes, couldn't review it yet, or approved an earlier commit). The Steward's own look always comes first: an approval never overrides it. The comment that marks it ready names the commit the Bailiff approved. Without the Bailiff, nothing changes. The Bailiff, like the Wright, is ours alone: an employee and an alarm source only where it is installed.
 
+### Install scripts
+
+A package's install script (its `preinstall`, `install` or `postinstall`, node-gyp for one with a `binding.gyp`, a git dependency's `prepare`) runs on this PC the moment npm installs it, before anything in the manor has looked at it. So every install the Steward makes (a shared set in `_modules`, a worktree's own, a release's, a refresh's, its own release) is guarded first (`src/installscripts.ts`):
+
+- it reads the lockfile's `packages`, where npm records `hasInstallScript` for each package that has one;
+- it runs `npm ci --ignore-scripts`, then `npm rebuild <name>` for the packages on Settings' **Install scripts allowed** alone (esbuild, unrs-resolver and fsevents to begin with: the ones the manor's own lockfiles carry);
+- a package with a script that isn't on the list, or any git dependency, holds the work: nothing is installed, the stage says which package, and an alarm names it, its version, the repository and the script its registry entry says it runs (`npm view`, which runs none of its code). The hold is kept in `install-held.json` until the package is allowed or not seen for two days.
+
+And any PR, whoever wrote it, whose `package-lock.json` brings a package whose name is new to the repository, or a package with an install script that isn't allowed, waits for you (`lockfileHold`, `src/review.ts`): look at it, then merge it yourself or label it `owner-done`. It rides in no merge train meanwhile. The Wright's drafts get the same look as part of theirs.
+
 ## Settings
 
 Changed on the page, under **Settings**, and kept in `%USERPROFILE%\.steward\settings.json`. They are used from the next stage on.

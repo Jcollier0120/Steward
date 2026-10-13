@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import path from 'node:path';
 import { withLock } from '../kit/lock.ts';
 import { dataFile } from '../kit/store.ts';
-import type { Settings } from '../settings.ts';
-import { tail } from '../run.ts';
+import { allowedInstallScripts, guardInstall, installLines, installPlan, named, type InstallPlan } from '../installscripts.ts';
+import type { Employee, Settings } from '../settings.ts';
+import { runLine, tail, type Ran } from '../run.ts';
 import { workRootOf, type Ctx } from './common.ts';
 
 /**
@@ -17,7 +18,28 @@ import { workRootOf, type Ctx } from './common.ts';
  *
  * The checks only read node_modules. A set that can't be installed, or a link that can't be made, leaves the worktree
  * to `npm ci` as before.
+ *
+ * Every install, a set's or a worktree's own, is guarded first (guardPackages, installscripts.ts): `npm ci
+ * --ignore-scripts`, then the scripts of the packages Settings allow, by name; a package with any other install script
+ * holds the work, and nothing is installed.
  */
+
+/** Before packages are installed in `dir` for `e`: how (installscripts.ts's plan), or why it is held, with an alarm. */
+export const guardPackages = (ctx: Ctx, e: Pick<Employee, 'id' | 'name' | 'repo'>, dir: string, doing: string) =>
+  guardInstall(ctx.run, dir, allowedInstallScripts(ctx.settings), { who: { id: e.id, name: e.name, repo: e.repo }, doing });
+
+/**
+ * A worktree's own install, as `plan` says (its lines one after the other, `npm ci --ignore-scripts` first): null when
+ * all passed, else the line that failed and what it printed.
+ */
+export async function installPackages(ctx: Ctx, dir: string, plan: InstallPlan, say: (line: string) => void, timeoutMs = 20 * 60_000): Promise<(Ran & { line: string }) | null> {
+  for (const line of installLines(plan)) {
+    const r = await runLine(ctx.run, line, { cwd: dir, timeoutMs });
+    say(`${line}: ${r.code === 0 ? 'ok' : `exit ${r.code}`}`);
+    if (r.code !== 0) return { ...r, line };
+  }
+  return null;
+}
 
 export const modulesRootOf = (s: Settings) => path.join(workRootOf(s), '_modules');
 
@@ -82,8 +104,8 @@ export async function renameWhenFree(from: string, to: string, o: { rename?: (a:
   }
 }
 
-/** The set's node_modules, installed (once) if it isn't yet; null when npm ci failed there. */
-async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) => void): Promise<string | null> {
+/** The set's node_modules, installed (once) if it isn't yet, as `plan` says; null when npm ci failed there. */
+async function setFor(ctx: Ctx, dir: string, key: string, plan: InstallPlan, say: (line: string) => void): Promise<string | null> {
   const root = modulesRootOf(ctx.settings);
   const set = path.join(root, key);
   if (existsSync(path.join(set, '.ready'))) return path.join(set, 'node_modules');
@@ -103,11 +125,20 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
       const t0 = Date.now();
       // From npm's own cache when it has the packages, without asking the registry whether they changed: a lockfile's
       // packages are pinned by their integrity, so the cache's copy is the one.
-      const r = await ctx.run('npm', ['ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: tmp, timeoutMs: INSTALL_MS });
+      // No package's install script runs by itself (--ignore-scripts); the allowed ones' run after it, by name.
+      const r = await ctx.run('npm', [...plan.ci.filter((a) => a !== '--prefer-offline'), '--prefer-offline'], { cwd: tmp, timeoutMs: INSTALL_MS });
       say(`npm ci, once for every worktree with these packages (${key}): ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
       if (r.code !== 0) {
         for (const line of tail(`${r.out}\n${r.err}`, 10).split('\n')) say(`  ${line}`);
         return null;
+      }
+      if (plan.rebuild.length) {
+        const b = await ctx.run('npm', ['rebuild', ...plan.rebuild], { cwd: tmp, timeoutMs: INSTALL_MS });
+        say(`npm rebuild ${plan.rebuild.join(' ')} (install scripts Settings allow): ${b.code === 0 ? 'ok' : `exit ${b.code}`}`);
+        if (b.code !== 0) {
+          for (const line of tail(`${b.out}\n${b.err}`, 10).split('\n')) say(`  ${line}`);
+          return null;
+        }
       }
       mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
       writeFileSync(path.join(tmp, '.ready'), new Date().toISOString());
@@ -141,17 +172,24 @@ export function sharesModules(dir: string): boolean {
 }
 
 /**
- * The worktree's node_modules, linked to its set of packages (installed first if need be); false when that couldn't be
- * done, and the worktree should `npm ci` itself.
+ * The worktree's node_modules, linked to its set of packages (installed first if need be, as `given` says: the guard's,
+ * guardPackages); false when that couldn't be done, and the worktree should install its own. Without a plan, one is
+ * made from its lockfile, and a package that would hold it isn't installed here either.
  */
-export async function linkSharedModules(ctx: Ctx, dir: string, say: (line: string) => void): Promise<boolean> {
+export async function linkSharedModules(ctx: Ctx, dir: string, say: (line: string) => void, given?: InstallPlan): Promise<boolean> {
   if (!sharesModules(dir)) {
     say("node_modules: its own (npm ci), as a Next.js build refuses packages linked from outside the project");
     return false;
   }
   try {
-    const key = packagesKey(readFileSync(path.join(dir, 'package-lock.json'), 'utf8'));
-    const modules = await setFor(ctx, dir, key, say);
+    const text = readFileSync(path.join(dir, 'package-lock.json'), 'utf8');
+    const plan = given ?? installPlan(text, allowedInstallScripts(ctx.settings));
+    if (plan.held.length) {
+      say(`node_modules: not shared, as ${plan.held.map(named).join(', ')} would run an install script Settings don't allow`);
+      return false;
+    }
+    const key = packagesKey(text);
+    const modules = await setFor(ctx, dir, key, plan, say);
     if (!modules) return false;
     symlinkSync(modules, path.join(dir, 'node_modules'), 'junction');
     const now = new Date();

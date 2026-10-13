@@ -11,7 +11,8 @@ import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
-import { linkSharedModules } from './modules.ts';
+import { installLines } from '../installscripts.ts';
+import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { trialPassOf } from './trialpass.ts';
@@ -131,9 +132,17 @@ export const needsNpmCi = (dir: string) =>
  * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string }): Promise<string | null> {
   const before: string[] = [];
-  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) before.push('npm ci --no-audit --no-fund');
+  if (needsNpmCi(dir)) {
+    // No package's install script runs unless Settings allow it; one that isn't holds the checks (installscripts.ts).
+    const g = await guardPackages(ctx, e, dir, o.doing ?? 'its checks');
+    if (g.held) {
+      o.say(`packages held: ${g.held}`);
+      return `its packages weren't installed: ${g.held}`;
+    }
+    if (!(await linkSharedModules(ctx, dir, o.say, g.plan))) before.push(...installLines(g.plan));
+  }
   if (e.fill) before.push(e.fill);
   // Each test step worked out once the dependencies and the kit are in place, so the kit's files are there to follow.
   const steps: (string | (() => Promise<string[]>))[] = [...before];
@@ -327,10 +336,10 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // the same checks on the same files but for the version, so they aren't run a second time.
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope });
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
   if (first) {
     say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say, affected: scope });
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
   // Only some of its tests ran: its rollout's bump runs them all (no trial pass is kept for it).
