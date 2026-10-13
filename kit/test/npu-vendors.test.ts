@@ -22,6 +22,9 @@ const { orderAccelerators, readAccelerators, validateAccelerators, validateKeepe
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
 const { RULES } = await import('./fixture/src/kit/rules.ts');
+// Intel's model files are pinned (2.2 GB of them): these tests' pulls are fakes that leave none, so the pins are kept for the test of them alone.
+const intelPins = V.NPU_CATALOG.routes.intel.models[0].pinned!;
+delete V.NPU_CATALOG.routes.intel.models[0].pinned;
 
 // What DETECT_PS prints for each NPU (the ComputeAccelerator class, as Heiward's NpuHardware.cs reads it). The
 // Snapdragon line is this laptop's (2026-10-07); the Intel and AMD ones are as Windows names those devices, with the
@@ -144,9 +147,9 @@ test('config entries per vendor: one server on its own port, its caps and timeou
 
   const i = V.npuEntry(V.NPU_CATALOG.routes.intel, { tools, exe: `${tools}\\servers\\ovms-2026.4.1\\ovms.exe`, port: 18185 });
   assert.equal(i.chat!.baseUrl, 'http://127.0.0.1:18185', "OpenVINO Model Server serves /v1/models and /v1/chat/completions at its root");
-  assert.equal(i.chat!.model, 'OpenVINO/Qwen3-8B-int4-cw-ov');
+  assert.equal(i.chat!.model, 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov');
   assert.deepEqual(i.chat!.startCommand!.slice(0, 5), [`${tools}\\servers\\ovms-2026.4.1\\ovms.exe`, '--rest_port', '18185', '--rest_bind_address', '127.0.0.1']);
-  assert.ok(i.chat!.startCommand!.includes('NPU') && i.chat!.startCommand!.includes('OpenVINO/Qwen3-8B-int4-cw-ov'));
+  assert.ok(i.chat!.startCommand!.includes('NPU') && i.chat!.startCommand!.includes('Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov'));
   assert.deepEqual(i.chat!.env, {
     PYTHONHOME: `${tools}\\servers\\ovms-2026.4.1\\python`,
     PATH: `${tools}\\servers\\ovms-2026.4.1;${tools}\\servers\\ovms-2026.4.1\\python;${tools}\\servers\\ovms-2026.4.1\\python\\Scripts;%PATH%`,
@@ -205,7 +208,7 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   assert.equal(intel.npu?.exe, path.join(tools, 'servers', 'ovms-2026.4.1', 'ovms.exe'));
   assert.deepEqual(intel.targets.map((t) => [t.id, t.variant?.variant, t.kinds]), [['gpu-intel-r-arc-tm-140v-gpu-16gb', 'vulkan-x64', ['chat', 'vision', 'embed']]], 'the Arc takes what the NPU does not, and is the fallback');
   const lines = describePlan(intel);
-  assert.match(lines[0], /^Core Ultra 200V, Lunar Lake \(NPU 4\) \(npu\): OpenVINO Model Server 2026\.4\.1, chat on 18183; OpenVINO\/Qwen3-8B-int4-cw-ov$/);
+  assert.match(lines[0], /^Core Ultra 200V, Lunar Lake \(NPU 4\) \(npu\): OpenVINO Model Server 2026\.4\.1, chat on 18183; Castellan-AI\/Qwen3-4B-Instruct-2507-int4-cw-ov$/);
   assert.match(lines[1], /get  OpenVINO Model Server 2026\.4\.1 \(140 MB, SHA-256 pinned\)/);
   // Its C++ runtime comes with it, beside ovms.exe: never "an administrator installs it" (a Lunar Lake, 2026-10-12).
   assert.equal(lines[2], '  get  the Microsoft Visual C++ runtime 14.44 (3 MB, SHA-256 pinned), beside ovms.exe: no administrator');
@@ -304,7 +307,7 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     'download Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix',
     `unpack into ${vsix}.unpacked`,
     ...['concrt140.dll', 'msvcp140.dll', 'msvcp140_codecvt_ids.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'].map((f) => `copy ${path.join(ovms, f)}`),
-    `run ovms.exe --pull --source_model OpenVINO/Qwen3-8B-int4-cw-ov --model_repository_path ${path.join(tools, 'models', 'openvino')} --task text_generation`,
+    `run ovms.exe --pull --source_model Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov --model_repository_path ${path.join(tools, 'models', 'openvino')} --task text_generation`,
   ]);
   const noRuntime = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...fakeNpuIo().io, download: async (d: { what: string }) => { if (d.what.endsWith('.vsix')) throw new Error('404 Not Found'); } });
   assert.equal(noRuntime.entry, undefined);
@@ -374,4 +377,30 @@ test('setup as a command: asks with the size first; the NPU entry is written onl
   assert.equal(after2.jobs.toast, false, 'the rest of the file kept');
   assert.deepEqual(orderAccelerators(readAccelerators(after2, null).accelerators, 'auto').map((a) => a.id), ['npu', 'gpu-intel-r-arc-tm-140v-gpu-16gb'], 'requests try the NPU first');
   assert.ok(existsSync(file));
+});
+
+test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, is checked on each; a generation's own pin comes first", async () => {
+  const tools = mkdtempSync(path.join(tmpdir(), 'kit-pins-'));
+  try {
+    const want = intelPins['*'];
+    assert.equal(Object.keys(intelPins).join(), '*');
+    assert.equal(want.files['openvino_model.bin'].sha256, 'dba3bbe51ca1b551d65ce89b3c32097c3db85e0529b033b9922d7be85d625dff');
+    // Small stand-ins for the files, with the pins' sizes and SHA-256s made to match them.
+    const dir = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-4B-Instruct-2507-int4-cw-ov');
+    mkdirSync(dir, { recursive: true });
+    const files: Record<string, { size: number; sha256: string }> = {};
+    for (const name of Object.keys(want.files)) {
+      writeFileSync(path.join(dir, name), name);
+      files[name] = { size: name.length, sha256: await V.sha256File(path.join(dir, name)) };
+    }
+    const m = { ...V.NPU_CATALOG.routes.intel.models[0], pinned: { '*': { dir: want.dir, files } } };
+    for (const g of ['meteor-lake', 'lunar-lake', 'panther-lake']) assert.deepEqual(await V.checkPinned(m, g, { tools }), [], g);
+    writeFileSync(path.join(dir, 'openvino_model.bin'), 'not the model!!!!!!');
+    assert.match((await V.checkPinned(m, 'lunar-lake', { tools }))[0], /openvino_model\.bin is 19 bytes, not 18/);
+    // A generation's own pin is used before '*'.
+    const own = { ...m, pinned: { ...m.pinned, 'lunar-lake': { dir: want.dir, files: {} } } };
+    assert.deepEqual(await V.checkPinned(own, 'lunar-lake', { tools }), []);
+  } finally {
+    rmSync(tools, { recursive: true, force: true });
+  }
 });

@@ -31,7 +31,10 @@ export interface NpuModel {
   /** About how much it downloads, in bytes. */
   size: number;
   licence: string;
-  /** Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. */
+  /**
+   * Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. `*` is every
+   * generation the route takes, for a model that is the same file on each (OpenVINO's, compiled on the PC itself).
+   */
   pinned?: Record<string, { dir: string; files: Record<string, { size: number; sha256: string }> }>;
 }
 
@@ -339,10 +342,11 @@ export function sha256File(file: string): Promise<string> {
 
 /**
  * Checks a pulled model's files against their pinned sizes and SHA-256s, for this generation (a model compiled for
- * the NPU is a different build on each). Empty when they all match, or none are pinned for it.
+ * the NPU is a different build on each), else for every generation (`*`). Empty when they all match, or none are
+ * pinned for it.
  */
 export async function checkPinned(m: NpuModel, generation: string | null, o: { tools: string; env?: Record<string, string | undefined>; hash?: (f: string) => Promise<string> } ): Promise<string[]> {
-  const pin = generation ? m.pinned?.[generation] : undefined;
+  const pin = (generation ? m.pinned?.[generation] : undefined) ?? m.pinned?.['*'];
   if (!pin) return [];
   const dir = expandRoute(pin.dir, { tools: o.tools, env: o.env });
   const problems: string[] = [];

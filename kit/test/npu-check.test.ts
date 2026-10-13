@@ -41,7 +41,7 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean; answer?:
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"OpenVINO/Qwen3-8B-int4-cw-ov"}]}');
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov"}]}');
         const j = JSON.parse(body);
         seen.push(j);
         const prompt = j.messages.map((m: any) => m.content).join(' ');
@@ -73,6 +73,7 @@ async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string } 
   const catalog = structuredClone(V.NPU_CATALOG);
   catalog.routes.intel.port = port;
   if (o.cap) catalog.routes.intel.maxContextTokens = o.cap;
+  delete catalog.routes.intel.models[0].pinned; // its pull is a fake that leaves no files to check
   const tools = mkdtempSync(path.join(home, 'tools-'));
   const exe = V.serverExe(catalog.routes.intel, tools);
   mkdirSync(path.dirname(exe), { recursive: true });
@@ -138,10 +139,10 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.equal((report.npu as any).pciDevice, '643E');
   assert.equal((report.npu as any).generation, 'lunar-lake');
   // The model was pulled with OpenVINO's own command; nothing was downloaded (the program was there).
-  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-8B-int4-cw-ov')));
+  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov')));
   assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size);
-  // Qwen3 (not an Instruct build) is told /no_think, and its empty think block is stripped from the answer.
-  assert.match(s.fake.seen[0].messages.at(-1).content, /\/no_think$/);
+  // Qwen3-4B-Instruct-2507 doesn't think, so isn't told /no_think; a think block (the fake writes one) is stripped all the same.
+  assert.doesNotMatch(s.fake.seen[0].messages.at(-1).content, /\/no_think/);
   assert.match(by['first-answer'].say, /answered "ready" \(with an empty think block, stripped\)/);
   // Under the cap answers; past it is refused plainly, and the server keeps answering.
   assert.equal(by.cap.ok, true);
