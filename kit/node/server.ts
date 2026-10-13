@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import { pipeline, type Readable } from 'node:stream';
 import { APP, HOST_NAME } from '../app.ts';
 import { isDeveloper } from './developer.ts';
 import { duty, setDuty } from './duty.ts';
@@ -36,12 +37,25 @@ export interface Request {
   body: any;
   /** The page token, for handlers that render a page with buttons. */
   token: string;
+  /** The request's headers (kit 2.61.0), lower-cased as Node gives them. serve() always gives them and `signal`. */
+  headers?: http.IncomingHttpHeaders;
+  /**
+   * Aborted when the client goes away before the reply has ended (kit 2.61.0): a handler that does long work for one
+   * caller, or streams to it, stops when it fires.
+   */
+  signal?: AbortSignal;
 }
 
 export type Reply =
   | { json: unknown; status?: number }
   | { html: string; status?: number }
-  | { body: string | Buffer; type: string; status?: number };
+  | { body: string | Buffer; type: string; status?: number }
+  /**
+   * A reply sent as it's made (kit 2.61.0), for one too long to hold, or with no end until the client stops it (a live
+   * recording): piped to the client as it comes. The stream is destroyed when the client goes away, and the reply cut
+   * off when the stream fails. A HEAD gets the status and type, and the stream is destroyed unread.
+   */
+  | { stream: Readable; type: string; status?: number };
 
 export type Handler = (req: Request) => Reply | Promise<Reply>;
 
@@ -223,11 +237,25 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   }
 
   const server = http.createServer(async (req, res) => {
+    // Aborted when the client goes away before the reply has ended: a long handler or a stream stops for no one.
+    const gone = new AbortController();
+    res.once('close', () => {
+      if (!res.writableFinished) gone.abort();
+    });
     const send = (r: Reply) => {
       const status = r.status ?? 200;
       if ('json' in r) res.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(r.json));
       else if ('html' in r) res.writeHead(status, { ...HEADERS, 'content-type': 'text/html; charset=utf-8' }).end(r.html);
-      else res.writeHead(status, { ...HEADERS, 'content-type': r.type }).end(r.body);
+      else if ('stream' in r) {
+        res.writeHead(status, { ...HEADERS, 'content-type': r.type });
+        if (req.method === 'HEAD' || gone.signal.aborted) {
+          r.stream.destroy();
+          res.end();
+        } else {
+          // Destroys the stream when the client goes away, and cuts the reply off when the stream fails.
+          pipeline(r.stream, res, () => {});
+        }
+      } else res.writeHead(status, { ...HEADERS, 'content-type': r.type }).end(r.body);
     };
     try {
       if (!hostAllowed(hosts, req.headers.host)) return send({ json: { error: 'wrong host' }, status: 421 });
@@ -240,7 +268,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
         const made = demo ? demoAnswer(url.pathname, demo) : undefined;
         const h = get[url.pathname];
         if (!h) return made === undefined ? send({ json: { error: 'not found' }, status: 404 }) : send({ json: made });
-        const r = await h({ path: url.pathname, query: url.searchParams, body: {}, token });
+        const r = await h({ path: url.pathname, query: url.searchParams, body: {}, token, headers: req.headers, signal: gone.signal });
         if (!demo) return send(r);
         // The demo's made-up answer laid over its own (the page's frame from the kit, its findings made up), and its ping
         // said to be a demo's.
@@ -257,7 +285,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
         // A demo changes nothing; it can still be stopped.
         if (demoDir() && url.pathname !== '/api/stop') return send({ json: { error: DEMO_NO }, status: 403 });
         const body = await readBody(req, url.pathname === '/api/settings' ? SETTINGS_BODY_LIMIT : 1_000_000);
-        return send(await h({ path: url.pathname, query: url.searchParams, body, token }));
+        return send(await h({ path: url.pathname, query: url.searchParams, body, token, headers: req.headers, signal: gone.signal }));
       }
       send({ json: { error: 'method not allowed' }, status: 405 });
     } catch (e) {
