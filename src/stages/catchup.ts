@@ -334,13 +334,13 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (theirs && KIT_VERSION.test(theirs.kit) && compareVersions(theirs.kit, brings) >= 0) return await closeKitPr(ctx, e, pr, repo, `${e.branch} already carries kit ${theirs.kit}`, { redundant: true });
   }
   const start = (await gitMaybe(run, repo, 'merge-base', branch, head))?.trim();
-  const [headV, fromV, baseV] = [await read(head), start ? await read(start) : null, await read(branch)];
+  // The three asked at once, the kit's with them, so git reads them in one command (showFile).
+  const kitAt = async (ref: string) => (/^\s*(\d+\.\d+\.\d+)\s*$/.exec((await showFile(run, repo, ref, KIT_VERSION_FILE)) ?? '')?.[1] ?? null);
+  const [headV, fromV, baseV, kHead, kBase, kStart] = await Promise.all([read(head), start ? read(start) : null, read(branch), kitAt(head), kitAt(branch), start ? kitAt(start) : null]);
   if (!headV || !baseV) return { done: false, note: `its version can't be read (${e.versionFiles.join(', ')})` };
   const choice = catchUpVersion({ head: headV, from: fromV, base: baseV, released: o.released, taken: o.taken, asksRelease: !!pr.after?.steps.includes('release') });
   // The kit, where the repository carries one (the Steward's own): its version settled the same way.
-  const kitAt = async (ref: string) => (/^\s*(\d+\.\d+\.\d+)\s*$/.exec((await showFile(run, repo, ref, KIT_VERSION_FILE)) ?? '')?.[1] ?? null);
-  const [kHead, kBase] = [await kitAt(head), await kitAt(branch)];
-  const kFrom = start && kHead ? await kitAt(start) : null;
+  const kFrom = kHead ? kStart : null;
   const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: o.kit?.taken ?? [], asksRelease: false }) : null;
   const behind = await aheadOf(run, repo, branch, head);
   if (!behind && !choice.why && !kit?.why) return { done: false, note: 'nothing to catch up' };

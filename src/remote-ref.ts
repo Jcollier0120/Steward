@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { hasObject } from './git.ts';
 import { isNetworkError } from './kit/net.ts';
 import type { Runner } from './run.ts';
 
@@ -61,8 +62,9 @@ export async function lsRemote(run: Runner, r: RemoteRepo, refs: string[]): Prom
 
 /** A ref's file at a known commit: fetched first when the commit isn't here yet. Null when it can't be read. */
 export async function fileAt(run: Runner, r: RemoteRepo, ref: string, sha: string, file: string): Promise<string | null> {
-  const here = await run('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: r.scratch, timeoutMs: ASK_MS });
-  if (here.code !== 0) {
+  // Read from the scratch repository's files first (hasObject): git is asked only when they don't say it plainly.
+  const here = hasObject(r.scratch, sha) || (await run('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd: r.scratch, timeoutMs: ASK_MS })).code === 0;
+  if (!here) {
     const local = `refs/remotes/manor/${r.key}/${ref.replace(/^refs\//, '')}`;
     const f = await run('git', ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', r.url, `+${ref}:${local}`], { cwd: r.scratch, timeoutMs: ASK_MS, env: QUIET });
     if (f.code !== 0) return null;

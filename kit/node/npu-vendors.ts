@@ -63,6 +63,8 @@ export interface NpuRoute {
   /** The keeper restarts it when it holds too much (GenieX's kept memory). */
   recycle: boolean;
   embeddings?: string;
+  /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
+  embedServer?: NpuEmbedServer;
   vision?: string;
   licence: string;
   notes: string;
@@ -83,6 +85,34 @@ export interface NpuRuntime {
   /** The folder in the zip that holds `files`. */
   from: string;
   files: string[];
+}
+
+/**
+ * An NPU's embedding server of its own (Qualcomm's: llama.cpp's llama-server of the very build GenieX carries, over
+ * GenieX's own libraries, its Hexagon backend and Qualcomm's signed HTP libraries among them, so nothing unsigned runs
+ * on the NPU). Its zip is unpacked into `into`, the route's server's `overlay` files are copied over it, and its model
+ * is downloaded as a file; it serves /v1/embeddings on its own port, in the NPU's turn like every NPU request.
+ */
+export interface NpuEmbedServer {
+  server: string;
+  version: string;
+  download: { file: string; url: string; size: number; sha256: string };
+  /** The folder its zip is unpacked into. */
+  into: string;
+  exe: string;
+  /** Files of the route's server copied over the unpacked ones (whenever they differ from what's there). */
+  overlay?: { from: string; files: string[] };
+  port: number;
+  /** Its arguments: {port}, {file} (the model's path) and {model} (the model's id) filled in. */
+  serve: string[];
+  /**
+   * What its environment needs ({tools} filled in): the Hexagon loads its HTP library through FastRPC, which looks in
+   * ADSP_LIBRARY_PATH or the working folder, and the keeper starts servers in the home folder.
+   */
+  env?: Record<string, string>;
+  /** Its model, a file in the tools home's models folder (where setup puts the graphics card's): the same file, so the same index. */
+  model: { id: string; file: string; url: string; size: number; sha256: string; licence: string };
+  licence: string;
 }
 
 export interface NpuCatalog {
@@ -188,13 +218,14 @@ export function npuSupport(dev: NpuDevice, arch: string, catalog: NpuCatalog = N
 // ------------------------------------------------------------------------------------------------
 // Its server, as setup installs it
 
-/** Placeholders and %VARS% in a route's paths and arguments: {tools}, {port}, {model}, %LOCALAPPDATA%, %USERPROFILE%. */
-export function expandRoute(s: string, v: { tools: string; port?: number; model?: string; env?: Record<string, string | undefined> }): string {
+/** Placeholders and %VARS% in a route's paths and arguments: {tools}, {port}, {model}, {file}, %LOCALAPPDATA%, %USERPROFILE%. */
+export function expandRoute(s: string, v: { tools: string; port?: number; model?: string; file?: string; env?: Record<string, string | undefined> }): string {
   const env = v.env ?? process.env;
   return s
     .replace(/\{tools\}/g, v.tools)
     .replace(/\{port\}/g, String(v.port ?? ''))
     .replace(/\{model\}/g, v.model ?? '')
+    .replace(/\{file\}/g, v.file ?? '')
     .replace(/%([^%]+)%/g, (whole, name: string) => {
       const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
       if (key && env[key] !== undefined) return env[key]!;
@@ -216,15 +247,22 @@ export const serverExe = (route: NpuRoute, tools: string, env?: Record<string, s
 /** The chat model's id, the one the server starts with. */
 const firstModel = (route: NpuRoute, kind: ServeKind) => route.models.find((m) => m.kinds.includes(kind));
 
-/** What the NPU serves with this route. */
-export const npuKinds = (route: NpuRoute): ServeKind[] => (['chat', 'vision', 'embed'] as ServeKind[]).filter((k) => route.models.some((m) => m.kinds.includes(k)));
+/** What the NPU serves with this route: its server's models' kinds, and embed when it has an embedding server of its own. */
+export const npuKinds = (route: NpuRoute): ServeKind[] =>
+  (['chat', 'vision', 'embed'] as ServeKind[]).filter((k) => route.models.some((m) => m.kinds.includes(k)) || (k === 'embed' && !!route.embedServer));
+
+/** Where a route's embedding server and its model are, once set up. */
+export function embedPaths(es: NpuEmbedServer, tools: string, env?: Record<string, string | undefined>): { folder: string; exe: string; model: string } {
+  return { folder: expandRoute(es.into, { tools, env }), exe: expandRoute(es.exe, { tools, env }), model: path.join(tools, 'models', es.model.file) };
+}
 
 /**
  * The config.json entry for the NPU on this route: one server on its port, chat and every other kind it serves, the
  * route's caps (per kind where they differ), its own timeouts, quirks. A kind on the chat model's server shares it
- * (no baseUrl of its own); its startCommand starts it with the chat model. `exe` is written as setup found it.
+ * (no baseUrl of its own); its startCommand starts it with the chat model. `exe` is written as setup found it. The
+ * route's embedding server, when it has one and `embed` says where setup put it, is the embed endpoint, on its own port.
  */
-export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string }): AcceleratorEntry {
+export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string } }): AcceleratorEntry {
   const port = o.port ?? route.port;
   const keep = o.portable ?? ((p: string) => p);
   const chat = firstModel(route, 'chat');
@@ -242,6 +280,15 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
   for (const k of ['vision', 'embed'] as const) {
     const m = firstModel(route, k);
     if (m) e[k] = { model: m.id, ...cap(k), ...(k === 'embed' ? { baseUrl, ...server } : {}) };
+  }
+  const es = route.embedServer;
+  if (es && o.embed && !e.embed) {
+    const args = es.serve.map((a) => {
+      const x = expandRoute(a, { tools: o.tools, port: es.port, model: es.model.id, file: o.embed!.model });
+      return a.includes('{file}') || a.includes('{tools}') ? keep(x) : x;
+    });
+    const env = es.env ? Object.fromEntries(Object.entries(es.env).map(([k, v]) => [k, v.includes('{tools}') ? keep(v.replace(/\{tools\}/g, o.tools)) : v])) : undefined;
+    e.embed = { baseUrl: `http://127.0.0.1:${es.port}`, model: es.model.id, startCommand: [keep(o.embed.exe), ...args], ...(env ? { env } : {}) };
   }
   if (Object.keys(route.timeouts).length) e.timeouts = { ...route.timeouts };
   return e;
@@ -281,7 +328,9 @@ export interface NpuPlan {
   kinds: ServeKind[];
   /** The runtime to put beside the server's program, when the route needs one and a file of it isn't there yet. */
   runtime: (NpuRuntime & { dest: string; into: string }) | null;
-  /** Bytes still to download: the server's, its runtime's and the models'. */
+  /** The route's embedding server, when it has one: where it goes, and its zip and model unless they're here. */
+  embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null }) | null;
+  /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
   downloadBytes: number;
 }
 
@@ -313,8 +362,21 @@ export function planNpu(o: {
   const into = path.dirname(exe);
   const rt = route.runtime;
   const runtime = rt && !(installed && rt.files.every((f) => exists(path.join(into, f)))) ? { ...rt, dest: path.join(o.downloadsDir, rt.file), into } : null;
-  const downloadBytes = (download ? download.size : 0) + (runtime ? runtime.size : 0) + models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), downloadBytes };
+  const es = route.embedServer;
+  let embed: NpuPlan['embed'] = null;
+  if (es) {
+    const p = embedPaths(es, o.tools, o.env);
+    const zip = exists(p.exe) ? null : { what: es.download.file, url: es.download.url, size: es.download.size, sha256: es.download.sha256, dest: path.join(o.downloadsDir, es.download.file), have: false };
+    const model = exists(p.model) ? null : { what: es.model.file, url: es.model.url, size: es.model.size, sha256: es.model.sha256, dest: p.model, have: false };
+    embed = { ...p, server: es, download: zip, modelDownload: model };
+  }
+  const downloadBytes =
+    (download ? download.size : 0) +
+    (runtime ? runtime.size : 0) +
+    models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
+    (embed?.download?.size ?? 0) +
+    (embed?.modelDownload?.size ?? 0);
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, downloadBytes };
 }
 
 // ------------------------------------------------------------------------------------------------

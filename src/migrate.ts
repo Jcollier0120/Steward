@@ -4,6 +4,7 @@ import path from 'node:path';
 import { publisherKey } from './kit/exchequer.ts';
 import { manorHome, originRepo } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import { gitExe } from './kit/git-exe.ts';
 import { RELEASE_HERE, type Employee } from './settings.ts';
 
 /**
@@ -76,7 +77,7 @@ export function folderTree(root: string): Tree {
 
 const gitOut = (cwd: string, args: string[]): string | null => {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+    return execFileSync(gitExe(), args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
   } catch {
     return null;
   }

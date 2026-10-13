@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -516,7 +516,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
 
   // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
   // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats when the NPU
-  // doesn't, and makes the embeddings when the NPU chats but serves none (every NPU route but a configured one).
+  // doesn't, and makes the embeddings when the NPU chats but serves none (Intel's and AMD's routes).
   const cards = o.detection.cards;
   let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
   const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
@@ -579,7 +579,9 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   problems.push(...found.problems);
   for (const m of found.models) {
     const dest = path.join(modelsDir, path.basename(m.file));
-    downloads.push({ what: `${m.repo}/${m.file}`, url: m.url, size: m.size, sha256: m.sha256, dest, have: fileSize(dest) === m.size && m.size > 0 });
+    // The NPU's embedding server downloads the same file first (it's set up first): once is enough.
+    const npuGets = npu?.embed?.modelDownload?.dest.toLowerCase() === dest.toLowerCase();
+    downloads.push({ what: `${m.repo}/${m.file}`, url: m.url, size: m.size, sha256: m.sha256, dest, have: npuGets || (fileSize(dest) === m.size && m.size > 0) });
   }
 
   // Ports: an accelerator keeps its own; a new one takes the next free from 18191.
@@ -626,6 +628,11 @@ export function describePlan(p: SetupPlan): string[] {
     lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
+    if (n.embed) {
+      const es = n.embed.server;
+      lines.push(`  ${n.embed.download ? 'get ' : 'have'} ${es.server} ${es.version} for embeddings on ${es.port} (${mb(es.download.size)}, SHA-256 pinned)`);
+      lines.push(`  ${n.embed.modelDownload ? 'get ' : 'have'} ${es.model.file} (${mb(es.model.size)})`);
+    }
   }
   if (p.npuNote) lines.push(p.npuNote);
   for (const t of p.targets) {
@@ -789,6 +796,10 @@ export interface NpuIo {
   exists?: (p: string) => boolean;
   /** The test request: problems, none when the server answered every kind it serves. */
   testNpu?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** The embedding server's test request (testNpuEmbed): problems, none when it gave a vector. */
+  testEmbed?: (entry: AcceleratorEntry) => Promise<string[]>;
+  /** Copies the route's server's files over the embedding server's (overlayFiles). */
+  overlay?: (from: string, into: string, files: string[]) => number;
   /** A file's SHA-256 (the pinned model files). */
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
@@ -820,6 +831,58 @@ export async function installRuntime(rt: NonNullable<NpuPlan['runtime']>, io: Np
   } finally {
     rmSync(tmp, { recursive: true, force: true });
     rmSync(rt.dest, { force: true });
+  }
+  return null;
+}
+
+/**
+ * Copies `files` from `from` into `into` where what's there differs (missing, another size or time), keeping each
+ * file's time so the next look finds them the same; how many it copied. Throws when one isn't in `from`.
+ */
+export function overlayFiles(from: string, into: string, files: string[]): number {
+  let copied = 0;
+  mkdirSync(into, { recursive: true });
+  for (const f of files) {
+    const src = path.join(from, f);
+    const dst = path.join(into, f);
+    const s = statSync(src, { throwIfNoEntry: false });
+    if (!s) throw new Error(`${src} isn't there`);
+    const d = statSync(dst, { throwIfNoEntry: false });
+    if (d && d.size === s.size && Math.abs(d.mtimeMs - s.mtimeMs) < 2_000) continue;
+    copyFileSync(src, dst);
+    utimesSync(dst, s.atime, s.mtime);
+    copied++;
+  }
+  return copied;
+}
+
+/**
+ * The NPU's own embedding server (the route's embedServer), set up: its zip downloaded (checked against its pinned
+ * SHA-256) and unpacked unless it's there, the route's server's files copied over it, its model downloaded unless it's
+ * there (checked the same way). Null when it's ready, else what failed.
+ */
+async function setUpNpuEmbed(e: NonNullable<NpuPlan['embed']>, tools: string, io: NpuIo): Promise<string | null> {
+  const es = e.server;
+  const progress = (what: string) => (done: number, total: number) => io.log(`  ${what}: ${mb(done)} of ${mb(total)}`);
+  try {
+    if (e.download) {
+      io.log(`downloading ${es.server} ${es.version} for the NPU's embeddings (${mb(e.download.size)})`);
+      await (io.download ?? download)(e.download, progress(e.download.what));
+      (io.unpack ?? unpack)(e.download.dest, e.folder);
+      rmSync(e.download.dest, { force: true });
+      if (!(io.exists ?? existsSync)(e.exe)) return `${e.exe} isn't there after unpacking`;
+    }
+    if (es.overlay) {
+      const n = (io.overlay ?? overlayFiles)(expandRoute(es.overlay.from, { tools }), e.folder, es.overlay.files);
+      if (n) io.log(`copied ${n} of the NPU server's files into ${e.folder}`);
+    }
+    if (e.modelDownload) {
+      io.log(`downloading ${es.model.file} (${mb(e.modelDownload.size)})`);
+      mkdirSync(path.dirname(e.modelDownload.dest), { recursive: true });
+      await (io.download ?? download)(e.modelDownload, progress(e.modelDownload.what));
+    }
+  } catch (err: any) {
+    return String(err?.message ?? err).split(/\r?\n/)[0];
   }
   return null;
 }
@@ -877,12 +940,52 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ 
     const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
     if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`);
   }
-  const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p) });
+  // Its own embedding server, where the route has one: a failure there leaves the NPU's chat as it is, and its
+  // embeddings go where they went before.
+  const later: string[] = [];
+  const noEmbed = (what: string) => later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
+  let embedAt: { exe: string; model: string } | undefined;
+  if (n.embed) {
+    const why = await setUpNpuEmbed(n.embed, tools, io);
+    if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`);
+    else embedAt = { exe: n.embed.exe, model: n.embed.model };
+  }
+  const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt });
   io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);
   const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e)))(entry);
   if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`);
-  io.log(`${n.route.server} answered on the NPU: ${n.kinds.join(', ')}`);
-  return { entry, problems: [] };
+  if (embedAt && n.embed) {
+    io.log(`asking ${n.embed.server.server} for a test embedding on the NPU`);
+    const bad = await (io.testEmbed ?? ((e: AcceleratorEntry) => testNpuEmbed(e)))(entry);
+    if (bad.length) {
+      delete entry.embed;
+      noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${bad.join('; ')}`);
+    }
+  }
+  io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
+  return { entry, problems: later };
+}
+
+/**
+ * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
+ * then one embedding. Problems in words; none when it gave a vector.
+ */
+export async function testNpuEmbed(e: AcceleratorEntry): Promise<string[]> {
+  const ep = readAccelerator(e)?.embed;
+  if (!ep?.baseUrl) return ['the entry has no embedding server'];
+  const problems: string[] = [];
+  await withAcceleratorTurn(
+    lockDirsOf({ id: 'npu', slots: 1 }),
+    async () => {
+      const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
+      await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000 });
+      const r = await postJson(s, '/v1/embeddings', { model: ep.model, input: 'ready' }, 5 * 60_000, { loading: true });
+      const v = r.json?.data?.[0]?.embedding;
+      if (!Array.isArray(v) || !v.length) problems.push(`embeddings gave no vector (${JSON.stringify(r.json).slice(0, 160)})`);
+    },
+    { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
+  ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
+  return problems;
 }
 
 /** An answer without its think block (a Qwen3 that thinks writes one, empty when told not to think). */

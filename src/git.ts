@@ -44,8 +44,85 @@ export async function fetchFor(run: Runner, repo: string, sha: string | null | u
 /** Fetches one branch from origin, so origin/<branch> is fresh. */
 export const fetchBranch = (run: Runner, repo: string, branch: string) => git(run, repo, 'fetch', '--quiet', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
 
-/** A file at a commit, or null when it has none. */
-export const showFile = (run: Runner, repo: string, ref: string, file: string) => gitMaybe(run, repo, 'show', `${ref}:${file.replace(/\\/g, '/')}`);
+/** One read waiting for its repository's batch. */
+interface Ask {
+  spec: string;
+  resolve: (text: string | null) => void;
+}
+
+/** The reads asked of each repository this turn of the event loop, by runner (a test's runner is its own). */
+const waiting = new WeakMap<Runner, Map<string, Ask[]>>();
+
+/**
+ * A file at a commit, or null when it has none. Reads asked of one repository in the same turn of the event loop (a
+ * stage's `Promise.all` over its version files, kit.json and tools/kit.ts) go to git together, as one `git cat-file
+ * --batch`: a round read some 100 files one `git show` each, a process started and ended for every one. A read alone
+ * is a `git show`, as before, and anything the batch can't say exactly is asked again that way.
+ */
+export function showFile(run: Runner, repo: string, ref: string, file: string): Promise<string | null> {
+  const spec = `${ref}:${file.replace(/\\/g, '/')}`;
+  return new Promise((resolve) => {
+    let repos = waiting.get(run);
+    if (!repos) waiting.set(run, (repos = new Map()));
+    const asks = repos.get(repo);
+    if (asks) return void asks.push({ spec, resolve });
+    repos.set(repo, [{ spec, resolve }]);
+    setImmediate(() => {
+      const all = repos.get(repo)!;
+      repos.delete(repo);
+      void showAll(run, repo, all);
+    });
+  });
+}
+
+const showOne = (run: Runner, repo: string, spec: string) => gitMaybe(run, repo, 'show', spec);
+
+async function showAll(run: Runner, repo: string, asks: Ask[]): Promise<void> {
+  const specs = [...new Set(asks.map((a) => a.spec))];
+  const said = new Map<string, string | null>();
+  try {
+    // A name over more than one line can't be asked on cat-file's.
+    const batch = specs.length > 1 && !specs.some((s) => /[\r\n]/.test(s)) ? await run('git', ['cat-file', '--batch'], { cwd: repo, timeoutMs: 5 * 60_000, input: `${specs.join('\n')}\n` }) : null;
+    const read = batch?.code === 0 ? readBatch(batch.out, specs.length) : null;
+    await Promise.all(specs.map(async (s, i) => said.set(s, read && read[i] !== undefined ? read[i] : await showOne(run, repo, s))));
+  } catch {
+    // A runner that threw: each read on its own, as before.
+    await Promise.all(specs.filter((s) => !said.has(s)).map(async (s) => said.set(s, await showOne(run, repo, s).catch(() => null))));
+  }
+  for (const a of asks) a.resolve(said.get(a.spec) ?? null);
+}
+
+/**
+ * `git cat-file --batch`'s answers to `n` names, in order: a blob's text, null for a name with nothing there
+ * (`missing`), undefined for one to ask `git show` instead (an ambiguous name). The Runner hands output over as UTF-8
+ * text, where bytes that aren't UTF-8 (a tree's listing, a file in another encoding) no longer count as cat-file
+ * counted them: that answer and every one after it are undefined, asked again with git show. Null when the output
+ * says more than n answers. Pure.
+ */
+export function readBatch(out: string, n: number): (string | null | undefined)[] | null {
+  const buf = Buffer.from(out, 'utf8');
+  const said: (string | null | undefined)[] = [];
+  const rest = () => [...said, ...Array<undefined>(n - said.length).fill(undefined)];
+  let at = 0;
+  while (said.length < n) {
+    const nl = buf.indexOf(0x0a, at);
+    if (nl < 0) return rest();
+    const head = buf.toString('utf8', at, nl);
+    if (/ (missing|ambiguous)$/.test(head)) {
+      said.push(head.endsWith(' missing') ? null : undefined);
+      at = nl + 1;
+      continue;
+    }
+    const m = /^[0-9a-f]{40,64} ([a-z]+) (\d+)$/.exec(head);
+    const end = m ? nl + 1 + Number(m[2]) : -1;
+    if (!m || end >= buf.length || buf[end] !== 0x0a) return rest();
+    const text = buf.toString('utf8', nl + 1, end);
+    if (m[1] !== 'blob' || text.includes('�')) return rest();
+    said.push(text);
+    at = end + 1;
+  }
+  return at === buf.length ? said : null;
+}
 
 /** The files tracked at a commit. */
 export async function trackedAt(run: Runner, repo: string, ref: string): Promise<string[]> {
@@ -120,12 +197,12 @@ function readPacked(common: string): Map<string, string> {
  * Whether the clone has an object, from its files alone (no git started): a loose object, or a name in a pack's index
  * (version 2: a fan-out table of 256 counts, then the sorted names, searched by halves with small reads). False when
  * the files don't say it plainly (another object format, an older index, alternates, anything unreadable): then the
- * caller fetches, as before.
+ * caller fetches, as before. A bare repository (the turns' scratch one) is its own git folder.
  */
 export function hasObject(repo: string, sha: string): boolean {
   try {
     if (!SHA.test(sha)) return false;
-    const common = commonDir(repo);
+    const common = commonDir(repo) ?? (existsSync(path.join(repo, 'HEAD')) && existsSync(path.join(repo, 'objects')) ? repo : null);
     if (!common) return false;
     const objects = path.join(common, 'objects');
     if (existsSync(path.join(objects, sha.slice(0, 2), sha.slice(2)))) return true;

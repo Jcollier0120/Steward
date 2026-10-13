@@ -158,6 +158,60 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.ok(s.lines.some((l) => l.startsWith('Suggested for npu-vendors.json')));
 });
 
+test("a route's own embedding server: set up beside the server, started by the kit, a query and a chunk timed warm, then stopped", async () => {
+  const s = await scene({ cap: 1536 });
+  // The Intel route given an embedding server of its own, as Qualcomm's has, on a port of its own.
+  const ePort = await freePort();
+  const q = V.NPU_CATALOG.routes.qualcomm.embedServer!;
+  s.catalog.routes.intel.embedServer = { ...structuredClone(q), port: ePort };
+  const got: string[] = [];
+  let embedServer: Server | null = null;
+  const inputs: string[] = [];
+  const startEmbed = async () => {
+    embedServer = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"qwen3-embedding-0.6b-gguf"}]}');
+        inputs.push(JSON.parse(body).input);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ embedding: new Array(1024).fill(0.01) }] }));
+        // The kit's started record would name it for the check to stop; this fake stops after the two it times.
+        if (inputs.length === 2) setImmediate(() => (embedServer!.closeAllConnections(), embedServer!.close()));
+      });
+    });
+    await new Promise<void>((r) => embedServer!.listen(ePort, '127.0.0.1', r));
+  };
+  const opts = {
+    ...s.opts,
+    io: {
+      ...s.opts.io,
+      setup: {
+        ...s.opts.io.setup,
+        download: async (d: { what: string }) => void got.push(`download ${d.what}`),
+        unpack: (_zip: string, into: string) => {
+          got.push('unpack');
+          mkdirSync(into, { recursive: true });
+          writeFileSync(path.join(into, 'llama-server.exe'), '');
+        },
+        overlay: (_from: string, _into: string, files: string[]) => (got.push(`overlay ${files.length}`), files.length),
+      },
+      embedTest: async () => (await startEmbed(), [] as string[]),
+    },
+  };
+  const { code, report } = await C.npuCheck(opts);
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.steps.map((x: any) => x.step).slice(-2), ['kit-test', 'embed']);
+  assert.deepEqual(got, ['download llama-b11125-bin-win-opencl-adreno-arm64.zip', 'unpack', 'overlay 13', 'download Qwen3-Embedding-0.6B-Q8_0.gguf']);
+  const embed = report.steps.at(-1) as any;
+  assert.equal(embed.ok, true);
+  assert.equal(embed.data.dims, 1024);
+  assert.equal(typeof embed.data.queryMs, 'number');
+  assert.match(embed.say, /the kit started llama\.cpp and had a vector in .* a query took \d+ ms and a chunk of code \d+ ms \(1024 dimensions\)/);
+  assert.equal(inputs[0], 'where is the push notification token registered');
+  assert.ok(inputs[1].length > 1500, 'a chunk about the size Reeve indexes');
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download.size + q.model.size);
+});
+
 test('a server that dies on a request past its cap fails the cap step, and is started again for the rest', async () => {
   const s = await scene({ cap: 1536, dieOverCap: true });
   const { code, report } = await C.npuCheck(s.opts);
@@ -193,7 +247,7 @@ test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; a missi
   assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /needs the Microsoft Visual C\+\+ runtime 14\.44, which setup puts beside it \(3 MB, no administrator\)/);
   assert.deepEqual(got, [rt.file]);
   for (const f of rt.files) assert.equal(readFileSync(path.join(dir, f), 'utf8'), 'from Microsoft', f);
-  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
+  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
   assert.equal(r.code, 0, s.lines.join('\n'));
 });
 

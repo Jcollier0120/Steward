@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
@@ -17,7 +17,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, parseReleases, parseHfFiles, setupCommand } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -240,8 +240,24 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   const M = 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json';
   const snap = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M]) });
   assert.equal(snap.npu?.installed, true);
-  assert.equal(snap.npu?.downloadBytes, 0);
-  assert.deepEqual(snap.targets.map((t) => [t.id, t.kinds]), [['cpu', ['embed']]], 'no card: GenieX serves no embeddings, so the processor makes them');
+  assert.deepEqual(snap.npu?.kinds, ['chat', 'vision', 'embed']);
+  assert.equal(snap.npu?.downloadBytes, 12848190 + 639150592, "only its embedding server: llama.cpp's b11125 zip and Qwen3-Embedding");
+  assert.deepEqual(snap.targets.map((t) => [t.id, t.kinds]), [], 'the NPU makes the embeddings too: nothing for the processor');
+  assert.deepEqual(describePlan(snap).slice(2, 5), [
+    '  have qualcomm/Qwen3-VL-4B-Instruct:W4A16 (4.4 GB)',
+    '  get  llama.cpp b11125 for embeddings on 18182 (13 MB, SHA-256 pinned)',
+    '  get  Qwen3-Embedding-0.6B-Q8_0.gguf (639 MB)',
+  ]);
+  const E = path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon', 'llama-server.exe');
+  const EM = path.join(tools, 'models', 'Qwen3-Embedding-0.6B-Q8_0.gguf');
+  const whole = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M, E, EM]) });
+  assert.equal(whole.npu?.downloadBytes, 0, 'everything here: nothing to download');
+  // With a card beside it, the card's copy of the same model file isn't downloaded a second time.
+  const card = 'adapter|0|20803|4294967296|17179869184|0x00000000_0x0000c3c3|0|Qualcomm(R) Adreno(TM) X2-90 GPU\n';
+  const both = await planSetup({ detection: parseDetection(`${card}${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M]) });
+  const cardCopy = both.downloads.find((d) => d.dest === EM);
+  assert.equal(cardCopy?.have, true, "the NPU's setup downloads it first");
+  assert.equal(both.downloadBytes, both.downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + both.npu!.downloadBytes);
   // The owner's configured NPU is left alone unless asked for by name.
   const own = { accelerators: [{ id: 'npu', kind: 'npu', chat: { baseUrl: 'http://127.0.0.1:18181', model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16', startCommand: [G, 'serve', '--keepalive', '86400'] }, vision: { model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16' } }] };
   const kept = await planSetup({ detection: parseDetection(`${NPU.x2}\n${ARM}`), ids: [], raw: own, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk([G, M]) });
@@ -250,7 +266,7 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
 });
 
 /** A setUpNpu world: what it ran, downloaded and unpacked, and whether its test request answers. */
-function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string } = {}) {
+function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean } = {}) {
   const did: string[] = [];
   const present = new Set<string>();
   const io = {
@@ -263,6 +279,12 @@ function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boole
       did.push(`unpack into ${into}`);
       present.add('unpacked');
     },
+    overlay: (from: string, into: string, files: string[]) => {
+      if (o.overlayFails) throw new Error(`${from}\\ggml-hexagon.dll isn't there`);
+      did.push(`overlay ${files.length} files from ${from} into ${into}`);
+      return files.length;
+    },
+    testEmbed: async () => (o.embeds === false ? ['embeddings gave no vector ({"error":"no HTP0"})'] : []),
     run: async (exe: string, args: string[]) => {
       did.push(`run ${path.win32.basename(exe)} ${args.join(' ')}`);
       if (args[0] === '/VERYSILENT' && o.installs !== false) present.add('installed');
@@ -289,11 +311,42 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   const ok = await setUpNpu(q, tools, qr.io);
   assert.deepEqual(ok.problems, []);
   assert.equal(ok.entry?.chat?.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
+  const hexagon = path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon');
   assert.deepEqual(qr.did, [
     'download geniex-cli-setup-windows-arm64-v0.8.0.exe',
     'run geniex-cli-setup-windows-arm64-v0.8.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER',
     'run geniex.exe pull qualcomm/Qwen3-VL-4B-Instruct:W4A16 --model-type vlm --skip-update',
+    // Its embedding server: llama.cpp's b11125 with GenieX's own libraries over it, and its model.
+    'download llama-b11125-bin-win-opencl-adreno-arm64.zip',
+    `unpack into ${hexagon}`,
+    `overlay 13 files from ${path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'GenieX CLI', 'llama_cpp')} into ${hexagon}`,
+    'download Qwen3-Embedding-0.6B-Q8_0.gguf',
   ]);
+  assert.deepEqual(ok.entry?.embed, {
+    baseUrl: 'http://127.0.0.1:18182',
+    model: 'qwen3-embedding-0.6b-gguf',
+    startCommand: [
+      portablePath(path.join(hexagon, 'llama-server.exe')),
+      ...['--host', '127.0.0.1', '--port', '18182', '--device', 'HTP0', '-ngl', '99', '-m', portablePath(path.join(tools, 'models', 'Qwen3-Embedding-0.6B-Q8_0.gguf'))],
+      ...['--embeddings', '--pooling', 'last', '-c', '8192', '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf'],
+    ],
+    // FastRPC finds the HTP library there, wherever the server is started from (the keeper starts it in the home folder).
+    env: { ADSP_LIBRARY_PATH: portablePath(hexagon) },
+  },"the graphics card's model and index name: its vectors match the card's (cosine 0.999 measured), so an index carries over");
+  assert.deepEqual(validateAccelerators({ accelerators: [ok.entry] }), []);
+  assert.deepEqual(validateKeeperConfig({ accelerators: [ok.entry] }), []);
+
+  // Its embedding server failing leaves the NPU's chat as it is, without embeddings, and says why.
+  for (const [what, o, re] of [
+    ['its test request fails', { embeds: false }, /llama\.cpp, its embedding server, didn't answer its test request: embeddings gave no vector/],
+    ["GenieX's libraries aren't there", { overlayFails: true }, /llama\.cpp b11125, its embedding server, couldn't be set up: .*ggml-hexagon\.dll isn't there/],
+  ] as const) {
+    const r = await setUpNpu(planFor(NPU.x1, 'arm64', tools), tools, fakeNpuIo(o).io);
+    assert.equal(r.entry?.chat?.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16', what);
+    assert.equal(r.entry?.embed, undefined, what);
+    assert.match(r.problems.join(), re, what);
+    assert.match(r.problems.join(), /The NPU's entry has no embeddings; they go to the graphics card or the processor$/, what);
+  }
   // Intel: OpenVINO Model Server's zip unpacked into the tools home, Microsoft's C++ runtime put beside ovms.exe
   // (before the pull, which runs it), then its model pulled by the server itself.
   const i = planFor(NPU.lunar, 'x64', tools);
@@ -331,6 +384,22 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     assert.match(r.problems[0], re, what);
     assert.match(r.problems[0], /config\.json gets no NPU entry; its work goes to the graphics card or the processor$/, what);
   }
+});
+
+test("GenieX's libraries are copied over llama.cpp's where they differ, and only then; a missing one says which", () => {
+  const from = path.join(home, 'overlay-from');
+  const into = path.join(home, 'overlay-into');
+  mkdirSync(from, { recursive: true });
+  mkdirSync(into, { recursive: true });
+  writeFileSync(path.join(from, 'ggml.dll'), 'genie-x ggml');
+  writeFileSync(path.join(from, 'libggml-htp.cat'), 'signed');
+  writeFileSync(path.join(into, 'ggml.dll'), "llama.cpp's own ggml");
+  assert.equal(overlayFiles(from, into, ['ggml.dll', 'libggml-htp.cat']), 2);
+  assert.equal(readFileSync(path.join(into, 'ggml.dll'), 'utf8'), 'genie-x ggml');
+  assert.equal(overlayFiles(from, into, ['ggml.dll', 'libggml-htp.cat']), 0, 'the same files: nothing copied');
+  writeFileSync(path.join(from, 'ggml.dll'), 'genie-x ggml, a later build');
+  assert.equal(overlayFiles(from, into, ['ggml.dll', 'libggml-htp.cat']), 1, 'GenieX updated: copied again');
+  assert.throws(() => overlayFiles(from, into, ['ggml-hexagon.dll']), /ggml-hexagon\.dll isn't there/);
 });
 
 test("a pulled model's files are checked against their pinned SHA-256s for this generation", async () => {

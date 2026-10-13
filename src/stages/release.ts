@@ -115,9 +115,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const remote = `origin/${e.branch}`;
   const commit = await freshBranch(ctx, e, repo);
   if (!commit) return result(e, 'refused', `no ${remote}`);
-  const v = agreedVersion(await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])));
+  // Asked together, so git reads them in one command (showFile).
+  const [texts, pinText] = await Promise.all([Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])), showFile(run, repo, remote, 'kit.json')]);
+  const v = agreedVersion(texts);
   const released = (await releasedOf(ctx, e)).map((r) => r.version);
-  const pinned = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
+  const pinned = readPin(pinText)?.kit ?? null;
   // A hire installs the version on its branch, whatever has been released before: there is no install of it here.
   const decision = o.hire ? releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released: [] }, null) : releaseDecision({ usesKit: e.usesKit, kit: pinned, version: 'version' in v ? v.version : null, released }, o.kit);
   if (!decision.release) {

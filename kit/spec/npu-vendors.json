@@ -109,7 +109,75 @@
         "image-path"
       ],
       "recycle": true,
-      "embeddings": "none: GenieX serves no /v1/embeddings, so embeddings go to the graphics card or the processor",
+      "embeddings": "on the NPU, through a server of their own: GenieX serves no /v1/embeddings, but carries llama.cpp b11125 with its Hexagon backend and Qualcomm's signed HTP libraries; llama.cpp's own llama-server of that build, run over GenieX's libraries, serves Qwen3-Embedding-0.6B on the Hexagon (measured on the X2 Elite 2026-10-12: the graphics card's results, in about half its time)",
+      "embedServer": {
+        "server": "llama.cpp",
+        "version": "b11125",
+        "download": {
+          "file": "llama-b11125-bin-win-opencl-adreno-arm64.zip",
+          "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11125/llama-b11125-bin-win-opencl-adreno-arm64.zip",
+          "size": 12848190,
+          "sha256": "9806ac40d46aacd1aa2ef6ea982054fb72e86cf28aec507b2d5e9bdb76ce20c1"
+        },
+        "into": "{tools}\\servers\\llama.cpp\\b11125-hexagon",
+        "exe": "{tools}\\servers\\llama.cpp\\b11125-hexagon\\llama-server.exe",
+        "overlay": {
+          "from": "%LOCALAPPDATA%\\GenieX CLI\\llama_cpp",
+          "files": [
+            "ggml.dll",
+            "ggml-base.dll",
+            "ggml-cpu.dll",
+            "ggml-opencl.dll",
+            "ggml-hexagon.dll",
+            "llama.dll",
+            "llama-common.dll",
+            "mtmd.dll",
+            "libggml-htp-v73.so",
+            "libggml-htp-v75.so",
+            "libggml-htp-v79.so",
+            "libggml-htp-v81.so",
+            "libggml-htp.cat"
+          ]
+        },
+        "port": 18182,
+        "serve": [
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "{port}",
+          "--device",
+          "HTP0",
+          "-ngl",
+          "99",
+          "-m",
+          "{file}",
+          "--embeddings",
+          "--pooling",
+          "last",
+          "-c",
+          "8192",
+          "-b",
+          "2048",
+          "-ub",
+          "2048",
+          "--parallel",
+          "1",
+          "--alias",
+          "{model}"
+        ],
+        "env": {
+          "ADSP_LIBRARY_PATH": "{tools}\\servers\\llama.cpp\\b11125-hexagon"
+        },
+        "model": {
+          "id": "qwen3-embedding-0.6b-gguf",
+          "file": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+          "url": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+          "size": 639150592,
+          "sha256": "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
+          "licence": "Apache-2.0"
+        },
+        "licence": "llama.cpp: MIT; GenieX's libraries as GenieX (above)"
+      },
       "licence": "GenieX: BSD-3-Clause, and Qualcomm's Terms of Use; its bundled QAIRT runtime's terms aren't stated in its NOTICE (review)",
       "notes": "Unsigned installer (SmartScreen, Smart App Control). Installs per user (HKCU, %LOCALAPPDATA%\\GenieX CLI), no administrator. Models are kept in %USERPROFILE%\\.cache\\geniex\\models. One model for chat and vision (Qwen3-VL-4B), measured on the X2 Elite 2026-10-04: no model swaps."
     },
