@@ -314,6 +314,46 @@ test('the claims ref out of reach: claimed here as before; shared on the next re
   assert.ok(C.claimsOn('Jcollier0120/Fake').some((c) => c.version === '0.4.13' && c.branch === 'claude/desk'));
 });
 
+test("a claim made while a round ran is still here after the round shares claims, so no catch-up hands its version on", async () => {
+  rmSync(C.claimsFile(), { force: true });
+  rmSync(path.join(path.dirname(C.claimsFile()), 'claims-seen.json'), { force: true });
+  const s = claimSetup('claims-mid-round');
+  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
+  assert.equal((await C.claimVersion(s.ctx, s.e, { branch: 'claude/one', by: 'claude', for: 'one', remote: s.remoteRepo })).claim.version, '0.4.12');
+  // The round's turns read the claims ref as it began.
+  const atStart = await shaOf(s.remoteRepo, C.CLAIMS_REF);
+  // A worker claims meanwhile.
+  assert.equal((await C.claimVersion(s.ctx, s.e, { branch: 'claude/two', by: 'claude', for: 'two', remote: s.remoteRepo })).claim.version, '0.4.13');
+  await C.shareClaims(realRun, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: atStart }]);
+  assert.deepEqual(C.claimsOn('Jcollier0120/Fake').map((c) => [c.version, c.branch]).sort(), [['0.4.12', 'claude/one'], ['0.4.13', 'claude/two']]);
+});
+
+test('a claim copied here by another process between the claims being read and kept stays', async () => {
+  rmSync(C.claimsFile(), { force: true });
+  rmSync(path.join(path.dirname(C.claimsFile()), 'claims-seen.json'), { force: true });
+  const s = claimSetup('claims-between');
+  const rows = [{ repo: 'Jcollier0120/Fake', name: 'Fake', main: { version: '0.4.10' }, release: { version: '0.4.10' }, prs: [] }];
+  await C.claimVersion(s.ctx, s.e, { branch: 'claude/one', by: 'claude', for: 'one', remote: s.remoteRepo });
+  // Right after the round's read of the ref, a worker claims, writing the ref and its copy here.
+  let claimed = false;
+  const between: Runner = async (cmd, args, opts) => {
+    const r = await realRun(cmd, args, opts);
+    if (!claimed && args[0] === 'ls-remote') {
+      claimed = true;
+      await C.claimVersion(s.ctx, s.e, { branch: 'claude/two', by: 'claude', for: 'two', remote: s.remoteRepo });
+    }
+    return r;
+  };
+  await C.shareClaims(between, rows, [{ repo: 'Jcollier0120/Fake', remote: s.remoteRepo, sha: null }]);
+  assert.ok(claimed);
+  assert.deepEqual(C.claimsOn('Jcollier0120/Fake').map((c) => [c.version, c.branch]).sort(), [['0.4.12', 'claude/one'], ['0.4.13', 'claude/two']]);
+  // The copy's own time stays here: the ref never carries it.
+  const there = (await R.readRef(realRun, s.remoteRepo, C.CLAIMS_REF, C.CLAIMS_FILE)) as { text: string };
+  await C.claimVersion(s.ctx, s.e, { branch: 'claude/three', by: 'claude', for: 'three', remote: s.remoteRepo });
+  const after = (await R.readRef(realRun, s.remoteRepo, C.CLAIMS_REF, C.CLAIMS_FILE)) as { text: string };
+  for (const t of [there.text, after.text]) assert.ok(!t.includes('copied'), t);
+});
+
 test('a throwaway ref against a real remote, when STEWARD_REAL_REMOTE names one', { skip: !process.env.STEWARD_REAL_REMOTE }, async () => {
   const r: RemoteRepo = { key: 'real', url: process.env.STEWARD_REAL_REMOTE!, scratch };
   const ref = `refs/manor/test-${Math.random().toString(36).slice(2, 10)}`;

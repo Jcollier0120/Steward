@@ -96,6 +96,39 @@ test('sets for different packages asked for at once install one after the other'
   assert.equal(said.filter((l) => l.startsWith('npm ci, once')).length, 3);
 });
 
+test("a set's rename waits while Windows says its files are in use, and only then", async () => {
+  const { renameWhenFree } = await import('../src/stages/modules.ts');
+  const busy = (code: string, times: number) => {
+    let tries = 0;
+    const rename = () => {
+      tries++;
+      if (tries <= times) throw Object.assign(new Error(code), { code });
+    };
+    return { rename, tries: () => tries };
+  };
+  const to = path.join(tmp, 'rename-to');
+  // In use a few times (Defender reading the new files), then free: renamed.
+  for (const code of ['EPERM', 'EACCES', 'EBUSY']) {
+    const b = busy(code, 2);
+    await renameWhenFree('from', to, { rename: b.rename });
+    assert.equal(b.tries(), 3, code);
+  }
+  // Anything else isn't waited for.
+  const gone = busy('ENOENT', 1);
+  await assert.rejects(renameWhenFree('from', to, { rename: gone.rename }), /ENOENT/);
+  assert.equal(gone.tries(), 1);
+  // Still in use when the time is up: its error.
+  const stuck = busy('EPERM', Number.POSITIVE_INFINITY);
+  await assert.rejects(renameWhenFree('from', to, { rename: stuck.rename, budgetMs: 100 }), /EPERM/);
+  assert.ok(stuck.tries() > 1, 'it tried again');
+  // Another process finished the set meanwhile: no wait, the caller takes theirs.
+  mkdirSync(to, { recursive: true });
+  writeFileSync(path.join(to, '.ready'), 'theirs');
+  const theirs = busy('EPERM', Number.POSITIVE_INFINITY);
+  await assert.rejects(renameWhenFree('from', to, { rename: theirs.rename }), /EPERM/);
+  assert.equal(theirs.tries(), 1);
+});
+
 test('two worktrees with the same packages: npm ci once, in the shared set, and each linked to it', async () => {
   const { run, ci } = npmStandIn();
   const e = employee(tmp, { test: ['node -e "require(\'fs\').accessSync(\'node_modules/typescript/marker.txt\')"'] });

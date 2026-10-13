@@ -281,7 +281,9 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.deepEqual(Object.keys(report.results.readFirstTokenMs), ['512', '1024']);
   assert.ok(report.results.writeTokensPerSecond!.median! > 0);
   for (const j of SUITE.jobs) assert.equal(report.results.jobs[j.id].passed, SUITE.tries.full);
-  assert.ok(report.results.jobTimeS! > 0);
+  // The fake answers in a millisecond or so, which rounds to 0.00 s: check the sum, not that it took time.
+  const jobSum = SUITE.jobs.reduce((n, j) => n + report.results.jobs[j.id].median!, 0);
+  assert.equal(report.results.jobTimeS, Number((jobSum / 1000).toFixed(2)));
   assert.ok(report.results.holding!.firstMinuteMs! > 0);
   assert.equal(report.results.energy, null, 'no energy without --energy');
   assert.equal(s.fake.starts, 2, 'a cold start, and a start again from the cache');
