@@ -18,6 +18,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.50
+
+**The Steward's kit 2.65.0: an Intel NPU that works, run on a real Lunar Lake.**
+
+### What changed
+
+- The Steward's kit 2.65.0. On an Intel Core Ultra PC without Microsoft's Visual C++ runtime, setting up local AI used to skip the NPU and say an administrator must install the runtime first. Now setup downloads the runtime from Microsoft and puts it beside the NPU's model server, with no administrator, and the NPU is set up.
+- Intel's NPU now runs a version of Qwen3-4B made for it (2.2 GB): the model it had answered with nonsense on a real Lunar Lake. Setup now checks that the NPU's answer makes sense before using it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.49
 
 **A pull request stuck on a conflict no longer holds up the pull requests queued behind it.**

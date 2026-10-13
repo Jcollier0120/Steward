@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.65.0
+
+**Intel's NPU route, run on a real Lunar Lake: a model that works on the NPU, the runtime it needs brought by setup, and a test request that checks the answer.**
+
+### What changed
+
+- **Intel's model is now `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (2.2 GB), a channel-wise INT4 export Castellan made for the NPU and publishes on Hugging Face.** The route's first model, OpenVINO's `Qwen3-4B-int4-ov` (a group-wise AWQ export), loaded and answered fast on a Lunar Lake NPU, but with nonsense ("?option?option…"), while answering properly on that PC's processor and graphics card. OpenVINO publishes channel-wise exports for the NPU, but none of a Qwen3 4B; its Qwen3-8B one worked (14.8 tokens a second, 4.7 GB). Castellan's 4B export of Qwen3-4B-Instruct-2507, the model the AMD and graphics-card routes chat with, passed every step of the NPU check after setup downloaded it from Hugging Face: a first load with its compile 31 s, 5 s from its cache, about 25 tokens a second, the 1,536-token cap refusing plainly. Its files are pinned (size and SHA-256), and Lunar Lake is now `verified`.
+- **A model pinned for every generation**: `pinned['*']` in npu-vendors.json, for a model that is the same file on each (OpenVINO's, which each PC compiles for its own NPU). A generation's own pin comes first.
+- **Setup's test request checks the answer.** It asks for the single word "ready", and the NPU entry is written only if the answer says it (`saysReady`, `withoutThinking` in setup.ts). Before, any text passed, so a broken model would have been configured, and every agent's request would have come back as nonsense. The NPU check's first, warm and restart answers are checked the same way.
+
+- **OpenVINO Model Server's runtime comes with it.** The server needs the Microsoft Visual C++ runtime. Until now setup refused Intel's route on a PC without it, saying an administrator must install it once, so the NPU never showed and nobody was told what to do. Intel's route now names a `runtime` in spec/npu-vendors.json: Microsoft's own package of those DLLs (the Visual Studio catalog's CRT redist, 3 MB, size and SHA-256 pinned, from download.visualstudio.microsoft.com). Setup downloads it with the server, after the server, and copies its five DLLs beside `ovms.exe`, where Windows looks first. Nothing is installed for the whole PC and nothing needs an administrator. A server that has them all beside it isn't given them again.
+- The plan says so: `get  the Microsoft Visual C++ runtime 14.44 (3 MB, SHA-256 pinned), beside ovms.exe: no administrator`, and its size counts in the download.
+- `NpuPlan.missing`, `NpuRoute.requires` and the System32 check behind them are gone. `NpuPlan.runtime` (an `NpuRuntime` with where it goes) takes their place. `setup.ts`' `installRuntime` does the copying, and `NpuIo.copy` lets a test watch it.
+- **The NPU check starts the server as the keeper does.** Setup writes the server's paths as `%USERPROFILE%\...`, and the check started that command without expanding it. So with a tools home under the user's folder it started nothing, said nothing, and waited 20 minutes. It expands them now, and a start that fails is written to the server's log. Found on the first run on an Intel NPU (Lunar Lake, 2026-10-12).
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Manor's page shows the runtime as a download only if it lists the plan's parts itself (Manor's local-ai.ts `planParts` does).
+
 ## 2.64.0
 
 **Fewer programs started for each git command: git's own git.exe, and `ls-remote` over https asked in the agent's process.**

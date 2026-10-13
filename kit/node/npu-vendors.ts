@@ -31,7 +31,10 @@ export interface NpuModel {
   /** About how much it downloads, in bytes. */
   size: number;
   licence: string;
-  /** Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. */
+  /**
+   * Per generation: the files a pull leaves, each with its size and SHA-256, checked after the pull. `*` is every
+   * generation the route takes, for a model that is the same file on each (OpenVINO's, compiled on the PC itself).
+   */
   pinned?: Record<string, { dir: string; files: Record<string, { size: number; sha256: string }> }>;
 }
 
@@ -42,7 +45,8 @@ export interface NpuRoute {
   /** Each generation; its own driverMin, where one needs a later driver than the route's. */
   generations: Record<string, { label: string; supported: boolean; verified: boolean; why?: string; driverMin?: string }>;
   driverMin?: string;
-  requires?: string[];
+  /** A runtime its programs need that its download doesn't carry, put beside its program (OpenVINO Model Server's C++ runtime). */
+  runtime?: NpuRuntime;
   download: { file: string; url: string; size: number; sha256: string };
   install: { kind: 'inno'; args: string[]; exe: string } | { kind: 'zip'; into: string; exe: string };
   port: number;
@@ -64,6 +68,23 @@ export interface NpuRoute {
   vision?: string;
   licence: string;
   notes: string;
+}
+
+/**
+ * A runtime a server's programs import and its download leaves out: a zip of the maker's own (Microsoft's CRT package
+ * from Visual Studio's catalog), pinned by size and SHA-256, whose `files` in `from` setup copies beside the server's
+ * program. Windows loads a DLL from the program's own folder first, so nothing is installed for the whole PC and no
+ * administrator is asked.
+ */
+export interface NpuRuntime {
+  what: string;
+  file: string;
+  url: string;
+  size: number;
+  sha256: string;
+  /** The folder in the zip that holds `files`. */
+  from: string;
+  files: string[];
 }
 
 /**
@@ -305,30 +326,18 @@ export interface NpuPlan {
   models: (NpuModel & { have: boolean })[];
   port: number;
   kinds: ServeKind[];
+  /** The runtime to put beside the server's program, when the route needs one and a file of it isn't there yet. */
+  runtime: (NpuRuntime & { dest: string; into: string }) | null;
   /** The route's embedding server, when it has one: where it goes, and its zip and model unless they're here. */
   embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null }) | null;
-  /** Bytes still to download: the server's and the models', the embedding server's included. */
+  /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
   downloadBytes: number;
-  /** What this PC lacks that the server needs and setup can't install without an administrator. */
-  missing: string[];
 }
-
-/** The Visual C++ runtime OpenVINO Model Server needs, by its DLL in System32. */
-export function hasVcRedist(env: Record<string, string | undefined> = process.env, exists: (p: string) => boolean = existsSync): boolean {
-  const sys = path.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32');
-  return ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'].every((f) => exists(path.join(sys, f)));
-}
-
-const REQUIREMENTS: Record<string, { has: (env: Record<string, string | undefined>, exists: (p: string) => boolean) => boolean; say: string }> = {
-  'vcredist-x64': {
-    has: hasVcRedist,
-    say: "the Microsoft Visual C++ Redistributable (x64), which an administrator installs once from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe), then run setup again",
-  },
-};
 
 /**
- * What setting the NPU up would do on this route: install the server unless it's there, pull the models that aren't,
- * and how much that downloads. Nothing is downloaded.
+ * What setting the NPU up would do on this route: install the server unless it's there, put its runtime beside it
+ * unless every file is there (a server installed before the runtime was carried gets it too), pull the models that
+ * aren't, and how much that downloads. Nothing is downloaded.
  */
 export function planNpu(o: {
   support: NpuSupport;
@@ -350,7 +359,9 @@ export function planNpu(o: {
     const present = m.present ? expandRoute(m.present, { tools: o.tools, env: o.env }) : '';
     return { ...m, pull: m.pull.map((a) => expandRoute(a, { tools: o.tools, model: m.id, env: o.env })), have: !!present && exists(present) };
   });
-  const missing = (route.requires ?? []).filter((r) => REQUIREMENTS[r] && !REQUIREMENTS[r].has(o.env ?? process.env, exists)).map((r) => REQUIREMENTS[r].say);
+  const into = path.dirname(exe);
+  const rt = route.runtime;
+  const runtime = rt && !(installed && rt.files.every((f) => exists(path.join(into, f)))) ? { ...rt, dest: path.join(o.downloadsDir, rt.file), into } : null;
   const es = route.embedServer;
   let embed: NpuPlan['embed'] = null;
   if (es) {
@@ -360,8 +371,12 @@ export function planNpu(o: {
     embed = { ...p, server: es, download: zip, modelDownload: model };
   }
   const downloadBytes =
-    (download ? download.size : 0) + models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) + (embed?.download?.size ?? 0) + (embed?.modelDownload?.size ?? 0);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, downloadBytes, missing };
+    (download ? download.size : 0) +
+    (runtime ? runtime.size : 0) +
+    models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0) +
+    (embed?.download?.size ?? 0) +
+    (embed?.modelDownload?.size ?? 0);
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, downloadBytes };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -389,10 +404,11 @@ export function sha256File(file: string): Promise<string> {
 
 /**
  * Checks a pulled model's files against their pinned sizes and SHA-256s, for this generation (a model compiled for
- * the NPU is a different build on each). Empty when they all match, or none are pinned for it.
+ * the NPU is a different build on each), else for every generation (`*`). Empty when they all match, or none are
+ * pinned for it.
  */
 export async function checkPinned(m: NpuModel, generation: string | null, o: { tools: string; env?: Record<string, string | undefined>; hash?: (f: string) => Promise<string> } ): Promise<string[]> {
-  const pin = generation ? m.pinned?.[generation] : undefined;
+  const pin = (generation ? m.pinned?.[generation] : undefined) ?? m.pinned?.['*'];
   if (!pin) return [];
   const dir = expandRoute(pin.dir, { tools: o.tools, env: o.env });
   const problems: string[] = [];
