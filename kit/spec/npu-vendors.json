@@ -174,7 +174,8 @@
           "url": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
           "size": 639150592,
           "sha256": "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
-          "licence": "Apache-2.0"
+          "licence": "Apache-2.0",
+          "dims": 1024
         },
         "licence": "llama.cpp: MIT; GenieX's libraries as GenieX (above)"
       },
@@ -189,12 +190,44 @@
         "meteor-lake": {
           "label": "Core Ultra Series 1, Meteor Lake (NPU 3720)",
           "supported": true,
-          "verified": false
+          "verified": false,
+          "timeouts": {
+            "requestBaseMs": 60000,
+            "requestPerTokenMs": 400,
+            "coldLoadMs": 360000
+          },
+          "maxContextTokens": 2048,
+          "caps": {
+            "chat": 2048
+          },
+          "args": {
+            "--max_prompt_len": "2048"
+          },
+          "memoryGb": {
+            "chat": 3.6
+          },
+          "basis": "Not measured: the NPU 3720 has about a quarter of Lunar Lake's compute (11 TOPS against 48) and slower memory, so from the Lunar Lake's numbers: prompts read at 150–200 tokens a second, 5–18 written, a first compile of 2–3 minutes. A 2,048-token compiled prompt halves the compile, the full-cap read (about 14 s) and the KV cache against 4,096, and holds 3.6 GB rather than 4.3; setup measures each PC and raises these when it's slower."
         },
         "arrow-lake": {
           "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
           "supported": true,
-          "verified": false
+          "verified": false,
+          "timeouts": {
+            "requestBaseMs": 60000,
+            "requestPerTokenMs": 400,
+            "coldLoadMs": 360000
+          },
+          "maxContextTokens": 2048,
+          "caps": {
+            "chat": 2048
+          },
+          "args": {
+            "--max_prompt_len": "2048"
+          },
+          "memoryGb": {
+            "chat": 3.6
+          },
+          "basis": "Not measured: Meteor Lake's NPU 3720, the same starting values."
         },
         "lunar-lake": {
           "label": "Core Ultra 200V, Lunar Lake (NPU 4)",
@@ -205,16 +238,32 @@
           "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
           "supported": true,
           "verified": false,
-          "driverMin": "32.0.100.5540"
+          "driverMin": "32.0.100.5540",
+          "timeouts": {
+            "requestBaseMs": 30000,
+            "requestPerTokenMs": 300,
+            "coldLoadMs": 240000
+          },
+          "basis": "Not measured: NPU 5, at least the Lunar Lake's NPU 4, so its values with room for a newer compiler's first compile; setup measures each PC."
         },
         "wildcat-lake": {
           "label": "Core Series 3, Wildcat Lake (NPU 5)",
           "supported": true,
           "verified": false,
-          "driverMin": "32.0.100.5540"
+          "driverMin": "32.0.100.5540",
+          "timeouts": {
+            "requestBaseMs": 30000,
+            "requestPerTokenMs": 300,
+            "coldLoadMs": 240000
+          },
+          "basis": "Not measured: Panther Lake's NPU 5, the same starting values."
         }
       },
       "driverMin": "32.0.100.4023",
+      "memoryGb": {
+        "chat": 4.3,
+        "embed": 1.74
+      },
       "runtime": {
         "what": "the Microsoft Visual C++ runtime 14.44",
         "file": "Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
