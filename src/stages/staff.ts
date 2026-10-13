@@ -261,12 +261,17 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     }
     commit ??= await commitOf(run, dir, remote);
     if (!commit) return void notes.push(`no ${remote} in ${dir}`);
-    const texts = await Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, dir, remote, f)] as [string, string | null]));
+    // Asked together, so git reads them in one command (showFile).
+    const wantsTool = e.usesKit && !!opts.tool && takesTool(e.fill);
+    const [texts, pinText, theirs] = await Promise.all([
+      Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, dir, remote, f)] as [string, string | null])),
+      showFile(run, dir, remote, 'kit.json'),
+      wantsTool ? showFile(run, dir, remote, TOOL) : null,
+    ]);
     const v = agreedVersion(texts);
-    const pin = readPin(await showFile(run, dir, remote, 'kit.json'));
+    const pin = readPin(pinText);
     let tool: 'current' | 'differs' | 'missing' | null = null;
-    if (e.usesKit && pin && opts.tool && takesTool(e.fill)) {
-      const theirs = await showFile(run, dir, remote, TOOL);
+    if (wantsTool && pin && opts.tool) {
       tool = theirs === null ? 'missing' : lf(theirs) === lf(opts.tool) ? 'current' : 'differs';
       if (tool === 'missing') notes.push(`no ${TOOL} on ${remote}`);
       if (tool === 'differs') notes.push(`${TOOL} on ${remote} isn't the Steward's: the next bump brings it`);

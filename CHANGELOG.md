@@ -12,8 +12,8 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - Checking which PC releases each repository asks the remote over https from the Steward itself, not through git, and reads the turn record again only when it changed. On one PC that was about 140 git commands in 22 minutes, each two programs or more.
 - A checkout's remote address is read from its config file instead of asking git.
 - gh no longer starts a copy of itself after each command to send telemetry, nor looks for its own updates.
+- The files a round reads from each repository (its version, its kit, its port) are read with one git command instead of one each: on 38 repositories, 38 commands instead of 266.
 - The Steward's kit 2.64.0, which brings the first two to every agent that takes it.
-- Still to come: reading several files from git in one command instead of one each.
 
 ### Before you update
 
