@@ -133,10 +133,24 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
   const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
   if (failed) return failed;
+  return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
+}
+
+/** The vouch's description: the checks that ran and passed, and at which commit (GitHub keeps 140 characters). */
+export function vouchDescription(e: Employee, scope: AffectedScope | undefined, head: string, where = ''): string {
   const ran = e.test.map((s) => (scope?.chose && s.trim() === 'npm test' ? `npm test (${scope.chose})` : s));
-  const description = `${[e.fill, ...ran].filter(Boolean).join(', ')} passed at ${o.head.slice(0, 7)}`.slice(0, 140);
-  const s = await hostFor(ctx, e).setStatus(o.repo, o.head, { state: 'success', context: VOUCH_CONTEXT, description });
-  if (s.code !== 0) return `its checks passed, but ${hostFor(ctx, e).name} wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
+  return `${[e.fill, ...ran].filter(Boolean).join(', ')} passed${where} at ${head.slice(0, 7)}`.slice(0, 140);
+}
+
+/**
+ * The vouch set on `head` (VOUCH_CONTEXT, success): by `steward vouch` once a clone's checks pass, and by the Steward's
+ * own PR test once they pass here (prtest.ts), so the Assayer, which vouches for any team PR head without one, doesn't
+ * install and test it a second time. Null once it is set, else why not. Never throws.
+ */
+export async function setVouch(ctx: Ctx, e: Employee, repo: string, head: string, description: string): Promise<string | null> {
+  const host = hostFor(ctx, e);
+  const s = await host.setStatus(repo, head, { state: 'success', context: VOUCH_CONTEXT, description }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
+  if (s.code !== 0) return `its checks passed, but ${host.name} wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
   return null;
 }
 

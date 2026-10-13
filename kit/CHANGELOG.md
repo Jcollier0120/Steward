@@ -2,7 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.68.0
+## 2.70.0
+
+**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more.**
+
+### What's new
+
+- **`node/checks-pace.ts`**: `pacedCommand(file, args, { fast })` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
+  - a hard cap on the processor: half of it by default (`checksCap()`), two processors' worth at least;
+  - below-normal priority, which its programs take from it (a program may still raise its own).
+- **One job for the whole PC** (`Local\kit-checks-pace`): two check runs side by side share the cap rather than taking it twice. A process already in a job of another family gets a job of its own with the same cap. The job ends what is left in it once no launcher holds it: a test's server left running, or a command stopped on a timeout.
+- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). `fast: true` (a run the person asked to be quick) isn't paced, as Run now lifts the gentle pace. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
+- Off Windows a paced command runs under `nice -n 10`. A launcher that can't be built leaves the command as it is, said once in the log: the pace never fails a check.
+
+Measured on an 18-core laptop (the Steward's own checks: its kit filled, a type check and its whole test suite): before, 60 s of 201 s at 98% or more; at half the processor, 1 s of 203 s (the rest of the PC's work on top, Windows Defender's scans of what the tests write among it).
+
+### Before you update
+
+- Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
 

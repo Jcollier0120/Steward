@@ -2,6 +2,7 @@ import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_pro
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
+import { pacedCommand } from './kit/checks-pace.ts';
 import { gitExe } from './kit/git-exe.ts';
 
 /** What a command did: its exit code, and what it printed. */
@@ -17,6 +18,11 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Written to its standard input, which is then closed (git credential fill reads its question there). */
   input?: string;
+  /**
+   * At the kit's checks pace (kit/checks-pace.ts): it and every program it starts held to a share of the processor, at
+   * below-normal priority. For test runs, type checks, installs and builds, so they never peg the processor.
+   */
+  paced?: boolean;
 }
 
 /**
@@ -124,9 +130,11 @@ const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
-const runPlain: Runner = (cmd, args, opts = {}) => {
-  const [file, argv] = resolveCommand(cmd, args);
-  const env = { ...process.env, ...opts.env };
+const runPlain: Runner = async (cmd, args, opts = {}) => {
+  const [resolved, resolvedArgs] = resolveCommand(cmd, args);
+  const paced = opts.paced ? await pacedCommand(resolved, resolvedArgs) : null;
+  const [file, argv] = paced ? [paced.file, paced.args] : [resolved, resolvedArgs];
+  const env = { ...process.env, ...paced?.env, ...opts.env };
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
   if (dotnetDir === undefined) dotnetDir = dotnetWithSdk();
   env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
