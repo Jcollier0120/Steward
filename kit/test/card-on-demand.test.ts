@@ -25,6 +25,7 @@ const { Npu, NpuError, resetNpuManners } = await import('./fixture/src/kit/npu.t
 const { acceleratorsDir } = await import('./fixture/src/kit/lock.ts');
 const { Reaper, serversToReap, cardOnDemand, gpuKeptOut } = await import('./fixture/src/kit/keeper.ts');
 const { testImage } = await import('./fixture/src/kit/npu-vendors.ts');
+const { configuredAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
 const { longFetch, serverClient } = await import('./fixture/src/kit/npu-server.ts');
 const { cardCheck } = await import('./fixture/src/kit/card-check.ts');
 
@@ -148,7 +149,7 @@ const npu = (over: Record<string, unknown>) => ({ id: 'npu', kind: 'npu', name: 
 const NEVER = [NODE, '-e', 'process.exit(3)'];
 
 /** Each accelerator with the work it serves, as `id: kinds`. */
-const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
+const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
 
 // ---------------------------------------------------------------- the rule
 
@@ -220,8 +221,8 @@ test('Intel-like: a vision request starts the card\'s vision server; the keeper 
     assert.equal(vision.keptOut, undefined);
     assert.equal(vision.idleMs, 3 * MIN);
     assert.deepEqual(servers.filter((s: ReapedServer) => s.acc.id === 'gpu-arc' && s.base !== visionBase).map((s: ReapedServer) => !!s.keptOut), [true, true]);
-    assert.equal(gpuKeptOut(config(raw).accelerators, false), true);
-    assert.deepEqual(cardOnDemand(config(raw).accelerators, false), [{ id: 'gpu-arc', kinds: ['vision'] }]);
+    assert.equal(gpuKeptOut(configuredAccelerators(raw), false), true);
+    assert.deepEqual(cardOnDemand(configuredAccelerators(raw), false), [{ id: 'gpu-arc', kinds: ['vision'] }]);
 
     const { pc, reaper } = keeperOn(new Map([[visionBase, stop]]));
     pc.clock = 3 * MIN - 1;
@@ -269,7 +270,7 @@ test('Snapdragon-like: the NPU chats, sees and embeds; the card is never asked, 
     assert.equal((await model.embed(['a'], { lane: 'interactive' })).accelerator.id, 'npu');
     assert.equal(c.seen.length, 0);
     assert.deepEqual(serversToReap(raw, { withNpu: false }).filter((s: ReapedServer) => s.acc.kind === 'gpu').map((s: ReapedServer) => !!s.keptOut), [true]);
-    assert.deepEqual(cardOnDemand(config(raw).accelerators, false), []);
+    assert.deepEqual(cardOnDemand(configuredAccelerators(raw), false), []);
   } finally {
     await Promise.all([n.close(), c.close()]);
     fresh();
@@ -283,8 +284,8 @@ test('gpuWithNpu on: unchanged, the card serves everything it is set up for, and
   const model = new Npu(config(raw), { gpuWithNpu: () => true });
   assert.deepEqual(serving(model.accelerators), ['npu: chat embed', 'gpu-arc: chat vision embed']);
   assert.deepEqual(serversToReap(raw, { withNpu: true }).map((s: ReapedServer) => !!s.keptOut), [false, false, false]);
-  assert.equal(gpuKeptOut(config(raw).accelerators, true), false);
-  assert.deepEqual(cardOnDemand(config(raw).accelerators, true), []);
+  assert.equal(gpuKeptOut(configuredAccelerators(raw), true), false);
+  assert.deepEqual(cardOnDemand(configuredAccelerators(raw), true), []);
 });
 
 test("the NPU failed its embeddings at setup: embeddings go to the card on demand; its chat and vision stay out", async () => {
@@ -306,7 +307,7 @@ test("the NPU failed its embeddings at setup: embeddings go to the card on deman
     assert.equal((await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 8, lane: 'interactive' })).accelerator.id, 'npu');
     const reaped = serversToReap(raw, { withNpu: false }).filter((s: ReapedServer) => s.acc.kind === 'gpu');
     assert.deepEqual(reaped.map((s: ReapedServer) => [s.base, !!s.keptOut]), [['http://127.0.0.1:11', true], ['http://127.0.0.1:12', true], [embedBase, false]]);
-    assert.deepEqual(cardOnDemand(config(raw).accelerators, false), [{ id: 'gpu-arc', kinds: ['embed'] }]);
+    assert.deepEqual(cardOnDemand(configuredAccelerators(raw), false), [{ id: 'gpu-arc', kinds: ['embed'] }]);
   } finally {
     await Promise.all([n.close(), c.close()]);
     fresh();

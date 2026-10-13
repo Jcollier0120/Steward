@@ -881,7 +881,7 @@ const npuAndCard = () => config({
 });
 
 /** Each accelerator with the work it serves, as `id: kinds`. */
-const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
+const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
 
 test("the core's withoutGpuBesideNpu: off with an NPU leaves the card only what no NPU serves and keeps the processor; on, or no NPU, changes nothing", () => {
   const list = npuAndCard().accelerators;
