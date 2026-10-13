@@ -16,7 +16,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
 | Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model, Qwen3-VL-4B) | its Inno Setup installer, silent, per user, no administrator |
-| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B INT4) | a zip, unpacked into the accelerators' folder |
+| Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B-Instruct-2507, channel-wise INT4) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat (Qwen3-4B-Instruct-2507), vision (Qwen3-VL-4B) | a portable zip, unpacked into the accelerators' folder |
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
@@ -55,9 +55,10 @@ Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' 
 
 1. **Plan, and ask.** It lists what it would install for the NPU (its server and each model, and whether they're already here), then each graphics card's llama.cpp build and models, then the total download, and asks before downloading anything (`--yes` skips the question; `--dry-run` only plans).
 2. **The server**: downloaded whole, its size and SHA-256 checked against the pinned ones in `npu-vendors.json` (a mismatch deletes the file and stops), then installed for this user: GenieX's installer with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER`, the others unpacked into the tools home's `servers\` (`%USERPROFILE%\.manor\accelerators\servers\`). Nothing needs an administrator. A server already installed is used as it is.
+   - **Its runtime**, where the route names one (`runtime` in `npu-vendors.json`): OpenVINO Model Server needs the Microsoft Visual C++ runtime, which a PC may not have and which only an administrator can install for everyone. So setup downloads Microsoft's own package of those DLLs (the Visual Studio catalog's CRT redist, 3 MB, size and SHA-256 pinned) and copies its five DLLs beside `ovms.exe`, where Windows looks first. A server that has them all beside it isn't given them again. Until kit 2.65.0 the route was refused on a PC without the runtime, with "administrator installs once": nothing the person could act on, and the NPU never showed.
 3. **The models**: each pulled with the server's own command, unless it is already there. Where `npu-vendors.json` pins a model's files for this generation (GenieX's Qwen3-VL-4B on the X2 Elite, measured on the owner's laptop), each file's size and SHA-256 are checked after the pull.
 4. **Its embedding server**, where the route has one (the Snapdragon's): its zip downloaded and checked against its pinned SHA-256, unpacked into the tools home's `servers\llama.cpp\`, the route's server's files copied over it, and its model downloaded into `models\` (checked the same way) unless it's there. When a graphics card is set up too, the card uses that same file rather than downloading it again.
-5. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15. Then one embedding from its embedding server, started the same way.
+5. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, which must say "ready" as asked (a model that doesn't run properly on an NPU answers fast, with nonsense: kit 2.65.0), and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15. Then one embedding from its embedding server, started the same way.
 6. **Only then** is the `npu` entry written into config.json, beside the cards'. Any failure (download, installer, pull, checksum, test) leaves no NPU entry, says which step failed, and the rest of setup goes on. A failure of the embedding server alone leaves the entry without embeddings, and says why.
 
 An NPU entry a person configured is left alone unless `npu` is asked for by name; the GenieX entry an older install wrote by default is replaced by a set-up one, and dropped on a PC whose NPU the manor can't use.
@@ -75,7 +76,7 @@ Conservative where nothing has been measured. The NPU always has one slot.
 | Maker | Cap (prompt and answer) | Background request | Cold load | Why |
 |---|---|---|---|---|
 | Qualcomm | 2,400 tokens, chat and vision | the rules' 15 s + 0.3 s a token | the rules' 90 s | measured on the X2 Elite: an ~8K prompt bluescreened it; GenieX writes ~34 tokens a second |
-| Intel | 1,536 tokens | 30 s + 0.6 s a token | 180 s | OpenVINO's NPU pipeline is compiled for a prompt length (`--max_prompt_len 1536`); the first load compiles the model; speed unmeasured |
+| Intel | 1,536 tokens | 15 s + 0.3 s a token | 120 s | OpenVINO's NPU pipeline is compiled for a prompt length (`--max_prompt_len 1536`); measured on a Lunar Lake: about 25 tokens a second, a first load with its compile 31 s; room left for Meteor Lake's slower NPU, unmeasured |
 | AMD | 4,096 tokens, chat and vision | 20 s + 0.4 s a token | 120 s | FastFlowLM takes long contexts, but unmeasured here |
 
 A cap can differ per kind (`maxContextTokens` on an endpoint: the core's `capFor`), and an accelerator's own `timeouts` take the rules' place (the core's `requestTimeoutMs`). Only GenieX is restarted for holding too much memory (the keeper's 9 GB recycle); the others aren't known to leak.
@@ -92,10 +93,10 @@ The keeper (the Smith, else Reeve) starts and restarts each server from its entr
 |---|---|---|---|
 | Qualcomm | `qualcomm/Qwen3-VL-4B-Instruct:W4A16` (Qualcomm AI Hub's NPU build) | chat, vision | 4.4 GB |
 | Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
-| Intel | `OpenVINO/Qwen3-4B-int4-ov` | chat | about 2.4 GB |
+| Intel | `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (Castellan's channel-wise INT4 export, the kind the NPU runs properly; its files pinned) | chat | 2.2 GB |
 | AMD | `qwen3-it:4b` (Qwen3-4B-Instruct-2507), `qwen3vl-it:4b` (Qwen3-VL-4B-Instruct) | chat, vision | about 3.3 GB and 4.1 GB |
 
-Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB, FastFlowLM 40 MB.
+Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB), FastFlowLM 40 MB.
 
 ## Licences
 
@@ -105,19 +106,21 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 | Qualcomm AI Hub's W4A16 builds | the base model's licence (Apache-2.0 for Qwen3), with AI Hub's "Usage and Limitations" | Those limitations exclude some uses (among them education, employment, law enforcement, biometrics, critical infrastructure): **have them reviewed** against Castellan's terms. |
 | llama.cpp (the Snapdragon's embedding server) | MIT | Run over GenieX's own libraries, under GenieX's terms. |
 | OpenVINO Model Server | Apache-2.0 | Its zip carries its third-party licences. |
+| The Microsoft Visual C++ runtime DLLs beside it | Visual Studio's "Distributable Code" terms | Microsoft lets an application carry these DLLs in its own folder; here each PC downloads them from Microsoft, so Castellan doesn't redistribute them either: **have it reviewed**. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
 | FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
 | Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-Embedding-0.6B | Apache-2.0 | |
+| Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own export, so Castellan publishes this one: with the base model's LICENSE, and a model card saying what was changed (the weights converted and compressed, nothing else) and how, as Apache-2.0 asks. |
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
-Each customer's PC downloads the servers and models from their makers (GitHub releases, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them.
+Each customer's PC downloads the servers, runtimes and models from their makers (GitHub releases, Microsoft, Hugging Face, Qualcomm AI Hub); Castellan doesn't redistribute them, except Intel's NPU model, its own export, which it publishes on Hugging Face as Castellan-AI.
 
 ## The NPU check (on a new maker's hardware)
 
 `node <agent>\src\kit\npu-check.ts --yes` (kit 2.60.0; the kit as an agent carries it, e.g. Manor's `%USERPROFILE%\.manor\app\src\kit\npu-check.ts`) runs everything below that hasn't run on real hardware, on the PC's own NPU, and measures it. It writes no config.json and leaves nothing running:
 
 1. **detect**: the NPU's name, maker, generation, PCI device id and driver, and whether the manor can use it (an unknown PCI id is printed, ready to add to `devices`).
-2. **requirements**: what the route needs that isn't there (the Visual C++ runtime for OpenVINO Model Server).
+2. **requirements**: what the route needs besides itself, and that setup brings it (the Visual C++ runtime beside OpenVINO Model Server).
 3. **setup**: the server downloaded, checked and installed, and its models pulled, as setup does them, each step timed.
 4. **start**: the server started from its entry, and the time until it answers `/v1/models`.
 5. **first-answer**: the first chat answer, and the whole first load (OpenVINO's compile for the NPU) from the start.
@@ -145,11 +148,17 @@ It ends with the caps and timeouts the numbers suggest for the route (`requestBa
 - the test request, chat and vision, through the kit, in the NPU's turn: answered in 14 s;
 - the keeper's GenieX handling (measured since kit 2.6.0).
 
+**Run on an Intel Lunar Lake** (Core Ultra 7 256V, PCI `643E`, NPU driver 32.0.100.4512, 2026-10-12), the NPU check passing every step:
+- setup from nothing: OpenVINO Model Server 2026.4.1's zip, the Visual C++ runtime beside it (the PC had it in System32 too, from Office; Windows loaded the copies beside `ovms.exe`), the model's pull;
+- `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` on the NPU, downloaded by setup from Hugging Face into an empty folder, its pinned files checked: a first load with its compile 31 s, 5 s from its cache; about 24–26 tokens written and 650–670 read a second; a short answer warm in 0.7 s; 1,395 tokens answered and 1,792 refused plainly at the 1,536 cap; two at once; 3.6 GB working set; the kit's test request in the NPU's turn;
+- OpenVINO's `Qwen3-8B-int4-cw-ov` there too, before Castellan's 4B was made: right, at 14.8 tokens a second, a 51 s first load and 5.5 GB;
+- `OpenVINO/Qwen3-4B-int4-ov`, the route's first model, answering nonsense on the NPU (right on the processor and the Arc 140V): why setup's test request now checks its answer says "ready".
+
 **Checked from source or the release, not run**: OpenVINO Model Server 2026.4.1's zip (its SHA-256, its layout, its `/v1/models` and `/v1/chat/completions` routes in its source at that tag); FastFlowLM 1.0.7's zip (SHA-256, `flm.exe` at its root).
 
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones), and on a first-generation Snapdragon X (its model build and its speed);
-- everything on Intel: OpenVINO Model Server on the NPU, the model's NPU compile, the 1,536-token cap, the timeouts, the PCI ids of each generation, the driver minimum, and whether the Visual C++ runtime check is needed;
+- Intel beyond Lunar Lake: Meteor Lake, Arrow Lake, Panther Lake and Wildcat Lake (their PCI ids, speed, and the driver minimum);
 - everything on AMD: FastFlowLM on XDNA 2, its models' names and sizes, the 4,096-token cap and timeouts, the PCI ids, the driver minimum;
 - that AMD's XDNA (Phoenix, Hawk Point) is refused with the right words on a real PC;
 - the keeper's restarts and idle stops of OpenVINO Model Server and FastFlowLM.

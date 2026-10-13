@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatBody, listsWhenLoaded, serverEnv } from './accelerators.ts';
+import { chatBody, expandEnv, listsWhenLoaded, serverEnv } from './accelerators.ts';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, runProgram } from './npu-vendors.ts';
-import { download, mb, type NpuIo, setUpNpu, testNpuEmbed, testNpuEntry, unpack } from './setup.ts';
+import { download, mb, type NpuIo, saysReady, setUpNpu, testNpuEmbed, testNpuEntry, unpack } from './setup.ts';
 
 /**
  * The NPU check (spec/NPU-VENDORS.md, "Verified, and not"): on a PC with an NPU whose route hasn't run on real hardware,
@@ -168,15 +168,19 @@ export function suggestFrom(steps: CheckStep[], route: Pick<NpuRoute, 'maxContex
 // ------------------------------------------------------------------------------------------------
 // The check
 
-/** Starts a server from its entry, detached, its output appended to `logFile`; stopped with its whole tree. */
+/**
+ * Starts a server from its entry, detached, its output appended to `logFile`; stopped with its whole tree. Its
+ * command's %VARIABLES% are expanded as the keeper does (setup writes %USERPROFILE%\... paths): before kit 2.65.0
+ * they weren't, so a tools home under the user's folder started nothing, and said nothing for 20 minutes.
+ */
 export async function startServer(entry: AcceleratorEntry, logFile: string): Promise<RunningServer> {
   const ep = entry.chat!;
-  const [cmd, ...args] = ep.startCommand!;
+  const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   mkdirSync(path.dirname(logFile), { recursive: true });
   const fd = openSync(logFile, 'a');
   const child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd], windowsHide: true, cwd: os.homedir(), env: serverEnv({ env: ep.env }) });
   closeSync(fd);
-  child.on('error', () => {});
+  child.on('error', (e) => appendFileSync(logFile, `npu-check couldn't start ${cmd}: ${e.message}\n`));
   child.unref();
   return {
     pid: child.pid,
@@ -273,8 +277,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const tools = o.tools ?? toolsHome(env);
   const support: NpuSupport = rehearsal ? { vendor, generation: null, label: `${route.server} rehearsal`, supported: true, verified: false } : npu!;
   const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
-  add({ step: 'requirements', ok: plan.missing.length === 0, say: plan.missing.length ? `missing: ${plan.missing.join('; ')}` : `${route.server} needs nothing more on this PC` });
-  if (plan.missing.length) return finish(1);
+  add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
   // 2. Its server and models, as setup does them, each step timed.
   const needs = plan.downloadBytes;
@@ -394,21 +397,25 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   try {
     if (up === null) return finish(1);
     const first = await time('first', () => ask('Reply with the single word: ready', 16, firstStartLimit)).catch((e) => ({ ok: false, ms: 0, raw: '', answer: '', status: 0, usage: null, error: String(e?.message ?? e) }));
+    // Answering isn't enough: a model that doesn't run properly on the NPU answers with nonsense.
+    const sensible = first.ok && saysReady(first.raw);
     add({
       step: 'first-answer',
-      ok: first.ok,
+      ok: sensible,
       ms: first.ms,
-      say: first.ok ? `answered "${first.answer.slice(0, 40)}"${/<think>/.test(first.raw) ? ' (with an empty think block, stripped)' : ''}; the first load (and compile) took ${((up + first.ms) / 1000).toFixed(0)} s from the start` : `no answer: ${first.error}`,
+      say: !first.ok ? `no answer: ${first.error}` : `answered "${first.answer.slice(0, 40)}"${/<think>/.test(first.raw) ? ' (with an empty think block, stripped)' : ''}${sensible ? '' : ', not "ready" as asked: the model doesn\'t run properly on this NPU'}; the first load (and compile) took ${((up + first.ms) / 1000).toFixed(0)} s from the start`,
       data: { loadMs: up + first.ms, raw: first.raw.slice(0, 200), usage: first.usage },
     });
-    if (!first.ok) return finish(1);
+    if (!sensible) return finish(1);
 
     const warmMs: number[] = [];
+    const warmSaid: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const w = await ask(`Reply with the single word: ready (${i + 1})`, 16, stepMs);
-      if (w.ok) warmMs.push(w.ms);
+      const w = await ask('Reply with the single word: ready', 16, stepMs);
+      if (w.ok && saysReady(w.raw)) warmMs.push(w.ms);
+      else warmSaid.push(w.ok ? `"${w.answer.slice(0, 30)}"` : String(w.error));
     }
-    add({ step: 'warm', ok: warmMs.length === 3, ms: median(warmMs), say: `a short answer, warm: ${warmMs.map((m) => `${(m / 1000).toFixed(2)} s`).join(', ')}`, data: { ms: warmMs } });
+    add({ step: 'warm', ok: warmMs.length === 3, ms: median(warmMs), say: `a short answer, warm: ${warmMs.map((m) => `${(m / 1000).toFixed(2)} s`).join(', ')}${warmSaid.length ? `; not "ready": ${warmSaid.join(', ')}` : ''}`, data: { ms: warmMs, ...(warmSaid.length ? { said: warmSaid } : {}) } });
 
     const sp = await ask('Write the numbers from one to one hundred in words, separated by commas.', 256, stepMs);
     const written = Number(sp.usage?.completion_tokens) || Math.round(sp.raw.length / 4);
@@ -473,7 +480,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     server = await start(entry, logFile);
     const up2 = await untilAnswers(firstStartLimit);
     const again = up2 === null ? null : await ask('Reply with the single word: ready', 16, firstStartLimit).catch(() => null);
-    const loadMs = up2 === null || !again?.ok ? null : up2 + again.ms;
+    const loadMs = up2 === null || !again?.ok || !saysReady(again.raw) ? null : up2 + again.ms;
     add({ step: 'restart', ok: loadMs !== null && loadMs <= coldMs, ms: loadMs ?? undefined, say: loadMs !== null ? `started again and answered in ${(loadMs / 1000).toFixed(0)} s (the route allows ${coldMs / 1000} s for a cold load)` : 'it didn’t answer after a start again', data: { loadMs } });
     await server.stop();
     await untilGone(listening, now);

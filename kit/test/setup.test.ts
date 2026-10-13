@@ -14,6 +14,8 @@ const { acceleratorEntry, cardNeedGb, DESKTOP_GB, describePlan, findModels, matc
 const { genieXConfig, isInstallDefaultNpu } = await import('./fixture/src/kit/setup.ts');
 const { setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { acceleratorConfigFile } = await import('./fixture/src/kit/accelerator-config.ts');
+// Intel's model files are pinned (npu-vendors.test.ts tests that): these tests' pulls are fakes that leave none.
+delete (await import('./fixture/src/kit/npu-vendors.ts')).NPU_CATALOG.routes.intel.models[0].pinned;
 const configFile = acceleratorConfigFile();
 
 // What DETECT_PS prints on this laptop (2026-10-02), and on a gaming desktop with two of one card.
