@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.67.0
+
+**Intel's NPU: three times the text a request may carry, and embeddings on the NPU, so a PC with default settings can search its code.**
+
+### What changed
+
+- **Intel's cap is 4,096 tokens** (it was 1,536): `--max_prompt_len 4096`, with the timeouts that suit it (30 s, plus 300 ms a token, and 180 s for a cold load, leaving room for Meteor Lake's slower NPU). On a Lunar Lake the NPU check passed every step at that cap. A short answer costs about 70 ms more, and the benchmark's jobs no time at all (job time 11.0 s, against 11.8).
+- **Embeddings on Intel's NPU.** The route's `embedServer` is a second OpenVINO Model Server: the route's own program and environment on port 18186, serving OpenVINO's channel-wise INT4 Qwen3-Embedding-0.6B (428 MB, pulled as the chat model is, its files pinned) with `--pooling LAST --max_length 2048`.
+  - The NPU compiles a fixed shape, so a request longer than 2,048 tokens is refused. A dense 1,500-character chunk (UUIDs, hex, base64) runs to 1,338 tokens, so 1,024 wasn't enough.
+  - The entry's embed cap is 680 tokens by the kit's estimate, which stays under 2,048 real tokens.
+  - On the Lunar Lake: the graphics card's own results, a query in 166 ms, and 16 of Reeve's chunks in 2.6 s, against 5.9 s on the Arc as setup gives it.
+  - Until now, a default Intel install had no embedder at all: Manor's `gpuWithNpu` is off, so the Arc is set aside.
+- `NpuEmbedServer` takes either kind of server.
+  - It may have no `download`, `into` or `exe`: it is then the route's own program, started a second time with the route's environment.
+  - Its `model` is either a file to download (`NpuEmbedFile`) or a model the route's program pulls (`NpuEmbedPull`: `pull`, `present`, `pinned`; `isPulled` tells them apart).
+  - `embedPaths` now takes the route. The plan's `embed.modelPull` holds the pull's arguments while the model isn't here.
+  - Setup pulls the model, then checks its pinned files. A failure leaves the NPU's chat as it was, without embeddings.
+  - An embedding endpoint carries its route's `caps.embed`.
+- `npu-check.ts --device CPU|GPU` moves the embedding server along with the route when it has a device argument too, and drops the NPU's `--max_length` off the NPU.
+- `checkPinned` takes anything with an `id` and `pinned`.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. On an Intel PC, setup run again pulls the embedding model and adds embeddings to the NPU's entry. Reeve then builds a new index under that model's name, `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov`.
+
 ## 2.66.0
 
 **The NPU benchmark: a fixed suite that measures how fast and how well a chip does Castellan's work, for the website's boards; and a count of the tokens agents send, to weigh it.**

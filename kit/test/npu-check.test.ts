@@ -217,7 +217,7 @@ test("a route's own embedding server: set up beside the server, started by the k
   assert.match(embed.say, /the kit started llama\.cpp and had a vector in .* a query took \d+ ms and a chunk of code \d+ ms \(1024 dimensions\)/);
   assert.equal(inputs[0], 'where is the push notification token registered');
   assert.ok(inputs[1].length > 1500, 'a chunk about the size Reeve indexes');
-  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download.size + q.model.size);
+  assert.equal(report.steps.find((x: any) => x.step === 'setup')!.data!.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size + q.download!.size + q.model.size);
 });
 
 test("Intel's embedding server: a second OpenVINO Model Server, nothing downloaded for it but its model, which it pulls", async () => {
