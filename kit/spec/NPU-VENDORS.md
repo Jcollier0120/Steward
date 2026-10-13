@@ -21,7 +21,23 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 Second choices, if a route fails on hardware: Foundry Local for Snapdragon and Intel; Lemonade Server (AMD's, Apache-2.0, which itself runs FastFlowLM) for AMD.
 
-**Embeddings** stay off the NPU everywhere for now. GenieX serves none. OpenVINO Model Server 2026 serves them on the NPU as a preview (Qwen3-Embedding-0.6B), not yet tried here: the Intel hardware decides. FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. So embeddings go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats and there is no card.
+**Embeddings** run on the Snapdragon's NPU, through a server of their own (below). Elsewhere they stay off the NPU for now: OpenVINO Model Server 2026 serves them on the NPU as a preview (Qwen3-Embedding-0.6B), not yet tried here (the Intel hardware decides), and FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms. There they go to the graphics card, or to the processor on a PC without one: setup sets the processor up for embeddings when the NPU chats but makes none and there is no card.
+
+### Embeddings on the Hexagon
+
+GenieX serves no `/v1/embeddings` (its issue #1149), but it carries llama.cpp (build b11125 in GenieX 0.8.0) with llama.cpp's Hexagon backend and Qualcomm's signed HTP libraries (`libggml-htp-v73/v75/v79/v81.so` and their catalogue `libggml-htp.cat`), so nothing needs test-signing. The route's `embedServer` runs llama.cpp's own `llama-server` of that very build (its release zip, pinned) over GenieX's libraries (its `overlay`: GenieX's `ggml*.dll`, `llama.dll`, `llama-common.dll`, `mtmd.dll` and the HTP files, copied whenever they differ), on `--device HTP0`, with Qwen3-Embedding-0.6B Q8_0, the graphics card's model. A llama-server of another build doesn't load GenieX's libraries (a missing entry point), so `embedServer.version` moves with GenieX's. The HTP library is loaded through FastRPC, which finds it by `ADSP_LIBRARY_PATH` (the entry's `env`) or the working folder.
+
+Measured on the X2 Elite (2026-10-12), Reeve's search eval on GamerNexus (9 questions), against the Adreno's llama.cpp and npu-embed's nomic-embed-text v1.5 on the NPU:
+
+| | Hexagon (Qwen3-Embedding) | Adreno X2-90 (Qwen3-Embedding) | NPU, nomic v1.5 (npu-embed) |
+|---|---|---|---|
+| Right file in the top 5 | 9/9 | 9/9 | 8/9 |
+| Right file first | 4/9 | 5/9 | 4/9 |
+| A query, warm | 45–73 ms | 103–155 ms | 73–88 ms |
+| A 1,600-character chunk | 124 ms | 265 ms | (128 tokens at most) |
+| Indexing GamerNexus, gentle pace | 31 min | about 65 min | 3 min |
+
+Its vectors match the card's (cosine 0.9990–0.9998 on the same texts), so it keeps the card's model name, `qwen3-embedding-0.6b-gguf`, and an index made by either serves both. Several requests at once are slower on the Hexagon, not faster (`--parallel 4`: 702 ms a chunk), so it takes one at a time. It holds about 2.8 GB of the NPU's memory beside GenieX's model (604 MB model, 896 MB context, 1.3 GB compute) and is stopped when idle, as GenieX is.
 
 ## Detection
 
@@ -40,8 +56,9 @@ Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' 
 1. **Plan, and ask.** It lists what it would install for the NPU (its server and each model, and whether they're already here), then each graphics card's llama.cpp build and models, then the total download, and asks before downloading anything (`--yes` skips the question; `--dry-run` only plans).
 2. **The server**: downloaded whole, its size and SHA-256 checked against the pinned ones in `npu-vendors.json` (a mismatch deletes the file and stops), then installed for this user: GenieX's installer with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER`, the others unpacked into the tools home's `servers\` (`%USERPROFILE%\.manor\accelerators\servers\`). Nothing needs an administrator. A server already installed is used as it is.
 3. **The models**: each pulled with the server's own command, unless it is already there. Where `npu-vendors.json` pins a model's files for this generation (GenieX's Qwen3-VL-4B on the X2 Elite, measured on the owner's laptop), each file's size and SHA-256 are checked after the pull.
-4. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15.
-5. **Only then** is the `npu` entry written into config.json, beside the cards'. Any failure (download, installer, pull, checksum, test) leaves no NPU entry, says which step failed, and the rest of setup goes on.
+4. **Its embedding server**, where the route has one (the Snapdragon's): its zip downloaded and checked against its pinned SHA-256, unpacked into the tools home's `servers\llama.cpp\`, the route's server's files copied over it, and its model downloaded into `models\` (checked the same way) unless it's there. When a graphics card is set up too, the card uses that same file rather than downloading it again.
+5. **A test request** in the NPU's turn (its lock and line): the server started if it isn't running, one short chat answer, and one about a small picture when it serves vision. The first load may take minutes (OpenVINO compiles the model for the NPU), so it is given 15. Then one embedding from its embedding server, started the same way.
+6. **Only then** is the `npu` entry written into config.json, beside the cards'. Any failure (download, installer, pull, checksum, test) leaves no NPU entry, says which step failed, and the rest of setup goes on. A failure of the embedding server alone leaves the entry without embeddings, and says why.
 
 An NPU entry a person configured is left alone unless `npu` is asked for by name; the GenieX entry an older install wrote by default is replaced by a set-up one, and dropped on a PC whose NPU the manor can't use.
 
@@ -49,7 +66,7 @@ The entry carries everything an agent and the keeper need: the server's `startCo
 
 ## Ports
 
-GenieX 18181 (its default, as before), OpenVINO Model Server 18183, FastFlowLM 18184; the next free one from 18191 when a card already has it. All on 127.0.0.1.
+GenieX 18181 (its default, as before), the Snapdragon's embedding server 18182, OpenVINO Model Server 18183, FastFlowLM 18184; the next free one from 18191 when a card already has it. All on 127.0.0.1.
 
 ## Caps and timeouts
 
@@ -74,10 +91,11 @@ The keeper (the Smith, else Reeve) starts and restarts each server from its entr
 | Maker | Model | Kinds | Download |
 |---|---|---|---|
 | Qualcomm | `qualcomm/Qwen3-VL-4B-Instruct:W4A16` (Qualcomm AI Hub's NPU build) | chat, vision | 4.4 GB |
+| Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
 | Intel | `OpenVINO/Qwen3-4B-int4-ov` | chat | about 2.4 GB |
 | AMD | `qwen3-it:4b` (Qwen3-4B-Instruct-2507), `qwen3vl-it:4b` (Qwen3-VL-4B-Instruct) | chat, vision | about 3.3 GB and 4.1 GB |
 
-Plus the server: GenieX 65 MB, OpenVINO Model Server 140 MB, FastFlowLM 40 MB.
+Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB, FastFlowLM 40 MB.
 
 ## Licences
 
@@ -85,6 +103,7 @@ Plus the server: GenieX 65 MB, OpenVINO Model Server 140 MB, FastFlowLM 40 MB.
 |---|---|---|
 | GenieX | BSD-3-Clause, and Qualcomm's Terms of Use | Its bundled QAIRT runtime's terms aren't stated in its NOTICE: **have it reviewed**. The installer isn't code-signed. |
 | Qualcomm AI Hub's W4A16 builds | the base model's licence (Apache-2.0 for Qwen3), with AI Hub's "Usage and Limitations" | Those limitations exclude some uses (among them education, employment, law enforcement, biometrics, critical infrastructure): **have them reviewed** against Castellan's terms. |
+| llama.cpp (the Snapdragon's embedding server) | MIT | Run over GenieX's own libraries, under GenieX's terms. |
 | OpenVINO Model Server | Apache-2.0 | Its zip carries its third-party licences. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
 | FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
@@ -110,6 +129,7 @@ Each customer's PC downloads the servers and models from their makers (GitHub re
 11. **memory**: the server's working set and private bytes.
 12. **restart**: stopped and started again: the cold load from its compile cache, against the route's `coldLoadMs`.
 13. **kit-test**: the kit's own test request, the server started as every agent starts it, in the NPU's turn.
+14. **embed** (kit 2.63.0), where the route has an embedding server of its own: the kit's test embedding, the server started as every agent starts it, then a short query and a chunk of code of the size Reeve indexes, timed warm.
 
 It ends with the caps and timeouts the numbers suggest for the route (`requestBaseMs` twice a full-cap read and a warm answer, `requestPerTokenMs` twice the time a token took, `coldLoadMs` half again the slowest start), and keeps the whole report as `npu-check-<maker>-<time>.json` in the tools home. `--no-setup` checks only what's installed.
 
