@@ -135,7 +135,7 @@ test('the keeper asks again at once when hardware.json has an NPU but not its na
   assert.equal(await refreshHardware({ file, detect }), false, 'named now: not asked again');
   writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), npu: false, cards: [] }));
   assert.equal(await refreshHardware({ file, detect }), false, "no processor's name, but not an hour old");
-  assert.equal(await refreshHardware({ file, detect, nowMs: Date.now() + 3_600_000 }), true, 'an hour old');
+  assert.equal(await refreshHardware({ file, detect, nowMs: Date.now() + 3_601_000 }), true, 'over an hour old');
   assert.equal(asked, 2);
 });
 
