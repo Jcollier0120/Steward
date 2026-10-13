@@ -256,7 +256,7 @@
         "--target_device",
         "NPU",
         "--max_prompt_len",
-        "1536",
+        "4096",
         "--cache_dir",
         "{tools}\\models\\openvino\\.npu-cache"
       ],
@@ -319,21 +319,94 @@
           }
         }
       ],
-      "maxContextTokens": 1536,
+      "maxContextTokens": 4096,
       "caps": {
-        "chat": 1536
+        "chat": 4096,
+        "embed": 680
       },
       "timeouts": {
-        "requestBaseMs": 15000,
+        "requestBaseMs": 30000,
         "requestPerTokenMs": 300,
-        "coldLoadMs": 120000
+        "coldLoadMs": 180000
       },
       "quirks": [],
       "recycle": false,
-      "embeddings": "not on the NPU yet: OpenVINO Model Server 2026 serves embeddings on the NPU as a preview (OpenVINO/Qwen3-Embedding-0.6B-int8-ov, --task embeddings --pooling LAST), untried here; until the NPU check has tried it on hardware they go to the graphics card or the processor",
-      "vision": "none on the NPU yet: OpenVINO's Qwen3-VL-4B INT4 build is asymmetric, which the NPU doesn't take; vision goes to the graphics card or the processor",
+      "embeddings": "on the NPU, through a second OpenVINO Model Server of its own (one process serves one task from the command line): OpenVINO's channel-wise INT4 Qwen3-Embedding-0.6B, last-token pooling, compiled for 2,048 tokens. The NPU compiles a fixed shape, so every request costs the full 2,048 and a longer one is refused (400); a dense 1,500-character chunk (UUIDs, hex, base64) is up to 1,338 tokens, so 1,024 wouldn't do. Its cap, 680 by the kit's estimate of 3 characters a token, keeps a request under 2,048 real tokens at nearly one a character. Measured on a Lunar Lake 2026-10-13: the graphics card's own results (OpenVINO, the same model), a query in 166 ms and 16 of Reeve's chunks in 2.6 s, against 5.9 s on the Arc through llama.cpp's Vulkan build, which setup gives the card",
+      "embedServer": {
+        "server": "OpenVINO Model Server",
+        "version": "2026.4.1",
+        "port": 18186,
+        "serve": [
+          "--rest_port",
+          "{port}",
+          "--rest_bind_address",
+          "127.0.0.1",
+          "--source_model",
+          "{model}",
+          "--model_repository_path",
+          "{tools}\\models\\openvino",
+          "--task",
+          "embeddings",
+          "--target_device",
+          "NPU",
+          "--pooling",
+          "LAST",
+          "--max_length",
+          "2048",
+          "--cache_dir",
+          "{tools}\\models\\openvino\\.npu-cache"
+        ],
+        "model": {
+          "id": "OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov",
+          "pull": [
+            "--pull",
+            "--source_model",
+            "OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov",
+            "--model_repository_path",
+            "{tools}\\models\\openvino",
+            "--task",
+            "embeddings"
+          ],
+          "size": 428341784,
+          "present": "{tools}\\models\\openvino\\OpenVINO\\Qwen3-Embedding-0.6B-int4-cw-ov\\graph.pbtxt",
+          "licence": "Qwen3-Embedding-0.6B: Apache-2.0 (OpenVINO's channel-wise INT4 export of it)",
+          "pinned": {
+            "*": {
+              "dir": "{tools}\\models\\openvino\\OpenVINO\\Qwen3-Embedding-0.6B-int4-cw-ov",
+              "files": {
+                "openvino_model.bin": {
+                  "size": 400497516,
+                  "sha256": "de3156d02bd07f2418fddbfaa74557e0ccb8346a93b5cc2fbbe0e84fc477f36c"
+                },
+                "openvino_model.xml": {
+                  "size": 2188563,
+                  "sha256": "842f76c25806cebccb10cffe00da8158c888b63599c6169439f53d88d6a5e5ee"
+                },
+                "openvino_tokenizer.bin": {
+                  "size": 5588840,
+                  "sha256": "1c7f757b411ea311555082721b54f4519d4127f4907674390a3ebd5fc40bc8d6"
+                },
+                "openvino_tokenizer.xml": {
+                  "size": 30729,
+                  "sha256": "08c80a3d21e2561fe3e48378f53802603d20f9dc5edc28e8979d268b22d25be7"
+                },
+                "openvino_detokenizer.bin": {
+                  "size": 2189717,
+                  "sha256": "d73093f72c80ebcaffb76a192727170ecd3c6a06c4df52df0e76b3f70ad9d7f7"
+                },
+                "openvino_detokenizer.xml": {
+                  "size": 12382,
+                  "sha256": "ceccf1505fc61ede06a3ee29e625c3a22c9dafb834d4637549dc30bb3bee2eba"
+                }
+              }
+            }
+          }
+        },
+        "licence": "OpenVINO Model Server: Apache-2.0"
+      },
+      "vision": "none on the NPU yet: OpenVINO's Qwen3-VL-4B INT4 build is asymmetric, which the NPU doesn't take, and OpenVINO Model Server 2026.4.1 fails its prompt on the NPU (prompt_ids.get_size() >= tokenized_history.size(), a Lunar Lake 2026-10-13) while answering on the graphics card; vision goes to the graphics card or the processor",
       "licence": "OpenVINO Model Server: Apache-2.0",
-      "notes": "A zip, unpacked into the tools home: no installer, no administrator. Its programs need the Microsoft Visual C++ runtime, which its zip doesn't carry (only its Python's vcruntime140): setup copies the five DLLs they import from Microsoft's own CRT package (runtime, pinned) beside ovms.exe, where Windows loads them first, so no administrator installs the Redistributable (run on a Lunar Lake, 2026-10-12). It needs Intel's NPU driver 32.0.100.4023 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same). Its model is a channel-wise INT4 export (symmetric, one scale per output channel), the kind the NPU runs properly: the group-wise AWQ export it had first, OpenVINO's Qwen3-4B-int4-ov, loads and answers fast on a Lunar Lake NPU, but nonsense (\"?option?option…\"), while answering properly on the same PC's processor and graphics card (2026-10-12). OpenVINO publishes channel-wise exports of other models (Qwen3-8B-int4-cw-ov, 4.7 GB, also answered properly there, at 14.8 tokens a second) but none of a Qwen3 4B, so Castellan made one of Qwen3-4B-Instruct-2507 (optimum-cli export openvino --weight-format int4 --sym --ratio 1.0 --group-size -1; its model card has the versions) and publishes it as Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, its files pinned for every generation (OpenVINO's model is the same file on each: each PC compiles it for its own NPU). The NPU check with it on that Lunar Lake (Core Ultra 7 256V, NPU driver 32.0.100.4512, 2026-10-12), every step passed: the first load with its compile 31 s, from its cache 4 s; 26 tokens written and about 670 read a second; a short answer warm in 0.7 s; 1,395 tokens answered and 1,792 refused plainly (400) at --max_prompt_len 1536, the server still up; two requests at once both answered; 3.6 GB working set. The timeouts leave room for Meteor Lake's slower NPU 3720, not yet measured (the check suggested base 10 s, 100 ms a token, cold load 60 s on Lunar Lake)."
+      "notes": "A zip, unpacked into the tools home: no installer, no administrator. Its programs need the Microsoft Visual C++ runtime, which its zip doesn't carry (only its Python's vcruntime140): setup copies the five DLLs they import from Microsoft's own CRT package (runtime, pinned) beside ovms.exe, where Windows loads them first, so no administrator installs the Redistributable (run on a Lunar Lake, 2026-10-12). It needs Intel's NPU driver 32.0.100.4023 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same). Its model is a channel-wise INT4 export (symmetric, one scale per output channel), the kind the NPU runs properly: the group-wise AWQ export it had first, OpenVINO's Qwen3-4B-int4-ov, loads and answers fast on a Lunar Lake NPU, but nonsense (\"?option?option…\"), while answering properly on the same PC's processor and graphics card (2026-10-12). OpenVINO publishes channel-wise exports of other models (Qwen3-8B-int4-cw-ov, 4.7 GB, also answered properly there, at 14.8 tokens a second) but none of a Qwen3 4B, so Castellan made one of Qwen3-4B-Instruct-2507 (optimum-cli export openvino --weight-format int4 --sym --ratio 1.0 --group-size -1; its model card has the versions) and publishes it as Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, its files pinned for every generation (OpenVINO's model is the same file on each: each PC compiles it for its own NPU). The NPU check with it on that Lunar Lake (Core Ultra 7 256V, NPU driver 32.0.100.4512, 2026-10-12), every step passed: the first load with its compile 31 s, from its cache 4 s; 26 tokens written and about 670 read a second; a short answer warm in 0.7 s; 1,395 tokens answered and 1,792 refused plainly (400) at --max_prompt_len 1536, the server still up; two requests at once both answered; 3.6 GB working set. Its cap is now 4,096 (--max_prompt_len 4096; the check again, 2026-10-13, every step passed): the first load 41 s; a short answer warm in 0.8 s, 24 to 28 tokens written a second; 3,112 tokens read in 4.6 s; 3,827 answered and 4,352 refused plainly (400), the server still up; 4.3 GB working set. The bigger compile costs a short prompt about 70 ms (a short answer 799 ms against 715, 512 tokens read in 830 ms against 761) and the benchmark's jobs nothing (11.0 s against 11.8). The timeouts leave room for Meteor Lake's slower NPU 3720, not yet measured (the check suggested base 15 s, 100 ms a token, cold load 90 s on Lunar Lake). Its embedding server beside it (embedServer) adds 1.7 GB; the two run on the NPU at once."
     },
     "amd": {
       "server": "FastFlowLM",

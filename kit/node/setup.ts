@@ -10,7 +10,7 @@ import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { withAcceleratorTurn } from './npu-queue.ts';
-import { checkPinned, expandRoute, type NpuPlan, npuEntry, planNpu, routeEnv, runProgram, testImage } from './npu-vendors.ts';
+import { checkPinned, expandRoute, isPulled, type NpuPlan, npuEntry, planNpu, routeEnv, runProgram, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -630,8 +630,10 @@ export function describePlan(p: SetupPlan): string[] {
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
     if (n.embed) {
       const es = n.embed.server;
-      lines.push(`  ${n.embed.download ? 'get ' : 'have'} ${es.server} ${es.version} for embeddings on ${es.port} (${mb(es.download.size)}, SHA-256 pinned)`);
-      lines.push(`  ${n.embed.modelDownload ? 'get ' : 'have'} ${es.model.file} (${mb(es.model.size)})`);
+      if (es.download) lines.push(`  ${n.embed.download ? 'get ' : 'have'} ${es.server} ${es.version} for embeddings on ${es.port} (${mb(es.download.size)}, SHA-256 pinned)`);
+      else lines.push(`  a second ${es.server} for embeddings on ${es.port}`);
+      const m = es.model;
+      lines.push(`  ${n.embed.modelDownload || n.embed.modelPull ? 'get ' : 'have'} ${isPulled(m) ? m.id : m.file} (${mb(m.size)})`);
     }
   }
   if (p.npuNote) lines.push(p.npuNote);
@@ -859,9 +861,11 @@ export function overlayFiles(from: string, into: string, files: string[]): numbe
 /**
  * The NPU's own embedding server (the route's embedServer), set up: its zip downloaded (checked against its pinned
  * SHA-256) and unpacked unless it's there, the route's server's files copied over it, its model downloaded unless it's
- * there (checked the same way). Null when it's ready, else what failed.
+ * there (checked the same way), or pulled by the route's program (`env`, its environment) unless it's there and its
+ * pinned files checked. Null when it's ready, else what failed.
  */
-async function setUpNpuEmbed(e: NonNullable<NpuPlan['embed']>, tools: string, io: NpuIo): Promise<string | null> {
+async function setUpNpuEmbed(n: NpuPlan, tools: string, io: NpuIo, env: NodeJS.ProcessEnv): Promise<string | null> {
+  const e = n.embed!;
   const es = e.server;
   const progress = (what: string) => (done: number, total: number) => io.log(`  ${what}: ${mb(done)} of ${mb(total)}`);
   try {
@@ -873,13 +877,22 @@ async function setUpNpuEmbed(e: NonNullable<NpuPlan['embed']>, tools: string, io
       if (!(io.exists ?? existsSync)(e.exe)) return `${e.exe} isn't there after unpacking`;
     }
     if (es.overlay) {
-      const n = (io.overlay ?? overlayFiles)(expandRoute(es.overlay.from, { tools }), e.folder, es.overlay.files);
-      if (n) io.log(`copied ${n} of the NPU server's files into ${e.folder}`);
+      const copied = (io.overlay ?? overlayFiles)(expandRoute(es.overlay.from, { tools }), e.folder, es.overlay.files);
+      if (copied) io.log(`copied ${copied} of the NPU server's files into ${e.folder}`);
     }
-    if (e.modelDownload) {
+    if (e.modelDownload && !isPulled(es.model)) {
       io.log(`downloading ${es.model.file} (${mb(e.modelDownload.size)})`);
       mkdirSync(path.dirname(e.modelDownload.dest), { recursive: true });
       await (io.download ?? download)(e.modelDownload, progress(e.modelDownload.what));
+    }
+    if (isPulled(es.model)) {
+      if (e.modelPull) {
+        io.log(`downloading ${es.model.id} (${mb(es.model.size)}) with ${es.server}`);
+        const r = await (io.run ?? runProgram)(e.exe, e.modelPull, { timeoutMs: 3600_000, env });
+        if (r.code !== 0) return `${es.server} couldn't download ${es.model.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`;
+      }
+      const bad = await checkPinned(es.model, n.support.generation, { tools, hash: io.hash });
+      if (bad.length) return `${es.model.id} isn't the build that was checked: ${bad.join('; ')}`;
     }
   } catch (err: any) {
     return String(err?.message ?? err).split(/\r?\n/)[0];
@@ -946,7 +959,7 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ 
   const noEmbed = (what: string) => later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
   let embedAt: { exe: string; model: string } | undefined;
   if (n.embed) {
-    const why = await setUpNpuEmbed(n.embed, tools, io);
+    const why = await setUpNpuEmbed(n, tools, io, env);
     if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`);
     else embedAt = { exe: n.embed.exe, model: n.embed.model };
   }
