@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://castellan-software.com/schemas/castellan-npu-bench-report-1.json",
+  "title": "A Castellan NPU benchmark report",
+  "description": "One run of the NPU benchmark (NPU-BENCHMARK.md): one PC, one device, one model, one server, one suite version. Nothing in it names the person or the PC.",
+  "type": "object",
+  "required": ["format", "suite", "at", "pc", "conditions", "run", "results", "quality", "vision", "marks", "ranked"],
+  "additionalProperties": false,
+  "$defs": {
+    "measure": {
+      "type": "object",
+      "required": ["tries", "median", "spread", "steady"],
+      "additionalProperties": false,
+      "properties": {
+        "tries": { "type": "array", "items": { "type": ["number", "null"] } },
+        "median": { "type": ["number", "null"] },
+        "spread": { "type": ["number", "null"] },
+        "steady": { "type": "boolean" }
+      }
+    }
+  },
+  "properties": {
+    "format": { "const": "castellan-npu-bench-report/1" },
+    "suite": {
+      "type": "object",
+      "required": ["version", "kit", "profile", "gate"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "kit": { "type": "string" },
+        "profile": { "enum": ["quick", "full"] },
+        "gate": { "type": "object", "required": ["score", "calibrated"], "properties": { "score": { "type": "number" }, "calibrated": { "type": "boolean" } } }
+      }
+    },
+    "at": { "type": "string" },
+    "pc": {
+      "type": "object",
+      "required": ["cpu", "chip", "npu", "pciDevice", "driver", "driverDate", "ramGb", "windowsBuild", "make", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": { "type": ["string", "null"] },
+        "chip": { "type": ["string", "null"] },
+        "npu": { "type": ["string", "null"] },
+        "pciDevice": { "type": ["string", "null"] },
+        "driver": { "type": ["string", "null"] },
+        "driverDate": { "type": ["string", "null"] },
+        "ramGb": { "type": "number" },
+        "windowsBuild": { "type": ["string", "null"] },
+        "make": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "required": ["onBattery", "batteryPercent", "powerMode", "brightness", "cpuBusyPercent", "windowsBuild", "make", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "onBattery": { "type": ["boolean", "null"] },
+        "batteryPercent": { "type": ["number", "null"] },
+        "powerMode": { "type": ["string", "null"] },
+        "brightness": { "type": ["number", "null"] },
+        "cpuBusyPercent": { "type": ["number", "null"] },
+        "windowsBuild": { "type": ["string", "null"] },
+        "make": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["vendor", "device", "server", "model", "candidate", "cap", "files", "streamed", "usageReported"],
+      "additionalProperties": false,
+      "properties": {
+        "vendor": { "type": ["string", "null"] },
+        "device": { "enum": ["NPU", "GPU", "CPU"] },
+        "server": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "candidate": { "type": "boolean" },
+        "cap": { "type": ["number", "null"] },
+        "files": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "object", "required": ["size", "sha256"], "properties": { "size": { "type": "number" }, "sha256": { "type": "string" } } }
+        },
+        "streamed": { "type": ["boolean", "null"] },
+        "usageReported": { "type": ["boolean", "null"] }
+      }
+    },
+    "results": {
+      "type": "object",
+      "required": ["coldLoadMs", "cachedLoadMs", "short", "writeTokensPerSecond", "readFirstTokenMs", "readAtCap", "jobs", "jobTimeS", "memory", "holding", "energy"],
+      "additionalProperties": false,
+      "properties": {
+        "coldLoadMs": { "type": ["number", "null"] },
+        "cachedLoadMs": { "type": ["number", "null"] },
+        "short": { "oneOf": [{ "$ref": "#/$defs/measure" }, { "type": "null" }], "type": ["object", "null"] },
+        "writeTokensPerSecond": { "type": ["object", "null"] },
+        "readFirstTokenMs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/measure", "type": "object" } },
+        "readAtCap": { "type": ["object", "null"], "properties": { "promptTokens": { "type": ["number", "null"] }, "firstTokenMs": { "type": ["number", "null"] } } },
+        "jobs": { "type": "object", "additionalProperties": { "type": "object", "required": ["tries", "median", "spread", "steady", "passed"], "properties": { "passed": { "type": "number" } } } },
+        "jobTimeS": { "type": ["number", "null"] },
+        "memory": { "type": ["object", "null"], "properties": { "workingSetBytes": { "type": "number" }, "privateBytes": { "type": "number" } } },
+        "holding": { "type": ["object", "null"], "properties": { "minutes": { "type": "number" }, "firstMinuteMs": { "type": ["number", "null"] }, "lastMinuteMs": { "type": ["number", "null"] }, "held": { "type": ["number", "null"] } } },
+        "energy": { "type": ["object", "null"], "properties": { "restMilliwatts": { "type": "number" }, "loadMilliwatts": { "type": "number" }, "jobs": { "type": "number" }, "tokens": { "type": "number" }, "millijoulesPerToken": { "type": ["number", "null"] } } }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": ["score", "passed", "of", "mustPass", "gate", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "score": { "type": ["number", "null"] },
+        "passed": { "type": "number" },
+        "of": { "type": "number" },
+        "mustPass": { "type": "boolean" },
+        "gate": { "type": "boolean" },
+        "items": { "type": "array", "items": { "type": "object", "required": ["id", "kind", "ok", "answer", "ms"], "properties": { "id": { "type": "string" }, "kind": { "type": "string" }, "ok": { "type": "boolean" }, "answer": { "type": "string" }, "ms": { "type": "number" } } } }
+      }
+    },
+    "vision": {
+      "type": ["object", "null"],
+      "properties": {
+        "passed": { "type": "number" },
+        "of": { "type": "number" },
+        "items": { "type": "array", "items": { "type": "object", "required": ["id", "ok", "answer", "ms"] } }
+      }
+    },
+    "marks": { "type": "array", "items": { "type": "object", "required": ["code", "say"], "additionalProperties": false, "properties": { "code": { "type": "string" }, "say": { "type": "string" } } } },
+    "ranked": { "type": "boolean" }
+  }
+}

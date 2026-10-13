@@ -303,6 +303,16 @@ const planFor = (line: string, arch: string, tools: string) => {
   return V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk() })!;
 };
 
+test("Intel's model counts as here once its pull finished (OpenVINO writes graph.pbtxt last), so setting up again doesn't plan its 2.2 GB", () => {
+  const tools = 'C:\\Users\\me\\.manor\\accelerators';
+  const support = parseNpus(NPU.lunar, 'x64')[0];
+  const graph = path.join(tools, 'models', 'openvino', 'Castellan-AI', 'Qwen3-4B-Instruct-2507-int4-cw-ov', 'graph.pbtxt');
+  const before = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk() })!;
+  assert.equal(before.models[0].have, false);
+  const after = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk([graph]) })!;
+  assert.equal(after.models[0].have, true);
+});
+
 test('setting the NPU up: download (pinned), install for this user, pull, test request; its entry only once it answered', async () => {
   const tools = path.join(home, 'npu-setup');
   // Snapdragon: GenieX's Inno Setup installer, silent and per user, then its pull.
