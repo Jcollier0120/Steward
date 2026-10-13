@@ -130,6 +130,9 @@ const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
+/** How much longer a command run at the checks pace may take than its time limit says. */
+export const PACED_TIME = 2;
+
 const runPlain: Runner = async (cmd, args, opts = {}) => {
   const [resolved, resolvedArgs] = resolveCommand(cmd, args);
   const paced = opts.paced ? await pacedCommand(resolved, resolvedArgs) : null;
@@ -145,12 +148,15 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
   }
+  // At the checks pace a command gets twice its time: held to half the processor below everything else, on a PC busy
+  // with other work it takes longer, and a run stopped for that would be taken for a failure.
+  const timeout = (opts.timeoutMs ?? 20 * 60_000) * (paced && paced.file !== resolved ? PACED_TIME : 1);
   return new Promise((resolve) => {
     const child = execFile(
       file,
       argv,
       // execFile hands its options to spawn, detached among them, though its type doesn't name it.
-      { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
+      { cwd: opts.cwd, env, windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
