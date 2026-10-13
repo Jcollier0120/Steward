@@ -24,6 +24,38 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing in the agent itself: take the kit and release as usual. An agent that starts servers from an endpoint on its own, not through the kit's `ensureServer` or keeper, must pass the endpoint's `env` (the kit's `serverEnv(ep)`) to the server it starts, or the NPU's embedding server exits at once. Reeve does so from 0.17.39, which must be out before this kit reaches a Snapdragon.
 
+## 2.62.0
+
+**A release can carry an agent's own native program for each processor, signed, and the installed copy keeps this PC's.**
+
+### What's new
+
+- **kit.json's `"native"`** (node/native.ts, spec/RELEASES.md "Native files"):
+  - `{"build": "native/build.ps1", "out": "native/build", "notices": [...], "thumbprint": "<SHA-1>"}`.
+  - `npm run release` runs the build script once per processor (`-Arch arm64`, `-Arch x64`), each into an emptied `<out>\<arch>\`.
+  - The zip carries both processors' files at the same paths, with the notices in `<out>\notices\`. `release.json` says `"native": {"out", "arch", "signed"}`.
+- **Signing** (node/sign.ts):
+  - A published release signs each `.exe` and `.dll` that isn't signed already, with the x64 signtool (a cloud key's provider is x64 only), and timestamps it. Files signed by their maker keep that signature.
+  - Every file is then checked: Valid, the certificate's, timestamped.
+  - The signer is checked with a trial signature before anything is built.
+  - A release with native files is never published unsigned.
+- **Install:**
+  - It keeps only this PC's processor's folder.
+  - Before an update or uninstall moves the app folder, it waits up to 5 seconds for programs running from it to end, then ends them.
+  - `nativeFolder(appRoot)` gives a copy its folder for this PC, checkout or installed.
+
+### What changed
+
+- Nothing, for an agent without `"native"`: its release, install and update are as before. Windows is asked about running programs only when the installed copy's release carried native files.
+
+### For an agent
+
+- To carry a native program:
+  - add `"native"` to kit.json and git-ignore its `out` folder;
+  - have the program end when the page does (tell it on `onStop`);
+  - keep the notices of any runtime it carries.
+- Nothing otherwise.
+
 ## 2.61.0
 
 **A handler can stream its reply: a live recording sent to another PC as it is made.**
