@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.64.0
+
+**Fewer programs started for each git command: git's own git.exe, and `ls-remote` over https asked in the agent's process.**
+
+### What's new
+
+- **node/git-exe.ts**: `gitExe()`, the git to start. On Windows, PATH finds Git for Windows' `cmd\git.exe`, a launcher that starts the real `git.exe` (under `clangarm64`, `mingw64` or `mingw32`) and, for an agent with no console, a console host for it: three processes for every git command. `gitExe()` names the real one, so git starts alone; the real git.exe sets up the environment the launcher would have (MSYSTEM, HOME, PATH) by itself. A git earlier on PATH that isn't the launcher, or a launcher with nothing behind it, stays `git`. Everywhere else it's `git`.
+- **node/smart-http.ts**: `advertisedRefs(url)` reads a remote's refs over https in the agent's own process (one request for its ref advertisement), and `lsRemoteText(args, refs)` prints them as `git ls-remote` would for the options it reads (`--heads`, `--tags`, `--refs`, `-q`) and plain patterns. Checked against git's own output.
+- **node/git-auth.ts**: `signedIn` answers `git ls-remote` over https itself, with the same sign-in it would have handed git, when the URL is plain https and nothing in git's config or environment changes how git would talk to it (a URL rewrite, a proxy, own certificates or headers). Anything else, and any failure (refused, redirected, timed out, an answer that isn't a ref list), runs git as before. `KIT_SMART_HTTP=0` turns it off. `remoteUrl(repo, name)` reads a clone's remote URL from its config file without starting git.
+
+### For an agent
+
+- Start git through `gitExe()` where you start it yourself (`execFile(gitExe(), …)`), and run your git through `signedIn` to get the in-process `ls-remote`. Nothing else: take the kit and release as usual.
+
 ## 2.63.0
 
 **On a Snapdragon, embeddings run on the Hexagon NPU: Qwen3-Embedding-0.6B through llama.cpp's own server over GenieX's libraries.**
