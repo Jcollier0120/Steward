@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.67
+
+**The Steward's kit 2.71.1: the tests the Steward runs no longer sign their throwaway commits with your key, and the kit's own release test is lighter.**
+
+### What changed
+
+- When the Steward runs a repository's checks (a kit's trial, a vouch, a pull request's test, a catch-up, a merge train), git's commit and tag signing is off for those checks alone. With commit signing on (an SSH or GPG key), every throwaway commit a test made started ssh-keygen or gpg, and Windows Defender scanned each one: 461 in one run of the Steward's own tests. Your own git settings are untouched, and the commits the Steward pushes are signed as before.
+- The Steward's own tests sign nothing either, and its test of building a release builds three times instead of five, and lists the zip instead of unpacking it: about a minute less, and hundreds fewer files for Defender to scan.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

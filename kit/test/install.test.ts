@@ -537,35 +537,44 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   const release = (...args: string[]) => spawnSync(process.execPath, [path.join(repo, 'src', 'kit', 'release.ts'), ...args], { cwd: repo, encoding: 'utf8', windowsHide: true, env });
   const out = path.join(repo, 'artifacts', APP.id);
   const sha = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
-  const unpacked = (into: string) => {
-    rmSync(into, { recursive: true, force: true });
-    mkdirSync(into, { recursive: true });
-    execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-x', '-f', path.join(out, zip), '-C', into], { windowsHide: true });
-    const list = (d: string, rel = ''): string[] => readdirSync(path.join(d, rel), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? list(d, `${rel}${e.name}/`) : [`${rel}${e.name}`]));
-    return list(into);
-  };
+  // Each build stages and packs the whole kit, and Defender reads every file tar does: so the zip is listed, and only
+  // what the built copy needs to run is unpacked (3 builds, one of them minified; there were 5, and 2 whole unpackings).
+  const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+  const zipOf = () => path.join(out, readdirSync(out).find((f) => f.endsWith('.zip'))!);
+  const listed = () => execFileSync(tar, ['-t', '-f', zipOf()], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/).filter((f) => f && !f.endsWith('/'));
 
   let r = release();
   assert.equal(r.status, 0, r.stderr);
   const zip = `${APP.name}-${pkg.version}.zip`;
+  assert.equal(zipOf(), path.join(out, zip));
   // Built: no TypeScript but the entry's stub, no README, release.json says so; and the built copy runs.
-  const built = path.join(tmp, 'built');
-  const files = unpacked(built);
+  const files = listed();
   assert.deepEqual(files.filter((f) => f.endsWith('.ts') && !f.startsWith('tools/')), ['src/cli.ts']);
-  assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "import './cli.js';\n");
   assert.ok(files.includes('src/cli.js') && files.includes('src/kit/install.js') && files.includes('src/kit/release.js'));
   assert.ok(!files.includes('README.md'));
+  const built = path.join(tmp, 'built');
+  mkdirSync(built, { recursive: true });
+  execFileSync(tar, ['-x', '-f', zipOf(), '-C', built, 'src', 'package.json', 'release.json'], { windowsHide: true });
+  assert.equal(readFileSync(path.join(built, 'src', 'cli.ts'), 'utf8'), "import './cli.js';\n");
   assert.equal(JSON.parse(readFileSync(path.join(built, 'release.json'), 'utf8')).form, 'minified');
   assert.match(r.stdout, /built with esbuild \d+\.\d+\.\d+: \d+ TypeScript/);
   const ran = spawnSync(process.execPath, [path.join(built, 'src', 'cli.ts'), 'status', '--json'], { encoding: 'utf8', windowsHide: true, env: { ...process.env, FIXTURE_HOME: path.join(tmp, 'built-home') } });
   assert.equal(ran.status, 0, ran.stderr);
   assert.equal(JSON.parse(ran.stdout).app, APP.id, 'the built copy answers as the agent');
+  // Its manor-agent.json, as committed, beside the zip and in SHA256SUMS.txt.
+  assert.equal(readFileSync(path.join(out, ANNOUNCEMENT), 'utf8'), readFileSync(path.join(repo, ANNOUNCEMENT), 'utf8'), 'the checkout\'s file, as committed');
+  assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n${sha(path.join(out, ANNOUNCEMENT))}  ${ANNOUNCEMENT}\n`);
+  assert.match(r.stdout, /manor-agent\.json, announcing/);
+  assert.doesNotMatch(r.stdout, /with uncommitted changes/);
 
-  // Readable: for a look on this PC, never published.
+  // Readable: for a look on this PC, never published. And a change to manor-agent.json makes the release dirty: it is
+  // published, so it must be the commit's.
+  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ role: 'Keeps a fixture well' })) + '\n');
   r = release('--readable');
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(unpacked(path.join(tmp, 'readable')).includes('src/kit/install.ts'));
+  assert.ok(listed().includes('src/kit/install.ts'));
   assert.match(r.stdout, /readable: not built/);
+  assert.match(r.stdout, /with uncommitted changes/);
   r = release('--readable', '--publish');
   assert.equal(r.status, 2);
   assert.match(r.stderr, /a readable release is never published/);
@@ -576,18 +585,6 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   r = release('--exchequer', '--install');
   assert.equal(r.status, 2);
   assert.match(r.stderr, /give it alone \(or with --urgent\)/);
-  r = release();
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(path.join(out, ANNOUNCEMENT), 'utf8'), readFileSync(path.join(repo, ANNOUNCEMENT), 'utf8'), 'the checkout\'s file, as committed');
-  assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n${sha(path.join(out, ANNOUNCEMENT))}  ${ANNOUNCEMENT}\n`);
-  assert.match(r.stdout, /manor-agent\.json, announcing/);
-  assert.doesNotMatch(r.stdout, /with uncommitted changes/);
-
-  // A change to it makes the release dirty: it is published, so it must be the commit's.
-  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ role: 'Keeps a fixture well' })) + '\n');
-  r = release();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /with uncommitted changes/);
 
   // Another repository's, or another agent's: refused, and the last build's files are left as they were.
   const before = readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8');
@@ -601,10 +598,10 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.match(r.stderr, /agent is "other", but this release is/);
   assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), before);
 
-  // None: the zip alone, and an earlier build's manor-agent.json is gone.
+  // None: the zip alone, and an earlier build's manor-agent.json is gone (readable or built, it's the same).
   rmSync(path.join(repo, ANNOUNCEMENT));
   git('commit', '-q', '-am', 'no announcement');
-  r = release();
+  r = release('--readable');
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!existsSync(path.join(out, ANNOUNCEMENT)));
   assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), `${sha(path.join(out, zip))}  ${zip}\n`);

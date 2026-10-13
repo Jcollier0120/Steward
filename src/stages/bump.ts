@@ -3,6 +3,7 @@ import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
+import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
@@ -144,7 +145,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
     const t0 = Date.now();
-    const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
+    // Its tests' throwaway commits signed with nobody's key (kit/unsigned-git.ts): never pushed, and each would start ssh-keygen.
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) } });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;

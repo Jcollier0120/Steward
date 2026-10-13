@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.71.1
+
+**Tests sign no commits: `unsigned-git.ts`, and `test-git.ts` for a test script's `--import`.**
+
+### What's new
+
+- `unsigned-git.ts`: `unsignedGitVars(env)` gives the environment variables that turn git's `commit.gpgsign` and `tag.gpgsign` off (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`), after any the environment already has, and nothing when it has them; `unsignedGit(env)` adds them in place. With the person's own commit signing on (an SSH key, as the manor's owner has it), every throwaway commit a test makes starts ssh-keygen, and Defender scans each signing buffer: 461 in one run of the Steward's tests. The person's own settings are never touched.
+- `test-git.ts` sets them for a whole test run: `"test": "node --import=./src/kit/test-git.ts --test \"test/**/*.test.ts\""`. The `=` keeps the script one the Steward can narrow to the tests a change reaches. Nothing else imports it: it changes the environment as it loads.
+
+### What changed
+
+- The Steward runs every repository's checks with them, whatever the repository's test script says.
+- The kit's release test builds three times instead of five, only once minified, and lists the zip (`tar -t`) instead of unpacking it twice: 83 s to 24 s, and Defender reads a few hundred fewer files.
+
+### For an agent
+
+- Nothing needed: the Steward's and the Assayer's checks already sign nothing. To make `npm test` run by hand sign nothing too, add `--import=./src/kit/test-git.ts` to its test script once it takes this kit.
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
