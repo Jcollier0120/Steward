@@ -37,7 +37,9 @@ import { RULES } from './rules.ts';
  * - **A game**: when a game is using its graphics card (games.json) and nobody has used the card for 2 minutes, it
  *   is stopped, so the game gets the card's memory.
  * - **The graphics card is kept out**: when Manor's settings say `"gpuWithNpu": false` (kit 2.10.0) and an NPU serves here, a
- *   graphics card's servers are stopped as soon as nobody uses the card, and never restarted.
+ *   graphics card's servers for the NPU's own work are stopped as soon as nobody uses the card, and never restarted.
+ *   Its servers for work no NPU here serves (vision, beside Intel's NPU: kit 2.69.0, the card on demand) are the
+ *   card's like any other: started by a request, stopped after `gpuIdleStopMinutes` unused, never started here.
  * - **Not answering**: when, with nobody using its accelerator, its /v1/models hasn't answered for 3 minutes
  *   (GenieX answers nothing while it loads a model or answers a request, which no idle accelerator takes that long
  *   to do), it is stopped and started again.
@@ -69,11 +71,28 @@ export const SMITH_SETTINGS_URL = `${SMITH_URL}#/settings`;
 export const keeper = (env: NodeJS.ProcessEnv = process.env): 'smith' | 'reeve' => (smithInstalled(env) ? 'smith' : 'reeve');
 
 /**
- * Whether the graphics cards are kept out of model work now: Manor's `gpuWithNpu` (manor.ts's gpuWithNpu(), true
- * unless Manor says false) is off and the list has an NPU that serves something, by the core's own rule
- * (withoutGpuBesideNpu), the one every agent's requests follow.
+ * Whether the graphics cards are kept out of model work now, all of it or the NPU's part: Manor's `gpuWithNpu`
+ * (manor.ts's gpuWithNpu(), true unless Manor says false) is off and the list has an NPU that serves something, by the
+ * core's own rule (withoutGpuBesideNpu), the one every agent's requests follow. cardOnDemand says what a card still does.
  */
-export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean) => core.withoutGpuBesideNpu(accs, withNpu).length < accs.length;
+export const gpuKeptOut = (accs: Accelerator[], withNpu: boolean) => {
+  const kept = core.withoutGpuBesideNpu(accs, withNpu);
+  return kept.length < accs.length || kept.some((a) => !accs.includes(a));
+};
+
+/**
+ * What the graphics cards still do while they're kept out beside the NPU (gpuKeptOut): the work no NPU here serves,
+ * each card's server started by a request and stopped once unused (kit 2.69.0). Vision beside Intel's NPU; none
+ * beside a Snapdragon's. Empty when the cards aren't kept out (they do everything they're set up for).
+ */
+export function cardOnDemand(accs: Accelerator[], withNpu: boolean): { id: string; kinds: EndpointKind[] }[] {
+  if (!gpuKeptOut(accs, withNpu)) return [];
+  return core
+    .withoutGpuBesideNpu(accs, withNpu)
+    .filter((a) => a.kind === 'gpu' && a.enabled !== false)
+    .map((a) => ({ id: a.id, kinds: ENDPOINT_KINDS.filter((k) => !!a[k]?.model) }))
+    .filter((c) => c.kinds.length);
+}
 
 // ------------------------------------------------------------------------------------------------
 // The servers, and what a look does
@@ -111,7 +130,7 @@ export interface ReapedServer {
   idleMs?: number;
   /** Restarted when its working set reaches `recycleBytes` (GenieX's kept memory). */
   recycle?: boolean;
-  /** Kept out (gpuWithNpu false): stopped as soon as nobody uses its accelerator, and never restarted here. */
+  /** Kept out (gpuWithNpu false, and the NPU serves its work): stopped as soon as nobody uses its accelerator, and never restarted here. */
   keptOut?: boolean;
 }
 
@@ -385,7 +404,8 @@ export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): strin
  * embedding endpoints (the embedding one when llama-server runs it, Qualcomm's on the Hexagon; npu-embed exits by
  * itself), and a graphics card's or the processor's chat, vision, embedding and
  * reranking endpoints, when they have a startCommand. `lockDirs` gives an accelerator's lock folders (or is the NPU's lock
- * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out.
+ * folder, the others beside it, as Reeve's reaper took it). `keptOut` marks a card's servers while gpuWithNpu keeps the card out
+ * (`keepGpuOut`), all but those for the work no NPU here serves (the core's withoutGpuBesideNpu): the card on demand.
  */
 export function reapedServers(
   accelerators: Accelerator[],
@@ -395,6 +415,20 @@ export function reapedServers(
   o: { keepGpuOut?: boolean } = {},
 ): ReapedServer[] {
   const out = new Map<string, ReapedServer>();
+  // The card's servers it still runs on demand beside the NPU: the keeper's own idle stop looks after them.
+  const onDemand = new Set<string>();
+  if (o.keepGpuOut) {
+    for (const k of core.withoutGpuBesideNpu(accelerators, false)) {
+      if (k.kind !== 'gpu') continue;
+      for (const kind of ENDPOINT_KINDS) {
+        try {
+          if (k[kind]?.model) onDemand.add(endpointFor(k, kind).baseUrl);
+        } catch {
+          // no server of its own: nothing to keep
+        }
+      }
+    }
+  }
   for (const a of accelerators) {
     if (a.enabled === false) continue;
     // An NPU's embed endpoint is looked after when llama-server runs it (Qualcomm's on the Hexagon); npu-embed exits by itself.
@@ -419,7 +453,7 @@ export function reapedServers(
         ...(idleMs !== undefined ? { idleMs } : {}),
         // GenieX alone keeps memory from every model load until it exits: the NPU's other servers aren't recycled.
         ...(a.kind === 'npu' && /geniex/i.test(path.win32.basename(expandEnv(ep.startCommand[0]))) ? { recycle: true } : {}),
-        ...(o.keepGpuOut && a.kind === 'gpu' ? { keptOut: true } : {}),
+        ...(o.keepGpuOut && a.kind === 'gpu' && !onDemand.has(ep.baseUrl) ? { keptOut: true } : {}),
       });
     }
   }

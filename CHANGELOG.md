@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.61
+
+**The Steward's kit 2.69.0: when the NPU can't do something, the graphics card does it, only while it's needed.**
+
+### What's new
+
+- On a PC whose NPU can't look at pictures (Intel's), the staff can now describe images and screenshots: the graphics card loads its vision model when they're asked to, and unloads it after 10 minutes unused, so it isn't kept running and drawing power.
+- The same goes for any work the NPU couldn't take on at Set up: the graphics card does it when asked, then rests.
+
+### What changed
+
+- With "Use the graphics card for models when there's an NPU" off (the default), the graphics card is no longer left out altogether: it still never does the NPU's own work, and on a PC whose NPU does everything (a Snapdragon) it isn't used at all, as before.
+- The NPU check waits as long as each of its steps allows; before, a very slow answer gave up after 5 minutes.
+
+### Before you update
+
+- Nothing: it updates itself as usual. How long the graphics card may rest unused before it unloads is the same setting as before (10 minutes by default).
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

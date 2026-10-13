@@ -387,18 +387,69 @@ export function ordered(rules, list, order) {
 }
 
 /**
+ * The kinds of work an enabled NPU in the list serves (chat, vision, embeddings): none on a PC without one.
+ * @param {ReadonlyArray<{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }>} list
+ * @returns {Work[]}
+ */
+export function npuServes(list) {
+  return WORKS.filter((w) => list.some((a) => a.kind === 'npu' && a.enabled !== false && !!a[w]));
+}
+
+/**
  * Manor's "Use the graphics card for models when there's an NPU" (settings.json's `gpuWithNpu`) applied: when it's
- * false and the list has an NPU that serves something, every graphics card is left out, so none is ever a candidate,
- * not even the fallback when the NPU fails or is busy. The processor stays. With it true, or no NPU serving anything,
- * the list is unchanged: on a PC without an NPU the switch means nothing.
+ * false and the list has an NPU that serves something, a graphics card keeps only the work no enabled NPU here serves
+ * (kit 2.69.0: the card on demand), so it is never a candidate for the NPU's own work, not even the fallback when the
+ * NPU fails or is busy. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
+ * before; on one whose NPU can't see (Intel's), the card keeps vision alone: its server is started by the first vision
+ * request and stopped by the keeper once unused (gpuIdleStopMinutes). A reranker, an add-on no NPU serves, is left
+ * out with the rest, as before: the processor reranks. The processor stays. A card left with nothing is dropped; one
+ * left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that server). With the
+ * switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch means nothing.
  * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A
  * @param {A[]} list
  * @param {boolean} gpuWithNpu
  * @returns {A[]}
  */
 export function withoutGpuBesideNpu(list, gpuWithNpu) {
-  const npu = list.some((a) => a.kind === 'npu' && a.enabled !== false && WORKS.some((w) => !!a[w]));
-  return gpuWithNpu === false && npu ? list.filter((a) => a.kind !== 'gpu') : list;
+  if (gpuWithNpu !== false) return list;
+  const npu = npuServes(list);
+  if (!npu.length) return list;
+  /** @type {A[]} */
+  const out = [];
+  for (const a of list) {
+    if (a.kind !== 'gpu') {
+      out.push(a);
+      continue;
+    }
+    const left = cardBesideNpu(a, npu);
+    if (left) out.push(left);
+  }
+  return out;
+}
+
+/**
+ * A graphics card with only the work `npu` doesn't cover; null when that leaves it nothing. The same object when it
+ * serves only such work already.
+ * @template {{ kind: AcceleratorKind, chat?: unknown, vision?: unknown, embed?: unknown }} A
+ * @param {A} a
+ * @param {Work[]} npu
+ * @returns {A | null}
+ */
+function cardBesideNpu(a, npu) {
+  /** @type {Record<string, any>} */
+  const card = a;
+  const keep = WORKS.filter((w) => !!card[w] && !npu.includes(w));
+  if (!keep.length) return null;
+  if (!npu.some((w) => !!card[w]) && !card.rerank) return a;
+  /** @type {Record<string, any>} */
+  const copy = { ...card };
+  for (const w of ['chat', 'vision', 'embed', 'rerank']) if (!keep.some((k) => k === w)) delete copy[w];
+  // A vision endpoint without a server of its own is on its chat endpoint's: it keeps that server when chat goes.
+  const chat = card.chat;
+  if (copy.vision && !copy.vision.baseUrl && !copy.chat && chat?.baseUrl) {
+    copy.vision = { ...copy.vision, baseUrl: chat.baseUrl, ...(chat.startCommand ? { startCommand: chat.startCommand } : {}), ...(chat.env ? { env: chat.env } : {}) };
+  }
+  return /** @type {A} */ (copy);
 }
 
 /**
