@@ -15,8 +15,10 @@ import { hostFor, type Answer } from '../hosts/index.ts';
  * - **A Claude Code session's** (a claude/… branch): a comment on the PR that names the files. The desktop app's
  *   Auto-fix, where it is on for that session, wakes it on the conflict itself.
  * - **Anyone else's**: the same comment, to its author.
- * Each is done once for a PR's head and its branch's: a round after that says the same, quietly. A new push to either
- * is a new conflict, and goes back again.
+ * Each is done once for a PR's head: a round after that says the same, quietly. A new push to it is a new conflict, and
+ * goes back again; so is its branch moving on, for the Wright's (closed and done afresh), but not for a comment while
+ * the files it conflicts in stay the same: a PR that gave up its turn (stages/merge.ts givesWay) sees its branch move at
+ * every merge above it, and its author is told once.
  */
 
 export const kickbacksFile = () => dataFile('kickbacks.json');
@@ -38,6 +40,8 @@ interface Kicked {
   note: string;
   closed: boolean;
   at: string;
+  /** The files it conflicted in: a comment is said again only when they change (none kept before 0.35.49: taken as the same). */
+  files?: string[];
 }
 
 const code = (s: string) => `\`${s}\``;
@@ -50,6 +54,8 @@ export function kickBackComment(pr: PrInfo, branch: string, files: string[], aut
     `The Steward can't merge this yet: it conflicts with ${code(branch)} in ${listOf(files)}, beyond what it resolves by itself (version lines, and a new entry at the top of CHANGELOG.md).`,
     '',
     `${who}: merge ${code(branch)} into ${code(pr.head)}, resolve ${files.length === 1 ? 'it' : 'them'}, and push (a merge commit, never a force-push). The Steward's next round tests it again and merges it.`,
+    '',
+    `Meanwhile it gives up its turn: PRs with higher versions merge before it, and once it is resolved the Steward gives it a version above theirs. Left unresolved a while, it is handed to the Wright, where the Wright works. The Steward says this once, until the conflict changes.`,
   ].join('\n');
 }
 
@@ -68,7 +74,8 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   const key = `${e.repo}#${pr.number}`;
   const kept = readJson<Record<string, Kicked>>(kickbacksFile(), {});
   const was = kept[key];
-  if (was && was.head === pr.headOid && was.branch === (branchAt ?? '')) return { note: was.note, closed: was.closed, sent: true };
+  const sameFiles = (f?: string[]) => !f || (f.length === files.length && f.every((x) => files.includes(x)));
+  if (was && was.head === pr.headOid && (was.branch === (branchAt ?? '') || (!was.closed && sameFiles(was.files)))) return { note: was.note, closed: was.closed, sent: true };
   const where = `it conflicts with ${e.branch} in ${files.join(', ')}`;
   const author = authorOf(pr);
   let done: { note: string; closed: boolean } | null = null;
@@ -94,7 +101,7 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   ctx.log(`[${e.id}] #${pr.number}: ${done.note}`);
   // One that couldn't be said is tried again next round.
   if (!said) return { ...done, sent: false };
-  kept[key] = { head: pr.headOid, branch: branchAt ?? '', ...done, at: new Date().toISOString() };
+  kept[key] = { head: pr.headOid, branch: branchAt ?? '', ...done, at: new Date().toISOString(), files };
   writeJson(kickbacksFile(), Object.fromEntries(Object.entries(kept).slice(-300)));
   return { ...done, sent: true };
 }
