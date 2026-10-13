@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 import { APP } from './app.ts';
-import type { Condition, FailedRollout } from './alarms.ts';
+import type { Condition, FailedRollout, Held } from './alarms.ts';
+import { CONFLICTS, loadConflicts, type ConflictLook } from './conflicts.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
@@ -24,7 +25,9 @@ import { hostFor } from './hosts/index.ts';
  *   (round-failed.json), and one of Reeve's alerts that is code work in an employee's repository: a new high or
  *   critical security advisory (his dependency-health job), a Maestro flow that failed (maestro-runs). Reeve's other
  *   alerts (the NPU driver, the test phone, a job that crashed) are a person's, and stay alarms. So do the Steward's
- *   own releases: its repository isn't one the Wright works in.
+ *   own releases: its repository isn't one the Wright works in. And a PR's conflict with its branch that its author was
+ *   told about and left an hour (Settings: alarms.blockingHours) at the same head (conflictItem): the PR is told once
+ *   that the Wright has it, and the issue closes by itself once the PR merges, closes, or no longer conflicts.
  * - **Where:** only an employee's repository (never one of the PC's other projects the Wright helps with), and only one
  *   the Wright's GET /api/work says it works in (`label`, `repos`), while it takes work,
  *   and only when gh here is signed in as one of its `team` (it takes no one else's issues), as the Surveyor and the
@@ -59,13 +62,15 @@ export function slotOf(id: string): string {
 export const workFiledFile = () => dataFile('work-filed.json');
 
 export interface WorkItem {
-  /** The marker's id: bump:<employee>:<kit>, release:<employee>:<commit>, reeve:<alert id>:<repo>. */
+  /** The marker's id: bump:<employee>:<kit>, release:<employee>:<commit>, reeve:<alert id>:<repo>, conflict:<repo>#<pr>:<head>. */
   id: string;
   /** The alarm's condition it holds back. */
   condition: string;
   repo: string;
   title: string;
   body: string;
+  /** A PR the work is about, told once, when the issue is filed, that the Wright has it (the issue's URL given). */
+  pr?: { number: number; comment: (url: string) => string };
 }
 
 /** work-filed.json's entry: an issue filed for a work item (or found open with its marker: `adopted`). */
@@ -221,8 +226,57 @@ export function reeveItems(answer: unknown, employees: Employee[]): WorkItem[] {
   return out;
 }
 
-/** This round's work: its failed bumps (while rollout is on) and releases, and Reeve's alerts that are code work. Not the Steward's own. */
-export function workItems(o: { failedReleases: Record<string, string>; failedRollouts?: Record<string, FailedRollout>; reeve?: unknown; round?: StageResult; employees: Employee[]; settings: Settings }): WorkItem[] {
+/**
+ * A PR's conflict with its branch, which its author was told about (stages/kickback.ts) and left, as an issue for the
+ * Wright. The Wright's jobs start from the branch on a wright/ branch of their own, never on someone else's: so the work
+ * is the PR's branch merged into the job's branch, the conflict resolved there, as a merge commit. Once the Wright's draft
+ * merges, the PR's own commits are on the branch, and GitHub marks the PR merged too. Should its author resolve it first,
+ * the issue is closed (closeResolved), and a job that starts anyway finds nothing left to do.
+ */
+export function conflictItem(e: Employee, look: ConflictLook): WorkItem {
+  const id = `conflict:${e.repo}#${look.number}:${look.headOid.slice(0, 7)}`;
+  const files = look.needs.map((f) => `\`${f}\``).join(', ');
+  return {
+    id,
+    condition: `waiting:${e.repo}#${look.number}`,
+    repo: e.repo,
+    title: `Resolve #${look.number}'s conflict with ${e.branch} (${look.needs.join(', ')})`.slice(0, 200),
+    body: [
+      `#${look.number} (${look.title}, on \`${look.head}\`) conflicts with \`${e.branch}\` in ${files}, beyond what the Steward resolves by itself (version lines, and a new entry at the top of CHANGELOG.md). Its author was told on the PR, and nothing has been pushed to it since, so it waits; meanwhile the PRs above it in the version queue merge without it.`,
+      '',
+      '**The work**',
+      '',
+      `Your branch starts from \`${e.branch}\`. Merge \`origin/${look.head}\` into it (\`git fetch origin ${look.head}\`, then \`git merge --no-ff origin/${look.head}\`), resolve the conflicts in ${files} so that both sides keep what they meant, and run the tests. Keep it a merge commit: never squash or rebase #${look.number}'s commits, so they land with yours. Its version lines and changelog entry give way to your own version.`,
+      '',
+      `**Done means:** your draft carries #${look.number}'s change on top of \`${e.branch}\` as it is now, with no conflicts and the tests passing. Once it merges, #${look.number}'s commits are on \`${e.branch}\`, and GitHub marks it merged too. If #${look.number} no longer conflicts when you start (its author resolved it), there is nothing left to do: say so.`,
+      ...footer(id),
+    ].join('\n'),
+    pr: { number: look.number, comment: (url) => `Still conflicting with \`${e.branch}\` in ${files}, so the Steward handed it to the Wright: ${url}. Its draft will carry this PR's commits with the conflict resolved; pushing a resolution here first is just as good (the issue then closes by itself).` },
+  };
+}
+
+/**
+ * The conflicts to hand to the Wright this round: each PR the merge stage held for a conflict (`held`) whose last look
+ * (conflicts.ts) sent it back to its author `hours` or more ago at the head it has now, and found files that need
+ * judgement. Never one of the Wright's own (those are closed and queued again: kickback.ts), nor a draft.
+ */
+export function conflictItems(o: { held: { employee: Employee; prs: Held[] }[]; hours: number; now: Date; looks?: ConflictLook[] }): WorkItem[] {
+  const looks = o.looks ?? loadConflicts(o.now.getTime());
+  const out: WorkItem[] = [];
+  for (const { employee: e, prs } of o.held) {
+    for (const pr of prs) {
+      if (pr.draft || !pr.why.startsWith(CONFLICTS)) continue;
+      const look = looks.find((l) => l.repo.toLowerCase() === e.repo.toLowerCase() && l.number === pr.number);
+      if (!look || look.outcome !== 'sent-back' || !look.needs.length || !look.headOid || look.head.startsWith('wright/')) continue;
+      if (o.now.getTime() - Date.parse(look.at) < o.hours * 3_600_000) continue;
+      out.push(conflictItem(e, look));
+    }
+  }
+  return out;
+}
+
+/** This round's work: its failed bumps (while rollout is on) and releases, Reeve's alerts that are code work, and conflicts left a while (conflictItems). Not the Steward's own. */
+export function workItems(o: { failedReleases: Record<string, string>; failedRollouts?: Record<string, FailedRollout>; reeve?: unknown; round?: StageResult; employees: Employee[]; settings: Settings; held?: { employee: Employee; prs: Held[] }[]; now?: Date }): WorkItem[] {
   const out: WorkItem[] = [];
   if (o.settings.rollout) {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
@@ -237,6 +291,7 @@ export function workItems(o: { failedReleases: Record<string, string>; failedRol
     out.push(releaseItem(e, commit, o.settings, said));
   }
   if (o.reeve) out.push(...reeveItems(o.reeve, o.employees));
+  if (o.held?.length) out.push(...conflictItems({ held: o.held, hours: o.settings.alarms.blockingHours, now: o.now ?? new Date() }));
   return out;
 }
 
@@ -421,6 +476,11 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
     filed[item.id] = { url: url[0], number: Number(url[1]), repo: item.repo, at, condition: item.condition };
     today.add(slotOf(item.id));
     o.log(`work: filed ${url[0]} for the Wright: ${item.title}`);
+    // The PR it is about, told once, now: a later round finds the issue filed, and says nothing.
+    if (item.pr) {
+      const c = await host.commentPr(item.repo, item.pr.number, item.pr.comment(url[0]));
+      if (c.code !== 0) o.log(`work: couldn't say on ${item.repo}#${item.pr.number} that ${url[0]} has it: ${redact(lastLine(c))}`);
+    }
     states.set(item.id, { state: 'filed', url: url[0], at });
   }
   // An issue whose failure is gone is forgotten after a month; until then it still counts for its day.
@@ -435,15 +495,25 @@ export async function fileWork(o: { items: WorkItem[]; work: unknown; employees:
  * (a later bump passed, or a fix landed and its bump merged), so there is nothing left to do. Left open, it waits in the
  * Wright's queue for the Wright to find nothing to fix, make no commit, and get stuck: an alarm for nothing. Not one
  * this round's failures still name (`items`), and only bump issues: a release's failure ends with a new commit, which
- * says nothing of the old one. Forgotten in work-filed.json once closed, or found closed already.
+ * says nothing of the old one. And each conflict issue whose PR no longer needs it (closeConflict). Forgotten in
+ * work-filed.json once closed, or found closed already.
  */
 export async function closeResolved(o: { items: WorkItem[]; employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }): Promise<void> {
   const filed = readJson<Record<string, FiledWork>>(workFiledFile(), {});
   const current = new Set(o.items.map((i) => i.id));
   let changed = false;
   for (const [id, f] of Object.entries(filed)) {
+    if (current.has(id)) continue;
+    const pr = /^conflict:([^#]+)#(\d+):/.exec(id);
+    if (pr) {
+      if (await closeConflict(o, f, pr[1], Number(pr[2]))) {
+        delete filed[id];
+        changed = true;
+      }
+      continue;
+    }
     const m = /^bump:([^:]+):(\d+\.\d+\.\d+)$/.exec(id);
-    if (!m || current.has(id)) continue;
+    if (!m) continue;
     const e = o.employees.find((x) => x.id === m[1]);
     if (!e || !existsSync(checkoutOf(e))) continue;
     const pin = readPin(await showFile(o.run, checkoutOf(e), `origin/${e.branch}`, 'kit.json'));
@@ -459,6 +529,34 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
     if (r.code === 0) o.log(`work: closed ${f.url}: ${e.name} carries kit ${pin.kit} now`);
   }
   if (changed) writeJson(workFiledFile(), filed);
+}
+
+/**
+ * A conflict issue whose PR no longer needs it, closed: the PR merged, was closed, or merges cleanly now (its author
+ * resolved it), as its host says now. True once it is closed, or found closed already; false while the PR still
+ * conflicts (the Wright's draft is still to land, say), or its host couldn't be asked.
+ */
+async function closeConflict(o: { run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, repo: string, n: number): Promise<boolean> {
+  const host = hostFor({ run: o.run, neutralDir: o.cwd });
+  const v = await host.viewPr(repo, n, 'state,mergeable');
+  if (v.code !== 0) return false;
+  let now: { state?: unknown; mergeable?: unknown };
+  try {
+    now = JSON.parse(v.out);
+  } catch {
+    return false;
+  }
+  const state = String(now.state ?? '').toUpperCase();
+  if (state === 'OPEN' && now.mergeable !== 'MERGEABLE') return false;
+  const why = state === 'MERGED' ? 'has merged' : state === 'CLOSED' ? 'was closed' : 'no longer conflicts';
+  const r = await host.closeIssue(f.repo, f.number, { reason: 'completed', comment: `Nothing left to do: #${n} ${why}. Closed by the ${APP.name}.` });
+  const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
+  if (!gone) {
+    o.log(`work: couldn't close ${f.url}, whose conflict is gone: ${redact(lastLine(r))}`);
+    return false;
+  }
+  if (r.code === 0) o.log(`work: closed ${f.url}: #${n} ${why}`);
+  return true;
 }
 
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;
