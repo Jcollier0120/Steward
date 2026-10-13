@@ -177,7 +177,7 @@ test('removing a worktree removes its link, never the packages it points to', as
   assert.equal(readFileSync(path.join(set, 'typescript', 'marker.txt'), 'utf8'), 'kept');
 });
 
-test('the sets most lately used are kept, and a half-done install a day old goes', () => {
+test('the sets most lately used are kept, and a half-done install goes: a day old, or its process gone', () => {
   const root = path.join(tmp, 'prune');
   const now = Date.now();
   const sets = Array.from({ length: KEEP_SETS + 2 }, (_, i) => (i.toString(16).padStart(16, '0')));
@@ -189,8 +189,13 @@ test('the sets most lately used are kept, and a half-done install a day old goes
   mkdirSync(path.join(root, `${sets[0]}.tmp-1-abc`));
   const old = new Date(now - 2 * 24 * 3600_000);
   utimesSync(path.join(root, `${sets[0]}.tmp-1-abc`), old, old);
-  assert.deepEqual(pruneSets(root, undefined, now).sort(), [...sets.slice(KEEP_SETS), `${sets[0]}.tmp-1-abc`].sort());
+  // One from a process that's gone, an hour old; one from a process still at it.
+  mkdirSync(path.join(root, `${sets[1]}.tmp-2-def`));
+  mkdirSync(path.join(root, `${sets[1]}.tmp-3-fed`));
+  const alive = (pid: number) => pid === 3;
+  assert.deepEqual(pruneSets(root, undefined, now, alive).sort(), [...sets.slice(KEEP_SETS), `${sets[0]}.tmp-1-abc`, `${sets[1]}.tmp-2-def`].sort());
   assert.ok(existsSync(path.join(root, sets[0])));
+  assert.ok(existsSync(path.join(root, `${sets[1]}.tmp-3-fed`)), 'an install going on is left');
 });
 
 test("a Next.js project's packages aren't linked from a shared set: its build refuses a link out of the project", async () => {

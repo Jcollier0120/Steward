@@ -1,11 +1,12 @@
-import { existsSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import { commitOf, fetchBranch, git, gitMaybe, unlinkModules } from '../git.ts';
 import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
-import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
+import { checksLogOf, runChecks } from './bump.ts';
 import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { withRepo } from './slots.ts';
@@ -13,8 +14,14 @@ import { withRepo } from './slots.ts';
 /**
  * After a stage released something, each repository whose Settings name a refresh (Refresh after releases) runs it: a
  * site's `npm run sync`, say, which writes every product's release notes and newest downloads into a file the site is
- * built from. In a fresh worktree of its branch on origin, in the work folder (<id>-refresh), never the person's own
- * clone, with its packages (shared where they can be: modules.ts) and gh at hand, as every command the Steward runs.
+ * built from. In a worktree of its branch on origin, in the work folder (<id>-refresh), never the person's own clone,
+ * with its packages (shared where they can be: modules.ts) and gh at hand, as every command the Steward runs. The
+ * worktree lasts from one refresh to the next (0.35.61): reset to the branch's head, its packages installed again only
+ * when its lockfile changed. A site's are its own (a Next.js build refuses linked ones): 440 packages npm ci unpacked
+ * afresh for every refresh, 49 times in a day and a half.
+ *
+ * While a round asks for the next to come sooner (a rollout's PRs merge and release then), its releases wait for that
+ * round's refresh, and one refresh covers them all (refreshStep); never longer than REFRESH_WAIT_MS.
  *
  * When the command changed tracked files, the repository's tests (Settings: Test it) run in that worktree, and only when
  * every one passes is the change committed ("Release notes and downloads after <what was released>") and pushed to the
@@ -36,6 +43,51 @@ export const loadRefreshFailures = (): Record<string, RefreshHold> => readJson<R
 
 /** The worktree a repository's refresh runs in. */
 export const refreshDirOf = (s: Ctx['settings'], e: Employee) => path.join(workRootOf(s), `${e.id}-refresh`);
+
+/** Beside the worktree: the hash of the lockfile its node_modules was installed (or linked) for. */
+export const packagesMarkOf = (dir: string) => `${dir}.packages`;
+
+const sameDir = (a: string, b: string) => path.resolve(a).replace(/[\\/]+/g, '/').toLowerCase() === path.resolve(b).replace(/[\\/]+/g, '/').toLowerCase();
+
+/**
+ * The worktree kept from the last refresh, at `commit`: its tracked files as the commit has them, and what the last
+ * command left untracked gone; ignored files (its node_modules, a build's cache) stay. False when there's none to keep
+ * (none there, not this repository's, or git couldn't reset it), and a new one is made.
+ */
+async function keptWorktree(ctx: Ctx, repo: string, dir: string, commit: string): Promise<boolean> {
+  if (!existsSync(path.join(dir, '.git'))) return false;
+  const list = await gitMaybe(ctx.run, repo, 'worktree', 'list', '--porcelain');
+  if (!list?.split('\n').some((l) => l.startsWith('worktree ') && sameDir(l.slice('worktree '.length).trim(), dir))) return false;
+  if ((await gitMaybe(ctx.run, dir, 'checkout', '--quiet', '--force', '--detach', commit)) === null) return false;
+  return (await gitMaybe(ctx.run, dir, 'clean', '--quiet', '-fd')) !== null;
+}
+
+/**
+ * The worktree's packages, for the command and its tests: kept while its lockfile is the one they were installed for;
+ * else the shared set where it can be (modules.ts), else its own npm ci. The failed npm ci, or null.
+ */
+async function packagesFor(ctx: Ctx, dir: string, say: (line: string) => void): Promise<{ code: number; out: string; err: string } | null> {
+  const lock = path.join(dir, 'package-lock.json');
+  if (!existsSync(path.join(dir, 'package.json')) || !existsSync(lock)) return null;
+  const hash = createHash('sha256').update(readFileSync(lock)).digest('hex').slice(0, 16);
+  const mark = packagesMarkOf(dir);
+  const modules = path.join(dir, 'node_modules');
+  if (existsSync(modules) && existsSync(mark) && readFileSync(mark, 'utf8').trim() === hash) {
+    say(`node_modules: kept from the last refresh, its lockfile unchanged (${hash})`);
+    return null;
+  }
+  rmSync(mark, { force: true });
+  unlinkModules(dir);
+  if (!existsSync(modules) && (await linkSharedModules(ctx, dir, say))) {
+    writeFileSync(mark, hash);
+    return null;
+  }
+  const ci = await runLine(ctx.run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
+  say(`npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
+  if (ci.code !== 0) return ci;
+  writeFileSync(mark, hash);
+  return null;
+}
 
 /** What a refresh's result says first, so the page and the alarms tell it from a release. */
 export const REFRESH = 'refresh: ';
@@ -72,20 +124,21 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
   if (!commit) return done('refused', `no ${remote} in ${repo}`);
   const at = commit.slice(0, 7);
   const dir = refreshDirOf(ctx.settings, e);
-  await dropWorktree(ctx, repo, dir);
   rmSync(checksLogOf(dir), { force: true });
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
-  say(`${command} in ${dir}, at ${remote} (${at}), after ${what}`);
-  try {
-    // Its packages first, for the command and its tests: the shared set where it can be, else its own.
-    if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, say))) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      say(`npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) {
-        for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) say(`  ${line}`);
-        keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
-        return done('failed', `npm ci failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
-      }
+  const kept = await keptWorktree(ctx, repo, dir, commit);
+  if (!kept) {
+    await dropWorktree(ctx, repo, dir);
+    rmSync(packagesMarkOf(dir), { force: true });
+    await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
+  }
+  say(`${command} in ${dir}${kept ? ' (kept from the last refresh)' : ''}, at ${remote} (${at}), after ${what}`);
+  {
+    // Its packages first, for the command and its tests.
+    const ci = await packagesFor(ctx, dir, say);
+    if (ci) {
+      for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) say(`  ${line}`);
+      keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
+      return done('failed', `npm ci failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
     }
     const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000 });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) say(`  ${line}`);
@@ -111,13 +164,8 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
     if (p.code !== 0) return done('failed', `git push to ${e.branch} refused (never forced): ${(p.err || p.out).trim().split('\n').slice(-2).join(' ')}${networkNote(`${p.out}\n${p.err}`)}`, { commit: at });
     say(`pushed ${made.slice(0, 7)} to ${e.branch}: ${title}`);
     return done('done', `pushed ${made.slice(0, 7)} to ${e.branch}: ${title} (${files.join(', ')})`, { commit: made.slice(0, 7), url: `https://github.com/${e.repo}/commit/${made}` });
-  } finally {
-    try {
-      await dropWorktree(ctx, repo, dir);
-    } catch (err) {
-      ctx.log(`[${e.id}] couldn't remove ${dir}: ${(err as Error).message}`);
-    }
   }
+  // The worktree is kept for the next refresh (keptWorktree), and anything left in it is reset then.
 }
 
 /**
@@ -131,11 +179,46 @@ async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> 
   await gitMaybe(ctx.run, repo, 'worktree', 'prune');
 }
 
+/** Releases whose refresh waits for the round that comes sooner, and since when. */
+export const refreshPendingFile = () => dataFile('refresh-pending.json');
+
+export type Released = Pick<EmployeeResult, 'id' | 'name' | 'version'>;
+
+export interface RefreshPending {
+  since: string;
+  released: Released[];
+}
+
+/** The longest a release's refresh waits for the rounds that come sooner. */
+export const REFRESH_WAIT_MS = 60 * 60_000;
+
 /**
- * Each repository with a refresh, after `released` (the stage's results that released something; none, and nothing
- * runs). What failed is kept by repository, for the alarms; one that went through, or found nothing to change, is let go.
+ * Whether a stage refreshes now, and after what: its own releases with those waiting (`pending`); or, when the next
+ * round comes sooner (`soon`: a rollout's PRs merge and release then), none yet, and they all wait for it, but never
+ * longer than REFRESH_WAIT_MS. Pure.
  */
-export async function refreshAfterReleases(ctx: Ctx, released: EmployeeResult[]): Promise<EmployeeResult[]> {
+export function refreshStep(o: { released: Released[]; pending: RefreshPending | null; soon: boolean; now: number }): { run: Released[] } | { wait: RefreshPending } {
+  const seen = new Set<string>();
+  const all = [...(o.pending?.released ?? []), ...o.released.map((r) => ({ id: r.id, name: r.name, ...(r.version ? { version: r.version } : {}) }))].filter((r) => {
+    const key = `${r.id}@${r.version ?? ''}`;
+    return seen.has(key) ? false : (seen.add(key), true);
+  });
+  if (!all.length) return { run: [] };
+  const since = o.pending?.since ?? new Date(o.now).toISOString();
+  if (o.soon && o.now - Date.parse(since) < REFRESH_WAIT_MS) return { wait: { since, released: all } };
+  return { run: all };
+}
+
+export const loadRefreshPending = (): RefreshPending | null => {
+  const p = readJson<RefreshPending | null>(refreshPendingFile(), null);
+  return p && typeof p.since === 'string' && Array.isArray(p.released) ? p : null;
+};
+
+/**
+ * Each repository with a refresh, after `released` (the releases it covers; none, and nothing runs). What failed is
+ * kept by repository, for the alarms; one that went through, or found nothing to change, is let go.
+ */
+export async function refreshAfterReleases(ctx: Ctx, released: Pick<EmployeeResult, 'name' | 'version'>[]): Promise<EmployeeResult[]> {
   if (!released.length) return [];
   // Not a repository another PC has its turn in (lease.ts): that PC refreshes it after its own releases.
   const which = ctx.settings.employees.filter((e) => e.refresh && !ctx.lease?.skip.has(e.id));

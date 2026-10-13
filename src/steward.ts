@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './alarms.ts';
 import { portUses } from './ports.ts';
 import { APP, dataDir } from './app.ts';
@@ -25,7 +25,7 @@ import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
-import { loadRefreshFailures, refreshAfterReleases } from './stages/refresh.ts';
+import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshPendingFile, refreshStep, releasedWords } from './stages/refresh.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
@@ -648,11 +648,21 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         log(`${name}: ${out.error}`);
       }
       // Something released: each repository with a refresh after releases runs it, and pushes what it changed once its
-      // tests pass (stages/refresh.ts). A stage that released nothing runs none.
+      // tests pass (stages/refresh.ts). A stage that released nothing runs none, unless releases wait for one. While the
+      // next round comes sooner (a rollout's PRs merge and release then), this round's releases wait for it: one refresh
+      // after them all (refreshStep), never more than an hour late.
       const releasedNow = out.results.filter(releasedSomething);
-      if (releasedNow.length && !quiet) {
+      const pending = quiet ? null : loadRefreshPending();
+      if ((releasedNow.length || pending) && !quiet) {
         try {
-          out.results.push(...(await refreshAfterReleases(ctx, releasedNow)));
+          const step = refreshStep({ released: releasedNow, pending, soon: name === 'round' && !!out.soon, now: Date.now() });
+          if ('wait' in step) {
+            writeJson(refreshPendingFile(), step.wait);
+            log(`refresh: after the next round, which comes sooner (${releasedWords(step.wait.released)} so far)`);
+          } else {
+            if (pending) rmSync(refreshPendingFile(), { force: true });
+            if (step.run.length) out.results.push(...(await refreshAfterReleases(ctx, step.run)));
+          }
         } catch (e) {
           log(`refresh: ${(e as Error).message}`);
         }
