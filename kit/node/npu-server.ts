@@ -30,7 +30,7 @@ const taskkill = (pid: number) =>
 
 /**
  * Starts a server from its entry, detached, its output appended to `logFile`; stopped with its whole tree. Its
- * command's %VARIABLES% are expanded as the keeper does (setup writes %USERPROFILE%\... paths): before kit 2.61.0
+ * command's %VARIABLES% are expanded as the keeper does (setup writes %USERPROFILE%\... paths): before kit 2.65.0
  * they weren't, so a tools home under the user's folder started nothing, and said nothing for 20 minutes.
  */
 export async function startServer(entry: AcceleratorEntry, logFile: string): Promise<RunningServer> {
@@ -43,6 +43,18 @@ export async function startServer(entry: AcceleratorEntry, logFile: string): Pro
   child.on('error', (e) => appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`));
   child.unref();
   return { pid: child.pid, stop: () => (child.pid ? taskkill(child.pid) : Promise.resolve()) };
+}
+
+/**
+ * Stops the server at `base` that the kit started (its started record names it), and waits up to 30 s for it to stop
+ * answering, so nothing is left running. `answers` says whether something answers there within the time given.
+ */
+export async function stopStartedAt(base: string, answers: (timeoutMs: number) => Promise<boolean>, now: () => number): Promise<void> {
+  if (!(await answers(1_000))) return;
+  const { readStarted } = await import('./accelerators.ts');
+  for (const s of readStarted().filter((x) => x.base === base)) await taskkill(s.pid);
+  const t = now();
+  while (now() - t < 30_000 && (await answers(1_000))) await new Promise((res) => setTimeout(res, 250));
 }
 
 /** A process's working set and private bytes, from Windows. */
@@ -231,12 +243,7 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
     return false;
   };
   /** Stops the server the kit's own test request started (its started record names it), so nothing is left running. */
-  const stopKitStarted = async () => {
-    if (!(await listening(1_000))) return;
-    const { readStarted } = await import('./accelerators.ts');
-    for (const s of readStarted().filter((x) => x.base === ep.baseUrl)) await taskkill(s.pid);
-    await untilGone();
-  };
+  const stopKitStarted = () => stopStartedAt(ep.baseUrl, listening, now);
   return { ep, lists, ask, askStream, answers, listening, untilAnswers, untilGone, stopKitStarted };
 }
 
@@ -276,6 +283,8 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
       entry = e;
       return [];
     },
+    // Its embedding server is measured by the caller, in a step of its own.
+    testEmbed: async () => [],
   });
   return { entry, problems: r.problems, timed };
 }

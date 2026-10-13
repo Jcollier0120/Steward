@@ -103,9 +103,10 @@ export async function cloneUses(run: Runner, employees: Employee[]): Promise<Por
     try {
       const repo = checkoutOf(e);
       const ref = `origin/${e.branch}`;
-      let port = appPort(await showFile(run, repo, ref, 'src/app.ts'));
+      // Both asked at once, so git reads them in one command (showFile).
+      const [app, announce] = await Promise.all([showFile(run, repo, ref, 'src/app.ts'), showFile(run, repo, ref, 'manor-agent.json')]);
+      let port = appPort(app);
       if (port === null) {
-        const announce = await showFile(run, repo, ref, 'manor-agent.json');
         port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
       }
       if (port !== null) out.push({ port, id: e.id, source: 'clone' });

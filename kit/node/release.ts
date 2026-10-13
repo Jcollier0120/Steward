@@ -46,6 +46,10 @@
  * build warns of it first. The zip is made and opened with Windows' own tar.exe, so there's
  * no dependency. Uncommitted changes in what the zip carries make a release marked dirty, version
  * <version>+dev.<commit>, which installs but doesn't publish.
+ *
+ * An agent with a program of its own that isn't Node says so in kit.json's "native" (native.ts, kit 2.62.0): the
+ * release builds it for each processor, carries both builds in the zip at the paths the checkout has them, and, when it
+ * is published, signs the programs and libraries that aren't signed already (sign.ts); install keeps this PC's.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -57,8 +61,10 @@ import { APP } from '../app.ts';
 import type { Release } from './install.ts';
 import { isUrgent, letOut, NEVER_SOLD, NOT_PUBLISHED, publisherKey, publishToExchequer, reachedExchequer, type ExchequerOutcome } from './exchequer.ts';
 import { loadEsbuild, minifyRelease } from './minify.ts';
+import { buildNative, nativeOf, runBuild, stageNative, type Native, type NativeBuilt } from './native.ts';
 import { releaseNotes, type Notes } from './notes.ts';
 import { PAGE_BUNDLE, PAGE_ENTRY, releasePage } from './react-page.ts';
+import { readySigner, signFiles, unsignedOf } from './sign.ts';
 
 /** Where a Steward from before 0.19.0 published Castellan's releases, before it had a setting for it. */
 const LEGACY_RELEASES_REPO = 'Jcollier0120/Manor-releases';
@@ -237,20 +243,55 @@ interface Built {
 export const INSTALL_NOTE =
   'Castellan installs and updates it by itself. To install it by hand, unpack the zip anywhere and run `node src\\cli.ts install` (Node 22.18 or later). `SHA256SUMS.txt` lists its SHA-256 (PowerShell: `Get-FileHash`).';
 
+/**
+ * kit.json's "native" (native.ts), checked against the checkout: null when it has none. Its build folder must be
+ * git-ignored, so a build never makes the tree look changed; a release to be published needs a certificate to sign with.
+ */
+export function nativeFor(dir: string, publishing: boolean, ignored: (p: string) => boolean): Native | null {
+  let pin: unknown;
+  try {
+    pin = JSON.parse(readFileSync(path.join(dir, 'kit.json'), 'utf8').replace(/^﻿/, ''));
+  } catch {
+    return null; // kitOf says what's wrong with it
+  }
+  const n = nativeOf(pin);
+  if (!n) return null;
+  if ('error' in n) throw new Error(n.error);
+  if (!ignored(n.out)) throw new Error(`kit.json's "native" builds into ${n.out}, which git doesn't ignore: add ${n.out}/ to .gitignore, so a build never makes the tree look changed.`);
+  if (publishing && !n.thumbprint) throw new Error(`Not published: kit.json's "native" gives no "thumbprint" to sign its files with, and a release's native files are never published unsigned.`);
+  return n;
+}
+
 /** Stages the release in a temporary folder, builds it (unless `readable`), zips it, and writes its SHA256SUMS.txt (manor-agent.json's line too, when there is one). */
-async function build(readable = false): Promise<Built> {
+async function build(readable = false, publishing = false): Promise<Built> {
   const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   if (pkg.version !== APP.version) throw new Error(`package.json says ${pkg.version} but src/app.ts says ${APP.version}; make them agree first.`);
   const kit = kitOf(root);
   if ('error' in kit) throw new Error(kit.error);
   const announced = announcementOf(root, APP.id, originRepo());
   if (announced && 'error' in announced) throw new Error(announced.error);
+  const native = nativeFor(root, publishing, (p) => spawnSync('git', ['check-ignore', '-q', `${p}/x`], { cwd: root, windowsHide: true }).status === 0);
+  // A release that will be published signs its native files: whether this PC can is known before minutes of building.
+  const signer = native && publishing ? readySigner(native.thumbprint!, native.timestamp) : null;
+  if (signer && 'problem' in signer) throw new Error(`Not published: its native files can't be signed: ${signer.problem}.`);
   const commit = git('rev-parse', '--short', 'HEAD');
   // Dirty means what goes into the zip isn't the commit's: a change or a new file there (src\kit\ is
   // git-ignored, and kit.json says what it is). Other untracked things in the checkout (a .claude folder,
   // scratch files) don't count. manor-agent.json, published beside the zip, does.
-  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT) !== '';
+  // The native sources (the build script's folder, and the notices) count too.
+  const nativeSources = native ? [path.posix.dirname(native.build), ...native.notices] : [];
+  const dirty = git('status', '--porcelain', '--untracked-files=all', '--', ...RELEASE_FOLDERS, ...RELEASE_FILES, ANNOUNCEMENT, ...nativeSources) !== '';
   const release: Release = { id: APP.id, name: APP.name, version: releaseVersion(pkg.version, commit, dirty), commit, dirty, built: new Date().toISOString(), kit: kit.kit, form: readable ? 'readable' : 'minified' };
+  let nativeBuilt: NativeBuilt | null = null;
+  if (native) {
+    nativeBuilt = buildNative(root, native, !!signer, {
+      build: (script, arch) => runBuild(root, script, arch),
+      unsigned: unsignedOf,
+      sign: (files) => signFiles(signer as Exclude<typeof signer, null | { problem: string }>, files, (l) => console.log(l)),
+      log: (l) => console.log(l),
+    });
+    release.native = { out: native.out, arch: native.arch, signed: !!signer };
+  }
   const esbuild = readable ? null : await loadEsbuild(root);
   if (esbuild && 'error' in esbuild) throw new Error(esbuild.error);
 
@@ -267,6 +308,7 @@ async function build(readable = false): Promise<Built> {
     if (pageEsbuild && 'error' in pageEsbuild) throw new Error(pageEsbuild.error);
     const page = pageEsbuild ? await releasePage(stage, root, pageEsbuild, readable) : null;
     const minified = esbuild ? await minifyRelease(stage, esbuild) : null;
+    const nativeCount = native && nativeBuilt ? stageNative(root, stage, native, nativeBuilt) : 0;
 
     const outDir = path.join(root, 'artifacts', APP.id);
     mkdirSync(outDir, { recursive: true });
@@ -283,11 +325,13 @@ async function build(readable = false): Promise<Built> {
     const hash = sha256(zip);
     const listed = [{ name, hash }, ...(announced ? [{ name: ANNOUNCEMENT, hash: sha256(announcement) }] : [])];
     writeFileSync(sums, sumsText(listed));
-    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
+    console.log(`${APP.name} ${release.version} (${commit}${dirty ? ', with uncommitted changes' : ''}, kit ${kit.kit}): ${path.relative(root, zip)}, ${files.length + 1 + nativeCount} files, ${Math.ceil(statSync(zip).size / 1024)} KB`);
     console.log(`  sha256 ${hash} (${path.relative(root, sums)})`);
     if (minified) console.log(`  built with esbuild ${esbuild!.version}: ${minified.ts} TypeScript and ${minified.js} JavaScript files, ${Math.ceil(minified.before / 1024)} KB of code to ${Math.ceil(minified.after / 1024)} KB`);
     else console.log('  readable: not built, so it can be looked into here; it is never published');
     if (page) console.log(`  its page, drawn in the browser: ${PAGE_BUNDLE}, ${page.kb} KB with React`);
+    for (const a of nativeBuilt?.arch ?? [])
+      console.log(`  native files for ${a.arch}: ${native!.out}/${a.arch}, ${a.files.length} files, ${Math.ceil(a.bytes / 1024)} KB${release.native?.signed ? `, ${a.signed} signed here (the rest by their makers)` : ', not signed (only a published release is)'}`);
     if (announced) console.log(`  ${ANNOUNCEMENT}, announcing ${APP.name} to every Manor: sha256 ${listed[1].hash}`);
     const notes = releaseNotes({ root, name: APP.name, version: pkg.version, commit, kit: kit.kit, install: INSTALL_NOTE });
     console.log(`  notes: ${notes.from === 'changelog' ? `CHANGELOG.md's entry for ${pkg.version}` : 'the commits since the release before'}`);
@@ -340,6 +384,10 @@ async function publish(b: Built, urgent = false): Promise<number> {
   }
   if (release.dirty) {
     console.error('Not published: the tree has uncommitted changes. Commit them, push, and release again.');
+    return 1;
+  }
+  if (release.native && !release.native.signed) {
+    console.error("Not published: its native files aren't signed.");
     return 1;
   }
   if (git('rev-list', '--count', 'HEAD', '--not', '--remotes=origin') !== '0') {
@@ -577,7 +625,7 @@ async function main(args: string[]): Promise<number> {
   }
   let built: Built;
   try {
-    built = await build(args.includes('--readable'));
+    built = await build(args.includes('--readable'), args.includes('--publish'));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 1;

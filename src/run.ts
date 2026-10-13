@@ -2,6 +2,7 @@ import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_pro
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
+import { gitExe } from './kit/git-exe.ts';
 
 /** What a command did: its exit code, and what it printed. */
 export interface Ran {
@@ -56,10 +57,12 @@ export const NO_GH = "gh isn't installed: install GitHub CLI (https://cli.github
 /**
  * The program to start for a command's first word: `node` is the Node running the Steward, and `npm` and
  * `npx` its own npm (no shell, so no cmd.exe quoting). `az` on Windows is the Azure CLI's own Python, as its az.cmd
- * starts it. Everything else, gh too, is found on PATH.
+ * starts it. `git` on Windows is Git for Windows' own git.exe (kit/git-exe.ts). Everything else, gh too, is found on PATH.
  */
 export function resolveCommand(cmd: string, args: string[]): [string, string[]] {
   if (cmd === 'node') return [process.execPath, args];
+  // Git for Windows' own git.exe, not the launcher PATH finds, which would start it and a console host for it (kit/git-exe.ts).
+  if (cmd === 'git') return [gitExe(), args];
   if ((cmd === 'npm' || cmd === 'npx') && existsSync(npmCli(cmd))) return [process.execPath, [npmCli(cmd), ...args]];
   if (cmd === 'az' && process.platform === 'win32') {
     const python = azurePython();
@@ -128,6 +131,12 @@ const runPlain: Runner = (cmd, args, opts = {}) => {
   if (dotnetDir === undefined) dotnetDir = dotnetWithSdk();
   env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
   if (dotnetDir) env.DOTNET_ROOT = dotnetDir;
+  // gh sends its telemetry from a copy of itself started after each command, with a console host of its own; and asks
+  // for a newer version once a day. Neither for the Steward's commands, unless the person set them.
+  if (cmd === 'gh') {
+    env.GH_TELEMETRY ??= '0';
+    env.GH_NO_UPDATE_NOTIFIER ??= '1';
+  }
   return new Promise((resolve) => {
     const child = execFile(
       file,

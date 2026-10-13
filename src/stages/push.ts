@@ -77,8 +77,10 @@ export async function pushOne(ctx: Ctx, e: Employee, o: PushOptions): Promise<Em
   if (open.length && !fold) return result(e, 'done', `PR #${open[0].number} was already open${remoteSha !== localSha ? '; pushed the new commits to it' : ''}`, { url: open[0].url });
 
   const versionFile = e.versionFiles[0];
-  const version = readVersion(versionFile, (await showFile(run, repo, branch, versionFile)) ?? '') ?? '?';
-  const from = readPin(await showFile(run, repo, remote, 'kit.json'))?.kit ?? null;
+  // Both asked at once, so git reads them in one command (showFile).
+  const [versionText, pinText] = await Promise.all([showFile(run, repo, branch, versionFile), showFile(run, repo, remote, 'kit.json')]);
+  const version = readVersion(versionFile, versionText ?? '') ?? '?';
+  const from = readPin(pinText)?.kit ?? null;
   const title = prTitle(e, version, o.kit);
   const changed = (await git(run, repo, 'diff', '--name-only', `${remote}...${branch}`)).split('\n').filter(Boolean);
   const files = e.versionFiles.filter((f) => changed.includes(f.replace(/\\/g, '/')));

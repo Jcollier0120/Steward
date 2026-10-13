@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
 import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu } from './npu-vendors.ts';
-import { processMemory, type RunningServer, serverClient, setUpRoute, startServer } from './npu-server.ts';
-import { mb, type NpuIo, saysReady, testNpuEntry } from './setup.ts';
+import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { mb, type NpuIo, saysReady, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
 
@@ -14,7 +14,8 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * it does what setup does for the NPU (its server and models, each step timed) without writing config.json, then
  * measures the server on the NPU: how long it takes to start and compile its model, a warm answer, how fast it writes
  * and reads, what happens at and past its cap, two requests at once, its memory, a start again from its compile cache,
- * and the kit's own test request in the NPU's turn. It says which steps passed, and the caps and timeouts the numbers
+ * and the kit's own test request in the NPU's turn; then, where the route has one, its embedding server (Qualcomm's
+ * llama-server on the Hexagon), started by the kit and timed warm. It says which steps passed, and the caps and timeouts the numbers
  * suggest for npu-vendors.json, and keeps the whole report as JSON beside the servers.
  *
  * `--route intel --device CPU` rehearses a maker's route off its NPU (OpenVINO on the processor, on any PC Windows runs
@@ -75,6 +76,8 @@ export interface NpuCheckOptions {
     fetch?: typeof fetch;
     memory?: (pid: number) => Promise<{ workingSetBytes: number; privateBytes: number } | null>;
     kitTest?: (entry: AcceleratorEntry) => Promise<string[]>;
+    /** The embedding server's test request (setup.ts' testNpuEmbed). */
+    embedTest?: (entry: AcceleratorEntry) => Promise<string[]>;
     now?: () => number;
   };
 }
@@ -234,8 +237,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
   // 2. Its server and models, as setup does them, each step timed.
-  const needs = (!plan.installed ? (plan.download?.size ?? 0) : 0) + (plan.runtime?.size ?? 0) + plan.models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0);
-  if ((!plan.installed || plan.runtime || plan.models.some((m) => !m.have)) && o.setup === false) {
+  const needs = plan.downloadBytes;
+  if (needs && o.setup === false) {
     add({ step: 'setup', ok: false, say: `${route.server} or its models aren't here, and --no-setup was given` });
     return finish(1);
   }
@@ -370,6 +373,48 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     await server.stop();
   }
   await client.stopKitStarted();
+
+  // 4. The NPU's own embedding server, where the route has one: started as every agent starts it, in the NPU's turn,
+  // then a short query and a chunk of code (what Reeve's index sends) timed warm.
+  if (acc.embed?.baseUrl && acc.embed.baseUrl !== ep.baseUrl) {
+    const eb = acc.embed.baseUrl;
+    const up = async (timeoutMs = 1_000) => {
+      try {
+        await (await http(`${eb}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const e0 = now();
+    const problems = await (o.io?.embedTest ?? ((e: AcceleratorEntry) => testNpuEmbed(e)))(entry);
+    const loadMs = Math.round(now() - e0);
+    const timedEmbed = async (input: string) => {
+      const t0 = now();
+      try {
+        const res = await http(`${eb}/v1/embeddings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: acc.embed!.model, input }), signal: AbortSignal.timeout(60_000) });
+        const j: any = await res.json().catch(() => null);
+        return { ms: Math.round(now() - t0), dims: Array.isArray(j?.data?.[0]?.embedding) ? j.data[0].embedding.length : 0 };
+      } catch {
+        return { ms: Math.round(now() - t0), dims: 0 };
+      }
+    };
+    const query = problems.length ? null : await timedEmbed('where is the push notification token registered');
+    const chunk = problems.length ? null : await timedEmbed(fillerPrompt(450));
+    const ok = !problems.length && !!query?.dims && !!chunk?.dims;
+    add({
+      step: 'embed',
+      ok,
+      ms: loadMs,
+      say: problems.length
+        ? problems.join('; ')
+        : ok
+          ? `the kit started ${route.embedServer?.server ?? 'its embedding server'} and had a vector in ${(loadMs / 1000).toFixed(1)} s; warm, a query took ${query!.ms} ms and a chunk of code ${chunk!.ms} ms (${query!.dims} dimensions)`
+          : 'the embedding server answered without a vector',
+      data: { loadMs, queryMs: query?.ms, chunkMs: chunk?.ms, dims: query?.dims },
+    });
+    await stopStartedAt(eb, up, now);
+  }
 
   report.suggest = suggestFrom(steps, route);
   if (report.suggest) {

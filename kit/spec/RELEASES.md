@@ -45,3 +45,51 @@ Castellan sells the staff by subscription. The **Exchequer**, Castellan's releas
 - **The Exchequer can't say** (no answer, an error, or an answer with no `forSale`: an Exchequer from before 0.6.0, or whose database isn't migrated yet): GitHub as before. An unsure Exchequer never keeps a release from GitHub.
 
 Without a releases repository (anyone else's agent), nothing changes: the agent's own repository, then the Exchequer when it takes the agent. Manor's own releases and setup, and Heiward's, are never published by this and stay on GitHub.
+
+## Native files (`node/native.ts`, kit 2.62.0)
+
+Some agents need a program that isn't Node, such as Envoy's media host (`envoy-media.exe`), which turns speech into text on the NPU. kit.json declares it, and the release builds it, signs it and carries it:
+
+```json
+"native": {"build": "native/build.ps1", "out": "native/build", "notices": ["native/NOTICES.txt"], "thumbprint": "6B654D9C34800D4307D42ACD63B925EDA5CE8D33"}
+```
+
+**The keys:**
+
+- **`build`:** a PowerShell script in the repository.
+  - `npm run release` runs it once per processor, as `-Arch arm64` and then `-Arch x64`, after emptying `<out>\<arch>\`. Nothing from an earlier build rides along.
+  - It must leave that processor's files in `<out>\<arch>\`.
+  - A build that fails, or leaves nothing, stops the release, with the script's last lines.
+  - Its folder holds the native sources, so a change there makes a release dirty.
+- **`out`:** the folder it builds into. It must be git-ignored; the release refuses one that isn't, so a build never makes the tree look changed.
+- **`arch`:** which processors to build (default `["arm64", "x64"]`).
+- **`notices`:** files in the repository that go with the native files, into `<out>\notices\`. Use it for the licenses of the runtimes they carry (ONNX Runtime's MIT license, .NET's).
+- **`thumbprint`:** the code-signing certificate's SHA-1 thumbprint, in `Cert:\CurrentUser\My`.
+  - **`timestamp`** is its RFC 3161 server; the default is Certum's, `http://time.certum.pl`.
+  - A release with native files is **never published unsigned**. Without a thumbprint, `--publish` is refused before anything is built, and so is it when this PC can't sign now.
+  - The signer check is a trial signature, so a cloud key that isn't connected is found before minutes of building, not after.
+
+**Signing** (`node/sign.ts`, as Manor signs its setup):
+
+- It uses the newest Windows SDK's **x64** signtool, never its Arm64 one: a cloud key's provider (Certum's SimplySign) comes as x64 DLLs only.
+- It signs each `.exe` and `.dll` whose Authenticode signature isn't Valid already, and timestamps it. A runtime's own DLLs keep their maker's signature.
+- It then checks every one is Valid, the certificate's, and timestamped.
+- Only a published release is signed: a local build or `--install` isn't. `release.json` says which (`"native": {"out", "arch", "signed"}`).
+
+**One zip, both processors:**
+
+- The zip carries `<out>\<arch>\` for each processor at the paths the checkout has them, so every Manor, the Exchequer and Castellan's setup take it as they take any release.
+- Envoy's media host is about 15 MB zipped per processor.
+
+**Installing:**
+
+- `install` keeps only this PC's processor's folder, plus the notices. When the release has none for this PC's processor, it keeps them all and says so.
+- An installed copy finds its files where its checkout does: `nativeFolder(appRoot)` is `<appRoot>\<out>\<arch>`, or null.
+- **Before an update moves the app folder** (Windows won't move it while a program in it runs), install waits up to 5 seconds for the old copy's programs to end with its page, then ends those that stay. Uninstall does the same.
+  - So an agent's native program should end when its page does: the page tells it to on `onStop`.
+  - This only happens for a copy whose release carries native files; for any other agent, an update asks Windows nothing more.
+
+**Third-party files:**
+
+- What the build puts in `<out>\<arch>\` is redistributed with the agent. Carry only what its license allows inside an application, and keep its notices.
+- Qualcomm's QNN runtime is licensed only "as incorporated in your application" and is revocable, so Envoy doesn't carry it: the agent fetches it from Qualcomm's own NuGet package on first use.

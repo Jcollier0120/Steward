@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { remoteUrl } from './kit/git-auth.ts';
 import { manorHome } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { fileAt, lsRemote, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
@@ -115,8 +116,12 @@ export async function remoteFor(run: Runner, settings: Settings, e: Pick<Employe
   const scratch = path.join(workRootOf(settings), '_turns.git');
   const checkout = e.checkout ? checkoutOf(e as Employee) : '';
   if (checkout && existsSync(checkout)) {
-    const r = await run('git', ['config', '--get', 'remote.origin.url'], { cwd: checkout, timeoutMs: 30_000 });
-    const url = r.code === 0 ? r.out.trim() : '';
+    // Read from the clone's config file; git asked only when it can't be (a URL kept in an included file, say).
+    let url = remoteUrl(checkout, 'origin') ?? '';
+    if (!url) {
+      const r = await run('git', ['config', '--get', 'remote.origin.url'], { cwd: checkout, timeoutMs: 30_000 });
+      url = r.code === 0 ? r.out.trim() : '';
+    }
     if (url) return { key: key(e.repo), url, scratch };
   }
   return { key: key(e.repo), url: `https://github.com/${e.repo}.git`, scratch };
@@ -170,14 +175,15 @@ async function claimTurn(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 
 }
 
 /** One repository's turn: read, and taken or renewed as decide() says. */
-export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number }): Promise<RepoTurn> {
+export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number; kept?: RepoTurn }): Promise<RepoTurn> {
   const at = new Date(o.now).toISOString();
   // Both refs in one look: the claims ref's commit is kept for claims.ts.
   const ls = await lsRemote(run, r, [RELEASE_PC_REF, CLAIMS_REF]);
   if (!ls.ok) return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at };
   const claimsSha = ls.refs[CLAIMS_REF] ?? null;
   const sha = ls.refs[RELEASE_PC_REF] ?? null;
-  const rec = sha ? readRecord(await fileAt(run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE)) : null;
+  // The record at a commit read before is the one kept with it: a commit's file never changes, so git isn't asked again.
+  const rec = !sha ? null : sha === o.kept?.sha && o.kept.record ? o.kept.record : readRecord(await fileAt(run, r, RELEASE_PC_REF, sha, RELEASE_PC_FILE));
   const d = decide(rec, { pc: o.me.id, checkout: o.checkout }, o.now, o.ttlMs);
   if (d === 'keep') return { repo: e.repo, status: 'here', sha: sha!, record: rec!, claimsSha, at };
   if (d === 'elsewhere') return { repo: e.repo, status: 'elsewhere', sha: sha!, record: rec!, claimsSha, at };
@@ -221,6 +227,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
   rmSync(dataFile('leases.json'), { force: true });
   const remotes = new Map<string, RemoteRepo>();
   const checkouts = new Map<string, boolean>();
+  const before = loadTurns().repos;
   const turns = await mapLimit(unique, 4, async (e): Promise<RepoTurn | null> => {
     if (!publishes(e)) return null;
     try {
@@ -229,7 +236,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       remotes.set(e.id, r);
       const checkout = !!e.checkout && existsSync(checkoutOf(e));
       checkouts.set(e.id, checkout);
-      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs });
+      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs, kept: before[key(e.repo)] });
     } catch (err) {
       log(`[${e.id}] turn: ${(err as Error).message}`);
       return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at: new Date(nowOf()).toISOString() };

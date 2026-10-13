@@ -1,6 +1,6 @@
 # The NPU benchmark
 
-A standard measurement of how well each chip runs Castellan's local AI, and each model on it, so the website can rank them. The command is built (kit 2.62.0, `npu-bench.ts`) and has run on a real Lunar Lake; the website's boards aren't yet. It builds on the NPU check (`npu-check.ts`, NPU-VENDORS.md's "Verified, and not"), which sets a route up, starts its server and measures it.
+A standard measurement of how well each chip runs Castellan's local AI, and each model on it, so the website can rank them. The command is built (kit 2.66.0, `npu-bench.ts`) and has run on a real Lunar Lake; the website's boards aren't yet. It builds on the NPU check (`npu-check.ts`, NPU-VENDORS.md's "Verified, and not"), which sets a route up, starts its server and measures it.
 
 The owner decided three things on 2026-10-12: count the tokens agents really send, so the jobs' mix can be set from them (the token tally, below); publish energy figures where the battery reading holds up; and show the Lunar Lake's Arc graphics card as a row on the chips board beside its NPU.
 
@@ -73,7 +73,7 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 - **JSON**: an answer that must parse and have given fields with given values. Graded by parsing.
 - **Short reasoning**: arithmetic, dates, which of two. Graded by number: the first number in the answer. An answer that shows its working when asked for the number alone ("3 + 2 × 4 = 11") counts as wrong, because an agent reads the answer as a number, and so does one that hedges ("32, or 42").
 
-Three of them are **must-pass**: the "ready" answer, a find at the end of the long text, and one JSON answer. A model that fails any of them runs badly on that device (the group-wise Qwen3-4B on Intel's NPU answered nonsense fast; kit 2.61.0), and the run isn't ranked however fast it was.
+Three of them are **must-pass**: the "ready" answer, a find at the end of the long text, and one JSON answer. A model that fails any of them runs badly on that device (the group-wise Qwen3-4B on Intel's NPU answered nonsense fast; kit 2.65.0), and the run isn't ranked however fast it was.
 
 The **gate** for ranking is all three must-pass items, and a score no lower than the gate in the suite. The gate is calibrated before the suite's first release, by running it on every route known to work (the Snapdragon X2 Elite's NPU, the Lunar Lake's NPU and its Arc graphics card) and setting the gate 10 points below the lowest of them. Until it is calibrated it is a placeholder (75%).
 
@@ -158,7 +158,7 @@ Later, not in the first version: a **Measure this PC** button in Manor's Acceler
 
 ## Open questions
 
-- **The jobs' mix.** The three jobs' sizes are a guess at the agents' work. The token tally counts what agents send from kit 2.62.0 on; a week of it on the owner's PCs (`--mix 7`) sets the sizes before the suite's first release. They are the ranking, so this matters most.
+- **The jobs' mix.** The three jobs' sizes are a guess at the agents' work. The token tally counts what agents send from kit 2.66.0 on; a week of it on the owner's PCs (`--mix 7`) sets the sizes before the suite's first release. They are the ranking, so this matters most.
 - **Energy.** To be published (decided), but how steady the battery reading is under load still has to be seen on battery, on the Lunar Lake and the Snapdragon. A reading that swings too much is shown as noisy and kept off the board.
 - **Intel's prompt cap.** Measured on the Lunar Lake: because the NPU reads in pieces of about 1,024 tokens, a bigger cap doesn't slow short prompts much. At 2,048 nothing changed (short answer 0.72 s, load 28 s, 3.6 GB). At 4,096 the short answer took 0.77 s instead of 0.72, the first load 41 s instead of 31, and the memory 4.3 GB instead of 3.6. Raising Intel's cap to 4,096 would let agents send three times the text, for about 50 ms on every answer. That is a change to npu-vendors.json to propose, with the timeouts that a 3,300-token prompt (4.4 s to start) needs.
 - **The gate's calibration** needs the three known-good routes measured first. AMD's route can't join the calibration until there's AMD hardware.

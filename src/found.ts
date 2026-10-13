@@ -10,6 +10,7 @@ import { employeeFor } from './employ.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { branchTree, dotnetTests, folderTree, type Tree } from './migrate.ts';
 import type { Runner } from './run.ts';
+import { gitExe } from './kit/git-exe.ts';
 import { employeesOfProjects, inEffect, isSelf, loadSettings, manorTakesOver, normalizeSettings, REEVE_URL, settingsFile, TAG_RELEASE, type Employee, type Settings } from './settings.ts';
 
 /**
@@ -360,7 +361,7 @@ export function anyRepo(who: string, o: { found?: FoundState; cwd?: string } = {
   while (!existsSync(path.join(top, '.git')) && path.dirname(top) !== top) top = path.dirname(top);
   let branch = 'main';
   try {
-    branch = execFileSync('git', ['-C', top, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim().replace(/^origin\//, '') || 'main';
+    branch = execFileSync(gitExe(), ['-C', top, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).trim().replace(/^origin\//, '') || 'main';
   } catch {
     // origin/HEAD isn't known here: main.
   }

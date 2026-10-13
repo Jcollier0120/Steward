@@ -3,7 +3,7 @@ import { getJson, loadAlarms, watchAlarms, type GetJson, type Held } from './ala
 import { portUses } from './ports.ts';
 import { APP, dataDir } from './app.ts';
 import { clock, gate, GithubLimited, loadBudget, noteGlance, noteLimited, restReset, roundCost, saveBudget, waitLine } from './budget.ts';
-import { apiAsk, repoSig, takeGlance, type Glance } from './glance.ts';
+import { apiAsk, repoSig, takeGlance, type Glance, type GlanceAsk } from './glance.ts';
 import { kitInfo, kitInfoFrom, chooseKit, latestKit, localChangelog, ownKit, stewardTool, type KitInfo } from './kitsource.ts';
 import { online as kitOnline } from './kit/net.ts';
 import { shareRemoteHeads } from './kit/remote-heads.ts';
@@ -89,13 +89,15 @@ export const loadStaff = () => readJson<Staff | null>(staffFile(), null);
  * What GitHub says of the account's API budget is kept (budget.ts); when GitHub refuses the account, one line says
  * so and until when nothing is asked of it.
  */
-export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host, now: () => Date = () => new Date()): Promise<Glance | null> {
+export async function tryGlance(run: Runner, settings: Settings, log: (line: string) => void = () => {}, host?: (e: Employee) => Host, now: () => Date = () => new Date(), ask?: GlanceAsk): Promise<Glance | null> {
   try {
-    // The Steward's own runner asks GitHub from its process (no gh for each round); a test's runner, through gh.
-    const g = await takeGlance(run, dataDir, settings, host, now, run === realRun && process.env.STEWARD_GLANCE_GH !== '1' ? apiAsk() : undefined);
+    // The Steward's own runner asks GitHub from its process (no gh for each round); a test's runner, through gh, unless
+    // the test gives its own `ask` for GitHub's API.
+    const real = run === realRun || ask !== undefined;
+    const g = await takeGlance(run, dataDir, settings, host, now, ask ?? (run === realRun && process.env.STEWARD_GLANCE_GH !== '1' ? apiAsk() : undefined));
     if (g.rates?.length || g.cost !== undefined) saveBudget(noteGlance(loadBudget(), g, now()));
     // The branch heads it read, for other agents (Reeve) to skip their own ls-remote of these repositories.
-    if (g.heads && run === realRun) {
+    if (g.heads && real) {
       try {
         shareRemoteHeads(g.heads, { now: now() });
       } catch (e) {

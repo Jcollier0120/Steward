@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { advertisedRefs, lsRemoteText } from './smart-http.ts';
 
 /**
  * git's sign-in given to git up front, for a fetch, push or ls-remote over https (the Steward's since 0.35.31, the kit's
@@ -96,6 +97,25 @@ export function remoteUrls(repo: string): string[] {
   }
 }
 
+/** One remote's URL (its first), from its clone's config file (no git started); null when it has none or can't be read. */
+export function remoteUrl(repo: string, name = 'origin'): string | null {
+  try {
+    const common = gitCommonDir(repo);
+    const config = common && path.join(common, 'config');
+    if (!config || !existsSync(config)) return null;
+    let mine = false;
+    for (const line of readFileSync(config, 'utf8').split('\n')) {
+      const section = /^\s*\[\s*([^\]\s"]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line);
+      if (section) mine = section[1].toLowerCase() === 'remote' && section[2]?.replace(/\\(.)/g, '$1') === name;
+      const url = mine ? /^\s*url\s*=\s*(.+?)\s*$/i.exec(line)?.[1] : undefined;
+      if (url) return url.replace(/^"(.*)"$/, '$1');
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** The https origins of a clone's remotes; 'named' for an https URL with its own user, 'other' for anything else. */
 export function remoteOrigins(repo: string): string[] {
   return remoteUrls(repo).map((u) => (/^https:/i.test(u) ? (httpsOrigin(u) ?? 'named') : 'other'));
@@ -155,6 +175,20 @@ export function scriptSignInEnv(headers: Map<string, string>, already: Record<st
   return configEnv(entries, already);
 }
 
+/** The https URL an `ls-remote` command line asks: the one it names, or its clone's remote by name; null for any other. */
+function lsRemoteUrl(args: string[], cwd: string | undefined): string | null {
+  const repo = args.slice(1).find((a) => !a.startsWith('-'));
+  if (!repo) return null;
+  const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(repo) ? repo : cwd && /^[\w.-]+$/.test(repo) ? remoteUrl(cwd, repo) : null;
+  return url && httpsOrigin(url) ? url : null;
+}
+
+/** The git folder whose config a command in `cwd` reads: a clone's (common) one, or a bare repository's own. */
+function gitDirAt(cwd: string | undefined): string | null {
+  if (!cwd) return null;
+  return gitCommonDir(cwd) ?? (existsSync(path.join(cwd, 'HEAD')) && existsSync(path.join(cwd, 'config')) ? cwd : null);
+}
+
 /** What a host says when it refuses a sign-in (GitHub says a private repository it won't show you isn't there). */
 export const refused = (r: GitRan) => /authentication failed|invalid (username|credentials)|could not read (username|password)|terminal prompts disabled|repository not found|returned error: 40[134]/i.test(`${r.err}\n${r.out}`);
 
@@ -175,7 +209,7 @@ interface Kept {
  * A runner whose git fetches, pushes and ls-remotes over https carry the host's sign-in themselves (see the top of this
  * file). Every other command, and git's own way when the sign-in can't be had, goes to `inner` as given.
  */
-export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRunner<O, R>, now: () => number = Date.now): GitRunner<O, R> {
+export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRunner<O, R>, now: () => number = Date.now, o: { fetch?: typeof fetch } = {}): GitRunner<O, R> {
   const byOrigin = new Map<string, Kept>();
   const headerFor = (origin: string, cwd: string | undefined): Promise<string | null> => {
     const k = byOrigin.get(origin);
@@ -197,6 +231,16 @@ export function signedIn<O extends GitRunOptions, R extends GitRan>(inner: GitRu
       const h = await headerFor(origin, opts.cwd);
       if (!h) return inner(cmd, args, opts);
       headers.set(origin, h);
+    }
+    // An ls-remote over https is asked in this process with the same sign-in (smart-http.ts, kit 2.64.0): no git. What
+    // that can't answer as git would, it leaves to git.
+    // Under node --test, only with a test's own fetch: a test's made-up remote is never asked over the network.
+    const ask = o.fetch ?? (process.env.NODE_TEST_CONTEXT ? null : fetch);
+    if (ask && args[0] === 'ls-remote' && origins.length === 1) {
+      const url = lsRemoteUrl(args, opts.cwd);
+      const refs = url ? await advertisedRefs(url, { authorization: headers.get(origins[0])!.replace(/^authorization:\s*/i, ''), gitDir: gitDirAt(opts.cwd), env: { ...process.env, ...opts.env }, fetch: ask }) : null;
+      const out = refs ? lsRemoteText(args, refs) : null;
+      if (out !== null) return { code: 0, out, err: '' } as unknown as R;
     }
     const r = await inner(cmd, args, { ...opts, env: { ...opts.env, ...signInEnv(headers, { ...process.env, ...opts.env }) } } as O);
     if (r.code === 0 || !refused(r)) return r;
