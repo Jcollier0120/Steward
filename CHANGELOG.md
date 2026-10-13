@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.60
+
+**The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**
+
+### What's new
+
+- On a PC with a newer or older Intel NPU than the one tested so far (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake), Set up measures that PC's NPU and sets its waiting times to suit it, instead of guessing.
+- Set up checks that the NPU's answers make sense, not just that it answers, for both chat and code search.
+- Set up uses the NPU only where the PC has the memory for it. On an 8 GB PC the NPU is left out; on a 12 GB PC it chats, and code search runs elsewhere.
+
+### What changed
+
+- When the NPU can't do something, Set up no longer reports an error. The graphics card or the processor takes over that work (chat and code search separately), and the accelerators' details say in plain words why the NPU isn't used.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On an Intel PC, running Set up again applies the new checks.
 ## 0.35.59
 
 **The Steward's tests pass on any PC, not only on its maker's laptop.**

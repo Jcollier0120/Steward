@@ -219,6 +219,28 @@ export function rememberHardware(hw: Hardware, file = hardwareFile()): void {
   });
 }
 
+/** npu-note.json, beside hardware.json: why the NPU, or its embeddings, isn't used, as setup last found it. */
+export const npuNoteFile = () => path.join(acceleratorsDir, 'npu-note.json');
+
+/**
+ * Keeps setup's note on the NPU (setup.ts' npuNoteFor: "The NPU (…) isn't used: its driver needs an update. …"), with
+ * when; null clears it, once the NPU is set up whole. A note, never an alarm: the NPU's work goes elsewhere.
+ */
+export function rememberNpuNote(note: string | null, file = npuNoteFile()): void {
+  if (note) writeWhole(file, { at: new Date().toISOString(), note });
+  else rmSync(file, { force: true });
+}
+
+/** The note setup last kept on the NPU, or null. */
+export function readNpuNote(file = npuNoteFile()): { at: string; note: string } | null {
+  try {
+    const j = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    return typeof j?.note === 'string' && j.note ? { at: typeof j.at === 'string' ? j.at : '', note: j.note } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- shared files
 
 /** Written whole: a temporary file, then a rename, so a reader never sees half of it. */
