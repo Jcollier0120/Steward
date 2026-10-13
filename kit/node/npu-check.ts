@@ -1,13 +1,13 @@
-import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatBody, expandEnv, listsWhenLoaded, serverEnv } from './accelerators.ts';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
-import { type Detection, detect, runPowerShell } from './detect.ts';
-import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, runProgram } from './npu-vendors.ts';
-import { download, mb, type NpuIo, saysReady, setUpNpu, testNpuEmbed, testNpuEntry, unpack } from './setup.ts';
+import { type Detection, detect } from './detect.ts';
+import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu } from './npu-vendors.ts';
+import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { mb, type NpuIo, saysReady, testNpuEmbed, testNpuEntry } from './setup.ts';
+
+export { processMemory, type RunningServer, startServer } from './npu-server.ts';
 
 /**
  * The NPU check (spec/NPU-VENDORS.md, "Verified, and not"): on a PC with an NPU whose route hasn't run on real hardware,
@@ -51,12 +51,6 @@ export interface NpuCheckReport {
   steps: CheckStep[];
   suggest: Suggestion | null;
   ok: boolean;
-}
-
-/** A server the check started itself: its process, and how to stop it (its whole tree). */
-export interface RunningServer {
-  pid: number | undefined;
-  stop: () => Promise<void>;
 }
 
 export interface NpuCheckOptions {
@@ -168,43 +162,6 @@ export function suggestFrom(steps: CheckStep[], route: Pick<NpuRoute, 'maxContex
 // ------------------------------------------------------------------------------------------------
 // The check
 
-/**
- * Starts a server from its entry, detached, its output appended to `logFile`; stopped with its whole tree. Its
- * command's %VARIABLES% are expanded as the keeper does (setup writes %USERPROFILE%\... paths): before kit 2.65.0
- * they weren't, so a tools home under the user's folder started nothing, and said nothing for 20 minutes.
- */
-export async function startServer(entry: AcceleratorEntry, logFile: string): Promise<RunningServer> {
-  const ep = entry.chat!;
-  const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
-  mkdirSync(path.dirname(logFile), { recursive: true });
-  const fd = openSync(logFile, 'a');
-  const child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd], windowsHide: true, cwd: os.homedir(), env: serverEnv({ env: ep.env }) });
-  closeSync(fd);
-  child.on('error', (e) => appendFileSync(logFile, `npu-check couldn't start ${cmd}: ${e.message}\n`));
-  child.unref();
-  return {
-    pid: child.pid,
-    stop: () =>
-      new Promise((resolve) => {
-        if (!child.pid) return resolve();
-        const k = spawn(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-        k.on('exit', () => resolve());
-        k.on('error', () => resolve());
-      }),
-  };
-}
-
-/** A process's working set and private bytes, from Windows. */
-export async function processMemory(pid: number): Promise<{ workingSetBytes: number; privateBytes: number } | null> {
-  try {
-    const out = await runPowerShell(`$p = Get-Process -Id ${pid} -ErrorAction Stop; "$($p.WorkingSet64)|$($p.PrivateMemorySize64)"`, 20_000);
-    const [ws, priv] = out.trim().split('|').map(Number);
-    return Number.isFinite(ws) ? { workingSetBytes: ws, privateBytes: priv } : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Runs the check: the report, and 0 when every step that can pass did. */
 export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number; report: NpuCheckReport }> {
   const log = o.log ?? console.log;
@@ -292,34 +249,9 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
       return finish(1);
     }
   }
-  const timed: Record<string, number> = {};
-  const time = async <T>(name: string, fn: () => Promise<T> | T): Promise<T> => {
-    const t0 = now();
-    try {
-      return await fn();
-    } finally {
-      timed[name] = (timed[name] ?? 0) + Math.round(now() - t0);
-    }
-  };
   const sio: Partial<NpuIo> = o.io?.setup ?? {};
-  let entry: AcceleratorEntry | undefined;
-  const r = await setUpNpu(plan, tools, {
-    ...sio,
-    log: (l) => log(`  ${l}`),
-    download: (dl, progress) => time('download', () => (sio.download ?? download)(dl, progress)),
-    unpack: (zip, into) => {
-      const t0 = now();
-      (sio.unpack ?? unpack)(zip, into);
-      timed.unpack = Math.round(now() - t0);
-    },
-    run: (exe, args, ro) => time(args.some((a) => /pull/i.test(a)) ? 'pull' : 'install', () => (sio.run ?? defaultRun)(exe, args, ro)),
-    testNpu: async (e) => {
-      entry = e;
-      return [];
-    },
-    // Its embedding server is measured below, in a step of its own.
-    testEmbed: async () => [],
-  });
+  const { entry, problems: setupProblems, timed } = await setUpRoute(plan, tools, sio, log, now);
+  const r = { problems: setupProblems };
   add({
     step: 'setup',
     ok: !r.problems.length && !!entry,
@@ -331,57 +263,10 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
 
   // 3. The server on the NPU, measured.
   const acc = readAccelerator(entry) as Accelerator;
-  const ep = { ...acc.chat!, baseUrl: acc.chat!.baseUrl! };
+  const client = serverClient(acc, { http, now });
+  const { ep, lists, ask, answers, listening, untilAnswers } = client;
   const logFile = path.join(tools, 'servers', 'logs', `npu-check-${vendor}.log`);
   const start = o.io?.start ?? startServer;
-  // One chat request; never throws: a failure (a timeout, a refused connection) is its answer, ok false.
-  const ask = async (prompt: string, maxTokens: number, timeoutMs: number) => {
-    const t0 = now();
-    let res: Response;
-    let text: string;
-    try {
-      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chatBody(acc as unknown as Parameters<typeof chatBody>[0], ep as any, [{ role: 'user', content: prompt }], maxTokens)), signal: AbortSignal.timeout(timeoutMs) });
-      text = await res.text();
-    } catch (e: any) {
-      return { status: 0, ok: false, ms: Math.round(now() - t0), raw: '', answer: '', usage: null, error: e?.name === 'TimeoutError' ? `no answer in ${Math.round(timeoutMs / 1000)} s` : String(e?.cause?.code ?? e?.message ?? e) };
-    }
-    const ms = Math.round(now() - t0);
-    let json: any = null;
-    try {
-      json = JSON.parse(text);
-    } catch {}
-    const raw = String(json?.choices?.[0]?.message?.content ?? '');
-    return { status: res.status, ok: res.ok && typeof json?.choices?.[0]?.message?.content === 'string', ms, raw, answer: raw.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(), usage: json?.usage ?? null, error: res.ok ? null : text.slice(0, 300) };
-  };
-  // Answering, and for a server that lists its model only once it's loaded (OpenVINO), listing it.
-  const lists = listsWhenLoaded(ep.startCommand);
-  const answers = async (timeoutMs = 5_000) => {
-    try {
-      const res = await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok || !lists) return res.ok;
-      const j: any = await res.json().catch(() => null);
-      return !(Array.isArray(j?.data) && j.data.length === 0);
-    } catch {
-      return false;
-    }
-  };
-  // Taking connections at all: what a server stopped no longer does.
-  const listening = async (timeoutMs = 1_000) => {
-    try {
-      await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const untilAnswers = async (deadlineMs: number) => {
-    const t0 = now();
-    while (now() - t0 < deadlineMs) {
-      if (await answers(2_000)) return Math.round(now() - t0);
-      await new Promise((res) => setTimeout(res, 500));
-    }
-    return null;
-  };
   if (await listening(5_000)) {
     add({ step: 'start', ok: false, say: `something already answers at ${ep.baseUrl} (the keeper's server?): stop it first, so the check measures a start of its own` });
     return finish(1);
@@ -396,7 +281,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   add({ step: 'start', ok: up !== null, ms: up ?? undefined, say: up !== null ? `${route.server} answered /v1/models${lists ? ' with its model loaded' : ''}` : `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`, data: { pid: server.pid, logFile } });
   try {
     if (up === null) return finish(1);
-    const first = await time('first', () => ask('Reply with the single word: ready', 16, firstStartLimit)).catch((e) => ({ ok: false, ms: 0, raw: '', answer: '', status: 0, usage: null, error: String(e?.message ?? e) }));
+    const first = await ask('Reply with the single word: ready', 16, firstStartLimit);
+    timed.first = first.ms;
     // Answering isn't enough: a model that doesn't run properly on the NPU answers with nonsense.
     const sensible = first.ok && saysReady(first.raw);
     add({
@@ -465,14 +351,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
 
     // A start again, which finds its compiled model in the cache.
     await server.stop();
-    const gone = await (async () => {
-      const t = now();
-      while (now() - t < 30_000) {
-        if (!(await listening())) return true;
-        await new Promise((res) => setTimeout(res, 250));
-      }
-      return false;
-    })();
+    const gone = await client.untilGone();
     if (!gone) {
       add({ step: 'restart', ok: false, say: `${route.server} still answers after it was stopped` });
       return finish(1);
@@ -483,7 +362,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     const loadMs = up2 === null || !again?.ok || !saysReady(again.raw) ? null : up2 + again.ms;
     add({ step: 'restart', ok: loadMs !== null && loadMs <= coldMs, ms: loadMs ?? undefined, say: loadMs !== null ? `started again and answered in ${(loadMs / 1000).toFixed(0)} s (the route allows ${coldMs / 1000} s for a cold load)` : 'it didn’t answer after a start again', data: { loadMs } });
     await server.stop();
-    await untilGone(listening, now);
+    await client.untilGone();
 
     // The kit's own test request: the server started as every agent starts it, in the NPU's turn.
     const k0 = now();
@@ -493,7 +372,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   } finally {
     await server.stop();
   }
-  await stopKitStarted(ep.baseUrl, listening, now);
+  await client.stopKitStarted();
 
   // 4. The NPU's own embedding server, where the route has one: started as every agent starts it, in the NPU's turn,
   // then a short query and a chunk of code (what Reeve's index sends) timed warm.
@@ -534,7 +413,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
           : 'the embedding server answered without a vector',
       data: { loadMs, queryMs: query?.ms, chunkMs: chunk?.ms, dims: query?.dims },
     });
-    await stopKitStarted(eb, up, now);
+    await stopStartedAt(eb, up, now);
   }
 
   report.suggest = suggestFrom(steps, route);
@@ -544,27 +423,6 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     for (const w of report.suggest.why) log(`  - ${w}`);
   }
   return finish(steps.some((s) => s.ok === false) ? 1 : 0);
-}
-
-const defaultRun: NonNullable<Parameters<typeof setUpNpu>[2]['run']> = (exe, args, o) => runProgram(exe, args, o);
-
-async function untilGone(answers: (ms?: number) => Promise<boolean>, now: () => number): Promise<void> {
-  const t = now();
-  while (now() - t < 30_000 && (await answers(1_000))) await new Promise((res) => setTimeout(res, 250));
-}
-
-/** Stops the server the kit's test request started (its started record names it), so the check leaves nothing running. */
-async function stopKitStarted(base: string, answers: (ms?: number) => Promise<boolean>, now: () => number): Promise<void> {
-  if (!(await answers(1_000))) return;
-  const { readStarted } = await import('./accelerators.ts');
-  for (const s of readStarted().filter((x) => x.base === base)) {
-    await new Promise<void>((resolve) => {
-      const k = spawn(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(s.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      k.on('exit', () => resolve());
-      k.on('error', () => resolve());
-    });
-  }
-  await untilGone(answers, now);
 }
 
 // ------------------------------------------------------------------------------------------------

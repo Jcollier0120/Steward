@@ -15,6 +15,15 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.54
+
+**The Steward's kit 2.66.0, with a benchmark for ranking chips and models.**
+
+### What changed
+
+- The Steward's kit 2.66.0: a benchmark that measures how fast and how well a PC's NPU (or graphics card) does Castellan's work, for the website's rankings. Nothing changes on your PC unless someone runs it.
+- Agents now count how many tokens they send to their local models each day, so the benchmark can weigh its jobs the way agents really work. Only the counts are kept, on your PC, for 60 days, and nothing is sent anywhere.
+
 ## 0.35.53
 
 **The Steward unpacks a project's packages once for all the staff that use them, and one install at a time.**

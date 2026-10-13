@@ -26,6 +26,7 @@ const { acceleratorsDir, lockDirFor, locksDir, npuLockDir } = await import('./fi
 const { lineSnapshot, queueDirFor, queueSnapshot, slotDirs, withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
 const { unverified } = await import('./fixture/src/kit/page.ts');
 const { APP } = await import('./fixture/src/app.ts');
+const { readTally } = await import('./fixture/src/kit/token-tally.ts');
 
 type Accelerator = import('./fixture/src/kit/accelerators.ts').Accelerator;
 type AcceleratorConfig = import('./fixture/src/kit/accelerators.ts').AcceleratorConfig;
@@ -100,7 +101,7 @@ async function closedPort(): Promise<number> {
 
 const gpu = (id: string, over: Partial<Accelerator> = {}) => ({ id, kind: 'gpu', name: id, memoryGb: 8, slots: 1, maxContextTokens: 16384, quirks: [], ...over });
 const fresh = () => {
-  for (const f of existsSync(acceleratorsDir) ? readdirSync(acceleratorsDir) : []) rmSync(path.join(acceleratorsDir, f), { force: true });
+  for (const f of existsSync(acceleratorsDir) ? readdirSync(acceleratorsDir) : []) rmSync(path.join(acceleratorsDir, f), { recursive: true, force: true });
   resetNpuManners();
   A.forgetServers();
 };
@@ -545,6 +546,15 @@ test('every answer says where it ran, and a background request goes around a car
     assert.equal((await model.chat(big, { maxTokens: 10, lane: 'interactive' })).accelerator.id, 'gpu-nvidia-geforce-rtx-4090');
     await assert.rejects(model.chat(big, { maxTokens: 10 }), (e: Error) => e instanceof NpuBusy && /game\.exe/.test(e.message));
     await assert.rejects(model.chat([{ role: 'user', content: 'x'.repeat(60_000) }], { maxTokens: 10 }), (e: Error) => e instanceof NpuError && !(e instanceof NpuBusy) && /largest cap is 16384/.test(e.message));
+    // Each answered request was counted for the benchmark's mix, by lane and kind: the server's counts, nothing refused.
+    const t = readTally(1);
+    assert.deepEqual(t.agents, [APP.id]);
+    const row = (lane: string, kind: string) => t.rows.find((r) => r.work === 'chat' && r.lane === lane && r.kind === kind);
+    assert.equal(row('background', 'npu')?.requests, 2);
+    assert.equal(row('background', 'npu')?.promptTokens, 24);
+    assert.equal(row('background', 'gpu')?.requests, 1);
+    assert.equal(row('interactive', 'gpu')?.answerTokens, 3);
+    assert.equal(t.rows.reduce((n, r) => n + r.requests, 0), 4);
   } finally {
     rmSync(A.gamesFile(), { force: true });
     await card.close();

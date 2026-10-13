@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.66.0
+
+**The NPU benchmark: a fixed suite that measures how fast and how well a chip does Castellan's work, for the website's boards; and a count of the tokens agents send, to weigh it.**
+
+### What's new
+
+- **node/npu-bench.ts**: `node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id>] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]`. It sets a route up as the NPU check does, without writing config.json, then streams a fixed suite at its server: first and cached loads, a short answer, writing and reading speed (time to the first token at 512 and 1,024 tokens and near the cap), three graded reference jobs (triage, reply, summary) whose medians add up to the **job time** the chips board ranks by, 24 graded quality items with three that must pass, vision where the model has it, memory, holding speed over ten minutes (full runs), and energy on battery (`--energy`). It records the conditions (plugged in, Windows' power mode, battery, brightness, how busy the processor was, the laptop's make and model) and marks a run that can't be ranked, with the reason. The report is JSON, checked against its schema, and names no person, PC or path. spec/NPU-BENCHMARK.md describes it all.
+- **spec/npu-bench-suite.json** (`castellan-npu-bench/1`, the prompts, grades and settings) and **spec/npu-bench.schema.json** (the report's schema).
+- **node/npu-server.ts**: starting and stopping a model server, asking it (streamed or not), waiting for it and reading its memory, out of the NPU check, which uses them and behaves as before.
+- **node/token-tally.ts**: every chat and vision request is counted, by day, agent, work, lane and accelerator kind: how many, prompt and answer tokens, time, and how sizes spread. Counts only, never what was asked or answered, kept in the accelerators folder (`usage\<day>\<agent>.json`) for 60 days and sent nowhere. `npu-bench.ts --mix [days]` prints them. The benchmark's job sizes are set from them.
+- **spec/NPU-BENCHMARK.md**: the benchmark's design, the owner's decisions, and the first run (a Lunar Lake's NPU: job time 11.8 s, 23 of 24 right).
+
+### What changed
+
+- Intel's model has a `present` file (its `graph.pbtxt`, which OpenVINO writes last), so a finished download counts as here.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. The tally writes a small file a day in the accelerators folder.
+
 ## 2.65.0
 
 **Intel's NPU route, run on a real Lunar Lake: a model that works on the NPU, the runtime it needs brought by setup, and a test request that checks the answer.**
