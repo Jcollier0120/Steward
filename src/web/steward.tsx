@@ -464,7 +464,7 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
     r.castellan === false
       ? 'merges each ready PR of yours in the repositories you said yes to (Merges your ready PRs), with what each asks for after, then releases each new version on a branch, where Settings say how'
       : `merges every PR of its own and the team's that is ready, with what each asks for after, then releases each employee whose branch carries a version with no release, ${more.length ? `${more.join(', ')}, ` : ''}and approves the jobs whose installed scripts are the merged ones`;
-  const tend = "opens again, through Manor, the page of any agent that is on duty but doesn't answer";
+  const tend = "opens again, through Manor, the page of any agent that is on duty but doesn't answer, and presses Update once more for an update Manor gave up on, when its install would take it now";
   const noRepos = r.repos === false;
   const what = noRepos
     ? r.tend

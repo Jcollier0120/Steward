@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.62
+
+**An agent update Manor gave up on is tried again by itself, once what stopped it has passed.**
+
+### What's new
+
+- When Manor gives up updating an agent after three failed tries, the Steward now checks, in its rounds, whether Manor's install would take the new version now (a dry run, which changes nothing). If it would, the Steward presses Update for that agent on Manor's page, as you would, so an update that failed only because a release wasn't yet everywhere (on release day, say, or while the license service was briefly away) finishes without you.
+- The Steward presses Update only once for each agent and version. If that install fails too, or Manor's install would still take an older release, it raises an alarm that says why in the install's own words, and clears it once the agent is on the new version.
+- A version the agent's own install rolled back (its page didn't answer after it) is never pressed: its installer refuses it until you allow it. The alarm says so, and how to allow it; its next version installs as usual.
+- It works under "Keeps the staff's pages up" in Settings: switched off, the Steward leaves Manor's updates alone.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.59
 
 **The Steward's tests pass on any PC, not only on its maker's laptop.**
