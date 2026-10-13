@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { withLock } from '../kit/lock.ts';
+import { dataFile } from '../kit/store.ts';
 import type { Settings } from '../settings.ts';
 import { tail } from '../run.ts';
 import { workRootOf, type Ctx } from './common.ts';
@@ -23,20 +25,33 @@ export const modulesRootOf = (s: Settings) => path.join(workRootOf(s), '_modules
 export const KEEP_SETS = 6;
 
 /**
- * A lockfile's packages as one key: its own name and version left out (a version bump changes nothing installed, and
- * the hires, whose packages are the same, share a set), with the Node ABI, platform and architecture they're built for.
+ * A lockfile's packages as one key: what it installs (every entry of `packages` but the project's own), with the Node
+ * ABI, platform and architecture they're built for. The project's own entry is left out: its name, version, `bin` and
+ * the ranges it asks for install nothing, and keyed by them, six agents with the very same 56 packages each had a set
+ * of their own, 50 MB unpacked six times. A lockfile older than `packages` is keyed whole, its name and version aside.
  */
 export function packagesKey(lockText: string): string {
   const lock = JSON.parse(lockText.replace(/^﻿/, ''));
-  delete lock.name;
-  delete lock.version;
-  const root = lock.packages?.[''];
-  if (root) {
-    delete root.name;
-    delete root.version;
+  let installs: unknown;
+  if (lock.packages) {
+    const { '': _own, ...rest } = lock.packages;
+    installs = Object.entries(rest).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  } else {
+    delete lock.name;
+    delete lock.version;
+    installs = lock;
   }
-  return createHash('sha256').update(JSON.stringify([lock, process.versions.modules, process.platform, process.arch])).digest('hex').slice(0, 16);
+  return createHash('sha256').update(JSON.stringify([installs, process.versions.modules, process.platform, process.arch])).digest('hex').slice(0, 16);
 }
+
+/**
+ * Held while a set is installed: one at a time on this PC, whichever of the Steward's processes asks (its page, a
+ * round in a terminal, a vouch). An install unpacks hundreds of files and starts npm's own processes; several side by
+ * side, as a kit trial's agents asked for theirs, were the heaviest burst the PC saw.
+ */
+const installLock = () => dataFile('locks', 'npm-install');
+/** How long an install may hold it: npm ci's own limit, and a little. */
+const INSTALL_MS = 20 * 60_000;
 
 /** The sets being installed in this process, by key, so two worktrees wanting one set install it once. */
 const installing = new Map<string, Promise<string | null>>();
@@ -48,7 +63,9 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
   if (existsSync(path.join(set, '.ready'))) return path.join(set, 'node_modules');
   const already = installing.get(key);
   if (already) return already;
-  const job = (async () => {
+  const job = withLock(installLock(), async () => {
+    // Installed by another process while this one waited its turn.
+    if (existsSync(path.join(set, '.ready'))) return path.join(set, 'node_modules');
     const tmp = `${set}.tmp-${process.pid}-${randomBytes(3).toString('hex')}`;
     mkdirSync(tmp, { recursive: true });
     try {
@@ -58,7 +75,9 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
       writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(pkg, null, 2));
       writeFileSync(path.join(tmp, 'package-lock.json'), readFileSync(path.join(dir, 'package-lock.json')));
       const t0 = Date.now();
-      const r = await ctx.run('npm', ['ci', '--no-audit', '--no-fund'], { cwd: tmp, timeoutMs: 20 * 60_000 });
+      // From npm's own cache when it has the packages, without asking the registry whether they changed: a lockfile's
+      // packages are pinned by their integrity, so the cache's copy is the one.
+      const r = await ctx.run('npm', ['ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: tmp, timeoutMs: INSTALL_MS });
       say(`npm ci, once for every worktree with these packages (${key}): ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
       if (r.code !== 0) {
         for (const line of tail(`${r.out}\n${r.err}`, 10).split('\n')) say(`  ${line}`);
@@ -76,7 +95,7 @@ async function setFor(ctx: Ctx, dir: string, key: string, say: (line: string) =>
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
-  })().finally(() => installing.delete(key));
+  }, { waitMs: INSTALL_MS + 60_000, staleMs: INSTALL_MS + 60_000 }).finally(() => installing.delete(key));
   installing.set(key, job);
   return job;
 }

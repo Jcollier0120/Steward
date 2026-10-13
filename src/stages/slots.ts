@@ -84,5 +84,11 @@ export async function withRepo<T>(log: (line: string) => void, id: string, fn: (
   );
 }
 
+/**
+ * Runs `fn` as work of its own named `name`, apart from the stage that started it: it holds none of that stage's
+ * repositories, so it waits for each like any other stage once that stage has gone on (a kit trial beside the rounds).
+ */
+export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> => held.exit(() => inStage.run(name, fn));
+
 /** Whether another stage is working on employee `id`'s repository now: then a look at it leaves its clone alone. */
 export const repoBusy = (id: string): boolean => !held.getStore()?.has(id) && existsSync(repoLock(id));
