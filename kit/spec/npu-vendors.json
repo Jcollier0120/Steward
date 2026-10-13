@@ -131,7 +131,7 @@
         "lunar-lake": {
           "label": "Core Ultra 200V, Lunar Lake (NPU 4)",
           "supported": true,
-          "verified": false
+          "verified": true
         },
         "panther-lake": {
           "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
@@ -147,9 +147,21 @@
         }
       },
       "driverMin": "32.0.100.4023",
-      "requires": [
-        "vcredist-x64"
-      ],
+      "runtime": {
+        "what": "the Microsoft Visual C++ runtime 14.44",
+        "file": "Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
+        "url": "https://download.visualstudio.microsoft.com/download/pr/45d3b8dd-bced-4b37-9974-142f748d710c/4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5/Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
+        "size": 3224191,
+        "sha256": "4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5",
+        "from": "Contents\\VC\\Redist\\MSVC\\14.44.35112\\x64\\Microsoft.VC143.CRT",
+        "files": [
+          "concrt140.dll",
+          "msvcp140.dll",
+          "msvcp140_codecvt_ids.dll",
+          "vcruntime140.dll",
+          "vcruntime140_1.dll"
+        ]
+      },
       "download": {
         "file": "ovms_windows_2026.4.1_python_on.zip",
         "url": "https://github.com/openvinotoolkit/model_server/releases/download/v2026.4.1/ovms_windows_2026.4.1_python_on.zip",
@@ -186,21 +198,21 @@
       },
       "models": [
         {
-          "id": "OpenVINO/Qwen3-4B-int4-ov",
+          "id": "OpenVINO/Qwen3-8B-int4-cw-ov",
           "kinds": [
             "chat"
           ],
           "pull": [
             "--pull",
             "--source_model",
-            "OpenVINO/Qwen3-4B-int4-ov",
+            "OpenVINO/Qwen3-8B-int4-cw-ov",
             "--model_repository_path",
             "{tools}\\models\\openvino",
             "--task",
             "text_generation"
           ],
-          "size": 2430000000,
-          "licence": "Qwen3-4B: Apache-2.0; OpenVINO's INT4 export carries the base model's licence"
+          "size": 4749398197,
+          "licence": "Qwen3-8B: Apache-2.0; OpenVINO's INT4 export carries the base model's licence"
         }
       ],
       "maxContextTokens": 1536,
@@ -208,16 +220,16 @@
         "chat": 1536
       },
       "timeouts": {
-        "requestBaseMs": 30000,
-        "requestPerTokenMs": 600,
-        "coldLoadMs": 180000
+        "requestBaseMs": 15000,
+        "requestPerTokenMs": 300,
+        "coldLoadMs": 120000
       },
       "quirks": [],
       "recycle": false,
       "embeddings": "not on the NPU yet: OpenVINO Model Server 2026 serves embeddings on the NPU as a preview (OpenVINO/Qwen3-Embedding-0.6B-int8-ov, --task embeddings --pooling LAST), untried here; until the NPU check has tried it on hardware they go to the graphics card or the processor",
       "vision": "none on the NPU yet: OpenVINO's Qwen3-VL-4B INT4 build is asymmetric, which the NPU doesn't take; vision goes to the graphics card or the processor",
       "licence": "OpenVINO Model Server: Apache-2.0",
-      "notes": "A zip, unpacked into the tools home: no installer, no administrator. It needs the Microsoft Visual C++ Redistributable (x64), which an administrator installs once, and Intel's NPU driver 32.0.100.3104 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same)."
+      "notes": "A zip, unpacked into the tools home: no installer, no administrator. Its programs need the Microsoft Visual C++ runtime, which its zip doesn't carry (only its Python's vcruntime140): setup copies the five DLLs they import from Microsoft's own CRT package (runtime, pinned) beside ovms.exe, where Windows loads them first, so no administrator installs the Redistributable (run on a Lunar Lake, 2026-10-12). It needs Intel's NPU driver 32.0.100.4023 or later. It serves the OpenAI routes at /v1 (and the older /v3), source-checked at v2026.4.1. The NPU compiles a model on first load (minutes), cached in --cache_dir. Its zip wraps everything in an ovms folder, which setup unpacks into ovms-2026.4.1; its Python (for chat templates) needs PYTHONHOME and PATH, which the entry's env gives (its setupvars script does the same). Its model is OpenVINO's channel-wise INT4 export (-cw-ov), the kind Intel makes for the NPU: the group-wise AWQ export it had first (Qwen3-4B-int4-ov) loads and answers fast on a Lunar Lake NPU, but nonsense (\"?option?option…\"), while answering properly on the same PC's processor and graphics card (2026-10-12). OpenVINO publishes no channel-wise Qwen3-4B; Phi-3.5-mini-instruct-int4-cw-ov (MIT, 2.0 GB) also answers properly there, at about 21 tokens a second to Qwen3-8B's 12. The NPU check on that Lunar Lake (Core Ultra 7 256V, NPU driver 32.0.100.4512, 2026-10-12), every step passed: the first load with its compile 51 s, from its cache 11 s; 14.8 tokens written and about 380 read a second; 1,395 tokens answered and 1,792 refused plainly (400) at --max_prompt_len 1536, the server still up; two requests at once both answered; 5.5 GB working set. Its suggested timeouts (base 10 s, 150 ms a token, cold load 90 s) are doubled here for Meteor Lake's slower NPU 3720, not yet measured."
     },
     "amd": {
       "server": "FastFlowLM",

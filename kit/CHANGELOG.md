@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.61.0
+
+**Intel's NPU route, run on a real Lunar Lake: a model that works on the NPU, the runtime it needs brought by setup, and a test request that checks the answer.**
+
+### What changed
+
+- **Intel's model is now `OpenVINO/Qwen3-8B-int4-cw-ov` (4.7 GB), OpenVINO's channel-wise INT4 export made for the NPU.** The route's first model, `OpenVINO/Qwen3-4B-int4-ov` (a group-wise AWQ export), loaded and answered fast on a Lunar Lake NPU, but with nonsense ("?option?option…"). The same model answered properly on that PC's processor and graphics card. OpenVINO publishes no channel-wise Qwen3-4B. The NPU check passed every step with Qwen3-8B there: a first load with its compile 51 s, 11 s from its cache, 14.8 tokens a second, the 1,536-token cap refusing plainly. Lunar Lake is now `verified`, and the route's timeouts come from the measurements (15 s + 300 ms a token, 120 s cold load, twice the check's suggestion for Meteor Lake's slower NPU).
+- **Setup's test request checks the answer.** It asks for the single word "ready", and the NPU entry is written only if the answer says it (`saysReady`, `withoutThinking` in setup.ts). Before, any text passed, so a broken model would have been configured, and every agent's request would have come back as nonsense. The NPU check's first, warm and restart answers are checked the same way.
+
+- **OpenVINO Model Server's runtime comes with it.** The server needs the Microsoft Visual C++ runtime. Until now setup refused Intel's route on a PC without it, saying an administrator must install it once, so the NPU never showed and nobody was told what to do. Intel's route now names a `runtime` in spec/npu-vendors.json: Microsoft's own package of those DLLs (the Visual Studio catalog's CRT redist, 3 MB, size and SHA-256 pinned, from download.visualstudio.microsoft.com). Setup downloads it with the server, after the server, and copies its five DLLs beside `ovms.exe`, where Windows looks first. Nothing is installed for the whole PC and nothing needs an administrator. A server that has them all beside it isn't given them again.
+- The plan says so: `get  the Microsoft Visual C++ runtime 14.44 (3 MB, SHA-256 pinned), beside ovms.exe: no administrator`, and its size counts in the download.
+- `NpuPlan.missing`, `NpuRoute.requires` and the System32 check behind them are gone. `NpuPlan.runtime` (an `NpuRuntime` with where it goes) takes their place. `setup.ts`' `installRuntime` does the copying, and `NpuIo.copy` lets a test watch it.
+- **The NPU check starts the server as the keeper does.** Setup writes the server's paths as `%USERPROFILE%\...`, and the check started that command without expanding it. So with a tools home under the user's folder it started nothing, said nothing, and waited 20 minutes. It expands them now, and a start that fails is written to the server's log. Found on the first run on an Intel NPU (Lunar Lake, 2026-10-12).
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Manor's page shows the runtime as a download only if it lists the plan's parts itself (Manor's local-ai.ts `planParts` does).
+
 ## 2.60.0
 
 **The NPU check: one command that tries a maker's NPU route on real hardware and measures it.**

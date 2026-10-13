@@ -33,7 +33,7 @@ async function freePort(): Promise<number> {
 }
 
 /** A fake OpenVINO Model Server: /v1/models, and chat that refuses a prompt past `cap` tokens (about 4 characters each). */
-function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean }) {
+function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean; answer?: string }) {
   const seen: any[] = [];
   let server: Server | null = null;
   const start = async () => {
@@ -41,7 +41,7 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean }) {
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
-        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"OpenVINO/Qwen3-4B-int4-ov"}]}');
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"OpenVINO/Qwen3-8B-int4-cw-ov"}]}');
         const j = JSON.parse(body);
         seen.push(j);
         const prompt = j.messages.map((m: any) => m.content).join(' ');
@@ -52,7 +52,7 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean }) {
           return;
         }
         const completion = j.max_tokens > 100 ? 120 : 2;
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: '<think>\n\n</think>\n\nready' } }], usage: { prompt_tokens: promptTokens, completion_tokens: completion } }));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: o.answer ?? '<think>\n\n</think>\n\nready' } }], usage: { prompt_tokens: promptTokens, completion_tokens: completion } }));
       });
     });
     await new Promise<void>((r) => server!.listen(port, '127.0.0.1', r));
@@ -67,8 +67,8 @@ function fakeOvms(port: number, o: { cap: number; dieOverCap?: boolean }) {
   return { seen, start, stop, starts: 0 };
 }
 
-/** The catalog on a free port, and a scratch tools home with the server's program "installed" and the VC runtime "there". */
-async function scene(o: { cap?: number; dieOverCap?: boolean } = {}) {
+/** The catalog on a free port, and a scratch tools home with the server's program and its C++ runtime "installed". */
+async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string } = {}) {
   const port = await freePort();
   const catalog = structuredClone(V.NPU_CATALOG);
   catalog.routes.intel.port = port;
@@ -77,17 +77,15 @@ async function scene(o: { cap?: number; dieOverCap?: boolean } = {}) {
   const exe = V.serverExe(catalog.routes.intel, tools);
   mkdirSync(path.dirname(exe), { recursive: true });
   writeFileSync(exe, '');
-  const sysRoot = path.join(tools, 'Windows');
-  mkdirSync(path.join(sysRoot, 'System32'), { recursive: true });
-  for (const f of ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']) writeFileSync(path.join(sysRoot, 'System32', f), '');
-  const fake = fakeOvms(port, { cap: catalog.routes.intel.maxContextTokens, dieOverCap: o.dieOverCap });
+  for (const f of catalog.routes.intel.runtime!.files) writeFileSync(path.join(path.dirname(exe), f), '');
+  const fake = fakeOvms(port, { cap: catalog.routes.intel.maxContextTokens, dieOverCap: o.dieOverCap, answer: o.answer });
   const ran: string[][] = [];
   const lines: string[] = [];
   const opts = {
     yes: true,
     tools,
     catalog,
-    env: { ...process.env, SystemRoot: sysRoot, REEVE_HOME: home },
+    env: { ...process.env, REEVE_HOME: home },
     detection: parseDetection(`${X64}${LUNAR}\n`),
     out: path.join(tools, 'report.json'),
     log: (l: string) => lines.push(l),
@@ -102,7 +100,7 @@ async function scene(o: { cap?: number; dieOverCap?: boolean } = {}) {
       kitTest: async () => [] as string[],
     },
   };
-  return { port, catalog, tools, fake, ran, lines, opts };
+  return { port, catalog, tools, exe, fake, ran, lines, opts };
 }
 
 test('the route on another device: OpenVINO gets its --target_device, and off the NPU loses --max_prompt_len; GenieX has no other', () => {
@@ -140,7 +138,7 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.equal((report.npu as any).pciDevice, '643E');
   assert.equal((report.npu as any).generation, 'lunar-lake');
   // The model was pulled with OpenVINO's own command; nothing was downloaded (the program was there).
-  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-4B-int4-ov')));
+  assert.ok(s.ran.some((a) => a.includes('--pull') && a.includes('OpenVINO/Qwen3-8B-int4-cw-ov')));
   assert.equal(by.setup.data.downloadBytes, V.NPU_CATALOG.routes.intel.models[0].size);
   // Qwen3 (not an Instruct build) is told /no_think, and its empty think block is stripped from the answer.
   assert.match(s.fake.seen[0].messages.at(-1).content, /\/no_think$/);
@@ -169,7 +167,7 @@ test('a server that dies on a request past its cap fails the cap step, and is st
   assert.equal(report.steps.find((x: any) => x.step === 'two-at-once')!.ok, true, 'measured after a start again');
 });
 
-test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; without the VC runtime it stops at the requirements', async () => {
+test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; a missing C++ runtime is put beside the server, with no administrator', async () => {
   const s = await scene();
   const env: NodeJS.ProcessEnv = { ...s.opts.env };
   delete env.REEVE_HOME;
@@ -177,12 +175,25 @@ test('a rehearsal of another maker’s route needs a scratch REEVE_HOME; without
   assert.equal(noHome.code, 2);
   assert.match(noHome.report.steps.at(-1)!.say, /scratch home/);
 
-  const sys = path.join(s.tools, 'Windows', 'System32', 'msvcp140.dll');
-  rmSync(sys);
-  const r = await C.npuCheck(s.opts);
-  assert.equal(r.code, 1);
-  assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /Visual C\+\+ Redistributable/);
-  assert.equal(s.fake.starts, 0);
+  // A server set up before the runtime was carried: its msvcp140.dll isn't beside it, so setup brings Microsoft's.
+  const rt = s.catalog.routes.intel.runtime!;
+  const dir = path.dirname(s.exe);
+  rmSync(path.join(dir, 'msvcp140.dll'));
+  const got: string[] = [];
+  const setup = {
+    ...s.opts.io.setup,
+    download: async (d: { what: string }) => void got.push(d.what),
+    unpack: (_zip: string, into: string) => {
+      mkdirSync(path.join(into, rt.from), { recursive: true });
+      for (const f of rt.files) writeFileSync(path.join(into, rt.from, f), 'from Microsoft');
+    },
+  };
+  const r = await C.npuCheck({ ...s.opts, io: { ...s.opts.io, setup } });
+  assert.match(r.report.steps.find((x: any) => x.step === 'requirements')!.say, /needs the Microsoft Visual C\+\+ runtime 14\.44, which setup puts beside it \(3 MB, no administrator\)/);
+  assert.deepEqual(got, [rt.file]);
+  for (const f of rt.files) assert.equal(readFileSync(path.join(dir, f), 'utf8'), 'from Microsoft', f);
+  assert.equal(r.report.steps.find((x: any) => x.step === 'setup')!.data.downloadBytes, rt.size + s.catalog.routes.intel.models[0].size);
+  assert.equal(r.code, 0, s.lines.join('\n'));
 });
 
 test('no download without --yes; an unsupported NPU stops at detection', async () => {
@@ -194,4 +205,31 @@ test('no download without --yes; an unsupported NPU stops at detection', async (
   assert.equal(old.code, 1);
   assert.match(old.report.steps[0].say, /needs Intel's NPU driver/);
   assert.ok(existsSync(s.opts.out));
+});
+
+test("the server is started from its entry's command with its %VARIABLES% expanded, as setup writes %USERPROFILE%\\... paths", async () => {
+  // Found on a Lunar Lake (2026-10-12): the check spawned "%USERPROFILE%\...\ovms.exe" as written, and nothing started.
+  const dir = path.join(home, 'started');
+  mkdirSync(dir, { recursive: true });
+  process.env.NPU_CHECK_TEST_NODE = path.dirname(process.execPath);
+  const mark = path.join(dir, 'ran');
+  const entry = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [`%NPU_CHECK_TEST_NODE%\\${path.basename(process.execPath)}`, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, 'ok')`] } };
+  const s = await C.startServer(entry as any, path.join(dir, 'server.log'));
+  for (let i = 0; i < 200 && !existsSync(mark); i++) await new Promise((r) => setTimeout(r, 25));
+  await s.stop();
+  delete process.env.NPU_CHECK_TEST_NODE;
+  assert.equal(existsSync(mark), true, readFileSync(path.join(dir, 'server.log'), 'utf8'));
+});
+
+test('a model that answers nonsense on the NPU fails the check at its first answer, as setup refuses it', async () => {
+  // OpenVINO's Qwen3-4B INT4 export on a Lunar Lake NPU (2026-10-12): it loads, answers fast, and says nothing.
+  const s = await scene({ cap: 1536, answer: '?option?option?option?option' });
+  const { code, report } = await C.npuCheck(s.opts);
+  const last = report.steps.at(-1) as any;
+  assert.equal(code, 1);
+  assert.equal(last.step, 'first-answer');
+  assert.equal(last.ok, false);
+  assert.match(last.say, /not "ready" as asked: the model doesn't run properly on this NPU/);
+  const { saysReady } = await import('./fixture/src/kit/setup.ts');
+  assert.deepEqual(['<think>\n\n</think>\n\nready', 'Ready.', '?option?option', 'hydrated hydrated', '<think>ready'].map(saysReady), [true, true, false, false, false]);
 });

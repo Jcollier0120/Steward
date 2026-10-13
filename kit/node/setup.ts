@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -509,10 +509,6 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   // A reranker alone is no reason to set the NPU up: none of its servers reranks.
   else if (det && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
     npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists });
-    if (npu?.missing.length) {
-      npuNote = `${det.label} (npu): not set up: ${npu.route.server} needs ${npu.missing.join('; and ')}. Until then the graphics card or the processor takes its work.`;
-      npu = null;
-    }
   } else if (det && configuredNpu) npuNote = `${det.label} (npu): already set up in config.json; left as it is (accelerators setup npu sets it up again)`;
   if (askedNpu && !det && !dropNpu) problems.push(noNpu(o.detection) ? 'npu: this PC has no NPU' : "npu: couldn't tell whether this PC has an NPU");
   // What the NPU will serve (set up now, or configured before).
@@ -628,6 +624,7 @@ export function describePlan(p: SetupPlan): string[] {
     const n = p.npu;
     lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${n.support.verified ? '' : ' (not yet tried on this kind of NPU)'}`);
     lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
+    if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
   }
   if (p.npuNote) lines.push(p.npuNote);
@@ -794,6 +791,37 @@ export interface NpuIo {
   testNpu?: (entry: AcceleratorEntry) => Promise<string[]>;
   /** A file's SHA-256 (the pinned model files). */
   hash?: (file: string) => Promise<string>;
+  /** Copies one file (the runtime's DLLs beside the server). */
+  copy?: (from: string, to: string) => void;
+}
+
+/**
+ * Puts a route's runtime beside its server's program: its zip downloaded (checked against the pinned size and
+ * SHA-256), unpacked into a folder of its own, and each of its files copied over. Problems in words; none when done.
+ */
+export async function installRuntime(rt: NonNullable<NpuPlan['runtime']>, io: NpuIo): Promise<string | null> {
+  const exists = io.exists ?? existsSync;
+  const d: Download = { what: rt.file, url: rt.url, size: rt.size, sha256: rt.sha256, dest: rt.dest, have: false };
+  io.log(`downloading ${rt.what} (${mb(rt.size)}), to go beside ${rt.into}`);
+  try {
+    await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
+  } catch (e: any) {
+    return `${rt.what}'s download failed: ${e?.message ?? e}`;
+  }
+  const tmp = `${rt.dest}.unpacked`;
+  try {
+    (io.unpack ?? unpack)(rt.dest, tmp);
+    // unpack drops a zip's one wrapping folder: the files' folder is `from`, or `from` without its first part.
+    const from = [rt.from, rt.from.split(/[\\/]/).slice(1).join('\\')].map((f) => path.join(tmp, f)).find((f) => rt.files.every((x) => exists(path.join(f, x))));
+    if (!from) return `${rt.what} has no ${rt.files.join(', ')} in ${rt.from}`;
+    for (const f of rt.files) (io.copy ?? copyFileSync)(path.join(from, f), path.join(rt.into, f));
+  } catch (e: any) {
+    return `${rt.what} couldn't be put beside the server: ${e?.message ?? e}`;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(rt.dest, { force: true });
+  }
+  return null;
 }
 
 /** The last lines of a program's output, for a problem's line. */
@@ -834,6 +862,11 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ 
     rmSync(d.dest, { force: true });
     if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`);
   }
+  // Before the pull: the server's own program pulls its models, and it needs the runtime to start.
+  if (n.runtime) {
+    const why = await installRuntime(n.runtime, io);
+    if (why) return fail(why);
+  }
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   for (const m of n.models) {
     if (!m.have) {
@@ -852,10 +885,20 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<{ 
   return { entry, problems: [] };
 }
 
+/** An answer without its think block (a Qwen3 that thinks writes one, empty when told not to think). */
+export const withoutThinking = (s: string) => s.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
+
+/**
+ * Whether an answer to "Reply with the single word: ready" says it. Answering isn't enough: OpenVINO's Qwen3-4B
+ * INT4 export on a Lunar Lake NPU answered every question with "?option?option?option…" (2026-10-12).
+ */
+export const saysReady = (s: string) => /\bready\b/i.test(withoutThinking(s));
+
 /**
  * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
- * then one short chat answer, and one about a picture when it serves vision. Problems in words; none when each
- * answered with text. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is given 15.
+ * then one short chat answer, which must say "ready" as asked, and one about a picture when it serves vision.
+ * Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take
+ * minutes, so it is given 15.
  */
 export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
@@ -868,8 +911,9 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string } = {}
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
       await ensureServer(chat, { waitMs: 120_000, readyMs: 15 * 60_000 });
-      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 8), 15 * 60_000, { loading: true });
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), 15 * 60_000, { loading: true });
       if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
+      else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
