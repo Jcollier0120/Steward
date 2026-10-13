@@ -5,6 +5,7 @@ import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
 import { BAILIFF_WAIT } from './review.ts';
+import { CONFLICTS } from './conflicts.ts';
 import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
@@ -24,6 +25,9 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  * The conditions:
  * - a PR to an employee that has waited a day: a draft no one marked ready, conflicts, failing checks, a version
  *   that clashes (Settings: waitingHours);
+ * - a PR that conflicts with its branch and holds up others waiting their turn behind it (the lowest version merges
+ *   first), for an hour (Settings: blockingHours): the whole queue stands still. One whose conflict was handed on to
+ *   its author gives up its turn instead (stages/merge.ts), so this is the one nobody could be told about;
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
  * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
  *   and one of the Steward's own releases that failed (self-failed.json): at once; a new kit that waits for the
@@ -47,7 +51,8 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  *   reports as crashed takes that problem's place (withoutReeveDuplicates).
  *
  * Work the team can do is handed to the Wright first (work.ts; Settings: fileWork): an employee's failed bump or
- * release, and Reeve's alerts that are code work in an employee's repository, are filed as manor:work issues, and their
+ * release, Reeve's alerts that are code work in an employee's repository, and a PR's conflict its author left an hour
+ * (blockingHours) after being told, are filed as manor:work issues, and their
  * alarms wait a day (waitingHours) from when they were filed, or are raised at once when the Wright gets stuck or its
  * PR waits for a person, or when they couldn't be filed (holdForWork).
  *
@@ -138,7 +143,12 @@ export interface Held {
   title: string;
   why: string;
   draft: boolean;
+  /** The PRs that wait their turn after it (the lowest version merges first), when it holds any up. */
+  blocks?: number[];
+  /** The files it conflicts with its branch in that need judgement, when a catch-up found them. */
+  files?: string[];
 }
+
 
 /** A bump or push of a kit that failed in a round (stages/rollout.ts's rollout-failed.json), as the alarms read it. */
 export interface FailedRollout {
@@ -198,6 +208,25 @@ export function roundConditions(o: {
         url: pr.url,
         afterMs: wait * HOUR,
       });
+      // The lowest version, held by a conflict, with others waiting their turn behind it: the whole queue stands still,
+      // so it is raised within the hour, not the day (Manor#226 held six ready PRs for five hours, 2026-10-12).
+      if (pr.blocks?.length && !pr.draft && pr.why.startsWith(CONFLICTS)) {
+        const behind = pr.blocks.map((n) => `#${n}`).join(', ');
+        const block = o.settings.alarms.blockingHours;
+        out.push({
+          id: `blocking:${e.repo}#${pr.number}`,
+          who: e.id,
+          title: `${e.name} #${pr.number} conflicts with ${e.branch}${pr.files?.length ? ` in ${pr.files.join(', ')}` : ''}, and holds up ${behind}`,
+          detail: [
+            pr.title,
+            pr.why,
+            `${behind} ${pr.blocks.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first.`,
+            `Merge ${e.branch} into its branch, resolve the conflict and push, or close it: the PRs behind it merge at the next round.`,
+          ],
+          url: pr.url,
+          afterMs: block * HOUR,
+        });
+      }
     }
   }
   for (const [id, commit] of Object.entries(o.failedReleases)) {
@@ -583,7 +612,7 @@ export async function watchAlarms(
   let states = new Map<string, WorkState>();
   if (filing) {
     try {
-      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings });
+      items = workItems({ failedReleases: o.failedReleases, failedRollouts: o.failedRollouts, reeve: reeve !== null && noAnswer(reeve) === null ? reeve : null, round: o.round, employees: o.employees, settings: o.settings, held: o.held, now });
       if (items.length) states = await fileWork({ items, work: wright, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), now, log: o.log });
       // And the bump issues whose failure is gone, closed, so the Wright isn't sent to find nothing to do.
       await closeResolved({ items, employees: o.employees, run: o.run!, cwd: o.neutralDir ?? process.cwd(), log: o.log });

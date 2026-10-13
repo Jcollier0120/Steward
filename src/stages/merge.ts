@@ -24,7 +24,7 @@ import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
 import { openPrs, parsePrs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
-import { noteConflict, type ConflictOutcome } from '../conflicts.ts';
+import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conflicts.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
 
@@ -152,7 +152,7 @@ export function holdReason(pr: PrInfo, branch?: string, age: AgeRule = {}): stri
   // One that needs the owner first (a migration to run): never merged by the Steward until they say (review.ts).
   const owner = ownerFirstHold(pr);
   if (owner) return owner;
-  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return 'conflicts with its branch';
+  if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return CONFLICTS;
   if (pr.mergeable !== 'MERGEABLE') return WORKING_OUT;
   if (pr.checks === 'failing') return 'checks failing';
   if (pr.checks === 'pending') return CHECKS_RUNNING;
@@ -290,7 +290,21 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   return { why: null, sets: v.head };
 }
 
-const heldOf = (pr: PrInfo, why: string): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft });
+const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}) });
+
+/** How the hold of a PR that gave up its turn (givesWay) reads. */
+export const GAVE_WAY = `${CONFLICTS}, beyond what the Steward resolves, and was handed on: it gives up its turn, so the PRs above it merge first, and once it is resolved it is caught up to a version of its own`;
+
+/**
+ * The PRs held by a conflict with their branch that has been handed on at their head as it is now (sent back to its
+ * author: kickback.ts, conflicts.ts handedOn): each gives up its turn in the version queue rather than hold up every
+ * PR above it until someone resolves it (Manor#226 held six ready PRs for five hours, 2026-10-12). Its place costs it
+ * nothing: once resolved, its version is below its branch's, and its catch-up gives it a new one (catchup.ts), as it
+ * does for any PR that a lower one overtook. A draft keeps its place (the owner's rule: it is being worked on); a
+ * conflict no one could be told about keeps it too, and its alarm comes within the hour (alarms.ts blockingHours).
+ */
+export const givesWay = (e: Employee, hold: { pr: PrInfo; why: string }[]): Set<number> =>
+  new Set(hold.filter((h) => h.why === CONFLICTS && !h.pr.draft && handedOn(e.repo, h.pr.number, h.pr.headOid)).map((h) => h.pr.number));
 
 /**
  * A ready team PR from the repository itself, or a kit PR of the Steward's, that waits only on its branch: conflicting
@@ -363,10 +377,11 @@ export type MergeLook = EmployeeResult & { merged: PrInfo[]; held: Held[]; did?:
  * Whether another look this round can merge more, after one that merged `merged` and left `held` waiting: it caught up a
  * PR GitHub runs no checks on (`testedHere`), which the Steward tests itself at its new head, so it needn't wait a round
  * for checks that would never come; or it merged one, and a PR still waits on that merge alone: stacked on it (pointed
- * at the branch at the next look), or GitHub working out whether it merges (asked again at the next look). Pure.
+ * at the branch at the next look), or GitHub working out whether it merges (asked again at the next look); or it handed on
+ * the conflict of a PR that held others up (`gaveWay`), which then gives up its turn, so they merge at the next look. Pure.
  */
-export const lookAgainAfter = (o: { merged: number; held: Held[]; testedHere: boolean }) =>
-  o.testedHere || (o.merged > 0 && o.held.some((h) => !h.draft && (h.why === WORKING_OUT || h.why.startsWith('stacked on #'))));
+export const lookAgainAfter = (o: { merged: number; held: Held[]; testedHere: boolean; gaveWay?: boolean }) =>
+  o.testedHere || !!o.gaveWay || (o.merged > 0 && o.held.some((h) => !h.draft && (h.why === WORKING_OUT || h.why.startsWith('stacked on #'))));
 
 export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
   const { run } = ctx;
@@ -430,7 +445,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     } else merge.push(r.pr);
   }
   // Lowest version first: of the open PRs that set a new version, only the lowest merges; each above it waits its turn.
-  // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up.
+  // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up. One
+  // whose conflict was handed on gives up its turn, as that is what happens to it anyway (givesWay).
   // Only where two or more could merge; where the versions can't be read, the order is the PRs' as before. With merge
   // trains on, also where none can merge yet (the lowest behind its branch, say): the train may take them all.
   const trains = o.yes && !!o.team && ctx.settings.mergeTrain;
@@ -441,11 +457,15 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         return new Map<number, string>();
       })
     : new Map<number, string>();
+  // A conflict handed on to its author gives up its turn (givesWay): the queue goes on without it.
+  const gaveWay = givesWay(e, hold);
+  for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
+  const queue = gaveWay.size ? new Map([...pending].filter(([n]) => !gaveWay.has(n))) : pending;
   // A merge train (stages/train.ts): the queue's ready PRs from its lowest version up, stacked, tested once and merged
   // together. Once it has merged, the next look takes what is left; where it didn't, they merge one at a time below.
   let trainLine: string[] = [];
-  if (trains && pending.size > 1) {
-    const cars = trainCars(prs, pending, e.branch);
+  if (trains && queue.size > 1) {
+    const cars = trainCars(prs, queue, e.branch);
     if (cars.length) {
       let t: TrainRun;
       try {
@@ -470,10 +490,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const turnAfter = new Map<number, number>();
   // The kit's PRs (in the Steward's own repository) come first: one waits only for a lower one of the kit's, and the rest,
   // merged after it, are caught up to versions above it. The agents' PRs that take the new kit wait for it (prtest.ts).
-  const kitQueue = new Map([...pending].filter(([n]) => prs.some((p) => p.number === n && raisesKit(p))));
+  const kitQueue = new Map([...queue].filter(([n]) => prs.some((p) => p.number === n && raisesKit(p))));
   merge = merge.filter((pr) => {
-    const v = pending.get(pr.number);
-    const below = v ? lowestBelow(raisesKit(pr) ? kitQueue : pending, v) : null;
+    const v = queue.get(pr.number);
+    const below = v ? lowestBelow(raisesKit(pr) ? kitQueue : queue, v) : null;
     if (!below) return true;
     hold.push({ pr, why: `its turn comes after #${below[0]} (v${below[1]}): the lowest version merges first` });
     turnAfter.set(pr.number, below[0]);
@@ -488,8 +508,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   merge.sort((a, b) => rank(a) - rank(b) || (pending.has(a.number) && pending.has(b.number) ? compareVersions(pending.get(a.number)!, pending.get(b.number)!) : 0) || a.number - b.number);
   hold.sort((a, b) => a.pr.number - b.pr.number);
   const waits = hold.map((h) => `${describe(h.pr)} waits: ${h.why}`);
-  // The same, for the alarms (alarms.ts): each PR that waits, and why.
-  const held = hold.map((h) => heldOf(h.pr, h.why));
+  // The same, for the alarms (alarms.ts): each PR that waits, and why; and the PRs that wait their turn after it.
+  const behind = (n: number) => [...turnAfter].filter(([, b]) => b === n).map(([m]) => m).sort((a, b) => a - b);
+  const held = hold.map((h) => heldOf(h.pr, h.why, behind(h.pr.number)));
   if (!o.yes) {
     const would = merge.map((pr) => {
       const before = untested(pr) ? testedBefore(e, pr) : null;
@@ -617,12 +638,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     const pr = prs.find((p) => p.number === n)!;
     if (mergedNow.has(below) && !pr.fork && (pr.whose === 'team' || isKitPr(pr))) catchable.set(n, pr);
   }
-  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false };
+  const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false, gaveWay: false };
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);
   const did = [...trainLine, ...(merged.length ? [`merged ${mergedWords.join(', ')}`] : []), ...failed.map((f) => `didn't merge ${f}`)];
   const parts = [...did, ...waits, ...caught.lines];
   const outcome = failed.length ? 'failed' : merged.length ? 'done' : 'skipped';
-  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, lookAgain: !leftToAnother && !trialGoing && lookAgainAfter({ merged: merged.length, held, testedHere: caught.testedHere }), ...(trialGoing ? { again: true } : {}) };
+  return { ...result(e, outcome, parts.join('; '), { url: (merged[0] ?? prs[0]).url }), merged, held, did: [...did, ...caught.lines], waits, lookAgain: !leftToAnother && !trialGoing && lookAgainAfter({ merged: merged.length, held, testedHere: caught.testedHere, gaveWay: caught.gaveWay }), ...(trialGoing ? { again: true } : {}) };
 }
 
 /**
@@ -713,11 +734,12 @@ async function stampBefore(ctx: Ctx, e: Employee, pr: PrInfo, o: { ready: { pr: 
  * After the merges: each PR that waits only on its branch, caught up (stages/catchup.ts), lowest number first, each
  * new version then taken; a PR whose checks failed here only when its branch has moved since. Each one's hold then
  * says what happened. One line each, for the stage's result; and whether it caught up a PR GitHub runs no checks on
- * (the Steward tests it itself, so it can be merged this round: mergeLooks).
+ * (the Steward tests it itself, so it can be merged this round: mergeLooks); and whether it handed on the conflict of a
+ * PR that others waited their turn behind (it gives up its turn at the next look: givesWay).
  */
-async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean }> {
+async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean; gaveWay: boolean }> {
   for (const { pr, t } of o.failedHere) if (pr.whose === 'team' && !pr.fork) o.catchable.set(pr.number, pr);
-  if (!o.catchable.size) return { lines: [], testedHere: false };
+  if (!o.catchable.size) return { lines: [], testedHere: false, gaveWay: false };
   const { released } = await o.lookup();
   const now = await commitOf(ctx.run, checkoutOf(e), `origin/${e.branch}`);
   for (const { pr, t } of o.failedHere) if (t.branch && t.branch === now) o.catchable.delete(pr.number);
@@ -725,6 +747,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   const taken = o.ready.filter((r) => r.sets && !merged.has(r.pr.number) && !o.catchable.has(r.pr.number)).map((r) => r.sets!);
   const lines: string[] = [];
   let testedHere = false;
+  let gaveWay = false;
   const kitTaken: string[] = [];
   let kitReleases: string[] | null = null;
   const kitReleased = async () => (kitReleases ??= (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released);
@@ -765,12 +788,15 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     }
     lookedAtConflict(e, pr, c, sent);
     const h = o.held.find((x) => x.number === pr.number);
+    if (h && c.conflicts?.length) h.files = c.conflicts;
+    // Handed on while others wait their turn behind it: the next look lets it give up its turn (givesWay).
+    if (h?.blocks?.length && sent && !c.closed && c.conflicts?.length) gaveWay = true;
     if (h) h.why = c.done ? `${CAUGHT_UP} (${c.note}): ${c.carried ? 'it merges without being tested again' : 'it merges once its checks pass at the new head'}` : c.closed ? `closed by the Steward: ${c.note}` : `${h.why} (not caught up: ${c.note})`;
     // A closed PR waits for nothing: no alarm counts its hours.
     if (h && c.closed) o.held.splice(o.held.indexOf(h), 1);
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
-  return { lines, testedHere };
+  return { lines, testedHere, gaveWay };
 }
 
 /** Why a catch-up didn't try: nothing the page's conflicts need to show. */
