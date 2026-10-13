@@ -10,7 +10,8 @@ import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
-import { releasedTool } from './trialpass.ts';
+import { kitReach, type KitReach } from './kitreach.ts';
+import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -350,7 +351,14 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       // The entry names the kit alone, and the PR's body points at the kit's changelog.
     }
     const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}) });
+    // Each bump runs the tests the kit reaches from the kit its branch pins, as the kit's trial did (kitreach.ts), not the
+    // whole suite: read from the kit's tag in the Steward's clone. Without the clone, or the tag, each runs them all.
+    const clone = stewardClone(ctx);
+    const reach = clone
+      ? async (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean): Promise<KitReach> =>
+          (await releasedTree(ctx, kit)) ? kitReach(ctx, { repo: clone, head: `refs/tags/kit-v${kit}`, pin, toolChanged }) : { all: `kit ${kit}'s release couldn't be read` }
+      : undefined;
+    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
       // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.

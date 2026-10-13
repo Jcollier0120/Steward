@@ -7,8 +7,9 @@ import { releasedTree } from './trialpass.ts';
  * What a new kit changes for one agent, for its trial (trial.ts): the files it takes from the kit that differ between
  * the kit its branch pins (that kit's release, the tag kit-v<kit>) and the kit under trial, at the paths they land in
  * the agent (as tools/kit.ts fills them). An agent none of whose files change isn't tried at all: its checks would run
- * the same code as on its own main. One whose files change runs only the tests those files reach (affected.ts); the
- * rollout's bump, once the kit is released, runs them all (bump.ts). Anything that can't be worked out tries it whole.
+ * the same code as on its own main. One whose files change runs only the tests those files reach (affected.ts). The
+ * rollout's bump, once the kit is released, asks the same of the kit's tag (rollout.ts, 0.35.61): it runs those tests,
+ * or none but the fill, typecheck and pretest where nothing it takes changes. Anything that can't be worked out runs whole.
  */
 
 /** What each part needs, as tools/kit.ts fills them: node runs the core, the core takes the spec's rules, and so on. */
