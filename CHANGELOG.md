@@ -16,6 +16,35 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The first checks after updating install the packages once more into the new shared copy. The old copies are cleared away as they go unused.
 
+## 0.35.52
+
+**A new kit is tried on the staff in one go, beside the rounds, instead of a few each round.**
+
+### What changed
+
+- When the Steward's own PR brings a new kit, its trial on the staff now runs on its own from the Steward's page, start to finish, while the rounds go on merging and releasing the rest. Before, each round tried the staff for 8 minutes and then waited for the next round, so a trial took many rounds.
+- Up to 4 staff are tried at once on a PC with enough processors (more if Settings ask for more), but never more than its free memory holds, at about 3 GB each.
+- As soon as a trial ends, a round comes to merge the PR or say which staff it fails, without waiting for the next scheduled one.
+- A second kit's trial waits for the first to end, and a trial another Steward process is already running is left to it.
+- A round run from a terminal still tries a few each round, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.35.50
+
+**The Steward's kit 2.65.0: an Intel NPU that works, run on a real Lunar Lake.**
+
+### What changed
+
+- The Steward's kit 2.65.0. On an Intel Core Ultra PC without Microsoft's Visual C++ runtime, setting up local AI used to skip the NPU and say an administrator must install the runtime first. Now setup downloads the runtime from Microsoft and puts it beside the NPU's model server, with no administrator, and the NPU is set up.
+- Intel's NPU now runs a version of Qwen3-4B made for it (2.2 GB): the model it had answered with nonsense on a real Lunar Lake. Setup now checks that the NPU's answer makes sense before using it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.49
 
 **A pull request stuck on a conflict no longer holds up the pull requests queued behind it.**
