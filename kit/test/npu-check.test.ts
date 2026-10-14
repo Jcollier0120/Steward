@@ -418,7 +418,7 @@ test('--harden fails where setup would have kept the NPU, or written timeouts sh
   assert.match(slow.by['harden-calibrate'].say, /not used: it wrote 1\.2 tokens a second/);
   // Nothing measured at all: a failure.
   const none = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, null);
-  assert.equal(none.by['harden-calibrate'].ok, false);
+  assert.equal(none.by['harden-calibrate']?.ok, false, JSON.stringify(none.report.steps.map((x: any) => [x.step, x.ok, x.say])));
 });
 
 test('--harden in a rehearsal: the driver case on one of the route\'s devices, no nonsense case off the NPU, calibration as measured', async () => {

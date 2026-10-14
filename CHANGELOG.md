@@ -2,6 +2,32 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.13
+
+**The Steward's checks go easier on your PC: a quarter of the processor at most, a cap on memory, two runs at a time, and your Settings as the only switch.**
+
+### What's new
+
+- Checks can't take all your memory. Each program gets at most an eighth of the PC's memory (2 to 6 GB), and all the checks together a quarter (4 to 12 GB). A test that runs away fails instead of slowing the whole PC.
+- At most two check runs go at once on the PC, from the Steward, the Assayer or a Claude session. The rest wait their turn, 20 minutes at most.
+- Local AI model servers no longer run at the limits of whichever agent started them, so they answer every agent at full speed.
+
+### What changed
+
+- Tests, type checks, installs and release builds the Steward runs now use at most a quarter of your processor (two cores' worth at most), the same share as the agents' own background work. Before, they could use half.
+  - Measured on an 18-core laptop with the Assayer's test suite on a quiet PC: before, the whole PC peaked at 91% and the suite took 39 seconds; now it peaks at 43% and takes 65 seconds.
+  - The Steward allows checks four times their usual time before it gives up on one.
+- Your background pace in Manor's Settings decides how hard the Steward and the agents work. At Full speed, checks run at full speed too. While it's gentle, `"checksPace"` in Manor's settings.json can give checks a different share.
+- Nothing else lifts it:
+  - `steward vouch --fast` is gone (it says so and vouches at the usual pace);
+  - looking at an agent's page no longer lifts its limits, so the page shows what the agent really costs in the background;
+  - Run now runs at your pace.
+- Brings the Steward's kit 2.73.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.12
 
 **A new kit that fails some agents no longer holds up the Steward's queue: what isn't the kit's doing is set apart, the rest goes to the Wright, and the PRs behind it merge meanwhile.**

@@ -93,11 +93,6 @@ export interface Ctx {
   pause?: (ms: number) => Promise<void>;
   /** The Exchequer to let an urgent release out at (release.ts urgentNote); tests stand in for it. Not given: Castellan's. */
   exchequer?: ExchequerOptions;
-  /**
-   * Its checks, installs and builds at full speed: the person asked for it (vouch --fast). Otherwise they run at the kit's
-   * checks pace (kit/checks-pace.ts), held to a share of the processor so they never peg it.
-   */
-  fast?: boolean;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */
