@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.1
+
+**The Steward's kit 2.72.0: the agents run on a better schedule, on one shared clock, each in a minute of its own.**
+
+### What's new
+
+- Every agent that takes this kit runs its rounds on the manor's shared 30-minute clock: a round every 5, 10, 15 or 30 minutes, or every 1, 3 or 6 hours, falls on fixed times instead of drifting a little later each round.
+- Each agent has its own minute on that clock, so they no longer all start work in the same minute and load the PC at once.
+
+### What changed
+
+- The Steward's own rounds go on the clock too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent goes on the clock when it takes this kit.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

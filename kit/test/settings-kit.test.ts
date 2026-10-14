@@ -167,7 +167,7 @@ test('an unreadable settings.json is kept aside when the panel saves over it', a
 });
 
 test('a new interval applies to the wait under way', async () => {
-  let ms = 60_000;
+  let ms = 70_000; // off the clock (whole minutes would put the next on a minute boundary)
   let rounds = 0;
   const job = every(() => ms, async () => void rounds++, { firstDelayMs: 1 });
   try {
