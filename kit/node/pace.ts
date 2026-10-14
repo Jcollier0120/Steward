@@ -24,7 +24,8 @@ import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
  * `"agentsAtOnce"` says (2 at a gentle pace, 4 at a full one, unless it says), and only one at a time while the PC is
  * busy or short of memory; the rest wait their turn, first come, first served.
  *
- * A round the person asked for (Run now) never waits in the line, and runs at normal priority: someone is waiting on it.
+ * A round the person asked for (Run now) never waits in the line, but runs at the pace like any other (kit 2.70.0): the
+ * setting is the only thing that changes the pace.
  * What Heiward adds in the background (Windows' efficiency mode, a very low disk priority, a hard cap on the processor)
  * needs Windows calls Node doesn't have: gentle.ts sets them through the agent's PowerShell worker (kit 2.50.0).
  */
@@ -71,12 +72,12 @@ function manorSetting(home: string, key: string): unknown {
 export const firstRoundLockDir = () => lockDirFor('first-rounds');
 
 /**
- * This process's priority for the pace: below normal when gentle, normal when full or when someone is waiting on the
- * round. Never throws (a PC that refuses keeps its priority); true when it was set.
+ * This process's priority for the pace: below normal when gentle, normal when full, whoever is waiting (kit 2.70.0: a
+ * round asked for no longer lifts it). Never throws (a PC that refuses keeps its priority); true when it was set.
  */
-export function setPriorityFor(p: Pace, asked = false, set: (priority: number) => void = (v) => os.setPriority(0, v)): boolean {
+export function setPriorityFor(p: Pace, set: (priority: number) => void = (v) => os.setPriority(0, v)): boolean {
   try {
-    set(p === 'gentle' && !asked ? os.constants.priority.PRIORITY_BELOW_NORMAL : os.constants.priority.PRIORITY_NORMAL);
+    set(p === 'gentle' ? os.constants.priority.PRIORITY_BELOW_NORMAL : os.constants.priority.PRIORITY_NORMAL);
     return true;
   } catch {
     return false;

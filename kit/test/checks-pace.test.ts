@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -99,6 +99,25 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.match(missing.err, /couldn't start no-such-program-anywhere/);
   const bad = await ran(p.file, ['lots', process.execPath, '-e', '0']);
   assert.equal(bad.code, 2, "limits it can't read: 2, nothing run");
+});
+
+test('on Windows, a program started apart (a model server): detached, its output to the file given, its process id answered', { skip: process.platform !== 'win32' }, async () => {
+  process.env.KIT_APART = '1';
+  const { startApart, alive } = await import('./fixture/src/kit/apart.ts');
+  const log = path.join(home, 'apart.log');
+  const fd = openSync(log, 'a');
+  let pid: number | null = null;
+  try {
+    pid = await startApart(process.execPath, ['-e', 'console.log("up " + process.argv[1]); setTimeout(() => {}, 20000)', 'a b'], { out: fd });
+  } finally {
+    closeSync(fd);
+    delete process.env.KIT_APART;
+  }
+  assert.ok(pid && pid > 0, 'its process id');
+  assert.ok(alive(pid), 'running after the launcher has gone');
+  for (let i = 0; i < 100 && !readFileSync(log, 'utf8').includes('up'); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(readFileSync(log, 'utf8').trim(), 'up a b', 'its arguments as they were, its output in the file');
+  process.kill(pid);
 });
 
 test('on Windows, a paced run takes a turn, and the runs it starts take none (they would wait on their own)', { skip: process.platform !== 'win32' }, async () => {

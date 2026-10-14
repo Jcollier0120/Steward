@@ -1,7 +1,9 @@
 // The kit's gentle pace in Windows' own terms (gentle.ts), as Heiward sets it for itself (Program.cs, Power.SetPace):
 // Windows' efficiency mode (EcoQoS), a very low disk priority, and a hard cap on the processor through a job object,
 // which every program the agent starts afterwards is in too. Compiled once to a DLL (gentle.ts) and loaded by the
-// agent's PowerShell worker, which sets them on the agent's process from outside it.
+// agent's PowerShell worker, which sets them on the agent's process from outside it, then joins the job itself (Join).
+// The job lets a program started with CREATE_BREAKAWAY_FROM_JOB leave it (the kit's apart launcher, for the model
+// servers every agent shares); nothing else the agents run asks to.
 using System;
 using System.Runtime.InteropServices;
 
@@ -23,12 +25,24 @@ public static class KitGentle
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr p);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr p, IntPtr job, out bool result);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int cls, ref CpuRateControl info, int size);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int cls, ref ExtendedLimits info, int size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct BasicLimits { public long PerProcessUserTimeLimit, PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct IoCounters { public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ExtendedLimits { public BasicLimits Basic; public IoCounters Io; public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed; }
+
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr fromProcess, IntPtr h, IntPtr toProcess, out IntPtr copy, uint access, bool inherit, uint options);
 
     const uint PROCESS_TERMINATE = 0x0001, PROCESS_DUP_HANDLE = 0x0040, PROCESS_SET_QUOTA = 0x0100,
         PROCESS_SET_INFORMATION = 0x0200, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     const uint JOB_OBJECT_ALL_ACCESS = 0x1F001F;
-    const int ProcessPowerThrottling = 4, ProcessIoPriority = 33, JobObjectCpuRateControlInformation = 15;
+    const int ProcessPowerThrottling = 4, ProcessIoPriority = 33, JobObjectCpuRateControlInformation = 15, JobObjectExtendedLimitInformation = 9;
+    const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800;
     const uint EXECUTION_SPEED = 1, CPU_RATE_ENABLE = 0x1, CPU_RATE_HARD_CAP = 0x4, DUPLICATE_SAME_ACCESS = 0x2;
 
     /// <summary>The job holding an agent's process: named for it, so a later worker finds it again.</summary>
@@ -66,6 +80,9 @@ public static class KitGentle
             if (!gentle) return true;
             job = CreateJobObject(IntPtr.Zero, JobName(pid));
             if (job == IntPtr.Zero) return false;
+            var limits = new ExtendedLimits();
+            limits.Basic.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limits, Marshal.SizeOf(typeof(ExtendedLimits)));
             bool inJob;
             if (!IsProcessInJob(p, job, out inJob) || !inJob)
             {
@@ -83,6 +100,25 @@ public static class KitGentle
                 ? new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, Math.Min(10000, capHundredths)) }
                 : new CpuRateControl { ControlFlags = 0, CpuRate = 0 };
             return SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));
+        }
+        finally { CloseHandle(job); }
+    }
+
+    /// <summary>
+    /// Puts the process running this (the agent's PowerShell worker) in agent <paramref name="pid"/>'s job: the worker was
+    /// started before the job was made, so it and the scripts it runs were outside the cap. "worker" when it is in it
+    /// now, "-" when it can't be (no job: the cap didn't take).
+    /// </summary>
+    public static string Join(int pid)
+    {
+        IntPtr job = OpenJobObject(JOB_OBJECT_ALL_ACCESS, false, JobName(pid));
+        if (job == IntPtr.Zero) return "-";
+        try
+        {
+            bool inJob;
+            IntPtr me = GetCurrentProcess();
+            if (IsProcessInJob(me, job, out inJob) && inJob) return "worker";
+            return AssignProcessToJobObject(job, me) ? "worker" : "-";
         }
         finally { CloseHandle(job); }
     }

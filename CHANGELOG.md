@@ -18,6 +18,9 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Measured on an 18-core laptop with the Assayer's test suite on a quiet PC: before, the whole PC peaked at 91% and the suite took 39 seconds; now it peaks at 43% and takes 65 seconds. Checks take longer, and the Steward allows them four times their usual time before it gives up on one.
 - `steward vouch --fast` is gone (it says so and vouches at the usual pace).
+- Your background pace in Manor's Settings is now the only thing that sets how hard the Steward and the agents work. Looking at an agent's page, or pressing Run now, no longer lifts its limits, so the page shows what it really costs in the background.
+- Local AI model servers no longer run at the limits of whichever agent started them, so they answer every agent at full speed.
+- Fixed: on a PC whose work folders sit on a Dev Drive reached through a linked folder, the Steward couldn't set up its worktrees again (catch-ups, kit trials, trains).
 - Brings the Steward's kit 2.70.0, whose checks pace other agents can use for their own test runs.
 
 ### Before you update

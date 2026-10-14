@@ -15,6 +15,11 @@
 // families (the Steward's page, the Assayer's, Claude sessions) don't each take their cap side by side. A launcher started
 // inside another's run (KIT_CHECKS_TURN set: the Assayer pacing `steward vouch`, which paces its own steps) takes no turn,
 // or it would wait for itself. A turn not had within TURN_WAIT_MS is gone without: a check never waits forever.
+//
+// `apart <command line>` (apart.ts) instead starts a program out of the jobs it would inherit, as far as they let it
+// (an agent's gentle job does, kit 2.70.0; one that doesn't keeps it), detached, its output to the launcher's standard
+// error, and answers its process id as the exit code (0: it couldn't start). For the model servers every agent shares:
+// an asker's cap isn't theirs, and they outlive it.
 using System;
 using System.Runtime.InteropServices;
 
@@ -84,6 +89,7 @@ public static class KitChecksPace
     public const string TURN_HELD = "KIT_CHECKS_TURN";
     const uint CPU_RATE_ENABLE = 0x1, CPU_RATE_HARD_CAP = 0x4;
     const uint CREATE_SUSPENDED = 0x4, BELOW_NORMAL_PRIORITY_CLASS = 0x4000;
+    const uint DETACHED_PROCESS = 0x8, CREATE_NEW_PROCESS_GROUP = 0x200, CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
     const int STARTF_USESTDHANDLES = 0x100;
     const uint INFINITE = 0xFFFFFFFF;
 
@@ -109,6 +115,7 @@ public static class KitChecksPace
     {
         Limits limits;
         string line = Rest(Marshal.PtrToStringUni(GetCommandLineW()));
+        if (args.Length >= 2 && args[0] == "apart" && line.Length > 0) return Apart(line);
         if (args.Length < 2 || !ParseLimits(args[0], out limits) || line.Length == 0)
         {
             Console.Error.WriteLine("usage: checks-pace <cap in hundredths of a percent>[,<MB per process>,<MB for the job>,<runs at once>] <command line>");
@@ -172,6 +179,27 @@ public static class KitChecksPace
         CloseHandle(pi.hProcess);
         if (job != IntPtr.Zero) CloseHandle(job);
         return (int)code;
+    }
+
+    // Starts `line` detached and out of the jobs that let it leave (CREATE_BREAKAWAY_FROM_JOB: it leaves each job up to
+    // the first that doesn't allow it, and stays in that one); if Windows refuses, as the launcher's own child. Its
+    // standard output and error are the launcher's standard error. The exit code is its process id, 0 when it couldn't start.
+    static int Apart(string line)
+    {
+        IntPtr err = GetStdHandle(-12);
+        var si = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)), dwFlags = STARTF_USESTDHANDLES, hStdInput = IntPtr.Zero, hStdOutput = err, hStdError = err };
+        ProcessInformation pi;
+        uint flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        bool ok = CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi)
+            || CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags, IntPtr.Zero, null, ref si, out pi);
+        if (!ok)
+        {
+            Console.Error.WriteLine("checks-pace: couldn't start " + line + " (Windows error " + Marshal.GetLastWin32Error() + ")");
+            return 0;
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return pi.dwProcessId;
     }
 
     // The job with its limits set (the cap; memory per process and for the whole job, so a runaway fails with "out of

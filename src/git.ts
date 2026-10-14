@@ -1,4 +1,4 @@
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
@@ -283,7 +283,22 @@ export function unlinkModules(dir: string): void {
   }
 }
 
-const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+/**
+ * The same folder, however it is spelt: git answers a worktree's path as it resolves it, through junctions (a folder
+ * linked to a Dev Drive: C:\DevData answered as E:\), so each is resolved the same way first, where it exists.
+ */
+const samePath = (a: string, b: string) => {
+  const norm = (p: string) => {
+    let real = p;
+    try {
+      real = realpathSync.native(p);
+    } catch {
+      // Not there (any more): as spelt.
+    }
+    return real.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+  };
+  return norm(a) === norm(b);
+};
 
 /**
  * Removes the Steward's worktree at `dir` and its branch, when there are any: only a worktree that is the

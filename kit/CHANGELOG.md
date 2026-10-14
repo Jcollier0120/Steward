@@ -4,9 +4,16 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.70.0
 
-**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more.**
+**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more. And the pace is the owner's setting alone.**
 
 ### What's new
+
+- **One switch decides the pace** (`node/gentle.ts`): Manor's Settings `"backgroundPace"`, gentle or full. A page being looked at no longer lifts its agent's cap, its round children's with it, for a minute after each request. So what a page shows is what the agent costs in the background, and a visit no longer starts PowerShell twice to lift the cap and set it again. Run now runs at the setting's pace too. `pageInUse()` stays, doing nothing, so an agent that calls it (Chronicler) still builds. `paceProcess(p)` and `setPriorityFor(p)` lose their `asked` argument.
+- **The PowerShell worker joins its agent's job** (`gentle.cs` `Join`). It made the job, so it was the one program the agent ran outside it.
+- **`containSelf(own)`**: for a long-lived process that doesn't run its work with `every()`, such as an MCP server, a page of its own or a scheduled job. It sets the process at the owner's pace and reads the setting again every 5 minutes (`CONTAIN_CHECK_MS`). Call it first, before the process starts anything.
+- **Model servers start apart from the asker's job** (`node/apart.ts` `startApart()`, `checks-pace.exe apart`). They serve every agent, so one started by a capped agent no longer runs at that agent's cap for as long as it lives. Measured on this PC:
+  - it leaves every job that allows breakaway, which the gentle job now does, and stays in the first that doesn't (Task Scheduler's, a terminal's);
+  - where Windows refuses, it starts as before.
 
 - **`node/checks-pace.ts`**: `pacedCommand(file, args)` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
   - a hard cap on the processor: the gentle pace's by default (`checksCap()` = `gentleCap()`), a quarter of it and two processors' worth at most;
@@ -23,6 +30,7 @@ Measured on an 18-core laptop, the Assayer's suite (155 tests): on a quiet PC, w
 ### Before you update
 
 - Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
+- An agent that calls `paceProcess(p, asked)` or `setPriorityFor(p, asked, set)` drops the `asked` argument (Surveyor's `setPriorityFor(pace())` is fine as it is). One with an MCP server or a process of its own outside `every()` (Reeve, the Assayer) calls `containSelf()` at its start.
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
 
