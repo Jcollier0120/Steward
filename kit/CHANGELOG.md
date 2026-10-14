@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.71.2
+
+**A refused project's reason speaks of projects and the manor's own, never of employees.** To the person using the manor, the repositories in Manor's Settings are just their projects. They never think of the manor's own repositories as employees, so the refusal no longer says "an employee is looked after as staff".
+
+### What changed
+
+- **node/manor.ts:** `projectsFrom` gives "is <owner/name>, one of the manor's own: the manor looks after it itself, so it can't be a project", and for a checkout "is one of / inside one of / a folder holding one of the manor's own checkouts: the manor looks after those itself, so it can't be a project". The doc comments of `projectsFrom` and `manorProjects` call them the owner's projects. The rules themselves are unchanged.
+- **What an agent must do:** nothing, unless a test of its own matches the old words. Manor's server test matched the whole message: it now matches only up to "one of the manor's own" (Manor 0.16.144), so take that Manor before pinning this kit there.
+- **Its tests:** kit/test/manor.test.ts, which also checks that no refusal mentions an employee.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 2.71.0
 
 **On a PC with little memory, the NPU's model server rests sooner when nobody uses it, and the first request after that waits for it to wake instead of failing.**

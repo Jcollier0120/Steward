@@ -20,6 +20,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - If you add a second PC later, it takes over each repository's turn when the first PC's half-day turn runs out, or at once with **Do it here**. Otherwise nothing: it updates itself as usual.
 
+## 0.35.77
+
+**The kit it hands out, 2.71.2, gives a refused project's reason without talking about employees.**
+
+### What changed
+
+- When a project in Manor's Settings is one of the manor's own repositories or checkouts, the reason it's turned away now reads "the manor looks after it itself, so it can't be a project". It used to talk about employees and staff. Which projects are refused hasn't changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent picks up the new wording with its next kit update.
+
 ## 0.35.73
 
 **A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**

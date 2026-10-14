@@ -183,7 +183,7 @@ test("Manor's icon: as its page serves it, else its app's own, else a house; nev
   assert.equal(safeSvg('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>'), true);
 });
 
-// Non-employee projects: repositories that ride along with the manor, never staff.
+// Projects: the owner's own repositories, of what they develop; never one of the manor's own.
 const NO_OWN = { repos: [], checkouts: [] };
 
 /** A folder that is a clone of `url` (a .git folder with its config), or a worktree of one when `worktreeOf` is given. */
@@ -285,12 +285,13 @@ test("a project is never one of the manor's own: its repository, its clone's ori
     { name: 'Side car', checkout: sideCar, repo: 'someone/side-car' },
   ], own, problems);
   assert.deepEqual(projects.map((p) => p.name), ['Next door', 'Side car']);
-  assert.match(problems[0], /"By repo"\) is jcollier0120\/porter, one of the manor's own: an employee is looked after as staff, never as a project; it's left out\./);
+  assert.match(problems[0], /"By repo"\) is jcollier0120\/porter, one of the manor's own: the manor looks after it itself, so it can't be a project; it's left out\./);
   assert.match(problems[1], /"Manor"\) is Jcollier0120\/Manor, one of the manor's own/);
   assert.match(problems[2], /"By origin"\) is Jcollier0120\/Porter, one of the manor's own/);
-  assert.match(problems[3], /"Its checkout"\) is one of the Steward's employees' checkouts/);
-  assert.match(problems[4], /"Inside one"\) is inside one of the Steward's employees' checkouts/);
-  assert.match(problems[5], /"Holding them"\) is a folder holding one of the Steward's employees' checkouts/);
+  assert.match(problems[3], /"Its checkout"\) is one of the manor's own checkouts: the manor looks after those itself, so it can't be a project; it's left out\./);
+  assert.match(problems[4], /"Inside one"\) is inside one of the manor's own checkouts/);
+  assert.match(problems[5], /"Holding them"\) is a folder holding one of the manor's own checkouts/);
+  assert.doesNotMatch(problems.join('\n'), /employee/i, 'the owner reads of projects and the manor\'s own, never of employees');
   assert.equal(problems.length, 6);
 });
 
