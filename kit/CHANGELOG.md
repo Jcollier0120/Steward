@@ -14,6 +14,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing for a command that isn't `node --test`: its arguments, limits and environment are as they were.
 - **Why:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
+- npu-bench.ts: the energy measurement's load goes on, past its minutes if need be, until it has read the battery once after a job ended. On a PC held back, at the checks pace say, a short load could end before any job reached the model and read only the battery at rest. A real load lasts minutes, so the results are as before.
 
 ### For an agent
 

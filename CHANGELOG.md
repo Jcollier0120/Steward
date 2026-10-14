@@ -11,6 +11,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On a PC with many processors, the gentle pace leaves tests a small share of the processor (two of 18 here). The Steward used to give a paced run four times its usual time limit, which suits a quarter of the processor. A big test suite could be stopped part way through, with nothing failed, and the vouch or check said only "Command failed". Now the time limit grows with how much the pace slows the run (nine times here), plus the 20 minutes it may wait for its turn.
 - The Steward's chosen tests now run a few test files at a time (four here), not one per processor. Every file shares the same small share of the processor, so running fewer at once means each one gets enough to finish.
 - A command stopped at its time limit now says "stopped after N minutes, its time limit at the checks pace" instead of "Command failed" and its whole command line.
+- Two of the Steward's own tests, one for the NPU benchmark's energy reading and one for renaming a shared package set, failed now and then at the checks pace, with nothing wrong, and made a vouch or a kit release run again. They no longer depend on how fast the PC runs them.
 - This brings kit 2.74.2.
 
 ### Before you update

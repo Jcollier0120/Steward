@@ -649,16 +649,26 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       if (!report.conditions.onBattery) log('energy: not measured, as the PC is plugged in (unplug it and run again with --energy)');
       else {
         const rate = o.io?.dischargeRate ?? dischargeRate;
+        // Under load, its time and at least one reading taken after a job ended: a PC held back (at the checks pace,
+        // say) can spend a short window before any job reaches the model, and readings then are only its rest.
         const sample = async (ms: number, during?: () => Promise<void>) => {
           const xs: number[] = [];
           const t0 = now();
           let busyWork: Promise<void> | null = null;
           let stop = false;
+          let ended = 0;
+          let afterWork = !during;
           if (during)
             busyWork = (async () => {
-              while (!stop) await during();
+              while (!stop)
+                try {
+                  await during();
+                } finally {
+                  ended++;
+                }
             })();
-          while (now() - t0 < ms) {
+          while (now() - t0 < ms || !afterWork) {
+            afterWork ||= ended > 0;
             const v = await rate();
             if (v !== null && v > 0) xs.push(v);
             await sleep(5_000);
