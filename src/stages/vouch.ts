@@ -5,6 +5,7 @@ import { originUrl, repoFromUrl } from '../scm.ts';
 import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
+import { assayedHead } from './assayed.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
@@ -16,7 +17,8 @@ import { hostFor } from '../hosts/index.ts';
  * `steward vouch`, run in the clone a PR was pushed from (a Claude Code session's, a person's), runs the repository's
  * checks as Settings give them (the Steward's own: its kit filled, then npm run typecheck and npm test) at the clone's
  * HEAD, which must be the PR's head, with nothing uncommitted. Once they pass, it sets a commit status on that commit:
- * context VOUCH_CONTEXT, state success. Nothing is set when they fail.
+ * context VOUCH_CONTEXT, state success. Nothing is set when they fail. When the Assayer already passed the whole of the
+ * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken.
  *
  * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on the PR's current head, for a team PR from the repository itself that isn't the
@@ -129,6 +131,13 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
  * (their failure, or "its checks passed, but GitHub wouldn't take the status: …").
  */
 async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void }): Promise<string | null> {
+  // The Assayer already passed exactly this tree (assayed.ts): nothing run again, so the PC isn't loaded twice.
+  const assayed = await assayedHead(ctx.run, o.dir, e);
+  if (assayed) {
+    const when = new Date(assayed.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    o.say(`the Assayer passed this exact tree at ${when}: nothing run again`);
+    return setVouch(ctx, e, o.repo, o.head, `${(assayed.commands ?? []).join(', ')} passed in the Assayer at ${o.head.slice(0, 7)}`.slice(0, 140));
+  }
   // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
   const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });

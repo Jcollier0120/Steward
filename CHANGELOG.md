@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.72
+
+**`steward vouch` no longer runs the tests a second time on code the Assayer just passed.**
+
+### What changed
+
+- If the Assayer's check passed your work (every check, the whole suite) and you then commit exactly that code, `steward vouch` takes the Assayer's pass and records the vouch in seconds without running anything. It says so in one line: "the Assayer passed this exact tree at <time>". Before, vouch ran the same suite again on identical code, which doubled the load on your PC.
+- The Assayer's pass counts only for exactly the committed code, with the same installed dependencies and the same Steward's kit, when it's under a day old and covers each check the Steward would run. Anything else (no check, a partial one, different code, a failure since) runs the checks as before.
+
+### Before you update
+
+- Update the Assayer to 0.3.31 or later: older Assayers don't record which code they checked, so vouch runs the checks as before.
+
 ## 0.35.64
 
 **The Steward's checks can't max out your processor any more, and each pull request is tested once rather than twice.**
