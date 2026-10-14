@@ -16,7 +16,7 @@ import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { kitTrialHold, raisesKit, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, TRIAL_GOING } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -577,6 +577,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     if (trial) {
       waits.push(`${describe(pr)} waits: ${trial}`);
       held.push(heldOf(pr, trial));
+      // A kit its trial fails, while its branch changed the kit since it left it: caught up, so it is tried again with
+      // what the branch fixed meanwhile, rather than waiting for its author (trial.ts's kitMovedUnder).
+      if (trialFails(trial) && !pr.fork && !pr.draft && (pr.whose === 'team' || isKitPr(pr))) {
+        await lookup().catch(() => null);
+        if (await kitMovedUnder(ctx, e, pr).catch(() => false)) catchable.set(pr.number, pr);
+      }
       continue;
     }
     // Another PC took its turn here meanwhile (lease.ts): it merges the rest.

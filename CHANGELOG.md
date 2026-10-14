@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.71
+
+**A new kit that breaks an agent no longer stalls the Steward's own updates until someone notices.**
+
+### What's new
+
+- When a new kit fails an agent's checks before release, the Steward hands that agent to the Wright: an issue in the agent's repository asks for a change that works with the new kit. Once that change is ready and passes, the kit goes ahead, and the agent's change follows it. The issue closes by itself when it's no longer needed.
+
+### What changed
+
+- A kit change that fails some agents is brought up to date by itself when a fix for the kit has landed in the meantime, and tried again with that fix, instead of failing the same way round after round.
+- The Steward's comment on such a change says that the Wright has the failing agents, and that the change is tried again once the kit moves underneath it.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Wright gets this work only on a PC where the Wright is installed; elsewhere a failing kit still waits for a person, as before.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

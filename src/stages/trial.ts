@@ -173,6 +173,8 @@ export function trialComment(t: KitTrial, sha: string): string {
     `Each was bumped as the rollout will bump it once the kit is released: its main, kit.json pinned to ${t.kit}, its kit filled from this PR's kit\\ and tools\\kit.ts, then its own checks, twice.`,
     '',
     `**What to do:** change the kit so they pass as they are (a new push here is tried again), or fix the agents (once an agent's main moves, the next round tries it again), or open a ready PR to the agent that pins kit ${t.kit} and passes with it (the next round tries it, and the kit then merges with it), or, when the agents must change later, add the label \`${KIT_BREAKS_LABEL}\` and say what each must do in the kit's changelog entry. The PR then merges, and each failed bump goes to the Wright.`,
+    '',
+    `Meanwhile the Steward doesn't wait on you alone: each agent above goes to the Wright as an issue in its own repository, for a ready PR that pins kit ${t.kit} and passes with it; and should the branch change the kit since this PR left it, this PR is caught up and its kit tried again.`,
   ].join('\n');
 }
 
@@ -597,4 +599,30 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   });
   const moves = pairWords(t);
   return `kit ${t.kit} fails ${standing.length} agent${standing.length === 1 ? "'s" : "s'"} checks here (${names})${notes.length ? `; ${notes.join('; ')}` : ''}${moves ? `; ${moves}` : ''}: its comment says which tests; fix the kit or the agents, open a ready PR to the agent that pins kit ${t.kit} and passes with it, or label it ${KIT_BREAKS_LABEL}`;
+}
+
+/** The kit a hold says fails agents' checks (kitTrialHold's last word, its trial done), or null for any other hold. Pure. */
+export const trialFails = (why: string): string | null => /^kit (\d+\.\d+\.\d+) fails \d+ agent(?:'s|s') checks here/.exec(why)?.[1] ?? null;
+
+/**
+ * Whether the branch changed the kit (kit\ or tools/kit.ts) since this PR left it: a kit PR its trial fails is then
+ * caught up (merge.ts), so it is tried again with what the branch fixed meanwhile. Steward#214 (kit 2.69.0) failed the
+ * Smith's typecheck round after round on 2026-10-13, which main had fixed in kit 2.68.0, and held every Steward PR
+ * above it.
+ * origin/<branch> as the round fetched it. False when it can't be told.
+ */
+export async function kitMovedUnder(ctx: Ctx, e: Employee, pr: PrInfo): Promise<boolean> {
+  if (!pr.headOid) return false;
+  const repo = checkoutOf(e);
+  await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
+  const base = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, pr.headOid))?.trim();
+  if (!base) return false;
+  const changed = await gitMaybe(ctx.run, repo, 'diff', '--name-only', base, `origin/${e.branch}`, '--', 'kit', 'tools/kit.ts');
+  return !!changed?.trim();
+}
+
+/** The latest trial kept for a PR of this kit, at any head (kit-trials.json), or null. */
+export function latestTrial(number: number, kit: string, kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})): KitTrial | null {
+  const mine = Object.entries(kept).filter(([k, t]) => k.startsWith(`${number}@`) && t.kit === kit).map(([, t]) => t);
+  return mine.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null;
 }
