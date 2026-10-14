@@ -2,7 +2,7 @@ import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_pro
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
-import { pacedCommand } from './kit/checks-pace.ts';
+import { pacedCommand, type Paced } from './kit/checks-pace.ts';
 import { sharesConsole } from './kit/console.ts';
 import { gitExe } from './kit/git-exe.ts';
 
@@ -138,8 +138,27 @@ export function startOptions(cmd: string, o: { shares: boolean; background: bool
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
-/** How much longer a command run at the checks pace may take than its time limit says. */
+/** How much longer a command run at the checks pace may take than its time limit says, when its kit doesn't say (Paced.slower). */
 export const PACED_TIME = 4;
+
+/**
+ * How long a command may run: its own time limit (20 minutes unless it says), and at the checks pace that stretched by
+ * as much as the cap slows it, plus the wait for a turn behind other runs (the kit's pacedSlower and CHECKS_TURN_MS,
+ * kit 2.74.2). A fixed four times, for a quarter of the processor, stopped Reeve's tests at 80 minutes on 2026-10-14,
+ * held to two of the laptop's 18 processors and sharing them with another run: a third of the way through, nothing
+ * failed.
+ */
+export function timeLimit(timeoutMs: number | undefined, paced: Paced | null, resolved: string): number {
+  const own = timeoutMs ?? 20 * 60_000;
+  if (!paced || paced.file === resolved) return own;
+  return own * (paced.slower ?? PACED_TIME) + (paced.waitMs ?? 0);
+}
+
+/** What a run stopped at its time limit says, in place of Node's "Command failed: <the whole command line>". */
+export function stoppedForTime(ms: number, paced: boolean): string {
+  const span = ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} s`;
+  return `stopped after ${span}, its time limit${paced ? ' at the checks pace' : ''}: it was still running`;
+}
 
 const runPlain: Runner = async (cmd, args, opts = {}) => {
   const [resolved, resolvedArgs] = resolveCommand(cmd, args);
@@ -156,10 +175,10 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
   }
-  // At the checks pace a command gets four times its time: held to the gentle cap below everything else, and waiting its
-  // turn behind other runs, it takes longer (the Assayer's suite on a busy PC: 73 s free, 219 s paced), and a run stopped
-  // for that would be taken for a failure.
-  const timeout = (opts.timeoutMs ?? 20 * 60_000) * (paced && paced.file !== resolved ? PACED_TIME : 1);
+  // At the checks pace a command gets as much more time as the cap slows it, and its wait for a turn (timeLimit): held to
+  // the gentle cap below everything else, and waiting its turn behind other runs, it takes longer (the Assayer's suite on
+  // a busy PC: 73 s free, 219 s paced), and a run stopped for that would be taken for a failure.
+  const timeout = timeLimit(opts.timeoutMs, paced, resolved);
   return new Promise((resolve) => {
     const child = execFile(
       file,
@@ -170,7 +189,9 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
-        const err = [String(stderr ?? ''), e && typeof e.code !== 'number' ? String(e.message) : ''].filter(Boolean).join('\n');
+        // Stopped at its time limit (Node kills it, with no exit code of its own): said so, not as a failure of its own.
+        const stopped = !!e?.killed && typeof e.code !== 'number' ? stoppedForTime(timeout, !!paced && paced.file !== resolved) : '';
+        const err = [String(stderr ?? ''), stopped || (e && typeof e.code !== 'number' ? String(e.message) : '')].filter(Boolean).join('\n');
         resolve({ code, out: String(stdout ?? ''), err });
       },
     );

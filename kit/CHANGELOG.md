@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.2
+**Paced test runs get room to finish: a time limit stretched as much as the cap slows them, and as many test files at once as the cap has room for.**
+
+### What's new
+
+- checks-pace.ts: **`pacedSlower(cap)`**, how many times its full-speed time limit a paced command may take: the whole processor against the share the cap leaves, 4 at least (9 for two of 18 processors). **`CHECKS_TURN_MS`**, the 20 minutes a run may wait for a turn. `pacedCommand()` gives both on what it returns, as `slower` and `waitMs` (left out when the command runs as it is).
+- **`pacedTestConcurrency(cap, processors)`** and **`withTestConcurrency(file, args, n)`**: a paced `node … --test …` (node itself, every argument before `--test` one of node's options, no concurrency of its own) gets `--test-concurrency` of twice the processors the cap leaves, 2 at least. `pacedCommand()` adds it. An npm script's node isn't seen, and `--test-concurrency` can't go in NODE_OPTIONS.
+
+### What changed
+
+- Nothing for a command that isn't `node --test`: its arguments, limits and environment are as they were.
+- **Why:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
+
+### For an agent
+
+- If your runner stretches a paced command's time limit by a fixed amount, use `slower` and `waitMs` from `pacedCommand()` instead: `timeoutMs * (paced.slower ?? 4) + (paced.waitMs ?? 0)`, as the Steward's run.ts does.
+- Nothing else to do to take it.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 

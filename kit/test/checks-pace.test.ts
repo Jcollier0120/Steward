@@ -12,7 +12,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, pacedCommand } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -59,6 +59,25 @@ test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor
   assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: '50' }, 18), 5000);
 });
 
+test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap slows the work, and as many test files at once as it has room for', () => {
+  assert.equal(pacedSlower(1111), 9, 'two of 18 processors: nine times');
+  assert.equal(pacedSlower(2500), 4, 'a quarter: four, as it always was');
+  assert.equal(pacedSlower(5000), 4, 'never under four');
+  assert.equal(pacedSlower(0), 1, 'no cap: its own time');
+  assert.equal(pacedTestConcurrency(1111, 18), 4, "two of 18 processors' worth: four files at once, not 17");
+  assert.equal(pacedTestConcurrency(2500, 4), 2, 'one processor: two at least');
+  assert.equal(pacedTestConcurrency(5000, 16), 16);
+  const node = process.execPath;
+  assert.deepEqual(withTestConcurrency(node, ['--import=./x.ts', '--test', 'a.test.ts'], 4), ['--import=./x.ts', '--test', '--test-concurrency=4', 'a.test.ts']);
+  assert.deepEqual(withTestConcurrency('node', ['--test'], 2), ['--test', '--test-concurrency=2']);
+  assert.deepEqual(withTestConcurrency(node, ['--test', '--test-concurrency=8', 'a'], 4), ['--test', '--test-concurrency=8', 'a'], 'its own says');
+  assert.deepEqual(withTestConcurrency(node, ['script.js', '--test'], 4), ['script.js', '--test'], "a script's own --test");
+  assert.deepEqual(withTestConcurrency(node, ['--import', 'x.ts', '--test'], 4), ['--import', 'x.ts', '--test'], "an option's value apart: left as it is");
+  assert.deepEqual(withTestConcurrency(node, ['-e', '0'], 4), ['-e', '0'], 'no --test');
+  assert.deepEqual(withTestConcurrency('npm', ['test'], 4), ['test'], "an npm script's node isn't seen");
+  assert.deepEqual(withTestConcurrency('C:\\x\\vitest.cmd', ['--test'], 4), ['--test'], 'not node');
+});
+
 test('the launcher: one for the PC, beside the gentle DLL, a new one for a new source; compiled to a name of its own', () => {
   assert.match(path.basename(checksPaceExe('a')), /^checks-pace-[0-9a-f]{12}\.exe$/);
   assert.equal(path.basename(path.dirname(checksPaceExe('a'))), 'kit');
@@ -86,7 +105,10 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.deepEqual(logged, [], 'the launcher was built');
   assert.equal(p.file, checksPaceExe());
   assert.deepEqual(p.args, [checksLimits(5000), process.execPath, 'x']);
+  assert.deepEqual([p.slower, p.waitMs], [4, CHECKS_TURN_MS], 'half the processor: four times its time, and the wait for a turn');
   assert.equal(p.env.MSBUILDDISABLENODEREUSE, '1', ".NET's build servers don't stay behind in the job");
+  const tests = await pacedCommand(process.execPath, ['--test', 'a.test.ts'], { env: { KIT_CHECKS_PACE: '25' }, home: path.join(home, 'no-manor'), processors: 16 });
+  assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for');
   const script = 'console.log(JSON.stringify([process.argv.slice(1), require("os").getPriority()])); console.error("e"); process.exit(7)';
   const args = ['a b', '"q"', '', 'C:\\x\\y z\\'];
   const noTurn = checksLimits(5000, checksMemory(), 0);

@@ -23,6 +23,10 @@ import { powershell, psQuote } from './ps.ts';
  * - **below-normal priority**: they give way to whatever the person is doing;
  * - **a turn**: at most CHECKS_AT_ONCE runs on the PC at once, from whichever agent or Claude session, the rest wait.
  *
+ * and, since it is slower so (kit 2.74.2), **room to finish**: a runner stretches its time limit by as much as the cap
+ * slows the work (pacedSlower) plus the wait for a turn, and node's test runner runs as many files at once as the cap
+ * has room for (pacedTestConcurrency), not one per processor.
+ *
  * The job is one for the whole PC: check runs side by side (two vouches, a trial's tries) share the cap rather than
  * taking it twice, so together they never peg the processor either.
  *
@@ -43,8 +47,44 @@ export function checksCap(processors = os.availableParallelism()): number {
   return gentleCap(processors);
 }
 
-/** How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, 20 minutes at most. */
+/** How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, CHECKS_TURN_MS at most. */
 export const CHECKS_AT_ONCE = 2;
+/** How long a paced run may wait for a turn before it runs without one (checks-pace.cs' TURN_WAIT_MS). */
+export const CHECKS_TURN_MS = 20 * 60_000;
+/** The least a paced run's time limit is stretched by (pacedSlower): what it always was, for a quarter of the processor. */
+export const PACED_SLOWER_MIN = 4;
+
+/**
+ * How many times longer a command may take at the checks pace than at full speed (kit 2.74.2): the whole processor
+ * against the share the cap leaves it, never under PACED_SLOWER_MIN. A quarter: 4. Two of 18 processors: 9, where a
+ * fixed 4 stopped Reeve's tests at 80 minutes on 2026-10-14, a third of the way through, nothing failed. A time limit
+ * meant for a run at full speed, stretched by this, still means the same work.
+ */
+export function pacedSlower(cap: number): number {
+  return cap > 0 ? Math.max(PACED_SLOWER_MIN, Math.round(10_000 / cap)) : 1;
+}
+
+/**
+ * How many test files node's runner runs at once at the checks pace (kit 2.74.2): twice the processors the cap leaves,
+ * two at least. Left to itself it starts one per processor but one, 17 on an 18-thread laptop, every one held to the
+ * same two processors' worth and the job's memory: each crawls, and their own timeouts fire for want of a processor.
+ * Twice keeps the cap busy while some wait on git or a timer.
+ */
+export function pacedTestConcurrency(cap: number, processors = os.availableParallelism()): number {
+  return Math.max(2, 2 * Math.ceil((processors * cap) / 10_000));
+}
+
+/**
+ * The arguments of `node … --test …` with `--test-concurrency=<n>` after `--test`, when every argument before it is an
+ * option of node's (so it is node's own, not a script's) and none names a concurrency already; any other command's as
+ * they are. An npm script's node isn't seen here: only a command that is node itself (the Steward's chosen tests are).
+ */
+export function withTestConcurrency(file: string, args: string[], n: number): string[] {
+  if (!/^node(\.exe)?$/i.test(path.basename(file))) return args;
+  const i = args.indexOf('--test');
+  if (i < 0 || args.slice(0, i).some((a) => !a.startsWith('-')) || args.some((a) => a.startsWith('--test-concurrency'))) return args;
+  return [...args.slice(0, i + 1), `--test-concurrency=${n}`, ...args.slice(i + 1)];
+}
 
 /**
  * The memory a paced run may take, in MB: each program an eighth of the PC's memory, 2 to 6 GB; the whole job (every
@@ -137,21 +177,29 @@ export interface Paced {
   file: string;
   args: string[];
   env: Record<string, string>;
+  /**
+   * How many times its full-speed time limit it may take (pacedSlower; kit 2.74.2), and how long it may first wait for a
+   * turn: a runner stretches its limit by both. Left out (or 1 and 0) when it runs as it is.
+   */
+  slower?: number;
+  waitMs?: number;
 }
 
 /**
  * The command `file args` at the checks pace: through the launcher with its limits (checksPaceCap(), checksMemory(), a
  * turn), or as it is when the cap is off (Manor's "checksPace": "full") or the launcher can't be had. The environment
  * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done).
- * Never throws.
+ * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency). Never throws.
  */
-export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}): Promise<Paced> {
+export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; processors?: number } = {}): Promise<Paced> {
   const plain: Paced = { file, args, env: {} };
   const env = o.env ?? process.env;
-  const cap = checksPaceCap(o.home, env);
+  const processors = o.processors ?? os.availableParallelism();
+  const cap = checksPaceCap(o.home, env, processors);
   if (!cap) return plain;
-  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: {} };
+  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: {}, slower: PACED_SLOWER_MIN, waitMs: 0 };
   const exe = await checksPaceLauncher(o.log);
   if (!exe) return plain;
-  return { file: exe, args: [checksLimits(cap), file, ...args], env: { MSBUILDDISABLENODEREUSE: '1' } };
+  const paced = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
+  return { file: exe, args: [checksLimits(cap), file, ...paced], env: { MSBUILDDISABLENODEREUSE: '1' }, slower: pacedSlower(cap), waitMs: CHECKS_TURN_MS };
 }
