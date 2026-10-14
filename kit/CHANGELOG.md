@@ -35,6 +35,7 @@ This builds on 2.68.0, which it needs.
 
 - Nothing: take the kit and release as usual. On an Intel PC with a graphics card, vision starts working with Manor's default settings, on the card, when something asks for it; nothing runs on the card otherwise.
 - An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
+- An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
 
 ## 2.68.0
 
