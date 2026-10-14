@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.2
+
+**The Steward's kit 2.71.3: agents read and write their small files far less often, so Manor checking on them costs almost nothing.**
+
+### What changed
+
+- Each time Manor checks on an agent (about 1,300 times an hour with Manor's page closed, 15,800 with it open), the agent used to read its settings, its on-duty switch and Manor's settings from disk. It now reads them only after they change, and otherwise only checks that they haven't.
+- An agent no longer rewrites a file with what it already holds.
+- An agent waiting for its settings (or for a license) notes it once, not again every round. Manor and the Surveyor still say what it waits for.
+- The Steward uses kit 2.71.3 itself.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

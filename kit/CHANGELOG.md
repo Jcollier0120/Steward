@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.71.3
+
+**An agent's small files cost a stat, not a read, while they are unchanged, and a write that would change nothing writes nothing: Manor's pings, the pace and round.json stop touching the disk for nothing.**
+
+### What changed
+
+- **`writeJson` leaves a file that holds exactly that JSON as it is** (store.ts): no temporary file, no rename, its modified time as it was. A file whose size differs is never read for the comparison. `{ always: true }` writes all the same, for a write whose time is read; the settings kit's save uses it, so a person's save of Settings still moves the file's time (the Steward's migration notes go by it).
+- **Reads are kept by what a stat says** (new `file-cache.ts`: `readText`, `readJsonFile`, `statOf`, `holds`, and `fileCounts` for tests and measurements). A file unchanged since this process read it (the same modified time, change time, size and file id) costs one stat; any change is read again at once. A file modified within 2 s of being read (`SETTLED_MS`) is read every time until it settles, so two changes in one tick of the file system's clock are never missed. Files over 1 MB are never kept, and at most 256 are. `readJson` goes through it and still parses afresh at every call.
+- **Manor's settings.json**, read by `pace()`, `agentsAtOnce()`, `manorLink()`, `developerOptions()`, `gpuWithNpu()`, `notifyPrefs()` and `manorProjects()`, and **the agent's own settings** (`readSettings()`, so `needsSettings()`), `duty()` and `ownDeveloperOptions()` all read through it. Each still answers what the file says now: a change in Manor's Settings applies at the next request or round, as before.
+- **`/api/ping` reads no file** while nothing has changed: measured with the fixture agent (a settings spec, one schedule held for a required setting), a ping went from 8 reads and 15 other file calls to 0 reads and 12 stats.
+- **A round held for the person** (its required settings, or an ended trial) is written to round.json when the hold starts or what it waits for changes, not at every interval (spec/ROUND.md): its `started` and `finished` are when the hold began. A reader takes an entry with `waiting` for an agent waiting for the person, however old.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that ages a file by its modified time, and writes it with `writeJson` with content that may not change, passes `{ always: true }`.
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

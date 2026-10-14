@@ -109,6 +109,20 @@ function recordRound(name: string, record: RoundRecord): void {
 }
 
 /**
+ * A round held for the person (its trial over, or its required settings still to fill in), kept in round.json when the
+ * hold starts or what it waits for changes. While it holds for the same reason its entry stays as it was, `started`
+ * and `finished` when the hold began (kit 2.71.3): before, it was written again at each interval, a rename an interval
+ * for nothing.
+ */
+function recordHeld(name: string, waiting: string, everyMs: number): void {
+  const was = readJson<unknown>(roundFile(), {});
+  const r = isObject(was) && isObject(was.rounds) ? was.rounds[name] : null;
+  if (isObject(r) && r.ok === null && r.waiting === waiting && r.everyMs === everyMs && r.error === null && r.next === null && r.turn === undefined) return;
+  const now = new Date().toISOString();
+  recordRound(name, { started: now, finished: now, ok: null, waiting, error: null, everyMs, next: null });
+}
+
+/**
  * round.json's `wentThrough`: each schedule's first round that went through, when (kit 2.43.3). A round.json from before
  * it, with rounds but no `wentThrough`, counts every schedule it names as through: an agent that already ran is never
  * taken for a new one, so updating never puts it in the first-round line.
@@ -201,8 +215,9 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * Its rounds never stop silently (kit 2.34.0):
  * - Held for its required settings (required.ts), a scheduled round runs nothing, but is still recorded: round.json
- *   says `"ok": null, "waiting": "<what>"` at each interval, and its state says `waiting`, so a reader sees a reason
- *   and a schedule still going, never silence.
+ *   says `"ok": null, "waiting": "<what>"` from the first round held (written again only when what it waits for
+ *   changes, kit 2.71.3), and its state says `waiting`, so a reader sees a reason and a schedule still going, never
+ *   silence.
  * - A round that runs past its time limit (`timeoutMs`, a number or a function read at each round; else
  *   roundTimeLimit(), three intervals and at least two hours) is let go: its job's signal is aborted, it is recorded
  *   as failed with `"timedOut": true`, and the next round is scheduled, which tries again. A hung await (a request
@@ -266,8 +281,7 @@ export function every(
     if (held) {
       if (stopped) return;
       wait();
-      const now = new Date().toISOString();
-      recordRound(opts.name ?? 'round', { started: now, finished: now, ok: null, waiting: held, error: null, everyMs: interval(), next: null });
+      recordHeld(opts.name ?? 'round', held, interval());
       return;
     }
     running = true;
