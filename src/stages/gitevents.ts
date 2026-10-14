@@ -8,7 +8,7 @@ import { splitCommand, tail, type Ran } from '../run.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
 import { claimedBranches, headsOnOrigin, proposal } from './branchesin.ts';
-import { checkoutOf, forgetGlance, hostIs, clearWorkDir, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, hostIs, freshWorktree, workRootOf, type Ctx } from './common.ts';
 import { recordTested } from '../tested.ts';
 
 /**
@@ -80,8 +80,7 @@ async function testHead(ctx: Ctx, e: Employee, branch: string, head: string): Pr
   const repo = checkoutOf(e);
   const dir = handInDirOf(ctx.settings, e);
   await removeWorktree(ctx.run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(ctx.run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
+  await freshWorktree(ctx.run, ctx.settings, repo, dir, head, '--detach');
   ctx.log(`[${e.id}] ${branch}: testing it here at ${sha}, in ${dir}, before it's handed in`);
   try {
     const say = (line: string) => ctx.log(`[${e.id}] ${line}`);

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
@@ -273,6 +273,23 @@ export async function onOrigin(run: Runner, repo: string, branch: string): Promi
   return ((await gitMaybe(run, repo, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`)) ?? '').trim() !== '';
 }
 
+/**
+ * `git worktree add --quiet <opts> <dir> <commit>`. git refuses a folder that's gone while it's still registered ("is a
+ * missing but already registered worktree"): a stage stopped half way by a sign-out, its folder then cleared, or one
+ * deleted by hand. On 2026-10-13 that stopped the Steward's kit trial and Reeve's release for hours. On that refusal,
+ * git's records of vanished worktrees are pruned and the add tried once more.
+ */
+export async function addWorktree(run: Runner, repo: string, dir: string, commit: string, ...opts: string[]): Promise<void> {
+  const add = () => git(run, repo, 'worktree', 'add', '--quiet', ...opts, dir, commit);
+  try {
+    await add();
+  } catch (err) {
+    if (!(err instanceof CommandFailed) || !/missing but already registered worktree/i.test(err.message)) throw err;
+    await gitMaybe(run, repo, 'worktree', 'prune');
+    await add();
+  }
+}
+
 /** A worktree's node_modules when it is a link (a junction): removed, and never what it points to. */
 export function unlinkModules(dir: string): void {
   const at = path.join(dir, 'node_modules');
@@ -283,15 +300,31 @@ export function unlinkModules(dir: string): void {
   }
 }
 
+/**
+ * A path with its links and junctions followed, as git records a worktree's: the deepest part that exists resolved, the
+ * rest kept. The Steward's work folder (~\.steward\work) became a junction to another drive on 2026-10-13, and git
+ * listed its worktrees there: none matched, so none was removed, and clearWorkDir's deletes left them registered.
+ */
+export function realOf(p: string): string {
+  const abs = path.resolve(p);
+  try {
+    return realpathSync.native(abs);
+  } catch {
+    const up = path.dirname(abs);
+    return up === abs ? abs : path.join(realOf(up), path.basename(abs));
+  }
+}
+
 const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 
 /**
  * Removes the Steward's worktree at `dir` and its branch, when there are any: only a worktree that is the
- * repo's, at that folder, and only a branch under steward/. Never the person's own.
+ * repo's, at that folder (by its real path, links followed), and only a branch under steward/. Never the person's own.
  */
 export async function removeWorktree(run: Runner, repo: string, dir: string, branch?: string): Promise<string[]> {
   const did: string[] = [];
-  const wt = (await worktrees(run, repo)).find((w) => samePath(w.path, dir));
+  const real = realOf(dir);
+  const wt = (await worktrees(run, repo)).find((w) => samePath(w.path, dir) || samePath(realOf(w.path), real));
   // Its node_modules may be a junction to packages other worktrees share (stages/modules.ts): the link goes first, alone.
   unlinkModules(dir);
   if (wt) {
