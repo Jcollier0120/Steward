@@ -26,8 +26,9 @@ import { powershell, psQuote } from './ps.ts';
  * The job is one for the whole PC: check runs side by side (two vouches, a trial's tries) share the cap rather than
  * taking it twice, so together they never peg the processor either.
  *
- * Manor's settings.json `"checksPace"` (or KIT_CHECKS_PACE) changes the cap: a percentage of the processor from 10 to
- * 100, or "full" for none. That setting is the only way out: a run asked for by hand is paced like any other. Windows
+ * Manor's Settings pace at full lifts it, as it lifts the agents' own (pace.ts): one switch for the whole manor. While
+ * that is gentle, settings.json `"checksPace"` (or KIT_CHECKS_PACE) may set the cap: a percentage of the processor from
+ * 10 to 100, or "full" for none. Nothing else lifts it: a run asked for by hand is paced like any other. Windows
  * only: elsewhere a paced command runs under `nice`. Never fails a command: a launcher that can't be built or started
  * leaves the command to run as it is.
  */
@@ -62,14 +63,15 @@ export function checksLimits(cap: number, memory = checksMemory(), atOnce = CHEC
 }
 
 /**
- * The cap now, in hundredths of a percent, or 0 for none: KIT_CHECKS_PACE, else Manor's settings.json `"checksPace"`,
- * else checksCap(). Either says a percentage (10 to 100; 100 is none) or "full" (none). Read afresh each time, so a
- * change applies from the next command. Under node --test, none unless KIT_CHECKS_PACE says: a test's commands never
- * build the launcher in this PC's kit folder.
+ * The cap now, in hundredths of a percent, or 0 for none: none when Manor's Settings pace (`"backgroundPace"`) is full,
+ * the one switch for everything the manor runs; else KIT_CHECKS_PACE, else Manor's settings.json `"checksPace"`, else
+ * checksCap(). Either says a percentage (10 to 100; 100 is none) or "full" (none). Read afresh each time, so a change
+ * applies from the next command. Under node --test, none unless KIT_CHECKS_PACE says: a test's commands never build the
+ * launcher in this PC's kit folder.
  */
 export function checksPaceCap(home = manorHome(), env: NodeJS.ProcessEnv = process.env, processors = os.availableParallelism()): number {
   if (env.NODE_TEST_CONTEXT && !env.KIT_CHECKS_PACE) return 0;
-  const said = env.KIT_CHECKS_PACE?.trim() || manorSetting(home, 'checksPace');
+  const said = env.KIT_CHECKS_PACE?.trim() || (manorSetting(home, 'backgroundPace') === 'full' ? 'full' : manorSetting(home, 'checksPace'));
   if (said === 'full' || said === 'off' || said === '0' || said === 0) return 0;
   const n = typeof said === 'number' ? said : typeof said === 'string' ? Number(said.replace(/%$/, '')) : NaN;
   if (!Number.isFinite(n)) return checksCap(processors);

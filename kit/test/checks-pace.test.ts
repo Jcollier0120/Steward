@@ -43,7 +43,7 @@ test("the launcher's first word: the cap, memory per program and for the job, ru
   assert.equal(checksLimits(5000, { processMb: 1, jobMb: 2 }, 0), '5000,1,2,0');
 });
 
-test("the cap now: KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
+test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
   const none = path.join(home, 'no-manor');
   assert.equal(checksPaceCap(none, {}, 18), 1111);
   assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}, 18), 7000);
@@ -51,6 +51,8 @@ test("the cap now: KIT_CHECKS_PACE, else Manor's checksPace, else the default; f
   assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}, 18), 0, '100%: no cap');
   assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}, 18), 1000, 'never under a tenth');
   assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}, 18), 1111, 'anything else: as if unsaid');
+  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}, 18), 0, "Settings' pace at full lifts it: the one switch");
+  assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}, 18), 4000);
   assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }, 18), 6000, 'the variable says instead of Manor');
   assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }, 18), 0);
   assert.equal(checksPaceCap(manorWith('m-t', { checksPace: 70 }), { NODE_TEST_CONTEXT: 'child' }, 18), 0, "a test's commands aren't paced");
