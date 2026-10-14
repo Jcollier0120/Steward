@@ -2,6 +2,42 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.71.0
+
+**On a PC with little memory, the NPU's model server rests sooner when nobody uses it, and the first request after that waits for it to wake instead of failing.**
+
+### What's new
+
+- **The NPU's idle stop by the PC's memory** (`npu-vendors.json`'s `idleStop`, spec/NPU-VENDORS.md "Resting when unused"). With no `npuIdleStopMinutes` in config.json:
+  - under 20 GB of memory (`smallPcGb`; 16 GB shows as 15.3 to 15.9), each server stops after its route's own minutes: GenieX and its llama-server 5, OpenVINO Model Server's chat and embedding servers 5, FastFlowLM 10;
+  - 20 GB or more, or memory unknown: rules.json's 10, as before.
+  - A route's minutes are 20 times its cold start, never under 5 (`idleMinutesFor`): GenieX 15 s and OpenVINO Model Server 4 s measured, FastFlowLM taken as 30 s.
+  - `npuIdleStopMinutes` in config.json, when set, wins on any PC (0 never stops).
+  - None of the three servers can unload its model and keep running, so stopping is the unload. The next request starts it again.
+  - New in `npu-vendors.ts`: `idleMinutesFor`, `smallPc`, `routeOfServer`, `coldStartMsOf`, `npuIdleStopMinutes`; the route's `idleStop` (`coldStartMs`, `minutes`, `basis`, `verify`). `serversToReap` takes `ramBytes` (default the PC's).
+- **Callers can be told the local AI is waking.** `AskOptions.onWaking(w: Waking)` is called before a request waits for a server to start (`how: 'starting'`) or to finish loading (`'loading'`). `w.line` is a plain line for the person, such as "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer.", and `w.aboutMs` is the route's cold start. `wakingOf` builds it. `ensureServer` takes `onWaking` too.
+- **`npu-check.ts --idle`** (its steps in the new `node/npu-idle.ts`) runs the rest and the waking on a real NPU, each step passing or failing:
+  - idle-wake;
+  - idle-stop: the keeper's own look stops every server after a minute unused;
+  - idle-cold-answer: a person's 20 s request after that is told it's waking and answers within the cold load, and its cold start is printed as `idleStop` numbers;
+  - idle-in-flight: a request in flight is never stopped.
+  - `npu-vendors.json`'s Intel and AMD `idleStop.verify` say how to run it on a 16 GB Lunar Lake and a Ryzen AI 300.
+
+### What changed
+
+- **Intel's embedding server is stopped when idle.** It is a second OpenVINO Model Server holding 1.7 GB, and the keeper now stops it with the NPU's lock and idle time. Before, it ran until the PC restarted.
+- **An idle stop never races a request.** The keeper already stopped a server only in the accelerator's turn. Now a stop whose turn isn't had within 2 s (`TURN_AT_ONCE_MS`) gives way and reports `in-use`: someone took the accelerator after the keeper looked. A request arriving during a stop waits its turn, then starts the server again.
+- **The first request after a start gets the cold-load allowance.** After the kit starts an NPU server, its warm-up gets at least `requestBaseMs` plus the larger `coldLoadMs`, even when the caller's `timeoutMs` is shorter (Envoy's 20 s captions). Before, that first request could time out and fail while the model was loading.
+
+### What an agent must do
+
+- **The Smith and Reeve** (the keepers): take 2.71.0, and the rule applies where they keep.
+  - The Smith's Settings should show the NPU's idle minutes as the rule gives them on this PC (`npuIdleStopMinutes({program, kind, ramBytes, otherwise})`).
+  - It should write `npuIdleStopMinutes` to config.json only when the person changes it: a value there overrides the rule.
+- **Envoy**: pass `onWaking` on caption requests and show `w.line` where the person is waiting, in the setting-up card's style.
+- **Manor's chat**: it can show `w.line` in place of its own "getting the model ready".
+- Nothing else: config.json's format is unchanged, and an agent that does nothing gets the new timings and the longer first wait.
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
