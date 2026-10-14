@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.35.61
+## 0.35.74
 
 **The Steward's kit 2.69.0: when the NPU can't do something, the graphics card does it, only while it's needed.**
 
@@ -22,6 +22,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. How long the graphics card may rest unused before it unloads is the same setting as before (10 minutes by default).
 - A graphics card already set up with its chat and search models keeps them: nothing is deleted, and the staff simply don't use them beside the NPU while the switch is off.
+
+## 0.35.73
+
+**A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**
+
+### What changed
+
+- On a PC where the Steward's work folder is a link to another drive, the Steward didn't recognise its own work folders, so it never told git they were gone. The next time it needed the same folder, git refused it ("a missing but already registered worktree"), and that release, kit trial or test failed every round. On 2026-10-13 this held up the Steward's kit trial, every Steward PR waiting behind it, and Reeve's release for hours. The Steward now finds its work folders through the link.
+- Whenever it clears a work folder a stopped job left behind, it also makes git forget it. If git still refuses a work folder that has gone missing some other way, the Steward clears git's record and tries once more. This covers releases, kit trials, catch-ups, merge trains, refreshes, PR tests and the Steward's own release.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.35.60
 
