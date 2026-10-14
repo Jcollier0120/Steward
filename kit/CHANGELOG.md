@@ -113,6 +113,41 @@ This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which
 
 - Nothing: take the kit and release as usual. Setup no longer fails when the NPU does, so a Set up that showed an NPU error now finishes, with the graphics card or the processor doing that work and a note saying why.
 
+## 2.69.0
+
+**The graphics card on demand: beside an NPU, the card does only the work the NPU can't, and only while it's asked for.**
+
+This builds on 2.68.0, which it needs.
+
+### What's new
+
+- **The card on demand.** With Manor's "Use the graphics card for models when there's an NPU" off (its default), a graphics card beside an NPU now keeps the work no enabled NPU on the PC serves, instead of being left out altogether.
+  - Beside Intel's NPU, which can't run the vision model, the card does vision: the first vision request starts its server (`ensureServer`, as for any server), and the keeper stops it after `gpuIdleStopMinutes` unused (10 by default). The card's other servers stay stopped.
+  - Beside a Snapdragon's NPU, which chats, sees and makes embeddings, nothing is left for the card: it is left out, as before.
+  - An NPU whose chat or embeddings failed at setup (2.68.0's fallback) leaves that work to the card the same way; with no card, to the processor where it is set up for it.
+  - Vision with no card and no processor set up for it stays unavailable, with the same plain note as before ("no vision model …").
+- **`card-check.ts`**, a check for a real PC with an NPU that can't see and a card that can: a chat question (the NPU's), a vision question (the card's, its server seen to start), then the keeper's looks with a short idle time until that server is stopped as unused, not sooner; then chat again on the NPU, and none of the card's other servers started. It prints PASS or FAIL and exits 0 or 1; it changes nothing in config.json. `node <agent>\src\kit\card-check.ts [--idle-minutes 1] [--out <file>]`.
+- core: **`npuServes(list)`**, the kinds of work an enabled NPU in the list serves.
+- keeper.ts: **`cardOnDemand(accs, withNpu)`**, what each card still does while it's kept out beside the NPU (`[{ id, kinds }]`).
+- **Setup by the same rule.** With the switch off, setup sets up a card beside an NPU only for the work no NPU serves after the NPU's own setup and tests (core's new **`cardWorkBesideNpu(kinds, npu)`**, which `withoutGpuBesideNpu` uses too, so setup, requests and the keeper can't drift apart). On an Intel PC the card gets vision alone: its chat and embedding models (about 3.1 GB) aren't downloaded. The plan says so per card (`SetupPlan.leftToNpu`, `SetupTarget.leftToNpu`, and a line in `describePlan`).
+  - The NPU failing a kind at setup: the card is set up for that kind too, in setup's second pass (before the processor's, which still serves a PC with no card). The NPU failing outright: the card gets everything, as before.
+  - The switch turned on: the next Set up fills in the card's other kinds; nothing re-runs setup on the switch itself. A card the NPU leaves nothing to (a Snapdragon's) is set up whole, as before, so the switch stays offered for it.
+  - `setupCommand` reads the switch (manor.ts's `gpuWithNpu()`) unless given `gpuWithNpu`; with no Manor it's the agent's default (on), as before. `planSetup` takes `gpuWithNpu` (left out: every card, as before). Kinds asked for by name are set up as asked.
+
+### What changed
+
+- core: **`withoutGpuBesideNpu(list, false)`** keeps a card with only the work no enabled NPU serves (a copy; the same object when that's all it does; dropped when that's nothing). A reranker stays off the card beside an NPU. A vision endpoint on its chat endpoint's server keeps that server when chat goes.
+- keeper.ts: `reapedServers(…, { keepGpuOut })` marks `keptOut` only the card's servers for the NPU's work; the on-demand ones get the card's idle time like any other. `gpuKeptOut` is true when a card is kept out of any work. The keeper still never starts a stopped server itself.
+- npu.ts: `new Npu(cfg, { gpuWithNpu })` takes Manor's switch as a check gives it. A request for the card by name, for work the NPU does, still says the card isn't used beside the NPU.
+- setup.ts: a card set up again keeps the entries it had for the kinds left to the NPU (`keepingAddOns`, `keptKinds`), and their ports: an install whose card has its chat and embeddings keeps them, files and all; the keeper keeps them out. A card's kinds it had take their ports before one it gains, so a card set up again never moves a server it kept.
+- npu-server.ts: **`longFetch`**, fetch over node:http for a local server, limited only by the request's own signal. Node's fetch gave up after 300 s without headers (undici's headersTimeout), although `npu-check`'s steps allow 10 minutes: `serverClient` (the NPU check and the benchmark) now uses it, and a request past its limit still says "no answer in N s".
+
+### For an agent
+
+- Nothing: take the kit and release as usual. On an Intel PC with a graphics card, vision starts working with Manor's default settings, on the card, when something asks for it; nothing runs on the card otherwise.
+- An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
+- An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

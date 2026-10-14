@@ -32,6 +32,27 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each agent picks up the new wording with its next kit update.
 
+## 0.35.74
+
+**The Steward's kit 2.69.0: when the NPU can't do something, the graphics card does it, only while it's needed.**
+
+### What's new
+
+- On a PC whose NPU can't look at pictures (Intel's), the staff can now describe images and screenshots: the graphics card loads its vision model when they're asked to, and unloads it after 10 minutes unused, so it isn't kept running and drawing power.
+- The same goes for any work the NPU couldn't take on at Set up: the graphics card does it when asked, then rests.
+- Set up downloads less beside an NPU: with "Use the graphics card for models when there's an NPU" off, the graphics card gets only the models for work the NPU can't do. On an Intel PC that's its vision model alone, about 3.1 GB less than before. If the NPU fails part of its test at Set up, the graphics card is set up for that part instead.
+
+### What changed
+
+- With "Use the graphics card for models when there's an NPU" off (the default), the graphics card is no longer left out altogether: it still never does the NPU's own work, and on a PC whose NPU does everything (a Snapdragon) it isn't used at all, as before.
+- The NPU check waits as long as each of its steps allows; before, a very slow answer gave up after 5 minutes.
+- Turning "Use the graphics card for models when there's an NPU" on later: press "Set up again" for local AI, and it sets up the rest of the graphics card's models then.
+
+### Before you update
+
+- Nothing: it updates itself as usual. How long the graphics card may rest unused before it unloads is the same setting as before (10 minutes by default).
+- A graphics card already set up with its chat and search models keeps them: nothing is deleted, and the staff simply don't use them beside the NPU while the switch is off.
+
 ## 0.35.73
 
 **A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**

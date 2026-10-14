@@ -286,9 +286,12 @@ function noCandidate(skipped: Skipped[], first: { acc: Accelerator; reason: stri
 
 export class Npu {
   private cfg: AcceleratorConfig | { error: string };
+  private withNpu: () => boolean;
 
-  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators()) {
+  /** `o.gpuWithNpu`: Manor's switch as a check gives it, in place of Manor's settings read afresh each time. */
+  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean } = {}) {
     this.cfg = 'error' in cfg || 'accelerators' in cfg ? cfg : fromNpuConfig(cfg);
+    this.withNpu = o.gpuWithNpu ?? (() => gpuWithNpu().on);
     if (!('error' in this.cfg)) for (const a of this.cfg.accelerators) known.add(a.id);
   }
 
@@ -299,11 +302,12 @@ export class Npu {
 
   /**
    * The accelerators, in the order requests try them (none when there is a problem). With Manor's "Use the graphics
-   * card for models when there's an NPU" off and an NPU here, no graphics card (manor.ts's gpuWithNpu(), read afresh
-   * each time, and the core's withoutGpuBesideNpu): a request never goes to one, not even as a fallback.
+   * card for models when there's an NPU" off and an NPU here, a graphics card only for the work no NPU here serves
+   * (manor.ts's gpuWithNpu(), read afresh each time, and the core's withoutGpuBesideNpu): the NPU's own work never
+   * goes to one, not even as a fallback; the rest (vision, beside Intel's NPU) starts the card's server on demand.
    */
   get accelerators(): Accelerator[] {
-    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, gpuWithNpu().on);
+    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, this.withNpu());
   }
 
   get hasVision(): boolean {
@@ -405,7 +409,7 @@ export class Npu {
     const serving = usable.filter(asked);
     if (!serving.length) {
       // Only a graphics card set aside beside the NPU would do: say so, rather than that nothing serves it.
-      const aside = cfg.accelerators.find((a) => asked(a) && !usable.includes(a));
+      const aside = cfg.accelerators.find((a) => asked(a) && !usable.some((u) => u.id === a.id && asked(u)));
       if (aside) throw new NpuError(core.say.gpuSetAside(aside));
       throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
 import { calibrate, CALIBRATION, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
-import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
@@ -247,7 +247,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const env = o.env ?? process.env;
   const catalog = o.catalog ?? NPU_CATALOG;
   const now = o.io?.now ?? (() => performance.now());
-  const http = o.io?.fetch ?? fetch;
+  const http = o.io?.fetch ?? longFetch;
   const steps: CheckStep[] = [];
   const add = (s: CheckStep) => {
     steps.push(s);
