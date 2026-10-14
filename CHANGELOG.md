@@ -2,6 +2,25 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.10
+
+**A vouch or a PR test on the Steward's own code runs only the tests its change reaches, and its whole suite runs before every kit release.**
+
+### What changed
+
+- A changelog entry, a README or another Markdown file no longer runs most of the tests. Only code that reads that file from its own place counts, such as a test checking the Steward's own changelog. Code that reads the changelog of a worktree or a commit it's given doesn't.
+- In the Steward's own repository, a change to the kit runs the kit's tests and the tests of the code that uses the kit's copies in the repository, instead of the whole suite. A kit version step (`kit/VERSION` and `kit.json`'s pin) runs only the tests that check the versions agree. In an agent's repository a kit change still runs everything.
+- A file in a folder that code reads as a whole (`new URL('./core/', import.meta.url)`) now reaches that code, rather than running everything.
+- Measured on the Steward's last twelve merged PRs, a vouch now runs about 50 of 126 test files on average, down from all of them in seven cases out of twelve.
+
+### What's new
+
+- Before releasing a kit, which every agent takes, the Steward runs its own whole suite at that commit, unless it has already passed that exact code whole. A failure there holds the kit's release like any failed release: an alarm, and no retry until a new commit lands on main. The Steward's own releases aren't held for it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.73
 
 **A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**

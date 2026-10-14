@@ -1,4 +1,4 @@
-import type { Changed } from '../affected.ts';
+import { landsAt, type Changed } from '../affected.ts';
 import { gitMaybe } from '../git.ts';
 import type { Ctx } from './common.ts';
 import { releasedTree } from './trialpass.ts';
@@ -13,8 +13,6 @@ import { releasedTree } from './trialpass.ts';
 
 /** What each part needs, as tools/kit.ts fills them: node runs the core, the core takes the spec's rules, and so on. */
 const NEEDS: Record<string, string[]> = { node: ['core'], core: ['spec'], dotnet: ['core'], react: ['node', 'web'] };
-/** Where each part lands in an agent (tools/kit.ts's PARTS, under src/kit). */
-const LANDS: Record<string, string> = { node: 'src/kit', web: 'src/kit/web', spec: 'src/kit/spec', core: 'src/kit/core', dotnet: 'src/kit/dotnet', react: 'src/kit/react' };
 
 /** The parts an agent's kit.json takes (a Node agent's three when it names none) and the parts they need. Pure. */
 export function partsTaken(pinned: string[] | null): string[] {
@@ -23,18 +21,8 @@ export function partsTaken(pinned: string[] | null): string[] {
   return parts;
 }
 
-/**
- * Where a file of the kit tree lands in an agent taking `parts` (node/npu.ts at src/kit/npu.ts, LICENSE at
- * src/kit/LICENSE), or null for one it doesn't get or that changes with every kit: VERSION, the changelog, the kit's own
- * tests, a part it doesn't take. Pure.
- */
-export function landsAt(kitPath: string, parts: string[]): string | null {
-  const p = kitPath.replace(/\\/g, '/');
-  if (p === 'LICENSE') return 'src/kit/LICENSE';
-  const [part, ...rest] = p.split('/');
-  if (!rest.length || !parts.includes(part) || !(part in LANDS)) return null;
-  return `${LANDS[part]}/${rest.join('/')}`;
-}
+/** Where a file of the kit tree lands in an agent: affected.ts's, which follows the Steward's own kit to its copies too. */
+export { landsAt };
 
 export type KitReach = { none: string } | { files: Changed[]; why: string } | { all: string };
 

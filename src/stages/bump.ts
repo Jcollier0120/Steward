@@ -4,7 +4,7 @@ import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
-import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
+import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
@@ -14,6 +14,7 @@ import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, r
 import { linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { keepWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 
@@ -160,6 +161,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
       return `${step} failed (exit ${r.code})${testsLine(tests)}${networkNote(output)}`;
     }
   }
+  // The Steward's own checks passed whole: kept by tree, so a kit released from the same code doesn't run them again (whole.ts).
+  await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
   return null;
 }
 
@@ -202,7 +205,9 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
         .map(([status, file]) => ({ status, path: file }));
       patches = patchesByFile(patch);
     }
-    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '' });
+    // The Steward's own repository fills its kit from its kit\: a kit file reaches its copies there.
+    const kitFrom = kitFromOf(dir, scripts);
+    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '', ...(kitFrom ? { kitFrom } : {}) });
     if (a.all) return whole(a.why);
     if (!a.files.length) {
       scope.chose = 'no test reaches the change';
