@@ -60,6 +60,8 @@ async function shaOf(r: RemoteRepo, ref: string) {
 /** An employee whose remote is `r` (no checkout here unless given). */
 const emp = (id: string, r: RemoteRepo, more: Partial<Employee> = {}) => employee(more.checkout ?? path.join(home, 'nowhere', id), { id, name: id[0].toUpperCase() + id.slice(1), repo: r.key, ...more });
 const deps = (remotes: Record<string, RemoteRepo>, now = T0, device = A) => ({ device, now: () => now, remote: async (e: Employee) => remotes[e.id] ?? null });
+/** Turns begun afresh by a PC that has seen another (DESKTOP-ABC): three rounds long. Alone, they'd be half a day (LONG_TTL_S). */
+const fresh = () => writeFileSync(L.turnsFile(), JSON.stringify({ at: null, device: null, repos: {}, others: { [B.id]: { name: B.name, at: new Date(T0).toISOString() } } }));
 
 test('decide: free or run out is taken; its own renewed at half its time; a pin waits a day; a checkout beats none', () => {
   const me = { pc: A.id, checkout: true };
@@ -84,7 +86,7 @@ test("with no turns (the tests' default), every repository is this PC's, and not
 });
 
 test('no ref anywhere: the first look takes the turn, and every repository acts as before', async () => {
-  rmSync(L.turnsFile(), { force: true });
+  fresh();
   const r1 = remote();
   const r2 = remote();
   const t = await L.takeTurns([emp('clerk', r1), emp('porter', r2)], { run: realRun, settings, deps: deps({ clerk: r1, porter: r2 }) });
@@ -134,7 +136,7 @@ test('a PC with a checkout takes the turn from one without', async () => {
 });
 
 test('before each publishing act: still its own goes on; renewed near its end; taken by another PC meanwhile, it stops', async () => {
-  rmSync(L.turnsFile(), { force: true });
+  fresh();
   const r = remote();
   const clerk = emp('clerk', r);
   let now = T0;
@@ -227,7 +229,7 @@ function roundSetup(name: string) {
 const MERGE7 = ['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge'];
 
 test("a round with no ref anywhere merges exactly as before, and takes the turn; another PC's turn, it publishes nothing", async () => {
-  rmSync(L.turnsFile(), { force: true });
+  fresh();
   const s = roundSetup('round-fresh');
   const d = { device: A, now: () => T0, remote: async () => s.remoteRepo };
   const first = await runStage('round', { full: true }, { run: s.r.run, turns: d });
@@ -242,7 +244,7 @@ test("a round with no ref anywhere merges exactly as before, and takes the turn;
 });
 
 test('offline (the remote out of reach), a round still builds and tests: nothing local waits for a turn', async () => {
-  rmSync(L.turnsFile(), { force: true });
+  fresh();
   const s = roundSetup('round-offline');
   const out = await runStage('round', { full: true }, { run: s.r.run, turns: { device: A, now: () => T0, remote: async () => gone() } });
   assert.equal(out.error, undefined);
@@ -393,4 +395,81 @@ test("an unchanged turn record isn't read again, and a checkout's remote is read
   const found = await L.remoteFor(counting, settings, emp('clerk', r, { checkout }));
   assert.equal(found?.url, 'https://example.test/o/clerk.git');
   assert.deepEqual(asked, [], 'no git config --get');
+});
+
+test('alone (no other PC seen for a month), a turn is taken for half a day; once another PC is seen, for three rounds', async () => {
+  rmSync(L.turnsFile(), { force: true });
+  const r = remote();
+  await L.takeTurns([emp('clerk', r)], { run: realRun, settings, deps: deps({ clerk: r }) });
+  assert.equal((await recordOf(r))?.until, new Date(T0 + L.LONG_TTL_S * 1000).toISOString());
+  // Another PC's turn found in a second repository: this PC isn't alone any more.
+  const r2 = remote();
+  await write(r2, { pc: B.id });
+  const porter = emp('porter', r2);
+  await L.takeTurns([porter], { run: realRun, settings, deps: deps({ porter: r2 }) });
+  assert.deepEqual(Object.keys(L.loadTurns().others ?? {}), [B.id]);
+  const r3 = remote();
+  await L.takeTurns([emp('herald', r3)], { run: realRun, settings, deps: deps({ herald: r3 }) });
+  assert.equal((await recordOf(r3))?.until, new Date(T0 + TTL).toISOString());
+  // Its turn run out and taken here: the repository forgets DESKTOP-ABC, this PC doesn't.
+  const later = T0 + TTL + 3 * MIN;
+  await L.takeTurns([porter], { run: realRun, settings, deps: deps({ porter: r2 }, later) });
+  assert.equal((await recordOf(r2))?.pc, A.id);
+  assert.equal(L.loadTurns().others?.[B.id]?.name, B.name);
+  assert.equal(L.aloneHere(L.loadTurns(), A, later), false);
+  assert.equal(L.aloneHere(L.loadTurns(), A, later + L.ALONE_AFTER_MS), true, 'a month on with no sign of it: alone again');
+});
+
+test('on GitHub, the turn refs are read through its API, not git; any other remote, or GitHub failing, with git', async () => {
+  const ran: string[][] = [];
+  const counting: Runner = (cmd, args, opts) => (ran.push(args), realRun(cmd, args, opts));
+  const asked: string[] = [];
+  const answer = [
+    { ref: L.RELEASE_PC_REF, object: { sha: 'a'.repeat(40) } },
+    { ref: L.CLAIMS_REF, object: { sha: 'b'.repeat(40) } },
+    { ref: 'refs/manor/other', object: { sha: 'c'.repeat(40) } },
+  ];
+  const api = () => ({ rest: async (method: string, at: string) => (asked.push(`${method} ${at}`), answer) }) as any;
+  const read = L.githubTurnRefs(counting, api);
+  const onGitHub: RemoteRepo = { key: 'jcollier0120/clerk', url: 'https://github.com/Jcollier0120/Clerk.git', scratch };
+  assert.deepEqual(await read(onGitHub, [L.RELEASE_PC_REF, L.CLAIMS_REF]), { ok: true, refs: { [L.RELEASE_PC_REF]: 'a'.repeat(40), [L.CLAIMS_REF]: 'b'.repeat(40) } });
+  assert.deepEqual(asked, ['GET repos/Jcollier0120/Clerk/git/matching-refs/manor']);
+  assert.deepEqual(ran, [], 'no git started');
+  // Another remote: git ls-remote, as before.
+  const r = remote();
+  await write(r, { pc: B.id });
+  const there = await read(r, [L.RELEASE_PC_REF]);
+  assert.ok(there.ok && there.refs[L.RELEASE_PC_REF]);
+  assert.ok(ran.some((a) => a[0] === 'ls-remote'));
+  assert.equal(asked.length, 1, 'GitHub not asked of it');
+  // GitHub failing: git, as before (here a stand-in, so nothing leaves this PC).
+  ran.length = 0;
+  const lsOut = `${'d'.repeat(40)}\t${L.RELEASE_PC_REF}\n`;
+  const stand: Runner = async (cmd, args, opts) => ((ran as string[][]).push(args), args[0] === 'ls-remote' ? { code: 0, out: lsOut, err: '' } : realRun(cmd, args, opts));
+  const failing = L.githubTurnRefs(stand, () => ({ rest: async () => Promise.reject(new Error('GitHub GET …: 502')) }) as any);
+  assert.deepEqual(await failing(onGitHub, [L.RELEASE_PC_REF]), { ok: true, refs: { [L.RELEASE_PC_REF]: 'd'.repeat(40) } });
+  assert.ok(ran.some((a) => a[0] === 'ls-remote'));
+
+  assert.equal(L.githubRepoOf('https://github.com/Jcollier0120/Clerk'), 'Jcollier0120/Clerk');
+  assert.equal(L.githubRepoOf('git@github.com:Jcollier0120/Clerk.git'), 'Jcollier0120/Clerk');
+  assert.equal(L.githubRepoOf('https://someone@github.com/o/r.git/'), 'o/r');
+  assert.equal(L.githubRepoOf('https://gitlab.com/o/r.git'), null);
+  assert.equal(L.githubRepoOf(path.join(home, 'remote-1.git')), null);
+});
+
+test("a round's two looks at the turns are one guard: each employee is asked of the look that took its turn", async () => {
+  fresh();
+  const r1 = remote();
+  const r2 = remote();
+  await write(r2, { pc: B.id });
+  const clerk = emp('clerk', r1);
+  const porter = emp('porter', r2);
+  const first = await L.takeTurns([clerk], { run: realRun, settings, deps: deps({ clerk: r1 }) });
+  const second = await L.takeTurns([porter], { run: realRun, settings, deps: deps({ porter: r2 }) });
+  const g = L.joinGuards(first.guard, second.guard)!;
+  assert.equal(await g.ok(clerk), true);
+  assert.equal(await g.ok(porter), false);
+  assert.deepEqual([...g.skip], ['porter']);
+  assert.equal(await g.ok(emp('nobody', r1)), false, 'no look took a turn for it');
+  assert.equal(L.joinGuards(null, first.guard), first.guard);
 });

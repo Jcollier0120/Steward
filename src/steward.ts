@@ -37,7 +37,7 @@ import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from 
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
 import { loadTending, tend, type OpenAgent, type StartManor } from './tend.ts';
 import { loadUnstick, manorDryRun, unstick, type DryRun, type ManorUpdates, type AllowAgain, type PressUpdate, type RolledBack } from './unstick.ts';
-import { loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
+import { githubTurnRefs, joinGuards, loadTurns, remoteFor, takeTurns, type TurnsDeps } from './lease.ts';
 import { lookForStrangers } from './strangers.ts';
 import { githubReady, hostOf, scmNow, type Host, type ScmLook } from './scm.ts';
 import { hostFor, must } from './hosts/index.ts';
@@ -221,12 +221,14 @@ export const releasedSomething = (r: EmployeeResult) => r.outcome === 'done' && 
 
 /**
  * The staff's table, refreshed and kept in staff.json: GitHub's side from `glance` (default: the stage's, ctx.glance),
- * else asked employee by employee; each checkout's side from git, fetching only a branch that has moved.
+ * else asked employee by employee; each checkout's side from git, fetching only a branch that has moved, and made again
+ * only for the employees whose repository, clone or Settings moved since.
  */
 export async function refreshStaff(ctx: Ctx, o: { fetch?: boolean; glance?: Glance | null } = {}): Promise<Staff> {
   const c = o.glance === undefined ? ctx : { ...ctx, glance: o.glance };
   const chosen = chooseKit(c.kit);
-  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool(), self: selfForStaff(c) });
+  // The table it had: a row whose repository, clone and Settings haven't moved stands (staff.ts's rowKey).
+  const s = await staff(c, { fetch: o.fetch ?? true, kit: 'version' in chosen ? chosen.version : null, kitNote: 'error' in chosen ? chosen.error : chosen.note, tool: stewardTool(), self: selfForStaff(c), before: loadStaff() });
   writeJson(staffFile(), s);
   try {
     pruneKitsNow(s, c.kit);
@@ -248,7 +250,8 @@ function selfForStaff(ctx: Ctx): Employee | null {
 
 /**
  * After a quiet round: when GitHub says of every employee what it said when the staff's table was made, the table is
- * still right, and is only marked as checked; true then. False when it needs making again.
+ * still right, and is only marked as checked; true then. False when it needs making again. The Steward's own row too,
+ * when the glance reads its repository (glance.ts's stewardPrsAsked).
  */
 export function markStaffChecked(glance: Glance, employees: Employee[], now = new Date()): boolean {
   const s = loadStaff();
@@ -257,6 +260,8 @@ export function markStaffChecked(glance: Glance, employees: Employee[], now = ne
     const g = glance.repos[e.id];
     if (!g || !s.rows.some((r) => r.id === e.id) || s.seen[e.id] !== repoSig(g)) return false;
   }
+  const own = glance.repos[APP.id];
+  if (own && s.rows.some((r) => r.self) && s.seen[APP.id] !== repoSig(own)) return false;
   writeJson(staffFile(), { ...s, checked: now.toISOString() });
   return true;
 }
@@ -363,20 +368,26 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
 }
 
-/** The turns this stage takes (lease.ts): StageOptions' own, else this PC's; none under node --test unless given. */
-const turnsDeps = (o: StageOptions): TurnsDeps | null => (o.turns !== undefined ? o.turns : process.env.NODE_TEST_CONTEXT ? null : {});
+/**
+ * The turns this stage takes (lease.ts): StageOptions' own, else this PC's, their refs read through GitHub's API where
+ * they're on GitHub (githubTurnRefs); none under node --test unless given.
+ */
+const turnsDeps = (o: StageOptions, run: Runner): TurnsDeps | null => (o.turns !== undefined ? o.turns : process.env.NODE_TEST_CONTEXT ? null : { refs: githubTurnRefs(run) });
 
 /**
  * The turns a merge, release or round takes with this PC's others (lease.ts), before it publishes: on the employees
  * asked about, the repositories refreshed after releases, and the Steward's own while it merges or releases itself.
  * Sets ctx.lease; gives back the employees asked about that are this PC's to publish for, and a line for each that isn't.
  * Only publishing waits on a turn: nothing here stops a build, a test, a tasting or a bump.
+ *
+ * `more`: a round's second look, once its plan says which employees it looks at (the first took the Steward's own and
+ * the refreshed repositories'): those alone, added to the turns it has (joinGuards).
  */
-async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
-  const refreshed = ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
-  const deps = turnsDeps(o);
+async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null, more = false): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
+  const refreshed = more ? [] : ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
+  const deps = turnsDeps(o, ctx.run);
   const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { run: ctx.run, settings: ctx.settings, log: ctx.log, deps });
-  ctx.lease = t.guard;
+  ctx.lease = more ? joinGuards(ctx.lease, t.guard) : t.guard;
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
   // takeTurns keeps one entry per id, so a Steward that is also its own employee comes back as that employee: match by id.
@@ -425,7 +436,10 @@ async function selfRound(ctx: Ctx, o: StageOptions, moved = false): Promise<Empl
   try {
     const facts = ctx.glance && !moved ? { main: ctx.glance.stewardMain ?? null, tags: ctx.glance.stewardReleases?.map((r) => r.tagName) ?? null } : await selfFactsAlone(ctx, checkout);
     // Holding its own repository, as an employee's release holds its (stages/slots.ts).
-    return await withRepo(ctx.log, APP.id, () => releaseSelf(ctx, { checkout, ...facts }));
+    const out = await withRepo(ctx.log, APP.id, () => releaseSelf(ctx, { checkout, ...facts }));
+    // Released: the glance no longer says how its repository is (its row in the staff's table reads it).
+    if (ctx.glance && out.some((r) => r.outcome === 'done')) delete ctx.glance.repos[APP.id];
+    return out;
   } catch (e) {
     ctx.log(`[steward] its own releases: ${(e as Error).message}`);
     return [];
@@ -528,11 +542,13 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
-          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
+          // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it. A round
+          // takes the Steward's own and the refreshed repositories' now, and the employees' once its plan says which it
+          // looks at (below): it publishes nothing to the rest.
           const whole = !ask.employees?.length;
-          const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
+          const turns = await takeTurnsFor(ctx, o, round ? [] : picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
           turnsOn = turns.on;
-          const acting = turns.acting;
+          let elsewhere = turns.elsewhere;
           // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
           // the head of its line (merge.ts), and the new kit released at once (selfRound), so the agents' PRs that take
           // that kit are tested after it is there, in this round. Not in a stage asked about some of them.
@@ -558,14 +574,18 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               log(`couldn't read the kit's releases again: ${(err as Error).message}`);
             }
           }
-          let employees = acting;
+          let employees = turns.acting;
           if (round) {
-            plan = planRound({ employees: acting, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            // Those another PC has its turn in are left to it, and not kept as seen (afterRound): looked at again next round.
+            const looked = await takeTurnsFor(ctx, o, plan.look, null, true);
+            plan = { ...plan, look: looked.acting };
+            elsewhere = looked.elsewhere;
             employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
           const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
-          out.results = [...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
+          out.results = [...elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
           held.push(
             ...merged.flatMap((r) => {
               const employee = employees.find((e) => e.id === r.id);

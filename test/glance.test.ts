@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { APP } from '../src/app.ts';
 import { GithubLimited } from '../src/budget.ts';
-import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, queryTimedOut, readGlance, repoSig, takeGlance, type Glance } from '../src/glance.ts';
+import { glanceQuery, headsFromGraph, PER_QUERY, PR_PAGE, prFromGraph, queryTimedOut, readGlance, repoSig, stewardPrsAsked, takeGlance, type Glance } from '../src/glance.ts';
 import type { Runner } from '../src/run.ts';
 import { appReleasesIn, parsePrs } from '../src/stages/staff.ts';
 import { employee, ok } from './helpers.ts';
@@ -96,6 +97,34 @@ test(`one gh call for up to ${PER_QUERY} employees, one more for each ${PER_QUER
   assert.equal(Object.keys(g.repos).length, PER_QUERY + 2);
   assert.deepEqual(g.stewardReleases, []);
   await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'gh: To get started with GitHub CLI, please run: gh auth login' }), '.', { employees: [porter], stewardRepo: 'x/y' }), /gh auth login/);
+});
+
+test("on a PC that merges the Steward's own PRs or shows its repository, the glance reads it as an employee's, under its own id; elsewhere as before", async () => {
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: true }), true);
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: false, releasesCastellan: true }), true);
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: false, releasesCastellan: false }), false);
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: '', mergeSelf: true }), false, 'no clone of it: nothing merges it here');
+  assert.doesNotMatch(glanceQuery([porter], 'Jcollier0120/Steward'), /steward: repository\([^{]*\) \{ pullRequests/);
+  assert.match(glanceQuery([porter], 'Jcollier0120/Steward', true), /steward: repository\([^{]*\) \{ pullRequests\(states: OPEN, first: 25, .* releases\(first: 100, .*tagCommit \{ oid \} .* main: ref/);
+  assert.match(glanceQuery([], 'Jcollier0120/Steward', true), /^query \{ /, 'its PRs asked in its own part: no fragment needed');
+
+  const own = { ...graphRepo(), ref: undefined, main: { target: { oid: 'd'.repeat(40) } }, kitVersion: { text: '2.9.0\n' }, packageJson: { text: '{"version":"0.35.1"}' }, pullRequests: { totalCount: 1, nodes: [graphPr()] } };
+  const queries: string[] = [];
+  const g = await takeGlance(async (_cmd, args) => (queries.push(args[3]), ok({ data: { steward: own, e0: graphRepo() } })), '.', { employees: [porter], stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: true });
+  assert.match(queries[0], /steward: repository\([^{]*\) \{ pullRequests/);
+  assert.equal(g.repos[APP.id].head, 'd'.repeat(40), "its main's head");
+  assert.deepEqual(g.repos[APP.id].prs.map((p) => p.number), [7]);
+  assert.equal(g.repos[APP.id].releases[0].commit, 'b'.repeat(40));
+  assert.deepEqual(g.stewardReleases, [{ tagName: 'v0.4.1', isDraft: false, publishedAt: '2026-10-04T10:00:00Z' }, { tagName: 'v0.4.2', isDraft: true }], 'its releases as before, with when each was published (0.35.68)');
+  assert.deepEqual(g.stewardMain, { head: 'd'.repeat(40), kit: '2.9.0', version: '0.35.1' });
+  assert.deepEqual(Object.keys(g.errors), []);
+
+  const many = empty();
+  readGlance([], JSON.stringify({ data: { steward: { ...own, pullRequests: { totalCount: PR_PAGE + 1, nodes: [graphPr()] } } } }), 'Jcollier0120/Steward', many, new Date(), APP.id);
+  assert.ok(!(APP.id in many.repos), 'more open than a glance reads: asked of GitHub as before');
+  const notAsked = empty();
+  readGlance([], JSON.stringify({ data: { steward: own } }), 'Jcollier0120/Steward', notAsked);
+  assert.ok(!(APP.id in notAsked.repos), 'not asked: not filed');
 });
 
 test("each query's rateLimit is kept: what the glance cost, summed, and what GitHub said is left", async () => {

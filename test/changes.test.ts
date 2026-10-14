@@ -89,6 +89,30 @@ test('the first round looks at everyone; the next, with nothing new, asks GitHub
   assert.notEqual(staff.checked, staff.at, "the table is only marked as checked: GitHub said nothing new");
 });
 
+test('a round takes its turn (lease.ts) only in a repository it looks at: a quiet one is asked nothing, not even that', async () => {
+  const { loadTurns } = await import('../src/lease.ts');
+  const { lsRemote } = await import('../src/remote-ref.ts');
+  const asked: string[] = [];
+  const turns = {
+    device: { id: 'aaaaaaaa-0000-4000-8000-000000000001', name: 'LAPTOP' },
+    remote: async () => ({ key: 'jcollier0120/fake', url: f.origin, scratch: path.join(home, 'turns.git') }),
+    refs: async (r: { key: string; url: string; scratch: string }, refs: string[]) => (asked.push(r.key), lsRemote(realRun, r, refs)),
+  };
+  const go = (full: boolean) => {
+    calls = [];
+    return runStage('round', full ? { full: true } : {}, { run, tell, turns });
+  };
+  const looked = await go(true);
+  assert.equal(looked.error, undefined);
+  assert.deepEqual(asked, ['jcollier0120/fake'], 'looked at: its turn read, and taken');
+  assert.equal(loadTurns().repos['jcollier0120/fake']?.status, 'here');
+  asked.length = 0;
+  const quiet = await go(false);
+  assert.deepEqual(asked, [], 'quiet: its turn not read');
+  assert.deepEqual(git(), [], 'and no git at all');
+  assert.deepEqual(quiet.results.map((r) => r.message), ['nothing new on GitHub since the last round']);
+});
+
 test('a version pushed to the branch is new: that round looks, releases it, and tells the pages that want to know', async () => {
   raise('0.4.0', '0.4.1');
   const out = await round();
@@ -168,4 +192,21 @@ test("with repositories, a round does their work and keeps the staff's pages up 
   assert.deepEqual(gh().map((c) => c.slice(1, 3))[0], ['api', 'graphql'], 'GitHub asked about the employee');
   assert.deepEqual(opened, ['porter']);
   assert.ok(out.results.some((r) => r.id === 'porter' && r.outcome === 'done' && r.message.startsWith('tend: ')));
+});
+
+test("a quiet round keeps the staff's table while GitHub says what it said of everyone, the Steward's own repository too", async () => {
+  const { markStaffChecked, staffFile: file } = await import('../src/steward.ts');
+  const { repoSig } = await import('../src/glance.ts');
+  const { APP } = await import('../src/app.ts');
+  const e = { id: 'quiet' } as any;
+  const theirs = { head: 'a'.repeat(40), prs: [], releases: [] };
+  const own = { head: 'b'.repeat(40), prs: [{ number: 1 }], releases: [] };
+  const table = { rows: [{ id: 'quiet' }, { id: APP.id, self: true }], seen: { quiet: repoSig(theirs), [APP.id]: repoSig(own) } };
+  const glance = (o: any) => ({ at: '', stewardReleases: null, errors: {}, repos: { quiet: theirs, ...o } });
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({ [APP.id]: own }) as any, [e]), true);
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({}) as any, [e]), true, "its repository not read: as before, the employees' alone");
+  writeFileSync(file(), JSON.stringify(table));
+  assert.equal(markStaffChecked(glance({ [APP.id]: { ...own, prs: [{ number: 1 }, { number: 2 }] } }) as any, [e]), false, 'a new PR to the Steward: the table is made again');
 });

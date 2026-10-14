@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.35.78
+
+**A quiet round starts about two git processes instead of over a hundred.**
+
+### What changed
+
+- Turns are read only for the repositories the round looks at, through GitHub's API from the Steward's own process, instead of one `git ls-remote` per repository every round.
+- A PC that has seen no other PC for a month takes its turns for half a day, so it renews them twice a day instead of every few rounds.
+- Version queues fetch a repository only when GitHub says its main branch has moved.
+- The staff table rebuilds only the rows whose repository changed, and checking a checkout for uncommitted work no longer lists untracked files.
+- On a PC that merges the Steward's own pull requests, the round reads them in the same GitHub query as everyone else's, so merging them and showing the Steward's row in the staff table no longer ask GitHub separately. A new pull request to the Steward now refreshes its row in the table, too.
+- Ports are read from each clone again only after its branch has moved.
+- Your PC should be noticeably quieter: far fewer git windows and credential checks in the background.
+
+### Before you update
+
+- If you add a second PC later, it takes over each repository's turn when the first PC's half-day turn runs out, or at once with **Do it here**. Otherwise nothing: it updates itself as usual.
+
 ## 0.35.73
 
 **A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**
