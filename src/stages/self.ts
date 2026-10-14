@@ -148,7 +148,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         if (dirty) return selfResult('failed', `the worktree at ${at} isn't clean (${dirty.split('\n').slice(0, 3).join(', ')}), so ${step.tag} wasn't released`, { version: step.version, commit: at });
       }
       // Its release goes to the releases repository too, as Settings say (MANOR_RELEASES_REPO, the kit's release.ts).
-      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: !ctx.fast });
+      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
       exchequer ||= exchequerNote(`${r.out}\n${r.err}`);

@@ -85,14 +85,14 @@ const USAGE = `${APP.id}: ${APP.role}
                    Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
-  vouch [<pr number>] [--fast]
+  vouch [<pr number>]
                    in the clone a PR was pushed from, once it is pushed: run the repository's checks (Settings')
                    at HEAD, which must be the PR's head with nothing uncommitted, and once they pass, record it
                    on that commit on GitHub (status steward/tested). The Steward then merges the PR without
                    testing it again, unless it is pushed to first. Without a number: the PR for this branch.
-                   The checks are held to half the processor (Manor's checksPace); --fast lifts that.
+                   The checks run at the checks pace, a share of the processor (Manor's Settings change it).
                    When the Assayer already passed every check on exactly HEAD's tree (same
-                   dependencies and kit, within a day), nothing runs again: its pass is taken
+                   dependencies and kit, within a day), nothing runs again: its pass is taken.
   claims [--json]  the versions claimed and not yet landed
   Only on the PC Castellan is made on (elsewhere they say so, and do nothing):
   claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]
@@ -377,16 +377,17 @@ switch (cmd) {
     break;
   }
   case 'vouch': {
-    // --fast: its checks at full speed, not held to the checks pace (kit/checks-pace.ts).
-    const fast = rest.includes('--fast');
+    // Its checks run at the checks pace (kit/checks-pace.ts). --fast, which once lifted that, is gone: Manor's Settings
+    // pace is the only way out. Said once rather than refused, so a script that still passes it keeps working.
+    if (rest.includes('--fast')) console.log("--fast is gone: the checks run at Manor's checks pace (Settings), the only way to change it");
     const words = rest.filter((w) => w !== '--fast');
     const n = words[0];
     if (words.length > 1 || (n !== undefined && !/^#?\d+$/.test(n))) {
-      console.error('vouch takes at most a PR number, and --fast, in the clone the PR was pushed from: vouch 134, or vouch for the PR of this branch');
+      console.error('vouch takes at most a PR number, in the clone the PR was pushed from: vouch 134, or vouch for the PR of this branch');
       process.exitCode = 2;
       break;
     }
-    const ctx = { ...(await context({ glance: false, team: false })), fast };
+    const ctx = await context({ glance: false, team: false });
     const v = await vouch(ctx, { dir: process.cwd(), ...(n ? { pr: Number(n.replace('#', '')) } : {}), say: (line) => console.log(line) });
     console[v.ok ? 'log' : 'error'](v.message);
     // Its round now, so the PR merges in minutes rather than at the next round.

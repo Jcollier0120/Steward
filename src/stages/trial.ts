@@ -382,7 +382,7 @@ const TRY_BYTES = 3 * 1024 ** 3;
  * more; never more than the memory free now holds at TRY_BYTES each (at least one). A try is an agent's install, its kit
  * filled and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
  * average, and two at a time left the trial waiting on itself. Their commands run at the kit's checks pace (Steward
- * 0.35.64), in one job for the PC with one processor cap: more tries at once share that cap rather than adding to it, so
+ * 0.36.8), in one job for the PC with one processor cap: more tries at once share that cap rather than adding to it, so
  * the processor is held to it whatever this says, and memory stays the limit. Pure.
  */
 export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem()): number =>

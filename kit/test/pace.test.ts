@@ -36,16 +36,15 @@ test("the pace: Manor's backgroundPace, gentle unless it says; full under node -
   assert.equal(pace('full', path.join(home, 'no-manor'), { NODE_TEST_CONTEXT: 'child', MANOR_PACE: 'gentle' }), 'gentle');
 });
 
-test('priority: below normal for a scheduled round at a gentle pace; normal when full, or when someone asked for it', () => {
+test('priority: below normal at a gentle pace, normal at a full one; the setting alone decides', () => {
   const set: number[] = [];
   const to = (v: number) => void set.push(v);
   const { PRIORITY_BELOW_NORMAL, PRIORITY_NORMAL } = os.constants.priority;
-  assert.equal(setPriorityFor('gentle', false, to), true);
-  setPriorityFor('gentle', true, to);
-  setPriorityFor('full', false, to);
-  assert.deepEqual(set, [PRIORITY_BELOW_NORMAL, PRIORITY_NORMAL, PRIORITY_NORMAL]);
+  assert.equal(setPriorityFor('gentle', to), true);
+  setPriorityFor('full', to);
+  assert.deepEqual(set, [PRIORITY_BELOW_NORMAL, PRIORITY_NORMAL]);
   assert.equal(
-    setPriorityFor('gentle', false, () => {
+    setPriorityFor('gentle', () => {
       throw new Error('refused');
     }),
     false,
@@ -130,16 +129,18 @@ test('the gentle script: compiles the helper only when asked to, to a name of it
   assert.match(first, /\[KitGentle\]::Set\(42, \$false, 1111\)/);
 });
 
-test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take', { skip: process.platform !== 'win32' }, async () => {
+test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take, and the worker joins its job', { skip: process.platform !== 'win32' }, async () => {
   const { spawn } = await import('node:child_process');
   const { readFileSync: read } = await import('node:fs');
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
   const source = read(new URL('./fixture/src/kit/gentle.cs', import.meta.url), 'utf8');
   const dll = path.join(home, 'gentle-test.dll');
-  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true });
+  // Alive for longer than the three calls can take: the first compiles the DLL, a minute and more at the checks pace on a
+  // busy PC. Ended below.
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 900000)'], { stdio: 'ignore', windowsHide: true });
   try {
-    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, source), { timeoutMs: 120_000 })).trim(), 'eco io cap');
-    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, null))).trim(), 'eco io cap', 'again: the same job');
+    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, source), { timeoutMs: 120_000 })).trim(), 'eco io cap worker');
+    assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, null))).trim(), 'eco io cap worker', 'again: the same job, the worker in it already');
     assert.equal((await powershell(gentleScript(child.pid!, false, 2500, dll, null))).trim(), 'eco io cap', 'lifted');
   } finally {
     child.kill();
