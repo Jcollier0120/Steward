@@ -181,6 +181,25 @@ export function commonDir(repo: string): string | null {
   return existsSync(common) ? path.resolve(own, readFileSync(common, 'utf8').trim()) : own;
 }
 
+/**
+ * The branch a clone has checked out, from its HEAD file (a worktree's own, in its gitdir), as `git branch
+ * --show-current` says it: '' at a commit (detached). Null when the files don't say it plainly: then git is asked.
+ */
+export function headBranch(repo: string): string | null {
+  try {
+    const dotGit = path.join(repo, '.git');
+    if (!existsSync(dotGit)) return null;
+    const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
+    if (!gitdir) return null;
+    const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
+    const ref = /^ref:\s*refs\/heads\/(\S+)$/.exec(head);
+    if (ref) return ref[1];
+    return SHA.test(head) ? '' : null;
+  } catch {
+    return null;
+  }
+}
+
 /** packed-refs' names and commits (a peeled line, `^…`, belongs to the tag above it and isn't a ref). */
 function readPacked(common: string): Map<string, string> {
   const out = new Map<string, string>();

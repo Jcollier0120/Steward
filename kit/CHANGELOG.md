@@ -2,6 +2,205 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.72.1
+
+**The graphics card on demand: beside an NPU, the card does only the work the NPU can't, and only while it's asked for.**
+
+This builds on 2.68.0, which it needs.
+
+### What's new
+
+- **The card on demand.** With Manor's "Use the graphics card for models when there's an NPU" off (its default), a graphics card beside an NPU now keeps the work no enabled NPU on the PC serves, instead of being left out altogether.
+  - Beside Intel's NPU, which can't run the vision model, the card does vision: the first vision request starts its server (`ensureServer`, as for any server), and the keeper stops it after `gpuIdleStopMinutes` unused (10 by default). The card's other servers stay stopped.
+  - Beside a Snapdragon's NPU, which chats, sees and makes embeddings, nothing is left for the card: it is left out, as before.
+  - An NPU whose chat or embeddings failed at setup (2.68.0's fallback) leaves that work to the card the same way; with no card, to the processor where it is set up for it.
+  - Vision with no card and no processor set up for it stays unavailable, with the same plain note as before ("no vision model …").
+- **`card-check.ts`**, a check for a real PC with an NPU that can't see and a card that can: a chat question (the NPU's), a vision question (the card's, its server seen to start), then the keeper's looks with a short idle time until that server is stopped as unused, not sooner; then chat again on the NPU, and none of the card's other servers started. It prints PASS or FAIL and exits 0 or 1; it changes nothing in config.json. `node <agent>\src\kit\card-check.ts [--idle-minutes 1] [--out <file>]`.
+- core: **`npuServes(list)`**, the kinds of work an enabled NPU in the list serves.
+- keeper.ts: **`cardOnDemand(accs, withNpu)`**, what each card still does while it's kept out beside the NPU (`[{ id, kinds }]`).
+- **Setup by the same rule.** With the switch off, setup sets up a card beside an NPU only for the work no NPU serves after the NPU's own setup and tests (core's new **`cardWorkBesideNpu(kinds, npu)`**, which `withoutGpuBesideNpu` uses too, so setup, requests and the keeper can't drift apart). On an Intel PC the card gets vision alone: its chat and embedding models (about 3.1 GB) aren't downloaded. The plan says so per card (`SetupPlan.leftToNpu`, `SetupTarget.leftToNpu`, and a line in `describePlan`).
+  - The NPU failing a kind at setup: the card is set up for that kind too, in setup's second pass (before the processor's, which still serves a PC with no card). The NPU failing outright: the card gets everything, as before.
+  - The switch turned on: the next Set up fills in the card's other kinds; nothing re-runs setup on the switch itself. A card the NPU leaves nothing to (a Snapdragon's) is set up whole, as before, so the switch stays offered for it.
+  - `setupCommand` reads the switch (manor.ts's `gpuWithNpu()`) unless given `gpuWithNpu`; with no Manor it's the agent's default (on), as before. `planSetup` takes `gpuWithNpu` (left out: every card, as before). Kinds asked for by name are set up as asked.
+
+### What changed
+
+- core: **`withoutGpuBesideNpu(list, false)`** keeps a card with only the work no enabled NPU serves (a copy; the same object when that's all it does; dropped when that's nothing). A reranker stays off the card beside an NPU. A vision endpoint on its chat endpoint's server keeps that server when chat goes.
+- keeper.ts: `reapedServers(…, { keepGpuOut })` marks `keptOut` only the card's servers for the NPU's work; the on-demand ones get the card's idle time like any other. `gpuKeptOut` is true when a card is kept out of any work. The keeper still never starts a stopped server itself.
+- npu.ts: `new Npu(cfg, { gpuWithNpu })` takes Manor's switch as a check gives it. A request for the card by name, for work the NPU does, still says the card isn't used beside the NPU.
+- setup.ts: a card set up again keeps the entries it had for the kinds left to the NPU (`keepingAddOns`, `keptKinds`), and their ports: an install whose card has its chat and embeddings keeps them, files and all; the keeper keeps them out. A card's kinds it had take their ports before one it gains, so a card set up again never moves a server it kept.
+- npu-server.ts: **`longFetch`**, fetch over node:http for a local server, limited only by the request's own signal. Node's fetch gave up after 300 s without headers (undici's headersTimeout), although `npu-check`'s steps allow 10 minutes: `serverClient` (the NPU check and the benchmark) now uses it, and a request past its limit still says "no answer in N s".
+
+### For an agent
+
+- Nothing: take the kit and release as usual. On an Intel PC with a graphics card, vision starts working with Manor's default settings, on the card, when something asks for it; nothing runs on the card otherwise.
+- An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
+- An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
+
+## 2.71.3
+
+**An agent's small files cost a stat, not a read, while they are unchanged, and a write that would change nothing writes nothing: Manor's pings, the pace and round.json stop touching the disk for nothing.**
+
+### What changed
+
+- **`writeJson` leaves a file that holds exactly that JSON as it is** (store.ts): no temporary file, no rename, its modified time as it was. A file whose size differs is never read for the comparison. `{ always: true }` writes all the same, for a write whose time is read; the settings kit's save uses it, so a person's save of Settings still moves the file's time (the Steward's migration notes go by it).
+- **Reads are kept by what a stat says** (new `file-cache.ts`: `readText`, `readJsonFile`, `statOf`, `holds`, and `fileCounts` for tests and measurements). A file unchanged since this process read it (the same modified time, change time, size and file id) costs one stat; any change is read again at once. A file modified within 2 s of being read (`SETTLED_MS`) is read every time until it settles, so two changes in one tick of the file system's clock are never missed. Files over 1 MB are never kept, and at most 256 are. `readJson` goes through it and still parses afresh at every call.
+- **Manor's settings.json**, read by `pace()`, `agentsAtOnce()`, `manorLink()`, `developerOptions()`, `gpuWithNpu()`, `notifyPrefs()` and `manorProjects()`, and **the agent's own settings** (`readSettings()`, so `needsSettings()`), `duty()` and `ownDeveloperOptions()` all read through it. Each still answers what the file says now: a change in Manor's Settings applies at the next request or round, as before.
+- **`/api/ping` reads no file** while nothing has changed: measured with the fixture agent (a settings spec, one schedule held for a required setting), a ping went from 8 reads and 15 other file calls to 0 reads and 12 stats.
+- **A round held for the person** (its required settings, or an ended trial) is written to round.json when the hold starts or what it waits for changes, not at every interval (spec/ROUND.md): its `started` and `finished` are when the hold began. A reader takes an entry with `waiting` for an agent waiting for the person, however old.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that ages a file by its modified time, and writes it with `writeJson` with content that may not change, passes `{ always: true }`.
+
+## 2.71.2
+
+**A refused project's reason speaks of projects and the manor's own, never of employees.** To the person using the manor, the repositories in Manor's Settings are just their projects. They never think of the manor's own repositories as employees, so the refusal no longer says "an employee is looked after as staff".
+
+### What changed
+
+- **node/manor.ts:** `projectsFrom` gives "is <owner/name>, one of the manor's own: the manor looks after it itself, so it can't be a project", and for a checkout "is one of / inside one of / a folder holding one of the manor's own checkouts: the manor looks after those itself, so it can't be a project". The doc comments of `projectsFrom` and `manorProjects` call them the owner's projects. The rules themselves are unchanged.
+- **What an agent must do:** nothing, unless a test of its own matches the old words. Manor's server test matched the whole message: it now matches only up to "one of the manor's own" (Manor 0.16.144), so take that Manor before pinning this kit there.
+- **Its tests:** kit/test/manor.test.ts, which also checks that no refusal mentions an employee.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 2.71.1
+
+**Tests sign no commits (`unsigned-git.ts`, and `test-git.ts` for a test script's `--import`), and release builds are tested once, before a kit is published, not in every run.**
+
+### What's new
+
+- `unsigned-git.ts`: `unsignedGitVars(env)` gives the environment variables that turn git's `commit.gpgsign` and `tag.gpgsign` off (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`), after any the environment already has, and nothing when it has them; `unsignedGit(env)` adds them in place. With the person's own commit signing on (an SSH key, as the manor's owner has it), every throwaway commit a test makes starts ssh-keygen, and Defender scans each signing buffer: 461 in one run of the Steward's tests. The person's own settings are never touched.
+- `test-git.ts` sets them for a whole test run: `"test": "node --import=./src/kit/test-git.ts --test \"test/**/*.test.ts\""`. The `=` keeps the script one the Steward can narrow to the tests a change reaches. Nothing else imports it: it changes the environment as it loads.
+
+### What changed
+
+- The Steward runs every repository's checks with them, whatever the repository's test script says.
+- The kit's release tests build one release each, the minified one as released, and list the zip (`tar -t`) instead of unpacking it twice; the native test unpacks only what it checks. The other builds (readable, dirty, no announcement, native and dirty: there were five and two) run with `STEWARD_RELEASE_TESTS=1`: `npm run test:release`, and `tools/kit-release.ts --publish` before it publishes a kit (`--skip-release-tests` leaves them out). In the full suite under load the two tests took 524 s and 514 s, and set the time of every vouch.
+- The kit's tests that serve a page take a port nothing listens on (`kit/test/free-port.ts`: from 40000-48999, checked on 127.0.0.1 and ::1), never the fixture's own 17979. Every checkout's tests used 17979, so two test runs at once met there and one failed with EADDRINUSE.
+
+- `release.ts`, `npu-bench.ts` and `npu-check.ts` run when started from a folder reached through a junction or link: they compared the path they were started by with their own real path, and did nothing, silently, when the two differed.
+
+### For an agent
+
+- Nothing needed: the Steward's and the Assayer's checks already sign nothing. To make `npm test` run by hand sign nothing too, add `--import=./src/kit/test-git.ts` to its test script once it takes this kit.
+
+## 2.71.0
+
+**On a PC with little memory, the NPU's model server rests sooner when nobody uses it, and the first request after that waits for it to wake instead of failing.**
+
+### What's new
+
+- **The NPU's idle stop by the PC's memory** (`npu-vendors.json`'s `idleStop`, spec/NPU-VENDORS.md "Resting when unused"). With no `npuIdleStopMinutes` in config.json:
+  - under 20 GB of memory (`smallPcGb`; 16 GB shows as 15.3 to 15.9), each server stops after its route's own minutes: GenieX and its llama-server 5, OpenVINO Model Server's chat and embedding servers 5, FastFlowLM 10;
+  - 20 GB or more, or memory unknown: rules.json's 10, as before.
+  - A route's minutes are 20 times its cold start, never under 5 (`idleMinutesFor`): GenieX 15 s and OpenVINO Model Server 4 s measured, FastFlowLM taken as 30 s.
+  - `npuIdleStopMinutes` in config.json, when set, wins on any PC (0 never stops).
+  - None of the three servers can unload its model and keep running, so stopping is the unload. The next request starts it again.
+  - New in `npu-vendors.ts`: `idleMinutesFor`, `smallPc`, `routeOfServer`, `coldStartMsOf`, `npuIdleStopMinutes`; the route's `idleStop` (`coldStartMs`, `minutes`, `basis`, `verify`). `serversToReap` takes `ramBytes` (default the PC's).
+- **Callers can be told the local AI is waking.** `AskOptions.onWaking(w: Waking)` is called before a request waits for a server to start (`how: 'starting'`) or to finish loading (`'loading'`). `w.line` is a plain line for the person, such as "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer.", and `w.aboutMs` is the route's cold start. `wakingOf` builds it. `ensureServer` takes `onWaking` too.
+- **`npu-check.ts --idle`** (its steps in the new `node/npu-idle.ts`) runs the rest and the waking on a real NPU, each step passing or failing:
+  - idle-wake;
+  - idle-stop: the keeper's own look stops every server after a minute unused;
+  - idle-cold-answer: a person's 20 s request after that is told it's waking and answers within the cold load, and its cold start is printed as `idleStop` numbers;
+  - idle-in-flight: a request in flight is never stopped.
+  - `npu-vendors.json`'s Intel and AMD `idleStop.verify` say how to run it on a 16 GB Lunar Lake and a Ryzen AI 300.
+
+### What changed
+
+- **Intel's embedding server is stopped when idle.** It is a second OpenVINO Model Server holding 1.7 GB, and the keeper now stops it with the NPU's lock and idle time. Before, it ran until the PC restarted.
+- **An idle stop never races a request.** The keeper already stopped a server only in the accelerator's turn. Now a stop whose turn isn't had within 2 s (`TURN_AT_ONCE_MS`) gives way and reports `in-use`: someone took the accelerator after the keeper looked. A request arriving during a stop waits its turn, then starts the server again.
+- **The first request after a start gets the cold-load allowance.** After the kit starts an NPU server, its warm-up gets at least `requestBaseMs` plus the larger `coldLoadMs`, even when the caller's `timeoutMs` is shorter (Envoy's 20 s captions). Before, that first request could time out and fail while the model was loading.
+
+### What an agent must do
+
+- **The Smith and Reeve** (the keepers): take 2.71.0, and the rule applies where they keep.
+  - The Smith's Settings should show the NPU's idle minutes as the rule gives them on this PC (`npuIdleStopMinutes({program, kind, ramBytes, otherwise})`).
+  - It should write `npuIdleStopMinutes` to config.json only when the person changes it: a value there overrides the rule.
+- **Envoy**: pass `onWaking` on caption requests and show `w.line` where the person is waiting, in the setting-up card's style.
+- **Manor's chat**: it can show `w.line` in place of its own "getting the model ready".
+- Nothing else: config.json's format is unchanged, and an agent that does nothing gets the new timings and the longer first wait.
+
+## 2.70.0
+
+**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more.**
+
+### What's new
+
+- **`node/checks-pace.ts`**: `pacedCommand(file, args, { fast })` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
+  - a hard cap on the processor: half of it by default (`checksCap()`), two processors' worth at least;
+  - below-normal priority, which its programs take from it (a program may still raise its own).
+- **One job for the whole PC** (`Local\kit-checks-pace`): two check runs side by side share the cap rather than taking it twice. A process already in a job of another family gets a job of its own with the same cap. The job ends what is left in it once no launcher holds it: a test's server left running, or a command stopped on a timeout.
+- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). `fast: true` (a run the person asked to be quick) isn't paced, as Run now lifts the gentle pace. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
+- Off Windows a paced command runs under `nice -n 10`. A launcher that can't be built leaves the command as it is, said once in the log: the pace never fails a check.
+
+Measured on an 18-core laptop (the Steward's own checks: its kit filled, a type check and its whole test suite): before, 60 s of 201 s at 98% or more; at half the processor, 1 s of 203 s (the rest of the PC's work on top, Windows Defender's scans of what the tests write among it).
+
+### Before you update
+
+- Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
+
+**Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
+
+This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which it needs.
+
+### What's new
+
+- **Starting values for each Intel generation** in `npu-vendors.json` (`generations.<id>`: `timeouts`, `maxContextTokens`, `caps`, `args`, `memoryGb`, `basis`; the route with them is `routeFor(route, generation)`).
+  - The NPU 3720 (Meteor Lake and Arrow Lake, about a quarter of Lunar Lake's compute): prompts of up to 2,048 tokens, 60 s plus 400 ms a token, and a 6-minute cold load.
+  - NPU 5 (Panther Lake and Wildcat Lake): Lunar Lake's values with a 4-minute cold load.
+  - Lunar Lake keeps its measured values. Every generation but Lunar Lake stays `verified: false`.
+- **Setup calibrates an unverified generation on the PC.** After the test request, two short requests more (a warm "ready", and a count to twenty) measure it. `calibrate` turns the measurements into that PC's timeouts in its NPU entry, never under the starting values and never past `CALIBRATION`'s bounds. Under 2 tokens a second the NPU isn't used for chat. `setUpNpu` returns `measured`, and `NpuIo.measure` replaces the measuring requests in tests (null skips them).
+- **Sanity, not just an answer.**
+  - The chat test refuses the same few characters five times over (`repetitive`), as well as an answer without "ready". The measuring count must count (`countsSensibly`).
+  - The embedding test sends three sentences (`EMBED_TEST`). `embedSanity` checks the dimensions (`dims` on the embedding server's model: Qwen3-Embedding-0.6B's 1,024), that the values are numbers and not all zero, and that "a cat" lands nearer "a kitten" than "an invoice".
+- **A memory check before choosing the NPU.** `npuMemoryFit` gives the NPU at most 40% of the PC's memory (`NPU_MEMORY_SHARE`), against the route's `memoryGb` (Intel: chat 4.3 GB, embeddings 1.74 GB; 3.6 GB at the NPU 3720's 2,048):
+  - 16 GB keeps both;
+  - 12 GB keeps chat;
+  - 8 GB keeps the NPU out.
+- **The NPU check names the generation, and gives the patch that verifies it.** The report's `generation`, and `patch`: on an unverified generation, with every step passing, the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts and what they were measured on. `--generation <id>` runs a rehearsal with a generation's starting values.
+- **`npu-check.ts --harden`** forces setup's failures on a real NPU, then checks its calibration against what it measured. Each step passes or fails:
+  - a driver minimum above the driver;
+  - a 1-second test;
+  - `OpenVINO/Qwen3-4B-int4-ov`, which answers nonsense there;
+  - the calibration itself.
+- **`npu-check.ts --generation <id>`** on a real NPU runs as that generation of its maker's, with that generation's starting values and prompt cap. For example, a Lunar Lake can stand in for an NPU 3720. The run counts as a rehearsal and changes nothing in npu-vendors.json.
+- **npu-check never measures someone else's server.** On the NPU, if a server already answers on the route's port (the manor's own local AI, most likely), it refuses and says to stop that server first. In a rehearsal off the NPU, its servers move to free ports instead.
+
+### What changed
+
+- **The NPU failing is no longer an error.** `setupCommand` logs the NPU's failures as `note:` lines and leaves them out of its exit code.
+  - Chat and embeddings fall back separately. What the NPU doesn't serve goes to a card set up beside it; with no card, the processor is set up for it in the same run.
+  - Why the NPU, or its embeddings, isn't used is kept in plain words (`npu-note.json`, via `rememberNpuNote`/`readNpuNote`). The accelerators' report shows it (`npuNote`).
+  - `setUpNpu` returns that note (`note`, built by `npuNoteFor`).
+- `planNpu` takes `noEmbed`, and `planSetup` takes `skipNpu` and `cpuKinds`. The plan's `npuPlain` says why the NPU, or its embeddings, isn't used.
+- A test request that times out says "didn't answer in time (N s)". `testNpuEntry` takes `timeoutMs`.
+- An NPU driver too old now reads "the NPU's driver needs an update: …".
+- `NpuIo.clockMs` is the clock the first start is timed by, for tests. It isn't called `now`, so an agent whose io extends `NpuIo` with a `now` of its own still compiles. The Smith's trial does that, with a `now` that returns a Date. Every member `NpuIo` gained in this version is optional.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Setup no longer fails when the NPU does, so a Set up that showed an NPU error now finishes, with the graphics card or the processor doing that work and a note saying why.
+
+## 2.69.1
+
+**An update is no longer rolled back because the network went down while it was installing.**
+
+### What changed
+
+- **The probation asks for the home page on 127.0.0.1** (`homePageUrl`, `homePageStatus`), as the ping always did, not at the page's `<agent>.localhost` name. Windows doesn't resolve `*.localhost` itself: it asks the network's DNS server (a home router answers 127.0.0.1). So while the network is down the name doesn't resolve, and a page that was up and answering was rolled back and flagged unsafe with "its home page didn't answer". On 2026-10-13 that happened to seven agents within the same minute: Windows logged that its DNS server stopped answering at 14:16:32Z, the moment the first one was rolled back. The page's server already takes 127.0.0.1 as its host.
+- **A home page that doesn't answer at all is asked again at each look**, and fails the probation only if it hasn't rendered by the end of it (90 s). An answer that's an error status still fails at once, and so do the wrong version answering and a page that stops answering its ping.
+  - The install's own settling (15 s) leaves the home page to the background watcher, which asks again.
+  - A rollback for a home page that never rendered keeps its old words, "its home page didn't answer", which the Steward's retry of such rollbacks reads.
+- `probation()` takes `homeLater`, for a settling whose end isn't its own to judge.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. The fix works from the agent's next update on, since a release's own install runs the probation. `unsafe-updates.json` is unchanged, so versions flagged before stay flagged until they are allowed again (`install --allow-unsafe`, or the Steward's retry of such rollbacks).
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

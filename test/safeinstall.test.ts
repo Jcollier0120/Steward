@@ -28,7 +28,7 @@ let n = 0;
  * it doesn't answer, though its process runs on and holds the port). As on Windows, Task Scheduler's /Run starts
  * nothing while a page is running, and a page that doesn't answer stops only when its process is ended.
  */
-function setup(o: { installCode?: number; page?: (t: number) => string | null; homeStatus?: number | null; installLeaves?: 'new' | 'old' } = {}) {
+function setup(o: { installCode?: number; page?: (t: number) => string | null; homeStatus?: number | null | ((t: number) => number | null); installLeaves?: 'new' | 'old' } = {}) {
   const dir = path.join(home, `case-${++n}`);
   const dataDir = path.join(dir, 'data');
   const app = path.join(dataDir, 'app');
@@ -80,7 +80,7 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
       return o.installCode ?? 0;
     },
     pingVersion: async () => (running === '0.8.14' && o.page ? o.page(t) : running || null),
-    homePage: async () => (o.homeStatus === undefined ? 200 : o.homeStatus),
+    homePage: async () => (o.homeStatus === undefined ? 200 : typeof o.homeStatus === 'function' ? o.homeStatus(t) : o.homeStatus),
     probationMs: 30_000,
     copy: (from, to) => cpSync(from, to, { recursive: true }),
     now: () => t,
@@ -167,6 +167,80 @@ test('the other ways an update fails its probation: the wrong version answers, t
     assert.equal(versionIn(s.app), '0.8.13');
     assert.match(loadUnsafe()['0.8.14'].why, why);
   }
+});
+
+test("a home page that doesn't answer at first is asked again, not rolled back: a network blip at the update (2026-10-13)", async () => {
+  // Its ping answers as 0.8.14 all along; the home page is silent for its first 20 s.
+  const late = (t: number) => (t < 20_000 ? null : 200);
+  rmSync(unsafeFile(), { force: true });
+  const s = setup({ homeStatus: late });
+  assert.equal(await safeInstall({ wait: true }, s.d), 0, s.said.join('\n'));
+  assert.equal(versionIn(s.app), '0.8.14');
+  assert.deepEqual(loadUnsafe(), {});
+
+  // Silent through the install's settling: handed to the watcher, which asks again and finds it.
+  const kit = await import('../src/kit/safeinstall.ts');
+  const b = setup({ homeStatus: late });
+  b.d.watch = async () => true;
+  assert.equal(await safeInstall({}, b.d), 0, b.said.join('\n'));
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, b.d), 0);
+  assert.equal(versionIn(b.app), '0.8.14');
+  assert.deepEqual(loadUnsafe(), {});
+
+  // No watcher: the install asks on itself until the probation's end.
+  const c = setup({ homeStatus: late });
+  c.d.watch = async () => false;
+  assert.equal(await safeInstall({}, c.d), 0, c.said.join('\n'));
+  assert.deepEqual(loadUnsafe(), {});
+});
+
+test("a home page that never renders in the whole probation is still rolled back, in the words the Steward's retry reads", async () => {
+  rmSync(unsafeFile(), { force: true });
+  const s = setup({ homeStatus: null });
+  assert.equal(await safeInstall({ wait: true }, s.d), 1);
+  assert.equal(versionIn(s.app), '0.8.13');
+  assert.equal(loadUnsafe()['0.8.14'].why, "its home page didn't answer");
+
+  const kit = await import('../src/kit/safeinstall.ts');
+  rmSync(unsafeFile(), { force: true });
+  const w = setup({ homeStatus: null });
+  w.d.watch = async () => true;
+  assert.equal(await safeInstall({}, w.d), 0, 'settled: the home page is the watcher\'s to judge');
+  assert.equal(await kit.watchProbation('0.8.14', '0.8.13', 0, w.d), 1);
+  assert.equal(versionIn(w.app), '0.8.13');
+  assert.equal(loadUnsafe()['0.8.14'].why, "its home page didn't answer");
+
+  // An answer that is an error is no blip: rolled back at once, long before the probation's end.
+  rmSync(unsafeFile(), { force: true });
+  const e = setup({ homeStatus: (t) => (t < 5_000 ? null : 503) });
+  assert.equal(await safeInstall({ wait: true }, e.d), 1);
+  assert.equal(loadUnsafe()['0.8.14'].why, 'its home page answered 503');
+  assert.ok(e.d.now() < 30_000, `rolled back at ${e.d.now()} ms`);
+});
+
+test('the real home page check asks 127.0.0.1, which the page takes as its host, never its .localhost name', async () => {
+  const kit = await import('../src/kit/safeinstall.ts');
+  const { allowedHosts, hostAllowed } = await import('../src/kit/server.ts');
+  const { port } = await import('../src/app.ts');
+  assert.equal(kit.homePageUrl(), `http://127.0.0.1:${port}/`);
+  // A page with the kit's host check, on a port of its own.
+  const http = await import('node:http');
+  let hosts = new Set<string>();
+  const server = http.createServer((req, res) => res.writeHead(hostAllowed(hosts, req.headers.host) ? 200 : 421).end());
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const at = (server.address() as import('node:net').AddressInfo).port;
+    hosts = allowedHosts(at);
+    assert.equal(await kit.homePageStatus(kit.homePageUrl(at)), 200);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+  // Nothing listening: no answer, not an error status.
+  const gone = http.createServer();
+  await new Promise<void>((resolve) => gone.listen(0, '127.0.0.1', resolve));
+  const free = (gone.address() as import('node:net').AddressInfo).port;
+  await new Promise((r) => gone.close(r));
+  assert.equal(await kit.homePageStatus(kit.homePageUrl(free), 5_000), null);
 });
 
 test("an install that changed nothing flags nothing, and a first install or --no-start has nothing to go back to", async () => {

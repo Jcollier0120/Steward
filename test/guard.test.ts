@@ -13,6 +13,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { prChecksFile } = await import('../src/stages/prtest.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const green = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }];
@@ -66,6 +67,7 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
     if (args[0] === 'pr' && args[1] === 'list') return ok([listed(7, head, { statusCheckRollup: [] })]);
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
     if (args[0] === 'pr' && args[1] === 'merge') return ok('');
+    if (args[0] === 'api' && args.includes('POST')) return ok({});
   });
   const round = () => {
     const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-untested'), run: r.run, neutralDir: tmp });
@@ -95,6 +97,27 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
   // The head tested here, and only that one: one pushed since is refused by GitHub.
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', head]]);
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(prChecksFile(), 'utf8'))), [`fake#7@${broken}`, `fake#7@${head}`], 'kept by commit');
+  // Its pass set the vouch on that head, as steward vouch would, so the Assayer doesn't test it again; the failure set none.
+  const vouches = r.gh.filter((a) => a[0] === 'api' && a.includes('POST'));
+  assert.deepEqual(vouches, [['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${e.test[0]} passed in the Steward's test at ${head.slice(0, 7)}`]]);
+  assert.match(fixed.lines, new RegExp(`#7: its head ${head.slice(0, 7)} has the vouch`));
+});
+
+test("a pass here whose vouch GitHub won't take still merges; the log says why", async () => {
+  const f = employeeWithPrs('no-status');
+  const sha = f.make(9, { files: { feature: 'yes\n' } });
+  const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([listed(9, sha, { statusCheckRollup: [] })]);
+    if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+    if (args[0] === 'pr' && args[1] === 'merge') return ok('');
+    if (args[0] === 'api' && args.includes('POST')) return { code: 1, out: '', err: 'HTTP 403: Resource not accessible' };
+  });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-no-status'), run: r.run, neutralDir: tmp });
+  const m = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(m.outcome, 'done');
+  assert.equal(m.message, `merged #9 (checks passed here at ${sha.slice(0, 7)})`);
+  assert.match(ctx.lines.join('\n'), /#9: its checks passed, but GitHub wouldn't take the status: HTTP 403/);
 });
 
 test('a check that fails once and passes on a second try merges the PR, and says so', async () => {

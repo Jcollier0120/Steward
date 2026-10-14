@@ -9,7 +9,9 @@ import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts'
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
 import { exchequerNote, networkFailure, networkNote, passingFailure, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { guardPackages, installPackages } from './modules.ts';
 import { releaseNeedsPackages } from './release.ts';
+import { linkSharedModules } from './modules.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
 
@@ -123,11 +125,16 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   await freshWorktree(run, ctx.settings, repo, dir, step.commit, '--detach');
   ctx.log(`[${APP.id}] releasing ${step.tag} from origin/${STEWARD_BRANCH} (${at}) in ${dir}`);
   try {
-    // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
-    if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      ctx.log(`[${APP.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
+    // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's,
+    // linked from the set installed for its lockfile where they can be (modules.ts), else installed.
+    // A kit's too: its release tests build the fixture's releases with it before it is published (tools/kit-release.ts).
+    if (releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
+      // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
+      const g = await guardPackages(ctx, { id: APP.id, name: APP.name, repo: ctx.settings.stewardRepo }, dir, `the release of ${step.tag}`);
+      if (g.held) return selfResult('failed', `${g.held}, so ${step.tag} wasn't released`, { version: step.version, commit: at });
+      const say = (line: string) => ctx.log(`[${APP.id}] ${line}`);
+      const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
+      if (ci) return selfResult('failed', `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
     }
     const commands = SELF_COMMANDS[step.what];
     let exchequer = '';
@@ -138,7 +145,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         if (dirty) return selfResult('failed', `the worktree at ${at} isn't clean (${dirty.split('\n').slice(0, 3).join(', ')}), so ${step.tag} wasn't released`, { version: step.version, commit: at });
       }
       // Its release goes to the releases repository too, as Settings say (MANOR_RELEASES_REPO, the kit's release.ts).
-      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
+      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: !ctx.fast });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
       exchequer ||= exchequerNote(`${r.out}\n${r.err}`);

@@ -84,6 +84,8 @@ Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' 
 
 **The NPU failing is never an error** (kit 2.68.0). Setup logs what failed as a `note:`, not a `problem:`, and its exit code doesn't count it: Manor shows nothing red, and nothing raises an alarm. Chat and embeddings fall back separately: what the NPU doesn't serve goes to a graphics card set up beside it, else setup sets the processor up for it in the same run (asking first, for its download, unless `--yes`). Why the NPU, or its embeddings, isn't used is kept in plain words (`npu-note.json` in the tools home, cleared once the NPU is set up whole) and shown with the accelerators (`smith accelerators`, the report's `npuNote`), e.g. "The NPU (Core Ultra Series 1, Meteor Lake (NPU 3720)) isn't used: it didn't answer its test in time. The graphics card or the processor does its work instead."
 
+**The graphics card beside the NPU** (kit 2.69.0). With Manor's "Use the graphics card for models when there's an NPU" off (`gpuWithNpu`, read by `setupCommand`), a card is set up only for the work no NPU serves, the rule requests and the keeper follow (ACCELERATORS.md): beside Intel's NPU, vision alone, so the card's chat and embedding models (about 3.1 GB) aren't downloaded; the plan lists the rest as left to the NPU. What the NPU fails at setup goes to that card in the same run (its second pass, before the processor's); an NPU that fails outright leaves the card everything. A card the NPU would leave nothing (a Snapdragon's) is set up whole, as before: Manor offers the switch only beside a configured card. With the switch on, or no Manor, every card is set up for everything; turning it on later, the next Set up fills the card's other kinds in. A card set up before keeps the entries, ports and files it had for the NPU's work: nothing is removed, and the keeper keeps them out.
+
 **Memory first** (kit 2.68.0). The NPU has no memory of its own: its models sit in the PC's, beside Windows, the browser and the manor's agents. Setup gives the NPU at most 40% of the PC's memory (`NPU_MEMORY_SHARE`), against the route's measured sizes (`memoryGb`: on Intel, chat 4.3 GB at the 4,096 cap and embeddings 1.74 GB, measured on the Lunar Lake; chat 3.6 GB at the NPU 3720's 2,048). A 16 GB PC (about 15.6 GB to Windows: 6.2 GB) keeps both, with over 9 GB left; a 12 GB PC (4.6 GB) keeps chat and makes embeddings elsewhere; an 8 GB PC (3 GB) keeps the NPU out. 40% because it lets the common 16 GB laptop keep both models with over 9 GB for everything else, while on an 8 GB PC chat alone (3.6 to 4.3 GB, half the PC) would leave Windows, a browser and the agents under 4 GB and paging. Memory that can't be read never keeps the NPU out.
 
 An NPU entry a person configured is left alone unless `npu` is asked for by name; the GenieX entry an older install wrote by default is replaced by a set-up one, and dropped on a PC whose NPU the manor can't use.
@@ -129,6 +131,21 @@ On a generation still `verified: false`, setup measures the NPU it has just set 
 OpenVINO Model Server opens its port within a second of starting and answers `/v1/models` with an empty list while it loads (on the NPU, compiles) its model, refusing requests until then: a server started from `ovms.exe` is ready only once it lists a model (accelerators.ts' `listsWhenLoaded`), and a request waits for it as long as the accelerator's `coldLoadMs` allows. Found by the NPU check's rehearsal, 2026-10-12.
 
 The keeper (the Smith, else Reeve) starts and restarts each server from its entry, as it does llama.cpp's: it reads each server's address from its command line (GenieX's `--host`, OpenVINO Model Server's `--rest_port`, FastFlowLM's `--port`). It stops an orphan only when it is the manor's own: its program is in the manor's servers folders, or a record says the manor started that very process (`started.<pid>.json` beside the failure markers, written whenever a server is started). A program on one of the manor's ports for any other reason (a person's own GenieX on its default 18181, Ollama, a server whose program Windows won't name) is never stopped.
+
+### Resting when unused (kit 2.71.0)
+
+None of the three servers can drop its model and keep running: GenieX's `--keepalive` unloads it, but the process keeps some 340 MB from every load until it exits; OpenVINO Model Server started with `--source_model` can't unload one (only its config-file mode can, by editing the file); FastFlowLM documents no unload. So the keeper stops the server, holding the NPU's turn, and the next request starts it again in its own turn. Intel's embedding server, a second OpenVINO Model Server holding 1.7 GB, is stopped with the chat server now; before 2.71.0 the keeper left every NPU embedding server but llama-server's running.
+
+When, with no `npuIdleStopMinutes` in config.json (`npu-vendors.json`'s `idleStop`):
+
+| PC | Stopped after |
+|---|---|
+| Under 20 GB of memory (8, 12 and 16 GB laptops; Windows shows 16 GB as 15.3 to 15.9) | its route's own minutes: GenieX and its llama-server 5, OpenVINO Model Server's two 5, FastFlowLM 10 |
+| 20 GB or more, or memory unknown | rules.json's `npuIdleStopMinutes`, 10, as before |
+
+A route's minutes are 20 times its cold start (stopped to its first answer), never under 5: waking it costs at most a twentieth of the quiet spell it ends, and a conversation's pauses, or an agent's rounds a minute apart, never pay it. GenieX starts and loads in 9 to 15 s (measured), so 5; OpenVINO Model Server starts from its compile cache in 4 s on a Lunar Lake (measured; the first compile is once per PC), so 5; FastFlowLM isn't measured, taken as 30 s, so 10. `npuIdleStopMinutes` in config.json (the Smith's Settings) overrides the rule on any PC, either way: 240 keeps it longer, 0 never stops it.
+
+An idle stop never races a request: the keeper stops a server only holding the NPU's turn, joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
 ## Models and sizes
 
@@ -188,6 +205,12 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - **harden-nonsense** (on the NPU only): `OpenVINO/Qwen3-4B-int4-ov`, the group-wise export that answers nonsense on the Lunar Lake's NPU, pulled and set up in the route's model's place: no NPU entry, and its note says the chat model doesn't run properly (where it answers sensibly, nothing was forced, and the step isn't counted);
 - **harden-calibrate**: setup's measuring requests, as on a generation nobody has measured: the timeouts it writes must be calibrate's from what it measured, cover what it measured, and stay inside the bounds; too slow fails on the NPU.
 
+`--idle` (kit 2.71.0) runs the NPU's rest and waking for real instead (npu-idle.ts), the keeper given a minute's idle time; after the setup step, four steps, each passing or failing:
+- **idle-wake**: a chat, and an embedding where the route has its own embedding server, asked through the kit as an agent asks; what each server holds of the PC's memory;
+- **idle-stop**: the keeper's own look, on this PC's processes and the NPU's real line, stops every server once the NPU has gone unused a minute, and their processes are gone (the memory freed is said); and what the rule chooses on this PC;
+- **idle-cold-answer**: a person's request after that (the interactive lane, Envoy's 20 s caption timeout) is told the local AI is waking, and answers within the route's cold load; so does an embedding. Its time is this PC's cold start, and the `idleStop` numbers it gives are printed for npu-vendors.json;
+- **idle-in-flight**: a keeper's look given 1 ms of idle time, while a request holds the NPU, finds it in use and stops nothing; the request answers.
+
 `--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. `--generation <id>` rehearses with a generation's starting values (e.g. `meteor-lake`). A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone, and never gives a patch. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
 
 ## Verified, and not
@@ -216,4 +239,4 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - Intel beyond Lunar Lake: Meteor Lake, Arrow Lake, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);
 - everything on AMD: FastFlowLM on XDNA 2, its models' names and sizes, the 4,096-token cap and timeouts, the PCI ids, the driver minimum;
 - that AMD's XDNA (Phoenix, Hawk Point) is refused with the right words on a real PC;
-- the keeper's restarts and idle stops of OpenVINO Model Server and FastFlowLM.
+- the keeper's restarts and idle stops of OpenVINO Model Server and FastFlowLM, and their cold starts after one (`npu-check --idle` runs both: on Intel's Lunar Lake, then AMD's XDNA 2).
