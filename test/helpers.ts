@@ -7,6 +7,7 @@ import { makersPcForTests } from '../src/maker.ts';
 import { run as realRun, type Ran, type Runner } from '../src/run.ts';
 import type { Employee, Settings } from '../src/settings.ts';
 import type { Ctx } from '../src/stages/common.ts';
+import { DEFAULT_PIPELINE } from '../src/pipeline.ts';
 
 /** Stand-ins for the world outside the Steward: real git, a scripted gh. */
 
@@ -118,7 +119,7 @@ export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
   const lines: string[] = [];
-  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, stagesAtOnce: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, mergeTrain: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true, makersPc: true };
+  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, stagesAtOnce: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, mergeTrain: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true, makersPc: true, buildPipeline: DEFAULT_PIPELINE };
   return {
     settings,
     run: o.run,

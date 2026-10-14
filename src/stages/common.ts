@@ -60,6 +60,11 @@ export interface StageResult {
    * checks running, at a head just caught up, or GitHub working out whether it merges. The next round comes sooner (agent.ts).
    */
   soon?: boolean;
+  /**
+   * A round under the build pipeline (pipeline.ts): between builds (and when the next is), or one of a build's rounds
+   * (its build time, who began it, which of its rounds, and whether this one ended it).
+   */
+  build?: { between?: boolean; next?: string | null; due?: string; by?: string; round?: number; closed?: boolean };
   results: EmployeeResult[];
   log: string[];
 }

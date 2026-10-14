@@ -247,6 +247,14 @@ A claim lives until its version is on the branch or overtaken by a release (the 
 
 Claims are shared by every PC that looks after a repository through `refs/manor/claims` in its remote, written by compare-and-swap, with a copy kept here so the merge stage sees them. With the remote out of reach, a claim is made here alone, as before, and shared on the next round that reaches it; one another PC claimed meanwhile is marked on the page, and its work gets a new version when it merges.
 
+## The build pipeline
+
+Settings' **Build pipeline** tab (off until switched on; `src/pipeline.ts`) makes the Steward build at set times, 08:00, 13:00 and 18:00 to start with, instead of whenever a PR goes ready. Between builds a round only looks: nothing is merged, caught up, rolled out or released. At a build time a build begins: its rounds merge every ready PR (no ten-minute wait: the build time is the time to push), roll the newest kit out (every build, or only the day's first), and once nothing is left that settles within minutes, release each repository once and tell Manor once. A build that runs past its time (two hours unless Settings say otherwise) releases what it merged; the rest waits for the next. A build the PC slept through begins at the first round after it wakes, once. `pipeline.json` keeps the build under way and the last 30, each with what it merged, released and failed; `GET /api/pipeline` gives Manor the times, the next build and whether one is under way (Manor holds its installs while one is).
+
+The owner's override is **Build now**: `steward build [--employees a,b] [--to-customers]` at a console, which asks for "build" to be typed first and refuses without a console, or `POST /api/pipeline/build` with the page's token. `--to-customers` lets that build's releases out to customers at once instead of on their release day. Coding sessions never run it: their work waits for the next build.
+
+With the pipeline on, a repository on `changes/` needs no version claimed: a piece of work writes `changes/<its branch as one word>.md` (`claim-version` names the file), and the stamp gives every such fragment merged before the next release that release's version, one above the last release (a minor step when a fragment's first line is `minor: true`), composed into one changelog entry: "Brings N changes: …", each section's bullets together, and "Before you update" saying "Nothing" only when none says anything else.
+
 ## Several PCs
 
 Each PC may run a Steward signed in to the same GitHub account. They elect one release PC per repository among themselves, through a ref in the repository's own remote, `refs/manor/release-pc`, with plain git on any host: no licence, no Exchequer ([docs/MULTI-PC.md](docs/MULTI-PC.md), `src/lease.ts`). Only publishing waits for the turn (merging, releasing, the pushes of a refresh, a kit rollout and a catch-up); builds, tests, bumps and claims never do.

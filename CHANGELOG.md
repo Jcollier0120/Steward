@@ -2,6 +2,28 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.0
+
+**The build pipeline: the Steward can merge and release at set times a few times a day, each agent released and updated once per build.**
+
+### What's new
+
+- A new Settings tab, **Build pipeline**. Switched on, the Steward builds at set times (08:00, 13:00 and 18:00 to start with, on the days you choose) instead of whenever a pull request goes ready.
+- At each build it merges every ready pull request, rolls out the newest kit (every build, or only the day's first), and once everything has settled releases each repository once and tells Manor once. So each agent is updated at most once per build.
+- Between builds its rounds only look: nothing is merged, rolled out or released, and ready pull requests wait for the next build.
+- A build the PC slept through runs as soon as the PC wakes. A build that hasn't settled in time (two hours by default) releases what it merged, and the rest waits for the next build.
+- An owner's override, **Build now**, for emergencies: `steward build` at a console, which asks you to type "build" first. It can build some repositories only, and with `--to-customers` let that build's releases out to customers at once.
+- The Steward's page says when the next build is, and Manor can ask whether a build is under way.
+- Changelog entries without versions: in a repository that writes its entries in `changes/`, a piece of work writes `changes/<its branch>.md` and picks no version. Every entry merged before the next release shares that release's version and is composed into its one changelog entry. A first line `minor: true` asks for a minor step. With the build pipeline on, `claim-version` answers with the file to write instead of a version.
+
+### What changed
+
+- With the build pipeline on, the Steward no longer releases after each merge, and the vouch's "merge soon" says which build a pull request will go into.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The build pipeline is off until you switch it on in Settings.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**

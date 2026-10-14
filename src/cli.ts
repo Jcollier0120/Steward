@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { APP, pageUrl } from './app.ts';
 import { serveSteward } from './agent.ts';
@@ -20,7 +21,7 @@ import { markMine } from './strangers.ts';
 import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
 import { askRoundSoon, vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
-import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
+import { CHANGES_DIR, fragmentFor, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
 import { letOut } from './kit/exchequer.ts';
 import { releasedOf } from './stages/common.ts';
@@ -54,7 +55,12 @@ const USAGE = `${APP.id}: ${APP.role}
                    own staff), at its branch's version: Manor's Hire for one of them asks for it
   round [--employees a,b]
                    one round, as the Steward runs by itself on duty (Settings): merge --yes --team, with
-                   what each merged PR asks for after, then a release of every version not yet released
+                   what each merged PR asks for after, then a release of every version not yet released.
+                   With the build pipeline on (Settings), between builds a round only looks
+  build [--employees a,b] [--to-customers]
+                   the owner's override of the build pipeline: a build now, outside the set times, for the
+                   repositories named or all; --to-customers lets its releases out to customers at once, not
+                   on their release day. Only at a console, which asks you to type "build" first
   staff [--json] [--no-fetch]
                    each employee: its checkout, its branch's version and kit, its latest release and the
                    kit in it, the open PRs of the Steward and the team (--hires is the same as --employees,
@@ -181,7 +187,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
 /** The commands that work on repositories: a developer's, so only while Developer options are on (maker.ts' stewardActs). */
-const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'staff', 'employ', 'claim-version', 'release-version', 'claims', 'vouch'];
+const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'build', 'staff','employ', 'claim-version', 'release-version', 'claims', 'vouch'];
 /** The commands only the PC Castellan is made on has: the ports of Castellan's new agents, and its merges done by hand. */
 const MAKERS_COMMANDS: Record<string, string> = {
   'claim-port': "Claiming a port for a new agent of Castellan's",
@@ -229,6 +235,45 @@ async function stage(name: 'bump' | 'push' | 'merge' | 'release' | 'round'): Pro
   }
 }
 
+/**
+ * The owner's Build now (pipeline.ts), at a console: a build outside the set times. Asked first, by typing "build", and
+ * refused without a console to type at, so a script or a coding session can't run one: their work waits for the next build.
+ */
+async function buildNow(): Promise<number> {
+  const bad: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '--employees') i++;
+    else if (rest[i] !== '--to-customers') bad.push(rest[i]);
+  }
+  if (bad.length) {
+    console.error(`build: unknown ${bad.join(' ')} (it takes --employees a,b and --to-customers)`);
+    return 2;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("build is the owner's override, asked at a console: it isn't run from a script or a coding session. Ready PRs go into the next build at its set time (Settings: Build pipeline).");
+    return 1;
+  }
+  const list = opt(rest, '--employees');
+  const employees = list ? list.split(',').map((x) => x.trim()).filter(Boolean) : null;
+  const toCustomers = rest.includes('--to-customers');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const said = await rl.question(`A build now, for ${employees?.length ? employees.join(', ') : 'every repository'}${toCustomers ? ', its releases let out to customers at once' : ''}. Type "build" to begin: `);
+  rl.close();
+  if (said.trim() !== 'build') {
+    console.log('No build.');
+    return 1;
+  }
+  try {
+    return printStage(await runStage('round', { full: true, employees, buildNow: { toCustomers } }, { log: (line) => console.log(line) }));
+  } catch (e) {
+    if (e instanceof LockTimeout) {
+      console.error('A round is running already (on the page, or in another terminal). Try again when it has finished: what is ready goes into the build then.');
+      return 1;
+    }
+    throw e;
+  }
+}
+
 if (cmd && cmd in MAKERS_COMMANDS && !makersPc()) {
   console.error(makersOnly(MAKERS_COMMANDS[cmd]));
   process.exit(1);
@@ -263,6 +308,9 @@ switch (cmd) {
   case 'release':
   case 'round':
     process.exitCode = await stage(cmd);
+    break;
+  case 'build':
+    process.exitCode = await buildNow();
     break;
   case 'staff': {
     const bad = unknownFlags('staff', rest);
@@ -336,6 +384,15 @@ switch (cmd) {
     if (!e) {
       console.error(`No repository ${who} here: an id, a name or owner/repo from Settings, one Reeve found on this PC, or the clone this runs in${makersPc() ? `, or the Steward's own (${ctx.settings.stewardRepo || 'named in Settings, or the Steward clone this runs in'})` : ''}.`);
       process.exitCode = 2;
+      break;
+    }
+    // The build pipeline on, in a repository that writes its entries in changes/: no version to claim. The work writes
+    // changes/<branch>.md, and the Steward gives it the next release's version as it merges (stages/stamp.ts).
+    if (!kit && ctx.settings.buildPipeline.on && (await usesChanges(ctx, e).catch(() => false))) {
+      const branch = opt(rest, '--branch');
+      const entry = fragmentFor(branch ?? 'your-branch');
+      if (rest.includes('--json')) console.log(JSON.stringify({ fragment: entry, version: null }));
+      else console.log(`${e.name} rides the build pipeline: no version to claim or set. Write its changelog entry in ${entry}${branch ? '' : ' (named by your branch)'}, and leave ${e.versionFiles.join(', ')} and ${CHANGELOG} as they are: the Steward gives it the next release's version as it merges, at the next build. A first line "minor: true" asks for a minor step.`);
       break;
     }
     const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), ...(kit ? { part: 'kit' as const } : {}) });

@@ -43,6 +43,8 @@ import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
 import { withRepo, withStageSlot } from './stages/slots.ts';
+import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
+import { letOut } from './kit/exchequer.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -75,6 +77,11 @@ export interface StageAsk {
    * Settings say it doesn't merge and release by itself. A round on a PC with no repositories to look after is this too.
    */
   tendOnly?: boolean;
+  /**
+   * round: the owner's Build now (pipeline.ts): a build begins at once, whatever the build times, for the employees asked
+   * about (all when none); ticked, its releases go out to customers at once too.
+   */
+  buildNow?: BuildNow;
 }
 
 export const lastStageFile = () => dataFile('last-stage.json');
@@ -487,8 +494,17 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       let rolloutWaits: { kit: string; own: string } | null = null;
       /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
       let turnsOn = false;
+      // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds merge, and its last releases.
+      const pipeline = name === 'round' && !quiet ? loadPipeline() : null;
+      const mode: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees }) : { kind: 'off' };
+      /** This round ends its build: it released what the build merged. */
+      let buildCloses = false;
+      /** "<id> #<n>" for each PR this round merged, for the build's record. */
+      const mergedHere: string[] = [];
       try {
-        const picked = pick(ctx.settings.employees, ask.employees);
+        // The owner's Build now for some repositories: each of its rounds looks at those alone.
+        const only = ask.employees?.length ? ask.employees : mode.kind === 'build' ? (mode.run.employees ?? null) : null;
+        const picked = pick(ctx.settings.employees, only);
         if ('error' in picked) throw new Error(picked.error);
         if (tendOnly) {
           out.tendOnly = true;
@@ -503,12 +519,32 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         } else if (budget) {
           out.budget = budget;
           log(waitLine(budget));
+        } else if (mode.kind === 'between') {
+          // Between builds: nothing merged, caught up, rolled out or released. The PRs that waited at the last look
+          // still wait, so the alarms go on counting their hours.
+          out.build = { between: true, next: mode.next?.toISOString() ?? null };
+          log(mode.line);
+          held.push(...heldBefore(seen!, picked.employees));
         } else if (name === 'merge' || name === 'round') {
+          if (mode.kind === 'build') {
+            const when = mode.run.by === 'owner' ? "the owner's Build now" : `the ${buildWhen(new Date(mode.run.due), at())} build`;
+            log(
+              mode.fresh
+                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled`
+                : mode.closing
+                  ? `${when} has run out of time (${ctx.settings.buildPipeline.windowMinutes} minutes): it releases what it merged, and the rest waits for the next build`
+                  : `${when} goes on (its round ${mode.run.rounds + 1})`,
+            );
+            // In a build, a ready PR merges at once: the build time was the time to push to it (merge.ts' ageHold). And
+            // nothing is released merge by merge: the build releases each repository once, when it closes.
+            ctx.settings = { ...ctx.settings, mergeMinAgeMinutes: 0, releaseAfterMerge: false };
+            out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
+          }
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
           const yes = round || !!ask.yes;
           // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
-          const whole = !ask.employees?.length;
+          const whole = !only?.length;
           const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
           turnsOn = turns.on;
           const acting = turns.acting;
@@ -524,6 +560,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             selfLine = line;
             if (prs.length) held.push({ employee: self, prs });
             if (selfMerged.length) selfMovedMain = true;
+            mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
           }
           // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
           const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
@@ -544,7 +581,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
           }
           const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
-          out.results = [...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
+          mergedHere.push(...merged.flatMap((r) => r.merged.map((p) => `${r.id} #${p.number}`)));
+          out.results =[...turns.elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
           held.push(
             ...merged.flatMap((r) => {
               const employee = employees.find((e) => e.id === r.id);
@@ -577,26 +615,48 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             out.results.push(...(await afterMerge(ctx, picked.employees, merged, { releaseKit, releaseAny })));
           }
           if (round) {
-            const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
-            const released = await releaseUnreleased(ctx, employees.filter((e) => !releasedNow.has(e.id)));
-            out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
-            // The Steward's own, released before the agents' merges (above).
-            out.results.push(...selfReleases);
+            const releaseNow = async (who: Employee[]) => {
+              const releasedNow = new Set(out.results.filter((r) => r.message.startsWith('release: ')).map((r) => r.id));
+              const released = await releaseUnreleased(ctx, who.filter((e) => !releasedNow.has(e.id)));
+              out.results.push(...released.map((r) => ({ ...r, message: `release: ${r.message}` })));
+            };
             // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
             // merged and released by the next round, which comes sooner for them (their checks passed here, and a kit PR
-            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold).
-            const newest = latestKit(ctx.kit);
-            try {
-              const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
-              out.results.push(...rolled.results);
-              if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
-              const opened = rolled.results.filter((r) => r.outcome === 'done');
-              if (opened.length && !out.soon) {
-                out.soon = true;
-                log(`the next round comes sooner: kit ${newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge and release then`);
+            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold). The kit PRs opened, if any.
+            const rollOut = async (): Promise<EmployeeResult[]> => {
+              const newest = latestKit(ctx.kit);
+              try {
+                const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
+                out.results.push(...rolled.results);
+                if (rolled.plan.waitsForSteward && newest && own) rolloutWaits = { kit: newest, own };
+                const opened = rolled.results.filter((r) => r.outcome === 'done');
+                if (opened.length && !out.soon) {
+                  out.soon = true;
+                  log(`the next round comes sooner: kit ${newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge${mode.kind === 'build' ? ' in this build' : ' and release'} then`);
+                }
+                return opened;
+              } catch (err) {
+                log(`rollout: ${(err as Error).message}`);
+                return [];
               }
-            } catch (err) {
-              log(`rollout: ${(err as Error).message}`);
+            };
+            if (mode.kind === 'build') {
+              // A build: the kit's PRs opened first, so they merge in this build too; then, once nothing is left that
+              // settles within minutes (checks running, a kit's trial, kit PRs just opened), every repository's new
+              // version released at once, the one release of this build. Or when the build's time has run out.
+              const opened = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run) ? await rollOut() : (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), []);
+              buildCloses = mode.closing || (!brief.length && !opened.length);
+              if (buildCloses) await releaseNow(acting);
+              else {
+                out.soon = true;
+                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : ''}`);
+              }
+              out.results.push(...selfReleases);
+            } else {
+              await releaseNow(employees);
+              // The Steward's own, released before the agents' merges (above).
+              out.results.push(...selfReleases);
+              await rollOut();
             }
             // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
             for (const e of picked.employees) {
@@ -646,6 +706,41 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       } catch (e) {
         out.error = (e as Error).message;
         log(`${name}: ${out.error}`);
+      }
+      // The build's record (pipeline.json): what this round merged, released and failed; ended when it closed, or when its
+      // time ran out whatever happened. The owner's Build now with "to customers" lets each release out at once.
+      let buildReleased: string[] = [];
+      if (pipeline && mode.kind === 'build') {
+        const closed = buildCloses || mode.closing;
+        buildReleased = out.results.filter(releasedSomething).map((r) => `${r.id} ${/released (v[\d.]+[^\s,;]*)/.exec(r.message)?.[1] ?? '?'}`);
+        if (closed && mode.run.toCustomers) {
+          for (const line of [...mode.run.released, ...buildReleased]) {
+            const [id, v] = line.split(' ');
+            if (!v?.startsWith('v')) continue;
+            const freed = await letOut(id, v.slice(1), ctx.exchequer);
+            log(freed.ok ? `${id} ${v} let out to customers now (the owner's Build now)` : freed.line);
+          }
+        }
+        try {
+          savePipeline(
+            endRound(pipeline, mode.run, {
+              merged: mergedHere,
+              released: buildReleased,
+              failed: out.results.filter((r) => r.outcome === 'failed').map((r) => `${r.id}: ${r.message}`),
+              closed,
+              cut: mode.closing,
+              now: at(),
+            }),
+          );
+        } catch (e) {
+          log(`couldn't keep the build's record: ${(e as Error).message}`);
+        }
+        if (closed) {
+          const all = mode.run.merged.length + mergedHere.length;
+          const rel = mode.run.released.length + buildReleased.length;
+          log(`the build ends: ${all} PR${all === 1 ? '' : 's'} merged, ${rel} release${rel === 1 ? '' : 's'}`);
+        }
+        out.build = { ...out.build, closed };
       }
       // Something released: each repository with a refresh after releases runs it, and pushes what it changed once its
       // tests pass (stages/refresh.ts). A stage that released nothing runs none.
@@ -711,7 +806,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
         }
       }
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
-      if (out.results.some(releasedSomething)) await tellAfterRelease(ctx.settings.afterRelease, log, o.tell);
+      // In a build, once: when it ends, for everything it released (the Steward's own, released in its first rounds, too).
+      const tellNow = mode.kind === 'build' ? !!out.build?.closed && mode.run.released.length + buildReleased.length > 0 : out.results.some(releasedSomething);
+      if (tellNow) await tellAfterRelease(ctx.settings.afterRelease, log, o.tell);
       // A round with nothing done or failed leaves no trace: the last stage stays what last happened. The staff's table
       // is made again only when GitHub says something new of anyone, from this round's glance.
       if (name === 'round' && !roundDidSomething(out.results, out.error)) {

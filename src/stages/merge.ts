@@ -6,7 +6,7 @@ import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { bailiffInstalled, type Employee } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
-import { changeFiles, changeVersion, CHANGES_DIR } from '../entries.ts';
+import { changeFiles, changeVersion, CHANGES_DIR, fragmentFiles } from '../entries.ts';
 import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
@@ -188,7 +188,7 @@ type Lookup = () => Promise<{ released: string[]; base: string | null }>;
  * One that leaves its version files alone and adds changes/<version>.md instead (entries.ts) sets the highest of those,
  * and `entries` lists them: the stamp (stages/stamp.ts) gives it its version as it merges.
  */
-export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null; entries?: string[] }> {
+export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ head: string | null; from: string | null; entries?: string[]; fragments?: string[] }> {
   const { run } = ctx;
   const repo = checkoutOf(e);
   // The PR's head, fetched by its number (a fork's too), read at the commit its host named.
@@ -202,10 +202,15 @@ export async function prVersions(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ h
   const head = await read(at);
   const from = start ? await read(start) : null;
   if (start && head === from) {
-    const entries = async (ref: string) => changeFiles(((await gitMaybe(run, repo, 'ls-tree', '--name-only', ref, `${CHANGES_DIR}/`)) ?? '').split('\n').map((l) => l.trim()));
-    const had = new Set(await entries(start));
-    const added = (await entries(at)).filter((f) => !had.has(f));
+    const listing = async (ref: string) => ((await gitMaybe(run, repo, 'ls-tree', '--name-only', ref, `${CHANGES_DIR}/`)) ?? '').split('\n').map((l) => l.trim());
+    const [before, now] = [await listing(start), await listing(at)];
+    const had = new Set(changeFiles(before));
+    const added = changeFiles(now).filter((f) => !had.has(f));
     if (added.length) return { head: changeVersion(added.at(-1)!), from, entries: added };
+    // A fragment (changes/<branch>.md): no version of its own, the stamp gives it the next release's.
+    const hadFragments = new Set(fragmentFiles(before));
+    const fragments = fragmentFiles(now).filter((f) => !hadFragments.has(f));
+    if (fragments.length) return { head, from, fragments };
   }
   return { head, from };
 }
@@ -260,8 +265,8 @@ export async function afterHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Looku
   if (!existsSync(repo)) return `it asks for a release, but there's no checkout at ${repo} to read its version from`;
   const { released, base } = await lookup();
   const v = await prVersions(ctx, e, pr);
-  // Its version is stamped as it merges: always a new one.
-  if (v.entries) return null;
+  // Its version is stamped as it merges: always a new one, or the next release's.
+  if (v.entries || v.fragments) return null;
   if (!v.head) return `it asks for a release, but its branch has no version the Steward can read (${e.versionFiles.join(', ')})`;
   const version = v.head !== v.from ? v.head : (base ?? v.head);
   if (released.includes(version)) return `it asks for a release, but v${version}, its version once merged, is already released: ${RAISE}`;
