@@ -31,4 +31,5 @@ export { pageTabInHash, PageTabs, settingsTabInHash, SHOW_TAB, Tabs, usePageTab,
 export { blank, canon, same, shownNow, tidy, words, type Messages, type SettingsData, type SettingsField } from './settings-values.ts';
 export { onPage, Tour, tourFrom, tourStart } from './tour.tsx';
 export { OnPageList, type OnPageItem } from './lists.tsx';
+export { ConnectAI, Glance, Kept, Output, Paste, showSection, SidePanel, StaffLayout, useFold, type ClientSetup, type ConnectedClient, type GlanceTile, type GlanceTone, type KeptRow, type KeptStat } from './staff.tsx';
 export type { Onboarding } from './page-data.ts';
