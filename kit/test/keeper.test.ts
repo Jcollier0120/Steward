@@ -79,7 +79,11 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
 test("a program's name reaches Windows' process list as text: quotes, curly quotes, $( ) and backticks stay in the name", async () => {
   assert.equal(wqlName("a'b\\c.exe"), "Name='a\\'b\\\\c.exe'");
   assert.equal(wqlName('llama-server.exe'), "Name='llama-server.exe'");
-  // Run for real: a name made to end the string early finds no process, and runs nothing.
+  // Run for real: a name made to end the string early finds no process, and runs nothing. The PowerShell worker up and its
+  // CIM cmdlets loaded first, with time to spare: at the checks pace on a busy PC that alone can take most of the 30 s a
+  // query is allowed.
+  const { powershell } = await import('./fixture/src/kit/ps.ts');
+  await powershell("Get-CimInstance Win32_OperatingSystem | Out-Null; 'ready'", { timeoutMs: 180_000 });
   for (const name of ["x\u2019; Write-Output INJECTED; \u2019y.exe", "x'; Write-Output INJECTED; 'y.exe", 'x$(Write-Output INJECTED)`n.exe', 'x" ; Write-Output INJECTED ; ".exe']) {
     assert.deepEqual(await serverProcesses(`C:\\nowhere\\${name}`, BASE), [], name);
   }

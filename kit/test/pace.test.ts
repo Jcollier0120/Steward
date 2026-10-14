@@ -135,7 +135,9 @@ test('on Windows, a process set gentle and back: efficiency mode, disk priority 
   const { powershell, stopPowerShellWorker } = await import('./fixture/src/kit/ps.ts');
   const source = read(new URL('./fixture/src/kit/gentle.cs', import.meta.url), 'utf8');
   const dll = path.join(home, 'gentle-test.dll');
-  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore', windowsHide: true });
+  // Alive for longer than the three calls can take: the first compiles the DLL, a minute and more at the checks pace on a
+  // busy PC. Ended below.
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 900000)'], { stdio: 'ignore', windowsHide: true });
   try {
     assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, source), { timeoutMs: 120_000 })).trim(), 'eco io cap worker');
     assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, null))).trim(), 'eco io cap worker', 'again: the same job, the worker in it already');
