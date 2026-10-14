@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.20
+
+**The Steward's own tests run faster, so a vouch on one of its pull requests and the test run before each kit release finish sooner.**
+
+### What changed
+
+- The Steward's tests no longer build each stand-in repository from scratch with eight git commands. They build the first of each kind once and copy it for the rest, each copy with a first commit of its own. Its slowest test files take about a quarter less time: on the owner's laptop, the merge guard's tests went from 30 to 22 seconds and the catch-up's from 80 to 59. The whole set of seven slowest files went from 218 to 181 seconds.
+- A few tests make several of their stand-in pull requests in one push instead of one push each.
+- Nothing the Steward does outside its tests changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.19
 
 **A vouch no longer tests code again when the Assayer already ran the tests the change reaches, not just the whole suite.**
