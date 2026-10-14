@@ -43,8 +43,11 @@ export async function installPackages(ctx: Ctx, dir: string, plan: InstallPlan, 
 
 export const modulesRootOf = (s: Settings) => path.join(workRootOf(s), '_modules');
 
-/** How many sets are kept, the most lately used. */
-export const KEEP_SETS = 6;
+/**
+ * How many sets are kept, the most lately used. Six was too few (0.35.68): the agents' lockfiles make seven sets or more
+ * (a patch of @types/node apart splits them), so a set was pruned and installed again within the same round.
+ */
+export const KEEP_SETS = 12;
 
 /**
  * A lockfile's packages as one key: what it installs (every entry of `packages` but the project's own), with the Node
@@ -203,15 +206,31 @@ export async function linkSharedModules(ctx: Ctx, dir: string, say: (line: strin
   }
 }
 
-/** The sets beyond the KEEP_SETS most lately used, and installs left half-done a day ago, removed. */
-export function pruneSets(root: string, keepKey?: string, now = Date.now()): string[] {
+/** Whether the process `pid` still runs on this PC. */
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/**
+ * The sets beyond the KEEP_SETS most lately used removed, and installs left half-done: a day old, or made by a process
+ * that no longer runs (its pid is in the name, <key>.tmp-<pid>-<random>).
+ */
+export function pruneSets(root: string, keepKey?: string, now = Date.now(), alive: (pid: number) => boolean = pidAlive): string[] {
   if (!existsSync(root)) return [];
   const entries = readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => ({ name: d.name, at: statSync(path.join(root, d.name)).mtimeMs }));
   const removed: string[] = [];
   const done = entries.filter((x) => /^[0-9a-f]{16}$/.test(x.name)).sort((a, b) => b.at - a.at);
-  const stale = [...done.slice(KEEP_SETS).filter((x) => x.name !== keepKey), ...entries.filter((x) => x.name.includes('.tmp-') && now - x.at > 24 * 3600_000)];
+  const stale = [...done.slice(KEEP_SETS).filter((x) => x.name !== keepKey), ...entries.filter((x) => {
+    const tmp = /\.tmp-(\d+)-/.exec(x.name);
+    return !!tmp && (now - x.at > 24 * 3600_000 || (Number(tmp[1]) !== process.pid && !alive(Number(tmp[1]))));
+  })];
   for (const x of stale) {
     try {
       rmSync(path.join(root, x.name), { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -13,7 +13,7 @@ process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');
-const { refreshFailedFile, releasedWords } = await import('../src/stages/refresh.ts');
+const { refreshFailedFile, refreshStep, releasedWords, REFRESH_WAIT_MS } = await import('../src/stages/refresh.ts');
 const { staffRow } = await import('../src/stages/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
@@ -120,25 +120,50 @@ test("after a round releases something, the site's refresh runs, its tests pass,
   assert.equal(sh(site.checkout, '--git-dir', site.origin, 'log', '-1', '--format=%s', 'main'), 'Release notes and downloads after Fake 0.4.1');
   assert.equal(sh(site.checkout, '--git-dir', site.origin, 'rev-parse', 'main^'), before, 'one commit on top of what was there, never forced');
   assert.equal(siteNotes(), 'Fake 0.4.1\nFake 0.4.0');
-  assert.equal(existsSync(path.join(home, 'work', 'site-refresh')), false, 'its worktree is removed');
-  assert.ok(!sh(site.checkout, 'worktree', 'list').includes('site-refresh'), 'and git forgets it');
+  assert.ok(existsSync(path.join(home, 'work', 'site-refresh')), 'its worktree is kept for the next refresh');
+  assert.ok(sh(site.checkout, 'worktree', 'list').includes('site-refresh'));
 });
 
-test("a refresh that changes nothing pushes nothing; a worktree left from before is cleared first", async () => {
-  // Left by a refresh cut short (the PC turned off mid-run): registered with git, its folder still there.
-  sh(site.checkout, 'worktree', 'add', '--quiet', '--detach', path.join(home, 'work', 'site-refresh'), 'origin/main');
+test("a refresh that changes nothing pushes nothing; the worktree kept from the last one is reset first", async () => {
+  // What a refresh cut short (the PC turned off mid-run) could leave: a tracked file changed, an untracked one made.
+  const kept = path.join(home, 'work', 'site-refresh');
+  writeFileSync(path.join(kept, 'notes.txt'), 'half written\n');
+  writeFileSync(path.join(kept, 'stray.txt'), 'left behind\n');
   raise('0.4.1', '0.4.2');
   const before = siteHead();
   const out = await round();
   const [refresh] = refreshes(out);
-  assert.equal(refresh?.outcome, 'skipped');
+  assert.equal(refresh?.outcome, 'skipped', JSON.stringify(out.results));
   assert.match(refresh.message, /changed nothing .*: nothing to push/);
   assert.equal(siteHead(), before);
+  assert.ok(out.log.some((l) => l.includes('(kept from the last refresh)')), out.log.join('\n'));
+  assert.ok(!existsSync(path.join(kept, 'stray.txt')), 'what the last one left untracked is gone');
+
+  // One no longer registered with git (pruned by hand): made afresh.
+  sh(site.checkout, 'worktree', 'remove', '--force', kept);
+  mkdirSync(kept, { recursive: true });
+  writeFileSync(path.join(kept, '.git'), 'gitdir: nowhere\n');
+  raise('0.4.2', '0.4.3');
+  const again = await round();
+  assert.equal(refreshes(again)[0]?.outcome, 'skipped', JSON.stringify(again.results));
+  assert.ok(!again.log.some((l) => l.includes('(kept from the last refresh)')));
+});
+
+test('releases wait for the round that comes sooner, and one refresh covers them all; never longer than an hour', () => {
+  const t0 = Date.parse('2026-10-13T08:00:00Z');
+  const porter = { id: 'porter', name: 'Porter', version: '0.5.48' };
+  const clerk = { id: 'clerk', name: 'Clerk', version: '0.5.41' };
+  const first = refreshStep({ released: [porter], pending: null, soon: true, now: t0 });
+  assert.deepEqual(first, { wait: { since: new Date(t0).toISOString(), released: [porter] } });
+  const pending = 'wait' in first ? first.wait : null;
+  assert.deepEqual(refreshStep({ released: [clerk, porter], pending, soon: false, now: t0 + 600_000 }), { run: [porter, clerk] }, 'the next round: both, once');
+  assert.deepEqual(refreshStep({ released: [], pending, soon: true, now: t0 + REFRESH_WAIT_MS }), { run: [porter] }, 'an hour on: it goes');
+  assert.deepEqual(refreshStep({ released: [], pending: null, soon: false, now: t0 }), { run: [] });
 });
 
 test("a refresh whose tests fail pushes nothing, and is an alarm until a later one goes through", async () => {
-  raise('0.4.2', '0.4.3');
-  writeFileSync(source, 'Fake 0.4.3\n');
+  raise('0.4.3', '0.4.4');
+  writeFileSync(source, 'Fake 0.4.4\n');
   writeFileSync(failFlag, '');
   const before = siteHead();
   const out = await round();
@@ -148,15 +173,15 @@ test("a refresh whose tests fail pushes nothing, and is an alarm until a later o
   assert.equal(siteHead(), before, 'a failing tree is never pushed');
   const held = JSON.parse(readFileSync(refreshFailedFile(), 'utf8'));
   assert.deepEqual(Object.keys(held), ['site']);
-  assert.equal(held.site.after, 'Fake 0.4.3');
+  assert.equal(held.site.after, 'Fake 0.4.4');
   assert.ok(alarms().some((id) => id.startsWith('refresh:site:')), alarms().join(', '));
 
   rmSync(failFlag);
-  raise('0.4.3', '0.4.4');
-  writeFileSync(source, 'Fake 0.4.4\nFake 0.4.3\n');
+  raise('0.4.4', '0.4.5');
+  writeFileSync(source, 'Fake 0.4.5\nFake 0.4.4\n');
   const next = await round();
   assert.equal(refreshes(next)[0]?.outcome, 'done', JSON.stringify(next.results));
-  assert.equal(siteNotes(), 'Fake 0.4.4\nFake 0.4.3');
+  assert.equal(siteNotes(), 'Fake 0.4.5\nFake 0.4.4');
   assert.deepEqual(JSON.parse(readFileSync(refreshFailedFile(), 'utf8')), {});
   assert.ok(!alarms().some((id) => id.startsWith('refresh:')), 'cleared');
 });

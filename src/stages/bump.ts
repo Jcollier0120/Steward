@@ -52,8 +52,9 @@ export interface BumpOptions {
    */
   trial?: boolean;
   /**
-   * A trial's: what the kit changes for the employee (kitreach.ts), given its pin and whether its tools/kit.ts changes.
-   * Nothing it takes: it isn't tried. Some files: only the tests they reach run.
+   * A trial's and the rollout's: what the kit changes for the employee (kitreach.ts), given its pin and whether its
+   * tools/kit.ts changes. Nothing it takes: a trial doesn't try it, and a rollout's bump runs its checks but no tests.
+   * Some files: only the tests they reach run.
    */
   reach?: (e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => Promise<KitReach>;
   /**
@@ -278,11 +279,14 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  // A trial of an agent the kit changes nothing for isn't tried: its checks would run its own main's code (kitreach.ts).
-  const reach = o.trial && o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
-  if (reach && 'none' in reach) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
-  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : undefined;
+  // What the kit changes for it (kitreach.ts): a trial's, and the rollout's (0.35.68). A trial of an agent the kit
+  // changes nothing for isn't tried: its checks would run its own main's code. The rollout still bumps it, with its fill,
+  // typecheck and pretest but no tests; one whose kit files change runs the tests they reach, as its trial did.
+  const reach = o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
+  if (reach && 'none' in reach && o.trial) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
+  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : reach && 'none' in reach ? { base: baseCommit, changed: [] } : undefined;
   if (reach && 'all' in reach) say(`all its checks: ${reach.all}`);
+  if (reach && 'none' in reach) say(`no tests for the kit: ${reach.none}`);
 
   const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
   if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
@@ -341,7 +345,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
     const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
-  // Only some of its tests ran: its rollout's bump runs them all (no trial pass is kept for it).
+  // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
   if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}) });
   const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';

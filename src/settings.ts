@@ -118,6 +118,10 @@ export interface Settings {
   afterRelease: string[];
   /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
   rollout: boolean;
+  /** A new kit is rolled out once it has gone this many hours without a newer kit release (0: at once). */
+  rolloutQuietHours: number;
+  /** ...and never later than this many hours after the oldest kit released since the last one rolled out. */
+  rolloutMaxWaitHours: number;
   /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
   releaseSelf: boolean;
   /** In its rounds, the team's PRs to the Steward's own repository are merged as an employee's are: tested here first. */
@@ -309,6 +313,8 @@ export const DEFAULT_SETTINGS: Settings = {
   tasteBeforeRelease: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
+  rolloutQuietHours: 2,
+  rolloutMaxWaitHours: 12,
   releaseSelf: true,
   mergeSelf: true,
   stewardCheckout: '',
@@ -599,6 +605,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     ...CASTELLAN,
     help: "Each repository on an older kit than the newest release is bumped and its PR pushed, a few at a time; later rounds merge and release it. Off: Bump and Push only when asked.",
   },
+  { key: 'rolloutQuietHours', kind: 'whole', min: 0, max: 48, unit: 'hours', advanced: true, label: 'A new kit settles for', tab: 'Castellan', ...CASTELLAN, help: 'It rolls out once no newer kit has been released for this long, so a burst of kits goes out once. A kit marked Urgent in its changelog goes at once. 0: each kit at once.' },
+  { key: 'rolloutMaxWaitHours', kind: 'whole', min: 1, max: 168, unit: 'hours', advanced: true, label: 'A new kit waits at most', tab: 'Castellan', ...CASTELLAN, help: 'Counted from the oldest kit not yet rolled out: however many follow it, the newest goes out by then.' },
   {
     key: 'releaseSelf',
     kind: 'switch',
@@ -719,6 +727,9 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   const parallel = Number(r.parallel);
   const stagesAtOnce = Number(r.stagesAtOnce);
   const roundMinutes = Number(r.roundMinutes);
+  const hours = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : Number.NaN);
+  const quietHours = hours(r.rolloutQuietHours);
+  const maxWaitHours = hours(r.rolloutMaxWaitHours);
   const mergeMinAge = r.mergeMinAgeMinutes == null || r.mergeMinAgeMinutes === '' ? NaN : Number(r.mergeMinAgeMinutes);
   return {
     settings: {
@@ -741,6 +752,8 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
+      rolloutQuietHours: Number.isInteger(quietHours) ? Math.min(48, Math.max(0, quietHours)) : d.rolloutQuietHours,
+      rolloutMaxWaitHours: Number.isInteger(maxWaitHours) ? Math.min(168, Math.max(1, maxWaitHours)) : d.rolloutMaxWaitHours,
       releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,
       mergeSelf: typeof r.mergeSelf === 'boolean' ? r.mergeSelf : d.mergeSelf,
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),

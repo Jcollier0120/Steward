@@ -48,7 +48,7 @@ export const STEWARD_BRANCH = 'main';
 export interface Glance {
   at: string;
   /** The Steward's own releases (its v<x.y.z> and the kit's kit-v<x.y.z>), or null when they couldn't be read. */
-  stewardReleases: { tagName: string; isDraft: boolean }[] | null;
+  stewardReleases: { tagName: string; isDraft: boolean; publishedAt?: string }[] | null;
   /** The Steward's own main, or null when it couldn't be read (left out: an older glance). */
   stewardMain?: StewardMain | null;
   /** By employee id. One GitHub gave no answer for is left out, and `errors` says why. */
@@ -104,7 +104,7 @@ export function glanceQuery(employees: Employee[], stewardRepo: string | null): 
   if (stewardRepo) {
     const main = (file: string) => `object(expression: ${JSON.stringify(`${STEWARD_BRANCH}:${file}`)}) { ... on Blob { text } }`;
     parts.unshift(
-      `steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } } ` +
+      `steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft publishedAt } } ` +
         `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} }`,
     );
   }
@@ -198,7 +198,7 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     return String(err?.message ?? 'GitHub gave no answer for it');
   };
   if (stewardRepo) {
-    into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true })) : null;
+    into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true, ...(typeof x?.publishedAt === 'string' ? { publishedAt: x.publishedAt } : {}) })) : null;
     into.stewardMain = data.steward ? stewardMainFrom(data.steward) : null;
   }
   employees.forEach((e, i) => {

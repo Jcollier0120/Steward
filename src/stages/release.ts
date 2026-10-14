@@ -20,6 +20,7 @@ import { checkoutOf, exchequerNote, forgetGlance, freshBranch, hostIs, mapLimit,
 import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
+import { linkSharedModules } from './modules.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -151,6 +152,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   await freshWorktree(run, ctx.settings, repo, dir, commit, '--detach');
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
+    // Its packages linked from the set installed once for its lockfile (modules.ts), as a bump's are; installed only where
+    // that can't be done (0.35.68). The release only reads them, and never packs node_modules (the kit's release.ts).
     if (releaseNeedsPackages(dir, e.release)) {
       // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
       const g = await guardPackages(ctx, e, dir, `the release of v${version}`);
@@ -158,7 +161,8 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
         ctx.log(`[${e.id}] packages held: ${g.held}`);
         return result(e, 'failed', `${g.held}, so its release wasn't built`, { version, commit: commit.slice(0, 7) });
       }
-      const ci = await installPackages(ctx, dir, g.plan, (line) => ctx.log(`[${e.id}] ${line}`));
+      const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
+      const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
       if (ci) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
         keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
