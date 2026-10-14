@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // Native files in a release (spec/RELEASES.md, "Native files"): kit.json's "native", the build and its signing, the
 // zip carrying both processors, and an install keeping this PC's. Nothing here signs or touches the real home folder.
@@ -11,7 +12,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'native-test-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 const ENV = String(pkg.name).toUpperCase().replace(/-/g, '_');
 process.env[`${ENV}_HOME`] = path.join(tmp, 'own-home');
-process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
+process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot } = await import('./fixture/src/app.ts');

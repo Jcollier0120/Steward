@@ -3,13 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { freePort } from '../kit/test/free-port.ts';
 
 // The Steward's page, on a port and data folder of its own, with no employees and gh standing in: it
 // pings as Manor expects, renders, and starts a stage only for a POST with the page's token from its own
 // origin.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-page-'));
 process.env.STEWARD_HOME = home;
-process.env.STEWARD_PORT = String(41000 + Math.floor(Math.random() * 8000));
+process.env.STEWARD_PORT = String(await freePort());
 writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ employees: [], stewardRepo: 'octocat/steward' }));
 // A Manor of its own, with Developer options on, as a developer's: the ping then says its pid (the kit's 2.40.0).
 const manor = path.join(home, 'manor');

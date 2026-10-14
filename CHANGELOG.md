@@ -11,6 +11,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - When the Steward runs a repository's checks (a kit's trial, a vouch, a pull request's test, a catch-up, a merge train), git's commit and tag signing is off for those checks alone. With commit signing on (an SSH or GPG key), every throwaway commit a test made started ssh-keygen or gpg, and Windows Defender scanned each one: 461 in one run of the Steward's own tests. Your own git settings are untouched, and the commits the Steward pushes are signed as before.
 - The Steward's own tests sign nothing either, and its two tests of building a release build once each instead of five and two times: the builds those tests made over and over now run once, before a kit is released, and checking a pull request takes minutes less.
 - Before it releases a kit, the Steward installs its packages and builds every kind of release the kit makes (`npm run test:release`). A kit whose release builds fail isn't released, and says so.
+- A check of the Steward no longer fails now and then because another one ran at the same time: its tests that open a page each take a port nothing else is using, instead of sharing one.
 
 ### Before you update
 

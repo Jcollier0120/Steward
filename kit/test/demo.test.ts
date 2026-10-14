@@ -3,11 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // Demo mode (demo.ts): a copy on its own port and an empty data folder, its page answered from made-up data.
 const home = mkdtempSync(path.join(os.tmpdir(), 'fixture-demo-'));
 process.env.FIXTURE_HOME = path.join(home, 'data');
-process.env.FIXTURE_PORT = String(40000 + Math.floor(Math.random() * 9000));
+process.env.FIXTURE_PORT = String(await freePort());
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { port } = await import('./fixture/src/app.ts');

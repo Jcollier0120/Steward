@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // Installing from a release (Manor's docs/INSTALLING.md). Nothing here touches Task Scheduler, a
 // running page or the real home folder: every install runs in a temporary folder, with stand-ins.
@@ -12,7 +13,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'install-test-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 const ENV = String(pkg.name).toUpperCase().replace(/-/g, '_');
 process.env[`${ENV}_HOME`] = path.join(tmp, 'own-home');
-process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
+process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');

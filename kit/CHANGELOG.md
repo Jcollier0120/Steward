@@ -15,6 +15,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - The Steward runs every repository's checks with them, whatever the repository's test script says.
 - The kit's release tests build one release each, the minified one as released, and list the zip (`tar -t`) instead of unpacking it twice; the native test unpacks only what it checks. The other builds (readable, dirty, no announcement, native and dirty: there were five and two) run with `STEWARD_RELEASE_TESTS=1`: `npm run test:release`, and `tools/kit-release.ts --publish` before it publishes a kit (`--skip-release-tests` leaves them out). In the full suite under load the two tests took 524 s and 514 s, and set the time of every vouch.
+- The kit's tests that serve a page take a port nothing listens on (`kit/test/free-port.ts`: from 40000-48999, checked on 127.0.0.1 and ::1), never the fixture's own 17979. Every checkout's tests used 17979, so two test runs at once met there and one failed with EADDRINUSE.
 
 - `release.ts`, `npu-bench.ts` and `npu-check.ts` run when started from a folder reached through a junction or link: they compared the path they were started by with their own real path, and did nothing, silently, when the two differed.
 
