@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.17
+
+**Releases go out again on a PC whose folders are on a Dev Drive: the Steward works in its work folder by its real path, and a release that published nothing is no longer called released.**
+
+### What changed
+
+- The Steward now works in its work folder by its real path, wherever the folder is reached through a junction, a symbolic link or a Dev Drive mounted in a folder. From the evening of 2026-10-13, when the owner's work folder became a junction to a Dev Drive, every agent's release ran its release command there and did nothing: the kit's release script didn't recognise itself through the junction and exited without building or publishing. The Steward reported each one released, round after round, and every other round failed with "a missing but already registered worktree".
+- A release command that finishes without making the agent's GitHub release is now a failed release on the PC that releases Castellan too, as it already was everywhere else, rather than "released". Such a release raises the usual alarm and waits for a person or a new commit, instead of reporting success.
+- A folder the Steward made in its work folder is recognised as its own however its path is spelled, so one a stopped stage left behind is still cleared.
+- The Steward hands out kit 2.73.1: the kit's scripts recognise themselves through junctions and Dev Drive mounts too, and the kit's new spec/DEV-DRIVES.md sets out how every agent compares paths.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you set the Work folder in settings.json to a Dev Drive's own letter to get releases going, you can leave it: it now works either way.
+
 ## 0.36.12
 
 **A new kit that fails some agents no longer holds up the Steward's queue: what isn't the kit's doing is set apart, the rest goes to the Wright, and the PRs behind it merge meanwhile.**

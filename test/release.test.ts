@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -12,7 +12,9 @@ import { ctxFor, ok, runner, sh } from './helpers.ts';
 
 // fresh, so the Steward links the packages installed once for its lockfile there first (modules.ts), else npm ci, as bump does.
 // fresh, so the Steward runs npm ci there first, as bump does.
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-release-'));
+// By its real path, as git and the work folder (workRootOf) spell it: the temporary folder may be on a Dev Drive mounted
+// in a folder (C:\DevData\Temp is E:\Temp).
+const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-release-')));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 // The release command: it fails without node_modules, as Reeve's does, and says what it saw.
@@ -47,7 +49,9 @@ test("a Node agent's release worktree gets the packages installed once for its l
   const work = path.join(tmp, 'work');
   const npm: string[][] = [];
   let npmFails = false;
-  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.3.0', isDraft: false, publishedAt: '2026-10-02T00:00:00Z' }]) : undefined));
+  // GitHub has v0.3.1 once the release command has run: a release command that made none failed.
+  const before = { tagName: 'v0.3.0', isDraft: false, publishedAt: '2026-10-02T00:00:00Z' };
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(existsSync(released) ? [{ tagName: 'v0.3.1', isDraft: false }, before] : [before]) : undefined));
   // npm stands in: `npm ci` makes node_modules (or fails); everything else runs for real.
   const run: Runner = async (cmd, args, opts) => {
     if (cmd !== 'npm') return r.run(cmd, args, opts);
@@ -132,7 +136,7 @@ test("a hire's release worktree gets no npm ci: its release only packs files wit
   const porter = DEFAULT_EMPLOYEES.find((x) => x.id === 'porter')!;
   const e: Employee = { ...porter, checkout, versionFiles: ['package.json'] };
   const npm: string[][] = [];
-  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.1', isDraft: false }]) : undefined));
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([...(npm.length ? [{ tagName: 'v0.4.2', isDraft: false }] : []), { tagName: 'v0.4.1', isDraft: false }]) : undefined));
   const run: Runner = async (cmd, args, opts) => {
     if (cmd !== 'npm') return r.run(cmd, args, opts);
     npm.push(args);
@@ -142,6 +146,29 @@ test("a hire's release worktree gets no npm ci: its release only packs files wit
   const done = await releaseOne(ctx, e, { kit: '2.9.0' });
   assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
   assert.deepEqual(npm, [['run', 'release', '--', '--publish']], 'its release, and no npm ci before it');
+});
+
+test("a release command that exits 0 but made no GitHub release failed, on the PC that releases Castellan too", async () => {
+  const origin = path.join(tmp, 'silent-origin.git');
+  const checkout = path.join(tmp, 'Porter-silent');
+  sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
+  sh(tmp, 'clone', '--quiet', origin, checkout);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(checkout, 'config', k, v);
+  writeFileSync(path.join(checkout, 'package.json'), '{\n  "name": "porter",\n  "version": "0.5.50",\n  "scripts": { "release": "node tools/kit.ts && node src/kit/release.ts" }\n}\n');
+  writeFileSync(path.join(checkout, 'kit.json'), '{\n  "kit": "2.69.1",\n  "parts": ["node", "web", "spec"]\n}\n');
+  sh(checkout, 'add', '-A');
+  sh(checkout, 'commit', '--quiet', '-m', 'Porter 0.5.50');
+  sh(checkout, 'push', '--quiet', 'origin', 'main');
+  const porter = DEFAULT_EMPLOYEES.find((x) => x.id === 'porter')!;
+  const e: Employee = { ...porter, checkout, versionFiles: ['package.json'] };
+  // As kit 2.69.1's release.ts did under a work folder reached through a junction: it never started, and exited 0.
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.5.49', isDraft: false }]) : undefined));
+  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? ok('') : r.run(cmd, args, opts));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-silent'), run, neutralDir: tmp });
+  assert.equal(ctx.settings.releasesCastellan, true, "the owner's PC");
+  const silent = await releaseOne(ctx, e, { kit: '2.69.1' });
+  assert.equal(silent.outcome, 'failed', silent.message);
+  assert.match(silent.message, /^npm run release -- --publish finished, but GitHub has no release v0\.5\.50 in Jcollier0120\/Porter: /);
 });
 
 test("a release that reached GitHub but not the Exchequer is done, with the kit's line as a note; never a failure", async () => {
@@ -161,8 +188,9 @@ test("a release that reached GitHub but not the Exchequer is done, with the kit'
   const clerk = DEFAULT_EMPLOYEES.find((x) => x.id === 'clerk')!;
   const e: Employee = { ...clerk, checkout, versionFiles: ['package.json'] };
   const said = "Not published to the Exchequer: couldn't reach https://api.castellan-software.com: fetch failed (ECONNREFUSED). The GitHub release stands; npm run release -- --exchequer finishes it.";
-  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.3.3', isDraft: false }]) : undefined));
-  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? { code: 0, out: 'Clerk 0.3.4 (abc1234, kit 2.30.0): artifacts\\clerk\\Clerk-0.3.4.zip\n', err: `${said}\n` } : r.run(cmd, args, opts));
+  let ran = false;
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([...(ran ? [{ tagName: 'v0.3.4', isDraft: false }] : []), { tagName: 'v0.3.3', isDraft: false }]) : undefined));
+  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? (ran = true) && { code: 0, out: 'Clerk 0.3.4 (abc1234, kit 2.30.0): artifacts\\clerk\\Clerk-0.3.4.zip\n', err: `${said}\n` } : r.run(cmd, args, opts));
   const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-exchequer'), run, neutralDir: tmp });
   const done = await releaseOne(ctx, e, { kit: '2.30.0' });
   assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
@@ -187,7 +215,14 @@ test('a release whose entry, or one it brings, starts "**Urgent fix:" is let out
   const e: Employee = { ...clerk, checkout, versionFiles: ['package.json'] };
   let released = ['v0.3.3'];
   const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(released.map((tagName) => ({ tagName, isDraft: false }))) : undefined));
-  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? ok('Published to the Exchequer: clerk-v0.3.5.\n') : r.run(cmd, args, opts));
+  // The release command makes the GitHub release of the version it builds.
+  const versionIn = (dir: string) => (JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) as { version: string }).version;
+  const run: Runner = async (cmd, args, opts) => {
+    if (cmd !== 'npm') return r.run(cmd, args, opts);
+    const v = versionIn(opts!.cwd!);
+    released.push(`v${v}`);
+    return ok(`Published to the Exchequer: clerk-v${v}.\n`);
+  };
   const asked: string[] = [];
   const exchequer = {
     env: { EXCHEQUER_URL: 'http://exchequer.invalid', EXCHEQUER_PUBLISHER_KEY: 'test-key' },
