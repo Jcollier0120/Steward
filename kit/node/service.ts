@@ -56,6 +56,27 @@ export async function start(cliFile: string): Promise<number> {
   return code;
 }
 
+/**
+ * How open starts the page: the program, its arguments, and how to spawn it (kit 2.72.2).
+ *
+ * On Windows through cmd's `start /b`, cmd started with a windowless console of its own (windowsHide, not detached).
+ * The page keeps that console after cmd has gone, and the git and gh it starts share it (console.ts) instead of each
+ * getting a console host (conhost.exe) of its own: one process for every git rather than two, all day. `start` also
+ * takes the page out of the job Node puts what it starts in, whose processes end when the process that ran open does.
+ *
+ * Elsewhere, and on Windows when a path holds a `%` or a `"` (which cmd would read), detached, with no console, as before.
+ */
+export function pageLaunch(
+  node: string,
+  entry: string,
+  o: { platform?: NodeJS.Platform; comspec?: string } = {},
+): { file: string; args: string[]; options: { windowsHide: true; detached?: true; windowsVerbatimArguments?: true } } {
+  if ((o.platform ?? process.platform) !== 'win32' || /[%"]/.test(node + entry)) return { file: node, args: [entry, 'serve'], options: { windowsHide: true, detached: true } };
+  // /s: cmd takes what's between the outer quotes as it is; start's first quoted word is a window title, here none.
+  const line = `"start "" /b "${node}" "${entry}" serve"`;
+  return { file: o.comspec ?? process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', line], options: { windowsHide: true, windowsVerbatimArguments: true } };
+}
+
 /** Starts `serve` in the background, its output in serve.log, and waits until the page answers. Duty is unchanged. */
 export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Promise<number> {
   if (await ping()) {
@@ -69,10 +90,10 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
   // A built release (kit 2.17.0) runs src\cli.js through the src\cli.ts stub: the page is started as cli.ts, as ever,
   // so its command line says so (Pinder and the Surveyor know the manor's own agents by it).
   const entry = cliFile.endsWith('.js') && existsSync(`${cliFile.slice(0, -3)}.ts`) ? `${cliFile.slice(0, -3)}.ts` : cliFile;
-  const child = spawn(process.execPath, [entry, 'serve'], {
-    detached: true,
+  const how = pageLaunch(process.execPath, entry);
+  const child = spawn(how.file, how.args, {
+    ...how.options,
     stdio: ['ignore', log, log],
-    windowsHide: true,
     // The data folder, not the program's: Windows won't move a folder that is a process's current folder
     // (or its children's, like PowerShell's), and an install swaps the program's folder.
     cwd: dataDir,

@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
 import { pacedCommand } from './kit/checks-pace.ts';
+import { sharesConsole } from './kit/console.ts';
 import { gitExe } from './kit/git-exe.ts';
 
 /** What a command did: its exit code, and what it printed. */
@@ -116,15 +117,22 @@ export function useDotnet(dir: string): void {
   dotnetDir = undefined;
 }
 
+/** In the background: no terminal, so neither its input nor its output is one. */
+const BACKGROUND = process.platform === 'win32' && !process.stdin.isTTY && !process.stdout.isTTY;
+/** git and gh, the Steward's most frequent commands, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
+const SHARING = new Set(['git', 'gh']);
+
 /**
- * Without a console of its own to share (the Steward running in the background, Steward 0.35.11), a command starts
- * detached: Windows gives a console program started from a process with none a console host (conhost.exe) of its own,
- * a second process for every git and gh, all day. Detached, it has none, and the programs it starts open no window.
- * From a terminal (the CLI) it shares the terminal's, as before, so Ctrl+C stops what it started.
+ * How a command is started on Windows. git and gh share the Steward's console when it has one (kit/console.ts, Steward
+ * 0.36.14): its page's, which keeps a windowless one from the way the kit starts it (kit 2.72.2), or a terminal's, so
+ * Ctrl+C stops what it started. Hidden, each would get a console host (conhost.exe) of its own: a second process for
+ * every git, all day. With none to share in the background (a page an older kit started), detached (Steward 0.35.11).
+ * Everything else starts hidden, as ever.
  */
-const DETACHED = process.platform === 'win32' && !process.stdin.isTTY && !process.stdout.isTTY;
-/** The commands that start detached: git and gh, the Steward's most frequent, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
-const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
+export function startOptions(cmd: string, o: { shares: boolean; background: boolean }): { windowsHide: boolean; detached: boolean } {
+  const sharing = SHARING.has(cmd);
+  return { windowsHide: !(sharing && o.shares), detached: sharing && !o.shares && o.background };
+}
 
 /**
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
@@ -157,7 +165,7 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
       file,
       argv,
       // execFile hands its options to spawn, detached among them, though its type doesn't name it.
-      { cwd: opts.cwd, env, windowsHide: true, timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
+      { cwd: opts.cwd, env, timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
