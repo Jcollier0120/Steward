@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -11,7 +11,7 @@ import { ctxFor, ok, runner, sh } from './helpers.ts';
 
 // A hire: the first install on this PC of one of its own agents (Manor's staff.local.json), built here from its clone.
 // A release never installs one that isn't installed (it was fired, or never hired); Manor's Hire asks for this instead.
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-hire-'));
+const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-hire-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 /** The release command: it says it ran, and where. */

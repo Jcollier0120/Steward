@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.73.1
+
+**Linked folders are fully supported: every script in the kit recognises itself through a junction, a symbolic link or a Dev Drive mounted in a folder.**
+
+### What's new
+
+- **spec/DEV-DRIVES.md**: why one folder has two spellings on a PC with a Dev Drive (`C:\DevData` is `E:\`), which calls give which, what went wrong on 2026-10-13, and the rules every agent follows: paths compared only by their real paths, the run-as-itself check's one form, temporary folders in tests taken by their real path, and what to tell a developer who moves onto a Dev Drive.
+
+### What changed
+
+- `card-check.ts`, and the kit's own `test/core-types.ts`, `test/turn-scenarios.ts` and `test/accelerator-scenarios.ts`, now compare their own path with the one they were started by through `realpathSync`, as `release.ts`, `npu-check.ts` and `npu-bench.ts` have since 2.71.1. Started from a linked folder, they did nothing and exited 0.
+- `manor.ts`: a project's checkout is compared with the others, and with the Steward's own, by its real path (`realPlace`, `realpathSync.native` of the deepest part that exists). One clone named through `C:\Projects` and by its Dev Drive's letter was two projects; a checkout inside the Steward's, spelled the other way, was let through.
+
+### For an agent
+
+- Take the kit and release as usual.
+- Check your own scripts for `path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`, or the `pathToFileURL(...).href === import.meta.url` form, and compare real paths instead (spec/DEV-DRIVES.md, rule 2). Started from a linked folder, such a script does nothing and exits 0.
 ## 2.73.0
 
 **The checks pace holds to the gentle cap, with memory caps and turns, and the pace is the owner's setting alone: viewing a page, Run now or a fast vouch no longer lifts it.**

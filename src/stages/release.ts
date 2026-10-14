@@ -186,9 +186,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       if (tagged) return result(e, 'failed', `${e.release} finished, but the tag v${version} couldn't be pushed to its origin: ${tagged}${networkNote(tagged)}`, { version, commit: commit.slice(0, 7) });
     }
     // A repository's own release command must make the GitHub release, or the next round would run it again: one that
-    // didn't is a failed release, which the rounds then leave to the person at that commit. (Castellan's own agents, and
-    // one released only on this PC, are known to.)
-    else if (!byGit && !ctx.settings.releasesCastellan && !releasedHere(e)) {
+    // didn't is a failed release, which the rounds then leave to the person at that commit. On the PC that releases
+    // Castellan too: from 2026-10-13 to 10-14 kit 2.69.1's release.ts did nothing under a work folder reached through a
+    // junction and still exited 0, and every round reported its agents released. (One released only on this PC has no
+    // GitHub release.)
+    else if (!byGit && !releasedHere(e)) {
       const now = await releasedOf(ctx, e).catch(() => null);
       if (now && !now.some((x) => x.version === version)) {
         keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
