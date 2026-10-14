@@ -185,7 +185,7 @@ test("a repository's signature changes with anything in it, and not with the ord
 });
 
 test("every branch head is read at a glance, for other agents to share (kit 2.58.0's remote-heads.json); the rest as before", () => {
-  assert.match(glanceQuery([porter], null), /fragment R on Repository \{.*refs\(refPrefix: "refs\/heads\/", first: 100\) \{ totalCount nodes \{ name target \{ oid \} \} \}/);
+  assert.match(glanceQuery([porter], null), /fragment R on Repository \{.*refs\(refPrefix: "refs\/heads\/", first: 100\) \{ totalCount pageInfo \{ hasNextPage endCursor \} nodes \{ name target \{ oid \} \} \}/);
   const g = empty();
   const refs = { totalCount: 2, nodes: [{ name: 'main', target: { oid: 'c'.repeat(40) } }, { name: 'claude/x', target: { oid: 'd'.repeat(40) } }] };
   readGlance([porter, heiward], JSON.stringify({ data: { e0: graphRepo({ refs }), e1: graphRepo({ refs: { ...refs, totalCount: 101 } }) } }), null, g);
@@ -194,4 +194,42 @@ test("every branch head is read at a glance, for other agents to share (kit 2.58
     'Jcollier0120/Heiward': { heads: { main: 'c'.repeat(40), 'claude/x': 'd'.repeat(40) }, complete: false },
   }, "one with more branches than a glance reads isn't complete");
   assert.equal(headsFromGraph(graphRepo()), null, 'an answer without them shares nothing');
+});
+
+test("the Steward's own repository's branch heads are shared too, though it isn't one of the employees", () => {
+  assert.match(glanceQuery([porter], 'Jcollier0120/Steward'), /steward: repository\([^)]*\) \{.*refs\(refPrefix: "refs\/heads\/"/);
+  const g = empty();
+  const refs = { totalCount: 1, pageInfo: { hasNextPage: false, endCursor: 'x' }, nodes: [{ name: 'main', target: { oid: 'e'.repeat(40) } }] };
+  readGlance([porter], JSON.stringify({ data: { steward: { releases: { nodes: [] }, refs }, e0: graphRepo({ refs }) } }), 'Jcollier0120/Steward', g);
+  assert.deepEqual(g.heads?.['Jcollier0120/Steward'], { heads: { main: 'e'.repeat(40) }, complete: true });
+  assert.ok(g.heads?.['Jcollier0120/Porter']);
+});
+
+test('a repository with more branches than a page has the rest read after, all such repositories in one query a page', async () => {
+  const page = (from: number, n: number, total: number, next: string | null) => ({
+    totalCount: total,
+    pageInfo: { hasNextPage: !!next, endCursor: next },
+    nodes: Array.from({ length: n }, (_, i) => ({ name: `b${from + i}`, target: { oid: `${from + i}`.padEnd(40, 'f') } })),
+  });
+  const asked: string[] = [];
+  // Porter: 250 branches, three pages; Heiward: 120, two; the Steward's own: 1.
+  const ask = async (q: string) => {
+    asked.push(q);
+    if (q.startsWith('fragment')) return JSON.stringify({ data: { steward: { releases: { nodes: [] }, refs: page(0, 1, 1, null) }, e0: graphRepo({ refs: page(0, 100, 250, 'p1') }), e1: graphRepo({ refs: page(0, 100, 120, 'h1') }) } });
+    const h = (alias: string, cursor: string) => new RegExp(`${alias}: repository\\([^)]*\\) \\{ refs\\(refPrefix: "refs/heads/", first: 100, after: "${cursor}"\\)`).test(q);
+    if (h('h0', 'p1') && h('h1', 'h1')) return JSON.stringify({ data: { h0: { refs: page(100, 100, 250, 'p2') }, h1: { refs: page(100, 20, 120, null) } } });
+    if (h('h0', 'p2') && !q.includes('h1:')) return JSON.stringify({ data: { h0: { refs: page(200, 50, 250, null) } } });
+    return JSON.stringify({ data: null, errors: [{ message: `not asked here: ${q.slice(0, 80)}` }] });
+  };
+  const g = await takeGlance(async () => assert.fail('no gh'), '.', { employees: [porter, heiward], stewardRepo: 'Jcollier0120/Steward' }, undefined, undefined, ask);
+  assert.equal(asked.length, 3, 'the glance, then one query a page for both');
+  assert.deepEqual([g.heads?.['Jcollier0120/Porter'].complete, Object.keys(g.heads?.['Jcollier0120/Porter'].heads ?? {}).length], [true, 250]);
+  assert.deepEqual([g.heads?.['Jcollier0120/Heiward'].complete, Object.keys(g.heads?.['Jcollier0120/Heiward'].heads ?? {}).length], [true, 120]);
+  assert.equal(g.heads?.['Jcollier0120/Steward'].complete, true);
+
+  // A page GitHub can't give: that repository stays incomplete, and the glance stands.
+  const down = async (q: string) => (q.startsWith('fragment') ? ask(q) : Promise.reject(new Error('GitHub POST graphql: 502')));
+  const h = await takeGlance(async () => assert.fail('no gh'), '.', { employees: [porter, heiward], stewardRepo: 'Jcollier0120/Steward' }, undefined, undefined, down);
+  assert.equal(h.heads?.['Jcollier0120/Porter'].complete, false);
+  assert.equal(Object.keys(h.repos).length, 2);
 });
