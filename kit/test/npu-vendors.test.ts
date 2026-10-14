@@ -514,6 +514,8 @@ test('setup as a command: asks with the size first; the NPU entry is written onl
   assert.ok(log.some((l) => /^note: npu: OpenVINO Model Server didn't answer its test request/.test(l)), log.join('\n'));
   assert.ok(!log.some((l) => /^problem:/.test(l)), log.join('\n'));
   assert.ok(log.includes("note: The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) isn't used: its model server didn't pass its test. The graphics card or the processor does its work instead."), log.join('\n'));
+  const refreshed = path.join(path.dirname(file), 'npu-refresh.json');
+  assert.equal(existsSync(refreshed), false, 'no NPU written: no kit noted as having written its command');
 
   const good = fakeNpuIo();
   const done = await setupCommand({ ...base, yes: true, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => vk } });
@@ -523,6 +525,10 @@ test('setup as a command: asks with the size first; the NPU entry is written onl
   assert.equal(after2.jobs.toast, false, 'the rest of the file kept');
   assert.deepEqual(orderAccelerators(readAccelerators(after2, null).accelerators, 'auto').map((a) => a.id), ['npu', 'gpu-intel-r-arc-tm-140v-gpu-16gb'], 'requests try the NPU first');
   assert.ok(existsSync(file));
+  // The kit that wrote the NPU's command, so the keeper's look with this kit leaves it be (npu-refresh.ts).
+  const rec = JSON.parse(readFileSync(refreshed, 'utf8'));
+  assert.equal(rec.did, 'set-up');
+  assert.equal(rec.kit, readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim());
 });
 
 test("a model pinned for every generation ('*'), as Intel's OpenVINO export is, is checked on each; a generation's own pin comes first", async () => {

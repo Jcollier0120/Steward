@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+**A PC set up by an older kit gets this kit's NPU command: the keeper tests it when nobody uses the NPU, and writes it only when it answers.**
+
+### What's new
+
+- **`npu-refresh.ts`**: `refreshNpu(deps)`, one look at whether the NPU's entry in config.json is what setup would write now on this PC: its commands, their environments, its caps and quirks. It runs once for each kit version, and never takes back a newer kit's. When the entry differs, nothing has to be downloaded, and the NPU is idle, it runs in the NPU's turn: it stops the NPU's servers, asks the new command the test question (and a test embedding), and writes the entry only when it answers properly and the entry didn't change meanwhile. It keeps the slots, timeouts and switch, and every other key. A failed test keeps the old command, and this kit doesn't try again. `argChanges(from, to)` gives the arguments that changed, for the log.
+- keeper.ts: **`startNpuRefresh()`**, the refresh in the background of the keeper's look (`keeperLook`, as the Smith and Reeve run it), once at a time, and only when nobody has held, waited for or used the NPU for 2 minutes (`NPU_REFRESH_QUIET_MS`). What it changed, or why it didn't, goes in reaper.log.
+- setup.ts: **`npu-refresh.json`** beside config.json (`readNpuRefresh`, `rememberNpuRefresh`, `npuRefreshFile`): the kit that last wrote or looked at the NPU's command, and what it found. Setup writes `set-up` when it writes the NPU's entry. `kitVersion()` is this kit's VERSION.
+- setup.ts: `testNpuEntry` and `testNpuEmbed` take `held: true` when the caller already holds the NPU's turn and has stopped its servers.
+- keeper.ts: `reaperTurn` takes the turn's `staleMs`.
+
+### What changed
+
+- **A command that changed between kits now reaches PCs already set up.** Before, it reached only PCs set up after it: setup leaves a configured NPU alone. An Intel NPU 3720 set up with the shipped command answered a short question in 3.1 s; with the chunked command, in 0.5 s. Spec: ACCELERATORS.md (the keeper), NPU-VENDORS.md (A later kit's command).
+
+### For an agent
+
+- Nothing to do: the Smith, else Reeve, runs it in its look. An agent that keeps the servers itself with `keeperLook` gets it the same way.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
