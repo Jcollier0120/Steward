@@ -15,6 +15,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **`open` starts the page with a console of its own, with no window.** On Windows it goes through `cmd /d /s /c "start "" /b …"`, cmd started hidden: the page keeps cmd's windowless console after cmd has exited, and `start` takes it out of the job Node puts what it starts in, so it outlives the process that ran `open`, as before. Its command line still names `src\cli.ts serve`, its output still goes to serve.log, its folder is still the data folder. Off Windows, and on a path holding `%` or `"`, it starts detached, as before. The page's one console host lasts as long as the page.
 - **unsigned-git.ts** also turns off `maintenance.auto`, so a test's throwaway commits no longer each start `git maintenance run --auto`: 20 commits started 62 processes, now 42. `UNSIGNED_KEYS` is now `OFF_KEYS`. test-git.ts and the Steward's checks get it as they are.
+- schedule.ts: a round on the clock (2.72.0) now says it's due exactly on its slot. Before, on a busy PC its `nextRunAt` could be a millisecond past the slot, because the wait read the time twice, and the clock's test then failed now and then. When it runs is unchanged.
 
 ### For an agent
 

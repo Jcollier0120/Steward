@@ -324,14 +324,15 @@ export function every(
     const p = phase(ms);
     return p === null ? ended + ms * jitter : nextOnClock(ended + ms / 2, ms, p);
   };
-  const waitFor = (ms: number) => {
-    dueAt = Date.now() + ms;
+  /** Waits `ms` from `now`: the same now the wait was worked out from, so a slot on the clock is due on it, not a moment past. */
+  const waitFor = (ms: number, now = Date.now()) => {
+    dueAt = now + ms;
     timer = setTimeout(tick, ms);
   };
   const wait = () => {
     jitter = 0.9 + Math.random() * 0.2;
     const now = Date.now();
-    waitFor(Math.max(0, dueAfter(now) - now));
+    waitFor(Math.max(0, dueAfter(now) - now), now);
   };
 
   const tick = async (asked = false) => {
@@ -512,7 +513,8 @@ export function every(
     reschedule(): void {
       if (stopped || running || lastEnded === null) return;
       clearTimeout(timer);
-      waitFor(Math.max(0, dueAfter(lastEnded) - Date.now()));
+      const now = Date.now();
+      waitFor(Math.max(0, dueAfter(lastEnded) - now), now);
     },
     get running() {
       return running;
