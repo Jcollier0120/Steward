@@ -666,7 +666,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   const world = (o: Parameters<typeof fakeNpuIo>[0], first: () => string[] = () => []) => {
     const f = fakeNpuIo(o);
     // The test request takes the first load's time on this fake clock: 300 s.
-    return { ...f.io, now: () => clock, testNpu: async () => ((clock += 300_000), first()) };
+    return { ...f.io, clockMs: () => clock, testNpu: async () => ((clock += 300_000), first()) };
   };
   const meteor = () => planFor(NPU.meteor, 'x64', tools);
   const r = await setUpNpu(meteor(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
@@ -700,6 +700,23 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   const e = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), testEmbed: async () => ['embeddings gave a vector of all zero'] });
   assert.ok(e.entry?.chat && !e.entry.embed);
   assert.equal(e.note, "The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) makes no embeddings: its embedding model doesn't run properly on it. The graphics card or the processor makes them instead.");
+});
+
+// An agent's own io may extend NpuIo with members of its own. Kit 2.68.0's first draft named the clock `now`, and the
+// Smith's trial, whose io has `now: () => Date`, stopped compiling: this keeps the kit off that name.
+type KitNpuIo = import('./fixture/src/kit/setup.ts').NpuIo;
+interface AgentIo extends KitNpuIo {
+  now: () => Date;
+}
+
+test("an agent's io that extends NpuIo with a `now` of its own (a Date, as the Smith's trial has) is taken, and setup never calls it", async () => {
+  const tools = path.join(home, 'agent-io');
+  let called = 0;
+  const io: AgentIo = { ...fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }).io, now: () => (called++, new Date()) };
+  const r = await setUpNpu(planFor(NPU.meteor, 'x64', tools), tools, io);
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.entry);
+  assert.equal(called, 0);
 });
 
 test("setup as a command, with no card: the NPU failing is no error; the processor takes its work, and the note is kept for the accelerators' page", async () => {

@@ -74,6 +74,7 @@ This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which
 - `planNpu` takes `noEmbed`, and `planSetup` takes `skipNpu` and `cpuKinds`. The plan's `npuPlain` says why the NPU, or its embeddings, isn't used.
 - A test request that times out says "didn't answer in time (N s)". `testNpuEntry` takes `timeoutMs`.
 - An NPU driver too old now reads "the NPU's driver needs an update: …".
+- `NpuIo.clockMs` is the clock the first start is timed by, for tests. It isn't called `now`, so an agent whose io extends `NpuIo` with a `now` of its own still compiles. The Smith's trial does that, with a `now` that returns a Date. Every member `NpuIo` gained in this version is optional.
 
 ### For an agent
 
