@@ -7,6 +7,8 @@ import { after, test } from 'node:test';
 // Accelerator setup (setup.ts, detect.ts: Reeve's until kit 2.10.0): planning on fixtures, never a real download.
 process.env.REEVE_HOME = mkdtempSync(path.join(tmpdir(), 'kit-setup-'));
 delete process.env.REEVE_CONFIG;
+// No Manor here: its "Use the graphics card for models when there's an NPU" switch reads as the agent's own default.
+process.env.MANOR_HOME = path.join(process.env.REEVE_HOME!, 'no-manor');
 after(() => rmSync(process.env.REEVE_HOME!, { recursive: true, force: true }));
 const { autoOrder, readAccelerators, validateAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
 const { detectedAccelerators, hardwareOf, keyCards, noNpu, npuName, parseAdapters, parseDetection, recommendedCard } = await import('./fixture/src/kit/detect.ts');

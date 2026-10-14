@@ -9,11 +9,15 @@ import { after, test } from 'node:test';
 // newer failure, the Wright's PR or a head pushed since, and it is tested here as before. And `steward vouch` itself.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-vouch-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
+// The Assayer's record of checks, never the person's own.
+process.env.ASSAYER_HOME = path.join(tmp, 'assayer');
+mkdirSync(process.env.ASSAYER_HOME, { recursive: true });
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
+const { assayerChecksFile, ASSAYED_MS, covers } = await import('../src/stages/assayed.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const vouchStatus = { __typename: 'StatusContext', context: VOUCH_CONTEXT, state: 'SUCCESS' };
@@ -126,4 +130,63 @@ test("after a vouch, the Steward running here is asked for a round now, with its
   assert.equal((asked[0][1].headers as Record<string, string>)['x-token'], 'tok');
   assert.equal(await askRoundSoon({ fetch: answer(403, { error: 'forbidden' }) as typeof fetch }), "The Steward's page answered HTTP 403: it merges at its next round instead.");
   assert.equal(await askRoundSoon({ fetch: (async () => { throw new Error('connect ECONNREFUSED'); }) as typeof fetch }), "The Steward's page didn't answer (connect ECONNREFUSED): it merges at its next round instead.");
+});
+test("steward vouch takes the Assayer's passing check of exactly HEAD's tree, and runs nothing; anything less, and the checks run", async () => {
+  const f = fakeEmployee(path.join(tmp, 'assayed'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/assayed');
+  writeFileSync(path.join(f.checkout, 'a.txt'), 'a\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'a');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  const tree = sh(f.checkout, 'rev-parse', 'HEAD^{tree}');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  const top = path.resolve(sh(f.checkout, 'rev-parse', '--show-toplevel')).toLowerCase();
+  // Its checks here always fail: a vouch that passes proves they weren't run.
+  const failing = 'node -e process.exit(1)';
+  const passed = { at: new Date().toISOString(), outcome: 'passed', full: true, cases: ['unit-tests', 'typecheck'], commands: [failing, 'npm run typecheck'], tree, marks: { 'node_modules/.package-lock.json': '-', 'src/kit/VERSION': '-' } };
+  const go = async (checks: object[], test = [failing]) => {
+    writeFileSync(assayerChecksFile(), JSON.stringify({ [top]: checks }));
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 9, state: 'OPEN', headRefOid: head, isCrossRepository: false });
+      if (a[0] === 'api') return ok('{}');
+    });
+    const said: string[] = [];
+    const e = employee(f.checkout, { fill: '', test });
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    const v = await vouch(ctx, { dir: f.checkout, say: (l) => said.push(l) });
+    return { v, r, said };
+  };
+
+  const taken = await go([passed]);
+  assert.equal(taken.v.ok, true, taken.v.message);
+  assert.match(taken.said.join('\n'), /^the Assayer passed this exact tree at \d\d:\d\d: nothing run again$/m);
+  assert.deepEqual(taken.r.gh.find((a) => a[0] === 'api')?.at(-1), `description=${failing}, npm run typecheck passed in the Assayer at ${head.slice(0, 7)}`);
+  // The Steward's typecheck is the Assayer's typecheck case, however it is written.
+  assert.equal((await go([passed], ['npx tsc -p . --noEmit', failing])).v.ok, true);
+
+  for (const [why, checks, test] of [
+    ['no record', [], [failing]],
+    ['other code', [{ ...passed, tree: 'f'.repeat(40) }], [failing]],
+    ['some tests only', [{ ...passed, full: undefined }], [failing]],
+    ['a failure since', [{ ...passed, outcome: 'failed' }, passed], [failing]],
+    ['too old', [{ ...passed, at: new Date(Date.now() - ASSAYED_MS - 60_000).toISOString() }], [failing]],
+    ['a check it never ran', [passed], [failing, 'npm run build']],
+    ['installed since', [{ ...passed, marks: { ...passed.marks, 'a.txt': '-' } }], [failing]],
+    ['an Assayer before 0.3.31', [{ at: passed.at, outcome: 'passed', cases: ['unit-tests'] }], [failing]],
+  ] as const) {
+    const t = await go([...checks], [...test]);
+    assert.equal(t.v.ok, false, why);
+    assert.match(t.v.message, /checks failed at .*Nothing was recorded/, why);
+    assert.doesNotMatch(t.said.join('\n'), /the Assayer passed/, why);
+    assert.ok(!t.r.gh.some((a) => a[0] === 'api'), why);
+  }
+});
+
+test('the Assayer check covers a vouch only when it ran each of its checks', () => {
+  const c = { cases: ['unit-tests', 'typecheck'], commands: ['npm test', 'npm run typecheck'] };
+  assert.equal(covers(['npx tsc -p . --noEmit', 'npm test'], c), true);
+  assert.equal(covers(['npm run typecheck', 'npm test'], c), true);
+  assert.equal(covers(['npm test', 'npm run build'], c), false);
+  assert.equal(covers(['npx tsc -p . --noEmit', 'npm test'], { cases: ['unit-tests'], commands: ['npm test'] }), false);
+  assert.equal(covers(['dotnet test HEI.Core.Tests'], { cases: ['unit-tests'], commands: ['dotnet test'] }), false);
 });

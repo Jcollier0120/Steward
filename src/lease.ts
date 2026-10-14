@@ -5,6 +5,8 @@ import path from 'node:path';
 import { remoteUrl } from './kit/git-auth.ts';
 import { manorHome } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import { githubApi } from './glance.ts';
+import type { GitHubApi } from './kit/github.ts';
 import { fileAt, lsRemote, readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
@@ -19,10 +21,12 @@ import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from '.
  * (remote-ref.ts), by compare-and-swap. No licence, no Exchequer, nothing of GitHub's: it works for anyone.
  *
  * - Before a stage publishes (merges, releases, refresh, kit rollout and catch-up pushes, the Release button), it reads
- *   the ref of each repository it would publish to. Free, or run out: it takes it, for three rounds. Its own: renewed
- *   once half of that is gone. Another PC's: left alone, and the page says so, with Do it here. A round reads a
- *   repository with nothing new on GitHub only in its hourly full look; in between, the turn last read stands, and
- *   one due is renewed by the compare-and-swap push alone (TurnsOptions.settled).
+ *   the ref of each repository it would publish to: a round, only of those its plan looks at (stages/changes.ts), as
+ *   it publishes nothing to the rest. Free, or run out: it takes it, for three rounds; for half a day while no other
+ *   PC has been seen in a turn record for a month (LONG_TTL_S), as a PC alone has no one to hand it over to. Its own:
+ *   renewed once half of that is gone. Another PC's: left alone, and the page says so, with Do it here.
+ * - On GitHub, the refs are read from the Steward's own process through GitHub's API (githubTurnRefs), not git
+ *   ls-remote, which starts git, its HTTPS helper and Git Credential Manager for each repository.
  * - Pinned (Keep it on this PC): another PC never takes it while it is renewed; a pin silent for over 24 hours may be
  *   taken, and the page says that PC has gone quiet. A PC with a checkout takes the turn from one without.
  * - Before each publishing act, one ls-remote: it acts only while the ref is still its own.
@@ -45,6 +49,13 @@ const MAX_TTL_S = 24 * 3600;
 const SKEW_MS = 2 * 60_000;
 /** A pinned turn renewed by no one for this long may be taken. */
 export const QUIET_PIN_MS = 24 * 3600_000;
+/**
+ * A turn's length while no other PC has been seen: half a day, renewed once half of it is gone. A PC that joins later
+ * finds it taken, and takes it once it runs out (or at once, with Do it here); from then on both use three rounds.
+ */
+export const LONG_TTL_S = 12 * 3600;
+/** Another PC seen in a turn record within this long: this PC isn't alone. */
+export const ALONE_AFTER_MS = 30 * 24 * 3600_000;
 
 export interface TurnRecord {
   /** The PC's id: Manor's device.json, else the Steward's own. */
@@ -80,13 +91,20 @@ export interface TurnsState {
   at: string | null;
   device: Device | null;
   repos: Record<string, RepoTurn>;
+  /** The other PCs seen in a turn record, by id: their name, and when last seen. */
+  others?: Record<string, { name: string; at: string }>;
 }
+
+/** A remote's commits of some refs, by ref (one it hasn't is left out), or why it couldn't be asked: lsRemote's answer. */
+export type TurnRefs = (r: RemoteRepo, refs: string[]) => Promise<{ ok: true; refs: Record<string, string> } | { ok: false; why: string }>;
 
 /** Stands in for this PC, the clock and the remotes (tests). */
 export interface TurnsDeps {
   device?: Device;
   now?: () => number;
   remote?: (e: Employee) => Promise<RemoteRepo | null>;
+  /** How a remote's turn refs are read: githubTurnRefs for the Steward's own stages; left out, git ls-remote. */
+  refs?: TurnRefs;
 }
 
 export const turnsFile = () => dataFile('turns.json');
@@ -95,6 +113,58 @@ const key = (repo: string) => repo.toLowerCase();
 
 /** A turn's length for Settings' rounds: three of them, at least 15 minutes. */
 export const ttlFor = (s: Pick<Settings, 'roundMinutes'>) => Math.min(MAX_TTL_S, Math.max(MIN_TTL_S, Math.round(3 * (s.roundMinutes || 10) * 60)));
+
+/** The other PCs `s` has seen: those it noted (others), and the holders of the turn records it keeps, as of when read. */
+function othersIn(s: TurnsState, me: Device): Record<string, { name: string; at: string }> {
+  const out = { ...(s.others ?? {}) };
+  for (const t of Object.values(s.repos)) {
+    const r = t.record;
+    if (r && r.pc !== me.id && !(Date.parse(out[r.pc]?.at ?? '') >= Date.parse(t.at))) out[r.pc] = { name: r.name, at: t.at };
+  }
+  delete out[me.id];
+  return out;
+}
+
+/** `s` with `repos`, and the other PCs seen kept: a repository whose turn this PC took over forgets its holder, but this PC doesn't. */
+const withRepos = (s: TurnsState, me: Device, repos: Record<string, RepoTurn>): TurnsState => ({ ...s, repos, others: othersIn({ ...s, others: othersIn(s, me), repos }, me) });
+
+/** Whether no other PC has been seen in a turn record for ALONE_AFTER_MS. Pure. */
+export const aloneHere = (s: TurnsState, me: Device, now: number) => !Object.values(othersIn(s, me)).some((o) => now - Date.parse(o.at) < ALONE_AFTER_MS);
+
+/** A turn's length now, in ms: LONG_TTL_S while this PC is alone (aloneHere), else three rounds (ttlFor). */
+export const turnMs = (settings: Pick<Settings, 'roundMinutes'>, s: TurnsState, me: Device, now: number) => (aloneHere(s, me, now) ? Math.max(LONG_TTL_S, ttlFor(settings)) : ttlFor(settings)) * 1000;
+
+/** owner/name of a remote on github.com (https or ssh), or null for any other. */
+export function githubRepoOf(url: string): string | null {
+  const m = /^(?:https:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * The turn refs of a repository on GitHub, read from the Steward's own process through GitHub's API: one GET of
+ * git/matching-refs/manor, kept by its ETag, so an unchanged answer is a 304 that costs nothing of the hourly limit.
+ * git ls-remote started git, its HTTPS helper and Git Credential Manager for each repository, every round. (GitHub's
+ * GraphQL, the glance, doesn't see refs outside refs/heads and refs/tags: it answers null for refs/manor/….) Any other
+ * remote, or GitHub not answering, is asked with git, as before.
+ */
+export const githubTurnRefs =
+  (run: Runner, api: () => Pick<GitHubApi, 'rest'> = githubApi): TurnRefs =>
+  async (r, refs) => {
+    const repo = githubRepoOf(r.url);
+    if (repo && refs.every((x) => x.startsWith('refs/manor/'))) {
+      try {
+        const list = await api().rest<unknown>('GET', `repos/${repo}/git/matching-refs/manor`);
+        if (Array.isArray(list)) {
+          const out: Record<string, string> = {};
+          for (const x of list) if (refs.includes(x?.ref) && typeof x?.object?.sha === 'string') out[x.ref] = x.object.sha;
+          return { ok: true, refs: out };
+        }
+      } catch {
+        // Asked with git.
+      }
+    }
+    return lsRemote(run, r, refs);
+  };
 
 /** This PC: Manor's device id when Manor has made one, else the Steward's own (made once); its name. */
 export function deviceHere(): Device {
@@ -177,10 +247,10 @@ async function claimTurn(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 
 }
 
 /** One repository's turn: read, and taken or renewed as decide() says. */
-export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number; kept?: RepoTurn }): Promise<RepoTurn> {
+export async function turnOne(run: Runner, r: RemoteRepo, e: Pick<Employee, 'name' | 'repo'>, o: { me: Device; checkout: boolean; now: number; ttlMs: number; kept?: RepoTurn; refs?: TurnRefs }): Promise<RepoTurn> {
   const at = new Date(o.now).toISOString();
   // Both refs in one look: the claims ref's commit is kept for claims.ts.
-  const ls = await lsRemote(run, r, [RELEASE_PC_REF, CLAIMS_REF]);
+  const ls = await (o.refs ?? ((x: RemoteRepo, refs: string[]) => lsRemote(run, x, refs)))(r, [RELEASE_PC_REF, CLAIMS_REF]);
   if (!ls.ok) return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at };
   const claimsSha = ls.refs[CLAIMS_REF] ?? null;
   const sha = ls.refs[RELEASE_PC_REF] ?? null;
@@ -202,6 +272,26 @@ export interface LeaseGuard {
   ok(e: Pick<Employee, 'id' | 'repo'>): Promise<boolean>;
   /** The employees another PC publishes for, this stage. */
   skip: Set<string>;
+  /** Whether this guard's turns were taken for the employee (by id). */
+  has(id: string): boolean;
+}
+
+/**
+ * Two stages' worth of turns as one guard: a round takes the Steward's own and the refreshed repositories' first, and
+ * the rest once its plan says which it looks at (steward.ts). An employee is asked of the guard that took its turn,
+ * the later first.
+ */
+export function joinGuards(a: LeaseGuard | null | undefined, b: LeaseGuard | null | undefined): LeaseGuard | null {
+  if (!a || !b) return a ?? b ?? null;
+  const skip = new Set([...a.skip, ...b.skip]);
+  return {
+    get skip() {
+      for (const id of [...a.skip, ...b.skip]) skip.add(id);
+      return skip;
+    },
+    has: (id) => b.has(id) || a.has(id),
+    ok: (e) => (b.has(e.id) || !a.has(e.id) ? b.ok(e) : a.ok(e)),
+  };
 }
 
 export interface TurnsOptions {
@@ -210,25 +300,6 @@ export interface TurnsOptions {
   log?: (line: string) => void;
   /** Null: no turns at all (the tests, unless they give their own). */
   deps: TurnsDeps | null;
-  /**
-   * The employees with nothing new on GitHub since the last round (stages/changes.ts): their turn as last read stands
-   * without a look at the remote (settledTurn), and one due for renewal is renewed by compare-and-swap on the commit last
-   * read. Each round looked at all 38 remotes (a `git ls-remote`, some 9 processes, each); a round now looks only where
-   * something is new, and the hour's full look reads them all. The guard still looks before each publishing act.
-   */
-  settled?: ReadonlySet<string>;
-}
-
-/**
- * What a settled repository's turn, as last read, comes to now with no look at its remote: it stands (this PC's and not
- * due, or another PC's that hasn't run out), it is renewed (this PC's, due), or null: it is read as before (none kept,
- * out of reach, a host that refuses the ref, one to take). Pure.
- */
-export function settledTurn(kept: RepoTurn | undefined, me: { pc: string; checkout: boolean }, now: number, ttlMs: number): 'stands' | 'renew' | null {
-  if (!kept?.sha || !kept.record || (kept.status !== 'here' && kept.status !== 'elsewhere')) return null;
-  const d = decide(kept.record, me, now, ttlMs);
-  if (kept.status === 'here') return d === 'keep' ? 'stands' : d === 'renew' ? 'renew' : null;
-  return d === 'elsewhere' ? 'stands' : null;
 }
 
 /**
@@ -241,14 +312,15 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
   const log = o.log ?? (() => {});
   const nowOf = () => deps.now?.() ?? Date.now();
   const me = deps.device ?? deviceHere();
-  const ttlMs = ttlFor(o.settings) * 1000;
   const remote = deps.remote ?? ((e: Employee) => remoteFor(o.run, o.settings, e));
   const unique = employees.filter((e, i) => employees.findIndex((x) => x.id === e.id) === i);
   // 0.24's file, from the turns through the Exchequer: gone.
   rmSync(dataFile('leases.json'), { force: true });
   const remotes = new Map<string, RemoteRepo>();
   const checkouts = new Map<string, boolean>();
-  const before = loadTurns().repos;
+  const state = loadTurns();
+  const before = state.repos;
+  const ttlMs = turnMs(o.settings, state, me, nowOf());
   const turns = await mapLimit(unique, 4, async (e): Promise<RepoTurn | null> => {
     if (!publishes(e)) return null;
     try {
@@ -257,22 +329,14 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       remotes.set(e.id, r);
       const checkout = !!e.checkout && existsSync(checkoutOf(e));
       checkouts.set(e.id, checkout);
-      const kept = before[key(e.repo)];
-      const now = nowOf();
-      const settled = o.settled?.has(e.id) ? settledTurn(kept, { pc: me.id, checkout }, now, ttlMs) : null;
-      if (settled === 'stands') return kept!;
-      if (settled === 'renew') {
-        // Still this PC's at the commit last read, unless the push finds it moved: then it is read as before.
-        const renewed = await claimTurn(o.run, r, e, recordFor(me, checkout, now, ttlMs, kept!.record!), kept!.sha!, me, now);
-        if (renewed.status === 'here') return { ...renewed, claimsSha: kept!.claimsSha };
-      }
-      return await turnOne(o.run, r, e, { me, checkout, now, ttlMs, kept });
+      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs, kept: before[key(e.repo)], refs: deps.refs });
     } catch (err) {
       log(`[${e.id}] turn: ${(err as Error).message}`);
       return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at: new Date(nowOf()).toISOString() };
     }
   });
-  const repos = { ...loadTurns().repos };
+  const now = loadTurns();
+  const repos = { ...now.repos };
   const acting: Employee[] = [];
   const elsewhere: EmployeeResult[] = [];
   unique.forEach((e, i) => {
@@ -284,12 +348,13 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       if (t?.note) log(`[${e.id}] ${t.note}`);
     }
   });
-  writeJson(turnsFile(), { at: new Date(nowOf()).toISOString(), device: me, repos } satisfies TurnsState);
+  writeJson(turnsFile(), withRepos({ ...now, at: new Date(nowOf()).toISOString(), device: me }, me, repos));
 
   const skip = new Set(elsewhere.map((r) => r.id));
   const given = new Set(acting.map((e) => e.id));
   const guard: LeaseGuard = {
     skip,
+    has: (id) => given.has(id) || skip.has(id),
     async ok(e) {
       if (skip.has(e.id) || !given.has(e.id)) return false;
       const r = remotes.get(e.id);
@@ -314,7 +379,7 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
         next = { repo: e.repo, status: rec?.pc === me.id ? 'here' : 'elsewhere', ...(sha ? { sha } : {}), ...(rec ? { record: rec } : {}), at: new Date(now).toISOString() };
       }
       const cur = loadTurns();
-      writeJson(turnsFile(), { ...cur, repos: { ...cur.repos, [k]: next } } satisfies TurnsState);
+      writeJson(turnsFile(), withRepos(cur, me, { ...cur.repos, [k]: next }));
       if (next.status === 'elsewhere') {
         skip.add(e.id);
         return false;
@@ -332,7 +397,6 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
 export async function handOver(e: Employee, o: { run: Runner; settings: Settings; deps?: TurnsDeps; pin?: boolean }): Promise<{ ok: boolean; message: string }> {
   const deps = o.deps ?? {};
   const me = deps.device ?? deviceHere();
-  const ttlMs = ttlFor(o.settings) * 1000;
   const r = await (deps.remote ?? ((x: Employee) => remoteFor(o.run, o.settings, x)))(e);
   if (!r) return { ok: false, message: `${e.name} has no remote to take its turn in.` };
   const checkout = !!e.checkout && existsSync(checkoutOf(e));
@@ -341,13 +405,16 @@ export async function handOver(e: Employee, o: { run: Runner; settings: Settings
     const read = await readRef(o.run, r, RELEASE_PC_REF, RELEASE_PC_FILE);
     if (read.kind === 'unreachable') return { ok: false, message: `Not now: this PC can't reach ${e.name}'s remote (${read.why}). Try again once it can.` };
     const had = read.kind === 'found' ? readRecord(read.text) : null;
+    // Taken from another PC: it is seen, so the turn is three rounds long, not half a day.
+    const ttlMs = had && had.pc !== me.id ? ttlFor(o.settings) * 1000 : turnMs(o.settings, loadTurns(), me, now);
     const rec = recordFor(me, checkout, now, ttlMs, had, o.pin ?? (had?.pc === me.id ? had.pinned : false));
     const t = await claimTurn(o.run, r, e, rec, read.kind === 'found' ? read.sha : null, me, now);
     if (t.status === 'alone') return { ok: false, message: `${t.note}.` };
     if (t.status === 'unreachable') return { ok: false, message: `Not now: ${t.note}.` };
     if (t.status === 'here' && t.sha && t.record?.until === rec.until) {
       const cur = loadTurns();
-      writeJson(turnsFile(), { ...cur, device: me, repos: { ...cur.repos, [key(e.repo)]: t } } satisfies TurnsState);
+      const seen = had && had.pc !== me.id ? { ...(cur.others ?? {}), [had.pc]: { name: had.name, at: new Date(now).toISOString() } } : cur.others;
+      writeJson(turnsFile(), withRepos({ ...cur, device: me, ...(seen ? { others: seen } : {}) }, me, { ...cur.repos, [key(e.repo)]: t }));
       const from = had && had.pc !== me.id && had.name ? ` from ${had.name}` : '';
       const words =
         o.pin === true

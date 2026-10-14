@@ -9,7 +9,7 @@ import { runChecks } from './bump.ts';
 import { bumpDirOf, checkoutOf, freshWorktree, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
-import { carryTested } from './prtest.ts';
+import { carryVouched } from './prtest.ts';
 import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, renameKitInTopEntry, repinKit } from './kitpart.ts';
 import { hostFor } from '../hosts/index.ts';
 
@@ -448,7 +448,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (kit?.why) did.push(`kit ${kit.version}, since ${kit.why.replace(/\bv(\d)/g, 'kit $1')}`);
     if (kitPr) {
       // No one tests the Steward's own PRs on their way in: its bump did, and so does its catch-up, here.
-      const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`) });
+      const failed = await runChecks(ctx, e, dir, { say: (line) => ctx.log(`[${e.id}] #${pr.number}: ${line}`), doing: `#${pr.number}'s checks after its catch-up` });
       if (failed) return said({ done: false, note: `${did.join('; ')}, but then ${failed}, so it wasn't pushed` });
       did.push('its checks passed');
     }
@@ -461,7 +461,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     // What passed at its head before still holds, where the catch-up wrote only versions and entries.
     const carried = !kitPr && !!o.carry && keepsStanding(conflictedFiles, e.versionFiles, !!kit);
     if (carried) {
-      carryTested(e, pr, pushed, o.carry!);
+      await carryVouched({ ...ctx, run }, e, pr, pushed, o.carry!);
       did.push(`its checks not run again (only version lines and the changelog changed since ${pr.headOid.slice(0, 7)})`);
     }
     const note = did.join('; ');

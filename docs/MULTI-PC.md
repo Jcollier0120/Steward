@@ -19,7 +19,10 @@ which PC has the repository's turn.
 ```
 
 - The device id is Manor's (`%USERPROFILE%\.manor\device.json`), or the Steward's own when Manor hasn't made one.
-- It is read with `git ls-remote <remote> refs/manor/release-pc`, and its commit fetched with an explicit refspec.
+- On GitHub it is read through GitHub's API from the Steward's own process (`git/matching-refs/manor`, asked again with
+  its ETag, so an unchanged answer costs nothing). GitHub's GraphQL can't see refs outside `refs/heads` and
+  `refs/tags`, so the round's glance can't carry it. Elsewhere, or when the API doesn't answer, it is read with
+  `git ls-remote <remote> refs/manor/release-pc`. Its commit is fetched with an explicit refspec when it is new.
 - It is written by compare-and-swap: `git push --force-with-lease=refs/manor/release-pc:<old sha, or empty> <remote>
   <new>:refs/manor/release-pc`. Losing that race is normal: someone else has the turn.
 - All of this happens in a scratch bare repository in the Steward's work folder (`work\_turns.git`), never in the
@@ -29,6 +32,12 @@ The rules (`src/lease.ts`):
 
 - **Taking the turn.** A turn that is free, or ran out more than 2 minutes ago, is taken for three rounds (at least 15
   minutes). The PC that has it renews it once half of that time is gone.
+- **Alone.** A PC that has seen no other PC in a turn record for a month takes its turns for half a day instead, so
+  it renews them twice a day, not every few rounds. A PC that joins later finds those turns taken, and takes each one
+  once it runs out (or at once, with **Do it here**). From then on both PCs use three rounds.
+- **Only where it looks.** A round reads the turns of the repositories its plan looks at (something new on GitHub, or
+  the hourly full look), and of the ones it refreshes after releases. It publishes nothing to the others, so it
+  leaves their turns alone.
 - **Who has it.** Another PC's turn is left alone, and the page says so ("Merging and releasing for Clerk: done by
   DESKTOP-ABC").
 - **Do it here** writes the turn to this PC at once.
@@ -39,10 +48,6 @@ The rules (`src/lease.ts`):
   takes part, through the remote's URL, so kit-update PRs keep flowing when no PC with a checkout is around.
 - **Re-checking.** Before every publishing act, one `ls-remote`: the PC acts only while the turn is still its own,
   renewing it if it is near its end.
-- **Quiet repositories.** A round reads the turn of a repository with nothing new on GitHub only in the hour's full
-  look. In between, the turn it last read stands. When that turn is due, it is renewed by the compare-and-swap push
-  alone; if the push loses, the turn is read as usual. A "Do it here" from another PC is seen at the next full look,
-  or by the re-check before this PC publishes anything there.
 
 ## What the turn gates, and what it never does
 

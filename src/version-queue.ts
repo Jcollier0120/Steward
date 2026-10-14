@@ -21,7 +21,7 @@ import { hostFor } from './hosts/index.ts';
  * glance says so for the employees, and a project's are asked of git and GitHub each round. A clone is fetched only when
  * its branch on GitHub moved: a head GitHub gave (the glance's, or remote-heads.json's for a project) that is the one
  * kept, or the clone's own already, needs no fetch. One the stage merged or released to is fetched as before, since its
- * glance was taken before that. A round fetched all 38 clones every 10 minutes, whether or not anything had moved.
+ * glance was taken before that.
  */
 
 export interface QueuedPr {

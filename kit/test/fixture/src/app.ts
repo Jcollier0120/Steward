@@ -38,7 +38,7 @@ export function placeFor(o: { id: string; port: number; dev: boolean; home: stri
 
 const place = placeFor({ id: APP.id, port: 17979, dev: devCheckout, home: os.homedir(), env: process.env });
 
-/** The page's port: its own (+ 10000 in a checkout), or FIXTURE_PORT (the tests set one). */
+/** The page's port: its own (+ 10000 in a checkout), or FIXTURE_PORT: the tests set a free one (kit/test/free-port.ts), never 17979, which every checkout shares. */
 export const port = place.port;
 
 export const HOST_NAME = `${APP.id}.localhost`;

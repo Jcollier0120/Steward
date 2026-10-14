@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // Native files in a release (spec/RELEASES.md, "Native files"): kit.json's "native", the build and its signing, the
 // zip carrying both processors, and an install keeping this PC's. Nothing here signs or touches the real home folder.
@@ -11,7 +12,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'native-test-'));
 const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.meta.url), 'utf8'));
 const ENV = String(pkg.name).toUpperCase().replace(/-/g, '_');
 process.env[`${ENV}_HOME`] = path.join(tmp, 'own-home');
-process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
+process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot } = await import('./fixture/src/app.ts');
@@ -268,18 +269,22 @@ test('npm run release carries both processors\' native files and their notices; 
   const zip = path.join(root, 'artifacts', APP.id, `${APP.name}-${pkg.version}.zip`);
   const into = path.join(tmp, 'native-unpacked');
   mkdirSync(into, { recursive: true });
-  execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-x', '-f', zip, '-C', into], { windowsHide: true });
+  // Only what's asserted is unpacked: Defender reads every file tar writes.
+  execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-x', '-f', zip, '-C', into, 'native', 'release.json'], { windowsHide: true });
   assert.match(readFileSync(path.join(into, 'native', 'build', 'arm64', 'host.txt'), 'utf8'), /host for arm64/);
   assert.match(readFileSync(path.join(into, 'native', 'build', 'x64', 'host.txt'), 'utf8'), /host for x64/);
   assert.equal(readFileSync(path.join(into, 'native', 'build', 'notices', 'NOTICES.txt'), 'utf8'), 'Runtime: MIT\n');
   assert.deepEqual(JSON.parse(readFileSync(path.join(into, 'release.json'), 'utf8')).native, { out: 'native/build', arch: ['arm64', 'x64'], signed: false });
 
-  // A change to the native sources makes the release dirty.
-  writeFileSync(path.join(root, 'native', 'build.ps1'), `${readFileSync(path.join(root, 'native', 'build.ps1'), 'utf8')}# changed\n`);
-  r = release();
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /with uncommitted changes/);
-  git('commit', '-q', '-am', 'changed');
+  // A change to the native sources makes the release dirty: a second build, so only before a kit is published
+  // (STEWARD_RELEASE_TESTS=1, as install.test.ts's FULL_RELEASE).
+  if (process.env.STEWARD_RELEASE_TESTS === '1') {
+    writeFileSync(path.join(root, 'native', 'build.ps1'), `${readFileSync(path.join(root, 'native', 'build.ps1'), 'utf8')}# changed\n`);
+    r = release();
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /with uncommitted changes/);
+    git('commit', '-q', '-am', 'changed');
+  }
 
   // No certificate named: refused before anything is built.
   r = release('--publish');

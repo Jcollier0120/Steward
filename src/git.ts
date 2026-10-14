@@ -169,26 +169,6 @@ export function refOnDisk(repo: string, ref: string): string | null {
   }
 }
 
-/**
- * The branch a clone has checked out, from its own HEAD file (a worktree's is in its gitdir): '' when it's detached;
- * null when the file doesn't say it plainly (a reftable clone, anything unreadable): then git is asked, as before.
- */
-export function branchOnDisk(repo: string): string | null {
-  try {
-    const dotGit = path.join(repo, '.git');
-    if (!existsSync(dotGit)) return null;
-    const common = commonDir(repo);
-    if (!common || existsSync(path.join(common, 'reftable'))) return null;
-    const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
-    if (!gitdir) return null;
-    const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
-    if (SHA.test(head)) return '';
-    return /^ref: refs\/heads\/(\S+)$/.exec(head)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /** The folder a clone keeps its refs in: .git, or for a worktree the main clone's (its gitdir's commondir). */
 export function commonDir(repo: string): string | null {
   const dotGit = path.join(repo, '.git');
@@ -199,6 +179,28 @@ export function commonDir(repo: string): string | null {
   const own = path.resolve(repo, gitdir);
   const common = path.join(own, 'commondir');
   return existsSync(common) ? path.resolve(own, readFileSync(common, 'utf8').trim()) : own;
+}
+
+/**
+ * The branch a clone has checked out, from its HEAD file (a worktree's own, in its gitdir), as `git branch
+ * --show-current` says it: '' at a commit (detached). Null when the files don't say it plainly (a reftable clone, whose
+ * HEAD file only says `refs/heads/.invalid`): then git is asked.
+ */
+export function headBranch(repo: string): string | null {
+  try {
+    const dotGit = path.join(repo, '.git');
+    if (!existsSync(dotGit)) return null;
+    const common = commonDir(repo);
+    if (!common || existsSync(path.join(common, 'reftable'))) return null;
+    const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
+    if (!gitdir) return null;
+    const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
+    const ref = /^ref:\s*refs\/heads\/(\S+)$/.exec(head);
+    if (ref) return ref[1];
+    return SHA.test(head) ? '' : null;
+  } catch {
+    return null;
+  }
 }
 
 /** packed-refs' names and commits (a peeled line, `^…`, belongs to the tag above it and isn't a ref). */
