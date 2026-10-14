@@ -45,6 +45,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.72
+
+**`steward vouch` no longer runs the tests a second time on code the Assayer just passed.**
+
+### What changed
+
+- If the Assayer's check passed your work (every check, the whole suite) and you then commit exactly that code, `steward vouch` takes the Assayer's pass and records the vouch in seconds without running anything. It says so in one line: "the Assayer passed this exact tree at <time>". Before, vouch ran the same suite again on identical code, which doubled the load on your PC.
+- The Assayer's pass counts only for exactly the committed code, with the same installed dependencies and the same Steward's kit, when it's under a day old and covers each check the Steward would run. Anything else (no check, a partial one, different code, a failure since) runs the checks as before.
+
+### Before you update
+
+- Update the Assayer to 0.3.31 or later: older Assayers don't record which code they checked, so vouch runs the checks as before.
+
 ## 0.35.68
 
 **New kits roll out once they settle, and releases take far less of the PC's time.**
@@ -104,6 +117,25 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Your agents get the new timings as they take kit 2.71.0.
+
+## 0.35.64
+
+**The Steward's checks can't max out your processor any more, and each pull request is tested once rather than twice.**
+
+### What's new
+
+- Tests, type checks, installs and release builds that the Steward runs use at most half your processor, at low priority, so your PC stays quiet and responsive while they run. That covers `vouch`, the kit's trials on every agent, the checks before a merge, rollouts and releases. Several running at once share that half rather than taking half each.
+- To change the share, set `"checksPace"` in Manor's settings.json: a percentage from 10 to 100, or `"full"` for no limit. `steward vouch --fast` runs one vouch at full speed.
+- When the Steward tests a pull request itself and it passes, it marks that commit as tested on GitHub, as `vouch` does. So does a pull request it catches up or stamps where only version lines and changelogs changed, since it isn't tested again. The Assayer then doesn't install and test the same pull request a second time, which used to double the work on your PC (and Windows Defender's scanning of every file each install wrote).
+
+### What changed
+
+- Measured on an 18-core laptop with the Steward's own checks: before, the processor sat at 98% or more for a full minute of a 3½-minute run. Now it gets there for about a second, and the run takes about as long as before.
+- Brings the Steward's kit 2.70.0, whose checks pace other agents can use for their own test runs.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The first paced check builds a small helper program once (about half a second).
 
 ## 0.35.62
 

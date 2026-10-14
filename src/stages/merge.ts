@@ -559,8 +559,10 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
     }
     // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
+    // Its vouch set here, once its checks passed here (prtest.ts): what this PC's test said.
     const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
-    if (vouched) notes.set(pr.number, `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
+    const here = vouched ? testedBefore(e, pr) : null;
+    if (vouched) notes.set(pr.number, here?.ok ? here.note : `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
     else if (untested(pr)) {
       // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
       // that brings that kit, or says none does (prtest.ts).

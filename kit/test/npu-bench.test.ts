@@ -128,7 +128,9 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   suite.energy.restSeconds = 0.05;
   suite.energy.loadMinutes = 0.002;
   suite.quiet.samples = 2;
-  suite.steady.maxSpread = 100; // a fake in this process answers in a millisecond or two, so its tries can't agree to 15%
+  // A fake in this process answers in a millisecond or two, so its tries can't agree to 15%; and on a busy PC, or one
+  // held to the checks pace's cap, one try now and then waits a tenth of a second for the processor: never noisy here.
+  suite.steady.maxSpread = Infinity;
   const lines: string[] = [];
   const cleared: string[] = [];
   // The battery reads higher once requests are arriving: working, against at rest.

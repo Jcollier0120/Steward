@@ -9,7 +9,7 @@ import { runChecks } from './bump.ts';
 import { bumpDirOf, checkoutOf, freshWorktree, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
-import { carryTested } from './prtest.ts';
+import { carryVouched } from './prtest.ts';
 import { isKitChangelog, isKitVersionFile, KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, renameKitInTopEntry, repinKit } from './kitpart.ts';
 import { hostFor } from '../hosts/index.ts';
 
@@ -461,7 +461,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     // What passed at its head before still holds, where the catch-up wrote only versions and entries.
     const carried = !kitPr && !!o.carry && keepsStanding(conflictedFiles, e.versionFiles, !!kit);
     if (carried) {
-      carryTested(e, pr, pushed, o.carry!);
+      await carryVouched({ ...ctx, run }, e, pr, pushed, o.carry!);
       did.push(`its checks not run again (only version lines and the changelog changed since ${pr.headOid.slice(0, 7)})`);
     }
     const note = did.join('; ');

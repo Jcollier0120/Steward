@@ -170,7 +170,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       }
     }
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
-    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
+    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: !ctx.fast });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);

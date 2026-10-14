@@ -52,6 +52,67 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **Manor's chat**: it can show `w.line` in place of its own "getting the model ready".
 - Nothing else: config.json's format is unchanged, and an agent that does nothing gets the new timings and the longer first wait.
 
+## 2.70.0
+
+**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more.**
+
+### What's new
+
+- **`node/checks-pace.ts`**: `pacedCommand(file, args, { fast })` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
+  - a hard cap on the processor: half of it by default (`checksCap()`), two processors' worth at least;
+  - below-normal priority, which its programs take from it (a program may still raise its own).
+- **One job for the whole PC** (`Local\kit-checks-pace`): two check runs side by side share the cap rather than taking it twice. A process already in a job of another family gets a job of its own with the same cap. The job ends what is left in it once no launcher holds it: a test's server left running, or a command stopped on a timeout.
+- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). `fast: true` (a run the person asked to be quick) isn't paced, as Run now lifts the gentle pace. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
+- Off Windows a paced command runs under `nice -n 10`. A launcher that can't be built leaves the command as it is, said once in the log: the pace never fails a check.
+
+Measured on an 18-core laptop (the Steward's own checks: its kit filled, a type check and its whole test suite): before, 60 s of 201 s at 98% or more; at half the processor, 1 s of 203 s (the rest of the PC's work on top, Windows Defender's scans of what the tests write among it).
+
+### Before you update
+
+- Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
+
+**Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
+
+This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which it needs.
+
+### What's new
+
+- **Starting values for each Intel generation** in `npu-vendors.json` (`generations.<id>`: `timeouts`, `maxContextTokens`, `caps`, `args`, `memoryGb`, `basis`; the route with them is `routeFor(route, generation)`).
+  - The NPU 3720 (Meteor Lake and Arrow Lake, about a quarter of Lunar Lake's compute): prompts of up to 2,048 tokens, 60 s plus 400 ms a token, and a 6-minute cold load.
+  - NPU 5 (Panther Lake and Wildcat Lake): Lunar Lake's values with a 4-minute cold load.
+  - Lunar Lake keeps its measured values. Every generation but Lunar Lake stays `verified: false`.
+- **Setup calibrates an unverified generation on the PC.** After the test request, two short requests more (a warm "ready", and a count to twenty) measure it. `calibrate` turns the measurements into that PC's timeouts in its NPU entry, never under the starting values and never past `CALIBRATION`'s bounds. Under 2 tokens a second the NPU isn't used for chat. `setUpNpu` returns `measured`, and `NpuIo.measure` replaces the measuring requests in tests (null skips them).
+- **Sanity, not just an answer.**
+  - The chat test refuses the same few characters five times over (`repetitive`), as well as an answer without "ready". The measuring count must count (`countsSensibly`).
+  - The embedding test sends three sentences (`EMBED_TEST`). `embedSanity` checks the dimensions (`dims` on the embedding server's model: Qwen3-Embedding-0.6B's 1,024), that the values are numbers and not all zero, and that "a cat" lands nearer "a kitten" than "an invoice".
+- **A memory check before choosing the NPU.** `npuMemoryFit` gives the NPU at most 40% of the PC's memory (`NPU_MEMORY_SHARE`), against the route's `memoryGb` (Intel: chat 4.3 GB, embeddings 1.74 GB; 3.6 GB at the NPU 3720's 2,048):
+  - 16 GB keeps both;
+  - 12 GB keeps chat;
+  - 8 GB keeps the NPU out.
+- **The NPU check names the generation, and gives the patch that verifies it.** The report's `generation`, and `patch`: on an unverified generation, with every step passing, the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts and what they were measured on. `--generation <id>` runs a rehearsal with a generation's starting values.
+- **`npu-check.ts --harden`** forces setup's failures on a real NPU, then checks its calibration against what it measured. Each step passes or fails:
+  - a driver minimum above the driver;
+  - a 1-second test;
+  - `OpenVINO/Qwen3-4B-int4-ov`, which answers nonsense there;
+  - the calibration itself.
+- **`npu-check.ts --generation <id>`** on a real NPU runs as that generation of its maker's, with that generation's starting values and prompt cap. For example, a Lunar Lake can stand in for an NPU 3720. The run counts as a rehearsal and changes nothing in npu-vendors.json.
+- **npu-check never measures someone else's server.** On the NPU, if a server already answers on the route's port (the manor's own local AI, most likely), it refuses and says to stop that server first. In a rehearsal off the NPU, its servers move to free ports instead.
+
+### What changed
+
+- **The NPU failing is no longer an error.** `setupCommand` logs the NPU's failures as `note:` lines and leaves them out of its exit code.
+  - Chat and embeddings fall back separately. What the NPU doesn't serve goes to a card set up beside it; with no card, the processor is set up for it in the same run.
+  - Why the NPU, or its embeddings, isn't used is kept in plain words (`npu-note.json`, via `rememberNpuNote`/`readNpuNote`). The accelerators' report shows it (`npuNote`).
+  - `setUpNpu` returns that note (`note`, built by `npuNoteFor`).
+- `planNpu` takes `noEmbed`, and `planSetup` takes `skipNpu` and `cpuKinds`. The plan's `npuPlain` says why the NPU, or its embeddings, isn't used.
+- A test request that times out says "didn't answer in time (N s)". `testNpuEntry` takes `timeoutMs`.
+- An NPU driver too old now reads "the NPU's driver needs an update: …".
+- `NpuIo.clockMs` is the clock the first start is timed by, for tests. It isn't called `now`, so an agent whose io extends `NpuIo` with a `now` of its own still compiles. The Smith's trial does that, with a `now` that returns a Date. Every member `NpuIo` gained in this version is optional.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. Setup no longer fails when the NPU does, so a Set up that showed an NPU error now finishes, with the graphics card or the processor doing that work and a note saying why.
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

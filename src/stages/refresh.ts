@@ -146,7 +146,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
       keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
       return done('failed', `${ci.line} failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
     }
-    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000 });
+    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000, paced: !ctx.fast });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) say(`  ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, command, r.code, `${r.out}\n${r.err}`);

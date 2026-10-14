@@ -349,7 +349,9 @@ const TRY_BYTES = 3 * 1024 ** 3;
  * How many agents a trial tries at once: Settings' parallel, or a quarter of this PC's processors up to 4, whichever is
  * more; never more than the memory free now holds at TRY_BYTES each (at least one). A try is an agent's install, its kit
  * filled and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
- * average, and two at a time left the trial waiting on itself. Pure.
+ * average, and two at a time left the trial waiting on itself. Their commands run at the kit's checks pace (Steward
+ * 0.35.64), in one job for the PC with one processor cap: more tries at once share that cap rather than adding to it, so
+ * the processor is held to it whatever this says, and memory stays the limit. Pure.
  */
 export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem()): number =>
   Math.max(1, Math.min(Math.max(parallel, Math.min(4, Math.floor(cpus / 4))), Math.floor(free / TRY_BYTES)));
