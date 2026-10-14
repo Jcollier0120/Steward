@@ -127,7 +127,8 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   try {
     // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's,
     // linked from the set installed for its lockfile where they can be (modules.ts), else installed.
-    if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
+    // A kit's too: its release tests build the fixture's releases with it before it is published (tools/kit-release.ts).
+    if (releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
       // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
       const g = await guardPackages(ctx, { id: APP.id, name: APP.name, repo: ctx.settings.stewardRepo }, dir, `the release of ${step.tag}`);
       if (g.held) return selfResult('failed', `${g.held}, so ${step.tag} wasn't released`, { version: step.version, commit: at });

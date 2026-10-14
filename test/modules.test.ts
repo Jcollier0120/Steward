@@ -214,3 +214,17 @@ test("a Next.js project's packages aren't linked from a shared set: its build re
   writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'agent', version: '0.1.0', devDependencies: { typescript: '^7.0.2' } }));
   assert.equal(sharesModules(site), true, 'any other project shares, as before');
 });
+
+test("a repository's checks run with git signing nothing (kit/unsigned-git.ts), after the settings its caller gives", async () => {
+  const seen: (Record<string, string | undefined> | undefined)[] = [];
+  const run: Runner = async (_cmd, _args, opts) => {
+    seen.push(opts?.env);
+    return ok('');
+  };
+  const e = employee(tmp, { fill: '', test: ['npm test'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-unsigned'), run, neutralDir: tmp });
+  const d = path.join(tmp, 'unsigned');
+  mkdirSync(d, { recursive: true });
+  assert.equal(await runChecks(ctx, e, d, { env: { STEWARD_TRIAL: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.autocrlf', GIT_CONFIG_VALUE_0: 'false' }, say: () => {} }), null);
+  assert.deepEqual(seen, [{ STEWARD_TRIAL: '1', GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'core.autocrlf', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false', GIT_CONFIG_KEY_2: 'tag.gpgsign', GIT_CONFIG_VALUE_2: 'false' }]);
+});

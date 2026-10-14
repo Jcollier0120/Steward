@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { until } from './until.ts';
+import { freePort } from './free-port.ts';
 
 // The kit's Settings panel and its API, run with the fixture agent's schema. Each agent's own schema is
 // checked in that agent, by agent-checks.ts (test/agent.test.ts here).
@@ -11,8 +12,7 @@ const id: string = JSON.parse(readFileSync(new URL('./fixture/package.json', imp
 const ENV = id.toUpperCase().replace(/-/g, '_');
 const home = mkdtempSync(path.join(os.tmpdir(), `${id}-settings-test-`));
 process.env[`${ENV}_HOME`] = home;
-// Below Windows' dynamic ports (49152 on), where it reserves ranges for Hyper-V and WSL that refuse a listen (EACCES).
-process.env[`${ENV}_PORT`] = String(40000 + Math.floor(Math.random() * 9000));
+process.env[`${ENV}_PORT`] = String(await freePort());
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 process.env.MANOR_HOME = path.join(home, 'no-manor'); // the title bar's Back to Manor: never the real Manor's settings
 process.env.REEVE_HOME = path.join(home, 'reeve'); // the page names this PC's accelerators: never the real Reeve's

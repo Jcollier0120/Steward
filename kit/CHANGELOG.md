@@ -32,6 +32,27 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: it updates itself as usual.
 
+## 2.71.1
+
+**Tests sign no commits (`unsigned-git.ts`, and `test-git.ts` for a test script's `--import`), and release builds are tested once, before a kit is published, not in every run.**
+
+### What's new
+
+- `unsigned-git.ts`: `unsignedGitVars(env)` gives the environment variables that turn git's `commit.gpgsign` and `tag.gpgsign` off (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`), after any the environment already has, and nothing when it has them; `unsignedGit(env)` adds them in place. With the person's own commit signing on (an SSH key, as the manor's owner has it), every throwaway commit a test makes starts ssh-keygen, and Defender scans each signing buffer: 461 in one run of the Steward's tests. The person's own settings are never touched.
+- `test-git.ts` sets them for a whole test run: `"test": "node --import=./src/kit/test-git.ts --test \"test/**/*.test.ts\""`. The `=` keeps the script one the Steward can narrow to the tests a change reaches. Nothing else imports it: it changes the environment as it loads.
+
+### What changed
+
+- The Steward runs every repository's checks with them, whatever the repository's test script says.
+- The kit's release tests build one release each, the minified one as released, and list the zip (`tar -t`) instead of unpacking it twice; the native test unpacks only what it checks. The other builds (readable, dirty, no announcement, native and dirty: there were five and two) run with `STEWARD_RELEASE_TESTS=1`: `npm run test:release`, and `tools/kit-release.ts --publish` before it publishes a kit (`--skip-release-tests` leaves them out). In the full suite under load the two tests took 524 s and 514 s, and set the time of every vouch.
+- The kit's tests that serve a page take a port nothing listens on (`kit/test/free-port.ts`: from 40000-48999, checked on 127.0.0.1 and ::1), never the fixture's own 17979. Every checkout's tests used 17979, so two test runs at once met there and one failed with EADDRINUSE.
+
+- `release.ts`, `npu-bench.ts` and `npu-check.ts` run when started from a folder reached through a junction or link: they compared the path they were started by with their own real path, and did nothing, silently, when the two differed.
+
+### For an agent
+
+- Nothing needed: the Steward's and the Assayer's checks already sign nothing. To make `npm test` run by hand sign nothing too, add `--import=./src/kit/test-git.ts` to its test script once it takes this kit.
+
 ## 2.71.0
 
 **On a PC with little memory, the NPU's model server rests sooner when nobody uses it, and the first request after that waits for it to wake instead of failing.**
