@@ -18,7 +18,8 @@ import { hostFor } from '../hosts/index.ts';
  * checks as Settings give them (the Steward's own: its kit filled, then npm run typecheck and npm test) at the clone's
  * HEAD, which must be the PR's head, with nothing uncommitted. Once they pass, it sets a commit status on that commit:
  * context VOUCH_CONTEXT, state success. Nothing is set when they fail. When the Assayer already passed the whole of the
- * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken.
+ * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken;
+ * and so is its affected pass, when the test files it ran take in every one the vouch would run itself.
  *
  * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on the PR's current head, for a team PR from the repository itself that isn't the
@@ -131,15 +132,19 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
  * (their failure, or "its checks passed, but GitHub wouldn't take the status: …").
  */
 async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void }): Promise<string | null> {
-  // The Assayer already passed exactly this tree (assayed.ts): nothing run again, so the PC isn't loaded twice.
-  const assayed = await assayedHead(ctx.run, o.dir, e);
-  if (assayed) {
-    const when = new Date(assayed.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    o.say(`the Assayer passed this exact tree at ${when}: nothing run again`);
-    return setVouch(ctx, e, o.repo, o.head, `${(assayed.commands ?? []).join(', ')} passed in the Assayer at ${o.head.slice(0, 7)}`.slice(0, 140));
-  }
   // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
+  // The Assayer already passed exactly this tree (assayed.ts), whole or the tests this change reaches: nothing run
+  // again, so the PC isn't loaded twice.
+  const assayed = await assayedHead(ctx.run, o.dir, e, { scope });
+  if (assayed) {
+    const when = new Date(assayed.check.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    o.say(`the Assayer passed this exact tree at ${when}${assayed.chose ? ` (npm test: ${assayed.chose})` : ''}: nothing run again`);
+    const description = assayed.check.full
+      ? `${(assayed.check.commands ?? []).join(', ')} passed in the Assayer at ${o.head.slice(0, 7)}`.slice(0, 140)
+      : vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: assayed.chose }, o.head);
+    return setVouch(ctx, e, o.repo, o.head, description);
+  }
   const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
   if (failed) return failed;
   return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));

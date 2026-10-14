@@ -8,7 +8,7 @@ import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFil
 import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
-import { failedTests, runLine, tail } from '../run.ts';
+import { failedTests, runLine, tail, type Runner } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
@@ -190,27 +190,26 @@ export interface AffectedScope {
   chose?: string;
 }
 
+/** What an AffectedScope takes of `npm test` (affectedPick): the whole suite and why, or the test files of all of them. */
+export type TestPick = { whole: string } | { files: string[]; tests: string[]; why: string; flags: string[]; pretest: boolean };
+
 /**
- * What runs in place of `npm test` for an AffectedScope: its pretest, then `node <its flags> --test <the affected files>`;
- * nothing when no test reaches the change; `npm test` itself when the script isn't a plain node --test, the change can't
- * be read, or it reaches everything. Never throws.
+ * What an AffectedScope takes of `npm test` in `dir`: the test files the change reaches (none when it reaches no test),
+ * with the script's flags and whether it has a pretest; or the whole suite, and why: the script isn't a plain node
+ * --test, the change can't be read, or it reaches everything. A vouch's own run (affectedSteps), and what an Assayer's
+ * affected pass must take in to stand in for it (assayed.ts). Never throws.
  */
-export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope, say: (line: string) => void): Promise<string[]> {
-  const whole = (why: string) => {
-    scope.chose = 'the whole suite';
-    say(`npm test: the whole suite (${why})`);
-    return ['npm test'];
-  };
+export async function affectedPick(run: Runner, dir: string, scope: AffectedScope): Promise<TestPick> {
   try {
     const scripts = scriptsIn(dir);
     const plain = nodeTestScript(scripts.test);
-    if (!plain) return whole("its test script isn't a plain node --test");
+    if (!plain) return { whole: "its test script isn't a plain node --test" };
     let changed = scope.changed;
     let patches = new Map<string, string>();
     if (!changed) {
-      const names = await gitMaybe(ctx.run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
-      const patch = await gitMaybe(ctx.run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
-      if (names === null || patch === null) return whole(`git couldn't compare it with ${scope.base}`);
+      const names = await gitMaybe(run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
+      const patch = await gitMaybe(run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
+      if (names === null || patch === null) return { whole: `git couldn't compare it with ${scope.base}` };
       changed = names
         .split('\n')
         .map((l) => l.trim().split('\t'))
@@ -221,18 +220,33 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
     // The Steward's own repository fills its kit from its kit\: a kit file reaches its copies there.
     const kitFrom = kitFromOf(dir, scripts);
     const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '', ...(kitFrom ? { kitFrom } : {}) });
-    if (a.all) return whole(a.why);
-    if (!a.files.length) {
-      scope.chose = 'no test reaches the change';
-      say(`npm test: skipped, no test reaches the change (${a.why})`);
-      return scripts.pretest ? ['npm run pretest'] : [];
-    }
-    scope.chose = `affected: ${a.files.length} of ${a.tests.length} test files`;
-    say(`npm test: ${scope.chose} (${a.why})`);
-    return [...(scripts.pretest ? ['npm run pretest'] : []), ['node', ...plain.flags, '--test', ...a.files.map((f) => `"${f}"`)].join(' ')];
+    if (a.all) return { whole: a.why };
+    return { files: a.files, tests: a.tests, why: a.why, flags: plain.flags, pretest: !!scripts.pretest };
   } catch (err) {
-    return whole(`couldn't work out which: ${(err as Error).message}`);
+    return { whole: `couldn't work out which: ${(err as Error).message}` };
   }
+}
+
+/**
+ * What runs in place of `npm test` for an AffectedScope (affectedPick): its pretest, then `node <its flags> --test <the
+ * affected files>`; nothing when no test reaches the change; `npm test` itself for the whole suite. Never throws.
+ */
+export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope, say: (line: string) => void): Promise<string[]> {
+  const p = await affectedPick(ctx.run, dir, scope);
+  if ('whole' in p) {
+    scope.chose = 'the whole suite';
+    say(`npm test: the whole suite (${p.whole})`);
+    return ['npm test'];
+  }
+  const pretest = p.pretest ? ['npm run pretest'] : [];
+  if (!p.files.length) {
+    scope.chose = 'no test reaches the change';
+    say(`npm test: skipped, no test reaches the change (${p.why})`);
+    return pretest;
+  }
+  scope.chose = `affected: ${p.files.length} of ${p.tests.length} test files`;
+  say(`npm test: ${scope.chose} (${p.why})`);
+  return [...pretest, ['node', ...p.flags, '--test', ...p.files.map((f) => `"${f}"`)].join(' ')];
 }
 
 /** A `git diff` cut into each file's part, by its path (the b/ side; the a/ side for a deletion). Pure. */
