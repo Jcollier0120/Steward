@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.69.1
+## 2.68.1
 
 **An update is no longer rolled back because the network went down while it was installing.**
 
