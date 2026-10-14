@@ -6,7 +6,7 @@ import { runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
-import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { linkSharedModules } from './modules.ts';
 import { withRepo } from './slots.ts';
 
@@ -74,7 +74,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
   const dir = refreshDirOf(ctx.settings, e);
   await dropWorktree(ctx, repo, dir);
   rmSync(checksLogOf(dir), { force: true });
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, commit);
+  await freshWorktree(run, ctx.settings, repo, dir, commit, '--detach');
   say(`${command} in ${dir}, at ${remote} (${at}), after ${what}`);
   try {
     // Its packages first, for the command and its tests: the shared set where it can be, else its own.

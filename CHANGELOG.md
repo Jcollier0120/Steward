@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.35.64
+## 0.36.8
 
 **The Steward's checks can't max out your processor any more, and each pull request is tested once rather than twice.**
 
@@ -20,12 +20,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - `steward vouch --fast` is gone (it says so and vouches at the usual pace).
 - Your background pace in Manor's Settings is now the only thing that sets how hard the Steward and the agents work. Looking at an agent's page, or pressing Run now, no longer lifts its limits, so the page shows what it really costs in the background.
 - Local AI model servers no longer run at the limits of whichever agent started them, so they answer every agent at full speed.
-- Fixed: on a PC whose work folders sit on a Dev Drive reached through a linked folder, the Steward couldn't set up its worktrees again (catch-ups, kit trials, trains).
 - Brings the Steward's kit 2.70.0, whose checks pace other agents can use for their own test runs.
 
 ### Before you update
 
 - Nothing: it updates itself as usual. The first paced check builds a small helper program once (about half a second).
+
+## 0.35.73
+
+**A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**
+
+### What changed
+
+- On a PC where the Steward's work folder is a link to another drive, the Steward didn't recognise its own work folders, so it never told git they were gone. The next time it needed the same folder, git refused it ("a missing but already registered worktree"), and that release, kit trial or test failed every round. On 2026-10-13 this held up the Steward's kit trial, every Steward PR waiting behind it, and Reeve's release for hours. The Steward now finds its work folders through the link.
+- Whenever it clears a work folder a stopped job left behind, it also makes git forget it. If git still refuses a work folder that has gone missing some other way, the Steward clears git's record and tries once more. This covers releases, kit trials, catch-ups, merge trains, refreshes, PR tests and the Steward's own release.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.35.60
 

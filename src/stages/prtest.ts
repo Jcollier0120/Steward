@@ -5,7 +5,7 @@ import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
-import { checkoutOf, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
 import { openPrs, parsePrs, readPin, VOUCH_CONTEXT, type PrInfo } from './staff.ts';
 import { setVouch, vouchDescription } from './vouch.ts';
@@ -212,8 +212,7 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, pr.headOid);
+  await freshWorktree(run, ctx.settings, repo, dir, pr.headOid, '--detach');
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {
     const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
