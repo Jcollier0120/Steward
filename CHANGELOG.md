@@ -90,6 +90,27 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each agent picks up the new wording with its next kit update.
 
+## 0.35.76
+
+**The Steward's kit 2.71.0: on a PC with 16 GB of memory or less, the local AI on the NPU gives its memory back sooner when nobody is using it, and wakes again when it's needed.**
+
+### What's new
+
+- On a PC with under 20 GB of memory, the NPU's local AI stops after 5 minutes unused (10 on AMD NPUs, whose AI takes longer to start), instead of 10. That frees 2 to 6 GB for everything else. On bigger PCs nothing changes.
+- The first question after a rest waits a few seconds while the local AI wakes, and agents can say so ("Waking the local AI on the NPU…") rather than leaving you wondering.
+- The NPU check can test the rest and the waking on a real NPU (`--idle`), and says whether each step passed.
+
+### What changed
+
+- On Intel NPUs, the code-search server is stopped when idle too. Before, it kept 1.7 GB until the PC restarted.
+- A request that arrives just as the local AI is resting is never cut off: it waits, then wakes it.
+- The first answer after the local AI wakes is given the time it needs to load, so it no longer fails on a short timeout.
+- The NPU's idle minutes in Settings still win when you've set them, on any PC (0 keeps it running).
+
+### Before you update
+
+- Nothing: it updates itself as usual. Your agents get the new timings as they take kit 2.71.0.
+
 ## 0.35.75
 
 **A Wi-Fi drop during an update no longer rolls the update back.**
@@ -187,27 +208,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Pull requests that update dependencies now wait for you when they bring packages the repository didn't have.
-
-## 0.35.65
-
-**The Steward's kit 2.71.0: on a PC with 16 GB of memory or less, the local AI on the NPU gives its memory back sooner when nobody is using it, and wakes again when it's needed.**
-
-### What's new
-
-- On a PC with under 20 GB of memory, the NPU's local AI stops after 5 minutes unused (10 on AMD NPUs, whose AI takes longer to start), instead of 10. That frees 2 to 6 GB for everything else. On bigger PCs nothing changes.
-- The first question after a rest waits a few seconds while the local AI wakes, and agents can say so ("Waking the local AI on the NPU…") rather than leaving you wondering.
-- The NPU check can test the rest and the waking on a real NPU (`--idle`), and says whether each step passed.
-
-### What changed
-
-- On Intel NPUs, the code-search server is stopped when idle too. Before, it kept 1.7 GB until the PC restarted.
-- A request that arrives just as the local AI is resting is never cut off: it waits, then wakes it.
-- The first answer after the local AI wakes is given the time it needs to load, so it no longer fails on a short timeout.
-- The NPU's idle minutes in Settings still win when you've set them, on any PC (0 keeps it running).
-
-### Before you update
-
-- Nothing: it updates itself as usual. Your agents get the new timings as they take kit 2.71.0.
 
 ## 0.35.64
 
