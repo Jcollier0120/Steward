@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -295,8 +295,23 @@ const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const branchOk = (b: string) => b.length <= 100 && !b.startsWith('-') && !/[\s~^:?*[\\\u0000-\u001f\u007f]|\.\.|\/\/|@\{|^\/|\/$|\.lock$|^@$/.test(b);
 /** A file inside the checkout, as a relative path: no drive or leading separator, no "." or ".." part, nothing Windows refuses. */
 const insideFile = (f: string) => f.length <= 200 && !/^[\\/]|^[a-z]:/i.test(f) && !/[\u0000-\u001f<>:"|?*]/.test(f) && f.split(/[\\/]/).every((part) => part && part !== '.' && part !== '..');
-/** A path as Windows compares them: whole, without a separator at the end, in one case. */
-const samePlace = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+/**
+ * A path by its real path (spec/DEV-DRIVES.md): links, junctions and a drive mounted in a folder followed, as git spells
+ * a checkout, the deepest part that exists resolved and the rest kept. A share (\\server\...) is taken as it is, so a
+ * look never wakes WSL.
+ */
+function realPlace(p: string): string {
+  const abs = path.resolve(p);
+  if (abs.startsWith('\\\\')) return abs;
+  try {
+    return realpathSync.native(abs);
+  } catch {
+    const up = path.dirname(abs);
+    return up === abs ? abs : path.join(realPlace(up), path.basename(abs));
+  }
+}
+/** A path as Windows compares them: by its real path, whole, without a separator at the end, in one case. */
+const samePlace = (p: string) => realPlace(p).replace(/[\\/]+$/, '').toLowerCase();
 const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer.endsWith('\\') ? outer : outer + '\\');
 
 /** owner/name from a GitHub remote's URL (https or ssh), or null for anything else. */

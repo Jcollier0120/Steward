@@ -13,6 +13,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### What changed
 
 - `card-check.ts`, and the kit's own `test/core-types.ts`, `test/turn-scenarios.ts` and `test/accelerator-scenarios.ts`, now compare their own path with the one they were started by through `realpathSync`, as `release.ts`, `npu-check.ts` and `npu-bench.ts` have since 2.71.1. Started from a linked folder, they did nothing and exited 0.
+- `manor.ts`: a project's checkout is compared with the others, and with the Steward's own, by its real path (`realPlace`, `realpathSync.native` of the deepest part that exists). One clone named through `C:\Projects` and by its Dev Drive's letter was two projects; a checkout inside the Steward's, spelled the other way, was let through.
 
 ### For an agent
 

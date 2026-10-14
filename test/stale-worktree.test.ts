@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { realOf, removeWorktree, worktrees } from '../src/git.ts';
+import { projectsFrom } from '../src/kit/manor.ts';
 import { run } from '../src/run.ts';
 import { DEFAULT_SETTINGS, type Employee } from '../src/settings.ts';
 import { freshWorktree, releaseDirOf, workRootOf } from '../src/stages/common.ts';
@@ -85,6 +86,28 @@ test('the work folder behind a junction is worked in at its real path, where a s
   const said = (dir: string) => execFileSync(process.execPath, ['probe.mjs'], { cwd: dir, encoding: 'utf8' }).trim();
   assert.equal(said(workRootOf(s)), 'ran', 'at the real path, as the Steward runs it now');
   assert.equal(said(workRoot), '', 'through the junction: nothing, and no error');
+});
+
+test("Manor's projects: one clone named through a junction and by its real path is one checkout, and so is the Steward's", () => {
+  const real = path.join(tmp, 'projects-drive');
+  mkdirSync(path.join(real, 'App'), { recursive: true });
+  mkdirSync(path.join(real, 'Steward'), { recursive: true });
+  // As C:\Projects is D:\ on the owner's PC.
+  const linked = path.join(tmp, 'Projects');
+  symlinkSync(real, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  const problems: string[] = [];
+  const projects = projectsFrom(
+    [
+      { name: 'App', checkout: path.join(linked, 'App') },
+      { name: 'App again', checkout: path.join(realpathSync.native(real), 'App') },
+      { name: 'Steward', checkout: path.join(real, 'Steward') },
+    ],
+    { repos: [], checkouts: [path.join(linked, 'Steward')] },
+    problems,
+  );
+  assert.deepEqual(projects.map((p) => p.name), ['App']);
+  assert.match(problems[0], /"App again"\) has the checkout of one listed before it/);
+  assert.match(problems[1], /"Steward"\) .*one of/);
 });
 
 test("no script of the Steward's or its kit's checks it was run as itself by its path's spelling (spec/DEV-DRIVES.md)", () => {
