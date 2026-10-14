@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.73.3
+**An install or a settings file written just before the PC crashes comes back whole, not as files full of nothing.**
+
+### What's new
+
+- **`flush.ts`**: `flushTree(dir)` writes every file under a folder through to the disk (fsync) and says how many it flushed and how many it couldn't; `flushFile(file)` does one. A folder that is renamed into place is flushed first.
+
+### What changed
+
+- **install.ts**: the release copied to `app.new` is flushed before it is swapped in for `app`, and so is `app` after the release is copied into a folder that can't be moved (`replaceContents`, which now flushes what it copied into). Windows writes a rename at once and a file's contents a few seconds later: when a PC crashed right after an update, the agent's app folder came back with every file the right size and nothing in it but NUL bytes, and its page couldn't start until it was installed again. `InstallDeps.flush` stands in for the flush in tests.
+- **safeinstall.ts**: `app.prev`, the copy a rollback puts back, is flushed as it's made.
+- **store.ts** `writeJson`, accelerator-config.ts `writeJsonWhole` and the accelerators' shared files: the temporary file is flushed before the rename, so a crash leaves the old file or the new one. About 1 ms more a write (0.2 ms to 1.2 ms on the owner's laptop); a write that would change nothing still writes nothing.
+- An agent's app folder of 130 files flushes in about 0.03 s.
+
+### What an agent must do
+
+- Nothing: it takes the kit as usual.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
