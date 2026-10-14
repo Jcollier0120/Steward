@@ -3,7 +3,7 @@ import path from 'node:path';
 import { NOT_PUBLISHED, type ExchequerOptions } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
-import { commitOf, fetchBranch } from '../git.ts';
+import { addWorktree, commitOf, fetchBranch, gitMaybe } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
 import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
@@ -289,13 +289,26 @@ export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
  * a git worktree (its .git a file, as git worktree add makes it) or, in the Steward's own work folder, what's left of
  * one. A clone of someone's own (its .git a folder), or anything else in a work folder Settings point elsewhere (a
  * folder of the person's projects, say), is never deleted: the worktree add after then fails on it, and says so.
+ * Whether it deleted the folder: git still has it registered (freshWorktree prunes that).
  */
-export function clearWorkDir(s: Settings, dir: string): void {
-  if (!existsSync(dir) || path.dirname(dir) !== workRootOf(s)) return;
+export function clearWorkDir(s: Settings, dir: string): boolean {
+  if (!existsSync(dir) || path.dirname(dir) !== workRootOf(s)) return false;
   const git = path.join(dir, '.git');
   const worktree = existsSync(git) && statSync(git).isFile();
   const ownRoot = workRootOf(s).toLowerCase() === path.resolve(DEFAULT_SETTINGS.workRoot).toLowerCase();
-  if (worktree || (ownRoot && !existsSync(git))) rmSync(dir, { recursive: true, force: true });
+  if (!worktree && !(ownRoot && !existsSync(git))) return false;
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+/**
+ * A worktree of `repo` made afresh at `dir` in the work folder: `git worktree add --quiet <opts> <dir> <commit>`, after
+ * clearing what a stage stopped half way left there. Cleared by Node, that folder stays registered with git, which then
+ * refuses to add a worktree there again ("a missing but already registered worktree"), round after round: git's record
+ * of it is pruned with it. addWorktree prunes too when the folder went some other way.
+ */
+export async function freshWorktree(run: Runner, s: Settings, repo: string, dir: string, commit: string, ...opts: string[]): Promise<void> {
+  if (clearWorkDir(s, dir)) await gitMaybe(run, repo, 'worktree', 'prune');
+  await addWorktree(run, repo, dir, commit, ...opts);
 }
 /** The Steward's worktree for an employee's bump, and the one for its release. */
 export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), e.id);
