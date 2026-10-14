@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.72.2
+
+**One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
+
+### What's new
+
+- **`console.ts`**: `sharesConsole()`, whether this process has a console the console programs it starts can share (asked once), and `hasConsole()`. Start git and gh with `windowsHide: !sharesConsole()`, not detached: in a page started by this kit they then share its windowless console. Started hidden, or from a page with no console, each one gets a console host (conhost.exe) of its own, detached or not. 40 git and gh calls from a page started 82 processes; sharing its console, 43.
+- service.ts: **`pageLaunch(node, entry)`**, how `open` starts the page: the program, its arguments and its spawn options.
+
+### What changed
+
+- **`open` starts the page with a console of its own, with no window.** On Windows it goes through `cmd /d /s /c "start "" /b …"`, cmd started hidden: the page keeps cmd's windowless console after cmd has exited, and `start` takes it out of the job Node puts what it starts in, so it outlives the process that ran `open`, as before. Its command line still names `src\cli.ts serve`, its output still goes to serve.log, its folder is still the data folder. Off Windows, and on a path holding `%` or `"`, it starts detached, as before. The page's one console host lasts as long as the page.
+- **unsigned-git.ts** also turns off `maintenance.auto`, so a test's throwaway commits no longer each start `git maintenance run --auto`: 20 commits started 62 processes, now 42. `UNSIGNED_KEYS` is now `OFF_KEYS`. test-git.ts and the Steward's checks get it as they are.
+
+### For an agent
+
+- Nothing to do to take it: the page gets its console the next time it starts.
+- To save the processes, start git and gh in your runner with `windowsHide: !sharesConsole()` (from `./kit/console.ts`) and without `detached`. Keep other commands hidden: a program that opens a window would show it.
+
 ## 2.72.1
 
 **The graphics card on demand: beside an NPU, the card does only the work the NPU can't, and only while it's asked for.**

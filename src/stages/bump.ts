@@ -155,7 +155,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
     const t0 = Date.now();
-    // Its tests' throwaway commits signed with nobody's key (kit/unsigned-git.ts): never pushed, and each would start ssh-keygen.
+    // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
+    // and each would start ssh-keygen and git maintenance.
     const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: !ctx.fast });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
