@@ -8,14 +8,17 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What's new
 
-- **`node/checks-pace.ts`**: `pacedCommand(file, args, { fast })` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
-  - a hard cap on the processor: half of it by default (`checksCap()`), two processors' worth at least;
-  - below-normal priority, which its programs take from it (a program may still raise its own).
+- **`node/checks-pace.ts`**: `pacedCommand(file, args)` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
+  - a hard cap on the processor: the gentle pace's by default (`checksCap()` = `gentleCap()`), a quarter of it and two processors' worth at most;
+  - a cap on memory (`checksMemory()`): each program an eighth of the PC's, 2 to 6 GB; the whole job a quarter, 4 to 12 GB;
+  - below-normal priority, which its programs take from it (a program may still raise its own);
+  - **a turn**: at most `CHECKS_AT_ONCE` (2) paced runs at once on the PC, from any agent or Claude session, through named mutexes `Local\kit-checks-turn-<n>`; the rest wait, 20 minutes at most, then run anyway. A run started inside another's (`KIT_CHECKS_TURN` set, as the Assayer pacing `steward vouch`) takes none. `KIT_CHECKS_TURN_NAME` gives a test turns of its own.
+  - The launcher's first word carries them: `cap[,MB per program,MB for the job,runs at once]` (`checksLimits()`).
 - **One job for the whole PC** (`Local\kit-checks-pace`): two check runs side by side share the cap rather than taking it twice. A process already in a job of another family gets a job of its own with the same cap. The job ends what is left in it once no launcher holds it: a test's server left running, or a command stopped on a timeout.
-- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). `fast: true` (a run the person asked to be quick) isn't paced, as Run now lifts the gentle pace. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
+- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). That setting is the only way out: there is no per-run `fast`, so a run asked for by hand is paced like any other. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
 - Off Windows a paced command runs under `nice -n 10`. A launcher that can't be built leaves the command as it is, said once in the log: the pace never fails a check.
 
-Measured on an 18-core laptop (the Steward's own checks: its kit filled, a type check and its whole test suite): before, 60 s of 201 s at 98% or more; at half the processor, 1 s of 203 s (the rest of the PC's work on top, Windows Defender's scans of what the tests write among it).
+Measured on an 18-core laptop, the Assayer's suite (155 tests): on a quiet PC, with no cap the whole PC peaked at 91% (the suite's own 68%) in 39 s; at the gentle cap, 43% (16%) in 65 s. On a busy PC: 73 s and 57% free, 44 s and 49% at half the processor (which barely held it), 219 s and 17% at the gentle cap. Its memory peaked at 0.8 GB. Callers with time limits should allow paced runs about four times their usual time (the Steward's `PACED_TIME`).
 
 ### Before you update
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gentleCap } from './gentle.ts';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { powershell, psQuote } from './ps.ts';
@@ -15,25 +16,49 @@ import { powershell, psQuote } from './ps.ts';
  * A paced command runs through a small launcher (checks-pace.cs, compiled once to an exe every agent on the PC shares, as
  * gentle.cs is to a DLL) that starts it, and every program it starts, in a job with
  *
- * - **a hard cap on the processor**: at most half of it by default (checksCap()), however many threads they run;
- * - **below-normal priority**: they give way to whatever the person is doing.
+ * - **a hard cap on the processor**: the gentle pace's, a quarter of it and two processors' worth at most
+ *   (checksCap()), however many threads they run;
+ * - **a cap on memory**: per program and for the whole job (checksMemory()), so a runaway test fails rather than
+ *   pages the PC;
+ * - **below-normal priority**: they give way to whatever the person is doing;
+ * - **a turn**: at most CHECKS_AT_ONCE runs on the PC at once, from whichever agent or Claude session, the rest wait.
  *
  * The job is one for the whole PC: check runs side by side (two vouches, a trial's tries) share the cap rather than
  * taking it twice, so together they never peg the processor either.
  *
  * Manor's settings.json `"checksPace"` (or KIT_CHECKS_PACE) changes the cap: a percentage of the processor from 10 to
- * 100, or "full" for none. A run the person asked to be fast (vouch --fast) isn't paced at all, as Run now lifts the
- * gentle pace. Windows only: elsewhere a paced command runs under `nice`. Never fails a command: a launcher that can't
- * be built or started leaves the command to run as it is.
+ * 100, or "full" for none. That setting is the only way out: a run asked for by hand is paced like any other. Windows
+ * only: elsewhere a paced command runs under `nice`. Never fails a command: a launcher that can't be built or started
+ * leaves the command to run as it is.
  */
 
 /**
- * The cap by default, in hundredths of a percent: half the processor. Measured on an 18-core laptop (Steward 0.35.64):
- * the Steward's checks kept it at 98% or more for 60 s of their 201 s, and at half they never passed 70% with the rest of
- * the PC's work on top, for about a third more time. Two processors' worth at least, so a small PC's checks still move.
+ * The cap by default, in hundredths of a percent: the gentle pace's (gentleCap()), a quarter of the processor and two
+ * processors' worth at most. Measured on an 18-core laptop (kit 2.70.0), the Assayer's own suite on a quiet PC: the whole
+ * PC peaked at 91% and the suite took 39 s with no cap, 43% and 65 s at this one. Half the processor, as this was first,
+ * barely held it (the suite's own peak went from 57% to 49%).
  */
 export function checksCap(processors = os.availableParallelism()): number {
-  return Math.round(Math.min(100, Math.max(50, 200 / Math.max(1, processors))) * 100);
+  return gentleCap(processors);
+}
+
+/** How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, 20 minutes at most. */
+export const CHECKS_AT_ONCE = 2;
+
+/**
+ * The memory a paced run may take, in MB: each program an eighth of the PC's memory, 2 to 6 GB; the whole job (every
+ * run sharing it) a quarter, 4 to 12 GB. The Assayer's suite peaked at 0.8 GB, the Steward's trials run several side by
+ * side.
+ */
+export function checksMemory(totalBytes = os.totalmem()): { processMb: number; jobMb: number } {
+  const mb = Math.floor(totalBytes / (1024 * 1024));
+  const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.floor(n)));
+  return { processMb: clamp(mb / 8, 2048, 6144), jobMb: clamp(mb / 4, 4096, 12288) };
+}
+
+/** The launcher's first word: the cap, memory per program and for the job, and runs at once (checks-pace.cs). */
+export function checksLimits(cap: number, memory = checksMemory(), atOnce = CHECKS_AT_ONCE): string {
+  return [cap, memory.processMb, memory.jobMb, atOnce].join(',');
 }
 
 /**
@@ -113,18 +138,18 @@ export interface Paced {
 }
 
 /**
- * The command `file args` at the checks pace: through the launcher with the cap (checksPaceCap()), or as it is when the
- * person asked for it fast, the cap is off, or the launcher can't be had. The environment keeps .NET's build servers from
- * staying behind in the job (the job ends what is left in it once its runs are done). Never throws.
+ * The command `file args` at the checks pace: through the launcher with its limits (checksPaceCap(), checksMemory(), a
+ * turn), or as it is when the cap is off (Manor's "checksPace": "full") or the launcher can't be had. The environment
+ * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done).
+ * Never throws.
  */
-export async function pacedCommand(file: string, args: string[], o: { fast?: boolean; home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}): Promise<Paced> {
+export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void } = {}): Promise<Paced> {
   const plain: Paced = { file, args, env: {} };
   const env = o.env ?? process.env;
-  if (o.fast) return plain;
   const cap = checksPaceCap(o.home, env);
   if (!cap) return plain;
   if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: {} };
   const exe = await checksPaceLauncher(o.log);
   if (!exe) return plain;
-  return { file: exe, args: [String(cap), file, ...args], env: { MSBUILDDISABLENODEREUSE: '1' } };
+  return { file: exe, args: [checksLimits(cap), file, ...args], env: { MSBUILDDISABLENODEREUSE: '1' } };
 }

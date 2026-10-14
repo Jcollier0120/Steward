@@ -79,7 +79,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
   try {
     // Its packages first, for the command and its tests: the shared set where it can be, else its own.
     if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, say))) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000, paced: !ctx.fast });
+      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000, paced: true });
       say(`npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) say(`  ${line}`);
@@ -87,7 +87,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
         return done('failed', `npm ci failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
       }
     }
-    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000, paced: !ctx.fast });
+    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000, paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) say(`  ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, command, r.code, `${r.out}\n${r.err}`);

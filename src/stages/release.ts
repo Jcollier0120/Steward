@@ -152,7 +152,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   ctx.log(`[${e.id}] releasing v${version} from ${remote} (${commit.slice(0, 7)}) in ${dir}`);
   try {
     if (releaseNeedsPackages(dir, e.release)) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000, paced: !ctx.fast });
+      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000, paced: true });
       ctx.log(`[${e.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
@@ -161,7 +161,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       }
     }
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
-    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: !ctx.fast });
+    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);

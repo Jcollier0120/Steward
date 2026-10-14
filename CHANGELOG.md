@@ -8,13 +8,16 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What's new
 
-- Tests, type checks, installs and release builds that the Steward runs use at most half your processor, at low priority, so your PC stays quiet and responsive while they run. That covers `vouch`, the kit's trials on every agent, the checks before a merge, rollouts and releases. Several running at once share that half rather than taking half each.
-- To change the share, set `"checksPace"` in Manor's settings.json: a percentage from 10 to 100, or `"full"` for no limit. `steward vouch --fast` runs one vouch at full speed.
+- Tests, type checks, installs and release builds that the Steward runs use at most a quarter of your processor (two cores' worth at most, as the agents' own background work does), at low priority, so your PC stays quiet and responsive while they run. That covers `vouch`, the kit's trials on every agent, the checks before a merge, rollouts and releases. Several running at once share that share rather than taking one each.
+- They can't take all your memory either: each program gets at most an eighth of the PC's memory (2 to 6 GB), and all the checks together a quarter (4 to 12 GB). A test that runs away fails instead of slowing the whole PC.
+- At most two check runs go at once on the PC, from the Steward, the Assayer or a Claude session; the rest wait their turn (20 minutes at most).
+- To change the share, set `"checksPace"` in Manor's settings.json: a percentage from 10 to 100, or `"full"` for no limit. That setting is the only way to run checks faster.
 - When the Steward tests a pull request itself and it passes, it marks that commit as tested on GitHub, as `vouch` does. So does a pull request it catches up or stamps where only version lines and changelogs changed, since it isn't tested again. The Assayer then doesn't install and test the same pull request a second time, which used to double the work on your PC (and Windows Defender's scanning of every file each install wrote).
 
 ### What changed
 
-- Measured on an 18-core laptop with the Steward's own checks: before, the processor sat at 98% or more for a full minute of a 3½-minute run. Now it gets there for about a second, and the run takes about as long as before.
+- Measured on an 18-core laptop with the Assayer's test suite on a quiet PC: before, the whole PC peaked at 91% and the suite took 39 seconds; now it peaks at 43% and takes 65 seconds. Checks take longer, and the Steward allows them four times their usual time before it gives up on one.
+- `steward vouch --fast` is gone (it says so and vouches at the usual pace).
 - Brings the Steward's kit 2.70.0, whose checks pace other agents can use for their own test runs.
 
 ### Before you update
