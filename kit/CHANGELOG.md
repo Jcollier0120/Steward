@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.1
+
+**The checks pace allows four processors' worth, not two.**
+
+### What changed
+
+- **`checksCap()`** is a quarter of the processor and four processors' worth at most (was the gentle pace's, `gentleCap()`: two at most). Up to eight processors nothing changes; on 18 the cap goes from 11% to 22%. A suite that starts a git for every step was too slow at two: the Steward's own took over an hour on an 18-processor laptop that was otherwise idle. The agents' own background pace (`gentleCap()`) is unchanged. spec/ROUND.md says so.
+
+### For an agent
+
+- Nothing to do: paced commands take the new cap as they start.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
