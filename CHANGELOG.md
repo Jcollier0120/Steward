@@ -45,6 +45,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.79
+
+**An agent update that stopped for a moment's trouble on this PC is finished by itself.**
+
+### What's new
+
+- When an agent's update was rolled back only because this PC's network dropped for a moment (its page gave no answer while the PC was offline, or while several agents were rolled back together), the Steward now allows that version again by itself and asks Manor to install it. It does this once the PC has been quiet for half an hour, as many agents at once as Manor lets agents work at once (two, unless Manor's settings say otherwise), and only once for each version. The install still goes through its usual checks, so a release that really fails is rolled back again.
+- A rollback that doesn't look like the PC's doing, or one that happens again after the Steward allowed the version, raises an alarm that gives the real reason and when it happened, instead of Manor's "failed 3 times".
+- When Manor gives up on an update for another reason, the Steward checks whether Manor's install would take the new version now (a dry run, which changes nothing). If it would, the Steward presses Update for it once; if not, it raises an alarm in the install's own words.
+- All of this comes under "Keeps the staff's pages up" in Settings: switched off, the Steward leaves Manor's updates alone.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.78
 
 **A quiet round starts about two git processes instead of over a hundred.**
@@ -212,21 +227,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The first paced check builds a small helper program once (about half a second).
-
-## 0.35.62
-
-**An agent update that stopped for a moment's trouble on this PC is finished by itself.**
-
-### What's new
-
-- When an agent's update was rolled back only because this PC's network dropped for a moment (its page gave no answer while the PC was offline, or while several agents were rolled back together), the Steward now allows that version again by itself and asks Manor to install it. It does this once the PC has been quiet for half an hour, as many agents at once as Manor lets agents work at once (two, unless Manor's settings say otherwise), and only once for each version. The install still goes through its usual checks, so a release that really fails is rolled back again.
-- A rollback that doesn't look like the PC's doing, or one that happens again after the Steward allowed the version, raises an alarm that gives the real reason and when it happened, instead of Manor's "failed 3 times".
-- When Manor gives up on an update for another reason, the Steward checks whether Manor's install would take the new version now (a dry run, which changes nothing). If it would, the Steward presses Update for it once; if not, it raises an alarm in the install's own words.
-- All of this comes under "Keeps the staff's pages up" in Settings: switched off, the Steward leaves Manor's updates alone.
-
-### Before you update
-
-- Nothing: it updates itself as usual.
 
 ## 0.35.60
 
