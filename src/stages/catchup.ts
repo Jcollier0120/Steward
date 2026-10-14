@@ -6,7 +6,7 @@ import { readPin } from './staff.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion, bumpPatch, readVersion, setVersion } from '../versions.ts';
 import { runChecks } from './bump.ts';
-import { bumpDirOf, checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
+import { bumpDirOf, checkoutOf, freshWorktree, workRootOf, type Ctx } from './common.ts';
 import type { PrInfo } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { carryTested } from './prtest.ts';
@@ -347,8 +347,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
 
   const dir = catchUpDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
+  await freshWorktree(run, ctx.settings, repo, dir, head, '--detach');
   let conflictedFiles: string[] = [];
   // What it says once the merge has been tried: with the files it conflicted in, when it did.
   const said = (c: CaughtUp): CaughtUp => (conflictedFiles.length ? { ...c, conflicted: conflictedFiles } : c);
