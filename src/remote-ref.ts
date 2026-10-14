@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { hasObject } from './git.ts';
 import { isNetworkError } from './kit/net.ts';
 import type { Runner } from './run.ts';
@@ -85,27 +87,70 @@ export async function readRef(run: Runner, r: RemoteRepo, ref: string, file: str
 /** Writes the ref to a new orphan commit holding `file`, only if it is still at `old` (null: only if it doesn't exist). */
 export async function writeRef(run: Runner, r: RemoteRepo, ref: string, file: string, text: string, old: string | null, message: string): Promise<RefWrite> {
   await ensureScratch(run, r.scratch);
+  const sha = commitHere(r.scratch, file, text, message) ?? (await commitByGit(run, r.scratch, file, text, message));
+  const push = await run('git', ['push', '--quiet', '--porcelain', `--force-with-lease=${ref}:${old ?? ''}`, r.url, `${sha}:${ref}`], { cwd: r.scratch, timeoutMs: PUSH_MS, env: QUIET });
+  if (push.code === 0) return { kind: 'ok', sha };
+  const said = `${push.out}\n${push.err}`;
+  // Lost to another writer: the lease's check, or the remote's own ref lock when two pushes land together.
+  if (/stale info|\[rejected\]|fetch first|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(said) && !/hook|denied|protected|not allowed|forbidden|refus/i.test(said)) return { kind: 'stale' };
+  if (isNetworkError(said) || /could not resolve host|unable to access|could not read from remote|connection (timed out|refused|reset)|operation timed out|failed to connect/i.test(said)) return { kind: 'unreachable', why: lastLine(push) };
+  return { kind: 'refused', why: lastLine(push) };
+}
+
+/** A loose object written into a repository's objects folder, unless it is there already: its id. */
+function writeObject(repo: string, type: 'blob' | 'tree' | 'commit', body: Buffer): string {
+  const data = Buffer.concat([Buffer.from(`${type} ${body.length}\0`), body]);
+  const sha = createHash('sha1').update(data).digest('hex');
+  const file = path.join(repo, 'objects', sha.slice(0, 2), sha.slice(2));
+  if (!existsSync(file)) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`;
+    writeFileSync(tmp, deflateSync(data));
+    try {
+      renameSync(tmp, file);
+    } catch (e) {
+      // Another writer put the same object there first: its content is the same.
+      rmSync(tmp, { force: true });
+      if (!existsSync(file)) throw e;
+    }
+  }
+  return sha;
+}
+
+/**
+ * The orphan commit holding `file`, made in the scratch repository from Node: a blob, a tree of one entry and a commit,
+ * written as loose objects. Each turn's renewal ran four git commands for this (hash-object, update-index, write-tree,
+ * commit-tree), about 450 an hour. Null for a repository whose objects aren't SHA-1 (`git init` set to SHA-256): then
+ * git makes it, as before.
+ */
+export function commitHere(scratch: string, file: string, text: string, message: string, now = Date.now()): string | null {
+  try {
+    if (file.includes('/') || /^\s*objectformat\s*=\s*(?!sha1\b)/im.test(readFileSync(path.join(scratch, 'config'), 'utf8'))) return null;
+  } catch {
+    return null;
+  }
+  const blob = writeObject(scratch, 'blob', Buffer.from(text, 'utf8'));
+  const tree = writeObject(scratch, 'tree', Buffer.concat([Buffer.from(`100644 ${file}\0`, 'utf8'), Buffer.from(blob, 'hex')]));
+  const who = `${AUTHOR.GIT_AUTHOR_NAME} <${AUTHOR.GIT_AUTHOR_EMAIL}> ${Math.floor(now / 1000)} +0000`;
+  return writeObject(scratch, 'commit', Buffer.from(`tree ${tree}\nauthor ${who}\ncommitter ${who}\n\n${message}\n`, 'utf8'));
+}
+
+/** The same commit made by git: for a repository commitHere can't write to. */
+async function commitByGit(run: Runner, scratch: string, file: string, text: string, message: string): Promise<string> {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-ref-'));
   try {
     const body = path.join(tmp, file);
     writeFileSync(body, text);
-    const blob = await run('git', ['hash-object', '-w', body], { cwd: r.scratch, timeoutMs: ASK_MS });
+    const blob = await run('git', ['hash-object', '-w', body], { cwd: scratch, timeoutMs: ASK_MS });
     if (blob.code !== 0) throw new Error(`git hash-object: ${lastLine(blob)}`);
     const index = { GIT_INDEX_FILE: path.join(tmp, 'index') };
-    const add = await run('git', ['update-index', '--add', '--cacheinfo', `100644,${blob.out.trim()},${file}`], { cwd: r.scratch, timeoutMs: ASK_MS, env: index });
+    const add = await run('git', ['update-index', '--add', '--cacheinfo', `100644,${blob.out.trim()},${file}`], { cwd: scratch, timeoutMs: ASK_MS, env: index });
     if (add.code !== 0) throw new Error(`git update-index: ${lastLine(add)}`);
-    const tree = await run('git', ['write-tree'], { cwd: r.scratch, timeoutMs: ASK_MS, env: index });
+    const tree = await run('git', ['write-tree'], { cwd: scratch, timeoutMs: ASK_MS, env: index });
     if (tree.code !== 0) throw new Error(`git write-tree: ${lastLine(tree)}`);
-    const commit = await run('git', ['commit-tree', tree.out.trim(), '-m', message], { cwd: r.scratch, timeoutMs: ASK_MS, env: AUTHOR });
+    const commit = await run('git', ['commit-tree', tree.out.trim(), '-m', message], { cwd: scratch, timeoutMs: ASK_MS, env: AUTHOR });
     if (commit.code !== 0) throw new Error(`git commit-tree: ${lastLine(commit)}`);
-    const sha = commit.out.trim();
-    const push = await run('git', ['push', '--quiet', '--porcelain', `--force-with-lease=${ref}:${old ?? ''}`, r.url, `${sha}:${ref}`], { cwd: r.scratch, timeoutMs: PUSH_MS, env: QUIET });
-    if (push.code === 0) return { kind: 'ok', sha };
-    const said = `${push.out}\n${push.err}`;
-    // Lost to another writer: the lease's check, or the remote's own ref lock when two pushes land together.
-    if (/stale info|\[rejected\]|fetch first|non-fast-forward|failed to update ref|cannot lock ref|incorrect old value|but expected/i.test(said) && !/hook|denied|protected|not allowed|forbidden|refus/i.test(said)) return { kind: 'stale' };
-    if (isNetworkError(said) || /could not resolve host|unable to access|could not read from remote|connection (timed out|refused|reset)|operation timed out|failed to connect/i.test(said)) return { kind: 'unreachable', why: lastLine(push) };
-    return { kind: 'refused', why: lastLine(push) };
+    return commit.out.trim();
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

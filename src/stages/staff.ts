@@ -4,7 +4,7 @@ import { expandEnv } from '../kit/settings-kit.ts';
 import { readAfter, type After } from '../after.ts';
 import { compareVersions, lf } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, branchOnDisk, commitOf, fetchBranch, gitMaybe, showFile } from '../git.ts';
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
@@ -246,7 +246,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
-    row.checkout.branch = (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim() || '(detached)';
+    // From the clone's HEAD file; git asked only when it doesn't say plainly.
+    row.checkout.branch = (branchOnDisk(dir) ?? (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim()) || '(detached)';
     row.checkout.changes = ((await gitMaybe(run, dir, '--no-optional-locks', 'status', '--porcelain')) ?? '').split('\n').filter((l) => l.trim()).length;
     // Fetched, unless the glance at GitHub says the checkout has its branch's head already, or a stage running beside
     // this one is working in it (stages/slots.ts): its own fetches bring the branch, and the next look shows it.

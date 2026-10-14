@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { showFile } from './git.ts';
+import { refOnDisk, showFile } from './git.ts';
 import { withLock } from './kit/lock.ts';
 import { manorHome } from './kit/manor.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
@@ -95,6 +95,12 @@ export function manorUses(home = manorHome()): PortUse[] {
   ];
 }
 
+/**
+ * Each clone's port as last read, with the commit it was read at, by clone and branch: read again only when the branch's
+ * commit (from the clone's files, no git) moved. Each round read all 39 clones, a git process each.
+ */
+const portsRead = new Map<string, { head: string; port: number | null }>();
+
 /** What each employee's clone says on its branch (as origin had it at the last fetch): src/app.ts, else manor-agent.json. */
 export async function cloneUses(run: Runner, employees: Employee[]): Promise<PortUse[]> {
   const out: PortUse[] = [];
@@ -103,11 +109,19 @@ export async function cloneUses(run: Runner, employees: Employee[]): Promise<Por
     try {
       const repo = checkoutOf(e);
       const ref = `origin/${e.branch}`;
-      // Both asked at once, so git reads them in one command (showFile).
-      const [app, announce] = await Promise.all([showFile(run, repo, ref, 'src/app.ts'), showFile(run, repo, ref, 'manor-agent.json')]);
-      let port = appPort(app);
-      if (port === null) {
-        port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
+      const head = refOnDisk(repo, ref);
+      const k = `${repo.toLowerCase()}\n${ref}`;
+      const had = head ? portsRead.get(k) : undefined;
+      let port: number | null;
+      if (had?.head === head) port = had.port;
+      else {
+        // Both asked at once, so git reads them in one command (showFile).
+        const [app, announce] = await Promise.all([showFile(run, repo, ref, 'src/app.ts'), showFile(run, repo, ref, 'manor-agent.json')]);
+        port = appPort(app);
+        if (port === null) {
+          port = announce ? portOfUrl((JSON.parse(announce.replace(/^﻿/, '')) as { agent?: { home?: unknown } })?.agent?.home) : null;
+        }
+        if (head) portsRead.set(k, { head, port });
       }
       if (port !== null) out.push({ port, id: e.id, source: 'clone' });
     } catch {

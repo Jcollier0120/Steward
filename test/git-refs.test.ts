@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { commitOf, refOnDisk } from '../src/git.ts';
+import { branchOnDisk, commitOf, refOnDisk } from '../src/git.ts';
 import { apiAsk, takeGlance } from '../src/glance.ts';
 import { GithubLimited } from '../src/budget.ts';
 import { run } from '../src/run.ts';
@@ -79,4 +79,21 @@ test("the glance over HTTPS: GitHub's answer as gh gave it, partial answers kept
 
   const limited = apiAsk({ token: async () => 't', fetch: answer(403, { message: 'You have exceeded a secondary rate limit. Please wait a few minutes.' }) });
   await assert.rejects(takeGlance(async () => assert.fail('no gh'), '.', { employees: [porter], stewardRepo: '' }, undefined, undefined, limited), (e: unknown) => e instanceof GithubLimited && e.secondary);
+});
+
+test("the branch a clone has checked out, from its HEAD file: a clone's, a worktree's own, detached, and none", () => {
+  const repo = path.join(home, 'heads');
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { windowsHide: true });
+  g(repo, 'config', 'user.email', 't@example.test');
+  g(repo, 'config', 'user.name', 'T');
+  writeFileSync(path.join(repo, 'a.txt'), 'a');
+  g(repo, 'add', '.');
+  g(repo, 'commit', '-qm', 'one');
+  assert.equal(branchOnDisk(repo), 'main');
+  const wt = path.join(home, 'heads-wt');
+  g(repo, 'worktree', 'add', '-q', '-b', 'feat/side', wt);
+  assert.equal(branchOnDisk(wt), 'feat/side', "a worktree's own HEAD, not the main clone's");
+  g(repo, 'switch', '-q', '--detach');
+  assert.equal(branchOnDisk(repo), '', 'detached');
+  assert.equal(branchOnDisk(path.join(home, 'no-clone')), null);
 });

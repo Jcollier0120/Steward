@@ -20,7 +20,9 @@ import { checkoutOf, mapLimit, result, workRootOf, type EmployeeResult } from '.
  *
  * - Before a stage publishes (merges, releases, refresh, kit rollout and catch-up pushes, the Release button), it reads
  *   the ref of each repository it would publish to. Free, or run out: it takes it, for three rounds. Its own: renewed
- *   once half of that is gone. Another PC's: left alone, and the page says so, with Do it here.
+ *   once half of that is gone. Another PC's: left alone, and the page says so, with Do it here. A round reads a
+ *   repository with nothing new on GitHub only in its hourly full look; in between, the turn last read stands, and
+ *   one due is renewed by the compare-and-swap push alone (TurnsOptions.settled).
  * - Pinned (Keep it on this PC): another PC never takes it while it is renewed; a pin silent for over 24 hours may be
  *   taken, and the page says that PC has gone quiet. A PC with a checkout takes the turn from one without.
  * - Before each publishing act, one ls-remote: it acts only while the ref is still its own.
@@ -208,6 +210,25 @@ export interface TurnsOptions {
   log?: (line: string) => void;
   /** Null: no turns at all (the tests, unless they give their own). */
   deps: TurnsDeps | null;
+  /**
+   * The employees with nothing new on GitHub since the last round (stages/changes.ts): their turn as last read stands
+   * without a look at the remote (settledTurn), and one due for renewal is renewed by compare-and-swap on the commit last
+   * read. Each round looked at all 38 remotes (a `git ls-remote`, some 9 processes, each); a round now looks only where
+   * something is new, and the hour's full look reads them all. The guard still looks before each publishing act.
+   */
+  settled?: ReadonlySet<string>;
+}
+
+/**
+ * What a settled repository's turn, as last read, comes to now with no look at its remote: it stands (this PC's and not
+ * due, or another PC's that hasn't run out), it is renewed (this PC's, due), or null: it is read as before (none kept,
+ * out of reach, a host that refuses the ref, one to take). Pure.
+ */
+export function settledTurn(kept: RepoTurn | undefined, me: { pc: string; checkout: boolean }, now: number, ttlMs: number): 'stands' | 'renew' | null {
+  if (!kept?.sha || !kept.record || (kept.status !== 'here' && kept.status !== 'elsewhere')) return null;
+  const d = decide(kept.record, me, now, ttlMs);
+  if (kept.status === 'here') return d === 'keep' ? 'stands' : d === 'renew' ? 'renew' : null;
+  return d === 'elsewhere' ? 'stands' : null;
 }
 
 /**
@@ -236,7 +257,16 @@ export async function takeTurns(employees: Employee[], o: TurnsOptions): Promise
       remotes.set(e.id, r);
       const checkout = !!e.checkout && existsSync(checkoutOf(e));
       checkouts.set(e.id, checkout);
-      return await turnOne(o.run, r, e, { me, checkout, now: nowOf(), ttlMs, kept: before[key(e.repo)] });
+      const kept = before[key(e.repo)];
+      const now = nowOf();
+      const settled = o.settled?.has(e.id) ? settledTurn(kept, { pc: me.id, checkout }, now, ttlMs) : null;
+      if (settled === 'stands') return kept!;
+      if (settled === 'renew') {
+        // Still this PC's at the commit last read, unless the push finds it moved: then it is read as before.
+        const renewed = await claimTurn(o.run, r, e, recordFor(me, checkout, now, ttlMs, kept!.record!), kept!.sha!, me, now);
+        if (renewed.status === 'here') return { ...renewed, claimsSha: kept!.claimsSha };
+      }
+      return await turnOne(o.run, r, e, { me, checkout, now, ttlMs, kept });
     } catch (err) {
       log(`[${e.id}] turn: ${(err as Error).message}`);
       return { repo: e.repo, status: 'unreachable', note: unreachableNote(e), at: new Date(nowOf()).toISOString() };

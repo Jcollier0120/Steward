@@ -351,10 +351,10 @@ const turnsDeps = (o: StageOptions): TurnsDeps | null => (o.turns !== undefined 
  * Sets ctx.lease; gives back the employees asked about that are this PC's to publish for, and a line for each that isn't.
  * Only publishing waits on a turn: nothing here stops a build, a test, a tasting or a bump.
  */
-async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
+async function takeTurnsFor(ctx: Ctx, o: StageOptions, picked: Employee[], self: Employee | null, settled?: ReadonlySet<string>): Promise<{ acting: Employee[]; elsewhere: EmployeeResult[]; selfActs: boolean; on: boolean }> {
   const refreshed = ctx.settings.employees.filter((e) => e.refresh && !picked.includes(e));
   const deps = turnsDeps(o);
-  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { run: ctx.run, settings: ctx.settings, log: ctx.log, deps });
+  const t = await takeTurns([...picked, ...refreshed, ...(self ? [self] : [])], { run: ctx.run, settings: ctx.settings, log: ctx.log, deps, settled });
   ctx.lease = t.guard;
   const elsewhere = t.elsewhere.filter((r) => picked.some((e) => e.id === r.id) || r.id === self?.id);
   for (const r of elsewhere) ctx.log(`[${r.id}] ${r.message}`);
@@ -509,7 +509,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           const yes = round || !!ask.yes;
           // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it.
           const whole = !ask.employees?.length;
-          const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
+          // Those with nothing new on GitHub, as the round's plan will find them: their turns stand as last read (lease.ts).
+          const settled =
+            round && ctx.glance
+              ? new Set(planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } }).quiet.map((e) => e.id))
+              : undefined;
+          const turns = await takeTurnsFor(ctx, o, picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole), settled);
           turnsOn = turns.on;
           const acting = turns.acting;
           // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
@@ -703,7 +708,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
       if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
         try {
-          const queues = await keepVersionQueues(ctx);
+          // Those the stage did something for (or failed partway) moved since its glance: their clones are fetched.
+          const queues = await keepVersionQueues(ctx, { moved: out.results.filter((r) => r.outcome === 'done' || r.outcome === 'failed').map((r) => r.id) });
           // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
           for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
         } catch (e) {

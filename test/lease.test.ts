@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -393,4 +394,89 @@ test("an unchanged turn record isn't read again, and a checkout's remote is read
   const found = await L.remoteFor(counting, settings, emp('clerk', r, { checkout }));
   assert.equal(found?.url, 'https://example.test/o/clerk.git');
   assert.deepEqual(asked, [], 'no git config --get');
+});
+
+test('a settled repository: its turn stands with no look at its remote, is renewed by compare-and-swap alone, and the guard still looks', async () => {
+  rmSync(L.turnsFile(), { force: true });
+  const r = remote();
+  const clerk = emp('clerk', r);
+  const asked: string[] = [];
+  const counting: Runner = (cmd, args, opts) => (asked.push(args[0]), realRun(cmd, args, opts));
+  let now = T0;
+  const turns = () => L.takeTurns([clerk], { run: counting, settings, deps: { device: A, now: () => now, remote: async () => r }, settled: new Set(['clerk']) });
+  // None kept: read and taken, as before.
+  let t = await turns();
+  assert.deepEqual(t.acting.map((e) => e.id), ['clerk']);
+  assert.ok(asked.includes('ls-remote'));
+  const first = await shaOf(r, L.RELEASE_PC_REF);
+
+  // The next round, far from its end: it stands, and git isn't started at all.
+  asked.length = 0;
+  now = T0 + 10 * MIN;
+  t = await turns();
+  assert.deepEqual([t.acting.map((e) => e.id), asked], [['clerk'], []]);
+
+  // Due for renewal: pushed over the commit last read, with no ls-remote first.
+  now = T0 + 20 * MIN;
+  t = await turns();
+  assert.deepEqual([asked.includes('ls-remote'), asked.includes('push')], [false, true]);
+  assert.notEqual(await shaOf(r, L.RELEASE_PC_REF), first);
+  assert.equal((await recordOf(r))?.until, new Date(now + TTL).toISOString());
+
+  // Do it here on another PC: the settled turn still stands this round, but the guard looks before publishing, and stops.
+  await write(r, { pc: B.id, until: new Date(now + TTL).toISOString() });
+  now = T0 + 25 * MIN;
+  t = await turns();
+  assert.deepEqual(t.acting.map((e) => e.id), ['clerk']);
+  assert.equal(await t.guard!.ok(clerk), false);
+
+  // Not settled (something new on GitHub): read every round, as before, and another PC's turn is left to it.
+  asked.length = 0;
+  t = await L.takeTurns([clerk], { run: counting, settings, deps: { device: A, now: () => now, remote: async () => r } });
+  assert.ok(asked.includes('ls-remote'));
+  assert.deepEqual(t.elsewhere.map((x) => x.id), ['clerk']);
+});
+
+test('a settled turn due for renewal that another PC took meanwhile: the push loses, and it is read as before', async () => {
+  rmSync(L.turnsFile(), { force: true });
+  const r = remote();
+  const clerk = emp('clerk', r);
+  let now = T0;
+  const turns = () => L.takeTurns([clerk], { run: realRun, settings, deps: { device: A, now: () => now, remote: async () => r }, settled: new Set(['clerk']) });
+  await turns();
+  await write(r, { pc: B.id, until: new Date(T0 + 50 * MIN).toISOString() });
+  now = T0 + 20 * MIN;
+  const t = await turns();
+  assert.deepEqual([t.acting, t.elsewhere.map((x) => x.id)], [[], ['clerk']]);
+  assert.equal((await recordOf(r))?.pc, B.id, "the other PC's turn is left to it");
+});
+
+test('settledTurn: stands while its own and not due, or another PC\'s not run out; renewed when due; else read', () => {
+  const me = { pc: A.id, checkout: true };
+  const rec = (pc: string, until: number, more: Partial<TurnRecord> = {}): TurnRecord => ({ pc, name: '', until: new Date(until).toISOString(), since: new Date(T0).toISOString(), pinned: false, ...more });
+  const kept = (status: 'here' | 'elsewhere' | 'unreachable' | 'alone', record?: TurnRecord) => ({ repo: 'o/r', status, sha: 'a'.repeat(40), record, at: new Date(T0).toISOString() });
+  assert.equal(L.settledTurn(undefined, me, T0, TTL), null);
+  assert.equal(L.settledTurn(kept('here', rec(A.id, T0 + TTL)), me, T0 + 10 * MIN, TTL), 'stands');
+  assert.equal(L.settledTurn(kept('here', rec(A.id, T0 + TTL)), me, T0 + 20 * MIN, TTL), 'renew');
+  assert.equal(L.settledTurn(kept('elsewhere', rec(B.id, T0 + TTL, { checkout: true })), me, T0 + 20 * MIN, TTL), 'stands');
+  assert.equal(L.settledTurn(kept('elsewhere', rec(B.id, T0 + TTL, { checkout: true })), me, T0 + TTL + 3 * MIN, TTL), null, 'run out: read, to be taken');
+  assert.equal(L.settledTurn(kept('unreachable'), me, T0, TTL), null);
+  assert.equal(L.settledTurn(kept('alone'), me, T0, TTL), null);
+});
+
+test("a turn's commit made from Node is the very commit git makes of it, and git reads it", async () => {
+  const bare = path.join(home, 'objects-here.git');
+  sh(home, 'init', '--quiet', '--bare', bare);
+  const text = '{\n  "pc": "é"\n}\n';
+  const at = T0 + 1234;
+  const mine = R.commitHere(bare, 'release-pc.json', text, 'Clerk: released from LAPTOP until then', at);
+  assert.match(mine ?? '', /^[0-9a-f]{40}$/);
+  const when = `@${Math.floor(at / 1000)} +0000`;
+  const git = (args: string[], input?: string) => execFileSync('git', args, { cwd: bare, encoding: 'utf8', windowsHide: true, input, env: { ...process.env, GIT_AUTHOR_NAME: 'Castellan Steward', GIT_AUTHOR_EMAIL: 'steward@manor.invalid', GIT_COMMITTER_NAME: 'Castellan Steward', GIT_COMMITTER_EMAIL: 'steward@manor.invalid', GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } }).trim();
+  const blob = git(['hash-object', '-w', '--stdin'], text);
+  const tree = git(['mktree'], `100644 blob ${blob}\trelease-pc.json\n`);
+  const theirs = git(['commit-tree', tree, '-m', 'Clerk: released from LAPTOP until then']);
+  assert.equal(mine, theirs);
+  assert.equal(sh(bare, 'show', `${mine}:release-pc.json`), text.trim());
+  assert.equal(R.commitHere(bare, 'release-pc.json', text, 'again', at) === mine, false, 'another message, another commit');
 });

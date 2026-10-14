@@ -106,3 +106,33 @@ test('a repository that can\'t be read says why, and a project that is one of th
   assert.equal(q.repos[0].working, null);
   assert.match(q.repos[1].note ?? '', /^no checkout at /);
 });
+
+test("a clone is fetched only when its branch on GitHub moved: the glance's head kept, or the clone's own already, needs none", async () => {
+  const a = repoWithPrs('agent3');
+  const h0 = sh(a.checkout, 'rev-parse', 'origin/main');
+  const h1 = a.make(1, '0.4.1');
+  const r = runner();
+  const fetches: string[][] = [];
+  const run: typeof r.run = (cmd, args, opts) => (cmd === 'git' && args.includes('fetch') && fetches.push(args), r.run(cmd, args, opts));
+  const e = employee(a.checkout, { id: 'fake3', name: 'Fake3' });
+  const ctx = (head: string) => ({ ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work3'), run, neutralDir: tmp }), glance: { at: '', stewardReleases: null, repos: { fake3: { head, prs: [], releases: [] } }, errors: {} } });
+
+  // The clone has GitHub's head already: no fetch.
+  let q = await keepVersionQueues(ctx(h0), { projects: [] });
+  assert.deepEqual([q.repos[0].head, q.repos[0].version, fetches.length], [h0, '0.4.0', 0]);
+
+  // GitHub's branch moved past the clone's: fetched once, and read at the new head.
+  sh(a.checkout, 'push', '--quiet', 'origin', `${h1}:refs/heads/main`);
+  sh(a.checkout, 'update-ref', 'refs/remotes/origin/main', h0);
+  q = await keepVersionQueues(ctx(h1), { projects: [] });
+  assert.deepEqual([q.repos[0].head, q.repos[0].version, fetches.length], [h1, '0.4.1', 1]);
+
+  // The same head next round: the one kept stands, whatever the clone has.
+  sh(a.checkout, 'update-ref', 'refs/remotes/origin/main', h0);
+  q = await keepVersionQueues(ctx(h1), { projects: [] });
+  assert.deepEqual([q.repos[0].head, q.repos[0].version, fetches.length], [h1, '0.4.1', 1]);
+
+  // One the stage merged or released to since its glance is fetched, whatever the glance said.
+  q = await keepVersionQueues(ctx(h1), { projects: [], moved: ['fake3'] });
+  assert.deepEqual([q.repos[0].head, fetches.length], [h1, 2]);
+});

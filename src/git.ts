@@ -169,6 +169,26 @@ export function refOnDisk(repo: string, ref: string): string | null {
   }
 }
 
+/**
+ * The branch a clone has checked out, from its own HEAD file (a worktree's is in its gitdir): '' when it's detached;
+ * null when the file doesn't say it plainly (a reftable clone, anything unreadable): then git is asked, as before.
+ */
+export function branchOnDisk(repo: string): string | null {
+  try {
+    const dotGit = path.join(repo, '.git');
+    if (!existsSync(dotGit)) return null;
+    const common = commonDir(repo);
+    if (!common || existsSync(path.join(common, 'reftable'))) return null;
+    const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
+    if (!gitdir) return null;
+    const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
+    if (SHA.test(head)) return '';
+    return /^ref: refs\/heads\/(\S+)$/.exec(head)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** The folder a clone keeps its refs in: .git, or for a worktree the main clone's (its gitdir's commondir). */
 export function commonDir(repo: string): string | null {
   const dotGit = path.join(repo, '.git');

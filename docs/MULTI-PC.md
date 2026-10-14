@@ -39,6 +39,10 @@ The rules (`src/lease.ts`):
   takes part, through the remote's URL, so kit-update PRs keep flowing when no PC with a checkout is around.
 - **Re-checking.** Before every publishing act, one `ls-remote`: the PC acts only while the turn is still its own,
   renewing it if it is near its end.
+- **Quiet repositories.** A round reads the turn of a repository with nothing new on GitHub only in the hour's full
+  look. In between, the turn it last read stands. When that turn is due, it is renewed by the compare-and-swap push
+  alone; if the push loses, the turn is read as usual. A "Do it here" from another PC is seen at the next full look,
+  or by the re-check before this PC publishes anything there.
 
 ## What the turn gates, and what it never does
 

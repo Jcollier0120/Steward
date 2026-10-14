@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.5
+
+**The Steward's rounds leave your repositories alone when nothing in them has changed.**
+
+### What changed
+
+- The version queues Manor shows no longer fetch every repository every round. A repository is fetched only when GitHub says its branch moved, or when the round has just merged or released something there. On a PC with 38 repositories, that took a round's queue pass from 38 fetches (15 to 45 seconds) to none (under a second).
+- The release-PC turns are no longer read from every repository's remote each round. A repository with nothing new on GitHub keeps the turn it last read, and when that turn is due for renewal, it is renewed in one push. Every repository is still read once an hour, and the Steward still checks the turn just before it merges, releases or pushes anything. An hour of turns on 37 repositories went from 777 git commands to 148.
+- Renewing a turn writes its small record directly, with no extra git commands for each renewal.
+- The ports check and the staff table read each clone's branch and port from its files. They ask git only when a branch has moved.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**
