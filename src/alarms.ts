@@ -9,6 +9,7 @@ import { CONFLICTS } from './conflicts.ts';
 import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { Migration } from './migrate.ts';
+import type { BuildLeft } from './stages/build.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { refreshDirOf } from './stages/refresh.ts';
 import type { Runner } from './run.ts';
@@ -154,7 +155,7 @@ export interface Held {
 export interface FailedRollout {
   kit: string;
   head: string;
-  stage: 'bump' | 'push';
+  stage: 'bump' | 'push' | 'build';
   message: string;
 }
 
@@ -176,6 +177,8 @@ export function roundConditions(o: {
   failedRollouts?: Record<string, FailedRollout>;
   failedSelf?: Record<string, FailedSelf>;
   rolloutWaits?: { kit: string; own: string } | null;
+  /** What builds left of each repository's batch (stages/build.ts's build-left.json), by employee: PRs kept for the next build are an alarm. */
+  buildLeft?: Record<string, BuildLeft>;
   /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
@@ -245,6 +248,17 @@ export function roundConditions(o: {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
       const e = o.employees.find((x) => x.id === id);
       if (!e) continue;
+      // A kit PR a build left out (stages/build.ts): the agent stays on its old kit.
+      if (f.stage === 'build') {
+        out.push({
+          id: `rollout:${id}:${f.kit}`,
+          who: id,
+          title: `${e.name}'s kit PR to kit ${f.kit} broke its build, so ${e.name} left without it and stays on its old kit`,
+          detail: [f.message, `Its kit PR doesn't go into a build again until it moves: a newer kit folds into it, or press Bump on the Steward's page once the kit or ${e.name} is fixed.`],
+          afterMs: 0,
+        });
+        continue;
+      }
       out.push({
         id: `rollout:${id}:${f.kit}`,
         who: id,
@@ -269,6 +283,20 @@ export function roundConditions(o: {
         afterMs: o.settings.alarms.waitingHours * HOUR,
       });
     }
+  }
+  // A build that couldn't find the one PR that broke a repository's batch: the PRs it kept wait for the next build.
+  for (const [id, l] of Object.entries(o.buildLeft ?? {})) {
+    if (!l.kept.length) continue;
+    const e = o.employees.find((x) => x.id === id);
+    const prs = l.kept.map((k) => `#${k.number}`).join(', ');
+    out.push({
+      id: `build:${id}:${l.due}`,
+      who: id,
+      title: `${e?.name ?? id} ${prs} didn't leave in ${l.name}, and wait${l.kept.length === 1 ? 's' : ''} for the next build`,
+      detail: [l.why, ...l.kept.map((k) => `#${k.number}: ${k.title}`), "They go into the next build as they are. Look at what failed (the Steward's log has each test run), and fix or close the PR that broke them."],
+      url: l.kept[0].url,
+      afterMs: 0,
+    });
   }
   if (o.settings.releaseSelf) {
     for (const [tag, f] of Object.entries(o.failedSelf ?? {})) {

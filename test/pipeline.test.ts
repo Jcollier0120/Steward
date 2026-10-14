@@ -27,9 +27,11 @@ test("the pipeline's settings: each value checked, a bad one its default", () =>
   assert.deepEqual(normalizePipeline(undefined), DEFAULT_PIPELINE);
   assert.equal(DEFAULT_PIPELINE.on, false, 'off until the owner switches it on');
   const p = normalizePipeline({ on: true, times: ['18:00', '8:00', 'noon', '08:00', '24:00'], days: ['mon', 'fri', 'xyz'], kit: 'first', windowMinutes: 9999 });
-  assert.deepEqual(p, { on: true, times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 360 });
+  assert.deepEqual(p, { on: true, times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 360, bisectRuns: 3 });
   assert.deepEqual(normalizePipeline({ times: ['nope'], kit: 'sometimes', windowMinutes: 'x' }).times, DEFAULT_PIPELINE.times);
   assert.equal(normalizePipeline({ windowMinutes: 1 }).windowMinutes, 15);
+  assert.equal(DEFAULT_PIPELINE.bisectRuns, 3);
+  assert.deepEqual([0, '5', 99, 1.5].map((bisectRuns) => normalizePipeline({ bisectRuns }).bisectRuns), [0, 5, 6, 3]);
 });
 
 test('the build times: the last one come and the next, on the days builds run', () => {

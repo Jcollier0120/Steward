@@ -1,4 +1,4 @@
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { Ran, Runner } from './run.ts';
 
@@ -283,7 +283,23 @@ export function unlinkModules(dir: string): void {
   }
 }
 
-const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+/** A folder as the disk has it, through any junction or link on its way (as git lists worktrees), as far as it exists. */
+function realOf(p: string): string {
+  const rest: string[] = [];
+  for (let at = path.resolve(p); ; ) {
+    try {
+      return path.join(realpathSync.native(at), ...rest);
+    } catch {
+      const up = path.dirname(at);
+      if (up === at) return path.resolve(p);
+      rest.unshift(path.basename(at));
+      at = up;
+    }
+  }
+}
+
+const norm = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+const samePath = (a: string, b: string) => norm(a) === norm(b) || norm(realOf(a)) === norm(realOf(b));
 
 /**
  * Removes the Steward's worktree at `dir` and its branch, when there are any: only a worktree that is the

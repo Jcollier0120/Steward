@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.3
+
+**A build whose checks fail no longer holds everything back: the Steward finds the pull request that broke it, takes it out, and ships the rest.**
+
+### What's new
+
+- At each build, the kit's pull request and the pull requests that write changelog fragments go together as one batch: stacked in the order they went ready (the kit first), stamped with one version and tested once.
+- When the batch's checks fail, the Steward tries once more (a flaky test doesn't break up a build), then tests the bottom half of the stack, and halves again, to find the one pull request that broke it.
+- That pull request is taken out and turned back into a draft, with a comment saying which tests failed and which pull request it clashed with, so the session that opened it can fix it for the next build. It also gets a red **steward/build** status. The rest of the batch ships without it.
+- If the kit's pull request is the one that broke it, the agent ships without the new kit, stays on its old one, and the kit rollout alarm goes off.
+- If the halving can't single out one pull request, the ones at the bottom of the stack that passed ship, and the rest wait for the next build, with an alarm naming them.
+- A new setting, **To find the PR that breaks a build, at most** (Build pipeline, advanced; `bisectRuns`, 3 by default, 0 to 6): how many extra test runs the halving may take. At 0 it doesn't look: what passed at the bottom ships, the rest wait.
+
+### What changed
+
+- The Steward now finds its own worktrees when its work folder or a repository sits behind a folder link (a junction to another drive), instead of failing to set them up again on the next round.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.0's build pipeline too, if that wasn't released on its own.
+
 ## 0.36.0
 
 **The build pipeline: the Steward can merge and release at set times a few times a day, each agent released and updated once per build.**

@@ -49,6 +49,8 @@ export interface SourceHost {
   commentPr(repo: string, n: number, body: string): Promise<Answer>;
   /** Takes a pull request out of draft. */
   readyPr(repo: string, n: number): Promise<Answer>;
+  /** Turns a pull request back into a draft (a build that dropped it: stages/build.ts). */
+  draftPr(repo: string, n: number): Promise<Answer>;
   closePr(repo: string, n: number, p?: { comment?: string; deleteBranch?: boolean }): Promise<Answer>;
   /** Merges a pull request with a merge commit; only while its head is `matchHead`, when given. */
   mergePr(repo: string, n: number, p?: { matchHead?: string; deleteBranch?: boolean }): Promise<Answer>;

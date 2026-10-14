@@ -132,7 +132,7 @@ export const TRAIN_WAITS_MS = [3_000, 7_000, 15_000];
  * One car's head, checked out in `dir`, with `under` (the stack so far, or the branch) merged in and its version settled:
  * null once it is, else why it can't ride.
  */
-async function stackOn(ctx: Ctx, e: Employee, dir: string, under: string, label: string, car: Car): Promise<string | null> {
+export async function stackOn(ctx: Ctx, e: Employee, dir: string, under: string, label: string, car: Car): Promise<string | null> {
   const { run } = ctx;
   if (await aheadOf(run, dir, under, 'HEAD')) {
     const m = await run('git', ['-c', 'merge.conflictStyle=diff3', 'merge', '--no-ff', '--no-edit', '-m', `Merge ${label} into ${car.pr.head}: stacked by the Steward`, under], { cwd: dir, timeoutMs: 5 * 60_000 });
@@ -175,10 +175,79 @@ async function stackOn(ctx: Ctx, e: Employee, dir: string, under: string, label:
   return null;
 }
 
+/**
+ * A stack that passed its checks here (`at`, checked out in `dir`), merged through its top car: pushed to the top PR's
+ * branch (a fast forward), GitHub's checks waited for there where the cars have any, the top PR merged at `at`, and
+ * each car under it, which GitHub then marks merged, said so on (closed where GitHub didn't). `top` and `under` word the
+ * comments: the top PR's, given the PRs under it, and each of theirs, given the top PR. Nothing merged gives back why
+ * (`waiting` while GitHub's checks still run, `ci` when they failed).
+ */
+export async function shipStack(
+  ctx: Ctx,
+  e: Employee,
+  dir: string,
+  rode: { pr: PrInfo; version: string }[],
+  at: string,
+  o: { say: (line: string) => void; top: (under: string) => string; under: (top: string) => string },
+): Promise<{ merged: true } | { note: string; waiting?: boolean; ci?: 'failing' }> {
+  const { run } = ctx;
+  const pause = ctx.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const numbers = rode.map((c) => `#${c.pr.number}`).join(', ');
+  const top = rode.at(-1)!;
+  // Another PC's turn here now (lease.ts): it merges them.
+  if (ctx.lease && !(await ctx.lease.ok(e))) return { note: `${numbers} stacked and passed, but another PC publishes ${e.name} now` };
+  // The top PR's branch moves on to the stack (never forced: it is on top of its head), and that PR merges at it.
+  const pushed = await run('git', ['push', '--quiet', 'origin', `${at}:refs/heads/${top.pr.head}`], { cwd: dir, timeoutMs: 5 * 60_000 });
+  if (pushed.code !== 0) return { note: `${numbers} stacked and passed, but the stack couldn't be pushed to ${top.pr.head}: ${(pushed.err || pushed.out).trim().split('\n').pop()}` };
+  const host = hostFor({ ...ctx, run }, e);
+  // GitHub's checks, where the cars have any, run once more on the whole stack: it merges once they pass.
+  if (rode.some((c) => c.pr.checks !== 'none')) {
+    o.say(`pushed to ${top.pr.head}: waiting for its checks on GitHub at ${at.slice(0, 7)}`);
+    const ci = await checksAtTop({ ...ctx, run }, e, top.pr.number, at, pause);
+    forgetGlance(ctx, e);
+    if (ci === 'pending') return { note: `${numbers} stacked and passed here, and pushed to ${top.pr.head}: its checks on GitHub are still running at ${at.slice(0, 7)}, and it merges once they pass`, waiting: true };
+    if (ci === 'moved') return { note: `${numbers} stacked and passed, but ${top.pr.head} moved on while its checks ran` };
+    if (ci === 'failing') return { note: `${numbers} stacked and passed here, but its checks on GitHub failed at ${at.slice(0, 7)}`, ci };
+  }
+  let merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
+  for (const ms of TRAIN_WAITS_MS) {
+    if (merge.code === 0) break;
+    await pause(ms);
+    merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
+  }
+  forgetGlance(ctx, e);
+  if (merge.code !== 0) {
+    const why = (merge.err || merge.out).trim().split('\n').pop();
+    await host.commentPr(e.repo, top.pr.number, `The Steward stacked ${numbers} on \`${e.branch}\` here (checks passed at ${at.slice(0, 7)}), but couldn't merge it: ${why}. The PRs under it are in this branch now, so it brings them in when it merges.`);
+    return { note: `${numbers} stacked and passed, pushed to ${top.pr.head}, but #${top.pr.number} couldn't be merged: ${why}` };
+  }
+  for (const c of rode) noteMerged(e, c.pr.number);
+  // Passed here before it merged: the Surveyor's GET /api/tested (tested.ts).
+  recordTested(e.id, { commit: at, stage: 'merge', branch: top.pr.head, pr: top.pr.number, version: top.version });
+  if (rode.length > 1) await host.commentPr(e.repo, top.pr.number, o.top(rode.slice(0, -1).map((c) => `#${c.pr.number}`).join(', ')));
+  // The cars under it are in the branch now: GitHub marks each merged, once it has taken the merge in.
+  for (const c of rode.slice(0, -1)) {
+    let state = '';
+    for (const ms of [0, ...TRAIN_WAITS_MS]) {
+      if (ms) await pause(ms);
+      const v = await host.viewPr(e.repo, c.pr.number, 'state');
+      try {
+        state = String(JSON.parse(v.out).state ?? '');
+      } catch {
+        state = '';
+      }
+      if (state === 'MERGED' || state === 'CLOSED') break;
+    }
+    const body = o.under(`#${top.pr.number}`);
+    if (state === 'MERGED') await host.commentPr(e.repo, c.pr.number, body);
+    else if (state === 'OPEN' || state === '') await host.closePr(e.repo, c.pr.number, { comment: `${body} GitHub didn't mark it merged, so the Steward closed it.` });
+  }
+  return { merged: true };
+}
+
 /** The train run: built, tested once, and merged through its top PR, as the module's comment says. Never merges what it didn't test. */
 export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<TrainRun> {
   const { run } = ctx;
-  const pause = ctx.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return { merged: [], note: `there's no checkout at ${repo}`, tested: false };
   await fetchBranch(run, repo, e.branch);
@@ -259,61 +328,22 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
       writeJson(trainsFile(), failed);
       return { merged: [], note: `${numbers} stacked, but ${checks}: they merge one at a time${stopped}`, tested: true };
     }
-    // Another PC's turn here now (lease.ts): it merges them.
-    if (ctx.lease && !(await ctx.lease.ok(e))) return { merged: [], note: `${numbers} stacked and passed, but another PC publishes ${e.name} now`, tested: true };
-    // The top PR's branch moves on to the stack (never forced: it is on top of its head), and that PR merges at it.
-    const pushed = await run('git', ['push', '--quiet', 'origin', `${at}:refs/heads/${top.pr.head}`], { cwd: dir, timeoutMs: 5 * 60_000 });
-    if (pushed.code !== 0) return { merged: [], note: `${numbers} stacked and passed, but the stack couldn't be pushed to ${top.pr.head}: ${(pushed.err || pushed.out).trim().split('\n').pop()}`, tested: true };
-    const host = hostFor({ ...ctx, run }, e);
-    // GitHub's checks, where the cars have any, run once more on the whole stack: it merges once they pass.
-    if (rode.some((c) => c.pr.checks !== 'none')) {
-      say(`pushed to ${top.pr.head}: waiting for its checks on GitHub at ${at.slice(0, 7)}`);
-      const ci = await checksAtTop({ ...ctx, run }, e, top.pr.number, at, pause);
-      forgetGlance(ctx, e);
-      if (ci === 'pending') return { merged: [], note: `${numbers} stacked and passed here, and pushed to ${top.pr.head}: its checks on GitHub are still running at ${at.slice(0, 7)}, and it merges once they pass`, tested: true, waiting: true };
-      if (ci === 'moved') return { merged: [], note: `${numbers} stacked and passed, but ${top.pr.head} moved on while its checks ran`, tested: true };
-      if (ci === 'failing') {
+    const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
+    const shipped = await shipStack(ctx, e, dir, rode, at, {
+      say,
+      top: (under) => `Merged by the Steward as one train with ${under}: ${words}. Each keeps its own version and changelog entry.`,
+      under: (top) => `Merged by the Steward in one train with ${top}: ${words}. Its commits are in \`${e.branch}\`.`,
+    });
+    if ('note' in shipped) {
+      if (shipped.ci === 'failing') {
         failed[e.id] = { key: trainKey(base, rode), note: `its checks on GitHub failed at ${at.slice(0, 7)}`, at: new Date().toISOString(), stack: at };
         writeJson(trainsFile(), failed);
-        return { merged: [], note: `${numbers} stacked and passed here, but its checks on GitHub failed at ${at.slice(0, 7)}: they merge one at a time${stopped}`, tested: true };
+        return { merged: [], note: `${shipped.note}: they merge one at a time${stopped}`, tested: true };
       }
-    }
-    let merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
-    for (const ms of TRAIN_WAITS_MS) {
-      if (merge.code === 0) break;
-      await pause(ms);
-      merge = await host.mergePr(e.repo, top.pr.number, { matchHead: at });
-    }
-    forgetGlance(ctx, e);
-    if (merge.code !== 0) {
-      const why = (merge.err || merge.out).trim().split('\n').pop();
-      await host.commentPr(e.repo, top.pr.number, `The Steward stacked ${numbers} on \`${e.branch}\` here (checks passed at ${at.slice(0, 7)}), but couldn't merge it: ${why}. The PRs under it are in this branch now, so it brings them in when it merges.`);
-      return { merged: [], note: `${numbers} stacked and passed, pushed to ${top.pr.head}, but #${top.pr.number} couldn't be merged: ${why}`, tested: true };
+      return { merged: [], note: shipped.note, tested: true, ...(shipped.waiting ? { waiting: true } : {}) };
     }
     delete failed[e.id];
     writeJson(trainsFile(), failed);
-    for (const c of rode) noteMerged(e, c.pr.number);
-    // Passed here before it merged: the Surveyor's GET /api/tested (tested.ts).
-    recordTested(e.id, { commit: at, stage: 'merge', branch: top.pr.head, pr: top.pr.number, version: top.version });
-    const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
-    await host.commentPr(e.repo, top.pr.number, `Merged by the Steward as one train with ${rode.slice(0, -1).map((c) => `#${c.pr.number}`).join(', ')}: ${words}. Each keeps its own version and changelog entry.`);
-    // The cars under it are in the branch now: GitHub marks each merged, once it has taken the merge in.
-    for (const c of rode.slice(0, -1)) {
-      let state = '';
-      for (const ms of [0, ...TRAIN_WAITS_MS]) {
-        if (ms) await pause(ms);
-        const v = await host.viewPr(e.repo, c.pr.number, 'state');
-        try {
-          state = String(JSON.parse(v.out).state ?? '');
-        } catch {
-          state = '';
-        }
-        if (state === 'MERGED' || state === 'CLOSED') break;
-      }
-      const body = `Merged by the Steward in one train with #${top.pr.number}: ${words}. Its commits are in \`${e.branch}\`.`;
-      if (state === 'MERGED') await host.commentPr(e.repo, c.pr.number, body);
-      else if (state === 'OPEN' || state === '') await host.closePr(e.repo, c.pr.number, { comment: `${body} GitHub didn't mark it merged, so the Steward closed it.` });
-    }
     ctx.log(`[${e.id}] merged ${numbers} as one train through #${top.pr.number} (${words})`);
     return { merged: rode.map((c) => c.pr), note: `${words}${stopped}`, tested: true };
   } finally {

@@ -130,9 +130,15 @@ function checkState(c: any): Checks {
  */
 export const VOUCH_CONTEXT = 'steward/tested';
 
-/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. A vouch (VOUCH_CONTEXT) isn't one. */
+/**
+ * The commit status a build sets on each PR it took (stages/build.ts): it left in that build, waits for the next, or was
+ * dropped from it. It says what the build did, and isn't a check either: checksOf leaves it out too.
+ */
+export const BUILD_CONTEXT = 'steward/build';
+
+/** A PR's checks as one word: failing if any fails, else pending if any is still running, else passing; none without checks. A vouch (VOUCH_CONTEXT) or a build's word (BUILD_CONTEXT) isn't one. */
 export function checksOf(rollup: unknown): Checks {
-  const list = (Array.isArray(rollup) ? rollup : []).filter((c) => c?.context !== VOUCH_CONTEXT);
+  const list = (Array.isArray(rollup) ? rollup : []).filter((c) => c?.context !== VOUCH_CONTEXT && c?.context !== BUILD_CONTEXT);
   if (!list.length) return 'none';
   const states = list.map(checkState);
   return states.includes('failing') ? 'failing' : states.includes('pending') ? 'pending' : 'passing';
