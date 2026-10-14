@@ -206,7 +206,7 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
 export const run: Runner = signedIn(runPlain);
 
 /** A command line from an employee's settings, run in its folder. */
-export const runLine = (runner: Runner, line: string, opts: RunOptions = {}) => {
+export const runLine = (runner: Runner, line: string, opts: RunOptions = {}): Promise<Ran> => {
   const [cmd, ...args] = splitCommand(line);
   if (!cmd) return Promise.resolve({ code: 2, out: '', err: 'no command' });
   return runner(cmd, args, opts);
