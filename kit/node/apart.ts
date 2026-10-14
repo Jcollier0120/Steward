@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { checksPaceLauncher } from './checks-pace.ts';
 
 /**
- * Starting a program apart from the agent's job (kit 2.70.0): for the model servers every agent shares
+ * Starting a program apart from the agent's job (kit 2.73.0): for the model servers every agent shares
  * (accelerators.ts, npu-server.ts). An agent at a gentle pace is in a job capped at a quarter of the processor
  * (gentle.ts), and so is every program it starts, so a model server the first asker started was held to that asker's
  * cap for as long as it ran, serving every other agent at that pace too. Started apart, through the checks pace's

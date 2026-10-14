@@ -16,12 +16,12 @@ import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { kitTrialHold, raisesKit, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, TRIAL_GOING } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
-import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
+import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, lockfileHold, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
 import { openPrs, parsePrs, type PrInfo } from './staff.ts';
 import { noteMerged } from '../strangers.ts';
 import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conflicts.ts';
@@ -152,6 +152,8 @@ export function holdReason(pr: PrInfo, branch?: string, age: AgeRule = {}): stri
   // One that needs the owner first (a migration to run): never merged by the Steward until they say (review.ts).
   const owner = ownerFirstHold(pr);
   if (owner) return owner;
+  // Its lockfile brings new packages or a new install script: the owner looks first (review.ts's lockfileHold).
+  if (pr.lockHold) return pr.lockHold;
   if (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY') return CONFLICTS;
   if (pr.mergeable !== 'MERGEABLE') return WORKING_OUT;
   if (pr.checks === 'failing') return 'checks failing';
@@ -367,6 +369,23 @@ export async function lookAtWrightDrafts(ctx: Ctx, e: Employee, prs: PrInfo[], b
 }
 
 /**
+ * Each PR that isn't a draft, whose package-lock.json changed, looked at (review.ts's lockfileHold): one that brings a
+ * package new to the repository, or one with an install script Settings don't allow, keeps why in `lockHold`, and waits
+ * for the owner (holdReason), out of any train. One that can't be compared waits too, and says why.
+ */
+export async function lookAtLockfiles(ctx: Ctx, e: Employee, prs: PrInfo[]): Promise<void> {
+  if (!existsSync(checkoutOf(e))) return;
+  for (const pr of prs.filter((p) => !p.draft)) {
+    try {
+      const why = await lockfileHold(ctx, e, pr);
+      if (why) pr.lockHold = why;
+    } catch (err) {
+      pr.lockHold = `the Steward couldn't compare its package-lock.json: ${(err as Error).message}`;
+    }
+  }
+}
+
+/**
  * One look at an employee's PRs (mergeOne): what it merged and what waits, and, apart, the lines of what it did (merged,
  * didn't merge, caught up) and of what waits, so that several looks in one round (merge) say each thing once.
  * `lookAgain`: another look this round can merge more (lookAgainAfter).
@@ -402,6 +421,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   // GitHub still working out whether one merges (just retargeted, or pushed to): asked again, so it needn't wait a round.
   if (o.yes) await askAgainWhetherMerges(ctx, e, prs);
+  // Whoever wrote it, one whose lockfile brings new packages or a new install script waits for the owner (review.ts).
+  if (o.yes) await lookAtLockfiles(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch, { minAgeMinutes: ctx.settings.mergeMinAgeMinutes });
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
@@ -460,7 +481,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // A conflict handed on to its author gives up its turn (givesWay): the queue goes on without it.
   const gaveWay = givesWay(e, hold);
   for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
-  const queue = gaveWay.size ? new Map([...pending].filter(([n]) => !gaveWay.has(n))) : pending;
+  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes.
+  const trialWay = trialGivesWay(e, prs);
+  const queue = gaveWay.size || trialWay.size ? new Map([...pending].filter(([n]) => !gaveWay.has(n) && !trialWay.has(n))) : pending;
   // A merge train (stages/train.ts): the queue's ready PRs from its lowest version up, stacked, tested once and merged
   // together. Once it has merged, the next look takes what is left; where it didn't, they merge one at a time below.
   let trainLine: string[] = [];
@@ -577,8 +600,15 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
     if (trial) {
+      if (trialWay.has(pr.number)) trial += '; meanwhile it gives up its turn, so the PRs above it merge first';
       waits.push(`${describe(pr)} waits: ${trial}`);
       held.push(heldOf(pr, trial));
+      // A kit its trial fails, while its branch changed the kit since it left it: caught up, so it is tried again with
+      // what the branch fixed meanwhile, rather than waiting for its author (trial.ts's kitMovedUnder).
+      if (trialFails(trial) && !pr.fork && !pr.draft && (pr.whose === 'team' || isKitPr(pr))) {
+        await lookup().catch(() => null);
+        if (await kitMovedUnder(ctx, e, pr).catch(() => false)) catchable.set(pr.number, pr);
+      }
       continue;
     }
     // Another PC took its turn here meanwhile (lease.ts): it merges the rest.

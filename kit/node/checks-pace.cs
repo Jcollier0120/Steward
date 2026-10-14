@@ -17,7 +17,7 @@
 // or it would wait for itself. A turn not had within TURN_WAIT_MS is gone without: a check never waits forever.
 //
 // `apart <command line>` (apart.ts) instead starts a program out of the jobs it would inherit, as far as they let it
-// (an agent's gentle job does, kit 2.70.0; one that doesn't keeps it), detached, its output to the launcher's standard
+// (an agent's gentle job does, kit 2.73.0; one that doesn't keeps it), detached, its output to the launcher's standard
 // error, and answers its process id as the exit code (0: it couldn't start). For the model servers every agent shares:
 // an asker's cap isn't theirs, and they outlive it.
 using System;

@@ -4,13 +4,15 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
-// The pace is the owner's setting alone (kit 2.70.0): a page being looked at no longer lifts it (it did from kit
+// The pace is the owner's setting alone (kit 2.73.0): a page being looked at no longer lifts it (it did from kit
 // 2.57.1, gentle.ts pageInUse), so what a page shows is what the agent costs in the background. In a file of its own,
 // since the pace is the process's.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-in-use-'));
 after(() => rmSync(home, { recursive: true, force: true }));
 process.env.FIXTURE_HOME = path.join(home, 'data');
+process.env.FIXTURE_PORT = String(await freePort()); // never the fixture's own 17979, which every checkout's tests share
 process.env.KIT_GENTLE = '0'; // priority alone: no PowerShell worker
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 

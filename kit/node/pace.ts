@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { lockDirFor } from './lock.ts';
+import { readJsonFile } from './file-cache.ts';
 import { manorHome } from './manor.ts';
 import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 
@@ -24,7 +25,7 @@ import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
  * `"agentsAtOnce"` says (2 at a gentle pace, 4 at a full one, unless it says), and only one at a time while the PC is
  * busy or short of memory; the rest wait their turn, first come, first served.
  *
- * A round the person asked for (Run now) never waits in the line, but runs at the pace like any other (kit 2.70.0): the
+ * A round the person asked for (Run now) never waits in the line, but runs at the pace like any other (kit 2.73.0): the
  * setting is the only thing that changes the pace.
  * What Heiward adds in the background (Windows' efficiency mode, a very low disk priority, a hard cap on the processor)
  * needs Windows calls Node doesn't have: gentle.ts sets them through the agent's PowerShell worker (kit 2.50.0).
@@ -47,7 +48,8 @@ export const FIRST_ROUND_WAITING = "its first round: the agents before it are do
 
 /**
  * The manor's pace now: Manor's settings.json `"backgroundPace"` when Manor is installed and says, else `own` (gentle
- * unless the agent says). Read afresh each time, so a change in Manor's Settings applies from the next round. Under
+ * unless the agent says). Read afresh each time (one stat while the file is unchanged: file-cache.ts), so a change in
+ * Manor's Settings applies from the next round. Under
  * node --test, full unless MANOR_PACE says: a test never waits in this PC's real line.
  */
 export function pace(own: Pace = 'gentle', home = manorHome(), env: NodeJS.ProcessEnv = process.env): Pace {
@@ -59,20 +61,15 @@ export function pace(own: Pace = 'gentle', home = manorHome(), env: NodeJS.Proce
 
 /** One key of Manor's settings.json, when Manor is installed and the file can be read; undefined otherwise. */
 function manorSetting(home: string, key: string): unknown {
-  const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return undefined;
-  try {
-    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''))?.[key];
-  } catch {
-    return undefined;
-  }
+  if (!existsSync(path.join(home, 'app'))) return undefined;
+  return readJsonFile<Record<string, unknown> | null>(path.join(home, 'settings.json'), null)?.[key];
 }
 
 /** The first-round line's lock folder, beside the accelerators' (`<locks>\first-rounds`): one slot, one agent at a time. */
 export const firstRoundLockDir = () => lockDirFor('first-rounds');
 
 /**
- * This process's priority for the pace: below normal when gentle, normal when full, whoever is waiting (kit 2.70.0: a
+ * This process's priority for the pace: below normal when gentle, normal when full, whoever is waiting (kit 2.73.0: a
  * round asked for no longer lifts it). Never throws (a PC that refuses keeps its priority); true when it was set.
  */
 export function setPriorityFor(p: Pace, set: (priority: number) => void = (v) => os.setPriority(0, v)): boolean {

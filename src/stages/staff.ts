@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { readAfter, type After } from '../after.ts';
 import { compareVersions, lf } from '../kitfiles.ts';
 import { takesTool, TOOL } from '../kitsource.ts';
-import { aheadOf, branchExists, commitOf, fetchBranch, gitMaybe, showFile } from '../git.ts';
+import { aheadOf, branchExists, commitOf, fetchBranch, gitMaybe, headBranch, refOnDisk, showFile } from '../git.ts';
 import { repoSig } from '../glance.ts';
 import { agreedVersion } from '../versions.ts';
 import { releasedHere, type Employee } from '../settings.ts';
@@ -58,6 +59,8 @@ export interface PrInfo {
   reviewHold?: string;
   /** For one of the Wright's drafts that passed the look: why it waits for the Bailiff's approval of its head (review.ts). Not from gh. */
   bailiffHold?: string;
+  /** Why its package-lock.json waits for the owner: new packages, or a new install script (review.ts's lockfileHold). Not from gh. */
+  lockHold?: string;
 }
 
 export interface ReleaseInfo {
@@ -111,6 +114,8 @@ export interface Staff {
   released: string[];
   local: string | null;
   rows: StaffRow[];
+  /** What each row was made from (rowKey), by id, for the rows made without a failure: the same next time, the row stands. */
+  keys?: Record<string, string>;
 }
 
 /** One check's state from a statusCheckRollup entry: a CheckRun (status, conclusion) or a StatusContext (state). */
@@ -246,8 +251,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
 
   const local = (async () => {
     if (!row.checkout.exists) return void notes.push(`no checkout at ${dir}`);
-    row.checkout.branch = (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim() || '(detached)';
-    row.checkout.changes = ((await gitMaybe(run, dir, '--no-optional-locks', 'status', '--porcelain')) ?? '').split('\n').filter((l) => l.trim()).length;
+    Object.assign(row.checkout, await checkoutNow(run, dir));
     // Fetched, unless the glance at GitHub says the checkout has its branch's head already, or a stage running beside
     // this one is working in it (stages/slots.ts): its own fetches bring the branch, and the next look shows it.
     let commit = g?.head ? await commitOf(run, dir, remote) : null;
@@ -256,6 +260,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
         await fetchBranch(run, dir, e.branch);
       } catch (err) {
         notes.push(`couldn't fetch ${remote}: ${(err as Error).message}`);
+        shaky.add(row);
       }
       commit = null;
     }
@@ -283,16 +288,17 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       const branch = bumpBranch(opts.kit);
       if (await branchExists(run, dir, branch)) row.prepared = { branch, ahead: await aheadOf(run, dir, branch, remote) };
     }
-  })().catch((err) => void notes.push((err as Error).message));
+  })().catch((err) => void (notes.push((err as Error).message), shaky.add(row)));
 
   const prs = (g || byGit ? Promise.resolve(JSON.stringify(g?.prs ?? [])) : openPrs(hostFor({ ...ctx, run }, e), e.repo))
     .then((out) => void (row.prs = parsePrs(out, ctx.settings.team)))
-    .catch((err) => void notes.push(`couldn't list its PRs: ${(err as Error).message}`));
+    .catch((err) => void (notes.push(`couldn't list its PRs: ${(err as Error).message}`), shaky.add(row)));
 
   const releases = (g ? Promise.resolve(JSON.stringify(g.releases)) : byGit ? Promise.reject(new Error(gitErr ?? 'no answer from its origin')) : hostFor({ ...ctx, run }, e).listReleases(e.repo, 'tagName,isDraft,publishedAt').then(must))
     .then((out) => appReleasesIn(out))
     .catch((err) => {
       notes.push(`couldn't list its releases: ${(err as Error).message}`);
+      shaky.add(row);
       return null;
     });
 
@@ -310,6 +316,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       } catch {
         // unknown
       }
+      // Unknown now, perhaps known once its commit is here: the row is made again next time.
+      if (kit === 'unknown') shaky.add(row);
       row.release = { ...latest, kit };
     }
     // Only one the Steward releases (Settings' Release it) is waiting for a release.
@@ -336,10 +344,58 @@ function releasedHereRow(e: Employee, row: StaffRow): { version: string | null }
  * Every employee's row, a few at a time, then the Steward's own (`self`) when it has one; with what GitHub said of each
  * employee (glance.ts's repoSig), so a round can tell when the table is out of date.
  */
-export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null; self?: Employee | null }): Promise<Staff> {
-  const rows = await mapLimit(ctx.settings.employees, 5, (e) => staffRow(ctx, e, opts));
-  if (opts.self) rows.push({ ...(await staffRow(ctx, opts.self, { ...opts, kit: null, tool: null })), self: true });
+export async function staff(ctx: Ctx, opts: { fetch: boolean; kit: string | null; kitNote?: string | null; tool?: string | null; self?: Employee | null; before?: Staff | null }): Promise<Staff> {
+  const keys: Record<string, string> = {};
+  // Made again only where what it rests on moved (rowKey); else the row the table had, its checkout looked at again.
+  const rowOf = async (e: Employee, o: { kit: string | null; tool?: string | null }, self: boolean): Promise<StaffRow> => {
+    const key = rowKey(ctx, e, { ...o, self });
+    const had = key && opts.before?.keys?.[e.id] === key ? opts.before.rows.find((r) => r.id === e.id && !!r.self === self) : undefined;
+    let row: StaffRow;
+    if (had) {
+      const exists = existsSync(had.checkout.path);
+      row = { ...had, checkout: { ...had.checkout, exists, ...(exists ? await checkoutNow(ctx.run, had.checkout.path) : {}) } };
+    } else row = await staffRow(ctx, e, { ...opts, ...o });
+    if (key && !shaky.has(row)) keys[e.id] = key;
+    return self ? { ...row, self: true } : row;
+  };
+  const rows = await mapLimit(ctx.settings.employees, 5, (e) => rowOf(e, opts, false));
+  if (opts.self) rows.push(await rowOf(opts.self, { kit: null, tool: null }, true));
   const at = new Date().toISOString();
   const seen = ctx.glance ? Object.fromEntries(Object.entries(ctx.glance.repos).map(([id, g]) => [id, repoSig(g)])) : undefined;
-  return { at, checked: at, kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows, ...(seen ? { seen } : {}) };
+  return { at, checked: at, kit: opts.kit, kitNote: opts.kitNote ?? null, released: ctx.kit.released, local: ctx.kit.local, rows, ...(seen ? { seen } : {}), keys };
+}
+
+/** Rows made with a failure on the way (a fetch, a host's answer, a release's kit unknown): never kept as made (rowKey). */
+const shaky = new WeakSet<StaffRow>();
+
+/** A checkout's branch, from its HEAD file (git asked only when that doesn't say), and its changed files, untracked left out. */
+async function checkoutNow(run: Ctx['run'], dir: string): Promise<{ branch: string; changes: number }> {
+  const branch = (headBranch(dir) ?? (await gitMaybe(run, dir, 'branch', '--show-current'))?.trim()) || '(detached)';
+  const changes = ((await gitMaybe(run, dir, '--no-optional-locks', 'status', '--porcelain', '-uno')) ?? '').split('\n').filter((l) => l.trim()).length;
+  return { branch, changes };
+}
+
+/**
+ * What an employee's row rests on, as one value, read from files alone (no git started): GitHub's side from the glance
+ * (repoSig), origin's branch and the bump prepared here as the clone's ref files have them, its installed release (one
+ * released here), its Settings, the team and the kit and tools/kit.ts the Steward hands out. Null when the row is to be
+ * made afresh whatever: no glance for it, or origin's branch here isn't the glance's head (there is something to fetch).
+ */
+export function rowKey(ctx: Ctx, e: Employee, o: { kit: string | null; tool?: string | null; self?: boolean }): string | null {
+  const g = glanceOf(ctx, e);
+  const dir = checkoutOf(e);
+  const origin = g?.head ? refOnDisk(dir, `refs/remotes/origin/${e.branch}`) : null;
+  if (!g?.head || origin !== g.head) return null;
+  const prepared = o.kit ? refOnDisk(dir, `refs/heads/${bumpBranch(o.kit)}`) : null;
+  let installed: string | null = null;
+  if (releasedHere(e)) {
+    try {
+      installed = readFileSync(path.join(expandEnv(e.installed), 'release.json'), 'utf8');
+    } catch {
+      installed = null;
+    }
+  }
+  const tool = o.tool ? createHash('sha256').update(o.tool).digest('hex') : null;
+  const what = { e, self: !!o.self, repo: repoSig(g), origin, prepared, installed, team: ctx.settings.team, kit: o.kit, tool };
+  return createHash('sha256').update(JSON.stringify(what)).digest('hex').slice(0, 32);
 }

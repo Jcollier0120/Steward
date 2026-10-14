@@ -35,7 +35,7 @@ import { powershell, psQuote } from './ps.ts';
 
 /**
  * The cap by default, in hundredths of a percent: the gentle pace's (gentleCap()), a quarter of the processor and two
- * processors' worth at most. Measured on an 18-core laptop (kit 2.70.0), the Assayer's own suite on a quiet PC: the whole
+ * processors' worth at most. Measured on an 18-core laptop (kit 2.73.0), the Assayer's own suite on a quiet PC: the whole
  * PC peaked at 91% and the suite took 39 s with no cap, 43% and 65 s at this one. Half the processor, as this was first,
  * barely held it (the suite's own peak went from 57% to 49%).
  */

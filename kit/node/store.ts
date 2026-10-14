@@ -1,18 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataDir } from '../app.ts';
+import { fileCounts, forget, holds, readJsonFile } from './file-cache.ts';
 
 /** A file in the agent's data folder. */
 export const dataFile = (...parts: string[]) => path.join(dataDir, ...parts);
 
-/** A JSON file, or `fallback` when it is missing or unreadable (a byte-order mark is fine). */
+/**
+ * A JSON file, or `fallback` when it is missing or unreadable (a byte-order mark is fine). A file unchanged since this
+ * process last read it costs one stat, not a read (file-cache.ts, kit 2.71.3); each call parses afresh, so the caller
+ * may change what it gets.
+ */
 export function readJson<T>(file: string, fallback: T): T {
-  if (!existsSync(file)) return fallback;
-  try {
-    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, '')) as T;
-  } catch {
-    return fallback;
-  }
+  return readJsonFile(file, fallback);
 }
 
 /** Errors with which Windows refuses a rename for a moment: something (an antivirus, the search indexer) has the file open. */
@@ -25,17 +25,23 @@ const sleepSync = (ms: number) => void Atomics.wait(new Int32Array(new SharedArr
  * Writes JSON through a temporary file and a rename, so a reader never sees half a file. A rename Windows refuses
  * for a moment (EPERM, EACCES or EBUSY: about one in a thousand in %TEMP% or a scanned folder, as the Wright measured
  * for the Miller) is tried again every 25 ms, for up to half a second; after that, or on any other error, the
- * temporary file is removed and the error thrown. `o` is for tests.
+ * temporary file is removed and the error thrown. A file that holds exactly that JSON already is left as it is (kit
+ * 2.71.3): no temporary file and no rename, its modified time as it was; `always` writes it all the same, for a
+ * write whose time is read (a person's save of Settings). `rename` and `sleep` are for tests.
  */
-export function writeJson(file: string, value: unknown, o: { rename?: typeof renameSync; sleep?: (ms: number) => void } = {}): void {
+export function writeJson(file: string, value: unknown, o: { always?: boolean; rename?: typeof renameSync; sleep?: (ms: number) => void } = {}): void {
   const rename = o.rename ?? renameSync;
   const sleep = o.sleep ?? sleepSync;
+  const text = JSON.stringify(value, null, 2) + '\n';
+  if (!o.always && holds(file, text)) return void fileCounts.unchanged++;
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+  writeFileSync(tmp, text);
+  forget(file);
   for (let t = 1; ; t++) {
     try {
-      return rename(tmp, file);
+      rename(tmp, file);
+      return void fileCounts.writes++;
     } catch (e) {
       if (t >= RENAME_TRIES || !BRIEFLY_REFUSED.has((e as NodeJS.ErrnoException).code ?? '')) {
         rmSync(tmp, { force: true });

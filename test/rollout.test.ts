@@ -14,7 +14,7 @@ process.env.BAILIFF_HOME = path.join(home, 'no-bailiff');
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const { runStage } = await import('../src/steward.ts');
-const { planRollout, rollout, rolloutFacts, rolloutGate, loadRolloutFailures } = await import('../src/stages/rollout.ts');
+const { planRollout, rollout, rolloutFacts, rolloutGate, loadRolloutFailures, settleKit, settlingLine, urgentIn } = await import('../src/stages/rollout.ts');
 const { bumpOne } = await import('../src/stages/bump.ts');
 const { planRound } = await import('../src/stages/changes.ts');
 const { roundSig } = await import('../src/glance.ts');
@@ -370,4 +370,50 @@ test("the Steward carrying an older kit, with the new kit's tag in its clone: th
   } finally {
     writeFileSync(file, before);
   }
+});
+
+test('a new kit settles: the newest goes once it has gone the quiet hours without a newer one, or the longest wait is up', () => {
+  const H = 3600_000;
+  const t0 = Date.parse('2026-10-13T08:00:00Z');
+  const published = { '2.9.0': new Date(t0 - 48 * H).toISOString(), '2.9.1': new Date(t0).toISOString(), '2.9.2': new Date(t0 + H).toISOString() };
+  const base = { newest: '2.9.2', released: ['2.9.2', '2.9.1', '2.9.0'], published, rolled: '2.9.0', urgent: [] as string[], quietHours: 2, maxWaitHours: 12 };
+  // 2.9.2 came an hour after 2.9.1: it settles until two hours after its own release, and 2.9.0 still reaches those behind it.
+  const quiet = settleKit({ ...base, now: t0 + 2 * H });
+  assert.deepEqual([quiet.kit, quiet.settling?.kit, quiet.settling?.until], ['2.9.0', '2.9.2', t0 + 3 * H]);
+  assert.match(settlingLine(quiet.settling!, quiet.kit), /^kit 2\.9\.2 settles until \d\d:\d\d \(kit 2\.9\.0 still reaches those behind it\)$/);
+  assert.deepEqual(settleKit({ ...base, now: t0 + 3 * H }), { kit: '2.9.2', settling: null, urgent: null }, 'settled');
+  // Kits every hour: never later than twelve hours after the oldest one waiting (2.9.1).
+  const burst = { ...base, newest: '2.9.9', released: ['2.9.9', ...base.released], published: { ...published, '2.9.9': new Date(t0 + 11.5 * H).toISOString() } };
+  assert.equal(settleKit({ ...burst, now: t0 + 11.9 * H }).kit, '2.9.0');
+  assert.equal(settleKit({ ...burst, now: t0 + 12 * H }).kit, '2.9.9', 'the longest wait is up');
+  // Nothing rolled out yet: nothing goes while it settles; counted from the oldest release, which may be long past.
+  assert.equal(settleKit({ ...base, rolled: null, now: t0 + 2 * H }).kit, '2.9.2', "2.9.0's release was two days ago");
+  const first = settleKit({ ...base, released: ['2.9.2', '2.9.1'], rolled: null, now: t0 + 2 * H });
+  assert.deepEqual([first.kit, first.settling?.kit], [null, '2.9.2']);
+  assert.match(settlingLine(first.settling!, null), /^kit 2\.9\.2 settles until \d\d:\d\d$/);
+  // The newest is the one rolled out already: it goes on, as before.
+  assert.deepEqual(settleKit({ ...base, rolled: '2.9.2', now: t0 + H }).kit, '2.9.2');
+  // Quiet hours 0: each kit at once.
+  assert.equal(settleKit({ ...base, quietHours: 0, now: t0 + H }).kit, '2.9.2');
+});
+
+test('an urgent kit goes at once, and one with no published time counts as old enough', () => {
+  const t0 = Date.parse('2026-10-13T08:00:00Z');
+  const base = { newest: '2.9.2', released: ['2.9.2', '2.9.1', '2.9.0'], rolled: '2.9.0', quietHours: 2, maxWaitHours: 12, now: t0 };
+  const published = { '2.9.1': new Date(t0).toISOString(), '2.9.2': new Date(t0).toISOString() };
+  assert.deepEqual(settleKit({ ...base, published, urgent: ['2.9.1'] }), { kit: '2.9.2', settling: null, urgent: '2.9.1' }, 'an urgent kit sends the newest');
+  assert.equal(settleKit({ ...base, published, urgent: ['2.9.0'] }).kit, '2.9.0', 'one rolled out already is no reason');
+  assert.equal(settleKit({ ...base, published: {}, urgent: [] }).kit, '2.9.2', 'no published times');
+  assert.equal(settleKit({ ...base, published: { '2.9.2': new Date(t0).toISOString() }, urgent: [] }).kit, '2.9.2', "2.9.1's time unknown: the longest wait is up");
+  // The changelog's mark: the entry's bold line.
+  const changelog = '# Kit\n\n## 2.9.2\n\n**Urgent: the release check failed on every agent.**\n\n### What changed\n\n## 2.9.1\n\n**Lighter tests.**\n';
+  assert.equal(urgentIn(changelog, '2.9.2'), true);
+  assert.equal(urgentIn(changelog, '2.9.1'), false);
+  assert.equal(urgentIn(changelog, '2.9.0'), false, 'no entry');
+  assert.equal(urgentIn('**urgent fix for the page**\n\n### What changed', '2.9.3'), true, "a release's notes with no heading");
+  assert.equal(urgentIn('**Not urgent.**', '2.9.3'), false);
+  assert.equal(urgentIn(null, '2.9.3'), false);
+  assert.deepEqual([normalizeSettings({}).settings.rolloutQuietHours, normalizeSettings({}).settings.rolloutMaxWaitHours], [2, 12]);
+  assert.deepEqual([normalizeSettings({ rolloutQuietHours: 0, rolloutMaxWaitHours: '24' }).settings.rolloutQuietHours, normalizeSettings({ rolloutMaxWaitHours: '24' }).settings.rolloutMaxWaitHours], [0, 24]);
+  assert.equal(normalizeSettings({ rolloutQuietHours: '' }).settings.rolloutQuietHours, 2, 'empty: the default');
 });

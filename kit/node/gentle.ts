@@ -17,7 +17,7 @@ import { powershell, psQuote } from './ps.ts';
  *   (gentleCap()), however many threads they run. A program that starts its own threads per processor (x265, a
  *   model's runtime) is held to the cap with the rest.
  *
- * The pace is the owner's setting alone (kit 2.70.0): Manor's Settings, gentle or full. Nothing else lifts it, not a
+ * The pace is the owner's setting alone (kit 2.73.0): Manor's Settings, gentle or full. Nothing else lifts it, not a
  * round someone asked for (Run now) nor a page being looked at, so what a page shows is what the agent costs in the
  * background. They are set from outside the agent's process, by its PowerShell worker, with gentle.cs compiled once to
  * a DLL every agent shares (gentleDll()), and only when the setting changes: a round at the same pace as the one before
@@ -75,7 +75,7 @@ export function keepResponsive(): Promise<void> {
 
 /**
  * Once did something (kit 2.57.1 to 2.69): a browser asking for the page lifted the agent to a normal pace for a minute,
- * its round children with it, so nobody looking at a page ever saw its real background rates. From kit 2.70.0 the pace
+ * its round children with it, so nobody looking at a page ever saw its real background rates. From kit 2.73.0 the pace
  * is the owner's setting alone (Manor's Settings, gentle or full), and this does nothing. Kept so an agent that calls
  * it (Chronicler) still builds.
  */
@@ -136,7 +136,7 @@ let containTimer: NodeJS.Timeout | null = null;
 
 /**
  * For a long-lived process that doesn't run its work with every() (an MCP server, a page of its own, a scheduled job;
- * kit 2.70.0): sets it at the owner's pace now (Manor's Settings; `own` when Manor doesn't say), gentle in a job with
+ * kit 2.73.0): sets it at the owner's pace now (Manor's Settings; `own` when Manor doesn't say), gentle in a job with
  * the gentle cap that every program it starts afterwards is in too, and reads the setting again every
  * CONTAIN_CHECK_MS so a change applies without a restart. Call it first, before the process starts anything. Model
  * servers it starts leave its job (accelerators.ts, apart.ts): they serve every agent, and an asker's cap isn't theirs.

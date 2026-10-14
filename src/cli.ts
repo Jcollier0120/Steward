@@ -90,7 +90,9 @@ const USAGE = `${APP.id}: ${APP.role}
                    at HEAD, which must be the PR's head with nothing uncommitted, and once they pass, record it
                    on that commit on GitHub (status steward/tested). The Steward then merges the PR without
                    testing it again, unless it is pushed to first. Without a number: the PR for this branch.
-                   The checks run at the checks pace, a share of the processor (Manor's Settings change it)
+                   The checks run at the checks pace, a share of the processor (Manor's Settings change it).
+                   When the Assayer already passed every check on exactly HEAD's tree (same
+                   dependencies and kit, within a day), nothing runs again: its pass is taken.
   claims [--json]  the versions claimed and not yet landed
   Only on the PC Castellan is made on (elsewhere they say so, and do nothing):
   claim-port <agent id> [--branch <b>] [--for "<what>"] [--by <who>] [--json]

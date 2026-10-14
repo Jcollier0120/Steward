@@ -10,7 +10,8 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-trial-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit, TRIAL_GOING, trialParallel, trialsOnTheirOwn } = await import('../src/stages/trial.ts');
+const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit, TRIAL_GOING, trialGivesWay, trialParallel, trialsOnTheirOwn } = await import('../src/stages/trial.ts');
+const { APP } = await import('../src/app.ts');
 const { writeJson } = await import('../src/kit/store.ts');
 const { bumpOne, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -18,7 +19,8 @@ type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 // An agent's test that relies on what the kit says, as nine agents' tests relied on kit 2.19.0's "note from the NPU".
-const CHECK = "import { readFileSync } from 'node:fs';\nprocess.exit(readFileSync('src/kit/node/npu.ts', 'utf8').includes('npu = 1') ? 0 : 1);\n";
+// It passes on its main as it is (kit 1.0.0), so the failure is the kit's: the trial runs it without the kit too.
+const CHECK = "import { readFileSync } from 'node:fs';\nprocess.exit(JSON.parse(readFileSync('kit.json', 'utf8')).kit === '1.0.0' ? 0 : 1);\n";
 
 // The Steward: its main, with kit 1.0.1 in kit\ (the PR's head), pushed as refs/pull/7/head.
 const steward = fakeEmployee(path.join(tmp, 'steward'), { kit: null, files: { 'kit/VERSION': '1.0.1\n', 'kit/node/npu.ts': 'export const npu = 2;\n', 'tools/kit.ts': kitTool } });
@@ -143,10 +145,38 @@ test('a failure kept before its commit was is tried again once; one whose commit
   assert.equal(await kitTrialHold(old.c, me, pr()), null, old.c.lines.join('\n'));
   assert.ok(old.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')));
 
-  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'failed', main: null }], passed: 1, at, commented: true } });
+  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'failed', main: null }], passed: 1, at, commented: true, steward: APP.version } });
   const unknown = ctx();
   assert.match((await kitTrialHold(unknown.c, me, pr())) ?? '', /\(Good\)/);
   assert.equal(unknown.c.lines.length, 0);
+});
+
+test("a failure another Steward kept is tried again, once, whatever its commit: that Steward's way of trying may have been why", async () => {
+  const at = new Date().toISOString();
+  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'good', name: 'Good', message: 'Could not resolve "react"', main: null }], passed: 1, at, commented: true, steward: '0.0.1' } });
+  const older = ctx();
+  assert.equal(await kitTrialHold(older.c, me, pr()), null, older.c.lines.join('\n'));
+  assert.ok(older.c.lines.some((l) => l.includes("Good failed kit 1.0.1's checks as Steward 0.0.1 tried them: trying it again")), older.c.lines.join('\n'));
+  assert.equal(JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`].steward, APP.version);
+});
+
+test('an agent that fails without the kit too is not held against it; a kit PR its trial fails gives up its turn', async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const broken = employee(fakeEmployee(path.join(tmp, 'broken'), { files: { 'tools/kit.ts': kitTool } }).checkout, { id: 'broken', name: 'Broken', test: ['node -e process.exit(1)'] });
+  const c = ctx();
+  c.c.settings.employees = [good, broken];
+  assert.equal(await kitTrialHold(c.c, me, pr()), null, c.c.lines.join('\n'));
+  assert.ok(c.c.lines.some((l) => l.startsWith("[broken] kit 1.0.1 trial: skipped: fails its checks without kit 1.0.1 too, so not the kit's doing")), c.c.lines.join('\n'));
+  const t = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`];
+  assert.deepEqual([t.passed, t.failed.length, t.own.map((f: { id: string }) => f.id)], [1, 0, ['broken']]);
+  // Its turn: given up once its trial is done, fails an agent and said so; never for a draft, a labelled PR or another's.
+  const kept = { [`7@${head}`]: { kit: '1.0.1', failed: [{ id: 'bad', name: 'Bad', message: 'x' }], passed: 1, at: t.at, commented: true } };
+  assert.deepEqual([...trialGivesWay(me, [pr()], kept)], [7]);
+  assert.deepEqual([...trialGivesWay(me, [pr({ draft: true })], kept)], []);
+  assert.deepEqual([...trialGivesWay(me, [pr({ labels: [KIT_BREAKS_LABEL] })], kept)], []);
+  assert.deepEqual([...trialGivesWay(me, [pr()], { [`7@${head}`]: { ...kept[`7@${head}`], commented: false } })], [], 'not until its author was told');
+  assert.deepEqual([...trialGivesWay(me, [pr()], { [`7@${head}`]: { ...kept[`7@${head}`], pending: ['bad'] } })], [], 'not while it is tried');
+  assert.deepEqual([...trialGivesWay(good, [pr()], kept)], [], "only the Steward's own");
 });
 
 test("a new head of the PR whose kit and tools/kit.ts are the same keeps the trial's verdict: nothing is tried again", async () => {

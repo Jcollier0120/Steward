@@ -7,6 +7,7 @@ import {
   clearFailure,
   currentGames,
   ensureServer,
+  expandEnv,
   gamesStale,
   lineLook,
   loadAccelerators,
@@ -41,6 +42,7 @@ import { gpuWithNpu } from './manor.ts';
 import { tallyRequest } from './token-tally.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
+import { coldStartMsOf, routeOfServer } from './npu-vendors.ts';
 
 export { npuLockDir };
 export { noteLabel, reeveHome, theAccelerator, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
@@ -106,6 +108,33 @@ export interface AskOptions {
   start?: boolean;
   /** How long the server may take to answer (default Reeve's requestTimeoutMs): shorter for a person waiting. */
   timeoutMs?: number;
+  /**
+   * Told, before the request waits, that its model was resting and is being woken: its server had stopped (the keeper
+   * stops one nobody used for a while: npuIdleStopMinutes) and is starting, or is busy loading its model. For a person
+   * waiting (a chat, a caption), say so plainly with its `line`, as a setting-up card would, rather than a bare spinner.
+   * The request then waits for the model: a server just started is given its cold load, whatever `timeoutMs` says.
+   */
+  onWaking?: (w: Waking) => void;
+}
+
+/** A resting model being woken for a request (AskOptions.onWaking). */
+export interface Waking {
+  accelerator: AcceleratorRef;
+  /** 'starting': its server had stopped and is starting; 'loading': it is up, loading its model. */
+  how: 'starting' | 'loading';
+  /** About how long waking takes (an NPU route's measured cold start, npu-vendors.json's idleStop), or null when unknown. */
+  aboutMs: number | null;
+  /** In plain words, for the person waiting: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 15 s longer." */
+  line: string;
+}
+
+/** What a request waking `acc`'s model is told: how, about how long (an NPU route's cold start), and a line saying so. */
+export function wakingOf(acc: Accelerator, work: Work, ep: Pick<Endpoint, 'startCommand'>, how: Waking['how']): Waking {
+  const aboutMs = acc.kind === 'npu' ? coldStartMsOf(routeOfServer(expandEnv(ep.startCommand?.[0] ?? ''), work), work) : null;
+  const longer = aboutMs ? `about ${Math.max(1, Math.round(aboutMs / 1000))} s longer` : 'a little longer';
+  const where = theAccelerator(refOf(acc));
+  const line = how === 'starting' ? `Waking the local AI on ${where}: it rests when nobody uses it, so the first answer takes ${longer}.` : `The local AI on ${where} is loading its model: the first answer takes ${longer}.`;
+  return { accelerator: refOf(acc), how, aboutMs, line };
 }
 
 export class NpuError extends Error {}
@@ -257,9 +286,12 @@ function noCandidate(skipped: Skipped[], first: { acc: Accelerator; reason: stri
 
 export class Npu {
   private cfg: AcceleratorConfig | { error: string };
+  private withNpu: () => boolean;
 
-  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators()) {
+  /** `o.gpuWithNpu`: Manor's switch as a check gives it, in place of Manor's settings read afresh each time. */
+  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean } = {}) {
     this.cfg = 'error' in cfg || 'accelerators' in cfg ? cfg : fromNpuConfig(cfg);
+    this.withNpu = o.gpuWithNpu ?? (() => gpuWithNpu().on);
     if (!('error' in this.cfg)) for (const a of this.cfg.accelerators) known.add(a.id);
   }
 
@@ -270,11 +302,12 @@ export class Npu {
 
   /**
    * The accelerators, in the order requests try them (none when there is a problem). With Manor's "Use the graphics
-   * card for models when there's an NPU" off and an NPU here, no graphics card (manor.ts's gpuWithNpu(), read afresh
-   * each time, and the core's withoutGpuBesideNpu): a request never goes to one, not even as a fallback.
+   * card for models when there's an NPU" off and an NPU here, a graphics card only for the work no NPU here serves
+   * (manor.ts's gpuWithNpu(), read afresh each time, and the core's withoutGpuBesideNpu): the NPU's own work never
+   * goes to one, not even as a fallback; the rest (vision, beside Intel's NPU) starts the card's server on demand.
    */
   get accelerators(): Accelerator[] {
-    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, gpuWithNpu().on);
+    return 'error' in this.cfg ? [] : core.withoutGpuBesideNpu(this.cfg.accelerators, this.withNpu());
   }
 
   get hasVision(): boolean {
@@ -376,7 +409,7 @@ export class Npu {
     const serving = usable.filter(asked);
     if (!serving.length) {
       // Only a graphics card set aside beside the NPU would do: say so, rather than that nothing serves it.
-      const aside = cfg.accelerators.find((a) => asked(a) && !usable.includes(a));
+      const aside = cfg.accelerators.find((a) => asked(a) && !usable.some((u) => u.id === a.id && asked(u)));
       if (aside) throw new NpuError(core.say.gpuSetAside(aside));
       throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }
@@ -420,11 +453,14 @@ export class Npu {
           acc,
           async () => {
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
-            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, acc.timeouts?.coldLoadMs ?? 0) });
+            const onWaking = opts.onWaking;
+            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, acc.timeouts?.coldLoadMs ?? 0), ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
-            if (warmed) await warmUp(acc, ep, opts.timeoutMs);
+            // A server just started (the keeper stopped it, unused) loads its model now: the first request waits for
+            // that, given at least the cold-load allowance, rather than failing on a person's short timeout.
+            if (warmed) await warmUp(acc, ep, server.started ? Math.max(opts.timeoutMs ?? 0, coldAllowanceMs(acc)) : opts.timeoutMs);
             // With no warm-up, a server just started or found busy may still be loading the model.
             const loading = !warmed && fresh;
             const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading });
@@ -481,6 +517,9 @@ async function warmUp(acc: Accelerator, ep: Endpoint, timeoutMs?: number): Promi
   const allowance = RULES.accelerators.requestBaseMs + RULES.accelerators.coldLoadMs;
   await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1), timeoutMs ?? allowance, { loading: true });
 }
+
+/** How long a model just started may take to load: the request's base and the cold load, the accelerator's own where longer. */
+const coldAllowanceMs = (acc: Accelerator) => RULES.accelerators.requestBaseMs + Math.max(RULES.accelerators.coldLoadMs, acc.timeouts?.coldLoadMs ?? 0);
 
 /** The pick (accelerators.ts), seeing this process's own requests already headed to each line. */
 function pick(list: Accelerator[], lane: Lane) {
