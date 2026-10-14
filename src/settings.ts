@@ -8,6 +8,7 @@ import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorPr
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { takeOntoKit } from './employ.ts';
+import { DEFAULT_INSTALL_SCRIPTS, PACKAGE_NAME } from './installscripts.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
@@ -103,6 +104,12 @@ export interface Settings {
   alarms: AlarmSettings;
   /** The Steward's look at the Wright's drafts (review.ts). */
   wrightReview: WrightReviewSettings;
+  /**
+   * The packages whose install scripts may run where the Steward installs packages (installscripts.ts): every install is
+   * `npm ci --ignore-scripts`, then these alone have theirs run. Any other package with one holds the work, with an alarm;
+   * and a PR whose lockfile brings one is held for you. Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
+   */
+  installScripts?: string[];
   /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
   catchUp: boolean;
   /** In its rounds, a repository's ready PRs in the version queue are stacked, tested once and merged together (stages/train.ts). */
@@ -296,6 +303,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mergeMinAgeMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
+  installScripts: DEFAULT_INSTALL_SCRIPTS,
   catchUp: true,
   mergeTrain: true,
   tasteBeforeRelease: true,
@@ -573,6 +581,15 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file matching one of these waits for you (* any part of a name, ** any folders). Claude Code's settings, secrets and the guards always wait too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
   },
+  {
+    key: 'installScripts',
+    kind: 'list',
+    tab: 'How it works',
+    label: 'Install scripts allowed',
+    help: "Packages whose install scripts may run where the Steward installs packages: every install runs with --ignore-scripts, then these alone run theirs. Any other package with one holds the work, with an alarm naming it and its script, and a PR whose package-lock.json brings one waits for you. Add a package only once you trust it.",
+    item: { label: 'npm package', maxLength: 214 },
+    maxItems: 40,
+  },
   { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC.', readOnly: true, tab: 'How it works', ...WRIGHT, hidden: true },
   {
     key: 'rollout',
@@ -718,6 +735,8 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       mergeMinAgeMinutes: Number.isInteger(mergeMinAge) ? Math.min(1440, Math.max(0, mergeMinAge)) : d.mergeMinAgeMinutes,
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
+      // Names npm takes, lowercased; an empty list is kept (no package's script runs).
+      installScripts: Array.isArray(r.installScripts) ? [...new Set(strings(r.installScripts, []).map((n) => n.toLowerCase()).filter((n) => PACKAGE_NAME.test(n)))] : d.installScripts,
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
       mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,

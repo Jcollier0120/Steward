@@ -7,7 +7,7 @@ import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
 import { checksLogOf, needsNpmCi, runChecks } from './bump.ts';
 import { checkoutOf, mapLimit, networkNote, result, clearWorkDir, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
-import { linkSharedModules } from './modules.ts';
+import { guardPackages, installPackages, linkSharedModules } from './modules.ts';
 import { withRepo } from './slots.ts';
 
 /**
@@ -78,13 +78,15 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
   say(`${command} in ${dir}, at ${remote} (${at}), after ${what}`);
   try {
     // Its packages first, for the command and its tests: the shared set where it can be, else its own.
-    if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, say))) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      say(`npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) {
+    if (needsNpmCi(dir)) {
+      // No package's install script runs unless Settings allow it; one that isn't holds the refresh (installscripts.ts).
+      const g = await guardPackages(ctx, e, dir, `the refresh after ${what}`);
+      if (g.held) return done('failed', `${g.held}, so ${command} wasn't run at ${at}, and nothing was pushed`, { commit: at });
+      const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
+      if (ci) {
         for (const line of tail(`${ci.out}\n${ci.err}`, 15).split('\n')) say(`  ${line}`);
-        keepFailure(dir, 'npm ci --no-audit --no-fund', ci.code, `${ci.out}\n${ci.err}`);
-        return done('failed', `npm ci failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
+        keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
+        return done('failed', `${ci.line} failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
       }
     }
     const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000 });
@@ -98,7 +100,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
     if (!files.length) return done('skipped', `${command} changed nothing at ${at}: nothing to push`, { commit: at });
     say(`it changed ${files.join(', ')}: its tests, before anything is pushed`);
     // Its tests, as a PR's are here (bump.ts): every one must pass, or nothing is pushed.
-    const failed = await runChecks(ctx, e, dir, { say });
+    const failed = await runChecks(ctx, e, dir, { say, doing: `the refresh after ${what}` });
     if (failed) return done('failed', `${command} changed ${files.join(', ')}, but ${failed}, so nothing was pushed; the failed step's whole output is in ${checksLogOf(dir)}`, { commit: at });
     await git(run, dir, 'add', '--', ...files);
     const title = refreshTitle(what);

@@ -15,6 +15,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.66
+
+**No package's install script runs where the Steward installs packages unless you allow it, and a PR that brings new packages waits for you.**
+
+### What's new
+
+- Every install the Steward makes (the shared packages for checks, a bump's, a PR's checks, a release's, a refresh's, its own release) now runs `npm ci --ignore-scripts`. Only the packages on a short list in Settings, **Install scripts allowed**, then have their install scripts run, by name. The list starts with the three the manor's own repositories need: esbuild, unrs-resolver and fsevents.
+- A package with an install script that isn't on the list stops the work before anything is installed. An alarm (and a Windows notification) names the package, its version, the repository and the script it would have run. If you trust it, add it to the list and the next round goes on; if not, take it out of the repository's dependencies.
+- Any pull request, not only the Wright's, whose `package-lock.json` brings a package new to the repository, or a package with an install script that isn't allowed, waits for you. Look at what it brings, then merge it yourself or label it `owner-done`.
+
+### What changed
+
+- A dependency installed from git, rather than from npm's registry, always stops the work, whatever its name: npm runs its prepare script as it installs.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Pull requests that update dependencies now wait for you when they bring packages the repository didn't have.
+
 ## 0.35.65
 
 **The Steward's kit 2.71.0: on a PC with 16 GB of memory or less, the local AI on the NPU gives its memory back sooner when nobody is using it, and wakes again when it's needed.**
