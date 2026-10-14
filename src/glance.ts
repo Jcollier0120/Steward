@@ -89,9 +89,14 @@ const PRS = `pullRequests(states: OPEN, first: ${PR_PAGE}, orderBy: {field: CREA
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { status conclusion } ... on StatusContext { state context } } } } } } }
 } }`;
 const RELEASES = 'releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft publishedAt tagCommit { oid } } }';
-/** How many branch heads a glance reads of each repository, for kit 2.58.0's remote-heads.json. */
+/**
+ * How many branch heads a glance reads of each repository at once, for kit 2.58.0's remote-heads.json (GitHub's most for
+ * a page). A repository with more has the rest read after (moreHeads), up to MORE_HEADS pages more.
+ */
 export const HEADS_PAGE = 100;
-const HEADS = `refs(refPrefix: "refs/heads/", first: ${HEADS_PAGE}) { totalCount nodes { name target { oid } } }`;
+export const MORE_HEADS = 9;
+const headsPage = (after?: string) => `refs(refPrefix: "refs/heads/", first: ${HEADS_PAGE}${after ? `, after: ${JSON.stringify(after)}` : ''}) { totalCount pageInfo { hasNextPage endCursor } nodes { name target { oid } } }`;
+const HEADS = headsPage();
 
 const ownerName = (repo: string) => {
   const [owner, name] = repo.split('/');
@@ -105,7 +110,7 @@ export function glanceQuery(employees: Employee[], stewardRepo: string | null): 
     const main = (file: string) => `object(expression: ${JSON.stringify(`${STEWARD_BRANCH}:${file}`)}) { ... on Blob { text } }`;
     parts.unshift(
       `steward: repository(${ownerName(stewardRepo)}) { releases(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { tagName isDraft } } ` +
-        `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} }`,
+        `main: ref(qualifiedName: ${JSON.stringify(`refs/heads/${STEWARD_BRANCH}`)}) { target { oid } } kitVersion: ${main('kit/VERSION')} packageJson: ${main('package.json')} ${HEADS} }`,
     );
   }
   // What it costs and what's left (budget.ts), asked in the query itself: free.
@@ -152,12 +157,51 @@ function repoFromGraph(r: any): RepoGlance {
   };
 }
 
-/** A repository's branch heads as the glance read them, and whether they're all of them; null when they weren't asked. */
-export function headsFromGraph(r: any): { heads: Record<string, string>; complete: boolean } | null {
+/**
+ * A repository's branch heads as the glance read them (added to `had`, an earlier page's), and whether they're all of
+ * them; null when they weren't asked. `after`: where the next page starts, when GitHub has more.
+ */
+export function headsFromGraph(r: any, had: Record<string, string> = {}): { heads: Record<string, string>; complete: boolean; after?: string } | null {
   if (!Array.isArray(r?.refs?.nodes)) return null;
-  const heads: Record<string, string> = {};
+  const heads: Record<string, string> = { ...had };
   for (const n of r.refs.nodes) if (typeof n?.name === 'string' && typeof n?.target?.oid === 'string') heads[n.name] = n.target.oid;
-  return { heads, complete: Number(r.refs.totalCount) === Object.keys(heads).length };
+  const after = r.refs.pageInfo?.hasNextPage === true && typeof r.refs.pageInfo.endCursor === 'string' ? r.refs.pageInfo.endCursor : undefined;
+  return { heads, complete: !after && Number(r.refs.totalCount) === Object.keys(heads).length, ...(after ? { after } : {}) };
+}
+
+/** The query for the next page of these repositories' branch heads (aliased h0, h1, …, in order). Pure. */
+export function moreHeadsQuery(repos: { repo: string; after: string }[]): string {
+  const parts = repos.map((r, i) => `h${i}: repository(${ownerName(r.repo)}) { ${headsPage(r.after)} }`);
+  return `query { rateLimit { cost limit remaining used resetAt } ${parts.join(' ')} }`.replace(/\s+/g, ' ');
+}
+
+/**
+ * The rest of the branch heads of the repositories with more than a glance's page (`more`: repository → where the next
+ * page starts): all of them in one query a page, up to MORE_HEADS pages. So a repository with many branches (Manor's)
+ * is shared whole, and other agents needn't ls-remote it. A page GitHub can't give leaves its repository incomplete, as
+ * before; it never fails the glance.
+ */
+export async function moreHeads(ask: GlanceAsk, glance: Glance, more: Map<string, string>, now: () => Date = () => new Date()): Promise<void> {
+  for (let page = 0; page < MORE_HEADS && more.size; page++) {
+    const repos = [...more].map(([repo, after]) => ({ repo, after }));
+    more.clear();
+    let data: any;
+    try {
+      data = JSON.parse(await ask(moreHeadsQuery(repos)))?.data;
+    } catch {
+      return;
+    }
+    const rate = readingFrom(data?.rateLimit, now());
+    if (rate) glance.rates = [...(glance.rates ?? []), rate];
+    if (typeof data?.rateLimit?.cost === 'number') glance.cost = (glance.cost ?? 0) + data.rateLimit.cost;
+    repos.forEach((r, i) => {
+      const had = glance.heads?.[r.repo];
+      const h = had ? headsFromGraph(data?.[`h${i}`], had.heads) : null;
+      if (!h) return;
+      glance.heads![r.repo] = { heads: h.heads, complete: h.complete };
+      if (h.after) more.set(r.repo, h.after);
+    });
+  }
 }
 
 const VERSION = /^\d+\.\d+\.\d+$/;
@@ -178,7 +222,7 @@ export function stewardMainFrom(s: any): StewardMain {
  * GitHub's answer to a glanceQuery, read: `gh api graphql` exits 1 when any part of the query failed (a repository
  * that isn't there, say), but still prints what it could answer, with `errors` for the rest.
  */
-export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance, now = new Date()): void {
+export function readGlance(employees: Employee[], answer: string, stewardRepo: string | null, into: Glance, now = new Date(), more?: Map<string, string>): void {
   let j: any;
   try {
     j = JSON.parse(answer);
@@ -197,9 +241,18 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     const err = (Array.isArray(j.errors) ? j.errors : []).find((x: any) => Array.isArray(x?.path) && x.path[0] === alias);
     return String(err?.message ?? 'GitHub gave no answer for it');
   };
+  // A repository's branch heads, for remote-heads.json; where it has more than a page, where the rest starts (moreHeads).
+  const keepHeads = (repo: string, r: any) => {
+    const h = r ? headsFromGraph(r) : null;
+    if (!h) return;
+    (into.heads ??= {})[repo] = { heads: h.heads, complete: h.complete };
+    if (h.after) more?.set(repo, h.after);
+  };
   if (stewardRepo) {
     into.stewardReleases = data.steward ? (data.steward.releases?.nodes ?? []).map((x: any) => ({ tagName: String(x?.tagName ?? ''), isDraft: x?.isDraft === true })) : null;
     into.stewardMain = data.steward ? stewardMainFrom(data.steward) : null;
+    // Its own repository's too: where it releases Castellan it isn't one of the employees, and was never shared.
+    keepHeads(stewardRepo, data.steward);
   }
   employees.forEach((e, i) => {
     const r = data[`e${i}`];
@@ -207,8 +260,7 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
     if (r && open > PR_PAGE) into.errors[e.id] = `${open} open PRs, more than a glance reads (${PR_PAGE})`;
     else if (r) into.repos[e.id] = repoFromGraph(r);
     else into.errors[e.id] = why(`e${i}`);
-    const heads = r ? headsFromGraph(r) : null;
-    if (heads) (into.heads ??= {})[e.repo] = heads;
+    keepHeads(e.repo, r);
   });
 }
 
@@ -244,9 +296,10 @@ export async function takeGlance(
   if (!all.length && !settings.stewardRepo) return glance;
   // A query GitHub gives up on as too slow is asked again in halves, down to one repository: a busy week's PRs can take
   // a few repositories past GitHub's 10 seconds. A failure of any other kind, or of one repository alone, is the glance's.
+  const more = new Map<string, string>();
   const asked = async (chunk: Employee[], stewardRepo: string | null): Promise<void> => {
     try {
-      readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now());
+      readGlance(chunk, await ask(glanceQuery(chunk, stewardRepo)), stewardRepo, glance, now(), more);
     } catch (e) {
       if (chunk.length < 2 || !queryTimedOut(e)) throw e;
       const half = Math.ceil(chunk.length / 2);
@@ -255,6 +308,7 @@ export async function takeGlance(
     }
   };
   for (let i = 0; i === 0 || i < all.length; i += PER_QUERY) await asked(all.slice(i, i + PER_QUERY), i === 0 ? settings.stewardRepo : null);
+  await moreHeads(ask, glance, more, now);
   return glance;
 }
 

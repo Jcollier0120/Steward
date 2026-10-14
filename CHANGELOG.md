@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.4
+
+**The branch heads it shares with your other agents now include its own repository and every branch of a large one, so they stop asking GitHub for these themselves.**
+
+### What changed
+
+- Each round the Steward shares what it read of every repository's branches, so the other agents (the Assayer, Reeve) can tell whether anything moved without asking GitHub themselves. Its own repository was left out of that, and so was any repository with more than 100 branches (Manor's has about 150): the agents asked GitHub about those on their own, every time. Both are shared whole now. A repository with more than 100 branches costs one more small question to GitHub a round, asked for all such repositories together.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**
