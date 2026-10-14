@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.35.70
+## 0.35.77
 
 **The kit it hands out, 2.71.2, gives a refused project's reason without talking about employees.**
 
@@ -13,6 +13,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Each agent picks up the new wording with its next kit update.
+
+## 0.35.73
+
+**A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**
+
+### What changed
+
+- On a PC where the Steward's work folder is a link to another drive, the Steward didn't recognise its own work folders, so it never told git they were gone. The next time it needed the same folder, git refused it ("a missing but already registered worktree"), and that release, kit trial or test failed every round. On 2026-10-13 this held up the Steward's kit trial, every Steward PR waiting behind it, and Reeve's release for hours. The Steward now finds its work folders through the link.
+- Whenever it clears a work folder a stopped job left behind, it also makes git forget it. If git still refuses a work folder that has gone missing some other way, the Steward clears git's record and tries once more. This covers releases, kit trials, catch-ups, merge trains, refreshes, PR tests and the Steward's own release.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.35.60
 
