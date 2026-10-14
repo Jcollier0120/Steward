@@ -139,7 +139,7 @@ export function startOptions(cmd: string, o: { shares: boolean; background: bool
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
 /** How much longer a command run at the checks pace may take than its time limit says. */
-export const PACED_TIME = 2;
+export const PACED_TIME = 4;
 
 const runPlain: Runner = async (cmd, args, opts = {}) => {
   const [resolved, resolvedArgs] = resolveCommand(cmd, args);
@@ -156,8 +156,9 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
   }
-  // At the checks pace a command gets twice its time: held to half the processor below everything else, on a PC busy
-  // with other work it takes longer, and a run stopped for that would be taken for a failure.
+  // At the checks pace a command gets four times its time: held to the gentle cap below everything else, and waiting its
+  // turn behind other runs, it takes longer (the Assayer's suite on a busy PC: 73 s free, 219 s paced), and a run stopped
+  // for that would be taken for a failure.
   const timeout = (opts.timeoutMs ?? 20 * 60_000) * (paced && paced.file !== resolved ? PACED_TIME : 1);
   return new Promise((resolve) => {
     const child = execFile(

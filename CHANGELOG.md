@@ -2,19 +2,58 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.14
-
+## 0.36.18
 **Half the processes for its git and gh calls: they share its page's console instead of each starting a console host of its own.**
 
 ### What changed
 
 - The Steward's page now keeps a console with no window, and the git and gh commands it runs all day share it. Before, Windows started a console host (conhost.exe) beside every one of them: 40 git and gh calls started 82 processes, and now start 43. In a trace of the Steward's rounds, console hosts were 40% of everything it started.
 - The tests it runs (a kit's trial, a vouch, a pull request's test) no longer start git's upkeep after each of their throwaway commits, which made a third of the processes a test's commits started.
-- With the Steward's kit 2.72.2, every agent's page gets the same console the next time it starts. The agents start sharing it once they take that kit and start their git that way.
+- With the Steward's kit 2.73.2, every agent's page gets the same console the next time it starts. The agents start sharing it once they take that kit and start their git that way.
 
 ### Before you update
 
 - Nothing: it updates itself as usual. The change takes effect when its page restarts after the update.
+
+## 0.36.17
+
+**Releases go out again on a PC whose folders are on a Dev Drive: the Steward works in its work folder by its real path, and a release that published nothing is no longer called released.**
+
+### What changed
+
+- The Steward now works in its work folder by its real path, wherever the folder is reached through a junction, a symbolic link or a Dev Drive mounted in a folder. From the evening of 2026-10-13, when the owner's work folder became a junction to a Dev Drive, every agent's release ran its release command there and did nothing: the kit's release script didn't recognise itself through the junction and exited without building or publishing. The Steward reported each one released, round after round, and every other round failed with "a missing but already registered worktree".
+- A release command that finishes without making the agent's GitHub release is now a failed release on the PC that releases Castellan too, as it already was everywhere else, rather than "released". Such a release raises the usual alarm and waits for a person or a new commit, instead of reporting success.
+- A folder the Steward made in its work folder is recognised as its own however its path is spelled, so one a stopped stage left behind is still cleared.
+- The Steward hands out kit 2.73.1: the kit's scripts recognise themselves through junctions and Dev Drive mounts too, and the kit's new spec/DEV-DRIVES.md sets out how every agent compares paths.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you set the Work folder in settings.json to a Dev Drive's own letter to get releases going, you can leave it: it now works either way.
+## 0.36.13
+
+**The Steward's checks go easier on your PC: a quarter of the processor at most, a cap on memory, two runs at a time, and your Settings as the only switch.**
+
+### What's new
+
+- Checks can't take all your memory. Each program gets at most an eighth of the PC's memory (2 to 6 GB), and all the checks together a quarter (4 to 12 GB). A test that runs away fails instead of slowing the whole PC.
+- At most two check runs go at once on the PC, from the Steward, the Assayer or a Claude session. The rest wait their turn, 20 minutes at most.
+- Local AI model servers no longer run at the limits of whichever agent started them, so they answer every agent at full speed.
+
+### What changed
+
+- Tests, type checks, installs and release builds the Steward runs now use at most a quarter of your processor (two cores' worth at most), the same share as the agents' own background work. Before, they could use half.
+  - Measured on an 18-core laptop with the Assayer's test suite on a quiet PC: before, the whole PC peaked at 91% and the suite took 39 seconds; now it peaks at 43% and takes 65 seconds.
+  - The Steward allows checks four times their usual time before it gives up on one.
+- Your background pace in Manor's Settings decides how hard the Steward and the agents work. At Full speed, checks run at full speed too. While it's gentle, `"checksPace"` in Manor's settings.json can give checks a different share.
+- Nothing else lifts it:
+  - `steward vouch --fast` is gone (it says so and vouches at the usual pace);
+  - looking at an agent's page no longer lifts its limits, so the page shows what the agent really costs in the background;
+  - Run now runs at your pace.
+- Brings the Steward's kit 2.73.0.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.12
 

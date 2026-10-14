@@ -158,7 +158,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     const t0 = Date.now();
     // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
     // and each would start ssh-keygen and git maintenance.
-    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: !ctx.fast });
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;

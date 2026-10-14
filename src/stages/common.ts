@@ -3,7 +3,7 @@ import path from 'node:path';
 import { NOT_PUBLISHED, type ExchequerOptions } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
-import { addWorktree, commitOf, fetchBranch, gitMaybe } from '../git.ts';
+import { addWorktree, commitOf, fetchBranch, gitMaybe, realOf } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
 import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
@@ -93,11 +93,6 @@ export interface Ctx {
   pause?: (ms: number) => Promise<void>;
   /** The Exchequer to let an urgent release out at (release.ts urgentNote); tests stand in for it. Not given: Castellan's. */
   exchequer?: ExchequerOptions;
-  /**
-   * Its checks, installs and builds at full speed: the person asked for it (vouch --fast). Otherwise they run at the kit's
-   * checks pace (kit/checks-pace.ts), held to a share of the processor so they never peg it.
-   */
-  fast?: boolean;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */
@@ -288,7 +283,13 @@ export function notHiredHere(e: Pick<Employee, 'installed' | 'name'>): string | 
   const app = path.resolve(expandEnv(e.installed));
   return existsSync(app) ? null : `${e.name} isn't installed on this PC (no ${e.installed}), and the Steward doesn't install it again by itself: hire it in Manor to have it back`;
 }
-export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
+/**
+ * The work folder at its real path, links and junctions followed (git.ts realOf). Git records a worktree by its real
+ * path, and a script's own path (import.meta.url) is its real path: under a work folder reached through a junction or
+ * a Dev Drive mounted in a folder (2026-10-13), worktrees were left registered every other round, and kit 2.69.1's
+ * release.ts never started (its run-directly check compared the two paths), so each release did nothing and exited 0.
+ */
+export const workRootOf = (s: Settings) => realOf(expandEnv(s.workRoot));
 /**
  * Clears a work folder the Steward made, before it makes it again. Only a folder in the work folder itself, and only
  * a git worktree (its .git a file, as git worktree add makes it) or, in the Steward's own work folder, what's left of
@@ -297,10 +298,12 @@ export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
  * Whether it deleted the folder: git still has it registered (freshWorktree prunes that).
  */
 export function clearWorkDir(s: Settings, dir: string): boolean {
-  if (!existsSync(dir) || path.dirname(dir) !== workRootOf(s)) return false;
+  // Compared by real paths: a folder named through the junction or mount the work folder is reached by is still in it.
+  const root = workRootOf(s).toLowerCase();
+  if (!existsSync(dir) || realOf(path.dirname(dir)).toLowerCase() !== root) return false;
   const git = path.join(dir, '.git');
   const worktree = existsSync(git) && statSync(git).isFile();
-  const ownRoot = workRootOf(s).toLowerCase() === path.resolve(DEFAULT_SETTINGS.workRoot).toLowerCase();
+  const ownRoot = root === realOf(DEFAULT_SETTINGS.workRoot).toLowerCase();
   if (!worktree && !(ownRoot && !existsSync(git))) return false;
   rmSync(dir, { recursive: true, force: true });
   return true;

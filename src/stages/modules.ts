@@ -35,7 +35,7 @@ export const guardPackages = (ctx: Ctx, e: Pick<Employee, 'id' | 'name' | 'repo'
  */
 export async function installPackages(ctx: Ctx, dir: string, plan: InstallPlan, say: (line: string) => void, timeoutMs = 20 * 60_000): Promise<(Ran & { line: string }) | null> {
   for (const line of installLines(plan)) {
-    const r = await runLine(ctx.run, line, { cwd: dir, timeoutMs, paced: !ctx.fast });
+    const r = await runLine(ctx.run, line, { cwd: dir, timeoutMs, paced: true });
     say(`${line}: ${r.code === 0 ? 'ok' : `exit ${r.code}`}`);
     if (r.code !== 0) return { ...r, line };
   }
@@ -130,7 +130,7 @@ async function setFor(ctx: Ctx, dir: string, key: string, plan: InstallPlan, say
       // From npm's own cache when it has the packages, without asking the registry whether they changed: a lockfile's
       // packages are pinned by their integrity, so the cache's copy is the one.
       // No package's install script runs by itself (--ignore-scripts); the allowed ones' run after it, by name.
-      const r = await ctx.run('npm', [...plan.ci.filter((a) => a !== '--prefer-offline'), '--prefer-offline'], { cwd: tmp, timeoutMs: INSTALL_MS, paced: !ctx.fast });
+      const r = await ctx.run('npm', [...plan.ci.filter((a) => a !== '--prefer-offline'), '--prefer-offline'], { cwd: tmp, timeoutMs: INSTALL_MS, paced: true });
       say(`npm ci, once for every worktree with these packages (${key}): ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
       if (r.code !== 0) {
         for (const line of tail(`${r.out}\n${r.err}`, 10).split('\n')) say(`  ${line}`);

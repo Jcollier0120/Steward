@@ -89,8 +89,8 @@ export async function post(path: string, body?: unknown): Promise<{ ok: boolean;
 /**
  * The page's data, kept current: every few seconds while busy, every `refreshSec` otherwise (0: never), at once after a
  * button (`reload`), and when /api/ping says a round started or ended. A look that fails keeps what the page has; the
- * next one tries again. While its tab is hidden it doesn't look at all (kit 2.57.1): a page someone is using keeps its
- * agent at a normal pace (the kit's gentle.ts pageInUse()), and one nobody sees shouldn't; shown again, it looks at once.
+ * next one tries again. While its tab is hidden it doesn't look at all (kit 2.57.1): nobody sees it, so its requests
+ * would be work for nothing; shown again, it looks at once.
  */
 export function usePageData<Body>(): { data: PageData<Body>; reload: () => Promise<void> } {
   const [data, setData] = useState<PageData<Body>>(initialData<Body>);
