@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { lockDirFor } from './lock.ts';
+import { readJsonFile } from './file-cache.ts';
 import { manorHome } from './manor.ts';
 import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 
@@ -46,7 +47,8 @@ export const FIRST_ROUND_WAITING = "its first round: the agents before it are do
 
 /**
  * The manor's pace now: Manor's settings.json `"backgroundPace"` when Manor is installed and says, else `own` (gentle
- * unless the agent says). Read afresh each time, so a change in Manor's Settings applies from the next round. Under
+ * unless the agent says). Read afresh each time (one stat while the file is unchanged: file-cache.ts), so a change in
+ * Manor's Settings applies from the next round. Under
  * node --test, full unless MANOR_PACE says: a test never waits in this PC's real line.
  */
 export function pace(own: Pace = 'gentle', home = manorHome(), env: NodeJS.ProcessEnv = process.env): Pace {
@@ -58,13 +60,8 @@ export function pace(own: Pace = 'gentle', home = manorHome(), env: NodeJS.Proce
 
 /** One key of Manor's settings.json, when Manor is installed and the file can be read; undefined otherwise. */
 function manorSetting(home: string, key: string): unknown {
-  const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return undefined;
-  try {
-    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''))?.[key];
-  } catch {
-    return undefined;
-  }
+  if (!existsSync(path.join(home, 'app'))) return undefined;
+  return readJsonFile<Record<string, unknown> | null>(path.join(home, 'settings.json'), null)?.[key];
 }
 
 /** The first-round line's lock folder, beside the accelerators' (`<locks>\first-rounds`): one slot, one agent at a time. */

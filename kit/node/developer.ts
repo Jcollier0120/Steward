@@ -10,8 +10,9 @@ import { dataFile, readJson } from './store.ts';
  *
  * One source of truth. With Manor installed and saying (its settings.json's "developerOptions", the switch on Manor's
  * Settings page), Manor's value wins. Otherwise the agent's own: "developerOptions" in its own settings.json, false
- * unless it says true. Both are read afresh on each call (two small files), so flipping the switch in Manor takes
- * effect at the next request, with no agent restarted: call developer() per request, never once at start.
+ * unless it says true. Both are read afresh on each call (two small files; a stat each while they are unchanged,
+ * file-cache.ts), so flipping the switch in Manor takes effect at the next request, with no agent restarted: call
+ * developer() per request, never once at start.
  */
 export interface Developer {
   /** Whether developer content may be shown and served. */

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { readJsonFile, readText } from './file-cache.ts';
 import { themeNamed } from './themes.ts';
 
 /**
@@ -56,10 +57,17 @@ export function manorLink(home = manorHome()): ManorLink | null {
 /** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
 function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown } | null {
   const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
+  // One stat while settings.json is unchanged (file-cache.ts): every ping and page load asks.
+  let text: string | null;
+  try {
+    text = readText(file);
+  } catch {
+    text = '';
+  }
+  if (text === null || !existsSync(path.join(home, 'app'))) return null;
   let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown } = {};
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    const parsed = JSON.parse(text.replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
   } catch {
     // Unreadable settings: Manor uses its defaults, and so does this link.
@@ -321,11 +329,7 @@ export function originRepo(checkout: string): string | null {
 
 /** A JSON file's contents, or null when it's missing or unreadable. */
 function jsonAt(file: string): unknown {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
-  } catch {
-    return null;
-  }
+  return readJsonFile<unknown>(file, null);
 }
 
 const listOf = (v: unknown, key: string): Record<string, unknown>[] => {
