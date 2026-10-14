@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ago } from './time.ts';
-import { Button } from './ui.tsx';
+import { Badge, Button } from './ui.tsx';
 
 /**
  * The page of an agent that is an MCP server (Reeve, the Assayer, any staff an AI assistant calls): the parts Reeve's
@@ -8,7 +8,9 @@ import { Button } from './ui.tsx';
  *
  * - `StaffLayout`: the order. What needs you (while anything does), at a glance, Connect your AI, Kept, then the
  *   agent's own sections.
+ * - `NeedsYou`: what the person must look at or do, a card each, its edge the colour of its badge.
  * - `Glance`: a row of tiles, a number each, its colour the state; a tile goes to its section.
+ * - `Row`: one line of a list (its badge, name, what matters, buttons), its details opening under it.
  * - `ConnectAI`: how to give an AI tool the agent's tools and the line for its instructions. Open until one is
  *   connected, then a single line that opens again to connect another.
  * - `Kept`: what the agent read so the AI didn't have to, as estimates: three totals and what each part read.
@@ -102,6 +104,80 @@ export function Glance({ tiles, label = 'At a glance' }: { tiles: GlanceTile[]; 
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** One thing that needs the person: its badge, what it is in a few words, a line more, and what to do about it. */
+export interface Need {
+  id: string;
+  /** Its edge and badge: danger (something broke), caution (something to do). */
+  tone: 'danger' | 'caution';
+  /** The badge's words: "problem", "approval", "Settings". */
+  label: string;
+  title: ReactNode;
+  text?: ReactNode;
+  /** A button or two, at the row's end. */
+  action?: ReactNode;
+  /** Anything longer, under its row. */
+  children?: ReactNode;
+}
+
+/**
+ * Needs you: what the person must look at or do, a card each, at the top of the page (StaffLayout's `needsYou`, drawn
+ * only while anything does). `empty` is said when nothing does, for a page that keeps the section among its own.
+ */
+export function NeedsYou({ items, empty = 'Nothing needs you right now.', tour = 'needs-you' }: { items: Need[]; empty?: ReactNode; tour?: string }) {
+  return (
+    <section className="ui-section ui-gap-md ui-needs" data-tour={tour} aria-label="Needs you">
+      <div className="ui-section-head">
+        <h2 className="ui-heading">Needs you</h2>
+      </div>
+      {items.length ? (
+        items.map((n) => (
+          <div key={n.id} className={cx('card', 'ui-need', `ui-need-${n.tone}`)}>
+            <div className="ui-line">
+              <Badge tone={n.tone} label={n.label} />
+              <strong>{n.title}</strong>
+              {n.text && <span className="muted small">{n.text}</span>}
+              {n.action && (
+                <>
+                  <span className="ui-fill" />
+                  {n.action}
+                </>
+              )}
+            </div>
+            {n.children}
+          </div>
+        ))
+      ) : (
+        <p className="card muted">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One row of a list, on one line: its badge, its name, a muted line of what matters (when, how long, where), and its
+ * buttons at the end. With `more`, a Details button opens the rest under it; `open` opens it to start with.
+ */
+export function Row({ mark, title, meta, actions, more, open: byDefault = false, id }: { mark?: ReactNode; title: ReactNode; meta?: ReactNode; actions?: ReactNode; more?: ReactNode; open?: boolean; id?: string }) {
+  const [open, setOpen] = useState(byDefault);
+  return (
+    <div className={cx('ui-list-row', open && 'ui-open')} id={id}>
+      <div className="ui-line">
+        {mark}
+        <span className="ui-line-title">{title}</span>
+        {meta && <span className="muted small ui-shrink">{meta}</span>}
+        <span className="ui-fill" />
+        {actions}
+        {more != null && more !== false && (
+          <button type="button" className="small quiet" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? 'Hide' : 'Details'}
+          </button>
+        )}
+      </div>
+      {open && more != null && more !== false && <div className="ui-line-more">{more}</div>}
     </div>
   );
 }

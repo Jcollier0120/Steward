@@ -170,4 +170,21 @@ details.ui-connect.ui-connect-todo { border-left: 4px solid var(--accent); }
 .ui-side-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ui-side-head > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ui-side-panel .ui-output { max-height: none; }
+.ui-needs > .card { margin: 0; }
+.card.ui-need { border-left: 4px solid var(--line); }
+.card.ui-need-danger { border-left-color: var(--alert); }
+.card.ui-need-caution { border-left-color: var(--warn); }
+.ui-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.ui-line-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.ui-list-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ui-list-row:last-child { border-bottom: none; }
+.ui-list-row:first-child { padding-top: 2px; }
+.ui-line-more { margin: 6px 0 2px; padding-left: 12px; border-left: 2px solid var(--line); }
+.ui-line-more > :first-child { margin-top: 0; }
+/* Phones: two tiles a row. */
+@media (max-width: 520px) {
+  .ui-glance, .ui-kept-stats { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .ui-glance .ui-tile, .ui-kept-stat { padding: 8px 10px; }
+  .ui-glance .ui-tile-value, .ui-kept-stat .ui-tile-value { font-size: 17px; }
+}
 `;

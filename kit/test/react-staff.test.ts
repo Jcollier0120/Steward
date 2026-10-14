@@ -11,7 +11,7 @@ const { bundleForNode, importPath } = await import('./react-render.ts');
 
 const ui = await bundleForNode<{ html: Record<string, () => string> }>(
   `import { renderToStaticMarkup as r } from 'react-dom/server';
-   import { ConnectAI, Glance, Kept, Output, Paste, SidePanel, StaffLayout } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
+   import { ConnectAI, Glance, Kept, NeedsYou, Output, Paste, Row, SidePanel, StaffLayout } from '${importPath(path.join(STEWARD, 'kit/react/index.ts'))}';
    const setups = [
      { id: 'claude-code', name: 'Claude Code', where: 'Run this once in a terminal.', text: 'claude mcp add --scope user assayer -- node cli.ts mcp' },
      { id: 'json', name: 'Claude Desktop, Cursor', where: "Add this to the tool's MCP settings.", text: '{ "mcpServers": {} }' },
@@ -31,6 +31,14 @@ const ui = await bundleForNode<{ html: Record<string, () => string> }>(
      paste: () => r(<Paste text="echo hi" label="A command" />),
      needs: () => r(<StaffLayout needs needsYou={<i>needs</i>} glance={<b>glance</b>} connect={<u>connect</u>} kept={<s>kept</s>}><em>own</em></StaffLayout>),
      calm: () => r(<StaffLayout needsYou={<i>needs</i>} glance={<b>glance</b>}><em>own</em></StaffLayout>),
+     needsYou: () => r(<NeedsYou items={[
+       { id: 'p', tone: 'danger', label: 'problem', title: 'The round failed', text: 'gh is signed out.' },
+       { id: 's', tone: 'caution', label: 'Settings', title: 'A test command', action: <button type="button">Open Settings</button> },
+     ]} />),
+     nothingNeeds: () => r(<NeedsYou items={[]} />),
+     row: () => r(<Row mark={<span className="badge">failed</span>} title="Heiward" meta="2 hours ago" actions={<button type="button">Output</button>} more={<p>more</p>} />),
+     rowOpen: () => r(<Row title="Manor" more={<p>more</p>} open />),
+     rowPlain: () => r(<Row title="Porter" meta="passes" />),
    };`,
 );
 const h = ui.html;
@@ -76,6 +84,23 @@ test('Kept: its totals, what each part read once something is counted, else its 
   assert.match(none, /aria-label="Kept out of your AI&#x27;s context"/);
   assert.doesNotMatch(none, /ui-kept-rows/);
   assert.match(none, /<p class="muted small">Nothing counted yet\.<\/p>/);
+});
+
+test('Needs you: a card each, its edge and badge its tone, its action at the end; a plain line when nothing needs you', () => {
+  const n = h.needsYou();
+  assert.match(n, /^<section class="ui-section ui-gap-md ui-needs" data-tour="needs-you" aria-label="Needs you"><div class="ui-section-head"><h2 class="ui-heading">Needs you<\/h2><\/div>/);
+  assert.match(n, /<div class="card ui-need ui-need-danger"><div class="ui-line"><span class="badge tone-danger">problem<\/span><strong>The round failed<\/strong><span class="muted small">gh is signed out\.<\/span><\/div><\/div>/);
+  assert.match(n, /<div class="card ui-need ui-need-caution"><div class="ui-line"><span class="badge tone-caution">Settings<\/span><strong>A test command<\/strong><span class="ui-fill"><\/span><button type="button">Open Settings<\/button><\/div><\/div>/);
+  assert.match(h.nothingNeeds(), /<p class="card muted">Nothing needs you right now\.<\/p><\/section>$/);
+});
+
+test('a row is one line, its details under it only once opened', () => {
+  assert.equal(
+    h.row(),
+    '<div class="ui-list-row"><div class="ui-line"><span class="badge">failed</span><span class="ui-line-title">Heiward</span><span class="muted small ui-shrink">2 hours ago</span><span class="ui-fill"></span><button type="button">Output</button><button type="button" class="small quiet" aria-expanded="false">Details</button></div></div>',
+  );
+  assert.match(h.rowOpen(), /^<div class="ui-list-row ui-open">.*aria-expanded="true">Hide<\/button><\/div><div class="ui-line-more"><p>more<\/p><\/div><\/div>$/);
+  assert.doesNotMatch(h.rowPlain(), /Details/, 'nothing more, no button');
 });
 
 test('long output goes in a panel beside the page, with its title, its lines and Close', () => {
