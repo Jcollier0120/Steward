@@ -36,7 +36,8 @@ Every agent that runs its rounds with the kit's scheduler leaves each round's ou
 | `waiting` | string, or absent | The round was held for the agent's required settings (onboarding's `required`), and ran nothing: what it waits for, in words ("Thunderbird or Mail accounts"), as `/api/ping`'s `needsSettings.text`. `ok` is null, `error` null and `next` null; `started` and `finished` are when it was first held for that reason (kit 2.71.3; before, when it was last held). Absent otherwise. Since kit 2.34.0. Also a round whose turn didn't come in the first-round line (kit 2.43.3) or the work line (kit 2.56.0) before its next was due: see Pace. |
 | `timedOut` | true, or absent | `true` when the round ran past its time limit (three intervals and at least two hours, unless the agent gives its own) and was let go: `ok` is false and `error` says so, and the next round tries again. Absent otherwise. Since kit 2.34.0. |
 | `error` | string or null | When it threw: the error's message, its first line, trimmed, at most 500 characters (`"it failed"` when that is empty). `null` when `ok`. |
-| `everyMs` | number | The interval between rounds, in milliseconds, as it was when the round ended. Each wait varies by ±10% about it. |
+| `everyMs` | number | The interval between rounds, in milliseconds, as it was when the round ended, kept to the whole second from a minute up (kit 2.72.0). On the clock (see The clock), the rounds fall on its slots; off it, each wait varies by ±10% about it. |
+| `phaseMs` | number, or absent | On the clock: how far into each of its slots the schedule's rounds fall, in milliseconds (whole minutes). Absent off the clock. Since kit 2.72.0. |
 | `next` | ISO 8601 (UTC) or null | When the next scheduled round is due. `null` when none is coming: the agent is off duty (only Run now runs a round then), or the schedule was stopped. The same as `/api/ping`'s `nextRunAt` just after the round. |
 | `turn` | `"first"`, `"work"`, or absent | Beside `waiting`, when the round waited its turn in a line (`first`: the first-round line; `work`: the work line) rather than for the person. A reader says it waited its turn, never that it waits for the person's settings. A first-round wait recorded before kit 2.56.0 has no `turn`; its `waiting` begins "its first round:". Since kit 2.56.0. |
 | `waitedMs` | number, or absent | How long the round waited its turn (the first-round line, the work line) before it ran, in milliseconds, when that was a second or more. `started` is when it began to run. Since kit 2.56.0. |
@@ -60,6 +61,16 @@ Times are what `Date.prototype.toISOString()` gives: `YYYY-MM-DDTHH:mm:ss.sssZ`.
 - Skip keys you don't know: later kit versions may add some, in an entry or beside `rounds`.
 - How long since `finished`, against `everyMs`, says whether the rounds are keeping up; `next` in the past while the agent is on duty says a round is overdue or under way.
 - An entry with `waiting` is an agent waiting for the person, not one that has stopped: say what it waits for, not that its rounds are late. With `turn` (or a `waiting` that begins "its first round:" or "its turn:") it waited its turn behind other agents instead: nothing for the person to do.
+
+## The clock (kit 2.72.0)
+
+The manor's agents share one 30-minute clock, so their rounds don't drift and don't all fire in the same minute.
+
+- **Intervals that fit it:** whole minutes that divide 30 minutes (1, 2, 3, 5, 6, 10, 15, 30), or multiples of 30 minutes that divide the day (1, 2, 3, 4, 6, 8, 12, 24 hours; 90 minutes). A schedule with one of these is on the clock; any other interval keeps the old way, each wait counted from the last round and varied by ±10%.
+- **Slots:** a schedule's rounds fall on multiples of its interval counted from local midnight, plus its phase: a 30-minute round at :00 and :30, a 6-hourly one at 00:00, 06:00, 12:00 and 18:00, in this PC's time.
+- **Phase:** whole minutes, under both the interval and 30 minutes, from the agent's id and the schedule's name (the same on every PC and at every start), unless the agent gives `every()` a `phaseMs`. An hourly round falls 0 to 29 minutes past the hour; a 5-minute round 0 to 4 minutes into each five.
+- **The next round** is the first slot at least half an interval after the last round ended, so a round that waited its turn or ran long keeps its slot, and one asked for (Run now) doesn't bring the next one forward.
+- The first round after the agent starts still comes after its start's stagger (Pace), then the rounds go on the clock.
 
 ## Pace (kit 2.43.3)
 

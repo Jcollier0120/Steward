@@ -45,6 +45,23 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.1
+
+**The Steward's kit 2.72.0: the agents run on a better schedule, on one shared clock, each in a minute of its own.**
+
+### What's new
+
+- Every agent that takes this kit runs its rounds on the manor's shared 30-minute clock: a round every 5, 10, 15 or 30 minutes, or every 1, 3 or 6 hours, falls on fixed times instead of drifting a little later each round.
+- Each agent has its own minute on that clock, so they no longer all start work in the same minute and load the PC at once.
+
+### What changed
+
+- The Steward's own rounds go on the clock too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent goes on the clock when it takes this kit.
+
 ## 0.35.79
 
 **An agent update that stopped for a moment's trouble on this PC is finished by itself.**

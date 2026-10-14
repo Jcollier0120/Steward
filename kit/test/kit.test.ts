@@ -96,7 +96,7 @@ test("rounds are recorded: the last to end and whether it went through, the next
   setDuty(true);
   let fail = false;
   let release: () => void = () => {};
-  const job = every(60_000, async () => {
+  const job = every(70_000, async () => {
     await new Promise<void>((r) => (release = r));
     if (fail) throw new Error('no network');
   }, { firstDelayMs: 50_000, name: 'mill' });
