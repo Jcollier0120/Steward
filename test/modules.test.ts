@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { removeWorktree } from '../src/git.ts';
 import type { Runner } from '../src/run.ts';
 import { runChecks } from '../src/stages/bump.ts';
-import { KEEP_SETS, modulesRootOf, packagesKey, pruneSets } from '../src/stages/modules.ts';
+import { KEEP_SETS, letterlessBy, letterlessMounts, modulesRootOf, onLetterlessDrive, packagesKey, pruneSets } from '../src/stages/modules.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // One node_modules for every worktree whose packages are the same: installed once, linked into each with a junction,
 // and only the link removed with the worktree.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-modules-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
+// The temp folder may be on a drive with no letter (a Dev Drive), where nothing is linked: these tests link.
+letterlessBy(() => false);
+after(() => letterlessBy(null));
 
 const lock = (name: string, version: string, deps: Record<string, string> = { typescript: '^7.0.2' }) =>
   JSON.stringify({ name, version, lockfileVersion: 3, requires: true, packages: { '': { name, version, devDependencies: deps }, 'node_modules/typescript': { version: '7.0.2' } } }, null, 2);
@@ -160,6 +163,48 @@ test('a set that fails to install leaves the worktree to npm ci itself, as befor
   assert.equal(await runChecks(ctx, e, c, { say: (l) => lines.push(l) }), 'npm ci --ignore-scripts --no-audit --no-fund failed (exit 1)');
   assert.equal(ci.length, 2, 'once for the set, once in the worktree');
   assert.equal(path.resolve(ci[1]).toLowerCase(), path.resolve(c).toLowerCase());
+});
+
+test('on a drive with no letter nothing is linked: esbuild follows no link there, so the worktree runs npm ci itself', async () => {
+  // mountvol's listing: a volume mounted only in a folder is letterless; one with a letter too isn't.
+  const listing = [
+    'Possible values for VolumeName along with current mount points are:',
+    '',
+    '    \\\\?\\Volume{4e8b7678-e67e-48e5-ad9c-891966b4e81a}\\',
+    '        C:\\',
+    '',
+    '    \\\\?\\Volume{700cb533-41b4-4f65-932b-5f9525f6e2c7}\\',
+    '        C:\\DevData\\',
+    '',
+    '    \\\\?\\Volume{ab49f3fd-4923-43f5-9316-80ce488f0a38}\\',
+    '        D:\\',
+    '        C:\\Projects\\',
+    '',
+    '    \\\\?\\Volume{b9f919d8-de5e-4ce2-ac0a-b09ebff2491b}\\',
+    '        *** NO MOUNT POINTS ***',
+  ].join('\r\n');
+  assert.deepEqual(letterlessMounts(listing), ['c:\\devdata']);
+  const real = realpathSync.native(tmp).toLowerCase();
+  assert.equal(onLetterlessDrive(tmp, [path.dirname(real)]), true);
+  assert.equal(onLetterlessDrive(tmp, [`${path.dirname(real)}x`]), false, 'a folder whose name merely begins the same');
+  assert.equal(onLetterlessDrive(tmp, []), false);
+  assert.equal(onLetterlessDrive(path.join(tmp, 'not-there'), [path.dirname(real)]), false, 'unreadable: as before');
+  const { run, ci } = npmStandIn();
+  const e = employee(tmp, { fill: '' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-mounted'), run, neutralDir: tmp });
+  const d = path.join(tmp, 'mounted');
+  project(d, 'porter', '0.4.1');
+  const { linkSharedModules } = await import('../src/stages/modules.ts');
+  const said: string[] = [];
+  letterlessBy((p) => path.resolve(p).toLowerCase() === path.resolve(d).toLowerCase());
+  try {
+    assert.equal(await linkSharedModules(ctx, d, (l) => said.push(l)), false);
+  } finally {
+    letterlessBy(() => false);
+  }
+  assert.equal(ci.length, 0, 'no shared set installed');
+  assert.equal(existsSync(path.join(d, 'node_modules')), false);
+  assert.match(said.join('\n'), /a drive with no letter/);
 });
 
 test('removing a worktree removes its link, never the packages it points to', async () => {

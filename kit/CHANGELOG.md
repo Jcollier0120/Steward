@@ -56,6 +56,30 @@ This builds on 2.68.0, which it needs.
 - An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
 - An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
 
+## 2.72.0
+
+**Rounds on the manor's shared 30-minute clock: they don't drift, and each agent's schedules fall in a minute of their own.**
+
+It comes after 2.69.0 to 2.71.2, still waiting to be merged here, and touches none of their files but `kit/VERSION`.
+
+### What's new
+
+- **On the clock.** `every()` puts a schedule whose interval fits the shared clock (`fitsClock`: whole minutes that divide 30, or multiples of 30 minutes that divide the day: 1, 5, 10, 15, 30 minutes, 1, 3, 6, 12, 24 hours…) on its slots: multiples of the interval from local midnight, plus the schedule's phase (`nextOnClock`). The next round is the first slot at least half an interval after the last one ended, so a round that waited its turn or ran long keeps its slot.
+- **A phase for each schedule.** `clockPhase(id, name, everyMs)`: whole minutes under both the interval and 30 minutes, from the agent's id and the schedule's name, the same on every PC and at every start. An agent may give its own with `every()`'s `phaseMs`.
+- round.json's entries say the phase (`phaseMs`; spec/ROUND.md's new section, The clock).
+
+### What changed
+
+- The interval is kept to the whole second from a minute up (`wholeInterval`), so one worked out in another unit can't drift off the clock.
+- An interval off the clock (7 minutes, 5 hours, anything under a minute or not in whole minutes) keeps the old way: each wait counted from the last round, varied by ±10%.
+- The first round after a start keeps its stagger (2 to 15 minutes at a gentle pace).
+
+### For an agent
+
+- Nothing to do: take the kit. To share the clock, give a schedule an interval that fits it (an hour rather than 50 minutes).
+- An interval function must return the interval, not the time left until the next round: every() works out the wait itself. (Porter returned the time left, which put odd values in round.json's `everyMs`.)
+- A test that expects a 1-minute schedule's next round a whole minute after the last should use an interval off the clock (70 s): on it, the next round falls on the next minute.
+
 ## 2.71.3
 
 **An agent's small files cost a stat, not a read, while they are unchanged, and a write that would change nothing writes nothing: Manor's pings, the pace and round.json stop touching the disk for nothing.**

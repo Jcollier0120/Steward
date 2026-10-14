@@ -8,7 +8,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
-import { checksLogOf } from './stages/bump.ts';
+import { checksLogOf, trialDirOf } from './stages/bump.ts';
+import { latestTrial, standingFailures, trialFails } from './stages/trial.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
@@ -27,7 +28,10 @@ import { hostFor } from './hosts/index.ts';
  *   alerts (the NPU driver, the test phone, a job that crashed) are a person's, and stay alarms. So do the Steward's
  *   own releases: its repository isn't one the Wright works in. And a PR's conflict with its branch that its author was
  *   told about and left an hour (Settings: alarms.blockingHours) at the same head (conflictItem): the PR is told once
- *   that the Wright has it, and the issue closes by itself once the PR merges, closes, or no longer conflicts.
+ *   that the Wright has it, and the issue closes by itself once the PR merges, closes, or no longer conflicts. And an
+ *   agent one of the Steward's own kit PRs waits for, its trial done and failing it (kitTrialItem): the work is the
+ *   agent's PR that pins the kit and passes with it, which lets the kit merge (stages/trial.ts's pairUp). Before Steward
+ *   0.35.71 that waited for the kit PR's author, and Steward#214 held the whole Steward queue for it.
  * - **Where:** only an employee's repository (never one of the PC's other projects the Wright helps with), and only one
  *   the Wright's GET /api/work says it works in (`label`, `repos`), while it takes work,
  *   and only when gh here is signed in as one of its `team` (it takes no one else's issues), as the Surveyor and the
@@ -56,8 +60,8 @@ export const PER_DAY = 3;
  * than three a day while the rest are alarms.
  */
 export function slotOf(id: string): string {
-  const kit = /^bump:[^:]+:(.+)$/.exec(id)?.[1];
-  return kit ? `bump:${kit}` : id;
+  const m = /^(bump|kittrial):[^:]+:(.+)$/.exec(id);
+  return m ? `${m[1]}:${m[2]}` : id;
 }
 export const workFiledFile = () => dataFile('work-filed.json');
 
@@ -275,7 +279,64 @@ export function conflictItems(o: { held: { employee: Employee; prs: Held[] }[]; 
   return out;
 }
 
-/** This round's work: its failed bumps (while rollout is on) and releases, Reeve's alerts that are code work, and conflicts left a while (conflictItems). Not the Steward's own. */
+/**
+ * An agent a new kit fails, as an issue in the agent's repository: the Steward's PR that raises the kit (`steward`'s
+ * #number) waits for it in its trial (stages/trial.ts). The work is the agent's PR that pins the kit and passes with it:
+ * once it is ready, the trial tries it at its head (pairUp), the kit merges and is released, and that PR merges after
+ * it. The kit itself being at fault is the Wright's to say on the issue, not to fix: the kit is the Steward's repository.
+ */
+export function kitTrialItem(e: Employee, f: { message: string; main?: string | null }, kit: string, steward: Employee, pr: { number: number; url: string; title: string }, settings: Settings): WorkItem {
+  const id = `kittrial:${e.id}:${kit}`;
+  const output = outputBeside(trialDirOf(settings, e));
+  const tests = e.test.join(' && ') || '(Settings give it no checks)';
+  return {
+    id,
+    condition: `waiting:${steward.repo}#${pr.number}`,
+    repo: e.repo,
+    title: `Make ${e.name} pass with kit ${kit} (the ${APP.name}'s #${pr.number} waits for it)`.slice(0, 200),
+    body: [
+      `The ${APP.name}'s ${pr.url} (${pr.title}) raises its kit to ${kit}. Before it merges, the ${APP.name} tries the new kit on every agent, and ${e.name}'s checks fail with it, so that PR waits, and every ${APP.name} PR above it in the version queue with it.`,
+      '',
+      '**What failed**',
+      '',
+      `${e.name}'s ${e.branch}${f.main ? ` at ${f.main.slice(0, 7)}` : ''}, with kit.json pinned to ${kit} and its kit filled from that PR's kit\\ (\`${e.fill}\`), then its checks (\`${tests}\`), twice:`,
+      '',
+      `> ${redact(f.message)}`,
+      '',
+      ...(output ? ['**What it printed** (the end of it, secrets taken out)', '', ...fence(output)] : ["Its whole output wasn't kept here."]),
+      '',
+      `**The work:** a pull request to ${e.name}'s ${e.branch} that pins kit ${kit} in kit.json and passes its checks with it. Kit ${kit} isn't released yet, so fill it from the PR: in a clone of ${steward.repo}, \`git fetch origin pull/${pr.number}/head\` and \`git worktree add <folder> FETCH_HEAD\`; then here \`node tools/kit.ts --from <folder>\\kit\`. Change ${e.name} so its checks pass with the new kit, as the kit's changelog entry for ${kit} (kit\\CHANGELOG.md there) says the agents must.`,
+      '',
+      `**If the kit is at fault** (it breaks what it shouldn't, and no change here is right): make no change, and say so on this issue with what you found. The kit is fixed in its own PR, by its author.`,
+      '',
+      `**Done means:** your PR is ready (not a draft) and passes with kit ${kit}. The ${APP.name}'s next round tries it at its head with that PR's kit; passing, the kit merges and is released, and your PR is tested with the released kit and merged after it. Should ${e.branch} pass with kit ${kit} as it is by the time you start (another fix landed), there is nothing to do: say so.`,
+      ...footer(id),
+    ].join('\n'),
+  };
+}
+
+/**
+ * The agents each of the Steward's own kit PRs waits for, as the merge stage held them (trialFails): the standing
+ * failures of its latest trial, done (kit-trials.json), each one's work in its own repository. Not a draft's.
+ */
+export function kitTrialItems(o: { held: { employee: Employee; prs: Held[] }[]; employees: Employee[]; settings: Settings; trials?: Parameters<typeof latestTrial>[2] }): WorkItem[] {
+  const out: WorkItem[] = [];
+  for (const { employee: steward, prs } of o.held) {
+    if (steward.id !== APP.id) continue;
+    for (const pr of prs) {
+      const kit = pr.draft ? null : trialFails(pr.why);
+      const t = kit ? latestTrial(pr.number, kit, o.trials) : null;
+      if (!kit || !t || t.pending?.length) continue;
+      for (const f of standingFailures(t)) {
+        const e = o.employees.find((x) => x.id === f.id);
+        if (e && e.id !== APP.id) out.push(kitTrialItem(e, f, kit, steward, pr, o.settings));
+      }
+    }
+  }
+  return out;
+}
+
+/** This round's work: its failed bumps (while rollout is on) and releases, Reeve's alerts that are code work, conflicts left a while (conflictItems), and the agents a kit PR's trial waits for (kitTrialItems). Not the Steward's own. */
 export function workItems(o: { failedReleases: Record<string, string>; failedRollouts?: Record<string, FailedRollout>; reeve?: unknown; round?: StageResult; employees: Employee[]; settings: Settings; held?: { employee: Employee; prs: Held[] }[]; now?: Date }): WorkItem[] {
   const out: WorkItem[] = [];
   if (o.settings.rollout) {
@@ -292,6 +353,7 @@ export function workItems(o: { failedReleases: Record<string, string>; failedRol
   }
   if (o.reeve) out.push(...reeveItems(o.reeve, o.employees));
   if (o.held?.length) out.push(...conflictItems({ held: o.held, hours: o.settings.alarms.blockingHours, now: o.now ?? new Date() }));
+  if (o.held?.length) out.push(...kitTrialItems({ held: o.held, employees: o.employees, settings: o.settings }));
   return out;
 }
 
@@ -512,6 +574,14 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
       }
       continue;
     }
+    const kt = /^kittrial:([^:]+):(\d+\.\d+\.\d+)$/.exec(id);
+    if (kt) {
+      if (await closeKitTrial(o, f, kt[1], kt[2])) {
+        delete filed[id];
+        changed = true;
+      }
+      continue;
+    }
     const m = /^bump:([^:]+):(\d+\.\d+\.\d+)$/.exec(id);
     if (!m) continue;
     const e = o.employees.find((x) => x.id === m[1]);
@@ -529,6 +599,41 @@ export async function closeResolved(o: { items: WorkItem[]; employees: Employee[
     if (r.code === 0) o.log(`work: closed ${f.url}: ${e.name} carries kit ${pin.kit} now`);
   }
   if (changed) writeJson(workFiledFile(), filed);
+}
+
+/**
+ * A kit trial's issue whose kit PR no longer waits for the agent, closed: the kit's latest trial, done, passes the agent
+ * or lets it move with its own PR (pairUp), or the kit PR merged or was closed. A trial going on (the PR caught up or
+ * pushed to) is no answer: the issue stays open until it ends. True once it is closed, or found closed already.
+ */
+async function closeKitTrial(o: { employees: Employee[]; run: Runner; cwd: string; log: (line: string) => void }, f: FiledWork, agent: string, kit: string): Promise<boolean> {
+  const c = /^waiting:([^#]+)#(\d+)$/.exec(f.condition ?? '');
+  if (!c) return false;
+  const n = Number(c[2]);
+  const name = o.employees.find((e) => e.id === agent)?.name ?? agent;
+  const host = hostFor({ run: o.run, neutralDir: o.cwd });
+  const t = latestTrial(n, kit);
+  let why: string | null = t && !t.pending?.length && !standingFailures(t).some((x) => x.id === agent) ? `kit ${kit}'s trial on ${c[1]}#${n} no longer waits for ${name}` : null;
+  if (!why) {
+    const v = await host.viewPr(c[1], n, 'state');
+    if (v.code !== 0) return false;
+    let state = '';
+    try {
+      state = String(JSON.parse(v.out).state ?? '').toUpperCase();
+    } catch {
+      return false;
+    }
+    if (state === 'OPEN') return false;
+    why = `${c[1]}#${n} ${state === 'MERGED' ? 'has merged (a failing bump to the released kit is work of its own)' : 'was closed'}`;
+  }
+  const r = await host.closeIssue(f.repo, f.number, { reason: 'completed', comment: `Nothing left to do: ${why}. Closed by the ${APP.name}.` });
+  const gone = r.code === 0 || /already closed/i.test(`${r.out}\n${r.err}`);
+  if (!gone) {
+    o.log(`work: couldn't close ${f.url}, whose kit trial no longer waits: ${redact(lastLine(r))}`);
+    return false;
+  }
+  if (r.code === 0) o.log(`work: closed ${f.url}: ${why}`);
+  return true;
 }
 
 /**

@@ -20,7 +20,7 @@ test('dotnetWithSdk: the first folder with dotnet.exe and an SDK, never a runtim
   rmSync(root, { recursive: true, force: true });
 });
 
-// Steward 0.36.11: a hidden git gets a console host of its own, a second process for every git; sharing the page's
+// Steward 0.36.14: a hidden git gets a console host of its own, a second process for every git; sharing the page's
 // windowless console (kit/console.ts) it gets none.
 test('startOptions: git and gh share a console the Steward has; without one, detached in the background; the rest hidden', () => {
   for (const cmd of ['git', 'gh']) {

@@ -124,7 +124,7 @@ const SHARING = new Set(['git', 'gh']);
 
 /**
  * How a command is started on Windows. git and gh share the Steward's console when it has one (kit/console.ts, Steward
- * 0.36.11): its page's, which keeps a windowless one from the way the kit starts it (kit 2.72.2), or a terminal's, so
+ * 0.36.14): its page's, which keeps a windowless one from the way the kit starts it (kit 2.72.2), or a terminal's, so
  * Ctrl+C stops what it started. Hidden, each would get a console host (conhost.exe) of its own: a second process for
  * every git, all day. With none to share in the background (a page an older kit started), detached (Steward 0.35.11).
  * Everything else starts hidden, as ever.

@@ -5,7 +5,7 @@ import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
-import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
+import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
 import { failedTests, runLine, tail } from '../run.ts';
@@ -16,6 +16,7 @@ import { installLines } from '../installscripts.ts';
 import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { keepWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 
@@ -173,6 +174,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
       return `${step} failed (exit ${r.code})${testsLine(tests)}${networkNote(output)}`;
     }
   }
+  // The Steward's own checks passed whole: kept by tree, so a kit released from the same code doesn't run them again (whole.ts).
+  await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
   return null;
 }
 
@@ -215,7 +218,9 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
         .map(([status, file]) => ({ status, path: file }));
       patches = patchesByFile(patch);
     }
-    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '' });
+    // The Steward's own repository fills its kit from its kit\: a kit file reaches its copies there.
+    const kitFrom = kitFromOf(dir, scripts);
+    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '', ...(kitFrom ? { kitFrom } : {}) });
     if (a.all) return whole(a.why);
     if (!a.files.length) {
       scope.chose = 'no test reaches the change';
@@ -254,6 +259,28 @@ export function testsLine(tests: { name: string; error: string | null }[]): stri
 /** kit.json's text with its pin moved to `kit`, everything else as it was. */
 export function repin(text: string, kit: string): string {
   return pinText({ ...JSON.parse(text.replace(/^﻿/, '')), kit });
+}
+
+/** How a trial's result begins when the agent fails its checks without the kit as well (trial.ts counts it apart). */
+export const WITHOUT_THE_KIT = 'fails its checks without kit';
+
+/**
+ * A trial's worktree put back as its main has it (nothing was committed: the bump's files and the kit filled from the
+ * PR go, its node_modules stays), and the same checks run there, once: the failure they give, or null when they pass.
+ * On 2026-10-13 kit 2.69.0 "failed" 22 agents for a reason that was this PC's (its work folder had moved to a drive
+ * where esbuild follows no link), and Reeve for 4 tests failing on its main: each held the kit, and every Steward PR
+ * behind it, though none was the kit's doing.
+ */
+async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+  try {
+    await git(ctx.run, dir, 'reset', '--quiet', '--hard', 'HEAD');
+    await git(ctx.run, dir, 'clean', '-fdxq', '-e', 'node_modules');
+  } catch (err) {
+    o.say(`couldn't put it back as its main has it, to run its checks without the kit: ${(err as Error).message}`);
+    return null;
+  }
+  o.say('its checks without the kit, as its main has it, to see whether the kit is why they fail');
+  return runChecks(ctx, e, dir, { ...o, doing: 'its checks without the kit' });
 }
 
 export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<EmployeeResult> {
@@ -346,6 +373,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
+    // A trial's failure isn't the kit's when the agent fails the very same way without it, on its main as it is. Failing
+    // otherwise there (its own kit couldn't be fetched, say) says nothing, and the failure stands.
+    const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
+    if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
+    if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.

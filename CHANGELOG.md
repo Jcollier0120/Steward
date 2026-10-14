@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.11
+## 0.36.14
 
 **Half the processes for its git and gh calls: they share its page's console instead of each starting a console host of its own.**
 
@@ -16,6 +16,47 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The change takes effect when its page restarts after the update.
 
+## 0.36.12
+
+**A new kit that fails some agents no longer holds up the Steward's queue: what isn't the kit's doing is set apart, the rest goes to the Wright, and the PRs behind it merge meanwhile.**
+
+### What's new
+
+- When a new kit fails an agent's checks in its trial, the Steward runs the same checks once more on that agent as it is, without the new kit. If they fail there too, the problem is the agent's or this PC's, not the kit's: it no longer holds the kit back, and the trial's comment names it apart.
+- When a new kit fails an agent's checks before release, the Steward hands that agent to the Wright: an issue in the agent's repository asks for a change that works with the new kit. Once that change is ready and passes, the kit goes ahead, and the agent's change follows it. The issue closes by itself when it's no longer needed.
+- A kit PR whose trial still fails agents gives up its turn in the queue, as a PR with a conflict already does. The PRs behind it merge meanwhile, and it merges once its trial passes.
+- Failures that an older Steward recorded in a kit trial are tried again once by the updated Steward, so a problem in the Steward itself doesn't keep a kit waiting after it was fixed.
+
+### What changed
+
+- A kit change that fails some agents is brought up to date by itself when a fix for the kit has landed in the meantime, and tried again with that fix, instead of failing the same way round after round.
+- The Steward's comment on such a change says that the Wright has the failing agents, and that the change is tried again once the kit moves underneath it.
+- On a PC whose work folder is on a drive that has no letter (a Dev Drive mounted only in a folder), the shared packages the Steward links into each check couldn't be found by esbuild, and every agent's page test failed. On 2026-10-13 that "failed" 22 of 34 agents in kit 2.69.0's trial and held every Steward PR behind it. On such a drive each check now installs its own packages. Giving the drive a letter as well (in its Properties) puts the shared packages back in use.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Wright gets this work only on a PC where the Wright is installed; elsewhere a failing kit still waits for a person, as before.
+
+## 0.36.10
+
+**A vouch or a PR test on the Steward's own code runs only the tests its change reaches, and its whole suite runs before every kit release.**
+
+### What changed
+
+- A changelog entry, a README or another Markdown file no longer runs most of the tests. Only code that reads that file from its own place counts, such as a test checking the Steward's own changelog. Code that reads the changelog of a worktree or a commit it's given doesn't.
+- In the Steward's own repository, a change to the kit runs the kit's tests and the tests of the code that uses the kit's copies in the repository, instead of the whole suite. A kit version step (`kit/VERSION` and `kit.json`'s pin) runs only the tests that check the versions agree. In an agent's repository a kit change still runs everything.
+- A file in a folder that code reads as a whole (`new URL('./core/', import.meta.url)`) now reaches that code, rather than running everything.
+- On the Steward's last twelve merged PRs, a vouch would have run about 45 of 126 test files on average instead of about 100, and taken about a third less test time. Seven of those twelve ran the whole suite before; none do now.
+- This release brings the versions below it that weren't released on their own (0.35.61 to 0.36.6) too, and the Steward uses kit 2.72.1 itself.
+
+### What's new
+
+- Before releasing a kit, which every agent takes, the Steward runs its own whole suite at that commit, unless it has already passed that exact code whole. A failure there holds the kit's release like any failed release: an alarm, and no retry until a new commit lands on main. The Steward's own releases aren't held for it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.6
 
 **The Steward's kit 2.71.1: the tests the Steward runs no longer sign their throwaway commits with your key, and release builds are tested once, before a kit is released, not in every check.**
@@ -26,7 +67,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's own tests sign nothing either, and its two tests of building a release build once each instead of five and two times: the builds those tests made over and over now run once, before a kit is released, and checking a pull request takes minutes less.
 - Before it releases a kit, the Steward installs its packages and builds every kind of release the kit makes (`npm run test:release`). A kit whose release builds fail isn't released, and says so.
 - A check of the Steward no longer fails now and then because another one ran at the same time: its tests that open a page each take a port nothing else is using, instead of sharing one.
-- This release brings the versions below it that weren't released on their own (0.35.61 to 0.36.4) too, and the Steward uses kit 2.72.1 itself.
 
 ### Before you update
 
@@ -58,6 +98,23 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.1
+
+**The Steward's kit 2.72.0: the agents run on a better schedule, on one shared clock, each in a minute of its own.**
+
+### What's new
+
+- Every agent that takes this kit runs its rounds on the manor's shared 30-minute clock: a round every 5, 10, 15 or 30 minutes, or every 1, 3 or 6 hours, falls on fixed times instead of drifting a little later each round.
+- Each agent has its own minute on that clock, so they no longer all start work in the same minute and load the PC at once.
+
+### What changed
+
+- The Steward's own rounds go on the clock too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent goes on the clock when it takes this kit.
 
 ## 0.35.79
 
