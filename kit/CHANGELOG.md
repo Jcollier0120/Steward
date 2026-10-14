@@ -148,6 +148,22 @@ This builds on 2.68.0, which it needs.
 - An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
 - An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
 
+## 2.68.1
+
+**An update is no longer rolled back because the network went down while it was installing.**
+
+### What changed
+
+- **The probation asks for the home page on 127.0.0.1** (`homePageUrl`, `homePageStatus`), as the ping always did, not at the page's `<agent>.localhost` name. Windows doesn't resolve `*.localhost` itself: it asks the network's DNS server (a home router answers 127.0.0.1). So while the network is down the name doesn't resolve, and a page that was up and answering was rolled back and flagged unsafe with "its home page didn't answer". On 2026-10-13 that happened to seven agents within the same minute: Windows logged that its DNS server stopped answering at 14:16:32Z, the moment the first one was rolled back. The page's server already takes 127.0.0.1 as its host.
+- **A home page that doesn't answer at all is asked again at each look**, and fails the probation only if it hasn't rendered by the end of it (90 s). An answer that's an error status still fails at once, and so do the wrong version answering and a page that stops answering its ping.
+  - The install's own settling (15 s) leaves the home page to the background watcher, which asks again.
+  - A rollback for a home page that never rendered keeps its old words, "its home page didn't answer", which the Steward's retry of such rollbacks reads.
+- `probation()` takes `homeLater`, for a settling whose end isn't its own to judge.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. The fix works from the agent's next update on, since a release's own install runs the probation. `unsafe-updates.json` is unchanged, so versions flagged before stay flagged until they are allowed again (`install --allow-unsafe`, or the Steward's retry of such rollbacks).
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

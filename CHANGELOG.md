@@ -32,6 +32,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each agent picks up the new wording with its next kit update.
 
+## 0.35.75
+
+**A Wi-Fi drop during an update no longer rolls the update back.**
+
+### What changed
+
+- The Steward's kit 2.68.1. After an update, each agent (the Steward too) checks that its page came up before keeping the new version. Part of that check used the page's name, such as `lamplighter.localhost`, and on Windows that name is looked up through your network. When the Wi-Fi or router dropped mid-update, the lookup failed, and an update that was working was rolled back and marked unsafe. The check now goes straight to the page on this PC, and a page that's slow to show its first screen gets the whole check (90 seconds) to do it. A page that shows an error, answers as the wrong version, or stops is still rolled back as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent gets the fix with its next release built on this kit. Updates already rolled back this way stay marked until they're allowed again; the Steward retries them by itself.
+
 ## 0.35.74
 
 **The Steward's kit 2.69.0: when the NPU can't do something, the graphics card does it, only while it's needed.**
