@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.19
+
+**A vouch no longer tests code again when the Assayer already ran the tests the change reaches, not just the whole suite.**
+
+### What changed
+
+- When a session checks its work with the Assayer's `affected` check (only the tests the change reaches) and commits exactly that, `steward vouch` now takes that pass instead of running the tests a second time. It does so when the test files the Assayer ran include every one the vouch would pick itself against `origin/<branch>`, and every other check (the typecheck and the rest) ran in full. Its status then says so: `npm test (affected: 12 of 126 test files, the Assayer's)`.
+- If the Assayer ran fewer test files than the vouch would, or doesn't say which (Vitest and Jest pick their own), or Settings have the vouch run the whole suite while the Assayer ran only some, the vouch runs the checks itself, as before. A full Assayer pass is still taken as it was.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Assayer records which test files an affected check ran from its 0.3.35 on. Until then, only its full checks stand in for a vouch.
+
 ## 0.36.18
 **Half the processes for its git and gh calls: they share its page's console instead of each starting a console host of its own.**
 
