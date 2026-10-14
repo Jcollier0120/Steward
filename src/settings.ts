@@ -498,7 +498,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: "Keeps the staff's pages up",
     tab: 'How it works',
-    help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped.",
+    help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped. And an update rolled back only because the PC was offline for a moment is allowed again and installed, once.",
   },
   {
     key: 'afterRelease',
