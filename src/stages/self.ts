@@ -8,7 +8,7 @@ import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { exchequerNote, networkFailure, networkNote, passingFailure, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { exchequerNote, networkFailure, networkNote, passingFailure, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseNeedsPackages } from './release.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -114,14 +114,13 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   const at = step.commit.slice(0, 7);
   const dir = selfDirOf(ctx);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
   if (!(await commitOf(run, repo, step.commit))) await fetchBranch(run, repo, STEWARD_BRANCH);
   // Only a commit on origin's main, which the scripts need too ("HEAD isn't on origin yet").
   if ((await gitMaybe(run, repo, 'merge-base', '--is-ancestor', step.commit, `origin/${STEWARD_BRANCH}`)) === null) {
     await fetchBranch(run, repo, STEWARD_BRANCH);
     if ((await gitMaybe(run, repo, 'merge-base', '--is-ancestor', step.commit, `origin/${STEWARD_BRANCH}`)) === null) return selfResult('failed', `${at} isn't on origin/${STEWARD_BRANCH} in ${repo}`, { version: step.version, commit: at });
   }
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, step.commit);
+  await freshWorktree(run, ctx.settings, repo, dir, step.commit, '--detach');
   ctx.log(`[${APP.id}] releasing ${step.tag} from origin/${STEWARD_BRANCH} (${at}) in ${dir}`);
   try {
     // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
