@@ -59,7 +59,9 @@ export function readText(file: string, s: Stats | null = statOf(file)): string |
     return k.text;
   }
   kept.delete(file);
-  const readAt = Date.now();
+  // The earlier of the wall clock and the process's own (which a test's mocked Date, or a clock set back, can't move
+  // ahead): a clock running ahead could take a file not yet settled for one that has.
+  const readAt = Math.min(Date.now(), performance.timeOrigin + performance.now());
   const text = readFileSync(file, 'utf8');
   fileCounts.reads++;
   if (s.size <= MAX_BYTES) {
