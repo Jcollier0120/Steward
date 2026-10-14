@@ -32,6 +32,8 @@ Measured on an 18-core laptop, the Assayer's suite (155 tests): on a quiet PC, w
 - Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
 - An agent that calls `paceProcess(p, asked)` or `setPriorityFor(p, asked, set)` drops the `asked` argument (Surveyor's `setPriorityFor(pace())` is fine as it is). One with an MCP server or a process of its own outside `every()` (Reeve, the Assayer) calls `containSelf()` at its start.
 
+## 2.68.0
+
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**
 
 This builds on 2.67.0 (Intel's 4,096-token cap and embeddings on the NPU), which it needs.
