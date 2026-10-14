@@ -11,6 +11,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On a PC with an Intel or AMD NPU, the agents' local AI requests now wait as long as that NPU's own settings allow. Before, they all waited the same short time, so a slower NPU's answers, or its first answer while it prepared its model, could be cut off and the work put off until later. The timings setup measured for an NPU nobody had measured before are used now too.
 - When one agent finds the NPU still loading its model because another agent just woke it, it now waits for the load to finish, as it already did when it woke the NPU itself.
 - On a PC with a Qualcomm NPU, nothing changes.
+- The NPU benchmark's battery measurement no longer comes out empty when the PC is busy.
 
 ### Before you update
 
