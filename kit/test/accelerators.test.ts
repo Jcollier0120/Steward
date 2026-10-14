@@ -880,22 +880,27 @@ const npuAndCard = () => config({
   ],
 });
 
-test("the core's withoutGpuBesideNpu: off with an NPU leaves every card out and keeps the processor; on, or no NPU, changes nothing", () => {
+/** Each accelerator with the work it serves, as `id: kinds`. */
+const serving = (l: Accelerator[]) => l.map((a) => `${a.id}: ${(['chat', 'vision', 'embed'] as const).filter((k) => A.serves(a, k)).join(' ')}`);
+
+test("the core's withoutGpuBesideNpu: off with an NPU leaves the card only what no NPU serves and keeps the processor; on, or no NPU, changes nothing", () => {
   const list = npuAndCard().accelerators;
   const ids = (l: { id: string }[]) => l.map((a) => a.id);
-  assert.deepEqual(ids(core.withoutGpuBesideNpu(list, false)), ['npu', 'cpu'], 'off: no card, the processor stays');
-  assert.deepEqual(ids(core.withoutGpuBesideNpu(list, true)), ['npu', 'gpu-adreno', 'cpu'], 'on: as today');
+  // This NPU makes no embeddings: the card keeps them (on demand), and nothing else.
+  assert.deepEqual(serving(core.withoutGpuBesideNpu(list, false)), ['npu: chat vision', 'gpu-adreno: embed', 'cpu: embed'], 'off: the card for what the NPU does not do, the processor stays');
+  assert.equal(core.withoutGpuBesideNpu(list, true), list, 'on: as today');
   const noNpu = list.filter((a) => a.kind !== 'npu');
   assert.deepEqual(ids(core.withoutGpuBesideNpu(noNpu, false)), ['gpu-adreno', 'cpu'], 'no NPU: the switch means nothing, the card stays');
   const npuOff = list.map((a) => (a.kind === 'npu' ? { ...a, enabled: false } : a));
-  assert.deepEqual(ids(core.withoutGpuBesideNpu(npuOff, false)), ['npu', 'gpu-adreno', 'cpu'], 'an NPU sent nothing is no NPU');
+  assert.equal(core.withoutGpuBesideNpu(npuOff, false), npuOff, 'an NPU sent nothing is no NPU');
   const npuServesNothing = list.map((a) => (a.kind === 'npu' ? { id: a.id, kind: a.kind, memoryGb: null } : a));
   assert.deepEqual(ids(core.withoutGpuBesideNpu(npuServesNothing as unknown as Accelerator[], false)), ['npu', 'gpu-adreno', 'cpu']);
   const twoCards = [...list, gpu('gpu-rtx', { memoryGb: 24, chat: { baseUrl: 'http://127.0.0.1:1', model: 'm' } } as any)];
-  assert.deepEqual(ids(core.withoutGpuBesideNpu(twoCards as Accelerator[], false)), ['npu', 'cpu'], 'every card, own memory or shared');
+  assert.deepEqual(serving(core.withoutGpuBesideNpu(twoCards as Accelerator[], false)), ['npu: chat vision', 'gpu-adreno: embed', 'cpu: embed'], 'every card, own memory or shared: one left nothing is dropped');
+  assert.deepEqual(list[1].chat, { baseUrl: 'http://127.0.0.1:1', model: 'm' }, 'the config itself is left as it is');
 });
 
-test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even as the fallback; the processor still serves", async () => {
+test("Manor's gpuWithNpu off, with an NPU: none of the NPU's work goes to the card, not even as the fallback; the processor still serves", async () => {
   fresh();
   noGames();
   const cfg = npuAndCard();
@@ -903,7 +908,7 @@ test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even
   try {
     manorSays({ gpuWithNpu: false });
     const model = new Npu(cfg);
-    assert.deepEqual(ids(model.accelerators), ['npu', 'cpu']);
+    assert.deepEqual(serving(model.accelerators), ['npu: chat vision', 'gpu-adreno: embed', 'cpu: embed'], 'the card only for the embeddings this NPU does not make');
     assert.equal(model.hasVision, true, 'the NPU still sees');
     assert.equal(model.budget(300), 2400 - 300, "the NPU's cap, not the card's 16K");
     // A request only the card's cap would take is refused before anything is sent, not sent to the card.
@@ -926,13 +931,13 @@ test("Manor's gpuWithNpu off, with an NPU: no request goes to the card, not even
       rmSync(queue, { recursive: true, force: true });
       free();
     }
-    // Embeddings: the card is set aside, the processor serves them.
+    // Embeddings, which this NPU doesn't make: the card on demand, then the processor (kit 2.69.0).
     assert.equal(model.hasEmbed, true);
-    assert.deepEqual(ids(model.accelerators.filter((a) => A.serves(a, 'embed'))), ['cpu']);
-    // With only the card serving embeddings, they're refused, and say why.
-    const cardEmbedOnly = new Npu(config({ accelerators: cfg.accelerators.filter((a) => a.kind !== 'cpu') }));
-    assert.equal(cardEmbedOnly.hasEmbed, false);
-    await assert.rejects(cardEmbedOnly.embed(['a']), (e: Error) => e instanceof NpuError && /the graphics card isn't used for models beside the NPU/.test(e.message));
+    assert.deepEqual(ids(model.accelerators.filter((a) => A.serves(a, 'embed'))), ['gpu-adreno', 'cpu']);
+    // Beside an NPU that makes them, the card is set aside for them too: asked for by name, refused, and says why.
+    const npuEmbeds = new Npu(config({ accelerators: [{ ...cfg.accelerators[0], embed: { baseUrl: 'http://127.0.0.1:1', model: 'e' } }, cfg.accelerators[1]] }));
+    assert.deepEqual(ids(npuEmbeds.accelerators), ['npu']);
+    await assert.rejects(npuEmbeds.embed(['a'], { accelerator: 'gpu-adreno' }), (e: Error) => e instanceof NpuError && /the graphics card isn't used for models beside the NPU/.test(e.message));
   } finally {
     noManor();
     fresh();
@@ -961,9 +966,9 @@ test("gpuWithNpu on, an older Manor without the key, no Manor, or no NPU: the ca
     assert.deepEqual(ids(noNpu.accelerators), ['gpu-adreno', 'cpu']);
     // Read afresh: Manor's change applies to the next request of the same Npu.
     const model = new Npu(cfg);
-    assert.deepEqual(ids(model.accelerators), ['npu', 'cpu']);
+    assert.deepEqual(serving(model.accelerators), ['npu: chat vision', 'gpu-adreno: embed', 'cpu: embed']);
     manorSays({ gpuWithNpu: true });
-    assert.deepEqual(ids(model.accelerators), ['npu', 'gpu-adreno', 'cpu']);
+    assert.deepEqual(serving(model.accelerators), ['npu: chat vision', 'gpu-adreno: chat vision embed', 'cpu: embed']);
   } finally {
     noManor();
     fresh();

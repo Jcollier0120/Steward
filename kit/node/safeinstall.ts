@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { APP, pageUrl } from '../app.ts';
+import { APP, port } from '../app.ts';
 import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, type InstallDeps } from './install.ts';
 import { ping } from './service.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
@@ -138,8 +138,13 @@ async function moveWithRetries(from: string, to: string, d: SafeDeps): Promise<v
 /**
  * Whether the new version holds up: its page answers as `version` until `ms` after `since` (now, and the whole
  * probation, unless said), and its home page renders. The reason when it doesn't, timed from `since`.
+ *
+ * A home page that answers with an error fails at once. One that doesn't answer at all is asked again at each look
+ * (kit 2.69.1), and fails only when it hasn't rendered by the end: its ping answers, so its process is up, and a first
+ * render can wait on something slow. `homeLater`: the end isn't this one's to judge, as the install's own settling
+ * hands the rest to a watcher, which asks again.
  */
-export async function probation(version: string, d: SafeDeps, o: { ms?: number; since?: number } = {}): Promise<string | null> {
+export async function probation(version: string, d: SafeDeps, o: { ms?: number; since?: number; homeLater?: boolean } = {}): Promise<string | null> {
   const start = o.since ?? d.now();
   const ms = o.ms ?? d.probationMs;
   let homeSeen = false;
@@ -158,11 +163,31 @@ export async function probation(version: string, d: SafeDeps, o: { ms?: number; 
     if (v !== version) return `its page answers as ${v}, not ${version}`;
     if (!homeSeen) {
       const status = await d.homePage();
-      if (status !== 200) return `its home page ${status === null ? "didn't answer" : `answered ${status}`}`;
-      homeSeen = true;
+      if (status !== null && status !== 200) return `its home page answered ${status}`;
+      homeSeen = status === 200;
     }
-    if (d.now() - start >= ms) return null;
+    // The same words as before 2.69.1, which the Steward's retry of such rollbacks reads.
+    if (d.now() - start >= ms) return homeSeen || o.homeLater ? null : "its home page didn't answer";
     await d.sleep(LOOK_EVERY_MS);
+  }
+}
+
+/**
+ * Where the probation asks for the home page (kit 2.69.1): 127.0.0.1, as the ping does, never the page's
+ * <agent>.localhost name. Windows doesn't name *.localhost itself: it asks the network's DNS server (a home router
+ * answers 127.0.0.1), so while the network is down the name doesn't resolve, and a page that was up was rolled back
+ * (2026-10-13: seven agents, in the minute the router stopped answering). The page's server takes 127.0.0.1 as its host.
+ */
+export const homePageUrl = (at: number = port) => `http://127.0.0.1:${at}/`;
+
+/** The status of the page's home page, or null when it doesn't answer within `ms`. */
+export async function homePageStatus(url = homePageUrl(), ms = 10_000): Promise<number | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    await res.body?.cancel();
+    return res.status;
+  } catch {
+    return null;
   }
 }
 
@@ -278,7 +303,7 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
   // Its start waited for here; the rest, in the background, when a watcher can take it (kit 2.52.0).
   const since = d.now();
   const background = !opts.wait && !!d.watch && d.probationMs > SETTLE_MS;
-  const why = await probation(release.version, d, { since, ms: background ? SETTLE_MS : d.probationMs });
+  const why = await probation(release.version, d, { since, ms: background ? SETTLE_MS : d.probationMs, homeLater: background });
   if (why) return goBack(release.version, from, why, d);
   if (background) {
     if (await d.watch!(['--watch-probation', release.version, '--from', from, '--since', String(since)])) {
@@ -303,13 +328,7 @@ export function safeDeps(): SafeDeps {
       const p = await ping();
       return p ? String(p.version ?? '') : null;
     },
-    homePage: async () => {
-      try {
-        return (await fetch(pageUrl, { signal: AbortSignal.timeout(10_000) })).status;
-      } catch {
-        return null;
-      }
-    },
+    homePage: () => homePageStatus(),
     probationMs: Number(process.env.KIT_PROBATION_MS || process.env.STEWARD_PROBATION_MS) || PROBATION_MS,
     endPage: async () => {
       await d.shutdown();

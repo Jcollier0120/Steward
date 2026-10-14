@@ -5,11 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { after, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // A handler's reply streamed as it's made (kit 2.61.0), and the signal that tells it the client went away.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-stream-'));
 after(() => rmSync(home, { recursive: true, force: true }));
 process.env.FIXTURE_HOME = path.join(home, 'data');
+process.env.FIXTURE_PORT = String(await freePort()); // never the fixture's own 17979, which every checkout's tests share
 process.env.KIT_GENTLE = '0';
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 

@@ -47,7 +47,7 @@ import { apart, withRepo } from './slots.ts';
  * for at most TRIAL_SLICE_MS, keeps what it found (KitTrial's `pending`: the ones still to try), and goes on with the
  * rest of its work; the PR waits meanwhile (TRIAL_GOING, a brief wait: the next round comes sooner). And each agent is
  * tried only as far as the kit changes it (kitreach.ts): one none of whose kit files change isn't tried at all, and one
- * whose files change runs only the tests they reach; its rollout's bump runs them all.
+ * whose files change runs only the tests they reach. Its rollout's bump runs the same ones (0.35.68).
  */
 
 /** How long a round tries agents for before it goes on with the rest of its work (the agents in flight finish). */
@@ -337,10 +337,10 @@ const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
   results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null }));
 
 /**
- * Each employee that passed with all its checks, by id: the commit of its branch it was bumped from (TrialPasses'
- * `mains`). One that ran only some of them (`partial`) isn't: its rollout's bump runs them all.
+ * Each employee that passed its checks, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). One
+ * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones (0.35.68).
  */
-const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base && !r.partial).map((r) => [r.id, r.base!]));
+const mainsOf = (results: EmployeeResult[]): Record<string, string> => Object.fromEntries(results.filter((r) => r.outcome === 'done' && r.base).map((r) => [r.id, r.base!]));
 
 /** The memory one agent's try may take at its peak: its install, a type check and a test run side by side. */
 const TRY_BYTES = 3 * 1024 ** 3;
@@ -349,7 +349,9 @@ const TRY_BYTES = 3 * 1024 ** 3;
  * How many agents a trial tries at once: Settings' parallel, or a quarter of this PC's processors up to 4, whichever is
  * more; never more than the memory free now holds at TRY_BYTES each (at least one). A try is an agent's install, its kit
  * filled and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
- * average, and two at a time left the trial waiting on itself. Pure.
+ * average, and two at a time left the trial waiting on itself. Their commands run at the kit's checks pace (Steward
+ * 0.35.64), in one job for the PC with one processor cap: more tries at once share that cap rather than adding to it, so
+ * the processor is held to it whatever this says, and memory stays the limit. Pure.
  */
 export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem()): number =>
   Math.max(1, Math.min(Math.max(parallel, Math.min(4, Math.floor(cpus / 4))), Math.floor(free / TRY_BYTES)));

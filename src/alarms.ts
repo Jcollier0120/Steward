@@ -4,6 +4,7 @@ import { APP, pageUrl } from './app.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
+import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
 import { BAILIFF_WAIT } from './review.ts';
 import { CONFLICTS } from './conflicts.ts';
 import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
@@ -14,6 +15,7 @@ import { refreshDirOf } from './stages/refresh.ts';
 import type { Runner } from './run.ts';
 import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
+import { unstickConditions, type UnstickState } from './unstick.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
 
 /**
@@ -43,7 +45,11 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  *   for two (the Wright's drafts wait for it).
  * - a release the Aletaster's tasting has held a while (tasting-held.json; Settings: tastingHours);
  * - an update of the Steward itself that its install rolled back (unsafe-updates.json), at once;
+ * - a package whose install script isn't on Settings' list, which held an install of the Steward's (install-held.json,
+ *   installscripts.ts), at once, naming the package, its version, the repository and the script;
  * - an agent on duty whose page doesn't answer, which the round couldn't open again through Manor (tend.ts), at once;
+ * - an agent update Manor gave up on that the round couldn't settle: its install would still take an older release, or
+ *   the Steward pressed Update for it once already (unstick.ts), at once;
  * - on the PC that releases Castellan, the Steward's PRs merged or its employees released by something that isn't this
  *   Steward, another Steward elsewhere most likely (strangers.ts), at once, for a day after the last one;
  * - each of Reeve's jobs' open alerts (his GET /api/alerts), at once, where Reeve is installed. Reeve raises no toast
@@ -186,16 +192,22 @@ export function roundConditions(o: {
   failedRefreshes?: Record<string, { commit: string; message: string; after: string }>;
   /** The staff's pages as the round's look left them (tend.ts's tending.json); null while Settings switch it off. */
   tending?: TendState | null;
+  /** The agent updates Manor gave up on that the Steward couldn't settle (unstick.ts's unstick.json); null while Settings switch it off. */
+  unstick?: UnstickState | null;
   /** Merges and releases of this Steward's repositories that it didn't make (strangers.ts), as its alarm. */
   strangers?: Condition[];
   /** Every agent's port, as Manor's lists, the clones and the claims say (ports.ts): two agents on one is an alarm. */
   ports?: PortUse[];
+  /** Packages whose install scripts held an install (installscripts.ts's install-held.json), by id. */
+  installHolds?: Record<string, InstallHold>;
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
   const out: Condition[] = [];
+  out.push(...installHoldConditions(o.installHolds ?? {}, allowedInstallScripts(o.settings)));
   if (o.ports) out.push(...portClashConditions(o.ports));
   if (o.tending) out.push(...tendConditions(o.tending));
+  if (o.unstick) out.push(...unstickConditions(o.unstick));
   out.push(...(o.strangers ?? []));
   const wait = o.settings.alarms.waitingHours;
   for (const { employee: e, prs } of o.held) {

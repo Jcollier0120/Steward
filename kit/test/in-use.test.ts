@@ -4,12 +4,14 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
+import { freePort } from './free-port.ts';
 
 // A page someone is using keeps its agent at a normal pace (gentle.ts pageInUse, kit 2.57.1). In a file of its own,
 // since the pace is the process's.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-in-use-'));
 after(() => rmSync(home, { recursive: true, force: true }));
 process.env.FIXTURE_HOME = path.join(home, 'data');
+process.env.FIXTURE_PORT = String(await freePort()); // never the fixture's own 17979, which every checkout's tests share
 process.env.KIT_GENTLE = '0'; // priority alone: no PowerShell worker
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 

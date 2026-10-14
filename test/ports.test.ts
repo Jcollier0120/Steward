@@ -77,3 +77,23 @@ test('an agent with a port keeps it; a claim ends when its port lands, or after 
   assert.equal(liveClaims([claim], [...uses, use('tallyman', 20909, 'clone')], t0 + DAY).length, 0, 'landed: its clone says so');
   await assert.rejects(claimPort({ id: 'Not An Id', by: 'claude', for: '', uses }), /isn't an agent id/);
 });
+
+test("each clone's port is read once per commit of origin's branch there: read again only once that has moved", async () => {
+  const { cloneUses } = await import('../src/ports.ts');
+  const { employee, fakeEmployee, sh } = await import('./helpers.ts');
+  const { run: realRun } = await import('../src/run.ts');
+  const f = fakeEmployee(path.join(home, 'clone'), { files: { 'manor-agent.json': JSON.stringify({ agent: { home: 'http://fake.localhost:19393/' } }) } });
+  const e = employee(f.checkout);
+  const git: string[][] = [];
+  const run = (cmd: string, args: string[], opts?: any) => (cmd === 'git' && git.push(args), realRun(cmd, args, opts));
+  assert.deepEqual(await cloneUses(run, [e]), [{ port: 19393, id: 'fake', source: 'clone' }]);
+  assert.ok(git.length > 0, 'read the first time');
+  git.length = 0;
+  assert.deepEqual(await cloneUses(run, [e]), [{ port: 19393, id: 'fake', source: 'clone' }]);
+  assert.deepEqual(git, [], 'the same commit: not read again');
+  writeFileSync(path.join(f.checkout, 'manor-agent.json'), JSON.stringify({ agent: { home: 'http://fake.localhost:19494/' } }));
+  sh(f.checkout, 'commit', '--quiet', '-am', 'moved');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  assert.deepEqual(await cloneUses(run, [e]), [{ port: 19494, id: 'fake', source: 'clone' }]);
+  assert.ok(git.length > 0, 'origin moved: read again');
+});

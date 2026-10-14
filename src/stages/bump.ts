@@ -3,6 +3,7 @@ import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
+import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
@@ -11,7 +12,8 @@ import { failedTests, runLine, tail } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
-import { linkSharedModules } from './modules.ts';
+import { installLines } from '../installscripts.ts';
+import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
 import { trialPassOf } from './trialpass.ts';
@@ -51,8 +53,9 @@ export interface BumpOptions {
    */
   trial?: boolean;
   /**
-   * A trial's: what the kit changes for the employee (kitreach.ts), given its pin and whether its tools/kit.ts changes.
-   * Nothing it takes: it isn't tried. Some files: only the tests they reach run.
+   * A trial's and the rollout's: what the kit changes for the employee (kitreach.ts), given its pin and whether its
+   * tools/kit.ts changes. Nothing it takes: a trial doesn't try it, and a rollout's bump runs its checks but no tests.
+   * Some files: only the tests they reach run.
    */
   reach?: (e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => Promise<KitReach>;
   /**
@@ -131,9 +134,17 @@ export const needsNpmCi = (dir: string) =>
  * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string }): Promise<string | null> {
   const before: string[] = [];
-  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) before.push('npm ci --no-audit --no-fund');
+  if (needsNpmCi(dir)) {
+    // No package's install script runs unless Settings allow it; one that isn't holds the checks (installscripts.ts).
+    const g = await guardPackages(ctx, e, dir, o.doing ?? 'its checks');
+    if (g.held) {
+      o.say(`packages held: ${g.held}`);
+      return `its packages weren't installed: ${g.held}`;
+    }
+    if (!(await linkSharedModules(ctx, dir, o.say, g.plan))) before.push(...installLines(g.plan));
+  }
   if (e.fill) before.push(e.fill);
   // Each test step worked out once the dependencies and the kit are in place, so the kit's files are there to follow.
   const steps: (string | (() => Promise<string[]>))[] = [...before];
@@ -144,7 +155,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
     const t0 = Date.now();
-    const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
+    // Its tests' throwaway commits signed with nobody's key (kit/unsigned-git.ts): never pushed, and each would start ssh-keygen.
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: !ctx.fast });
     o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
@@ -269,11 +281,14 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  // A trial of an agent the kit changes nothing for isn't tried: its checks would run its own main's code (kitreach.ts).
-  const reach = o.trial && o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
-  if (reach && 'none' in reach) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
-  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : undefined;
+  // What the kit changes for it (kitreach.ts): a trial's, and the rollout's (0.35.68). A trial of an agent the kit
+  // changes nothing for isn't tried: its checks would run its own main's code. The rollout still bumps it, with its fill,
+  // typecheck and pretest but no tests; one whose kit files change runs the tests they reach, as its trial did.
+  const reach = o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
+  if (reach && 'none' in reach && o.trial) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
+  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : reach && 'none' in reach ? { base: baseCommit, changed: [] } : undefined;
   if (reach && 'all' in reach) say(`all its checks: ${reach.all}`);
+  if (reach && 'none' in reach) say(`no tests for the kit: ${reach.none}`);
 
   const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
   if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
@@ -326,13 +341,13 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // the same checks on the same files but for the version, so they aren't run a second time.
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope });
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
   if (first) {
     say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say, affected: scope });
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
-  // Only some of its tests ran: its rollout's bump runs them all (no trial pass is kept for it).
+  // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
   if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}) });
   const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';

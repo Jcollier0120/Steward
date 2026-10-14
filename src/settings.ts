@@ -8,6 +8,7 @@ import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorPr
 import { dataFile, readJson } from './kit/store.ts';
 import { makersIds, makersOwn, makersPc } from './maker.ts';
 import { takeOntoKit } from './employ.ts';
+import { DEFAULT_INSTALL_SCRIPTS, PACKAGE_NAME } from './installscripts.ts';
 import { fillMigrationGaps, migrateSettings, migrateToOwnRepos } from './migrate.ts';
 import { loadScm, sourceControlField, type SourceControl } from './scm.ts';
 import { LOCAL_URL as LOCAL_ACTION } from './upkeep.ts';
@@ -103,6 +104,12 @@ export interface Settings {
   alarms: AlarmSettings;
   /** The Steward's look at the Wright's drafts (review.ts). */
   wrightReview: WrightReviewSettings;
+  /**
+   * The packages whose install scripts may run where the Steward installs packages (installscripts.ts): every install is
+   * `npm ci --ignore-scripts`, then these alone have theirs run. Any other package with one holds the work, with an alarm;
+   * and a PR whose lockfile brings one is held for you. Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
+   */
+  installScripts?: string[];
   /** In its rounds, a ready team PR that waits only on its branch moving is caught up with it (stages/catchup.ts). */
   catchUp: boolean;
   /** In its rounds, a repository's ready PRs in the version queue are stacked, tested once and merged together (stages/train.ts). */
@@ -111,6 +118,10 @@ export interface Settings {
   afterRelease: string[];
   /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
   rollout: boolean;
+  /** A new kit is rolled out once it has gone this many hours without a newer kit release (0: at once). */
+  rolloutQuietHours: number;
+  /** ...and never later than this many hours after the oldest kit released since the last one rolled out. */
+  rolloutMaxWaitHours: number;
   /** In its rounds, a kit version or a Steward version on the Steward's own main with no release is released (stages/self.ts). */
   releaseSelf: boolean;
   /** In its rounds, the team's PRs to the Steward's own repository are merged as an employee's are: tested here first. */
@@ -296,11 +307,14 @@ export const DEFAULT_SETTINGS: Settings = {
   mergeMinAgeMinutes: 10,
   alarms: { on: true, toast: true, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 },
   wrightReview: { on: true, maxLines: 600, sensitive: DEFAULT_REVIEW_SENSITIVE },
+  installScripts: DEFAULT_INSTALL_SCRIPTS,
   catchUp: true,
   mergeTrain: true,
   tasteBeforeRelease: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
+  rolloutQuietHours: 2,
+  rolloutMaxWaitHours: 12,
   releaseSelf: true,
   mergeSelf: true,
   stewardCheckout: '',
@@ -498,7 +512,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'switch',
     label: "Keeps the staff's pages up",
     tab: 'How it works',
-    help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped.",
+    help: "An agent on duty whose page doesn't answer is opened again through Manor: three tries, then one an hour and an alarm. One you stopped stays stopped. And an update rolled back only because the PC was offline for a moment is allowed again and installed, once.",
   },
   {
     key: 'afterRelease',
@@ -573,6 +587,15 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'sensitive', kind: 'list', label: 'For a person to review', help: "A draft changing a file matching one of these waits for you (* any part of a name, ** any folders). Claude Code's settings, secrets and the guards always wait too.", item: { label: 'Path pattern', maxLength: 120 }, maxItems: 40 },
     ],
   },
+  {
+    key: 'installScripts',
+    kind: 'list',
+    tab: 'How it works',
+    label: 'Install scripts allowed',
+    help: "Packages whose install scripts may run where the Steward installs packages: every install runs with --ignore-scripts, then these alone run theirs. Any other package with one holds the work, with an alarm naming it and its script, and a PR whose package-lock.json brings one waits for you. Add a package only once you trust it.",
+    item: { label: 'npm package', maxLength: 214 },
+    maxItems: 40,
+  },
   { key: 'wrightHere', kind: 'switch', label: 'The Wright is on this PC', help: 'Read from this PC.', readOnly: true, tab: 'How it works', ...WRIGHT, hidden: true },
   {
     key: 'rollout',
@@ -582,6 +605,8 @@ export const SETTINGS_SCHEMA: Field[] = [
     ...CASTELLAN,
     help: "Each repository on an older kit than the newest release is bumped and its PR pushed, a few at a time; later rounds merge and release it. Off: Bump and Push only when asked.",
   },
+  { key: 'rolloutQuietHours', kind: 'whole', min: 0, max: 48, unit: 'hours', advanced: true, label: 'A new kit settles for', tab: 'Castellan', ...CASTELLAN, help: 'It rolls out once no newer kit has been released for this long, so a burst of kits goes out once. A kit marked Urgent in its changelog goes at once. 0: each kit at once.' },
+  { key: 'rolloutMaxWaitHours', kind: 'whole', min: 1, max: 168, unit: 'hours', advanced: true, label: 'A new kit waits at most', tab: 'Castellan', ...CASTELLAN, help: 'Counted from the oldest kit not yet rolled out: however many follow it, the newest goes out by then.' },
   {
     key: 'releaseSelf',
     kind: 'switch',
@@ -702,6 +727,9 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
   const parallel = Number(r.parallel);
   const stagesAtOnce = Number(r.stagesAtOnce);
   const roundMinutes = Number(r.roundMinutes);
+  const hours = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : Number.NaN);
+  const quietHours = hours(r.rolloutQuietHours);
+  const maxWaitHours = hours(r.rolloutMaxWaitHours);
   const mergeMinAge = r.mergeMinAgeMinutes == null || r.mergeMinAgeMinutes === '' ? NaN : Number(r.mergeMinAgeMinutes);
   return {
     settings: {
@@ -718,10 +746,14 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       mergeMinAgeMinutes: Number.isInteger(mergeMinAge) ? Math.min(1440, Math.max(0, mergeMinAge)) : d.mergeMinAgeMinutes,
       alarms: normalizeAlarms(r.alarms),
       wrightReview: normalizeReview(r.wrightReview),
+      // Names npm takes, lowercased; an empty list is kept (no package's script runs).
+      installScripts: Array.isArray(r.installScripts) ? [...new Set(strings(r.installScripts, []).map((n) => n.toLowerCase()).filter((n) => PACKAGE_NAME.test(n)))] : d.installScripts,
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
       mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
+      rolloutQuietHours: Number.isInteger(quietHours) ? Math.min(48, Math.max(0, quietHours)) : d.rolloutQuietHours,
+      rolloutMaxWaitHours: Number.isInteger(maxWaitHours) ? Math.min(168, Math.max(1, maxWaitHours)) : d.rolloutMaxWaitHours,
       releaseSelf: typeof r.releaseSelf === 'boolean' ? r.releaseSelf : d.releaseSelf,
       mergeSelf: typeof r.mergeSelf === 'boolean' ? r.mergeSelf : d.mergeSelf,
       stewardCheckout: str(r.stewardCheckout, d.stewardCheckout),

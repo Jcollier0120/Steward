@@ -19,6 +19,8 @@ export interface KitInfo {
   local: string | null;
   /** The kit\ folder of this checkout, when there is one. */
   localDir: string | null;
+  /** When each released kit was published (ISO), by version, where GitHub said: the rollout settles by it (rollout.ts). */
+  published?: Record<string, string>;
 }
 
 export const latestKit = (k: KitInfo) => k.released[0] ?? null;
@@ -50,6 +52,17 @@ export function ownKit(root = appRoot): string | null {
 /** Whether an employee fills its kit with tools/kit.ts (the Node agents), and so takes the Steward's. */
 export const takesTool = (fill: string) => /(^|[\s"'])tools[\\/]kit\.ts\b/.test(fill);
 
+/** When each kit-v<version> release in a `gh release list --json tagName,isDraft,publishedAt` answer was published, by version. */
+export function kitPublishedIn(json: string): Record<string, string> {
+  const list = JSON.parse(json || '[]') as { tagName?: string; isDraft?: boolean; publishedAt?: string | null }[];
+  const out: Record<string, string> = {};
+  for (const r of list) {
+    const v = /^kit-v(\d+\.\d+\.\d+)$/.exec(r.tagName ?? '')?.[1];
+    if (v && !r.isDraft && typeof r.publishedAt === 'string' && r.publishedAt) out[v] = r.publishedAt;
+  }
+  return out;
+}
+
 /** The kit-v<version> releases in a `gh release list --json tagName,isDraft` answer, newest version first. */
 export function kitReleasesIn(json: string): string[] {
   const list = JSON.parse(json || '[]') as { tagName?: string; isDraft?: boolean }[];
@@ -63,23 +76,27 @@ export function kitReleasesIn(json: string): string[] {
 const localKitDir = () => (devCheckout && existsSync(path.join(appRoot, 'kit', 'VERSION')) ? path.join(appRoot, 'kit') : null);
 
 /** The kit releases from a glance at GitHub (glance.ts), which reads the Steward's releases with the employees'. */
-export function kitInfoFrom(stewardReleases: { tagName: string; isDraft: boolean }[]): KitInfo {
+export function kitInfoFrom(stewardReleases: { tagName: string; isDraft: boolean; publishedAt?: string }[]): KitInfo {
   const localDir = localKitDir();
-  return { released: kitReleasesIn(JSON.stringify(stewardReleases)), releasesError: null, local: localDir ? kitVersionOf(localDir) : null, localDir };
+  const json = JSON.stringify(stewardReleases);
+  return { released: kitReleasesIn(json), releasesError: null, local: localDir ? kitVersionOf(localDir) : null, localDir, published: kitPublishedIn(json) };
 }
 
 /** The kit releases, asked of GitHub on their own (when there's no glance to read them from). */
 export async function kitInfo(run: Runner, cwd: string, stewardRepo: string): Promise<KitInfo> {
   const localDir = localKitDir();
   let released: string[] = [];
+  let published: Record<string, string> = {};
   let releasesError: string | null = null;
   if (!stewardRepo) return { released, releasesError: "Settings name no Steward repository (The Steward's repository), so no kit releases are looked for", local: localDir ? kitVersionOf(localDir) : null, localDir };
   try {
-    released = kitReleasesIn(must(await hostFor({ run, neutralDir: cwd }).listReleases(stewardRepo, 'tagName,isDraft')));
+    const json = must(await hostFor({ run, neutralDir: cwd }).listReleases(stewardRepo, 'tagName,isDraft,publishedAt'));
+    released = kitReleasesIn(json);
+    published = kitPublishedIn(json);
   } catch (e) {
     releasesError = (e as Error).message;
   }
-  return { released, releasesError, local: localDir ? kitVersionOf(localDir) : null, localDir };
+  return { released, releasesError, local: localDir ? kitVersionOf(localDir) : null, localDir, published };
 }
 
 /**

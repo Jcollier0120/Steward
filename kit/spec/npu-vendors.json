@@ -1,5 +1,11 @@
 {
   "about": "The NPU's model server for each vendor, as data (NPU-VENDORS.md beside this file says why each was chosen and what is unverified): how detection tells the vendor and generation, the server's pinned download, how it installs, the models it pulls, its port, caps and timeouts. The node part's npu-vendors.ts reads it; setup installs from it. A server or model is changed here, with its pinned size and SHA-256, and released as a kit version. Sizes in bytes, times in milliseconds. %LOCALAPPDATA% and %USERPROFILE% are expanded; {tools} is the tools home (toolsHome), {port} the server's port, {model} a model's id.",
+  "idleStop": {
+    "smallPcGb": 20,
+    "floorMinutes": 5,
+    "coldStartTimes": 20,
+    "about": "When the NPU's servers stop after a quiet spell (the keeper, keeper.ts), unless config.json's npuIdleStopMinutes says otherwise. On a PC with less than smallPcGb of memory (Windows shows a 16 GB PC as 15.3 to 15.9; the next common size is 24 or 32), each route's own minutes per kind (its idleStop.minutes); on a bigger PC, rules.json's keeper.npuIdleStopMinutes, as before. A route's minutes are coldStartTimes times its cold start (idleStop.coldStartMs: stopped to the first answer), so waking it again costs at most a twentieth of the quiet spell it ends, and never under floorMinutes, so the pauses in a conversation, or between an agent's rounds, never pay it. None of the three servers can drop its model and keep running: GenieX's --keepalive unloads it, but the process keeps some 340 MB from every load until it exits; OpenVINO Model Server started with --source_model can't unload one (only its config-file mode can); FastFlowLM documents no unload. So the keeper stops the server, holding the NPU's turn, and the next request starts it again in its own turn."
+  },
   "routes": {
     "qualcomm": {
       "server": "GenieX",
@@ -109,6 +115,17 @@
         "image-path"
       ],
       "recycle": true,
+      "idleStop": {
+        "coldStartMs": {
+          "chat": 15000,
+          "embed": 10000
+        },
+        "minutes": {
+          "chat": 5,
+          "embed": 5
+        },
+        "basis": "Chat: GenieX started and its model loaded in 9 to 15 s (v0.7.0 on the X2 Elite, 2026-10-03, in every memory state tried). Embeddings: llama-server on the Hexagon, not timed apart; a 0.6B model, taken as 10 s."
+      },
       "embeddings": "on the NPU, through a server of their own: GenieX serves no /v1/embeddings, but carries llama.cpp b11125 with its Hexagon backend and Qualcomm's signed HTP libraries; llama.cpp's own llama-server of that build, run over GenieX's libraries, serves Qwen3-Embedding-0.6B on the Hexagon (measured on the X2 Elite 2026-10-12: the graphics card's results, in about half its time)",
       "embedServer": {
         "server": "llama.cpp",
@@ -380,6 +397,18 @@
       },
       "quirks": [],
       "recycle": false,
+      "idleStop": {
+        "coldStartMs": {
+          "chat": 4000,
+          "embed": 4000
+        },
+        "minutes": {
+          "chat": 5,
+          "embed": 5
+        },
+        "basis": "Chat: started to its first answer in 4 s from the compile cache (--cache_dir) on a Lunar Lake, 2026-10-12; the first compile (31 to 41 s there, minutes on an NPU 3720) is once per PC and model, not per start. Embeddings: not timed apart; a 0.6B model from the same cache, taken as the chat model's 4 s. The NPU 3720's own start isn't measured: npu-check --idle measures it.",
+        "verify": "On a Lunar Lake laptop with 16 GB (Windows shows 15.3 to 15.9), with OpenVINO Model Server set up by setup: stop the manor's own NPU servers first (or let the keeper stop them), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It starts the chat and embedding servers through the kit, has the keeper stop both once the NPU has been unused a minute (idle-stop: their processes gone, the memory freed said), asks again as a person would with a 20 s timeout (idle-cold-answer: told the local AI is waking, answered within the cold load; the time is this PC's cold start), and checks a request in flight is never stopped (idle-in-flight). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
+      },
       "embeddings": "on the NPU, through a second OpenVINO Model Server of its own (one process serves one task from the command line): OpenVINO's channel-wise INT4 Qwen3-Embedding-0.6B, last-token pooling, compiled for 2,048 tokens. The NPU compiles a fixed shape, so every request costs the full 2,048 and a longer one is refused (400); a dense 1,500-character chunk (UUIDs, hex, base64) is up to 1,338 tokens, so 1,024 wouldn't do. Its cap, 680 by the kit's estimate of 3 characters a token, keeps a request under 2,048 real tokens at nearly one a character. Measured on a Lunar Lake 2026-10-13: the graphics card's own results (OpenVINO, the same model), a query in 166 ms and 16 of Reeve's chunks in 2.6 s, against 5.9 s on the Arc through llama.cpp's Vulkan build, which setup gives the card",
       "embedServer": {
         "server": "OpenVINO Model Server",
@@ -534,6 +563,18 @@
       },
       "quirks": [],
       "recycle": false,
+      "idleStop": {
+        "coldStartMs": {
+          "chat": 30000,
+          "vision": 30000
+        },
+        "minutes": {
+          "chat": 10,
+          "vision": 10
+        },
+        "basis": "Not measured: FastFlowLM loads a 3.3 GB model onto the NPU at its start, taken as 30 s until npu-check --idle times it on an XDNA 2.",
+        "verify": "On a Ryzen AI 300 (XDNA 2) laptop with 16 GB, with FastFlowLM set up by setup: stop the manor's own NPU server first (or let the keeper stop it), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). Its steps pass or fail: idle-wake, idle-stop (the keeper stops FastFlowLM once the NPU has been unused a minute, its process gone), idle-cold-answer (a person's request after that is told the local AI is waking and answers within the cold load) and idle-in-flight (a request in flight is never stopped). It prints FastFlowLM's measured cold start and the idleStop numbers it gives: put them here in place of the 30 s taken, and FastFlowLM's restarts and idle stops leave the unverified list in NPU-VENDORS.md."
+      },
       "embeddings": "not on the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms; embeddings go to the graphics card or the processor",
       "licence": "FastFlowLM: MIT (orchestration and CLI), NPU kernels free for any use including commercial; asks for \"Powered by FastFlowLM\" in the product's notices",
       "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server switches between its models on demand, as GenieX does. Models are kept in %USERPROFILE%\\.flm\\models."
