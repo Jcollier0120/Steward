@@ -14,6 +14,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.35.73
+
+**A release, a kit trial or a PR's test no longer stops for good when its last work folder vanished.**
+
+### What changed
+
+- On a PC where the Steward's work folder is a link to another drive, the Steward didn't recognise its own work folders, so it never told git they were gone. The next time it needed the same folder, git refused it ("a missing but already registered worktree"), and that release, kit trial or test failed every round. On 2026-10-13 this held up the Steward's kit trial, every Steward PR waiting behind it, and Reeve's release for hours. The Steward now finds its work folders through the link.
+- Whenever it clears a work folder a stopped job left behind, it also makes git forget it. If git still refuses a work folder that has gone missing some other way, the Steward clears git's record and tries once more. This covers releases, kit trials, catch-ups, merge trains, refreshes, PR tests and the Steward's own release.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.35.60
 
 **The Steward's kit 2.68.0: local AI is set up safely on Intel NPUs that haven't been tested yet, and an NPU that can't do the work never shows an error.**
