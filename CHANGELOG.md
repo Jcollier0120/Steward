@@ -12,6 +12,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's own tests sign nothing either, and its two tests of building a release build once each instead of five and two times: the builds those tests made over and over now run once, before a kit is released, and checking a pull request takes minutes less.
 - Before it releases a kit, the Steward installs its packages and builds every kind of release the kit makes (`npm run test:release`). A kit whose release builds fail isn't released, and says so.
 - A check of the Steward no longer fails now and then because another one ran at the same time: its tests that open a page each take a port nothing else is using, instead of sharing one.
+- This release brings the versions below it that weren't released on their own (0.35.61 to 0.36.4) too, and the Steward uses kit 2.72.1 itself.
 
 ### Before you update
 
@@ -80,7 +81,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- The Steward's kit 2.68.1. After an update, each agent (the Steward too) checks that its page came up before keeping the new version. Part of that check used the page's name, such as `lamplighter.localhost`, and on Windows that name is looked up through your network. When the Wi-Fi or router dropped mid-update, the lookup failed, and an update that was working was rolled back and marked unsafe. The check now goes straight to the page on this PC, and a page that's slow to show its first screen gets the whole check (90 seconds) to do it. A page that shows an error, answers as the wrong version, or stops is still rolled back as before.
+- The Steward's kit 2.69.1. After an update, each agent (the Steward too) checks that its page came up before keeping the new version. Part of that check used the page's name, such as `lamplighter.localhost`, and on Windows that name is looked up through your network. When the Wi-Fi or router dropped mid-update, the lookup failed, and an update that was working was rolled back and marked unsafe. The check now goes straight to the page on this PC, and a page that's slow to show its first screen gets the whole check (90 seconds) to do it. A page that shows an error, answers as the wrong version, or stops is still rolled back as before.
 
 ### Before you update
 
@@ -88,7 +89,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.35.74
 
-**The Steward's kit 2.69.0: when the NPU can't do something, the graphics card does it, only while it's needed.**
+**The Steward's kit 2.72.1: when the NPU can't do something, the graphics card does it, only while it's needed.**
 
 ### What's new
 
