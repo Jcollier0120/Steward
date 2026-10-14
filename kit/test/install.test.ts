@@ -520,6 +520,13 @@ test("the zip's name has no spaces: GitHub stores one as a dot, which SHA256SUMS
   assert.equal(zipName('Developer Herald', '0.5.3'), 'DeveloperHerald-0.5.3.zip');
 });
 
+/**
+ * The release builds beyond the first (a readable one, a dirty one, one without an announcement): STEWARD_RELEASE_TESTS=1,
+ * which `npm run test:release` sets and tools/kit-release.ts runs before it publishes a kit. Every other run builds once:
+ * each build stages, minifies and packs the whole kit, and what the others add is tested without a build above.
+ */
+const FULL_RELEASE = process.env.STEWARD_RELEASE_TESTS === '1';
+
 test('npm run release copies manor-agent.json beside the zip and lists it in SHA256SUMS.txt; a mismatched one builds nothing', { skip: process.platform !== 'win32' && 'needs Windows tar.exe' }, () => {
   // A copy of the fixture as an agent's own repository, from Jcollier0120/Fixture, committed, its kit filled.
   const repo = path.join(tmp, 'fixture-repo');
@@ -538,7 +545,8 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   const out = path.join(repo, 'artifacts', APP.id);
   const sha = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
   // Each build stages and packs the whole kit, and Defender reads every file tar does: so the zip is listed, and only
-  // what the built copy needs to run is unpacked (3 builds, one of them minified; there were 5, and 2 whole unpackings).
+  // what the built copy needs to run is unpacked. One build, the minified one as released, and 2 more with FULL_RELEASE;
+  // there were 5, and 2 whole unpackings.
   const tar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
   const zipOf = () => path.join(out, readdirSync(out).find((f) => f.endsWith('.zip'))!);
   const listed = () => execFileSync(tar, ['-t', '-f', zipOf()], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/).filter((f) => f && !f.endsWith('/'));
@@ -568,13 +576,15 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.doesNotMatch(r.stdout, /with uncommitted changes/);
 
   // Readable: for a look on this PC, never published. And a change to manor-agent.json makes the release dirty: it is
-  // published, so it must be the commit's.
-  writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ role: 'Keeps a fixture well' })) + '\n');
-  r = release('--readable');
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(listed().includes('src/kit/install.ts'));
-  assert.match(r.stdout, /readable: not built/);
-  assert.match(r.stdout, /with uncommitted changes/);
+  // published, so it must be the commit's (a dirty tree's version is tested without a build: "+dev.<commit>", above).
+  if (FULL_RELEASE) {
+    writeFileSync(path.join(repo, ANNOUNCEMENT), JSON.stringify(announcement({ role: 'Keeps a fixture well' })) + '\n');
+    r = release('--readable');
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(listed().includes('src/kit/install.ts'));
+    assert.match(r.stdout, /readable: not built/);
+    assert.match(r.stdout, /with uncommitted changes/);
+  }
   r = release('--readable', '--publish');
   assert.equal(r.status, 2);
   assert.match(r.stderr, /a readable release is never published/);
@@ -598,7 +608,9 @@ test('npm run release copies manor-agent.json beside the zip and lists it in SHA
   assert.match(r.stderr, /agent is "other", but this release is/);
   assert.equal(readFileSync(path.join(out, 'SHA256SUMS.txt'), 'utf8'), before);
 
-  // None: the zip alone, and an earlier build's manor-agent.json is gone (readable or built, it's the same).
+  // None: the zip alone, and an earlier build's manor-agent.json is gone (readable or built, it's the same; without a
+  // build, "none is nothing" above).
+  if (!FULL_RELEASE) return;
   rmSync(path.join(repo, ANNOUNCEMENT));
   git('commit', '-q', '-am', 'no announcement');
   r = release('--readable');

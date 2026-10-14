@@ -125,7 +125,8 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   ctx.log(`[${APP.id}] releasing ${step.tag} from origin/${STEWARD_BRANCH} (${at}) in ${dir}`);
   try {
     // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
-    if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
+    // A kit's too: its release tests build the fixture's releases with it before it is published (tools/kit-release.ts).
+    if (releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
       const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
       ctx.log(`[${APP.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
       if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });

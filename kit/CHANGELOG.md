@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.71.1
 
-**Tests sign no commits: `unsigned-git.ts`, and `test-git.ts` for a test script's `--import`.**
+**Tests sign no commits (`unsigned-git.ts`, and `test-git.ts` for a test script's `--import`), and release builds are tested once, before a kit is published, not in every run.**
 
 ### What's new
 
@@ -14,7 +14,9 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### What changed
 
 - The Steward runs every repository's checks with them, whatever the repository's test script says.
-- The kit's release test builds three times instead of five, only once minified, and lists the zip (`tar -t`) instead of unpacking it twice: 83 s to 24 s, and Defender reads a few hundred fewer files.
+- The kit's release tests build one release each, the minified one as released, and list the zip (`tar -t`) instead of unpacking it twice; the native test unpacks only what it checks. The other builds (readable, dirty, no announcement, native and dirty: there were five and two) run with `STEWARD_RELEASE_TESTS=1`: `npm run test:release`, and `tools/kit-release.ts --publish` before it publishes a kit (`--skip-release-tests` leaves them out). In the full suite under load the two tests took 524 s and 514 s, and set the time of every vouch.
+
+- `release.ts`, `npu-bench.ts` and `npu-check.ts` run when started from a folder reached through a junction or link: they compared the path they were started by with their own real path, and did nothing, silently, when the two differed.
 
 ### For an agent
 

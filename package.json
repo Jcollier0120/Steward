@@ -26,6 +26,7 @@
     "status": "node src/cli.ts status",
     "test": "node --import=./src/kit/test-git.ts --test \"test/**/*.test.ts\" \"kit/test/**/*.test.ts\"",
     "posttest": "node kit/test/dotnet.ts --if-present",
+    "test:release": "node tools/kit-release.ts --tests",
     "test:dotnet": "node kit/test/dotnet.ts",
     "test:dotnet-publish": "node kit/test/dotnet.ts --publish",
     "typecheck": "tsc -p . && tsc -p tsconfig.web.json",
