@@ -9,7 +9,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-affected-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { affectedTests, globRe, nodeTestScript, resolveSpecifier, specifiersOf, versionOnly } = await import('../src/affected.ts');
+const { affectedTests, globRe, kitFromOf, nodeTestScript, pinOnly, readsInPlace, resolveSpecifier, specifiersOf, versionOnly } = await import('../src/affected.ts');
 const { affectedSteps, patchesByFile } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, runner, sh } = await import('./helpers.ts');
 
@@ -101,6 +101,99 @@ test('which test files a change reaches, and what runs everything', () => {
   assert.match(String(pick([['D', 'src/gone.ts']])), /^all: src\/gone\.ts was deleted or renamed/);
   assert.match(String(pick([['M', 'web/logo.bin']])), /^all: web\/logo\.bin changed, and no code names it/);
   assert.match(String(pick(Array.from({ length: 201 }, (_, i) => ['M', `src/f${i}.ts`] as [string, string]))), /^all: 201 files changed/);
+});
+
+test('Markdown reaches only the code that reads it where it lies', () => {
+  const here = "const here = path.dirname(fileURLToPath(import.meta.url));\n";
+  assert.equal(readsInPlace(`${here}const log = readFileSync(path.join(here, '..', 'CHANGELOG.md'), 'utf8');\n`, 'CHANGELOG.md'), true);
+  assert.equal(readsInPlace(`${here}const kit = path.join(here, '..', 'kit');\nconst notes = path.join(kit, 'CHANGELOG.md');\n`, 'CHANGELOG.md'), true, 'through a path built from its place');
+  assert.equal(readsInPlace("const log = readFileSync('CHANGELOG.md', 'utf8');\n", 'CHANGELOG.md'), true, 'from the working folder');
+  assert.equal(readsInPlace("export const notesOf = (dir: string) => readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');\n", 'CHANGELOG.md'), false, "a folder it is given: another repository's");
+  assert.equal(readsInPlace(`${here}// its CHANGELOG.md, beside import.meta.url\n`, 'CHANGELOG.md'), false, 'a comment');
+  const pkg = "const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));\n";
+  assert.equal(readsInPlace(`${pkg}const notes = path.join(pkg.dir, 'CHANGELOG.md');\n`, 'CHANGELOG.md'), false, 'what was read there holds no place');
+
+  const dir = path.join(home, 'markdown');
+  const files: Record<string, string> = {
+    'CHANGELOG.md': '# Changelog\n',
+    'README.md': '# Fake\n',
+    'src/notes.ts': "export const notesOf = (dir: string) => readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');\n",
+    'src/core.ts': "export const core = new URL('./core/', import.meta.url);\n",
+    'src/core/a.json': '{}\n',
+    'src/core/b.md': '# b\n',
+    'src/app.ts': "export const root = new URL('..', import.meta.url);\n",
+    'test/notes.test.ts': "import { notesOf } from '../src/notes.ts';\n",
+    'test/own.test.ts': `${here}const text = readFileSync(path.join(here, '..', 'CHANGELOG.md'), 'utf8');\n`,
+    'test/core.test.ts': "import { core } from '../src/core.ts';\n",
+    'test/app.test.ts': "import { root } from '../src/app.ts';\n",
+  };
+  for (const [f, t] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    writeFileSync(path.join(dir, f), t);
+  }
+  const pick = (...changed: string[]) => {
+    const a = affectedTests({ dir, changed: changed.map((p) => ({ status: 'M', path: p })), testGlobs: ['test/**/*.test.ts'], patchOf: () => '@@\n-x\n+y' });
+    return a.all ? `all: ${a.why}` : a.files;
+  };
+  assert.deepEqual(pick('CHANGELOG.md'), ['test/own.test.ts'], "the test reading its own changelog, not the code reading a worktree's");
+  assert.deepEqual(pick('README.md'), [], 'named by none');
+  assert.deepEqual(pick('src/core/a.json'), ['test/core.test.ts'], 'a file in a folder code reads');
+  assert.deepEqual(pick('src/core/b.md'), ['test/core.test.ts']);
+  assert.deepEqual(pick('src/notes.ts'), ['test/notes.test.ts'], "the repository's root, which src/app.ts finds things from, isn't read whole");
+});
+
+test("the Steward's own kit, filled from its kit folder: a kit file reaches its copies, its version and pin are a step", () => {
+  const dir = path.join(home, 'own-kit');
+  const files: Record<string, string> = {
+    'package.json': '{\n  "name": "fake",\n  "version": "0.4.1",\n  "scripts": { "kit": "node tools/kit.ts --from kit", "test": "node --test \\"test/**/*.test.ts\\" \\"kit/test/**/*.test.ts\\"" }\n}\n',
+    'kit.json': '{\n  "kit": "2.70.0",\n  "parts": ["node"]\n}\n',
+    'kit/VERSION': '2.70.0\n',
+    'kit/CHANGELOG.md': '# Kit\n',
+    'kit/node/store.ts': 'export const store = 1;\n',
+    'kit/test/store.test.ts': "import { store } from '../node/store.ts';\n",
+    'kit/test/version.test.ts': "const v = readFileSync(new URL('../VERSION', import.meta.url), 'utf8');\n",
+    'kit/test/fixture/src/kit/PARTS': 'node\n',
+    'kit/test/fixture/src/kit/store.ts': 'export const store = 1;\n',
+    'kit/test/fill.test.ts': "import { store } from './fixture/src/kit/store.ts';\n",
+    'src/kit/PARTS': 'node\n',
+    'src/kit/store.ts': 'export const store = 1;\n',
+    'src/a.ts': "import { store } from './kit/store.ts';\nexport const a = store;\n",
+    'test/a.test.ts': "import { a } from '../src/a.ts';\n",
+    'test/pin.test.ts': "const pin = JSON.parse(readFileSync(new URL('../kit.json', import.meta.url), 'utf8'));\n",
+  };
+  for (const [f, t] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    writeFileSync(path.join(dir, f), t);
+  }
+  const globs = ['test/**/*.test.ts', 'kit/test/**/*.test.ts'];
+  const pick = (changed: [string, string][], kitFrom?: string) => {
+    const a = affectedTests({ dir, changed: changed.map(([p]) => ({ status: 'M', path: p })), testGlobs: globs, patchOf: (f) => changed.find(([p]) => p === f)?.[1] ?? '', ...(kitFrom ? { kitFrom } : {}) });
+    return a.all ? `all: ${a.why}` : a.files;
+  };
+  const edit = '@@\n-x\n+y';
+  assert.deepEqual(pick([['kit/node/store.ts', edit]], 'kit'), ['kit/test/fill.test.ts', 'kit/test/store.test.ts', 'test/a.test.ts'], 'its own tests, and through each copy the fill made');
+  const step: [string, string][] = [
+    ['kit/VERSION', '@@ -1 +1 @@\n-2.69.0\n+2.70.0'],
+    ['kit.json', '@@ -2 +2 @@\n-  "kit": "2.69.0",\n+  "kit": "2.70.0",'],
+    ['kit/CHANGELOG.md', edit],
+  ];
+  assert.deepEqual(pick(step, 'kit'), ['kit/test/version.test.ts', 'test/pin.test.ts'], 'a kit version step: only the tests reading the version where it lies');
+  assert.match(String(pick([['kit.json', '@@ -3 +3 @@\n-  "parts": ["node"]\n+  "parts": ["node", "web"]']], 'kit')), /^all: kit\.json changed beyond its kit's version/);
+  assert.match(String(pick([['kit/node/store.ts', edit]])), /^all: kit\/node\/store\.ts changed \(the kit itself\)/, "an agent's kit comes from a release");
+  assert.match(String(pick(step.slice(1, 2))), /^all: kit\.json changed \(the kit pin\)/);
+
+  assert.equal(versionOnly('@@ -1 +1 @@\n-2.69.0\n+2.70.0', 'kit/VERSION'), true);
+  assert.equal(versionOnly('@@ -1 +1 @@\n-2.69.0\n+2.70.0'), false, 'a bare version, but not in a VERSION file');
+  assert.equal(versionOnly('@@ -1 +1,2 @@\n-2.69.0\n+2.70.0\n+next', 'kit/VERSION'), false);
+  assert.equal(pinOnly('@@ -2 +2 @@\n-  "kit": "2.69.0",\n+  "kit": "2.70.0-beta.1",'), true);
+  assert.equal(pinOnly('@@ -2 +2 @@\n-  "kit": "2.69.0",\n+  "kit": "2.70.0",\n+  "parts": []'), false);
+  assert.equal(pinOnly(''), false);
+
+  assert.equal(kitFromOf(dir, { kit: 'node tools/kit.ts --from kit' }), 'kit');
+  assert.equal(kitFromOf(dir, { pretest: 'node tools/kit.ts --from ./kit/ && node x.js' }), 'kit');
+  assert.equal(kitFromOf(dir, { kit: 'node tools/kit.ts --from ../kit' }), null, 'outside the repository');
+  assert.equal(kitFromOf(dir, { kit: 'node tools/kit.ts --from src' }), null, 'no VERSION there');
+  assert.equal(kitFromOf(dir, { kit: 'node tools/kit.ts' }), null, 'from a release');
 });
 
 test("in a vouch's clone: npm test becomes node --test with only the files the branch's change reaches", async () => {
