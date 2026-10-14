@@ -15,10 +15,6 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - If the halving can't single out one pull request, the ones at the bottom of the stack that passed ship, and the rest wait for the next build, with an alarm naming them.
 - A new setting, **To find the PR that breaks a build, at most** (Build pipeline, advanced; `bisectRuns`, 3 by default, 0 to 6): how many extra test runs the halving may take. At 0 it doesn't look: what passed at the bottom ships, the rest wait.
 
-### What changed
-
-- The Steward now finds its own worktrees when its work folder or a repository sits behind a folder link (a junction to another drive), instead of failing to set them up again on the next round.
-
 ### Before you update
 
 - Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.0's build pipeline too, if that wasn't released on its own.
