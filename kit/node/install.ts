@@ -5,6 +5,7 @@ import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
 import { endProcesses, keepOwnArch, nativeRelease, processesUnder, type NativeRelease } from './native.ts';
+import { inside, realPath, samePath } from './real-path.ts';
 import { pageAt, ping, shutdown } from './service.ts';
 
 /**
@@ -211,14 +212,11 @@ export function readRelease(root: string): Release | null {
   }
 }
 
-const norm = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
-const samePath = (a: string, b: string) => norm(a) === norm(b);
-const inside = (p: string, dir: string) => samePath(p, dir) || norm(p).startsWith(norm(dir) + path.sep);
-
 /**
  * Why --purge won't remove `dataDir`, or null when it's the agent's own. `<ID>_HOME` can name any folder, and --purge
- * deletes all it holds, so a mistaken one is refused rather than emptied:
- * - a whole drive;
+ * deletes all it holds, so a mistaken one is refused rather than emptied. Folders are compared by their real paths
+ * (spec/DEV-DRIVES.md), so a folder reached through a junction, or a drive mounted in a folder, is refused too:
+ * - a whole drive, by its letter or mounted in a folder (C:\DevData, where E: is mounted);
  * - the profile, or one of Windows' own or the person's folders (Documents, Desktop, AppData, Program Files...), or a
  *   folder holding one;
  * - a git repository;
@@ -226,7 +224,8 @@ const inside = (p: string, dir: string) => samePath(p, dir) || norm(p).startsWit
  */
 export function purgeRefusal(dataDir: string, home: string, env: NodeJS.ProcessEnv = process.env): string | null {
   const dir = path.resolve(dataDir);
-  if (samePath(dir, path.parse(dir).root)) return 'it is a whole drive';
+  const real = realPath(dir);
+  if (real === path.parse(real).root) return dir === path.parse(dir).root ? 'it is a whole drive' : `it is a whole drive, ${real} mounted there`;
   const profile = env.USERPROFILE || home;
   const shared = [home, profile, env.LOCALAPPDATA, env.APPDATA, env.ProgramData, env.ProgramFiles, env['ProgramFiles(x86)'], env.SystemRoot, env.PUBLIC, env.OneDrive,
     ...['Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music', 'OneDrive', 'source', 'Projects'].map((f) => (profile ? path.join(profile, f) : ''))];

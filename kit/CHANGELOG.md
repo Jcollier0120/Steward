@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.73.5
+
+**Every folder the kit compares, it compares by its real path: through a junction, a link or a Dev Drive mounted in a folder, one folder is one folder.**
+
+### What's new
+
+- **`real-path.ts`**: `realPath(p)`, a path with its junctions, links and mounted folders followed (`realpathSync.native` of the deepest part that exists, the rest kept as given; a share such as `\\wsl.localhost\...` taken as it is, so WSL and the network are never woken; answers kept a minute), and `pathKey`, `samePath`, `inside` and `keyInside` to compare by it. `forgetRealPaths()` is for a test that makes a junction. spec/DEV-DRIVES.md's rule 1 points to it.
+- native.ts: `spellingsOf(dir)`, a folder as given and its real path when that's another.
+
+### What changed
+
+- install.ts: `--purge`'s guard compares the data folder with the profile and Windows' folders by their real paths, and refuses a whole drive mounted in a folder (`C:\DevData`, where `E:` is mounted). Before, a data folder named for the agent that held the profile through a junction passed as the agent's own, and would have been emptied. `install` knows its installed copy however its release and data folder are spelled.
+- An update ends the programs running from the app folder under either spelling (`processesUnder`): Windows names a process's program as it was started, through a junction or a mounted folder if it was.
+- keeper.ts: a model server's program (`sameProgram`) and the manor's servers folders (`manorOwns`, `manorServerDirs`) are compared by their real paths. A configured server whose process was started under the other spelling wasn't known as itself, and could be stopped as an orphan.
+- accelerators.ts, accelerator-config.ts: Reeve's older config.json is the accelerators' own when one's folder is a junction to the other's, so it's neither moved nor mirrored onto itself.
+- folders.ts: `uniqueFolders` lists a folder once however it's spelled.
+- manor.ts compares a project's checkout through `real-path.ts`, as it has since 2.73.1, now with its answers kept a minute.
+
+### For an agent
+
+- Take the kit and release as usual.
+- Compare your own folders with `samePath`, `inside` or `pathKey` from `./kit/real-path.ts`, not `path.resolve(...).toLowerCase()` (spec/DEV-DRIVES.md, rules 1 and 5).
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
