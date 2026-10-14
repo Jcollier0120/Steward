@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { withLock } from '../kit/lock.ts';
 import { dataFile } from '../kit/store.ts';
@@ -141,12 +142,65 @@ export function sharesModules(dir: string): boolean {
 }
 
 /**
+ * The folders that volumes with no drive letter are mounted in, from `mountvol`'s listing (lower case, no trailing \):
+ * a Dev Drive mounted only at C:\DevData, say. One that has a letter too isn't. Pure.
+ */
+export function letterlessMounts(listing: string): string[] {
+  const found: string[] = [];
+  let points: string[] | null = null;
+  const end = () => {
+    if (points && !points.some((m) => /^[a-z]:\\$/i.test(m))) found.push(...points.map((m) => m.replace(/\\+$/, '').toLowerCase()));
+  };
+  for (const raw of listing.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (/^\\\\\?\\Volume\{/i.test(line)) {
+      end();
+      points = [];
+    } else if (points && /^[a-z]:\\/i.test(line)) points.push(line);
+  }
+  end();
+  return found;
+}
+
+let mounts: string[] | null = null;
+/** This PC's letterless mounts, asked of mountvol once per process; none where it can't be asked. */
+const letterless = (): string[] => {
+  if (mounts) return mounts;
+  const r = process.platform === 'win32' ? spawnSync('mountvol', [], { encoding: 'utf8', windowsHide: true, timeout: 10_000 }) : null;
+  return (mounts = r?.status === 0 ? letterlessMounts(r.stdout) : []);
+};
+
+/**
+ * Whether `p` lies on a volume with no drive letter, mounted only in a folder. esbuild (0.28) follows no link onto or off
+ * such a volume: a node_modules junction there, or one to a set there, leaves every package unresolved ("Could not
+ * resolve "react""). On 2026-10-13 the work folder moved to a Dev Drive mounted only at C:\DevData, and 22 of 34 agents'
+ * page tests failed kit 2.69.0's trial for it; once the drive had a letter too, the same links resolved. Anything
+ * unreadable counts as not, as before.
+ */
+export function onLetterlessDrive(p: string, folders = letterless()): boolean {
+  try {
+    const real = realpathSync.native(p).toLowerCase();
+    return /^\\\\\?\\volume\{/.test(real) || folders.some((m) => real === m || real.startsWith(`${m}\\`));
+  } catch {
+    return false;
+  }
+}
+
+let mounted = (p: string) => onLetterlessDrive(p);
+/** For the tests, whose temp folder may itself be on such a drive: how one is told (null: onLetterlessDrive). */
+export const letterlessBy = (by: ((p: string) => boolean) | null) => void (mounted = by ?? ((p: string) => onLetterlessDrive(p)));
+
+/**
  * The worktree's node_modules, linked to its set of packages (installed first if need be); false when that couldn't be
  * done, and the worktree should `npm ci` itself.
  */
 export async function linkSharedModules(ctx: Ctx, dir: string, say: (line: string) => void): Promise<boolean> {
   if (!sharesModules(dir)) {
     say("node_modules: its own (npm ci), as a Next.js build refuses packages linked from outside the project");
+    return false;
+  }
+  if (mounted(dir) || mounted(modulesRootOf(ctx.settings))) {
+    say('node_modules: its own (npm ci), as the work folder is on a drive with no letter, where esbuild follows no link');
     return false;
   }
   try {
