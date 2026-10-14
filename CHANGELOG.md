@@ -2,6 +2,27 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.12
+
+**A new kit that fails some agents no longer holds up the Steward's queue: what isn't the kit's doing is set apart, the rest goes to the Wright, and the PRs behind it merge meanwhile.**
+
+### What's new
+
+- When a new kit fails an agent's checks in its trial, the Steward runs the same checks once more on that agent as it is, without the new kit. If they fail there too, the problem is the agent's or this PC's, not the kit's: it no longer holds the kit back, and the trial's comment names it apart.
+- When a new kit fails an agent's checks before release, the Steward hands that agent to the Wright: an issue in the agent's repository asks for a change that works with the new kit. Once that change is ready and passes, the kit goes ahead, and the agent's change follows it. The issue closes by itself when it's no longer needed.
+- A kit PR whose trial still fails agents gives up its turn in the queue, as a PR with a conflict already does. The PRs behind it merge meanwhile, and it merges once its trial passes.
+- Failures that an older Steward recorded in a kit trial are tried again once by the updated Steward, so a problem in the Steward itself doesn't keep a kit waiting after it was fixed.
+
+### What changed
+
+- A kit change that fails some agents is brought up to date by itself when a fix for the kit has landed in the meantime, and tried again with that fix, instead of failing the same way round after round.
+- The Steward's comment on such a change says that the Wright has the failing agents, and that the change is tried again once the kit moves underneath it.
+- On a PC whose work folder is on a drive that has no letter (a Dev Drive mounted only in a folder), the shared packages the Steward links into each check couldn't be found by esbuild, and every agent's page test failed. On 2026-10-13 that "failed" 22 of 34 agents in kit 2.69.0's trial and held every Steward PR behind it. On such a drive each check now installs its own packages. Giving the drive a letter as well (in its Properties) puts the shared packages back in use.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Wright gets this work only on a PC where the Wright is installed; elsewhere a failing kit still waits for a person, as before.
+
 ## 0.36.10
 
 **A vouch or a PR test on the Steward's own code runs only the tests its change reaches, and its whole suite runs before every kit release.**

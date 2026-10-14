@@ -5,7 +5,7 @@ import { APP } from '../app.ts';
 import { commitOf, fetchBranch, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
-import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf } from './bump.ts';
+import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf, WITHOUT_THE_KIT } from './bump.ts';
 import { checkoutOf, glanceOf, mapLimit, networkFailure, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
 import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -74,6 +74,16 @@ export interface KitTrial extends TrialPasses {
   pending?: string[];
   /** How many weren't tried: nothing they take from the kit changes (kitreach.ts). */
   untouched?: number;
+  /**
+   * The employees that failed with the kit and without it alike (bump.ts's withoutTheKit): not the kit's doing, so not
+   * held against it. Their own failure is theirs (or this PC's) to fix; their rollout bump will say so in its turn.
+   */
+  own?: { id: string; name: string; message: string }[];
+  /**
+   * The Steward that tried it (APP.version). Failures one older than this one kept are tried again, once: the Steward's
+   * own way of trying may have been why (Steward 0.35.73's fixes for a work folder on a Dev Drive).
+   */
+  steward?: string;
   at: string;
   /** Whether its comment on the PR was left. */
   commented?: boolean;
@@ -117,7 +127,7 @@ function triedElsewhere(t: KitTrial, now = Date.now()): boolean {
 /** The hold of a PR whose trial goes on: how far it got. Pure. */
 const goingWords = (t: KitTrial): string => {
   const pending = t.pending?.length ?? 0;
-  const total = t.passed + t.failed.length + (t.untouched ?? 0) + pending;
+  const total = t.passed + t.failed.length + (t.untouched ?? 0) + (t.own?.length ?? 0) + pending;
   const failing = t.failed.length ? `, ${t.failed.length} failing (${t.failed.map((f) => f.name).join(', ')})` : '';
   return `${TRIAL_GOING}: ${total - pending} of ${total} so far${failing}; the rounds go on meanwhile`;
 };
@@ -159,6 +169,21 @@ const pairNote = (t: KitTrial, id: string): string => {
   return p.draft ? ` (its #${p.number} pins this kit, but is a draft: once it's ready, it is tried with this kit)` : ` (its #${p.number}, which pins this kit, fails too: ${p.message.replace(/\r?\n/g, ' ')})`;
 };
 
+/**
+ * The Steward's kit PRs whose trial at their head is done and fails agents (its comment on the PR left), not labelled
+ * KIT_BREAKS_LABEL: each gives up its turn in the version queue, as a conflict handed on does (merge.ts givesWay), so
+ * the PRs above it merge meanwhile; once it passes, its catch-up gives it versions above theirs, and keeps its trial.
+ * Steward#214 (kit 2.69.0) held twelve PRs for hours on 2026-10-13, most of them the very fixes for why it failed.
+ */
+export function trialGivesWay(e: Employee, prs: PrInfo[], kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})): Set<number> {
+  if (e.id !== APP.id) return new Set();
+  const fails = (pr: PrInfo) => {
+    const t = kept[keyOf(pr)];
+    return !!t && !t.pending?.length && !!t.commented && standingFailures(t).length > 0;
+  };
+  return new Set(prs.filter((pr) => raisesKit(pr) && !pr.draft && !!pr.headOid && !pr.labels.includes(KIT_BREAKS_LABEL) && fails(pr)).map((pr) => pr.number));
+}
+
 /** The comment on the PR: the employees the kit breaks, and what to do. Pure. */
 export function trialComment(t: KitTrial, sha: string): string {
   const standing = standingFailures(t);
@@ -169,10 +194,13 @@ export function trialComment(t: KitTrial, sha: string): string {
     '',
     ...lines,
     ...(moves ? ['', `Not waited for: ${moves}.`] : []),
+    ...(t.own?.length ? ['', `Not held against it: ${t.own.map((f) => f.name).join(', ')} ${t.own.length === 1 ? 'fails' : 'fail'} the same checks without it, on main as it is.`] : []),
     '',
     `Each was bumped as the rollout will bump it once the kit is released: its main, kit.json pinned to ${t.kit}, its kit filled from this PR's kit\\ and tools\\kit.ts, then its own checks, twice.`,
     '',
     `**What to do:** change the kit so they pass as they are (a new push here is tried again), or fix the agents (once an agent's main moves, the next round tries it again), or open a ready PR to the agent that pins kit ${t.kit} and passes with it (the next round tries it, and the kit then merges with it), or, when the agents must change later, add the label \`${KIT_BREAKS_LABEL}\` and say what each must do in the kit's changelog entry. The PR then merges, and each failed bump goes to the Wright.`,
+    '',
+    `Meanwhile the Steward doesn't wait on you alone: each agent above goes to the Wright as an issue in its own repository, for a ready PR that pins kit ${t.kit} and passes with it; and should the branch change the kit since this PR left it, this PR is caught up and its kit tried again.`,
   ].join('\n');
 }
 
@@ -336,6 +364,10 @@ async function pairUp(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial): Pro
 const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
   results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null }));
 
+/** The ones that failed without the kit too (bump.ts's withoutTheKit): not the kit's doing. */
+const ownFailuresOf = (results: EmployeeResult[]): NonNullable<KitTrial['own']> =>
+  results.filter((r) => r.outcome === 'skipped' && r.message.startsWith(WITHOUT_THE_KIT)).map((r) => ({ id: r.id, name: r.name, message: r.message }));
+
 /**
  * Each employee that passed its checks, by id: the commit of its branch it was bumped from (TrialPasses' `mains`). One
  * that ran only the tests the kit reaches (`partial`) is kept too: its rollout's bump would run the same ones (0.35.68).
@@ -388,6 +420,8 @@ async function trySlice(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial, sl
         t.failed = [...t.failed, ...failuresOf(counted)];
         t.passed += counted.filter((r) => r.outcome === 'done').length;
         t.untouched = (t.untouched ?? 0) + counted.filter((r) => r.outcome === 'skipped' && r.message.includes(': not tried, ')).length;
+        const own = ownFailuresOf(counted);
+        if (own.length) t.own = [...(t.own ?? []), ...own];
         t.mains = { ...t.mains, ...mainsOf(counted) };
         save();
       }
@@ -407,13 +441,21 @@ async function triedAt(ctx: Ctx, repo: string, head: string): Promise<{ tree?: s
 
 /**
  * The employees a kept trial failed whose branch on origin has moved since (fixed on their side): they are tried again.
- * One kept before their commits were (no `main`) counts as moved, once. One that can't be fetched now waits.
+ * One kept before their commits were (no `main`) counts as moved, once. One that can't be fetched now waits. Every one,
+ * when another Steward tried them (`steward`, missing before 0.35.73): its way of trying may have been why, as an older
+ * one's was on a work folder moved to a Dev Drive (2026-10-13).
  */
 async function movedOn(ctx: Ctx, t: KitTrial): Promise<Employee[]> {
   const moved: Employee[] = [];
+  const another = t.steward !== APP.version;
   for (const f of t.failed) {
     const e = ctx.settings.employees.find((x) => x.id === f.id);
-    if (!e || !e.usesKit || f.main === null || !existsSync(checkoutOf(e))) continue;
+    if (!e || !e.usesKit || !existsSync(checkoutOf(e))) continue;
+    if (another) {
+      moved.push(e);
+      continue;
+    }
+    if (f.main === null) continue;
     try {
       await fetchBranch(ctx.run, checkoutOf(e), e.branch);
     } catch (err) {
@@ -483,7 +525,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     } else {
       const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
       ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, ${onTheirOwn ? `${trialParallel(ctx.settings.parallel)} at a time, beside the rounds` : 'a few each round'}`);
-      t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id) };
+      t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version };
     }
   }
   const key = keyOf(pr);
@@ -527,7 +569,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     const order = (id: string) => ctx.settings.employees.findIndex((e) => e.id === id) >>> 0;
     t.failed = [...t.failed].sort((a, b) => order(a.id) - order(b.id));
     t.at = new Date().toISOString();
-    ctx.log(`[${APP.id}] #${pr.number}: kit ${t.kit} tried on every agent: ${t.passed} passed, ${t.failed.length} failed, ${t.untouched ?? 0} not tried (nothing they take from the kit changes)`);
+    ctx.log(`[${APP.id}] #${pr.number}: kit ${t.kit} tried on every agent: ${t.passed} passed, ${t.failed.length} failed, ${t.own?.length ?? 0} failed without it too (not held against it), ${t.untouched ?? 0} not tried (nothing they take from the kit changes)`);
   }
   if (!fresh && t.failed.length) {
     // Fixed on the agents' side: each whose branch moved since is tried again with the same kit.
@@ -535,7 +577,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
     if (moved.length) {
       const waits = otherGoing();
       if (waits) return waits;
-      ctx.log(`[${APP.id}] #${pr.number}: ${moved.map((e) => e.name).join(', ')} moved on since kit ${t.kit} failed their checks: trying ${moved.length === 1 ? 'it' : 'them'} again`);
+      const why = t.steward === APP.version ? `moved on since kit ${t.kit} failed their checks` : `failed kit ${t.kit}'s checks as Steward ${t.steward ?? 'before 0.35.73'} tried them`;
+      ctx.log(`[${APP.id}] #${pr.number}: ${moved.map((e) => e.name).join(', ')} ${why}: trying ${moved.length === 1 ? 'it' : 'them'} again`);
       await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
       const results = await tryAtHead(ctx, steward, pr, t.kit, moved);
       // Cut short by the network: the kept verdict stands, and the next round tries them again (their main still moved).
@@ -544,7 +587,8 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       const failed = [...t.failed.filter((f) => !ids.has(f.id)), ...failuresOf(results)];
       // Its pairs kept, by head commit: one tried before isn't tried again (pairUp).
       const mains = { ...Object.fromEntries(Object.entries(t.mains ?? {}).filter(([id]) => !ids.has(id))), ...mainsOf(results) };
-      const now: KitTrial = { kit: t.kit, failed, passed: t.passed + results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...(t.tree ? { tree: t.tree, tool: t.tool } : {}), mains, ...(t.pairs ? { pairs: t.pairs } : {}), ...(t.pairsSaid ? { pairsSaid: t.pairsSaid } : {}) };
+      const own = [...(t.own ?? []).filter((f) => !ids.has(f.id)), ...ownFailuresOf(results)];
+      const now: KitTrial = { kit: t.kit, failed, passed: t.passed + results.filter((r) => r.outcome === 'done').length, at: new Date().toISOString(), ...(t.tree ? { tree: t.tree, tool: t.tool } : {}), mains, ...(t.untouched ? { untouched: t.untouched } : {}), ...(own.length ? { own } : {}), steward: APP.version, ...(t.pairs ? { pairs: t.pairs } : {}), ...(t.pairsSaid ? { pairsSaid: t.pairsSaid } : {}) };
       if (sameFailures(t.failed, failed)) now.commented = t.commented;
       else if (!failed.length) {
         const names = results.filter((r) => r.outcome === 'done').map((r) => r.name);
@@ -597,4 +641,30 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   });
   const moves = pairWords(t);
   return `kit ${t.kit} fails ${standing.length} agent${standing.length === 1 ? "'s" : "s'"} checks here (${names})${notes.length ? `; ${notes.join('; ')}` : ''}${moves ? `; ${moves}` : ''}: its comment says which tests; fix the kit or the agents, open a ready PR to the agent that pins kit ${t.kit} and passes with it, or label it ${KIT_BREAKS_LABEL}`;
+}
+
+/** The kit a hold says fails agents' checks (kitTrialHold's last word, its trial done), or null for any other hold. Pure. */
+export const trialFails = (why: string): string | null => /^kit (\d+\.\d+\.\d+) fails \d+ agent(?:'s|s') checks here/.exec(why)?.[1] ?? null;
+
+/**
+ * Whether the branch changed the kit (kit\ or tools/kit.ts) since this PR left it: a kit PR its trial fails is then
+ * caught up (merge.ts), so it is tried again with what the branch fixed meanwhile. Steward#214 (kit 2.69.0) failed the
+ * Smith's typecheck round after round on 2026-10-13, which main had fixed in kit 2.68.0, and held every Steward PR
+ * above it.
+ * origin/<branch> as the round fetched it. False when it can't be told.
+ */
+export async function kitMovedUnder(ctx: Ctx, e: Employee, pr: PrInfo): Promise<boolean> {
+  if (!pr.headOid) return false;
+  const repo = checkoutOf(e);
+  await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
+  const base = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, pr.headOid))?.trim();
+  if (!base) return false;
+  const changed = await gitMaybe(ctx.run, repo, 'diff', '--name-only', base, `origin/${e.branch}`, '--', 'kit', 'tools/kit.ts');
+  return !!changed?.trim();
+}
+
+/** The latest trial kept for a PR of this kit, at any head (kit-trials.json), or null. */
+export function latestTrial(number: number, kit: string, kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})): KitTrial | null {
+  const mine = Object.entries(kept).filter(([k, t]) => k.startsWith(`${number}@`) && t.kit === kit).map(([, t]) => t);
+  return mine.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null;
 }
