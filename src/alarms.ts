@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { APP, pageUrl } from './app.ts';
+import { manorHome } from './kit/manor.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
@@ -643,16 +645,33 @@ export const getJson: GetJson = async (url) => {
 };
 
 const powershellExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-/** Windows PowerShell's own AppUserModelID, so a toast needs no registered app (as Reeve's). */
+/** Windows PowerShell's own AppUserModelID: the toast goes under it should Castellan's not take. */
 const POWERSHELL_AUMID = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';
-// Text arrives in environment variables and is XML-escaped in PowerShell, so nothing is spliced into code.
+/** Castellan's AppUserModelID, as Manor's own notifications use it (its needs-you.ts): one name for the manor's. */
+export const TOAST_APP_ID = 'Castellan';
+/** Manor's castle, as a PNG: the name's icon, and the toast's own picture, since Windows may leave the name's out. */
+const toastIcon = () => path.join(manorHome(), 'app', 'art', 'manor-icon.png');
+// Text arrives in environment variables and is XML-escaped in PowerShell, so nothing is spliced into code. The app id
+// is put in the registry first with Castellan's name and icon (a key, no shortcut, no admin); should that fail, the
+// toast goes under Windows PowerShell's own, as before.
 const TOAST_PS = `$ErrorActionPreference = 'Stop'
 [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
 [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
 function E([string]$s) { [System.Security.SecurityElement]::Escape($s) }
+$icon = $env:STEWARD_TOAST_ICON -and (Test-Path -LiteralPath $env:STEWARD_TOAST_ICON)
+$id = $env:STEWARD_TOAST_FALLBACK
+try {
+  $k = 'HKCU:\\Software\\Classes\\AppUserModelId\\' + $env:STEWARD_TOAST_APPID
+  if (-not (Test-Path $k)) { [void](New-Item -Path $k -Force) }
+  Set-ItemProperty -Path $k -Name DisplayName -Value $env:STEWARD_TOAST_NAME
+  if ($icon) { Set-ItemProperty -Path $k -Name IconUri -Value $env:STEWARD_TOAST_ICON }
+  $id = $env:STEWARD_TOAST_APPID
+} catch { }
+$logo = ''
+if ($icon) { $logo = "<image placement=""appLogoOverride"" hint-crop=""none"" src=""$(E $env:STEWARD_TOAST_LOGO)""/>" }
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xml.LoadXml("<toast activationType=""protocol"" launch=""$(E $env:STEWARD_TOAST_LAUNCH)""><visual><binding template=""ToastGeneric""><text>$(E $env:STEWARD_TOAST_TITLE)</text><text>$(E $env:STEWARD_TOAST_BODY)</text></binding></visual></toast>")
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:STEWARD_TOAST_APPID).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+$xml.LoadXml("<toast activationType=""protocol"" launch=""$(E $env:STEWARD_TOAST_LAUNCH)""><visual><binding template=""ToastGeneric""><text>$(E $env:STEWARD_TOAST_TITLE)</text><text>$(E $env:STEWARD_TOAST_BODY)</text>$logo</binding></visual></toast>")
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
 `;
 
 export type Toast = (title: string, body: string) => Promise<void>;
@@ -664,7 +683,21 @@ export const toast: Toast = (title, body) => {
     execFile(
       powershellExe,
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(TOAST_PS, 'utf16le').toString('base64')],
-      { windowsHide: true, timeout: 30_000, env: { ...process.env, STEWARD_TOAST_TITLE: title.slice(0, 120), STEWARD_TOAST_BODY: body.slice(0, 400), STEWARD_TOAST_APPID: POWERSHELL_AUMID, STEWARD_TOAST_LAUNCH: `${pageUrl}#alarms` } },
+      {
+        windowsHide: true,
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          STEWARD_TOAST_TITLE: title.slice(0, 120),
+          STEWARD_TOAST_BODY: body.slice(0, 400),
+          STEWARD_TOAST_APPID: TOAST_APP_ID,
+          STEWARD_TOAST_NAME: 'Castellan',
+          STEWARD_TOAST_ICON: toastIcon(),
+          STEWARD_TOAST_LOGO: pathToFileURL(toastIcon()).href,
+          STEWARD_TOAST_FALLBACK: POWERSHELL_AUMID,
+          STEWARD_TOAST_LAUNCH: `${pageUrl}#alarms`,
+        },
+      },
       (err) => (err ? reject(new Error(`toast failed: ${err.message.slice(0, 300)}`)) : resolve()),
     );
   });

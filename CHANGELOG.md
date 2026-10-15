@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.57
+
+**The Steward's notifications come under Castellan's name, with the castle, instead of Windows PowerShell.**
+
+### What changed
+
+- The Steward's Windows notifications (an alarm that needs you, a release that stopped) now say **Castellan**, as Manor's own do, with the castle on each one. In Windows' notification settings, Castellan's notifications are turned on or off together, without touching Windows PowerShell's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The castle shows once Manor 0.16.165 or later is installed; before that, the notifications already say Castellan.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**
