@@ -448,3 +448,44 @@ test('on a Snapdragon GenieX is the NPU only: --device GPU and --cap are refused
   assert.match(cap.report.marks[0].say, /no prompt cap to set/);
   assert.equal(s.fake.starts, 0);
 });
+
+test('a candidate chats only unless --vision says it sees: pulled as its own type, found in its own folder', () => {
+  const geniex = V.NPU_CATALOG.routes.qualcomm;
+  const text = B.candidateRoute(geniex, 'ai-hub-models/Qwen3-4B-Instruct-2507');
+  assert.deepEqual(text.models.map((m: any) => m.kinds), [['chat']], "not the kinds of GenieX's model, which sees");
+  assert.deepEqual(text.models[0].pull, ['pull', 'ai-hub-models/Qwen3-4B-Instruct-2507', '--model-type', 'llm', '--skip-update']);
+  // GenieX's folder drops the id's :tag, so the route's model's folder isn't taken for the candidate's.
+  assert.equal(text.models[0].present, '%USERPROFILE%\\.cache\\geniex\\models\\ai-hub-models\\Qwen3-4B-Instruct-2507\\geniex.json');
+  const sees = B.candidateRoute(geniex, 'qualcomm/Qwen3-VL-4B-Instruct-2:W8A16', { vision: true });
+  assert.deepEqual(sees.models[0].kinds, ['chat', 'vision']);
+  assert.deepEqual(sees.models[0].pull, ['pull', 'qualcomm/Qwen3-VL-4B-Instruct-2:W8A16', '--model-type', 'vlm', '--skip-update'], 'renamed once, not again inside the new name');
+  assert.equal(sees.models[0].present, '%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct-2\\geniex.json');
+  // FastFlowLM's tags are its models' names: the whole id is renamed.
+  assert.deepEqual(B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0].pull, ['pull', 'qwen3-it:1.7b']);
+  const intel = B.candidateRoute(V.NPU_CATALOG.routes.intel, 'Castellan-AI/Qwen3-1.7B-int4-cw-ov');
+  assert.equal(intel.models[0].present, '{tools}\\models\\openvino\\Castellan-AI\\Qwen3-1.7B-int4-cw-ov\\graph.pbtxt');
+  assert.throws(() => B.candidateRoute(V.NPU_CATALOG.routes.intel, 'a/b', { vision: true }), /has no vision/);
+  assert.deepEqual(B.parseBenchArgs(['--candidate', 'a/b', '--vision']), { candidate: 'a/b', vision: true });
+  assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
+});
+
+test("a text candidate on a Snapdragon is pulled as one and asked no pictures; with --vision it's asked them, not the route's model", async () => {
+  const C = 'ai-hub-models/Qwen3-4B-Instruct-2507';
+  for (const vision of [false, true]) {
+    const s = await scene({ vendor: 'qualcomm' });
+    const pulls: string[][] = [];
+    const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', candidate: C, vision, io: { ...s.opts.io, setup: { run: async (_exe: string, args: string[]) => (pulls.push(args), { code: 0, out: '' }) } } });
+    assert.equal(code, 0, s.lines.join('\n'));
+    assert.equal(report.run.candidate, true);
+    assert.equal(report.run.model, C);
+    assert.deepEqual(pulls, [['pull', C, '--model-type', vision ? 'vlm' : 'llm', '--skip-update']]);
+    assert.ok(s.fake.seen.every((j) => j.model === C), 'every request names the candidate');
+    if (vision) {
+      assert.deepEqual([report.vision!.passed, report.vision!.of], [4, 4]);
+      assert.equal(s.fake.pictures.length, SUITE.warmups + SUITE.vision.length);
+    } else {
+      assert.equal(report.vision, null, 'a text model has no vision column');
+      assert.deepEqual(s.fake.pictures, []);
+    }
+  }
+});

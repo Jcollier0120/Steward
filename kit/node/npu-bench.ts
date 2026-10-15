@@ -7,7 +7,7 @@ import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, t
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
+import { NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -19,7 +19,7 @@ import { mixSummary, readTally } from './token-tally.ts';
  * (spec/npu-bench.schema.json). A run that doesn't meet the conditions is still reported, with marks saying why it
  * isn't ranked.
  *
- *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id>]
+ *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
  *                                     [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]
  */
 
@@ -359,11 +359,33 @@ async function dischargeRate(): Promise<number | null> {
 // ------------------------------------------------------------------------------------------------
 // A route for the run
 
-/** The route with a model that isn't in npu-vendors.json: pulled the same way as the route's own, its files not pinned. */
-export function candidateRoute(route: NpuRoute, id: string): NpuRoute {
+/**
+ * Renames one model id to another in a route's strings, in one pass: the id, and without its `:tag` where it has one
+ * (GenieX keeps qualcomm/Qwen3-VL-4B-Instruct:W4A16 in a folder qualcomm\Qwen3-VL-4B-Instruct), each with / or \.
+ */
+function renamer(from: string, to: string): (s: string) => string {
+  const bare = (x: string) => x.replace(/:[^:/\\]*$/, '');
+  const names = new Map<string, string>();
+  for (const [a, b] of [[from, to], ...(bare(from) !== from ? [[bare(from), bare(to)]] : [])]) for (const sep of ['/', '\\']) names.set(a.replace(/\//g, sep), b.replace(/\//g, sep));
+  const re = new RegExp([...names.keys()].sort((x, y) => y.length - x.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  return (s) => s.replace(re, (m) => names.get(m)!);
+}
+
+/**
+ * The route with a model that isn't in npu-vendors.json: pulled the same way as the route's own, its files not pinned.
+ * It chats only, unless `vision` says it sees too: it doesn't take the kinds of the model it stands in for, or a text
+ * model on GenieX's route (whose one model chats and sees) would be pulled as a vision model and asked the pictures.
+ */
+export function candidateRoute(route: NpuRoute, id: string, o: { vision?: boolean } = {}): NpuRoute {
   const base = route.models.find((m) => m.kinds.includes('chat')) ?? route.models[0];
-  const swap = (s: string) => s.split(base.id).join(id).split(base.id.replace(/\//g, '\\')).join(id.replace(/\//g, '\\'));
-  return { ...route, models: [{ ...base, id, pull: base.pull.map(swap), ...(base.present ? { present: swap(base.present) } : {}), size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
+  if (o.vision && !route.models.some((m) => m.kinds.includes('vision'))) throw new Error(`${route.server}'s route has no vision, so --vision can't measure a candidate's`);
+  const swap = renamer(base.id, id);
+  const pull = base.pull.map(swap);
+  // GenieX's pull says the model's type (llm or vlm): the candidate's own, not the route's model's.
+  const type = pull.indexOf('--model-type');
+  if (type >= 0) pull[type + 1] = o.vision ? 'vlm' : 'llm';
+  const kinds: NpuModel['kinds'] = o.vision ? ['chat', 'vision'] : ['chat'];
+  return { ...route, models: [{ ...base, id, kinds, pull, ...(base.present ? { present: swap(base.present) } : {}), size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
 }
 
 /** The route with only the model asked for (and its vision model, where the route has one beside it). */
@@ -409,6 +431,8 @@ export interface NpuBenchOptions {
   device?: string;
   model?: string;
   candidate?: string;
+  /** The candidate sees too (`--vision`): pulled as a vision model where the server asks, and asked the pictures. */
+  vision?: boolean;
   cap?: number;
   energy?: boolean;
   setup?: boolean;
@@ -503,7 +527,7 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   try {
     // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
     route = routeOnDevice(routeFor(catalog.routes[vendor], npu.generation), device);
-    if (o.candidate) route = candidateRoute(route, o.candidate);
+    if (o.candidate) route = candidateRoute(route, o.candidate, { vision: o.vision });
     else if (o.model) route = routeWithModel(route, o.model);
     route = benchServe(route, { device, cap: o.cap });
   } catch (e: any) {
@@ -786,6 +810,7 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
       o.device = v;
     } else if (a === '--model') o.model = argv[++i];
     else if (a === '--candidate') o.candidate = argv[++i];
+    else if (a === '--vision') o.vision = true;
     else if (a === '--cap') {
       const v = Number(argv[++i]);
       if (!Number.isInteger(v) || v < 256) return { error: '--cap takes a number of tokens, 256 or more' };
@@ -798,13 +823,14 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
     } else return { error: `unknown argument ${a}` };
   }
   if (o.model && o.candidate) return { error: '--model and --candidate are one or the other' };
+  if (o.vision && !o.candidate) return { error: "--vision says a --candidate sees: the route's own models already say what they do" };
   return o;
 }
 
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id>] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
+    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
     process.exit(2);
   }
   if (o.mix) {

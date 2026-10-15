@@ -3,7 +3,7 @@
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
 ## Unreleased
-**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files, and its spec says how to run it on a PC.**
+**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, and its spec says how to run it on a PC.**
 
 ### What changed
 
@@ -21,6 +21,11 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - Other servers still get `data:` URLs. `picturePng` gives a picture's bytes; `picture` is its `data:` URL, as before.
 - **GenieX's `prefix-leak` nonce was already there.** The bench's requests are the kit's own (`chatBody`, `visionBody`), and its entry carries the route's quirks, so every request starts with a nonce. A test now holds it to that, and the run's log names the quirks it applied.
 - **One picture as a warm-up, not counted**, before the four graded, as every other measurement has. GenieX holds one model at a time and loads its vision part for a picture, so the first picture's time was that load's. Only routes with vision are affected (GenieX's; Intel's has none).
+- **A `--candidate` only chats, unless `--vision` says it sees.** `candidateRoute(route, id, { vision })` took the kinds of the model it stood in for. On GenieX's route, whose one model chats and sees, a text model was therefore:
+  - pulled with `--model-type vlm`, where GenieX's pull takes `llm` or `vlm`; it now gets `llm`, or `vlm` with `--vision`;
+  - asked the four pictures, and reported 0 of 4; it now has no vision column.
+  - Its `present` file kept the route's own model's folder, because GenieX's folder drops the id's `:W4A16` tag. So a candidate counted as downloaded whenever Qwen3-VL was, and was never pulled. The id is now renamed with and without its tag, in one pass.
+  - `--vision` on a route with no vision (Intel's) is refused, and so is `--vision` without `--candidate`.
 - **spec/NPU-BENCHMARK.md**:
   - says all of the above;
   - drops the `streams` a route was said to declare in `npu-vendors.json`, which none does: the bench sees whether each answer was streamed and marks the run `not-streamed` (or `no-usage`) when not. Whether GenieX streams, with usage in its last chunk, is still to be checked on the X2 Elite;
