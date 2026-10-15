@@ -18,6 +18,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do: a page drawing `NeedsYou` gets the spacing as it pins this kit. Anything it draws just after Needs you that belongs under its heading can move into its children.
 
+## 2.74.0
+
 **A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
 
 ### What's new
