@@ -25,8 +25,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Take the kit and release as usual.
 - Compare your own folders with `samePath`, `inside` or `pathKey` from `./kit/real-path.ts`, not `path.resolve(...).toLowerCase()` (spec/DEV-DRIVES.md, rules 1 and 5).
 
-## Unreleased (its version needs claiming on the main laptop)
-**Intel's NPU 3720 measured and verified: a short answer in 0.5 s, not 3.1, by reading prompts 128 tokens at a time; Arrow Lake-U named; the NPU check times a real compile.**
 ## 2.73.4
 
 **An NPU's own timeouts are used: its requests run on them, and a model found still loading is given its cold load.**
