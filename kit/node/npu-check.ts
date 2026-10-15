@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,6 +112,8 @@ export interface NpuCheckOptions {
     idle?: IdleDeps;
     /** Whether a port is free (portFree): the route's own, or one a rehearsal moves to. */
     portFree?: (port: number) => Promise<boolean>;
+    /** Empties the check's own compile cache before its first start (checkServe). */
+    clearCache?: (dir: string) => void;
     now?: () => number;
   };
 }
@@ -121,15 +123,16 @@ export interface NpuCheckOptions {
 
 /**
  * The route with its server pointed at another device (OpenVINO's --target_device): off the NPU its NPU-only
- * arguments (--max_prompt_len, and its embedding server's --max_length) go. Its embedding server goes with it when
- * it has a device argument too; one without stays on the NPU. A route without a device argument runs on its NPU only.
+ * arguments (--max_prompt_len, its NPU plugin's settings in --plugin_config, and its embedding server's --max_length)
+ * go. Its embedding server goes with it when it has a device argument too; one without stays on the NPU. A route
+ * without a device argument runs on its NPU only.
  */
 export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   const on = (args: string[]) => {
     const serve = [...args];
     serve[serve.indexOf('--target_device') + 1] = device.toUpperCase();
     if (device.toUpperCase() !== 'NPU') {
-      for (const flag of ['--max_prompt_len', '--max_length']) {
+      for (const flag of ['--max_prompt_len', '--plugin_config', '--max_length']) {
         const j = serve.indexOf(flag);
         if (j >= 0) serve.splice(j, 2);
       }
@@ -142,6 +145,23 @@ export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   }
   const es = route.embedServer;
   return { ...route, serve: on(route.serve), ...(es?.serve.includes('--target_device') ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
+}
+
+/**
+ * The route's servers given the check's own compile cache (OpenVINO's --cache_dir), emptied before the first start:
+ * the first load compiles, as on a PC that has never run the model, or after a driver update (whose compiler can't
+ * use the old compile), and the start again loads that compile. From the manor's warm cache an NPU 3720 whose
+ * compile took 30 to 48 s answered first in 9 s, and the check suggested a 30 s cold load (2026-10-14).
+ */
+export function checkServe(route: NpuRoute): NpuRoute {
+  const own = (args: string[]) => {
+    const serve = [...args];
+    const c = serve.indexOf('--cache_dir');
+    if (c >= 0) serve[c + 1] = `${path.win32.dirname(serve[c + 1])}\\.check-cache`;
+    return serve;
+  };
+  const es = route.embedServer;
+  return { ...route, serve: own(route.serve), ...(es ? { embedServer: { ...es, serve: own(es.serve) } } : {}) };
 }
 
 /** Whether nothing answers or listens on 127.0.0.1's port. */
@@ -333,6 +353,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'ports', ok: false, say: e.message });
     return finish(2);
   }
+  // The measurements compile the model in a cache of their own (the idle stop and hardening keep the manor's).
+  if (!o.idle && !o.harden) route = checkServe(route);
   report.server = `${route.server} ${route.version}`;
   const tools = o.tools ?? toolsHome(env);
   const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : playing ? { ...npu!, generation, verified: false } : npu!;
@@ -394,6 +416,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'start', ok: false, say: `something already answers at ${ep.baseUrl} (the keeper's server?): stop it first, so the check measures a start of its own` });
     return finish(1);
   }
+  const cacheArg = route.serve.indexOf('--cache_dir');
+  if (cacheArg >= 0) (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(route.serve[cacheArg + 1].replace('{tools}', tools));
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;
   // What a measured request may take: a slow device is measured, not cut off.
   const stepMs = Math.max(10 * 60_000, coldMs * 2);
