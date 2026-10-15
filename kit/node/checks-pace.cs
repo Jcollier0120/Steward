@@ -16,6 +16,12 @@
 // inside another's run (KIT_CHECKS_TURN set: the Assayer pacing `steward vouch`, which paces its own steps) takes no turn,
 // or it would wait for itself. A turn not had within TURN_WAIT_MS is gone without: a check never waits forever.
 //
+// Runs in sight (kit 2.75.0): a launcher that takes part in the turns says where it stands in a file of its own,
+// <KIT_CHECKS_RUNS>\<its process id>.run, so an agent's work status (work-status.ts) shows every check run on the PC:
+// its first line "waiting -1 <since>" while it waits, "turn <n> <since>" once it holds turn n, "running -1 <since>" when
+// it runs without one; its second KIT_CHECKS_WHO, as the agent that started it set it. Removed when it ends; one left by
+// a launcher that was stopped is removed by the next reader, whose process is gone.
+//
 // `apart <command line>` (apart.ts) instead starts a program out of the jobs it would inherit, as far as they let it
 // (an agent's gentle job does, kit 2.73.0; one that doesn't keeps it), detached, its output to the launcher's standard
 // error, and answers its process id as the exit code (0: it couldn't start). For the model servers every agent shares:
@@ -123,17 +129,60 @@ public static class KitChecksPace
         }
         // Ctrl+C goes to the command, which shares this console: the launcher waits for it to end.
         SetConsoleCtrlHandler(IntPtr.Zero, true);
-        IntPtr turn = TakeTurn(limits.AtOnce);
+        string runs = TakesTurn(limits.AtOnce) ? RunsFile() : null;
+        Say(runs, "waiting", -1);
+        int slot;
+        IntPtr turn = TakeTurn(limits.AtOnce, out slot);
+        Say(runs, turn != IntPtr.Zero ? "turn" : "running", turn != IntPtr.Zero ? slot : -1);
         Environment.SetEnvironmentVariable(TURN_HELD, "1");
+        // The programs it starts take no turn, so say nothing of their own.
+        Environment.SetEnvironmentVariable(RUNS, null);
         try { return Run(line, limits); }
-        finally { if (turn != IntPtr.Zero) { ReleaseMutex(turn); CloseHandle(turn); } }
+        finally
+        {
+            if (turn != IntPtr.Zero) { ReleaseMutex(turn); CloseHandle(turn); }
+            if (runs != null) try { System.IO.File.Delete(runs); } catch { }
+        }
+    }
+
+    /// <summary>The folder a launcher says where it stands in (work-status.ts's checksRunsDir); none unset.</summary>
+    public const string RUNS = "KIT_CHECKS_RUNS";
+
+    // Whether this launcher takes part in the PC's turns: asked for, and not inside another launcher's run.
+    static bool TakesTurn(int atOnce)
+    {
+        return atOnce > 0 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(TURN_HELD));
+    }
+
+    // This launcher's file in KIT_CHECKS_RUNS's folder, or null when that isn't set or can't be made.
+    static string RunsFile()
+    {
+        string dir = Environment.GetEnvironmentVariable(RUNS);
+        if (string.IsNullOrEmpty(dir)) return null;
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            return System.IO.Path.Combine(dir, System.Diagnostics.Process.GetCurrentProcess().Id + ".run");
+        }
+        catch { return null; }
+    }
+
+    // Where this launcher stands, in its file: the state, the turn (-1 for none) and since when, then who started it.
+    static void Say(string file, string state, int slot)
+    {
+        if (file == null) return;
+        string who = (Environment.GetEnvironmentVariable("KIT_CHECKS_WHO") ?? "").Replace('\r', ' ').Replace('\n', ' ');
+        if (who.Length > 300) who = who.Substring(0, 300);
+        try { System.IO.File.WriteAllText(file, state + " " + slot + " " + DateTime.UtcNow.ToString("o") + "\n" + who + "\n"); } catch { }
     }
 
     // One of the PC's turns for check runs, or zero for none: none asked, one already held by the launcher this runs
     // inside, or none had within TURN_WAIT_MS. A mutex left by a launcher that was stopped comes free as abandoned.
-    static IntPtr TakeTurn(int atOnce)
+    // `slot`: which of them, or -1.
+    static IntPtr TakeTurn(int atOnce, out int slot)
     {
-        if (atOnce <= 0 || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(TURN_HELD))) return IntPtr.Zero;
+        slot = -1;
+        if (!TakesTurn(atOnce)) return IntPtr.Zero;
         var turns = new IntPtr[Math.Min(atOnce, 32)];
         int made = 0;
         for (int i = 0; i < turns.Length; i++)
@@ -146,6 +195,7 @@ public static class KitChecksPace
         uint got = WaitForMultipleObjects((uint)made, turns, false, TURN_WAIT_MS);
         int held = got < WAIT_OBJECT_0 + made ? (int)(got - WAIT_OBJECT_0) : got >= WAIT_ABANDONED_0 && got < WAIT_ABANDONED_0 + made ? (int)(got - WAIT_ABANDONED_0) : -1;
         for (int i = 0; i < made; i++) if (i != held) CloseHandle(turns[i]);
+        slot = held;
         return held < 0 ? IntPtr.Zero : turns[held];
     }
 

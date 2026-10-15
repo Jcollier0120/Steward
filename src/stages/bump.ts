@@ -4,6 +4,7 @@ import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
+import { codeAt, recordResult, withWork } from '../kit/work-status.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
@@ -16,7 +17,7 @@ import { installLines } from '../installscripts.ts';
 import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
-import { keepWhole } from '../whole.ts';
+import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 
@@ -142,7 +143,31 @@ export const needsNpmCi = (dir: string) =>
  * `failed`, when given, is filled with the step that failed and the tests it failed (node --test's TAP), for a caller
  * that weighs a second try against the first (wholesuite.ts).
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
+  // A task in the Steward's work status (the kit's work-status.ts), with the commit and code tree it runs at; what it
+  // came to is kept by that tree, unless a kit under trial filled it (not the tree's own result) or it wasn't clean.
+  const { commit, tree } = await codeAt(dir);
+  const trial = !!o.env?.STEWARD_KIT;
+  const what = `${e.name}: ${o.doing ?? 'its checks'}`;
+  return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async () => {
+    const failed = await checksIn(ctx, e, dir, o);
+    const after = trial || !commit ? null : await codeAt(dir);
+    if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, ...(failed ? { note: failed.slice(0, 500) } : {}) });
+    return failed;
+  });
+}
+
+/** runChecks' options. */
+export interface ChecksOptions {
+  env?: Record<string, string>;
+  say: (line: string) => void;
+  affected?: AffectedScope;
+  doing?: string;
+  timeLimit?: (kind: CheckKind) => TimeLimit | null;
+  failed?: FailedChecks;
+}
+
+async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   const started = Date.now();
   const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
   let limit: (TimeLimit & { at: number }) | null = null;
