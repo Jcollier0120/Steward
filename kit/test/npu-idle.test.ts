@@ -67,7 +67,7 @@ test("a server's route by its program and kind: GenieX and its llama-server, Ope
   assert.equal(vendor('C:\\t\\servers\\fastflowlm-1.0.7\\flm.exe', 'chat'), 'amd');
   assert.equal(vendor('C:\\t\\llama-server.exe', 'chat'), null, "a card's llama-server is no NPU route's chat");
   assert.equal(vendor('C:\\Python\\python.exe', 'embed'), null, 'npu-embed');
-  assert.equal(V.coldStartMsOf(V.NPU_CATALOG.routes.intel, 'embed'), 4_000);
+  assert.equal(V.coldStartMsOf(V.NPU_CATALOG.routes.intel, 'embed'), 2_800, "the NPU 3720's measured embedding start");
   assert.equal(V.coldStartMsOf(V.NPU_CATALOG.routes.qualcomm, 'vision'), 15_000, "vision on the chat model's server: chat's");
   assert.equal(V.npuIdleStopMinutes({ program: OVMS, kind: 'embed', ramBytes: 15.6 * GB, otherwise: 10 }), 5);
   assert.equal(V.npuIdleStopMinutes({ program: OVMS, kind: 'embed', ramBytes: 32 * GB, otherwise: 10 }), 10);
@@ -79,8 +79,8 @@ test("waking's words: the route's measured cold start where it has one, plainly,
   const npu = { id: 'npu', kind: 'npu', name: 'NPU', slots: 1, maxContextTokens: 4096, quirks: [] } as any;
   const w = wakingOf(npu, 'chat', { startCommand: ['%USERPROFILE%\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms.exe', '--rest_port', '18183'] }, 'starting');
   assert.equal(w.how, 'starting');
-  assert.equal(w.aboutMs, 4_000);
-  assert.equal(w.line, 'Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer.');
+  assert.equal(w.aboutMs, 6_900);
+  assert.equal(w.line, 'Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 7 s longer.');
   assert.equal(wakingOf(npu, 'chat', { startCommand: ['C:\\x\\geniex.exe'] }, 'loading').line, 'The local AI on the NPU is loading its model: the first answer takes about 15 s longer.');
   const card = { id: 'gpu-rtx', kind: 'gpu', name: 'NVIDIA GeForce RTX 4080', slots: 1, maxContextTokens: 8192, quirks: [] } as any;
   assert.match(wakingOf(card, 'chat', { startCommand: ['C:\\x\\llama-server.exe'] }, 'starting').line, /^Waking the local AI on .*RTX 4080.*: .* a little longer\.$/);

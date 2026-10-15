@@ -108,12 +108,15 @@ async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string; e
   return { port, catalog, tools, exe, fake, ran, lines, opts };
 }
 
-test('the route on another device: OpenVINO gets its --target_device, and off the NPU loses --max_prompt_len and its NPU plugin settings; GenieX has no other', () => {
+test('the route on another device: OpenVINO gets its --target_device, and off the NPU loses --max_prompt_len, its NPU plugin settings and the NPU\'s prefix caching off; GenieX has no other', () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const cpu = C.routeOnDevice(intel, 'cpu');
   assert.equal(cpu.serve[cpu.serve.indexOf('--target_device') + 1], 'CPU');
   assert.ok(!cpu.serve.includes('--max_prompt_len'));
   assert.ok(!cpu.serve.includes('--plugin_config'));
+  assert.ok(intel.serve.includes('--enable_prefix_caching'));
+  assert.ok(!cpu.serve.includes('--enable_prefix_caching'), "the CPU keeps OpenVINO's own prefix caching");
+  assert.ok(!cpu.serve.includes('false'), 'and the flag goes with its value');
   assert.ok(!C.routeOnDevice(V.routeFor(intel, 'meteor-lake'), 'GPU').serve.includes('--plugin_config'), "the NPU 3720's prompt chunks stay on the NPU");
   assert.deepEqual(C.routeOnDevice(intel, 'NPU').serve, intel.serve);
   // Its embedding server, OpenVINO too, goes with it, and loses the NPU's fixed --max_length.
