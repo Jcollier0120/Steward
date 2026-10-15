@@ -32,6 +32,7 @@ import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
+import { settleWholeSuite } from './stages/wholesuite.ts';
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
@@ -664,6 +665,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
           const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
+          // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
+          if (round && whole && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
             // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
             // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
@@ -919,7 +922,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }

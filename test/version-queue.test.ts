@@ -251,6 +251,11 @@ test("the round says what holds the Steward's own queue and since when, and an a
   assert.equal(raised[0].title, 'Steward #21 (v0.4.1) has held its version queue for 1 hour or more: #22, #23 wait behind it');
   assert.ok(raised[0].detail.some((d) => d.startsWith('Mark it ready once it is done')), raised[0].detail.join('\n'));
 
+  // Its turn another PC's (turns.json): that PC's Steward merges there and raises it, so this one doesn't as well.
+  const turnIs = (status: 'here' | 'elsewhere') => ({ repos: { 'jcollier0120/steward': { repo: 'Jcollier0120/Steward', status, at: T } } });
+  assert.deepEqual(heldQueues(loadVersionQueues(), turnIs('elsewhere')), []);
+  assert.equal(heldQueues(loadVersionQueues(), turnIs('here')).length, 1);
+
   // A conflict holding it is the blocking alarm's, which names its files.
   assert.deepEqual(conditions([{ ...holds[0], hold: { ...holds[0].hold, why: `${CONFLICTS} in src/app.ts` } }]), []);
 

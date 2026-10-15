@@ -200,11 +200,12 @@ async function stopUnless(key: string | null, why: string, say: (line: string) =
 
 /**
  * The round's look at the whole suite beside it, for a kit's planned release (self.ts): stopped when main moved on from
- * it (`step` at another commit) or no kit waits for one any more (`step` null), so it never runs for code nobody releases.
+ * it (`step` at another commit) or no kit waits for one any more (`step` null), so it never runs for code nobody releases;
+ * and when the Steward's own turn is another PC's (steward.ts, self.ts: `why`), whose Steward runs it there.
  */
-export async function settleWholeSuite(ctx: Ctx, step: { tag: string; commit: string } | null): Promise<void> {
+export async function settleWholeSuite(ctx: Ctx, step: { tag: string; commit: string } | null, why?: string): Promise<void> {
   const say = (line: string) => ctx.log(`[${APP.id}] ${line}`);
-  await stopUnless(step ? keyOf(step) : null, step ? `${STEWARD_BRANCH} moved on to ${step.commit.slice(0, 7)} (${step.tag})` : `no kit on ${STEWARD_BRANCH} waits for it any more`, say);
+  await stopUnless(step ? keyOf(step) : null, why ?? (step ? `${STEWARD_BRANCH} moved on to ${step.commit.slice(0, 7)} (${step.tag})` : `no kit on ${STEWARD_BRANCH} waits for it any more`), say);
 }
 
 /**

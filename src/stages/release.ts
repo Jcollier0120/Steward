@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { commitOf, git, removeWorktree, showFile } from '../git.ts';
 import { readLsRemote } from '../scm.ts';
+import { stayAwake } from '../kit/awake.ts';
 import { combinedEntry } from '../kit/notes.ts';
 import { isUrgent, letOut, NEVER_SOLD } from '../kit/exchequer.ts';
 import { compareVersions } from '../kitfiles.ts';
@@ -96,8 +97,22 @@ export function releaseDecision(c: ReleaseCandidate, kit: string | null): { rele
  * `unless`, given the commit to release and its version, may say why not (a round leaves a commit whose release
  * failed before to a person). Then the Aletaster tastes that commit (tasting.ts): a release it holds waits, with its
  * reason, and the next round asks again.
+ *
+ * The PC is kept awake while a release is made (the kit's awake.ts, Steward 0.36.45), from when it is decided on until
+ * it is done; not while it is only looked at.
  */
-export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean }): Promise<EmployeeResult> {
+export async function releaseOne(ctx: Ctx, e: Employee, o: ReleaseOptions): Promise<EmployeeResult> {
+  let letGo = () => {};
+  try {
+    return await releaseIn(ctx, e, o, (what) => (letGo = stayAwake(what, ctx.log)));
+  } finally {
+    letGo();
+  }
+}
+
+type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean };
+
+async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what: string) => void): Promise<EmployeeResult> {
   const { run } = ctx;
   if (!e.usesKit && o.kit !== null) return result(e, 'skipped', NOT_ON_KIT);
   // Released only once the person said how (Settings' Release it), and only a repository with a version.
@@ -151,6 +166,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
   const noted = gate.note ? `; ${gate.note}` : '';
   // Another PC took its turn here meanwhile (lease.ts): it releases this. A hire is this PC's own install.
   if (!o.hire && ctx.lease && !(await ctx.lease.ok(e))) return result(e, 'skipped', `v${version} is left to another PC, whose turn it is now`, { version, commit: commit.slice(0, 7) });
+  awake(`${e.name} v${version}'s release`);
 
   // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
   // The release before: the versions merged since and never released on their own come in its notes.

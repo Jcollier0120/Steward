@@ -4,9 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.45
 
-**The whole test suite before a kit's release no longer holds up merging, and the Steward says which pull request is holding a version queue.**
+**The whole test suite before a kit's release no longer holds up merging, the Steward says which pull request is holding a version queue, and the PC stays awake while the Steward is working.**
 
 ### What's new
+
+- While the Steward runs checks, merges a pull request or makes a release, Windows doesn't put the PC to sleep on its own. Once that work ends, the PC may sleep again. On 15 October the PC slept for an hour in the middle of a round's checks, and again for 13 minutes, which is much of why that round ran out of time. This only stops sleep from idling: if you choose Sleep, press the power button or close the lid, the PC still sleeps, and the display still turns off as usual. Rounds that only look at GitHub don't keep the PC awake, so it still sleeps when nothing is being worked on. This comes with kit 2.74.8.
 
 - The Steward's page has a new card, **What holds the version queues**. It appears when the lowest version waiting in a repository is a draft, untested, or has failing or running checks, while ready pull requests above it wait their turn (the lowest version always merges first). It names the pull request holding the queue, why it isn't ready, which pull requests wait behind it, and since when. The round's log says the same.
 - When a queue has been held that way for more than an hour, it is an alarm (the same hour as a conflict that holds a queue, Settings' `blockingHours`). The alarm says what to do: mark the pull request ready, give it a version above the others, or close it. This covers the Steward's own repository too, where three drafts held every merge for hours on 14 and 15 October without anything saying so.
@@ -17,6 +19,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - Before it releases a kit, the Steward runs its whole test suite (twice if the first run fails). That used to happen inside a round, and the round waited: a slow run held every merge for 45 minutes to 2 hours on 14 and 15 October, until the round was given up at its time limit with its tests still running. Now the suite runs on its own, beside the rounds. The round that starts it goes on merging at once, and the kit waits. The first round after the suite passes releases the kit. If it fails, the kit is held as a failed release, as before. Only one run goes at a time, never a second beside it.
 - A new commit on main stops a whole suite still running for the old commit and starts one for the new commit. When the Steward stops, its whole suite stops with it, along with every program it started. If a Steward ended without stopping it, the next Steward ends whatever was left running when it starts.
 - Code that has already passed the whole suite on this PC is still not run again, and a kit whose two runs failed only on different tests is still released.
+- With several PCs taking turns at the Steward's work, the whole suite runs only on the PC whose turn the Steward's own repository is. If the turn moves to another PC, this PC stops its run, and the other PC runs the suite there. The alarm for a held version queue is raised only by the PC whose turn that repository is, so two PCs never both raise it.
 
 ### Before you update
 

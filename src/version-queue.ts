@@ -5,6 +5,7 @@ import { manorProjects, type ManorProject } from './kit/manor.ts';
 import { freshRemoteHeads } from './kit/remote-heads.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Held } from './alarms.ts';
+import type { TurnsState } from './lease.ts';
 import type { Employee } from './settings.ts';
 import { checkoutOf, glanceOf, hostIs, type Ctx } from './stages/common.ts';
 import { holdReason, prVersions } from './stages/merge.ts';
@@ -345,4 +346,9 @@ export interface HeldQueue {
   hold: QueueHold;
 }
 
-export const heldQueues = (v: VersionQueues): HeldQueue[] => v.repos.flatMap((r) => (r.held && r.repo ? [{ id: r.id, name: r.name, repo: r.repo, branch: r.branch, hold: r.held }] : []));
+/**
+ * What holds each queue kept. `turns` (lease.ts's turns.json): those whose repository another PC has its turn in left
+ * out, as that PC's Steward merges there and raises its alarm, so two PCs never raise one twice. Pure.
+ */
+export const heldQueues = (v: VersionQueues, turns?: Pick<TurnsState, 'repos'>): HeldQueue[] =>
+  v.repos.flatMap((r) => (r.held && r.repo && turns?.repos[r.repo.toLowerCase()]?.status !== 'elsewhere' ? [{ id: r.id, name: r.name, repo: r.repo, branch: r.branch, hold: r.held }] : []));

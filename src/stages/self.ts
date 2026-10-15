@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
+import { whileAwake } from '../kit/awake.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
 import { releasesRepoEnv } from '../settings.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
@@ -199,6 +200,8 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
         }
         // Another PC took its turn here meanwhile (lease.ts): it releases this.
         if (ctx.lease && !(await ctx.lease.ok({ id: APP.id, repo: ctx.settings.stewardRepo }))) {
+          // Its whole suite too, beside the rounds here: that PC's Steward runs it there.
+          await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           results.push(selfResult('skipped', `${step.tag} is left to another PC, whose turn it is now`));
           break;
         }
@@ -211,7 +214,8 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
             results.push(selfResult('skipped', held.beside ? `${step.tag} waits: ${held.why}` : `${step.tag} waits for the next round: ${held.why}`, { version: step.version, commit: step.commit.slice(0, 7) }));
             break;
           }
-          r = held ? selfResult('failed', `${held.why}, so ${step.tag} wasn't released`, { version: step.version, commit: step.commit.slice(0, 7) }) : await releaseStep(ctx, repo, step);
+          // The PC kept awake while it releases (the kit's awake.ts).
+          r = held ? selfResult('failed', `${held.why}, so ${step.tag} wasn't released`, { version: step.version, commit: step.commit.slice(0, 7) }) : await whileAwake(`the Steward's ${step.tag}`, () => releaseStep(ctx, repo, step), ctx.log);
         } catch (err) {
           r = selfResult('failed', `${step.tag}: ${(err as Error).message}`, { version: step.version, commit: step.commit.slice(0, 7) });
         }

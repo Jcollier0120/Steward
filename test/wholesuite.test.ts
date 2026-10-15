@@ -256,6 +256,24 @@ test('beside the rounds, a new commit on main stops the whole suite for the old 
   assert.equal(ended.at(-1)?.state, 'passed');
 });
 
+test("beside the rounds, a whole suite is stopped once the Steward's own turn is another PC's: that PC's Steward runs it", async (t) => {
+  besideOn();
+  t.after(() => wholeSuitesBeside(null));
+  commit('NOTES.md', 'beside, another PC\n');
+  writeFileSync(hold, '');
+  fresh();
+  await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  await until(() => pidsNow().length === 1, 60_000, 'its tests running');
+  const [tests] = pidsNow();
+  const elsewhere = { ...ctx, lease: { ok: async () => false, skip: new Set<string>(['steward']), has: () => true } };
+  const out = await releaseSelf(elsewhere, facts(['v0.8.0', 'kit-v1.0.0']));
+  unlinkSync(hold);
+  assert.deepEqual(out.map((x) => x.message), ['self: kit-v1.1.0 is left to another PC, whose turn it is now']);
+  await until(() => !alive(tests), 30_000, 'its tests ended');
+  assert.equal(loadWholeJob()?.state, 'ended');
+  assert.match(loadWholeJob()?.why ?? '', /was stopped: the Steward's own turn is another PC's now$/);
+});
+
 test("a whole suite a Steward that is gone left running is ended, with the program it left, and its record says so", async () => {
   const gone = spawnSync(process.execPath, ['-e', '']).pid;
   const left = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });

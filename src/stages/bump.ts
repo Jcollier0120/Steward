@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
+import { whileAwake } from '../kit/awake.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
@@ -141,8 +142,17 @@ export const needsNpmCi = (dir: string) =>
  *
  * `failed`, when given, is filled with the step that failed and the tests it failed (node --test's TAP), for a caller
  * that weighs a second try against the first (wholesuite.ts).
+ *
+ * The PC is kept awake while they run (the kit's awake.ts, Steward 0.36.45): on 2026-10-15 it slept on its own for an
+ * hour in the middle of a round's checks.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks }): Promise<string | null> {
+export function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
+  return whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
+}
+
+type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks };
+
+async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   const started = Date.now();
   const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
   let limit: (TimeLimit & { at: number }) | null = null;

@@ -2,6 +2,22 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.8
+
+**An agent's work can keep the PC awake: while it runs checks, merges or a release, Windows doesn't sleep on its own, and once the work ends it may again.**
+
+### What's new
+
+- **awake.ts**: `stayAwake(what)` holds the PC awake until the function it returns is called, and `whileAwake(what, fn)` holds it while `fn` runs. Holds from anywhere in the agent's process share one hold of Windows, which ends when the last is let go. `awakeFor()` lists what holds it now.
+- **schedule.ts**: a round's job gets `awake(what)` beside its `signal`. It holds the PC awake for the round's work, and anything it still holds is let go when the round ends.
+- On Windows a small helper holds it (`awake.cs`, compiled once to `awake-<hash>.exe` beside the checks pace's launcher, shared by every agent on the PC). It asks Windows to keep the system working (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) until the agent closes its input. It lets go if the agent ends first, so a hold never outlives the agent, and `powercfg /requests` lists it while it holds.
+- It prevents idle sleep only. A sleep the person chooses (Start's Sleep, the power button, closing the lid) still happens, the display still turns off, and other platforms do nothing. A helper that can't be built or started leaves the PC to its own power settings, said once in the log, and never fails the work.
+- On 15 October a PC slept on its own for an hour in the middle of the Steward's checks, and for 13 minutes later, which is much of why that round ran out of time.
+
+### For an agent
+
+- Nothing to do: nothing is held until the agent asks. Hold it only around real work: a hold resets Windows' idle timer, so a round every few minutes that held it while only looking would keep the PC up all day. Under `node --test` nothing is held unless the test sets `setAwakeDeps`.
+
 ## Unreleased
 
 **A route can give calibrate its server's own reading speed (`readPerWrite`), and AMD's does: an AMD NPU of a generation nobody has measured gets a 35 s base, not 90 s. AMD's NPU measured on battery (20.7 mJ a token), its picture size, and setup's picture-first test request on a Krackan, none needing a change to the route's command.**
