@@ -17,8 +17,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do: requests on an Intel or AMD NPU, or on one setup measured, wait as long as its timeouts allow. A caller's own `timeoutMs` still decides a request, as before.
 
-## Unreleased (its version needs claiming on the main laptop)
-**Intel's NPU 3720 measured and verified: a short answer in 0.5 s, not 3.1, by reading prompts 128 tokens at a time; Arrow Lake-U named; the NPU check times a real compile.**
 ## 2.73.3
 **An install or a settings file written just before the PC crashes comes back whole, not as files full of nothing; and Intel's NPU 3720 is measured and verified, a short answer in 0.5 s, not 3.1.**
 
