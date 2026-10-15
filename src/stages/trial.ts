@@ -148,6 +148,9 @@ const keyOf = (pr: PrInfo) => `${pr.number}@${pr.headOid}`;
 /** Does this PR raise the kit's version (so it is the kit's release once merged)? From gh's files. */
 export const raisesKit = (pr: PrInfo) => pr.files.some((f) => f.replace(/\\/g, '/') === 'kit/VERSION');
 
+/** A kit PR whose trial at its head is still going (KitTrial's `pending`): caught up now, its trial would start again. */
+export const trialGoingAt = (pr: PrInfo, kept?: Record<string, KitTrial>): boolean => raisesKit(pr) && !!(kept ?? readJson<Record<string, KitTrial>>(kitTrialsFile(), {}))[keyOf(pr)]?.pending?.length;
+
 /** The passing pair of an employee the kit fails, if it has one. Pure. */
 export const passingPair = (t: KitTrial, id: string): KitPair | undefined => t.pairs?.find((p) => p.id === id && p.ok);
 
