@@ -251,7 +251,11 @@
         "lunar-lake": {
           "label": "Core Ultra 200V, Lunar Lake (NPU 4)",
           "supported": true,
-          "verified": true
+          "verified": true,
+          "args": {
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"16\"}"
+          },
+          "basis": "Measured by the NPU check on a Lunar Lake (Core Ultra 7 256V), 2026-10-12, with OpenVINO's own prompt settings: the route's values. Its prompt settings are estimated from the NPU 3720 (meteor-lake), the only other Intel NPU there is to run (NPU-VENDORS.md, Estimated): the NPU 4 read a 1,024-token chunk in 0.23 to 0.26 of the NPU 3720's time, and a chunk costs a fixed part and a part for each of its tokens. In 512-token chunks a short prompt should take 0.3 to 0.4 s, what the NPU 3720 takes in its 128, against 0.72 s in OpenVINO's 1,024, and the jobs' prompts 18 to 27% less, whether or not the fixed part is faster on the NPU 4. GENERATE_HINT BEST_PERF wrote 13% faster on the NPU 3720 for about twice the first compile: 31 to 41 s here, so about 60 to 90 s, inside the 180 s cold load. OpenVINO Model Server's own prefix cache, 128 blocks of 256 tokens, could hold 32,768 tokens of prompts, about 4 GB more over a day's varied ones: 16 blocks keep 4,096 tokens, as the NPU 3720's 32 of 128 do."
         },
         "panther-lake": {
           "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
@@ -263,7 +267,10 @@
             "requestPerTokenMs": 300,
             "coldLoadMs": 240000
           },
-          "basis": "Not measured: NPU 5, at least the Lunar Lake's NPU 4, so its values with room for a newer compiler's first compile; setup measures each PC."
+          "args": {
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"16\"}"
+          },
+          "basis": "Not measured: NPU 5 at 50 TOPS, about the Lunar Lake's NPU 4 (48), so its values and its estimated prompt settings (lunar-lake), with room for a newer compiler's first compile; setup measures each PC."
         },
         "wildcat-lake": {
           "label": "Core Series 3, Wildcat Lake (NPU 5)",
@@ -275,7 +282,18 @@
             "requestPerTokenMs": 300,
             "coldLoadMs": 240000
           },
-          "basis": "Not measured: Panther Lake's NPU 5, the same starting values."
+          "maxContextTokens": 2048,
+          "caps": {
+            "chat": 2048
+          },
+          "args": {
+            "--max_prompt_len": "2048",
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
+          },
+          "memoryGb": {
+            "chat": 4.3
+          },
+          "basis": "Not measured: Panther Lake's NPU 5, but a third of it, 15 to 17 TOPS against 50, about 1.4 times the NPU 3720's 11.5, so the NPU 3720's prompt settings and memory (meteor-lake): a 512-token chunk would take it 0.9 s, a 128-token one 0.3 s (NPU-VENDORS.md, Estimated). It goes in low-cost laptops of 8 to 16 GB, where the NPU 3720's 2,048-token prompt leaves room for the embedding server and 4,096 doesn't. Panther Lake's starting timeouts, with room for a newer compiler's first compile; setup measures each PC."
         }
       },
       "driverMin": "32.0.100.4023",

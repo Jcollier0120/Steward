@@ -655,7 +655,7 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, 32 blocks cached, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, 32 blocks cached, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; Lunar Lake and Panther Lake in 512-token chunks, Wildcat Lake as the NPU 3720, estimated from it", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
@@ -675,7 +675,7 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
   // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). It writes with BEST_PERF, 10.7 to 11.6 tokens
   // a second against 9.6 to 10.5, and keeps 32 blocks of prompts (4,096 tokens) cached, 3.8 GB against 5.2 with
-  // OpenVINO Model Server's 128. Lunar Lake keeps OpenVINO's, as measured.
+  // OpenVINO Model Server's 128.
   const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
   assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128', GENERATE_HINT: 'BEST_PERF', NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS: '32' });
   assert.ok(meteor.timeouts.coldLoadMs! >= 62_000 * 1.5, "the cold load covers BEST_PERF's first compile with half again");
@@ -692,7 +692,21 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   const panther = V.routeFor(intel, 'panther-lake');
   assert.ok(panther.timeouts.coldLoadMs! > intel.timeouts.coldLoadMs! && panther.timeouts.requestPerTokenMs! >= intel.timeouts.requestPerTokenMs!);
   assert.equal(panther.serve[panther.serve.indexOf('--max_prompt_len') + 1], intel.serve[intel.serve.indexOf('--max_prompt_len') + 1], "NPU 5 keeps Lunar Lake's prompt length");
-  assert.equal(V.routeFor(intel, 'lunar-lake'), intel, 'Lunar Lake: the route as measured, untouched');
+  // Estimated from the NPU 3720, the only other Intel NPU to run (NPU-VENDORS.md, Estimated): the NPU 4 and Panther
+  // Lake's NPU 5, about four times as fast, read in 512-token chunks, a short prompt in about the NPU 3720's 0.4 s, and
+  // keep 4,096 tokens cached (16 blocks of 256), not OpenVINO Model Server's 32,768. Lunar Lake's other values are the
+  // route's, as measured.
+  const lunar = V.routeFor(intel, 'lunar-lake');
+  assert.deepEqual(JSON.parse(plugin(lunar)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '512', GENERATE_HINT: 'BEST_PERF', NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS: '16' });
+  assert.deepEqual({ ...lunar, serve: intel.serve }, intel, 'Lunar Lake: otherwise the route as measured');
+  assert.ok(lunar.timeouts.coldLoadMs! >= 41_000 * 2 * 1.5, "the cold load covers twice its first compile, BEST_PERF's, with half again");
+  assert.equal(plugin(panther), plugin(lunar));
+  // Wildcat Lake's NPU 5 is a third of Panther Lake's, about 1.4 times the NPU 3720, in 8 to 16 GB laptops: the NPU 3720's.
+  const wildcat = V.routeFor(intel, 'wildcat-lake');
+  assert.equal(plugin(wildcat), plugin(meteor));
+  assert.equal(wildcat.serve[wildcat.serve.indexOf('--max_prompt_len') + 1], '2048');
+  assert.deepEqual([wildcat.maxContextTokens, wildcat.caps.chat, wildcat.memoryGb?.chat], [2048, 2048, meteor.memoryGb?.chat]);
+  assert.deepEqual(wildcat.timeouts, panther.timeouts, "Panther Lake's starting timeouts, until setup measures the PC");
   // A generation's arguments replace the route's, never add one it hasn't (off the NPU, --max_prompt_len is gone).
   const offNpu = { ...intel, serve: intel.serve.filter((a, i, s) => a !== '--max_prompt_len' && s[i - 1] !== '--max_prompt_len') };
   assert.ok(!V.routeFor(offNpu, 'meteor-lake').serve.includes('--max_prompt_len'));

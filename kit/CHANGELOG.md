@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF` and keeps 4,096 tokens of prompts cached.**
+
+### What changed
+
+- **npu-vendors.json's Intel generations** (spec/NPU-VENDORS.md, Estimated). No Intel NPU beyond the Lunar Lake and the NPU 3720 will be run, so the others are estimated from the NPU 3720's sweep, scaled by the Lunar Lake's numbers.
+  - **`lunar-lake` and `panther-lake`**: `--plugin_config` `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"512","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"16"}`. That should be a short answer in 0.3–0.4 s rather than 0.72 s, and the jobs' prompts read 18–27% faster. OpenVINO Model Server's own prefix cache could hold 32,768 tokens on them, about 4 GB more over a day; this keeps it to 4,096 tokens. The Lunar Lake's other values are as measured.
+  - **`wildcat-lake`**: the NPU 3720's settings: 2,048-token cap, 128-token chunks, `BEST_PERF`, 32 blocks, 4.3 GB. Its NPU 5 is 15–17 TOPS, about 1.4 times the NPU 3720, in laptops of 8 to 16 GB.
+
+### For an agent
+
+- Nothing to do. On a Lunar Lake already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
+
 ## 2.74.5
 
 **The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, AMD's runs on a 16 GB Ryzen AI (XDNA 2 verified), a known maker's NPU of a generation setup doesn't know is tried instead of refused, and the benchmark times prompts the server hasn't seen.**

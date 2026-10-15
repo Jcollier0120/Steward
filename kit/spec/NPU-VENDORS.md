@@ -133,14 +133,15 @@ A generation in `npu-vendors.json` can carry its own `timeouts`, `maxContextToke
 
 | Generation | NPU | Prompt cap | Background request | Cold load | Why |
 |---|---|---|---|---|---|
-| Lunar Lake | NPU 4, 48 TOPS | 4,096 | 30 s + 0.3 s a token | 180 s | measured (the route's own values, unchanged) |
+| Lunar Lake | NPU 4, 48 TOPS | 4,096, read 512 tokens at a time | 30 s + 0.3 s a token | 180 s | Measured (the route's own values), its prompt settings estimated from the NPU 3720 (Estimated, below): 512-token chunks, `BEST_PERF`, 16 blocks of prompts cached. |
 | Meteor Lake, Arrow Lake-U (`7D1D`) | NPU 3720, about 11 TOPS | 2,048 (`--max_prompt_len 2048`), read 128 tokens at a time | 15 s + 0.2 s a token | 120 s | Measured (Verified, below): about 11 tokens a second written (`BEST_PERF`), 1,740 read in 6.3 s, a first load with its compile 57–62 s, 4.3 GB with 32 blocks of prompts cached. At 3,072 it held 0.4 GB more and read 5–10% slower; at 4,096, 1.0 GB more, too much beside the embedding server on the 16 GB laptops these come in, and Reeve's and the agents' requests fit in 2,048. |
 | Arrow Lake-S (`AD1D`) | NPU 3720 | 2,048, read 128 tokens at a time | 60 s + 0.4 s a token | 360 s | The same NPU as Arrow Lake-U, with its prompt settings and memory, but not yet run: the generous starting values stay until the NPU check runs on one. |
-| Panther Lake, Wildcat Lake | NPU 5 | 4,096 | 30 s + 0.3 s a token | 240 s | Lunar Lake's, the cold load with a third more room for a new compiler. |
+| Panther Lake | NPU 5, 50 TOPS | 4,096, read 512 tokens at a time | 30 s + 0.3 s a token | 240 s | Lunar Lake's, with its estimated prompt settings, the cold load with a third more room for a new compiler. |
+| Wildcat Lake | NPU 5, 15–17 TOPS | 2,048, read 128 tokens at a time | 30 s + 0.3 s a token | 240 s | Panther Lake's timeouts; the NPU 3720's prompt settings and memory, estimated (below): its NPU is about 1.4 times the NPU 3720, in laptops of 8 to 16 GB. |
 
 Embeddings keep `--max_length 2048` on every generation: the kit's 680-token estimate of a chunk (3 characters a token) undercounts hex, base64 and ids, whose 1,500-character chunks reach about 1,338 real tokens, so a shorter `max_length` would need a pessimistic estimate of about a character a token.
 
-**The NPU 3720 reads a prompt 128 tokens at a time** (`--plugin_config {"NPUW_LLM_PREFILL_CHUNK_SIZE":"128"}`). OpenVINO's NPU pipeline reads a prompt in chunks of 1,024 tokens unless told otherwise, and every chunk costs its whole length: on the NPU 3720 a one-line question took 3.1 s, the time of a 1,024-token read. In chunks of 128 it took 0.5 s, 1,550 tokens were read in 4–6.4 s against 7 s, the first compile was a few seconds shorter and the memory 0.2 GB less, with the same answers word for word (Core Ultra 5 225U, 2026-10-14; 256 gave 0.77 s and 512 1.37 s). `PERFORMANCE_HINT` `LATENCY` already holds. The route's command carries `--plugin_config {}` (OpenVINO Model Server's graph is the same as without it) so a generation's `args` can replace it; off the NPU it is dropped with the other NPU-only flags. Lunar Lake keeps the default, unmeasured with chunks.
+**The NPU 3720 reads a prompt 128 tokens at a time** (`--plugin_config {"NPUW_LLM_PREFILL_CHUNK_SIZE":"128"}`). OpenVINO's NPU pipeline reads a prompt in chunks of 1,024 tokens unless told otherwise, and every chunk costs its whole length: on the NPU 3720 a one-line question took 3.1 s, the time of a 1,024-token read. In chunks of 128 it took 0.5 s, 1,550 tokens were read in 4–6.4 s against 7 s, the first compile was a few seconds shorter and the memory 0.2 GB less, with the same answers word for word (Core Ultra 5 225U, 2026-10-14; 256 gave 0.77 s and 512 1.37 s). `PERFORMANCE_HINT` `LATENCY` already holds. The route's command carries `--plugin_config {}` (OpenVINO Model Server's graph is the same as without it) so a generation's `args` can replace it; off the NPU it is dropped with the other NPU-only flags. The other generations' chunks are estimated from these (Estimated, below).
 
 **It writes with `GENERATE_HINT` `BEST_PERF` and keeps 32 blocks of prompts cached** (`{"NPUW_LLM_PREFILL_CHUNK_SIZE":"128","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"32"}`), from 20 quick benchmarks on the Core Ultra 5 225U (2026-10-14), each also reading prompts that start with a line of their own, so no cache has seen them:
 - `BEST_PERF` wrote 10.7–11.6 tokens a second against 9.6–10.5, and the benchmark's jobs took 22.6–24.3 s against 26.0–27.8 (five runs each, never overlapping), with the same reads, answers and memory. One NPU check run had seen 11.5 against 11.2. Its first compile takes 57–62 s against 27–39, once per PC and driver (the compile cache keeps it): hence the 120 s cold load.
@@ -149,6 +150,28 @@ Embeddings keep `--max_length 2048` on every generation: the kit's 680-token est
 - No faster: `PREFILL_HINT` `STATIC` (every prompt 7.4 s, the full 2,048 each time), `NPUW_LLM_PREFILL_ATTENTION_HINT` `STATIC` (reads 15–20% slower, a 21 s compile), `NPU_TURBO`.
 
 These are starting values only: setup's calibration replaces them on the PC, and the NPU check on one of each verifies them.
+
+### Estimated, for the Intel NPUs no one will run
+
+The Lunar Lake and this Arrow Lake-U's NPU 3720 are the only Intel NPUs there are to run (the owner, 2026-10-15). So the other generations' prompt settings (chunks, `GENERATE_HINT`, the prefix cache, the cap) are estimated from the NPU 3720's sweep, scaled by the Lunar Lake's own numbers. Setup still calibrates each unverified generation's timeouts on the PC; nothing calibrates these settings.
+
+- **A chunk costs a fixed part and a part for each of its tokens.** On the NPU 3720 at a 2,048-token cap, a chunk of c tokens took about 110 ms + 2.34 ms × c: 0.26 s at 64, 0.41 s at 128, 0.71 s at 256 and 1.31 s at 512. A 1,024-token chunk cost more, 3.0 s. A prompt costs whole chunks, and later chunks of a long prompt 10–20% more. That fits the sweep's short answers, and its reads of 512 to 1,740 tokens no cache had seen, to within about 20%. A 4,096-token cap added about 5%.
+- **The NPU 4 is about four times as fast.** The Lunar Lake read a 1,024-token chunk in 0.68 s (a short answer, 0.72 s) against the NPU 3720's 3.0 s, and two in 1.79 s against 7.0 s: 0.23 to 0.26 of the time. Whether its fixed part is faster too isn't known, so both cases are taken: (A) all of it four times as fast, and (B) the fixed part the NPU 3720's 110 ms.
+- **The NPU 3720's choice, carried over.** It took 128-token chunks over 256, for a short prompt's one chunk in 0.41 s rather than 0.71 s, though 256 and 512 read long prompts a little faster. So for each NPU, among the chunks one of which takes no longer than that, the pick is the one that reads the jobs' prompts fastest (NPU-BENCHMARK.md's three, about 290, 900 and 850 tokens with the chat template).
+
+| A short prompt's chunk / the three jobs' prompts | 128 | 256 | 512 | 1,024 (OpenVINO's) | Pick |
+|---|---|---|---|---|---|
+| NPU 3720 (the fit) | 0.41 s / 7.4 s | 0.71 / 7.1 | 1.31 / 6.5 | 3.0 / 9.0 | 128 |
+| NPU 4, and Panther Lake's NPU 5 (A) | 0.10 / 1.8 | 0.17 / 1.7 | 0.32 / 1.6 | 0.73 / 2.2 | 512 |
+| the same (B) | 0.18 / 3.3 | 0.26 / 2.6 | 0.40 / 2.0 | 0.82 / 2.5 | 512 |
+| Wildcat Lake's NPU 5, 16 TOPS (A, B) | 0.29–0.33 / 5.3–5.9 | 0.51–0.54 / 5.1–5.4 | 0.94–0.97 / 4.7–4.9 | 2.2 / 6.5 | 128 |
+
+- **Lunar Lake and Panther Lake read in 512-token chunks.** Panther Lake's NPU 5 is 50 TOPS, about the NPU 4's 48. Against OpenVINO's 1,024 that should give a short prompt in 0.3–0.4 s rather than 0.72 s, and the jobs' prompts 18–27% faster, in either case. Their cap stays at 4,096, as measured on the Lunar Lake.
+- **Wildcat Lake gets the NPU 3720's settings.** Its NPU 5 is 15–17 TOPS (the Core 3 304 to the Core 7 360), about 1.4 times the NPU 3720, so it reads in 128-token chunks. It also comes in low-cost laptops of 8 to 16 GB, so it gets the NPU 3720's 2,048-token cap and memory.
+- **`BEST_PERF` on every generation.** It is the compiler's effort on the model that writes, which made the NPU 3720 write 13% faster. It doubles the first compile: on the Lunar Lake that takes 31–41 s now, so 60–90 s, inside every generation's cold load.
+- **The prefix cache holds 4,096 tokens on every generation.** What it holds depends on the model, not the NPU: about 122 KB a token, Qwen3-4B's keys and values. OpenVINO Model Server's 128 blocks of 128 tokens held 2.0 GB on the NPU 3720. A block is 256 tokens for a chunk of 256 or more, and the chunk itself below that. So at Lunar Lake's chunks until now, OpenVINO Model Server's 128 blocks hold 32,768 tokens: about 4 GB more over a day's varied prompts, past a 16 GB Lunar Lake's 6.2 GB for chat and embeddings together. 16 blocks of 256 keep 4,096 tokens, as the NPU 3720's 32 blocks of 128 do.
+
+A quick benchmark on the Lunar Lake (NPU-BENCHMARK.md) would check its estimate. Its report, set against the Lunar Lake's first run on suite 2, says whether to keep it.
 
 ### Calibration
 
@@ -284,7 +307,7 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones), and on a first-generation Snapdragon X (its model build and its speed);
 - Intel beyond Lunar Lake and Arrow Lake-U: Meteor Lake itself (verified through the Arrow Lake-U, which shares its NPU and PCI id, but not run on one), Arrow Lake-S and -H, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);
-- Lunar Lake's speed with the NPU 3720's 128-token prompt chunks, `BEST_PERF` and a bounded prefix cache (OpenVINO Model Server's 128 blocks grow its working set too);
+- the prompt settings estimated from the NPU 3720 (Estimated, above): Lunar Lake's and Panther Lake's 512-token chunks, `BEST_PERF` and 16 blocks cached, and Wildcat Lake's NPU 3720 settings. Only a benchmark on the Lunar Lake can check any of them;
 - Embeddings on the NPU 3720 against the graphics card (llama.cpp Vulkan) for Reeve's indexing;
 - AMD beyond the Krackan: Strix Point, Strix Halo and Gorgon Point (XDNA 2 too, the same PCI id, but not run on one), a PC with 24 GB or more (where FastFlowLM's default context may well load: the cap keeps it at 4,096 everywhere), and the driver minimum, 32.0.203.311 (only 32.0.20101.3760 and 32.0.20102.3930 ran);
 - FastFlowLM's `--pmode` on battery, where its power modes may differ (on mains power they wrote alike);
