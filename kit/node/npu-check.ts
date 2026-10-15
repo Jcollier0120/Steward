@@ -125,8 +125,9 @@ export interface NpuCheckOptions {
  * The route with its server pointed at another device (OpenVINO's --target_device): off the NPU its NPU-only
  * arguments (--max_prompt_len, its NPU plugin's settings in --plugin_config, the NPU's prefix caching turned off by
  * --enable_prefix_caching, and its embedding server's --max_length) go, so the other device keeps OpenVINO's own.
- * Its embedding server goes with it when it has a device argument too; one without stays on the NPU. A route without
- * a device argument runs on its NPU only.
+ * Its embedding server goes with it off the NPU when it has a device argument too; one without stays on the NPU. On the
+ * NPU it stays where the route has it: a generation may run it on the graphics (the NPU 3720's, `embedArgs`). A route
+ * without a device argument runs on its NPU only.
  */
 export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   const on = (args: string[]) => {
@@ -145,7 +146,8 @@ export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
     return route;
   }
   const es = route.embedServer;
-  return { ...route, serve: on(route.serve), ...(es?.serve.includes('--target_device') ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
+  const moves = es?.serve.includes('--target_device') && device.toUpperCase() !== 'NPU';
+  return { ...route, serve: on(route.serve), ...(es && moves ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
 }
 
 /**

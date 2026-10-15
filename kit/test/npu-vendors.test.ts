@@ -716,10 +716,23 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   // A generation's arguments replace the route's, never add one it hasn't (off the NPU, --max_prompt_len is gone).
   const offNpu = { ...intel, serve: intel.serve.filter((a, i, s) => a !== '--max_prompt_len' && s[i - 1] !== '--max_prompt_len') };
   assert.ok(!V.routeFor(offNpu, 'meteor-lake').serve.includes('--max_prompt_len'));
+  // The NPU 3720's embeddings run on the processor's graphics, with the route's embedding command otherwise: a query in
+  // 50 ms against its NPU's 1.1 s, 16 of Reeve's chunks in 4.8 s against 18, the NPU's vectors (cosine 0.997 to 0.999),
+  // and chat writing as fast beside them (an Arrow Lake-U, 2026-10-15). Its chat stays on the NPU.
+  const embedOn = (r: typeof intel) => r.embedServer!.serve[r.embedServer!.serve.indexOf('--target_device') + 1];
+  assert.equal(embedOn(meteor), 'GPU');
+  assert.equal(meteor.serve[meteor.serve.indexOf('--target_device') + 1], 'NPU');
+  assert.deepEqual({ ...meteor.embedServer, serve: meteor.embedServer!.serve.map((a, i, s) => (s[i - 1] === '--target_device' ? 'NPU' : a)) }, intel.embedServer);
+  // Every other generation's on its NPU: Arrow Lake-S's F models have no graphics, and an unknown one may not either.
+  for (const id of [...Object.keys(g).filter((id) => id !== 'meteor-lake'), V.UNKNOWN_GENERATION]) assert.equal(embedOn(V.routeFor(intel, id)), 'NPU', id);
+  assert.equal(embedOn(intel), 'NPU');
   // An NPU 3720 is planned with them.
   const plan = planFor(NPU.meteor, 'x64', 'C:\\t');
   assert.equal(plan.route.maxContextTokens, 2048);
   assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 120_000);
+  const embed = V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port, embed: { exe: plan.embed!.exe, model: plan.embed!.model } }).embed!;
+  assert.deepEqual(embed.startCommand!.slice(embed.startCommand!.indexOf('--target_device'), embed.startCommand!.indexOf('--target_device') + 2), ['--target_device', 'GPU']);
+  assert.equal(embed.baseUrl, `http://127.0.0.1:${intel.embedServer!.port}`);
 });
 
 test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
