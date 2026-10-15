@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterWords } from '../after.ts';
+import { whileAwake } from '../kit/awake.ts';
 import { commitOf, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
@@ -748,7 +749,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
-    const r = await hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine });
+    // The PC kept awake while it merges (the kit's awake.ts), as while it tests (runChecks).
+    const r = await whileAwake(`${e.name} #${pr.number}'s merge`, () => hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine }), ctx.log);
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);

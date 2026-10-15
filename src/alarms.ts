@@ -19,6 +19,7 @@ import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { unstickConditions, type UnstickState } from './unstick.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
+import type { HeldQueue } from './version-queue.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -32,6 +33,9 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  * - a PR that conflicts with its branch and holds up others waiting their turn behind it (the lowest version merges
  *   first), for an hour (Settings: blockingHours): the whole queue stands still. One whose conflict was handed on to
  *   its author gives up its turn instead (stages/merge.ts), so this is the one nobody could be told about;
+ * - the lowest version in a queue that isn't ready for another reason (a draft, untested, its checks failing or
+ *   running) while ready PRs wait behind it (version-queue.ts's queueHold), for an hour from when it began to hold them
+ *   (Settings: blockingHours);
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
  * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
  *   and one of the Steward's own releases that failed (self-failed.json): at once; a new kit that waits for the
@@ -207,6 +211,8 @@ export function roundConditions(o: {
   ports?: PortUse[];
   /** Packages whose install scripts held an install (installscripts.ts's install-held.json), by id. */
   installHolds?: Record<string, InstallHold>;
+  /** What holds each version queue, and since when (version-queue.ts's queueHold, kept in version-queues.json). */
+  queueHolds?: HeldQueue[];
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -247,6 +253,31 @@ export function roundConditions(o: {
         });
       }
     }
+  }
+  // The lowest version not ready (a draft, untested, its checks), with ready PRs waiting their turn behind it: the queue
+  // stands still, so it is raised within the hour (three drafts held the Steward's own for hours, 2026-10-14 and 15). A
+  // conflict holding it is the blocking alarm's, above, which names its files.
+  for (const q of o.queueHolds ?? []) {
+    const h = q.hold;
+    if (h.why.startsWith(CONFLICTS)) continue;
+    const block = o.settings.alarms.blockingHours;
+    const behind = h.behind.map((n) => `#${n}`).join(', ');
+    out.push({
+      id: `queue:${q.repo}#${h.number}`,
+      who: q.id,
+      title: `${q.name} #${h.number} (v${h.version}) has held its version queue for ${hours(block)} or more: ${behind} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it`,
+      detail: [
+        h.title,
+        `Why it isn't ready: ${h.why}.`,
+        `${behind} ${h.behind.length === 1 ? 'is' : 'are'} ready, and ${h.behind.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first. Held since ${h.since}.`,
+        h.draft
+          ? 'Mark it ready once it is done, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.'
+          : 'Get it ready to merge, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.',
+      ],
+      url: h.url,
+      since: h.since,
+      afterMs: block * HOUR,
+    });
   }
   for (const [id, commit] of Object.entries(o.failedReleases)) {
     const e = o.employees.find((x) => x.id === id);

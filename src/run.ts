@@ -14,6 +14,8 @@ export interface Ran {
   err: string;
   /** Stopped at its time limit, with everything it started. */
   timedOut?: boolean;
+  /** Stopped by its caller (RunOptions' stop), with everything it started. */
+  stopped?: boolean;
 }
 
 export interface RunOptions {
@@ -32,6 +34,13 @@ export interface RunOptions {
    * below-normal priority. For test runs, type checks, installs and builds, so they never peg the processor.
    */
   paced?: boolean;
+  /**
+   * Once aborted, the command is ended with everything it started (taskkill /T), as at its time limit: the whole suite
+   * beside the rounds (stages/wholesuite.ts) when the Steward stops or a new commit on main supersedes it.
+   */
+  stop?: AbortSignal;
+  /** Told the process id of the program it started, so its tree can be ended should the Steward itself be ended first. */
+  started?: (pid: number) => void;
 }
 
 /**
@@ -192,7 +201,9 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
   const timeout = Math.max(1, Math.min(usual, opts.limitMs ?? usual));
   return new Promise((resolve) => {
     let timedOut = false;
+    let stopped = false;
     let timer: NodeJS.Timeout | undefined;
+    let onStop: (() => void) | undefined;
     const child = execFile(
       file,
       argv,
@@ -201,16 +212,29 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
       { cwd: opts.cwd, env, timeout: WINDOWS ? 0 : timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
         clearTimeout(timer);
+        if (onStop) opts.stop?.removeEventListener('abort', onStop);
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
-        if (!WINDOWS && e?.killed && e.signal === 'SIGTERM') timedOut = true;
-        // Stopped at its time limit: said so, in place of Node's "Command failed: <the whole command line>".
-        const stopped = timedOut ? stoppedForTime(timeout, !!paced && paced.file !== resolved) : '';
-        const err = [String(stderr ?? ''), stopped || (e && typeof e.code !== 'number' ? String(e.message) : '')].filter(Boolean).join('\n');
-        resolve({ code, out: String(stdout ?? ''), err, ...(timedOut ? { timedOut } : {}) });
+        if (!WINDOWS && !stopped && e?.killed && e.signal === 'SIGTERM') timedOut = true;
+        // Stopped at its time limit, or by its caller: said so, in place of Node's "Command failed: <the whole command line>".
+        const said = stopped ? 'stopped: it was still running' : timedOut ? stoppedForTime(timeout, !!paced && paced.file !== resolved) : '';
+        const err = [String(stderr ?? ''), said || (e && typeof e.code !== 'number' ? String(e.message) : '')].filter(Boolean).join('\n');
+        resolve({ code: stopped && code === 0 ? 1 : code, out: String(stdout ?? ''), err, ...(timedOut ? { timedOut } : {}), ...(stopped ? { stopped } : {}) });
       },
     );
+    if (child.pid) opts.started?.(child.pid);
+    // Stopped by its caller: ended with everything it started, as at its time limit.
+    if (opts.stop) {
+      const pid = child.pid;
+      onStop = () => {
+        stopped = true;
+        if (WINDOWS && pid) endProcesses([pid]);
+        else child.kill();
+      };
+      if (opts.stop.aborted) onStop();
+      else opts.stop.addEventListener('abort', onStop, { once: true });
+    }
     // At its time limit a command is ended with everything it started (taskkill /T), while it still holds them together:
     // execFile's own limit ends only the program it started, and a test run under npm, or under the pace's launcher, ran on.
     if (WINDOWS && child.pid) {
