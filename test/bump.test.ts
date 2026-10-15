@@ -12,7 +12,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 
 const { bumpBranch } = await import('../src/stages/common.ts');
-const { bumpOne, kitBumpEntry, repin, replacingEntry } = await import('../src/stages/bump.ts');
+const { bumpOne, kitBumpEntry, onlyFlaky, repin, replacingEntry, wholeTestSteps } = await import('../src/stages/bump.ts');
 const { prBody, pushOne } = await import('../src/stages/push.ts');
 const { claimsFile, loadClaims } = await import('../src/claims.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -371,4 +371,37 @@ test("replacingEntry writes a version's entry again, leaving the others; withEnt
   assert.equal(replacingEntry('# Fake\n\n## 0.4.1\n\n**Old.**\n', '## 0.4.1\n\n**New.**', 'Fake'), '# Fake\n\n## 0.4.1\n\n**New.**\n');
   assert.equal(replacingEntry(log.replace(/\n/g, '\r\n'), '## 0.4.1\n\n**New.**', 'Fake'), '# Fake\r\n\r\n## 0.4.1\r\n\r\n**New.**\r\n\r\n## 0.4.0\r\n\r\n**First.**\r\n');
   assert.equal(replacingEntry(log, '## 0.4.2\n\n**Next.**', 'Fake'), '# Fake\n\n## 0.4.2\n\n**Next.**\n\n## 0.4.1\n\n**Old.**\n\n## 0.4.0\n\n**First.**\n');
+});
+
+test("wholeTestSteps: a plain node --test script runs as node itself, between its pretest and posttest, so the checks pace sees node's test runner; any other through npm", () => {
+  const at = (scripts: Record<string, string>) => {
+    const d = mkdtempSync(path.join(tmp, 'whole-'));
+    writeFileSync(path.join(d, 'package.json'), JSON.stringify({ name: 'x', scripts }));
+    return wholeTestSteps(d);
+  };
+  const test = 'node --import=./src/kit/test-git.ts --test "test/**/*.test.ts" "kit/test/**/*.test.ts"';
+  assert.deepEqual(at({ test, pretest: 'npm run kit', posttest: 'node kit/test/dotnet.ts --if-present' }), [
+    'npm run pretest',
+    'node --import=./src/kit/test-git.ts --test "test/**/*.test.ts" "kit/test/**/*.test.ts"',
+    'npm run posttest',
+  ]);
+  assert.deepEqual(at({ test: "node --test 'test/*.test.mjs'" }), ['node --test "test/*.test.mjs"']);
+  assert.deepEqual(at({ test: 'node --test' }), ['npm test'], 'no files named: node picks its own');
+  assert.deepEqual(at({ test: 'vitest run' }), ['npm test']);
+  assert.deepEqual(at({ test: 'node --test "a.test.ts" && node other.js' }), ['npm test']);
+  assert.deepEqual(wholeTestSteps(path.join(tmp, 'no-such-folder')), ['npm test']);
+});
+
+test('onlyFlaky: two failed runs of the same step whose failing tests each passed in the other; not a test failing both times, a run stopped, or one whose tests are unknown', () => {
+  const step = 'node --test "test/**/*.test.ts"';
+  const run = (tests: string[], more: object = {}) => ({ step, tests, timedOut: false, ...more });
+  assert.equal(onlyFlaky(run(['console: a page started as open starts']), run(['fallback: the next accelerator answers'])), true);
+  assert.equal(onlyFlaky(run(['a', 'b']), run(['c'])), true);
+  assert.equal(onlyFlaky(run(['a', 'b']), run(['b', 'c'])), false, 'b failed both times');
+  assert.equal(onlyFlaky(run(['a']), run(['b'], { timedOut: true })), false, 'a run stopped at its time limit');
+  assert.equal(onlyFlaky(run(['a'], { timedOut: true }), run(['b'])), false);
+  assert.equal(onlyFlaky(run(['a']), run(['b'], { step: 'npm run typecheck' })), false, 'another step');
+  assert.equal(onlyFlaky(run([]), run(['b'])), false, 'no test named: something else failed');
+  assert.equal(onlyFlaky(run(['a']), run([])), false);
+  assert.equal(onlyFlaky({}, run(['b'])), false);
 });

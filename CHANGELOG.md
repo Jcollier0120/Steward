@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.41
+## 0.36.46
 
 **A build whose checks fail no longer holds everything back: the Steward finds the pull request that broke it, takes it out, and ships the rest.**
 
@@ -18,6 +18,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.40's build pipeline too, if that wasn't released on its own.
+## 0.36.42
+
+**Full test runs keep to the checks pace without starving their own tests, and a kit's release is no longer held by tests that fail at random.**
+
+### What changed
+
+- When the Steward runs a repository's whole test suite (before releasing a kit, or for a change that reaches every test), it now starts the test runner itself instead of going through `npm test`. The checks pace can then see how many test files run at once and limit them to what its share of the processor allows. Through `npm test` it couldn't: on an 18-thread laptop 17 test files started together, all within a third of the processor, and tests that time themselves failed. The repository's pretest and posttest still run, before and after, as `npm test` runs them.
+- Before a kit is released, its whole suite runs a second time when the first run fails, as before. The kit was then held whenever the second run failed too, even when a different test failed each time, each passing in the other run. Those are tests failing at random, not a real problem, so the kit is now released. A test that fails in both runs still holds it. On 15 October kit 2.74.5 was held this way, and the Steward's own release waited behind it.
+- Two of the kit's tests that failed on a busy PC now allow for one: the test of moving to the next accelerator when one is slow, and the test that starts pages with a console of their own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.40
 
@@ -40,6 +53,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The build pipeline is off until you switch it on in Settings.
+
 ## 0.36.39
 
 **Fewer git commands again: projects' version queues, and pull requests that set no version.**
