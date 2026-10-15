@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.75.0
+
+**Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it.**
+
+### What's new
+
+- **work-status.ts**: `workStatus(extra)` builds an agent's status (shape version 1) from what the kit knows, plus what the agent adds. The kit's server answers it for every agent at `GET /api/peer/work`. The route is read-only, so Manor's link to other PCs passes it on as it is. `serve({ work })` gives the agent's own part: its `slots`, more `running`, `waiting` or `lines`, its `results`, and what is `blocked`.
+  - `pcLines()`: the PC's lines as they stand, each with who holds a place and who waits, since when:
+    - the checks pace's turns (`checks`);
+    - the kit pace's work line (`work`);
+    - the first-round line (`first-round`);
+    - each accelerator's line (`accelerator:<id>`).
+  - `pcLoad()`: the PC's name, processors and memory, how busy its processors are (0 to 1), its pace, and the checks pace's cap.
+  - `recordResult()`, `resultFor()`, `recentResults()`: what work came to, one per kind, repository and code tree (git's tree id, the same for the same code whatever the commit). The latest is kept in `work-results.json` (200 of them).
+  - `codeAt(dir)`: a checkout's commit and tree, and whether anything tracked has changed. It is read with git itself, apart from the agent's runner.
+- **work-tasks.ts**: an agent's tasks.
+  - `withWork(fields, fn)` runs `fn` as a task. `startWork(fields)` gives a handle to `waitIn(line)`, `running()`, `set()` and `done()`.
+  - A task started inside another is its part (`parent`). `outsideWork(fn)` makes work that outlives its task (a job beside the rounds) a task of its own.
+- **schedule.ts**: every scheduled round is a task. It waits in the first-round line or the work line, then runs, and the work its job does is its part.
+- **checks-pace.ts and checks-pace.cs**: the checks pace's turns are in sight.
+  - Each launcher that takes part in the turns writes `<pid>.run` in `checksRunsDir()` while it runs. The file says whether it waits for a turn or holds one, since when, and which agent, task and command it is for (`KIT_CHECKS_WHO`, which `pacedCommand` sets).
+  - `checksRuns()` reads the files, and removes those whose launcher has gone.
+  - The turns themselves work as before. The launcher's source changed, so each PC compiles it again once.
+
+### For an agent
+
+- Nothing to do: the route comes with the kit's server. To say more, pass `work: () => ({ slots, blocked, … })` to `serve()`, and wrap long work in `withWork` so that it shows as a task.
+
 ## 2.74.8
 
 **An agent's work can keep the PC awake: while it runs checks, merges or a release, Windows doesn't sleep on its own, and once the work ends it may again.**
