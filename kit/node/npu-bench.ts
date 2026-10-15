@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
-import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
@@ -176,6 +177,11 @@ const DIGITS: Record<string, string[]> = {
 
 /** A suite picture as a `data:` URL: one colour, two halves, digits, or dots in a row. */
 export function picture(spec: ImageSpec): string {
+  return `data:image/png;base64,${picturePng(spec).toString('base64')}`;
+}
+
+/** A suite picture as a PNG file's bytes. */
+export function picturePng(spec: ImageSpec): Buffer {
   const white: [number, number, number] = [255, 255, 255];
   let buf: Buffer;
   if (spec.digits) {
@@ -201,7 +207,7 @@ export function picture(spec: ImageSpec): string {
   } else {
     buf = png(spec.width ?? 224, spec.height ?? 224, () => spec.solid ?? white);
   }
-  return `data:image/png;base64,${buf.toString('base64')}`;
+  return buf;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -383,6 +389,12 @@ export function benchServe(route: NpuRoute, o: { device: string; cap?: number })
   return { ...route, serve, maxContextTokens: o.cap ?? route.maxContextTokens };
 }
 
+/** What each of a server's quirks makes the bench's requests do, for its log. */
+const QUIRK_SAYS: Record<Quirk, string> = {
+  'prefix-leak': 'a nonce first in every request (prefix-leak)',
+  'image-path': 'each picture as a file of its own, its path sent (image-path)',
+};
+
 /** How much more than at rest working must draw for its energy to count: the battery's rate wobbles by about this much. */
 export const ENERGY_MIN_EXTRA = { milliwatts: 1_000, share: 0.1 };
 
@@ -530,7 +542,11 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   report.conditions.cpuBusyPercent = busy.length ? Math.round(busy.reduce((a, b) => a + b, 0) / busy.length) : null;
 
   // 4. The server, measured.
+  // The entry carries the route's quirks, and the client's requests are the kit's own (chatBody, visionBody), so they
+  // take them as an agent's do: GenieX's nonce first in every request, which stops it reusing a shared prefix's state
+  // across the tries of one prompt (prefix-leak). Its pictures go as files (image-path), below.
   const acc = readAccelerator(entry) as Accelerator;
+  if (acc.quirks.length) log(`${route.server}'s requests as the kit sends them: ${acc.quirks.map((q) => QUIRK_SAYS[q] ?? q).join('; ')}`);
   const client = serverClient(acc, { http: o.io?.fetch, now });
   const logFile = path.join(tools, 'servers', 'logs', `npu-bench-${vendor}.log`);
   const start = o.io?.start ?? startServer;
@@ -613,14 +629,30 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     report.quality.gate = report.quality.mustPass && report.quality.score >= suite.gate.score;
     log(`quality: ${report.quality.passed} of ${report.quality.of}${report.quality.mustPass ? '' : ', a must-pass question wrong'}${report.quality.items.some((x) => !x.ok) ? ` (wrong: ${report.quality.items.filter((x) => !x.ok).map((x) => x.id).join(', ')})` : ''}`);
 
-    if (acc.vision?.model) {
-      const items: NonNullable<BenchReport['vision']>['items'] = [];
-      for (const v of suite.vision) {
-        const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: picture(v.image) });
-        items.push({ id: v.id, ok: r.ok && grade(v.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
+    if (acc.vision?.model && suite.vision.length) {
+      // A server that reads a local path (GenieX: image-path) gets each picture as a file, as an agent's pictures go to
+      // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one.
+      const dir = acc.quirks.includes('image-path') ? mkdtempSync(path.join(os.tmpdir(), 'npu-bench-pictures-')) : null;
+      const imageOf = (v: Suite['vision'][number]) => {
+        if (!dir) return picture(v.image);
+        const file = path.join(dir, `${v.id}.png`);
+        writeFileSync(file, picturePng(v.image));
+        return file;
+      };
+      try {
+        // A warm-up, as every measurement has: GenieX holds one model at a time, and a server may load its vision part
+        // only for the first picture. Neither is a picture's time.
+        for (let i = 0; i < suite.warmups; i++) await ask({ prompt: suite.vision[0].prompt, maxTokens: suite.vision[0].maxTokens, image: imageOf(suite.vision[0]) });
+        const items: NonNullable<BenchReport['vision']>['items'] = [];
+        for (const v of suite.vision) {
+          const r = await ask({ prompt: v.prompt, maxTokens: v.maxTokens, image: imageOf(v) });
+          items.push({ id: v.id, ok: r.ok && grade(v.grade, r.answer), answer: (r.ok ? r.answer : `(${r.error})`).slice(0, 120), ms: r.ms });
+        }
+        report.vision = { passed: items.filter((x) => x.ok).length, of: items.length, items };
+        log(`vision: ${report.vision.passed} of ${report.vision.of}`);
+      } finally {
+        if (dir) rmSync(dir, { recursive: true, force: true });
       }
-      report.vision = { passed: items.filter((x) => x.ok).length, of: items.length, items };
-      log(`vision: ${report.vision.passed} of ${report.vision.of}`);
     }
 
     report.results.memory = server.pid ? await (o.io?.memory ?? processMemory)(server.pid) : null;

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -24,6 +24,9 @@ const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 256V\nram|16849174528\n';
+// The owner's Snapdragon laptop, as detection reads it (npu-vendors.test.ts).
+const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+const ARM = 'cpu|12|18|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm Oryon(TM) CPU\nram|51127103488\n';
 const SUITE = B.SUITE;
 
 /** A right answer to every quality question, by id: each must pass its own grade. */
@@ -55,6 +58,10 @@ const RIGHT: Record<string, string> = {
   triage: '{"label": "billing", "urgent": true}',
   reply: 'Of course! Saturday is fine. The ladder will be by the side gate from nine.',
   summary: 'The cellar is now dry and usable. The works cost $18,400 in total, under the $20,000 budget. The door and window still need attention.',
+  red: 'Red.',
+  halves: 'left blue, right yellow',
+  number: '472',
+  count: '3',
 };
 
 async function freePort(): Promise<number> {
@@ -65,11 +72,17 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** A fake OpenVINO Model Server that knows the suite's right answers (or answers `wrong`), streamed or not. */
+/**
+ * A fake OpenVINO Model Server (or GenieX: the same OpenAI routes) that knows the suite's right answers (or answers
+ * `wrong`), streamed or not. Each picture a request carries is looked at as it arrives: its URL, and whether that is a
+ * PNG file on this PC, as GenieX reads one.
+ */
 function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: boolean } = {}) {
   const answers = new Map<string, string>();
   for (const item of [...SUITE.quality, ...SUITE.jobs]) answers.set(B.promptOf(SUITE, item), RIGHT[item.id]);
+  for (const v of SUITE.vision) answers.set(v.prompt, RIGHT[v.id]);
   const seen: any[] = [];
+  const pictures: { url: string; pngFile: boolean }[] = [];
   let server: Server | null = null;
   const answerFor = (prompt: string) => {
     if (o.wrong) return o.wrong;
@@ -87,7 +100,10 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
         const j = JSON.parse(body);
         seen.push(j);
         const content = j.messages.at(-1).content;
-        const text = answerFor(typeof content === 'string' ? content : '');
+        const parts: any[] = Array.isArray(content) ? content : [];
+        const url = parts.find((p) => p.type === 'image_url')?.image_url?.url;
+        if (typeof url === 'string') pictures.push({ url, pngFile: !/^data:/.test(url) && existsSync(url) && readFileSync(url).subarray(1, 4).toString() === 'PNG' });
+        const text = answerFor(typeof content === 'string' ? content : (parts.find((p) => p.type === 'text')?.text ?? ''));
         const pieces = text.split(/(?<=\s)/);
         const usage = o.usage === false ? undefined : { prompt_tokens: Math.round(JSON.stringify(j.messages).length / 4), completion_tokens: pieces.length };
         if (j.stream && o.stream !== false) {
@@ -108,22 +124,34 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
     s.closeAllConnections();
     await new Promise((r) => s.close(r));
   };
-  return { seen, start, stop, starts: 0, commands: [] as string[][] };
+  return { seen, pictures, start, stop, starts: 0, commands: [] as string[][] };
 }
 
 const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', brightness: 60, windowsBuild: '26200', make: 'HP', model: 'HP OmniBook X Laptop 17-dd0xxx' };
 
-/** The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not minutes. */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string } = {}) {
+/**
+ * The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not
+ * minutes. On a Snapdragon (`vendor: 'qualcomm'`), GenieX is "installed" where its installer puts it, in a scratch
+ * %LOCALAPPDATA%, and its embedding server is left out: the benchmark asks for no embeddings.
+ */
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' } = {}) {
   const port = await freePort();
+  const vendor = o.vendor ?? 'intel';
   const catalog = structuredClone(V.NPU_CATALOG);
-  catalog.routes.intel.port = port;
-  delete catalog.routes.intel.models[0].pinned; // its pull is a fake that leaves no files to check
+  const route = catalog.routes[vendor];
+  route.port = port;
+  for (const m of route.models) delete m.pinned; // its pull is a fake that leaves no files to check
   const tools = mkdtempSync(path.join(home, 'tools-'));
-  const exe = V.serverExe(catalog.routes.intel, tools);
+  let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
+  if (vendor === 'qualcomm') {
+    delete route.embedServer;
+    env = Object.fromEntries(Object.entries(env).filter(([k]) => !/^(localappdata|userprofile)$/i.test(k)));
+    Object.assign(env, { LOCALAPPDATA: path.join(tools, 'local'), USERPROFILE: path.join(tools, 'profile') });
+  }
+  const exe = V.serverExe(route, tools, env);
   mkdirSync(path.dirname(exe), { recursive: true });
   writeFileSync(exe, '');
-  for (const f of catalog.routes.intel.runtime!.files) writeFileSync(path.join(path.dirname(exe), f), '');
+  for (const f of route.runtime?.files ?? []) writeFileSync(path.join(path.dirname(exe), f), '');
   const fake = fakeOvms(port, o);
   const suite = structuredClone(SUITE);
   suite.holding.minutes = 0.002;
@@ -147,8 +175,8 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     catalog,
     suite,
     kitVersion: '2.62.0',
-    env: { ...process.env, REEVE_HOME: home },
-    detection: parseDetection(`${X64}${o.npu ?? LUNAR}\n`),
+    env,
+    detection: parseDetection(vendor === 'qualcomm' ? `${ARM}${o.npu ?? X2}\n` : `${X64}${o.npu ?? LUNAR}\n`),
     out: path.join(tools, 'report.json'),
     log: (l: string) => lines.push(l),
     io: {
@@ -298,8 +326,9 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.equal(report.results.energy, null, 'no energy without --energy');
   assert.equal(s.fake.starts, 2, 'a cold start, and a start again from the cache');
   assert.match(s.cleared[0], /\.bench-cache-npu$/);
-  // Every request was streamed, with the server's usage asked for.
+  // Every request was streamed, with the server's usage asked for; Intel's route has no quirks, so none starts with a nonce.
   assert.ok(s.fake.seen.every((j) => j.stream === true && j.stream_options?.include_usage === true));
+  assert.ok(s.fake.seen.every((j) => j.messages[0].role === 'user'));
   assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
   // Nothing in it names the person or the PC.
   assert.doesNotMatch(readFileSync(s.opts.out, 'utf8'), new RegExp(process.env.USERNAME ?? 'no-user-name-here', 'i'));
@@ -377,4 +406,45 @@ test("an energy figure only when working draws clearly more than rest: the batte
     assert.equal(r.report.results.energy!.restMilliwatts, rest, 'what was read is kept');
     assert.ok(s.lines.some((l) => /^energy: not counted: working read \d+ mW against \d+ mW at rest/.test(l)), s.lines.join('\n'));
   }
+});
+
+test("a run on a Snapdragon: GenieX's nonce first in every request, and each picture a file it reads, not a data: URL", async () => {
+  const geniex = V.NPU_CATALOG.routes.qualcomm;
+  assert.deepEqual(geniex.quirks, ['prefix-leak', 'image-path'], "the quirks come from GenieX's route, as the kit's own requests take them");
+  const s = await scene({ vendor: 'qualcomm' });
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.server, `GenieX ${geniex.version}`);
+  assert.equal(report.run.cap, geniex.maxContextTokens);
+  assert.equal(report.quality.passed, 24);
+  // GenieX leaks state between requests that share a prompt's start, and the benchmark asks the same prompt a warm-up
+  // and three or five times over: every request starts with a nonce of its own, as an agent's do.
+  const nonces = s.fake.seen.map((j) => (j.messages[0].role === 'system' ? /^\[req [a-z0-9]+\]/.exec(j.messages[0].content)?.[0] : undefined));
+  assert.ok(nonces.every(Boolean), 'a nonce first in every request');
+  assert.equal(new Set(nonces).size, nonces.length, 'never the same twice');
+  const shorts = s.fake.seen.filter((j) => j.messages.at(-1).content === SUITE.short.prompt);
+  assert.ok(shorts.length >= SUITE.warmups + SUITE.tries.quick, 'the same prompt, asked again and again');
+  // Each picture as a PNG file, its path sent, there while GenieX reads it: a warm-up, then the four graded.
+  assert.equal(s.fake.pictures.length, SUITE.warmups + SUITE.vision.length);
+  for (const p of s.fake.pictures) {
+    assert.doesNotMatch(p.url, /^data:/);
+    assert.ok(path.isAbsolute(p.url), p.url);
+    assert.ok(p.pngFile, `${p.url}: a PNG file on this PC`);
+  }
+  assert.deepEqual(report.vision, { passed: 4, of: 4, items: report.vision!.items });
+  assert.deepEqual(report.vision!.items.map((x: any) => x.id), SUITE.vision.map((v: any) => v.id), 'the warm-up is no item');
+  assert.ok(s.fake.pictures.every((p) => !existsSync(p.url)), 'the pictures are gone after the run');
+  assert.ok(s.lines.some((l) => /^GenieX's requests as the kit sends them: a nonce first in every request \(prefix-leak\); each picture as a file/.test(l)), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+});
+
+test('on a Snapdragon GenieX is the NPU only: --device GPU and --cap are refused before anything starts', async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  const gpu = await B.npuBench({ ...s.opts, device: 'GPU' });
+  assert.equal(gpu.code, 2);
+  assert.match(gpu.report.marks[0].say, /GenieX runs on the NPU only/);
+  const cap = await B.npuBench({ ...s.opts, cap: 4096 });
+  assert.equal(cap.code, 2);
+  assert.match(cap.report.marks[0].say, /no prompt cap to set/);
+  assert.equal(s.fake.starts, 0);
 });
