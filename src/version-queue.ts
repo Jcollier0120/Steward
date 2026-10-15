@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { commitOf, fetchBranch, gitMaybe, showFile } from './git.ts';
 import { compareVersions } from './kitfiles.ts';
 import { manorProjects, type ManorProject } from './kit/manor.ts';
+import { freshRemoteHeads } from './kit/remote-heads.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import type { Employee } from './settings.ts';
 import { checkoutOf, glanceOf, hostIs, type Ctx } from './stages/common.ts';
@@ -17,8 +18,10 @@ import { hostFor } from './hosts/index.ts';
  * changes one). Kept in version-queues.json and served at GET /api/version-queues, which Manor shows.
  *
  * A repository's versions are read again only when its branch or one of its PRs has a new head commit: the round's
- * glance says so for the employees (an employee's clone is fetched only when its branch's head there isn't the
- * glance's), and a project's are asked of git and GitHub each round.
+ * glance says so for the employees, and a project's are asked of git and GitHub each round. A clone is fetched only when
+ * its branch on GitHub moved: a head GitHub gave (the glance's, or remote-heads.json's for a project) that is the one
+ * kept, or the clone's own already, needs no fetch. One the stage merged or released to is fetched as before, since its
+ * glance was taken before that.
  */
 
 export interface QueuedPr {
@@ -164,24 +167,41 @@ async function openPrs(ctx: Ctx, t: Target): Promise<PrInfo[]> {
   return parsePrs(JSON.stringify(raw), authors);
 }
 
-async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at: string): Promise<VersionQueue> {
+/**
+ * What a PR's head sets, as read at a branch head (with the version files read): kept so a PR that sets no version above
+ * the branch's, which the queue doesn't keep, isn't read again each round (a fetch and a merge-base each time).
+ */
+const prsRead = new Map<string, string | null>();
+const PRS_READ_MAX = 2000;
+
+/** The head of the target's branch on GitHub as the round already knows it: its glance's, or remote-heads.json's for a project. */
+function knownHead(ctx: Ctx, t: Target, moved: Set<string>): string | null {
+  if (!t.prs || !t.repo || moved.has(t.id)) return null;
+  if (t.kind === 'agent') return glanceOf(ctx, { id: t.id } as Employee)?.head ?? null;
+  return freshRemoteHeads(t.repo)?.[t.branch] ?? null;
+}
+
+async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at: string, moved: Set<string> = new Set()): Promise<VersionQueue> {
   const base: Omit<VersionQueue, 'version' | 'head' | 'files' | 'queue' | 'working' | 'latest' | 'note'> = { id: t.id, name: t.name, kind: t.kind, repo: t.repo, branch: t.branch, at };
   const empty = (note: string, version: string | null = null, head: string | null = null, files: string[] = []): VersionQueue => ({ ...base, version, head, files, queue: [], working: null, latest: null, note });
   if (!existsSync(t.checkout)) return empty(`no checkout at ${t.checkout}`);
-  // Its branch as its origin has it, or the clone's own branch when there is no origin to fetch from. An employee's isn't
-  // fetched when the round's glance says origin's branch is at the commit the clone has already (common.ts's freshBranch).
+  // Its branch as its origin has it, or the clone's own branch when there is no origin to fetch from. Fetched only when
+  // GitHub's head is neither the one kept (with its version) nor the clone's already.
   let ref = `origin/${t.branch}`;
-  const glanced = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee)?.head : null;
-  if (!glanced || (await commitOf(ctx.run, t.checkout, ref)) !== glanced) {
+  const known = knownHead(ctx, t, moved);
+  const kept = !!known && before?.head === known && !!before.version && !!before.files?.length;
+  if (!kept && (!known || (await commitOf(ctx.run, t.checkout, ref)) !== known)) {
     try {
       await fetchBranch(ctx.run, t.checkout, t.branch);
     } catch {
       if (!(await commitOf(ctx.run, t.checkout, ref))) ref = t.branch;
     }
   }
-  const head = await commitOf(ctx.run, t.checkout, ref);
+  const head = kept ? known : await commitOf(ctx.run, t.checkout, ref);
   if (!head) return empty(`no branch ${t.branch} in ${t.checkout}`);
-  const v = before?.head === head && before.version && before.files?.length ? { version: before.version, files: before.files } : await versionAt(ctx, t, ref);
+  // Read again only at a new head: a branch with no version found at this head has none still.
+  const same = before?.head === head;
+  const v = same && before.version && before.files?.length ? { version: before.version, files: before.files } : same && !before.version && before.note ? { error: before.note } : await versionAt(ctx, t, ref);
   if ('error' in v) return empty(v.error, null, head);
   let prs: PrInfo[];
   try {
@@ -189,15 +209,19 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   } catch (err) {
     return empty(`couldn't list its PRs: ${(err as Error).message}`, v.version, head, v.files);
   }
-  const known = new Map((before?.queue ?? []).map((q) => [q.head, q.version]));
+  const read = new Map((before?.queue ?? []).map((q) => [q.head, q.version]));
   const queue: QueuedPr[] = [];
   for (const pr of prs) {
     if (pr.base !== t.branch || !pr.headOid) continue;
-    let sets = known.get(pr.headOid) ?? null;
-    if (!sets) {
+    let sets = read.get(pr.headOid) ?? null;
+    const asked = `${t.checkout}\n${head}\n${pr.headOid}\n${v.files.join()}`;
+    if (!sets && prsRead.has(asked)) sets = prsRead.get(asked)!;
+    else if (!sets) {
       try {
         const p = await prVersions(ctx, { id: t.id, checkout: t.checkout, branch: t.branch, versionFiles: v.files } as Employee, pr);
         sets = p.head && p.head !== p.from ? p.head : null;
+        if (prsRead.size >= PRS_READ_MAX) prsRead.clear();
+        prsRead.set(asked, sets);
       } catch {
         sets = null;
       }
@@ -213,10 +237,12 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
 
 /**
  * Every repository's queue made again (only what changed is read again), kept, and returned. A repository that can't
- * be read keeps a note saying why; one that fails outright keeps what it had.
+ * be read keeps a note saying why; one that fails outright keeps what it had. `moved`: the employees the stage merged or
+ * released to after its glance, whose clones are fetched whatever the glance said.
  */
-export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]; now?: () => Date } = {}): Promise<VersionQueues> {
+export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]; now?: () => Date; moved?: Iterable<string> } = {}): Promise<VersionQueues> {
   const at = (o.now?.() ?? new Date()).toISOString();
+  const moved = new Set(o.moved ?? []);
   const before = new Map(loadVersionQueues().repos.map((r) => [r.id, r]));
   let projects: ManorProject[];
   try {
@@ -227,7 +253,7 @@ export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]
   const repos: VersionQueue[] = [];
   for (const t of targetsOf(ctx, projects)) {
     try {
-      repos.push(await queueOf(ctx, t, before.get(t.id), at));
+      repos.push(await queueOf(ctx, t, before.get(t.id), at, moved));
     } catch (err) {
       const kept = before.get(t.id);
       ctx.log(`[${t.id}] couldn't read its version queue: ${(err as Error).message}`);
