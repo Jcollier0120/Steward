@@ -2,6 +2,19 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**The NPU benchmark times prompts the server hasn't seen: suite `castellan-npu-bench/2`.**
+
+### What changed
+
+- **Every read and job is asked as a new prompt.** npu-bench.ts puts a line of its own first, `[bench <run>-<count>]`, in each warm-up and try of the reads and jobs, the read near the cap, holding speed and energy (`freshPrompt`). OpenVINO Model Server turns the NPU's prefix caching on, so suite 1, which asked one prompt over and over, timed mostly the cache: on an NPU 3720, 0.74 s to the first token at 512 tokens, against 2.26 s for a prompt it hadn't seen. The short answer, writing and quality prompts are as they were. GenieX's requests were already new, by their nonce.
+- **The suite is `castellan-npu-bench/2`.** The website compares runs of one major version, so suite 1's runs don't rank against these. The report's format (`castellan-npu-bench-report/1`) is unchanged.
+
+### For an agent
+
+- Nothing to do. A run made to compare with an earlier one needs both on suite 2.
+
 ## 2.74.3
 
 **The staff page's Needs you: its heading sits like every other section's, and it takes what belongs under it without being a need.**
