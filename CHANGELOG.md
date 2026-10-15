@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.31
+
+**Kit 2.74.3: on the pages of the agents your AI assistant calls, Needs you sits closer to the top and can show what waits under it.**
+
+### What changed
+
+- The kit the Steward hands out (2.74.3) lays out Needs you on Reeve's and the Assayer's pages without the large empty gap above it, its heading like the page's other section headings. Agents get it as they pin the kit.
+- Needs you can now show quiet things under its cards that aren't something to do, such as a review queue with nothing waiting. Reeve moves its own there in its next update.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.30
 
 **Releases that need code signing wait for SimplySign instead of failing.**
