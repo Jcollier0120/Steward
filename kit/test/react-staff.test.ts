@@ -36,6 +36,8 @@ const ui = await bundleForNode<{ html: Record<string, () => string> }>(
        { id: 's', tone: 'caution', label: 'Settings', title: 'A test command', action: <button type="button">Open Settings</button> },
      ]} />),
      nothingNeeds: () => r(<NeedsYou items={[]} />),
+     needsAndMore: () => r(<NeedsYou items={[{ id: 'p', tone: 'danger', label: 'problem', title: 'The round failed' }]}><p className="muted small">No review queue yet.</p></NeedsYou>),
+     nothingAndMore: () => r(<NeedsYou items={[]}><p className="muted small">No review queue yet.</p></NeedsYou>),
      row: () => r(<Row mark={<span className="badge">failed</span>} title="Heiward" meta="2 hours ago" actions={<button type="button">Output</button>} more={<p>more</p>} />),
      rowOpen: () => r(<Row title="Manor" more={<p>more</p>} open />),
      rowPlain: () => r(<Row title="Porter" meta="passes" />),
@@ -88,10 +90,24 @@ test('Kept: its totals, what each part read once something is counted, else its 
 
 test('Needs you: a card each, its edge and badge its tone, its action at the end; a plain line when nothing needs you', () => {
   const n = h.needsYou();
-  assert.match(n, /^<section class="ui-section ui-gap-md ui-needs" data-tour="needs-you" aria-label="Needs you"><div class="ui-section-head"><h2 class="ui-heading">Needs you<\/h2><\/div>/);
+  assert.match(n, /^<section class="ui-section ui-gap-md ui-needs" data-tour="needs-you" aria-label="Needs you">/);
   assert.match(n, /<div class="card ui-need ui-need-danger"><div class="ui-line"><span class="badge tone-danger">problem<\/span><strong>The round failed<\/strong><span class="muted small">gh is signed out\.<\/span><\/div><\/div>/);
   assert.match(n, /<div class="card ui-need ui-need-caution"><div class="ui-line"><span class="badge tone-caution">Settings<\/span><strong>A test command<\/strong><span class="ui-fill"><\/span><button type="button">Open Settings<\/button><\/div><\/div>/);
   assert.match(h.nothingNeeds(), /<p class="card muted">Nothing needs you right now\.<\/p><\/section>$/);
+});
+
+test("Needs you's heading is a Section's, so page.ts's h2 margin doesn't stack on the section's", () => {
+  // A bare h2 in .ui-section-head took page.ts's 26px top margin on top of .ui-section's 22px; in .ui-section-name it
+  // has none, as every Section's heading.
+  const head = '<div class="ui-section-head"><div class="ui-section-name"><h2>Needs you</h2></div></div>';
+  assert.ok(h.needsYou().includes(head));
+  assert.ok(h.nothingNeeds().includes(head));
+  assert.doesNotMatch(h.needsYou(), /ui-heading/, "the plain h2, as Section's");
+});
+
+test('what goes under Needs you without being a need: after the cards, or after the empty line, inside the section', () => {
+  assert.match(h.needsAndMore(), /<strong>The round failed<\/strong><\/div><\/div><p class="muted small">No review queue yet\.<\/p><\/section>$/);
+  assert.match(h.nothingAndMore(), /<p class="card muted">Nothing needs you right now\.<\/p><p class="muted small">No review queue yet\.<\/p><\/section>$/);
 });
 
 test('a row is one line, its details under it only once opened', () => {

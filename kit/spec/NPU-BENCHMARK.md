@@ -39,6 +39,7 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 ### Settings for every request
 
 - `temperature: 0` and a fixed `max_tokens` per request, as the kit's own `chatBody` sends, and the model's thinking turned off where it has any.
+- **The server's quirks, as an agent's requests carry them** (the route's `quirks`, ACCELERATORS.md). GenieX's `prefix-leak`: every request starts with a nonce, because GenieX leaks state between requests that share a prompt's start, and the benchmark asks each prompt a warm-up and five times over. GenieX's `image-path`: each picture is written to a file of its own in the temporary folder and its path sent, because GenieX reads a local path, not a `data:` URL. Other servers get pictures as `data:` URLs. The run's log names the quirks it applied.
 - **Streamed** (`stream: true`, with usage in the last chunk), so the time to the first token (reading the prompt) and the time between tokens (writing) are measured separately. The NPU check doesn't stream, so it estimates writing speed by taking off half a short answer's time. That is close enough for a timeout, but not for a ranking. A server that can't stream is measured without it and the run is marked: its job times still count, its reading and writing speeds are shown as estimates and not ranked.
 - Token counts come from the server's own usage numbers. A server that doesn't report them is marked the same way.
 - Every prompt fits under 1,280 tokens, prompt and answer together, so it runs under every route's cap (the smallest chat cap is Qualcomm's 2,400). A route whose cap is lower can't run the suite, and the website says so rather than leaving it out silently.
@@ -61,8 +62,8 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 6. **Quality.** 24 graded items (below). The score is the share answered correctly.
 7. **Memory.** The server's working set and private bytes after the jobs, as the NPU check reads them.
 8. **Holding speed** (the full run only). Ten minutes of triage jobs back to back. It shows how fast the job runs in the first minute and in the last: a laptop that gets hot and slows down shows it here.
-9. **Energy** (optional, on battery only). Windows reports the battery's discharge rate (`root\wmi` `BatteryStatus.DischargeRate`, in milliwatts). The run reads it for a minute at rest, then through three minutes of triage jobs. The extra drain divided by the tokens done gives **millijoules a token**. This is where Intel's NPU should show what it's for: slower than its graphics card, but with far less power. It is a whole-laptop measurement (screen, fans, everything), so the run records the screen's brightness (it doesn't change it) and the figure is shown as an approximation. The discharge rate can be read without an administrator: this was checked on the Lunar Lake laptop, an HP OmniBook X 17, where plugged in it reads 0, as it should. How steady it is under load still has to be measured on battery.
-10. **Vision** (where the model has it). Four questions about fixed pictures, graded. Shown as its own column; it is not part of job time, because Intel's route has no vision yet.
+9. **Energy** (optional, on battery only). Windows reports the battery's discharge rate (`root\wmi` `BatteryStatus.DischargeRate`, in milliwatts). The run reads it for a minute at rest, then through three minutes of triage jobs. The extra drain divided by the tokens done gives **millijoules a token**. This is where Intel's NPU should show what it's for: slower than its graphics card, but with far less power. It is a whole-laptop measurement (screen, fans, everything), so the run records the screen's brightness (it doesn't change it) and the figure is shown as an approximation. The discharge rate can be read without an administrator: this was checked on the Lunar Lake laptop, an HP OmniBook X 17, where plugged in it reads 0, as it should. On battery it didn't hold up there: it read 28–29 W at rest while the battery's real drain was about 16 W, and working read only 2–6% more, or less. So the figure counts only when working reads clearly more than rest: by 1 W and by a tenth of the rest reading (`ENERGY_MIN_EXTRA`). Otherwise the report keeps both readings with no millijoules a token, and the log says why.
+10. **Vision** (where the model has it). Four questions about fixed pictures, graded, after one picture as a warm-up that isn't counted: GenieX holds one model at a time and loads its vision part for a picture, so the first picture's time would be that load's. Shown as its own column; it is not part of job time, because Intel's route has no vision yet.
 
 ### Quality items
 
@@ -99,12 +100,95 @@ One JSON file per run, `castellan-npu-bench/1`, with its schema beside this file
 - **suite**: version, kit version, profile (quick or full).
 - **pc**: the processor and its chip generation (as detection labels it, e.g. "Intel Core Ultra 7 256V, Lunar Lake"), the NPU's name, PCI device and driver version and date, RAM, Windows build, and the laptop's make and model (cooling and power limits differ between laptops with the same chip).
 - **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start.
-- **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured), and whether it is shipped or a candidate.
+- **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured once setup has pulled it, except on FastFlowLM's route: see `--candidate` in **What's built**), and whether it is shipped or a candidate.
 - **results**: each measurement's five tries, their median and spread, and the job time.
 - **quality**: each item's answer, its grade, the score, and whether the gate passed.
 - **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed), each with its reason in plain words.
 
 Nothing in it names the person or the PC: no user name, PC name, serial number or paths. The laptop's make and model is the most it says about whose PC it was.
+
+## Running it on a PC
+
+What an agent (or a person) does to measure a PC for the website's boards, start to finish. A run changes nothing on the PC: it sets the route up as setup does without writing `config.json`, starts the server itself, and stops it at the end. Ask the owner before the steps that pause their agents.
+
+**1. The newest kit.** Every agent carries the benchmark in its `src\kit\`, at the kit version its `kit.json` pins, so an agent's copy can be older than this page. Run the Steward's instead, from a worktree of its own (never switch the branch of a checkout another session works in):
+
+```powershell
+git -C C:\Projects\Steward fetch origin
+git -C C:\Projects\Steward worktree add C:\worktrees\Steward-bench origin/main   # or the branch to test, before it merges
+cd C:\worktrees\Steward-bench
+npm ci
+npm run kit        # fills src\kit\ from kit\
+```
+
+`src\kit\VERSION` is the kit it runs, and the report says it (`suite.kit`).
+
+**2. Node for the processor.** Node 22.18 or later (the kit runs TypeScript as it is), built for this PC's processor: `node -p "process.arch"` must print `arm64` on a Snapdragon and `x64` on Intel or AMD. An x64 Node on a Snapdragon runs under emulation, which slows the benchmark's own timing and stream reading. If it prints the wrong one, install the right one (`winget install OpenJS.NodeJS.LTS --architecture arm64` on a Snapdragon) and open a new terminal.
+
+**3. The conditions** (Conditions, above). A run that misses one still writes its report, marked, but isn't ranked:
+
+- Plugged in, for the speed run (energy is a second run, step 7).
+- Windows' default power mode, **Balanced** (Settings › System › Power & battery › Power mode). It is the one ranked, and on Intel's NPU Best performance changed nothing.
+- **The processor under 15% busy** before the start: the benchmark reads it ten times, 3 s apart, and marks the run `busy` above 15%. Close other programs and wait for Windows Update or a Defender scan to finish; Task Manager shows it.
+- The PC stays awake for the half hour: if its screen or sleep timeouts are shorter, lengthen them for the run (Settings › System › Power & battery › Screen, sleep & hibernate timeouts) and put them back after. Leave the brightness as it is: the report records it.
+
+**4. Nothing else on the NPU.** The benchmark needs the route's server to itself. If anything answers on the route's port (GenieX 18181, OpenVINO Model Server 18183, FastFlowLM 18184) it stops at once, exit 1: "something already answers at … (the keeper's server?): stop it first". With the owner's OK:
+
+- In Manor, pause the keeper's duty (the Smith's, else Reeve's), so it starts nothing, and the agents that ask the local models, so none sends the server a request mid-run.
+- Stop the NPU's servers that are still running, and its embedding server (the Snapdragon's llama-server on 18182, Intel's second OpenVINO Model Server on 18186): it holds the NPU's memory, and the benchmark doesn't ask it anything.
+
+  ```powershell
+  Get-NetTCPConnection -State Listen -LocalPort 18181,18182,18183,18184,18186 -ErrorAction SilentlyContinue |
+    ForEach-Object { Get-Process -Id $_.OwningProcess } | Select-Object Id, Name, Path
+  Stop-Process -Id <each Id listed>   # the manor's own: geniex, llama-server, ovms or flm
+  ```
+
+  Run the first command again: it must list nothing. A program that isn't the manor's (its path outside the GenieX CLI folder and the tools home's `servers\`) is the owner's to stop, not yours.
+
+**5. A quick run first** (about 8 minutes past setup), to see every step works before the half hour:
+
+```powershell
+node src\kit\npu-bench.ts --profile quick --yes 2>&1 | Tee-Object -FilePath npu-bench-quick.log
+```
+
+On a PC where Set up local AI already ran, nothing is downloaded; on a fresh one, `--yes` lets it download what setup would instead of asking: the server, its model and its embedding server (about 5.1 GB on the Snapdragon, 2.8 GB on Intel). It exits 0 when it ran to the end, ranked or not, and 1 when it couldn't, with the reason in its last lines.
+
+**6. The full run, plugged in.** This is the one the boards rank, about 25 minutes past setup:
+
+```powershell
+node src\kit\npu-bench.ts --profile full --yes 2>&1 | Tee-Object -FilePath npu-bench-full.log
+```
+
+Its last line says `Ranked: it met every condition.` or why not. A run that isn't ranked is still worth sending: the marks say what to fix.
+
+**7. Energy, on battery.** Unplug, with enough charge for half an hour, and run again with `--energy`:
+
+```powershell
+node src\kit\npu-bench.ts --profile full --energy --yes 2>&1 | Tee-Object -FilePath npu-bench-energy.log
+```
+
+After everything else it reads the battery's discharge rate for a minute at rest, then through three minutes of triage jobs. Its figure counts only when working reads at least 1 W more than rest, and a tenth more (`ENERGY_MIN_EXTRA`); otherwise the report keeps both readings with `millijoulesPerToken` null, and the log says why. Either is an answer. Its speed figures aren't ranked (marked `battery`).
+
+**8. What to send back.** For each run:
+
+- **The report.** Its last lines say where: `The report: <path>`, by default `npu-bench-<maker>-<device>-<date>.json` in the tools home (`%USERPROFILE%\.manor\accelerators`, or `%USERPROFILE%\.reeve` on a PC set up before kit 2.31.0; `--out <file>` puts it elsewhere). It names nothing personal.
+- **The log** (the `Tee-Object` file), and when a step failed, the server's own output, `servers\logs\npu-bench-<maker>.log` in the tools home. Logs hold the PC's folder paths, so send them privately (to the session or person who asked, or a secret gist), never to a public page.
+
+Then resume the keeper and the agents in Manor, and put any timeouts back.
+
+### On a Snapdragon
+
+The route is GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16), one model for chat and vision, on port 18181. Run it as above, with an Arm64 Node, and look for these:
+
+- **GenieX's quirks are applied.** Near the start the log says `GenieX's requests as the kit sends them: a nonce first in every request (prefix-leak); each picture as a file of its own, its path sent (image-path)`. If that line is missing, `src\kit` is older than this page: go back to step 1. Without the nonce GenieX reuses state across the tries of one prompt, and without the files it can't read the pictures.
+- **One model at a time.** GenieX holds one model and loads its vision part for a picture after text. The benchmark sends one picture as an untimed warm-up before the four graded ones, so their times aren't a load's, and its second start (the cached load) is a new process. GenieX's DSP fails after about a dozen vision loads in one process (ACCELERATORS.md); a run sends five. This is also why nothing else may ask GenieX during the run (step 4): another agent's request would make it swap.
+- **The cap is 2,400 tokens, and stays there.** The kit counts three characters a token, so for text like the suite's 2,400 by its count is about 1,700 by the server's. An ~8K-token prompt bluescreened the X2 Elite (bug check 0x18B). The benchmark's longest prompt is its read near the cap: 90% of 2,400 at four characters a token, about 2,050 tokens by the server's count. That is more than an agent ever sends GenieX, and a quarter of what crashed it. `--cap` is refused on GenieX (exit 2: it compiles no prompt length). Never raise the cap in `npu-vendors.json`, or the suite's sizes, to read further on a Snapdragon.
+- **No graphics-card run yet.** GenieX runs on the NPU only, so `--device GPU` (or `CPU`) is refused, exit 2: "GenieX runs on the NPU only: it has no device to choose". The Adreno serves the manor's models through llama.cpp, which isn't an NPU route, so a Snapdragon graphics-card row needs a route for it first. When one exists, `--device GPU` runs it, plugged in, as on Intel.
+- **Streaming is unverified.** Whether GenieX streams one chunk a token and puts its token counts in the last chunk hasn't been checked. The first run's report says: `run.streamed` and `run.usageReported`. If either is false, the run is marked `not-streamed` or `no-usage` and isn't ranked; send it back anyway, as that is the finding. If the first load fails with a 4xx in GenieX's log, it refused the streamed request (`stream_options`, say): send the log.
+- **Energy on the X2 Elite is unseen.** On the Lunar Lake laptop the battery's rate didn't hold up (Energy, above). Whether the Snapdragon's does is what step 7 finds out.
+- **Setup checks the model's files.** On the X2 Elite each of Qwen3-VL-4B's pinned files is read and its SHA-256 checked before the server starts (4.3 GB), so the first lines take a little while. A `--candidate`'s files are read once too, after setup, for the report's SHA-256s.
+
+The plugged-in full run's report is what the website's speed table takes for the Snapdragon row.
 
 ## The website
 
@@ -140,20 +224,20 @@ The same model on the Arc 140V, measured with the experiment harness rather than
 ## What's built
 
 1. **Shared parts out of the NPU check**: starting and stopping a server, asking, waiting for it to answer, and reading its memory move into `npu-server.ts`. The NPU check uses them as it does now and behaves the same.
-2. **Streamed requests**: `askStream` sends `stream: true` with `stream_options.include_usage`, reads the server's events, and returns the time to the first token, each token's time and the usage. A route says whether its server streams (`streams` in `npu-vendors.json`). OpenVINO Model Server streams with usage in its last chunk. This was checked on the Lunar Lake's NPU: one chunk a token, and the writing rate between tokens was 24.1–24.2 a second over 256 tokens, steady from one try to the next. Whether GenieX and FastFlowLM do the same has to be checked.
+2. **Streamed requests**: `askStream` sends `stream: true` with `stream_options.include_usage`, reads the server's events, and returns the time to the first token, each token's time and the usage. No route declares whether its server streams: the benchmark asks every request streamed and sees what comes back. An answer that comes all at once, not as server-sent events, is read that way, and a run where any did is marked `not-streamed` (the report's `run.streamed` false); one whose stream carried no token counts is marked `no-usage` (`run.usageReported` false). OpenVINO Model Server streams with usage in its last chunk. This was checked on the Lunar Lake's NPU: one chunk a token, and the writing rate between tokens was 24.1–24.2 a second over 256 tokens, steady from one try to the next. Whether GenieX streams, and puts its usage in the last chunk, still has to be checked on the X2 Elite (its first run's `run.streamed` and `run.usageReported` say). FastFlowLM's too, once there's AMD hardware.
 3. **The suite** as data (`npu-bench-suite.json`): settings, warm-ups and tries, the speed prompts, the three jobs, the quality items with their grades, the vision items and pictures, the gate.
 4. **Grading**: an exact match, a regular expression, a number, JSON fields.
 5. **Conditions**: plugged in or not, battery charge and discharge rate, Windows' power mode, how busy the processor is, the Windows build, the laptop's make and model (`Win32_ComputerSystem`).
 6. **`npu-bench.ts`**, the command:
 
    ```
-   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id>] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]
+   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]
    node <agent>\src\kit\npu-bench.ts --mix [days]
    ```
 
-   It sets the route up as the NPU check does, without writing config.json, measures, grades, and writes the report beside the servers. `--candidate` measures a model that isn't in `npu-vendors.json` (the Qwen3-1.7B we might export for Intel, say) without a release, pulled as the route pulls its own: the report marks it as a candidate, with the SHA-256 of its files as measured. `--cap` serves the model with another prompt cap, in its own compile cache. `--no-setup` measures what's already set up. It exits 0 when it ran to the end (ranked or not), 1 when it couldn't, and 2 for a request it doesn't understand.
+   It sets the route up as the NPU check does, with the NPU's generation's own values (its cap, timeouts and server arguments, as setup runs it), without writing config.json, measures, grades, and writes the report beside the servers. The report's cap, and the read near it, are the generation's: 2,048 on Meteor Lake's NPU 3720, not the route's 4,096. `--candidate` measures a model that isn't in `npu-vendors.json` (the Qwen3-1.7B we might export for Intel, say) without a release, pulled as the route pulls its own: the report marks it as a candidate. Its files aren't pinned, so once setup has pulled it the benchmark measures them: every file in its model's folder, the one its `present` file is in (GenieX's `%USERPROFILE%\.cache\geniex\models\<org>\<name>`, OpenVINO's `{tools}\models\openvino\<org>\<name>`), each by its name there, with its size and SHA-256, in `run.files` as `npu-vendors.json` pins a model's. FastFlowLM's route doesn't say where its models are, so there `run.files` stays null, and the log says so. A candidate only chats, whatever the route's model does: on GenieX's route, whose one model chats and sees, a text model is pulled as one (`--model-type llm`) and asked no pictures. `--vision` says the candidate sees too: it is pulled as a vision model (`vlm`) and asked the pictures, on a route that has vision. `--cap` serves the model with another prompt cap, in its own compile cache. Off the NPU nothing is compiled for a cap, so there `--cap` only sets where the long read goes. Without it, a graphics card's long read is at the NPU's cap on that PC, so the two runs compare. `--no-setup` measures what's already set up. It exits 0 when it ran to the end (ranked or not), 1 when it couldn't, and 2 for a request it doesn't understand.
 7. **The report's schema** (`npu-bench.schema.json`), and the report checked against it before it's written.
-8. **Tests**, with fake servers as the NPU check's tests have: streaming and its timing, grading, the gate, the conditions that keep a run off the board, the job time, a server that can't stream, the report against its schema.
+8. **Tests**, with fake servers as the NPU check's tests have: streaming and its timing, grading, the gate, the conditions that keep a run off the board, the job time, a server that can't stream, the report against its schema, and a Snapdragon's run with GenieX's quirks (a nonce in every request, each picture a file).
 9. **The token tally** (`token-tally.ts`): every chat and vision request an agent's kit answers is counted, by day, agent, work, lane and accelerator kind: how many, the prompt and answer tokens (the server's counts, or the kit's estimate where it gives none), the time, and how they spread over size buckets. Counts only, never what was asked or answered, kept on the PC in the accelerators folder (`usage\<day>\<agent>.json`) for 60 days, and sent nowhere. `npu-bench.ts --mix` prints them.
 
 Later, not in the first version: a **Measure this PC** button in Manor's Accelerators page; the website's import and pages (in the website's repository); uploads from other people.
@@ -161,5 +245,5 @@ Later, not in the first version: a **Measure this PC** button in Manor's Acceler
 ## Open questions
 
 - **The jobs' mix.** The three jobs' sizes are a guess at the agents' work. The token tally counts what agents send from kit 2.66.0 on; a week of it on the owner's PCs (`--mix 7`) sets the sizes before the suite's first release. They are the ranking, so this matters most.
-- **Energy.** To be published (decided), but how steady the battery reading is under load still has to be seen on battery, on the Lunar Lake and the Snapdragon. A reading that swings too much is shown as noisy and kept off the board.
+- **Energy.** To be published (decided). On the Lunar Lake laptop the battery's rate doesn't hold up (Energy, above), so a figure from it isn't counted. Still to try: the battery's whole drop over a long fixed workload (30 minutes of jobs, say) rather than its rate, or the processor package's own energy counters. The Snapdragon's reading is still to be seen.
 - **The gate's calibration** needs the three known-good routes measured first. AMD's route can't join the calibration until there's AMD hardware.
