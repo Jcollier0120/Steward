@@ -66,10 +66,27 @@ Its vectors match the card's (cosine 0.9990–0.9998 on the same texts), so it k
 Detection asks Windows for the devices it lists as **Neural processors** (the `ComputeAccelerator` device class, as Heiward's `NpuHardware.cs` reads it), with their maker, PnP device id and driver (`DETECT_PS`, its `npu2|…` line). A PC whose Windows lists none is asked for a Hexagon driver as before.
 
 - **Maker**: Qualcomm (or a Hexagon name), Intel, or AMD ("Advanced Micro Devices", or AMD as a word), from the maker and the name.
-- **Generation**: a Snapdragon by its part number or name (`X1E`/`X1P`, "X Elite", "X Plus": `snapdragon-x`; `X2E`/`X2P`, "X2 Elite", "X2 Plus": `snapdragon-x2`); Intel and AMD by the PCI device id (`npu-vendors.json`'s `devices`: Intel `7D1D` Meteor Lake and Arrow Lake-U (a Core Ultra 5 225U shows it, 2026-10-14: Intel's driver serves `7D1D` and `AD1D` from one NPU 3720 section; Arrow Lake-H, the same NPU, likely shows it too), `AD1D` Arrow Lake-S, `643E` Lunar Lake, `B03E` Panther Lake, `FD3E` Wildcat Lake, as Linux's ivpu driver lists them; AMD `1502` XDNA, the Ryzen 7040 and 8040, `17F0` XDNA 2).
+- **Generation**: a Snapdragon by its part number or name (`X1E`/`X1P`, "X Elite", "X Plus": `snapdragon-x`; `X2E`/`X2P`, "X2 Elite", "X2 Plus": `snapdragon-x2`); Intel and AMD by the PCI device id (`npu-vendors.json`'s `devices`: Intel `7D1D` Meteor Lake and Arrow Lake-U (a Core Ultra 5 225U shows it, 2026-10-14: Intel's driver serves `7D1D` and `AD1D` from one NPU 3720 section; Arrow Lake-H, the same NPU, likely shows it too), `AD1D` Arrow Lake-S, `643E` Lunar Lake, `B03E` Panther Lake, `FD3E` Wildcat Lake, as Linux's ivpu driver lists them; AMD `1502` XDNA, the Ryzen 7040 and 8040, `17F0` XDNA 2). Anything else from a known maker is `unknown`, tried on guessed values (below).
 - **Supported** or not, and why, in plain words: a maker setup doesn't know, a generation no server runs language models on (AMD's first XDNA: no NPU server supports it, and AMD's own Lemonade says none plans to), an NPU driver older than the server needs (Intel 32.0.100.4023, as Intel's NPU model cards for OpenVINO 2026 state, and 32.0.100.5540 on Panther Lake and Wildcat Lake, where OpenVINO 2026.2–2026.4 may crash with older drivers (its known issue CVS-233822); AMD 32.0.203.311; a generation's own `driverMin` comes first), or a server built for the other processor (GenieX is Arm64 only; OpenVINO Model Server and FastFlowLM are x64 only).
 
 An NPU the manor can't use is still recorded in `hardware.json` as an NPU (so a model is never called the NPU on it falsely), and setup says why it isn't set up; its work goes to the graphics card or the processor. `accelerators` (the report) shows the maker, generation, driver and the reason.
+
+### A known maker's NPU of a generation setup doesn't know
+
+A new NPU from Qualcomm, Intel or AMD whose PCI id (or Snapdragon name) isn't in `npu-vendors.json` used to be refused ("isn't one setup knows yet"), though its maker's server most likely runs on it. It is now **tried**, on guessed values. Its generation is `unknown` (`UNKNOWN_GENERATION`), which no catalog stores: `unknownGeneration` works it out from the route's supported generations, the most cautious of each (all through `routeFor`):
+
+- **the smallest cap** of any of them, never over the route's, with that generation's `args` (so OpenVINO's `--max_prompt_len` and prompt chunks match the cap: the NPU 3720's 2,048 and 128 on Intel), and each kind's cap at most that;
+- **the longest timeouts and cold load**, each on its own (Intel: Arrow Lake-S's 60 s + 0.4 s a token and 360 s);
+- **the most memory** per kind (`memoryGb`), so the memory check is the strictest;
+- **the latest driver minimum** (Intel: Panther Lake's 32.0.100.5540, so an unknown Intel NPU needs it; AMD: the route's 32.0.203.311).
+
+On AMD it is XDNA 2's values, on Qualcomm the route's: **its 2,400-token cap is never raised** (an ~8K prompt bluescreened the X2 Elite), whatever a generation might carry. It is `verified: false` and `guessed: true`, so setup's test request (it must answer "ready", nothing degenerate) and calibration (under 2 tokens a second isn't used) decide whether the NPU is kept, as on any unverified generation; the arch and driver checks still apply. Its label says so: "AMD NPU of a generation setup doesn't know yet, device 17F1".
+
+Still refused: a maker setup doesn't know; AMD's first XDNA (`1502`, Phoenix and Hawk Point), which `devices` names and no server runs; a route with no supported generation to take values from.
+
+When it passes, its note says so in plain words, kept in `npu-note.json` and shown by `accelerators` (the report's `npuNote`): "The NPU (Intel NPU of a generation setup doesn't know yet, device ABCD) runs on guessed values: setup gave it the most cautious cap it has (2,048 tokens) and this PC's own timeouts, measured. It passed its test, so it's used; a kit update that knows this NPU may change them." The plan and the report add "(tried on guessed values, the most cautious it has, and kept only if it passes its test)". When it fails, the note is the usual "isn't used" one. The NPU check (below) is how such an NPU gets values of its own.
+
+**FastFlowLM's `flm validate` was looked at as AMD's compatibility check, and isn't one** (read from FastFlowLM 1.0.7's source and `flm.exe`, not run: another session held the NPU). On Windows it asks WMI for `VEN_1022&DEV_17F0` alone, so any other PCI id is "no AMD device found"; its driver check compares only the driver version's fourth part against 32.0.203.304's; and its `--json` is `{"object":"npu_stack_validation","platform":"windows","amd_device_found":…,"npu_driver_ok":…,"ready":…}`. It would refuse exactly the NPUs this tries, so setup's test request decides instead. (`flm serve` also runs `xrt-smi configure --pmode` as it starts.)
 
 ## What setup does (NPU first, then graphics cards, then the processor)
 
@@ -185,7 +202,7 @@ Each customer's PC downloads the servers, runtimes and models from their makers 
 
 `node <agent>\src\kit\npu-check.ts --yes` (kit 2.60.0; the kit as an agent carries it, e.g. Manor's `%USERPROFILE%\.manor\app\src\kit\npu-check.ts`) runs everything below that hasn't run on real hardware, on the PC's own NPU, and measures it. It writes no config.json and leaves nothing running:
 
-1. **detect**: the NPU's name, maker, generation, PCI device id and driver, and whether the manor can use it (an unknown PCI id is printed, ready to add to `devices`).
+1. **detect**: the NPU's name, maker, generation, PCI device id and driver, and whether the manor can use it. An NPU of a generation setup doesn't know is run on its guessed values ("… on guessed values, the most cautious its route has"), and its PCI id is printed, ready to add to `devices` (`{"devices":{"amd":{"17F1":"amd-17f1"}}}`, also the report's `unknownDevice`); a Snapdragon, which has none, is told by its name, in `npuGeneration`.
 2. **requirements**: what the route needs besides itself, and that setup brings it (the Visual C++ runtime beside OpenVINO Model Server).
 3. **setup**: the server downloaded, checked and installed, and its models pulled, as setup does them, each step timed.
 4. **start**: the server started from its entry, and the time until it answers `/v1/models`.
@@ -202,7 +219,7 @@ Each customer's PC downloads the servers, runtimes and models from their makers 
 
 It ends with the caps and timeouts the numbers suggest for the route (`requestBaseMs` twice a full-cap read and a warm answer, `requestPerTokenMs` twice the time a token took, `coldLoadMs` half again the slowest start), and keeps the whole report as `npu-check-<maker>-<time>.json` in the tools home. `--no-setup` checks only what's installed.
 
-The report names the NPU's generation (`generation`) and runs it with that generation's starting values. On a generation still `verified: false`, every step passing gives `patch` (kit 2.68.0): the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts (and cap, where a request under it failed) and what they were measured on, printed and kept in the JSON report, ready to merge into the generation. A verified generation (the Lunar Lake) gets none: its values stay.
+The report names the NPU's generation (`generation`) and runs it with that generation's starting values. On a generation still `verified: false`, every step passing gives `patch` (kit 2.68.0): the change to `npu-vendors.json` that flips it to `verified: true`, with the suggested timeouts (and cap, where a request under it failed) and what they were measured on, printed and kept in the JSON report, ready to merge into the generation. A verified generation (the Lunar Lake) gets none: its values stay. On an NPU of a generation setup doesn't know, every step passing gives a patch that adds it: its PCI id to `devices` as a new generation, `<maker>-<pci id>` (`amd-17f1`), verified, on the guessed values it ran with and the timeouts measured (its label, "AMD NPU, device 17F1", wants its processors' name before it's merged). A Snapdragon of a new generation gets none: it is told by its name, in code.
 
 `--harden` (kit 2.68.0) checks setup's own handling on the NPU instead of measuring it: after the setup step, four steps, each passing or failing:
 - **harden-driver**: a driver minimum above the installed driver: the NPU isn't used, and its note says the driver needs an update;
@@ -216,7 +233,7 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - **idle-cold-answer**: a person's request after that (the interactive lane, Envoy's 20 s caption timeout) is told the local AI is waking, and answers within the route's cold load; so does an embedding. Its time is this PC's cold start, and the `idleStop` numbers it gives are printed for npu-vendors.json;
 - **idle-in-flight**: a keeper's look given 1 ms of idle time, while a request holds the NPU, finds it in use and stops nothing; the request answers.
 
-`--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. `--generation <id>` rehearses with a generation's starting values (e.g. `meteor-lake`). A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone, and never gives a patch. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
+`--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. `--generation <id>` rehearses with a generation's starting values (e.g. `meteor-lake`, or `unknown` for the guessed ones). A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone, and never gives a patch. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed.
 
 ## Verified, and not
 
@@ -243,7 +260,7 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` beside it at 2,048: a first vector in 18 s, a query 1.1 s (Embeddings on Intel's NPU);
 - OpenVINO Model Server idle uses no processor time between requests.
 
-**Checked from source or the release, not run**: OpenVINO Model Server 2026.4.1's zip (its SHA-256, its layout, its `/v1/models` and `/v1/chat/completions` routes in its source at that tag); FastFlowLM 1.0.7's zip (SHA-256, `flm.exe` at its root).
+**Checked from source or the release, not run**: OpenVINO Model Server 2026.4.1's zip (its SHA-256, its layout, its `/v1/models` and `/v1/chat/completions` routes in its source at that tag); FastFlowLM 1.0.7's zip (SHA-256, `flm.exe` at its root); FastFlowLM 1.0.7's `flm validate --json`, from its source and `flm.exe`: it looks for PCI `17F0` alone, so it can't vouch for an AMD NPU setup doesn't know (Detection, above).
 
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones), and on a first-generation Snapdragon X (its model build and its speed);
@@ -252,4 +269,5 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - Embeddings on the NPU 3720 against the graphics card (llama.cpp Vulkan) for Reeve's indexing;
 - everything on AMD: FastFlowLM on XDNA 2, its models' names and sizes, the 4,096-token cap and timeouts, the PCI ids, the driver minimum;
 - that AMD's XDNA (Phoenix, Hawk Point) is refused with the right words on a real PC;
+- a known maker's NPU of a generation setup doesn't know, tried on guessed values: no such NPU has run it (the tests run it on the kit's fake servers, and the NPU check's patch for one). On an older Snapdragon the try downloads GenieX and its 4.4 GB model before its test request can fail; on Intel, the latest driver minimum (32.0.100.5540) may refuse an NPU that would run on an older driver;
 - the keeper's restarts and idle stops of OpenVINO Model Server and FastFlowLM, and their cold starts after one (`npu-check --idle` runs both: on Intel's Lunar Lake, then AMD's XDNA 2).

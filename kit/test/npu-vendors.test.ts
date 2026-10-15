@@ -19,7 +19,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection, parseNpus, hardwareOf } = await import('./fixture/src/kit/detect.ts');
-const { planSetup, describePlan, runSetup, setUpNpu, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand } = await import('./fixture/src/kit/setup.ts');
+const { planSetup, describePlan, runSetup, setUpNpu, overlayFiles, portablePath, parseReleases, parseHfFiles, setupCommand, printReport, reportFrom } = await import('./fixture/src/kit/setup.ts');
 const { orderAccelerators, readAccelerators, validateAccelerators, validateKeeperConfig } = await import('./fixture/src/kit/accelerator-config.ts');
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
@@ -95,7 +95,8 @@ test('an NPU the manor can\'t use says so plainly, and why: its work falls back 
   assert.match(why(NPU.panther.replace('32.0.100.5540', '32.0.100.4512'), 'x64').why!, /needs Intel's NPU driver 32\.0\.100\.5540 or later on the Core Ultra Series 3, Panther Lake \(NPU 5\), and this PC has 32\.0\.100\.4512/);
   assert.equal(why(NPU.panther.replace('DEV_B03E', 'DEV_FD3E'), 'x64').generation, 'wildcat-lake');
   assert.match(why(NPU.amdOldDriver, 'x64').why!, /needs AMD's NPU driver 32\.0\.203\.311 or later/);
-  assert.match(why(NPU.intelUnknown, 'x64').why!, /this Intel NPU \("Intel\(R\) AI Boost", device ABCD\) isn't one setup knows yet/);
+  // An Intel NPU of a generation setup doesn't know is tried, but needs the driver the newest it knows need.
+  assert.match(why(NPU.intelUnknown, 'x64').why!, /needs Intel's NPU driver 32\.0\.100\.5540 or later on an NPU setup doesn't know yet \(as the newest Intel NPUs it knows do\), and this PC has 32\.0\.100\.4841/);
   assert.match(why(NPU.other, 'x64').why!, /from a maker setup doesn't know yet/);
   assert.match(why(NPU.x2, 'x64').why!, /GenieX runs on arm64 Windows, and this PC is x64/);
   assert.match(why(NPU.lunar, 'arm64').why!, /OpenVINO Model Server runs on x64 Windows/);
@@ -113,10 +114,71 @@ test('generations: a Snapdragon by its part number or name, Intel and AMD by the
   assert.equal(g('qualcomm', 'Snapdragon(R) X2 Elite - X2E88100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x2');
   assert.equal(g('qualcomm', 'Snapdragon(R) X2 Plus - X2P42100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x2');
   assert.equal(g('qualcomm', 'Snapdragon(R) X Plus - X1P64100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x');
-  assert.equal(g('qualcomm', 'Qualcomm(R) Hexagon(TM) NPU'), null, 'no part number: not one setup knows');
+  assert.equal(g('qualcomm', 'Qualcomm(R) Hexagon(TM) NPU'), V.UNKNOWN_GENERATION, 'no part number: not one setup knows, so tried on guessed values');
+  assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_17F1'), V.UNKNOWN_GENERATION);
+  assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_1502'), 'xdna');
   assert.equal(g('intel', 'Intel(R) AI Boost', 'PCI\\VEN_8086&DEV_AD1D'), 'arrow-lake');
   assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_17F0'), 'xdna2');
   assert.ok(V.compareVersions('32.0.100.3104', '32.0.100.3104') === 0 && V.compareVersions('32.0.100.10', '32.0.100.9') > 0 && V.compareVersions('31.9', '32') < 0);
+});
+
+// A known maker's NPU whose generation setup doesn't know: new hardware from Qualcomm, Intel or AMD before a kit update
+// adds its id. Tried on the route's most cautious values rather than refused; setup's test and calibration decide.
+const AMD_NEW = NPU.strix.replace('DEV_17F0', 'DEV_17F1');
+const INTEL_NEW = NPU.intelUnknown.replace('32.0.100.4841', '32.0.100.5540');
+const X3 = NPU.x2.replace('Snapdragon(R) X2 Elite Extreme - X2E94100', 'Snapdragon(R) X3 Elite - X3E96100');
+
+test("a known maker's NPU of a generation setup doesn't know: tried on the most cautious of its route's values, never verified", () => {
+  const { intel, amd, qualcomm } = V.NPU_CATALOG.routes;
+  for (const vendor of V.NPU_VENDORS) assert.ok(!Object.hasOwn(V.NPU_CATALOG.routes[vendor].generations, V.UNKNOWN_GENERATION), `${vendor}: no real generation is called ${V.UNKNOWN_GENERATION}`);
+
+  // Intel: the NPU 3720's 2,048-token prompt read 128 at a time (the smallest cap, with the arguments that compile it),
+  // the Arrow Lake-S's generous timeouts and cold load, the most memory, and Panther Lake's later driver.
+  const i = V.unknownGeneration(intel)!;
+  assert.deepEqual(
+    { supported: i.supported, verified: i.verified, maxContextTokens: i.maxContextTokens, caps: i.caps, timeouts: i.timeouts, memoryGb: i.memoryGb, driverMin: i.driverMin, args: i.args },
+    { supported: true, verified: false, maxContextTokens: 2048, caps: { chat: 2048, embed: 680 }, timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 }, memoryGb: { chat: 4.3, embed: 1.74 }, driverMin: '32.0.100.5540', args: intel.generations['meteor-lake'].args },
+  );
+  const ir = V.routeFor(intel, V.UNKNOWN_GENERATION);
+  assert.equal(ir.serve[ir.serve.indexOf('--max_prompt_len') + 1], '2048', "OpenVINO compiles for the cap it's given");
+  assert.deepEqual(JSON.parse(ir.serve[ir.serve.indexOf('--plugin_config') + 1]), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128' });
+  for (const id of Object.keys(intel.generations)) {
+    const r = V.routeFor(intel, id);
+    assert.ok(ir.maxContextTokens <= r.maxContextTokens && ir.timeouts.coldLoadMs! >= r.timeouts.coldLoadMs! && ir.timeouts.requestPerTokenMs! >= r.timeouts.requestPerTokenMs!, `no more daring than ${id}`);
+  }
+
+  // AMD: XDNA 2's values, the only generation FastFlowLM runs on; the first XDNA (1502) stays refused.
+  const a = V.unknownGeneration(amd)!;
+  assert.deepEqual([a.maxContextTokens, a.caps, a.timeouts, a.driverMin], [4096, { chat: 4096, vision: 4096 }, amd.timeouts, amd.driverMin]);
+  const n = parseNpus(AMD_NEW, 'x64')[0];
+  assert.deepEqual([n.vendor, n.generation, n.supported, n.verified, n.guessed], ['amd', V.UNKNOWN_GENERATION, true, false, true]);
+  assert.equal(n.label, "AMD NPU of a generation setup doesn't know yet, device 17F1");
+  const phoenix = parseNpus(NPU.phoenix, 'x64')[0];
+  assert.deepEqual([phoenix.generation, phoenix.supported, phoenix.guessed], ['xdna', false, undefined]);
+
+  // Qualcomm: never over the 2,400-token cap (an ~8K prompt bluescreened the X2 Elite), even beside a generation that
+  // claims more; Arm64 only, as GenieX is.
+  assert.equal(V.unknownGeneration(qualcomm)!.maxContextTokens, 2400);
+  const bolder = structuredClone(V.NPU_CATALOG);
+  Object.assign(bolder.routes.qualcomm.generations['snapdragon-x2'], { maxContextTokens: 8192, caps: { chat: 8192, vision: 8192 } });
+  bolder.routes.qualcomm.generations['snapdragon-x'].supported = false;
+  assert.deepEqual([V.unknownGeneration(bolder.routes.qualcomm)!.maxContextTokens, V.unknownGeneration(bolder.routes.qualcomm)!.caps], [2400, { chat: 2400, vision: 2400 }]);
+  const x3 = parseNpus(X3, 'arm64')[0];
+  assert.deepEqual([x3.generation, x3.supported, x3.guessed, x3.label], [V.UNKNOWN_GENERATION, true, true, "Qualcomm NPU of a generation setup doesn't know yet, device 0FF0"]);
+  assert.match(parseNpus(X3, 'x64')[0].why!, /GenieX runs on arm64 Windows/);
+  assert.equal(V.routeFor(qualcomm, V.UNKNOWN_GENERATION).maxContextTokens, 2400);
+
+  // Intel's with its driver: tried.
+  const ni = parseNpus(INTEL_NEW, 'x64')[0];
+  assert.deepEqual([ni.generation, ni.supported, ni.guessed], [V.UNKNOWN_GENERATION, true, true]);
+
+  // A route with no generation it runs to start from: refused, as before.
+  const none = structuredClone(V.NPU_CATALOG);
+  none.routes.amd.generations.xdna2.supported = false;
+  const refused = V.npuSupport({ device: 'NPU Compute Accelerator Device', manufacturer: 'Advanced Micro Devices, Inc.', deviceId: 'PCI\\VEN_1022&DEV_17F1', driver: '32.0.203.376', driverDate: '' }, 'x64', none);
+  assert.deepEqual([refused.supported, refused.generation, refused.guessed], [false, null, undefined]);
+  assert.match(refused.why!, /this AMD NPU \("NPU Compute Accelerator Device", device 17F1\) isn't one setup knows yet/);
+  assert.equal(V.generationOf(amd, 'xdna3'), undefined, 'a generation id the route lacks is no generation');
 });
 
 test('every route in npu-vendors.json is whole: a pinned https download, an install, a chat model, caps that validate', () => {
@@ -348,6 +410,18 @@ const planFor = (line: string, arch: string, tools: string) => {
   const support = parseNpus(line, arch)[0];
   return V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, exists: disk() })!;
 };
+
+test("an NPU of a generation setup doesn't know: planned on the most cautious values, and the plan and the report say so", async () => {
+  const tools = path.join(home, 'guessed-plan');
+  const p = await planSetup({ detection: parseDetection(`${INTEL_NEW}\n${X64('Intel(R) Core(TM) Ultra 7 365')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
+  assert.deepEqual([p.npu?.support.generation, p.npu?.route.maxContextTokens, p.npu?.route.timeouts.coldLoadMs], [V.UNKNOWN_GENERATION, 2048, 360_000]);
+  assert.match(describePlan(p)[0], /^Intel NPU of a generation setup doesn't know yet, device ABCD \(npu\): OpenVINO Model Server .* \(tried on guessed values, the most cautious it has, and kept only if it passes its test\)$/);
+  // Its model's files are the same on every Intel NPU ('*'), so they're checked on this one too.
+  assert.match((await V.checkPinned({ id: 'm', pinned: intelPins }, V.UNKNOWN_GENERATION, { tools })).join(), /openvino_model\.bin is missing/);
+  const out: string[] = [];
+  printReport(reportFrom(parseDetection(`${INTEL_NEW}\n${X64('Intel(R) Core(TM) Ultra 7 365')}`), {}, path.join(tools, 'none.json'), path.join(tools, 'no-note.json')), (l: string) => out.push(l));
+  assert.ok(out.some((l) => /Intel NPU of a generation setup doesn't know yet, device ABCD, driver 32\.0\.100\.5540 .*the manor runs models on it \(tried on guessed values/.test(l)), out.join('\n'));
+});
 
 test("Intel's model counts as here once its pull finished (OpenVINO writes graph.pbtxt last), so setting up again doesn't plan its 2.2 GB", () => {
   const tools = 'C:\\Users\\me\\.manor\\accelerators';
@@ -716,6 +790,57 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   const e = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), testEmbed: async () => ['embeddings gave a vector of all zero'] });
   assert.ok(e.entry?.chat && !e.entry.embed);
   assert.equal(e.note, "The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) makes no embeddings: its embedding model doesn't run properly on it. The graphics card or the processor makes them instead.");
+});
+
+test("setup on an NPU of a generation setup doesn't know: measured and calibrated from the most cautious values, kept with a note that says so, refused as any other when it fails", async () => {
+  const tools = path.join(home, 'guessed');
+  let clock = 0;
+  const world = (o: Parameters<typeof fakeNpuIo>[0], first: () => string[] = () => []) => ({ ...fakeNpuIo(o).io, clockMs: () => clock, testNpu: async () => ((clock += 90_000), first()) });
+  // AMD's next NPU, before a kit update adds its PCI id: FastFlowLM on XDNA 2's values, then this PC's own.
+  const amd = () => planFor(AMD_NEW, 'x64', tools);
+  const r = await setUpNpu(amd(), tools, world({ measured: { warmMs: 2_000, tokensPerSecond: 12 } }));
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, amd().route).timeouts);
+  assert.equal(r.entry?.maxContextTokens, 4096);
+  assert.equal(r.note, "The NPU (AMD NPU of a generation setup doesn't know yet, device 17F1) runs on guessed values: setup gave it the most cautious cap it has (4,096 tokens) and this PC's own timeouts, measured. It passed its test, so it's used; a kit update that knows this NPU may change them.");
+  // Intel's: the NPU 3720's 2,048-token prompt, compiled so; its embeddings failing their test are said beside it.
+  const i = await setUpNpu(planFor(INTEL_NEW, 'x64', tools), tools, { ...world({ measured: { warmMs: 3_000, tokensPerSecond: 8 } }), testEmbed: async () => ['embeddings gave a vector of all zero'] });
+  assert.equal(i.entry?.maxContextTokens, 2048);
+  assert.ok(i.entry?.chat?.startCommand?.join(' ').includes('--max_prompt_len 2048'), i.entry?.chat?.startCommand?.join(' '));
+  assert.match(i.note!, /^The NPU \(Intel NPU of a generation setup doesn't know yet, device ABCD\) runs on guessed values: .*\(2,048 tokens\).* The NPU \(Intel NPU of a generation setup doesn't know yet, device ABCD\) makes no embeddings: its embedding model doesn't run properly on it\./);
+  // No measuring (the NPU check measures its own): the longest timeouts it has.
+  assert.match((await setUpNpu(amd(), tools, world({}))).note!, /and the longest timeouts it has\./);
+
+  // Its test, or its measuring, failing: no entry, and the same plain notes as any NPU's.
+  for (const [what, io, re] of [
+    ['nonsense to the test request', world({}, () => ['chat answered nonsense ("?option?option?opt"), not "ready" as asked']), /isn't used: its chat model doesn't run properly on it\./],
+    ['no answer in time', world({}, () => ["didn't answer in time (360 s): This operation was aborted"]), /isn't used: it didn't answer its test in time\./],
+    ['too slow', world({ measured: { warmMs: 9_000, tokensPerSecond: 1.5 } }), /isn't used: it is too slow for the chat model\./],
+  ] as const) {
+    const f = await setUpNpu(amd(), tools, io);
+    assert.equal(f.entry, undefined, what);
+    assert.match(f.note!, re, what);
+    assert.ok(!/guessed/.test(f.note!), what);
+  }
+});
+
+test("setup as a command on an NPU of a generation setup doesn't know: kept, and the accelerators' report says it runs on guessed values", async () => {
+  const tools = path.join(home, 'cmd-guessed');
+  const file = path.join(home, 'cmd-guessed-config.json');
+  const noteFile = path.join(home, 'cmd-guessed-npu-note.json');
+  writeFileSync(file, '{}');
+  const detection = parseDetection(`${INTEL_NEW}\n${X64('Intel(R) Core(TM) Ultra 7 365')}`);
+  const io = fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 8 } });
+  const log: string[] = [];
+  const r = await setupCommand({ ids: [], detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: noteFile, log: (l: string) => log.push(l), io: { ...io.io, exists: (p: string) => disk()(p) || io.io.exists(p), listDevices: async () => '' } });
+  assert.equal(r.code, 0, log.join('\n'));
+  const npu = JSON.parse(readFileSync(file, 'utf8')).accelerators.find((a: any) => a.kind === 'npu');
+  assert.equal(npu?.maxContextTokens, 2048);
+  assert.match(A.readNpuNote(noteFile)!.note, /^The NPU \(Intel NPU of a generation setup doesn't know yet, device ABCD\) runs on guessed values: /);
+  assert.ok(log.some((l) => /^note: The NPU .* runs on guessed values/.test(l)), log.join('\n'));
+  const out: string[] = [];
+  printReport(reportFrom(detection, JSON.parse(readFileSync(file, 'utf8')), file, noteFile), (l: string) => out.push(l));
+  assert.ok(out.some((l) => /^ {4}The NPU \(Intel NPU of a generation setup doesn't know yet, device ABCD\) runs on guessed values/.test(l)), out.join('\n'));
 });
 
 // An agent's own io may extend NpuIo with members of its own. Kit 2.68.0's first draft named the clock `now`, and the

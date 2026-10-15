@@ -394,6 +394,49 @@ test('the patch: none for a rehearsal, a failed step, a verified generation; a c
   assert.equal(g.basis, 'Measured by the NPU check on Intel(R) Core(TM) Ultra X7 358H, NPU driver 32.0.100.5540, 2026-11-02, every step passing: 4096 tokens failed.');
 });
 
+// An Intel NPU whose PCI id npu-vendors.json doesn't list yet (a generation after Wildcat Lake, say), with the driver
+// the newest ones it knows need.
+const INTEL_NEW = 'npu2|32.0.100.5540|2026-08-28|Intel Corporation|PCI\\VEN_8086&DEV_ABCD&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
+
+test("an NPU of a generation setup doesn't know: its PCI id printed ready for devices, run on the most cautious values, and every step passing gives the patch that adds it", async () => {
+  const s = await scene({ cap: 2048 });
+  const { code, report } = await C.npuCheck({ ...s.opts, detection: parseDetection(`${X64}${INTEL_NEW}\n`) });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.generation, V.UNKNOWN_GENERATION);
+  const detect = report.steps.find((x) => x.step === 'detect')!;
+  assert.match(detect.say, /^Intel AI Boost \(Intel NPU of a generation setup doesn't know yet, device ABCD\), device ABCD, driver 32\.0\.100\.5540 of 2026-08-28: the manor can use it on guessed values, the most cautious its route has$/);
+  assert.deepEqual(detect.data!.unknownDevice, { vendor: 'intel', pciDevice: 'ABCD', devices: { intel: { ABCD: 'intel-abcd' } } });
+  assert.ok(s.lines.includes(`npu-vendors.json doesn't know device ABCD: add it to devices, under the generation it is (one it has, or the new one this check's patch adds when every step passes): {"devices":{"intel":{"ABCD":"intel-abcd"}}}`), s.lines.join('\n'));
+  // Its cap: the NPU 3720's, the smallest Intel's route has, compiled so (the fake refuses past it, as OpenVINO does).
+  const cap = report.steps.find((x) => x.step === 'cap')!;
+  assert.equal(cap.ok, true, cap.say);
+  const p = report.patch as any;
+  assert.deepEqual(p.devices, { intel: { ABCD: 'intel-abcd' } });
+  const g = p.routes.intel.generations['intel-abcd'];
+  const guessed = V.unknownGeneration(s.catalog.routes.intel)!;
+  assert.deepEqual([g.label, g.supported, g.verified, g.maxContextTokens, g.args['--max_prompt_len'], g.driverMin], ['Intel NPU, device ABCD', true, true, 2048, '2048', '32.0.100.5540']);
+  assert.deepEqual(g.timeouts, { ...guessed.timeouts, ...report.suggest!.timeouts });
+  assert.match(g.basis, /^Measured by the NPU check on Intel Core Ultra 7 258V, NPU driver 32\.0\.100\.5540, \d{4}-\d\d-\d\d, every step passing, on the most cautious of the route's values \(its cap, memory and driver minimum unmeasured\)/);
+  assert.ok(s.lines.some((x) => /^The change to npu-vendors.json this run supports \(it adds device ABCD to devices as a new generation, intel-abcd, verified on this NPU/.test(x)), s.lines.join('\n'));
+});
+
+test("the patch for an NPU setup doesn't know: a new generation for its PCI id; none for a Snapdragon (told by its name), a rehearsal or a failed step", () => {
+  const route = V.NPU_CATALOG.routes.amd;
+  const base = { vendor: 'amd' as const, generation: V.UNKNOWN_GENERATION, rehearsal: false, steps: [{ step: 'detect', ok: true, say: '' }], suggest: { timeouts: { requestBaseMs: 25_000 }, why: ['measured'] }, route, pc: 'AMD Ryzen AI 7 450', driver: '32.0.20101.3760', device: '17F1', at: '2026-11-02T10:00:00.000Z' };
+  const p = C.checkPatch(base) as any;
+  assert.deepEqual(p.devices, { amd: { '17F1': 'amd-17f1' } });
+  const g = p.routes.amd.generations['amd-17f1'];
+  assert.deepEqual([g.label, g.verified, g.maxContextTokens, g.caps, g.timeouts], ['AMD NPU, device 17F1', true, 4096, { chat: 4096, vision: 4096 }, { ...route.timeouts, requestBaseMs: 25_000 }]);
+  assert.equal(C.checkPatch({ ...base, device: null }), null);
+  assert.equal(C.checkPatch({ ...base, rehearsal: true }), null);
+  assert.equal(C.checkPatch({ ...base, steps: [{ step: 'first-answer', ok: false, say: '' }] }), null);
+  // A Snapdragon's ACPI id has a DEV_ too, but its generation is told by its name, in code.
+  const snapdragon = { vendor: 'qualcomm' as const, deviceId: 'ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0', name: 'Snapdragon X3 Elite - X3E96100 - Qualcomm Hexagon NPU' };
+  assert.equal(C.unknownDevice(snapdragon).devices, null);
+  assert.match(C.unknownDeviceSay(snapdragon), /no PCI id: a Snapdragon's generation is told by its name \("Snapdragon X3 Elite - X3E96100 - Qualcomm Hexagon NPU"\), in npu-vendors\.ts' npuGeneration/);
+  assert.equal(C.unknownDevice({ vendor: 'amd', deviceId: 'PCI\\VEN_1022&DEV_17f1&REV_10', name: 'NPU Compute Accelerator Device' }).devices!.amd['17F1'], 'amd-17f1');
+});
+
 /** --harden on the scene: its test requests answered by `answers` (by case), setup's measuring by `measured`. */
 async function harden(answers: Record<string, string[]>, measured: { warmMs: number; tokensPerSecond: number } | null, more: Record<string, unknown> = {}) {
   const s = await scene({ cap: 1536 });

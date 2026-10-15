@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { calibrate, CALIBRATION, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
+import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor, UNKNOWN_GENERATION } from './npu-vendors.ts';
 import { longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
@@ -314,10 +314,11 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     step: 'detect',
     ok: rehearsal ? null : npu ? !!npu.supported : false,
     say: npu
-      ? `${npu.name} (${npu.label}), device ${pciDevice(npu.deviceId) ?? npu.deviceId}, driver ${npu.driver || '?'}${npu.driverDate ? ` of ${npu.driverDate}` : ''}: ${npu.supported ? 'the manor can use it' : `not used: ${npu.why}`}${npu.supported && !npu.verified ? " (its generation hasn't run on real hardware before this check)" : ''}`
+      ? `${npu.name} (${npu.label}), device ${pciDevice(npu.deviceId) ?? npu.deviceId}, driver ${npu.driver || '?'}${npu.driverDate ? ` of ${npu.driverDate}` : ''}: ${npu.supported ? 'the manor can use it' : `not used: ${npu.why}`}${npu.supported && npu.guessed ? ' on guessed values, the most cautious its route has' : npu.supported && !npu.verified ? " (its generation hasn't run on real hardware before this check)" : ''}`
       : `Windows lists no NPU${d.problems.length ? ` (${d.problems.join('; ')})` : ''}`,
-    data: { cpu: d.cpu, ramBytes: d.ramBytes, cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })) },
+    data: { cpu: d.cpu, ramBytes: d.ramBytes, cards: d.cards.map((c) => ({ name: c.name, memoryGb: c.memoryGb })), ...(npu?.guessed ? { unknownDevice: unknownDevice(npu) } : {}) },
   });
+  if (npu?.guessed) log(unknownDeviceSay(npu));
   if (!vendor || !NPU_VENDORS.includes(vendor)) return finish(1);
   if (!rehearsal && !npu?.supported) return finish(1);
   if (report.rehearsal && !env.REEVE_HOME) {
@@ -329,8 +330,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const generation = rehearsal ? (o.generation ?? null) : (o.generation ?? npu?.generation ?? null);
   const playing = !rehearsal && !!o.generation && o.generation !== npu?.generation;
   if (playing) report.rehearsal = true;
-  if (generation && !catalog.routes[vendor].generations[generation]) {
-    add({ step: 'route', ok: false, say: `${vendor} has no generation ${generation} (it has ${Object.keys(catalog.routes[vendor].generations).join(', ')})` });
+  if (generation && !generationOf(catalog.routes[vendor], generation)) {
+    add({ step: 'route', ok: false, say: `${vendor} has no generation ${generation} (it has ${[...Object.keys(catalog.routes[vendor].generations), UNKNOWN_GENERATION].join(', ')})` });
     return finish(2);
   }
   report.generation = generation;
@@ -569,23 +570,54 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     log(`  ${JSON.stringify({ ...(report.suggest.maxContextTokens ? { maxContextTokens: report.suggest.maxContextTokens } : {}), timeouts: report.suggest.timeouts })}`);
     for (const w of report.suggest.why) log(`  - ${w}`);
   }
-  report.patch = checkPatch({ vendor, generation, rehearsal: report.rehearsal, steps, suggest: report.suggest, route: catalog.routes[vendor], pc: report.pc.cpu, driver: npu?.driver ?? null, at: report.at });
-  const gen = generation ? catalog.routes[vendor].generations[generation] : undefined;
+  const pci = npu ? unknownDevice(npu).pciDevice : null;
+  report.patch = checkPatch({ vendor, generation, rehearsal: report.rehearsal, steps, suggest: report.suggest, route: catalog.routes[vendor], pc: report.pc.cpu, driver: npu?.driver ?? null, device: pci, at: report.at });
+  const gen = generationOf(catalog.routes[vendor], generation);
+  const guessed = generation === UNKNOWN_GENERATION && !gen?.verified;
   if (report.patch) {
-    log(`The change to npu-vendors.json this run supports (it flips ${generation} to verified):`);
+    log(
+      guessed
+        ? `The change to npu-vendors.json this run supports (it adds device ${pci} to devices as a new generation, ${newGenerationId(vendor, pci!)}, verified on this NPU: give it its processors' name in its label):`
+        : `The change to npu-vendors.json this run supports (it flips ${generation} to verified):`,
+    );
     log(JSON.stringify(report.patch, null, 2));
-  } else if (!report.rehearsal) log(gen?.verified ? `${generation} is verified already: npu-vendors.json keeps its values.` : `No change to npu-vendors.json: ${steps.some((s) => s.ok === false) ? 'a step failed' : 'its generation is unknown'}.`);
+  } else if (!report.rehearsal)
+    log(
+      gen?.verified
+        ? `${generation} is verified already: npu-vendors.json keeps its values.`
+        : `No change to npu-vendors.json: ${steps.some((s) => s.ok === false) ? 'a step failed' : guessed && !pci ? "a Snapdragon's generation is told by its name, in npu-vendors.ts' npuGeneration" : 'its generation is unknown'}.`,
+    );
   return finish(steps.some((s) => s.ok === false) ? 1 : 0);
 }
 
 // ------------------------------------------------------------------------------------------------
 // What the run supports for npu-vendors.json
 
+/** The id a passing check gives the new generation of an NPU setup didn't know, from its maker and PCI id (`amd-17f1`). */
+export const newGenerationId = (vendor: NpuVendor, pci: string) => `${vendor}-${pci.toLowerCase()}`;
+
+/** An NPU of a generation setup doesn't know, as npu-vendors.json's `devices` would take it: its maker and PCI id (none on a Snapdragon, told by its name). */
+export function unknownDevice(npu: { vendor: NpuVendor | null; deviceId: string; name: string }): { vendor: NpuVendor | null; pciDevice: string | null; devices: Record<string, Record<string, string>> | null } {
+  // A Snapdragon's ACPI id (`ACPI\VEN_QCOM&DEV_0FF0`) has a DEV_ too, but npuGeneration tells it by its name.
+  const pci = npu.vendor === 'qualcomm' ? null : pciDevice(npu.deviceId);
+  return { vendor: npu.vendor, pciDevice: pci, devices: npu.vendor && pci ? { [npu.vendor]: { [pci]: newGenerationId(npu.vendor, pci) } } : null };
+}
+
+/** The line the check prints for an NPU setup doesn't know: its PCI id, ready to add to `devices`; a Snapdragon's name, for npuGeneration. */
+export function unknownDeviceSay(npu: { vendor: NpuVendor | null; deviceId: string; name: string }): string {
+  const u = unknownDevice(npu);
+  if (!u.devices) return `npu-vendors.json doesn't know this NPU's generation, and it has no PCI id: a Snapdragon's generation is told by its name ("${npu.name}"), in npu-vendors.ts' npuGeneration.`;
+  return `npu-vendors.json doesn't know device ${u.pciDevice}: add it to devices, under the generation it is (one it has, or the new one this check's patch adds when every step passes): ${JSON.stringify({ devices: u.devices })}`;
+}
+
 /**
  * The change to npu-vendors.json a run on a real NPU supports, as a JSON merge patch: on a generation not yet verified
  * (its starting values guessed), every step passing flips it to verified, with the timeouts the measurements suggest in
- * place of the guess (and the cap, where a request under it failed), and what they were measured on. Null for a
- * rehearsal, a failed step, an unknown generation, or one verified already (the Lunar Lake keeps its values).
+ * place of the guess (and the cap, where a request under it failed), and what they were measured on. On an NPU of a
+ * generation setup doesn't know (UNKNOWN_GENERATION), with a PCI id, it adds that id to `devices` as a new generation,
+ * verified, on the most cautious values it ran with (unknownGeneration) and the timeouts measured. Null for a
+ * rehearsal, a failed step, an unknown Snapdragon (told by its name), or one verified already (the Lunar Lake keeps
+ * its values).
  */
 export function checkPatch(o: {
   vendor: NpuVendor;
@@ -596,20 +628,25 @@ export function checkPatch(o: {
   route: NpuRoute;
   pc: string | null;
   driver: string | null;
+  /** The NPU's PCI device id, for an unknown generation's new one. */
+  device?: string | null;
   at: string;
 }): Record<string, unknown> | null {
   if (o.rehearsal || !o.generation || o.steps.some((s) => s.ok === false)) return null;
-  const gen = o.route.generations[o.generation];
-  if (!gen || gen.verified) return null;
-  const g: Record<string, unknown> = { verified: true };
+  const known = Object.hasOwn(o.route.generations, o.generation);
+  const gen = generationOf(o.route, o.generation);
+  if (!gen || gen.verified || (!known && !o.device)) return null;
+  const g: Record<string, unknown> = known ? { verified: true } : { ...gen, label: `${MAKERS[o.vendor]} NPU, device ${o.device}`, verified: true };
   if (o.suggest && Object.keys(o.suggest.timeouts).length) g.timeouts = { ...gen.timeouts, ...o.suggest.timeouts };
   if (o.suggest?.maxContextTokens) {
     g.maxContextTokens = o.suggest.maxContextTokens;
-    g.caps = { chat: o.suggest.maxContextTokens };
+    g.caps = known ? { chat: o.suggest.maxContextTokens } : { ...gen.caps, chat: o.suggest.maxContextTokens };
     if (o.route.serve.includes('--max_prompt_len')) g.args = { ...gen.args, '--max_prompt_len': String(o.suggest.maxContextTokens) };
   }
-  g.basis = `Measured by the NPU check on ${o.pc ?? 'a PC'}${o.driver ? `, NPU driver ${o.driver}` : ''}, ${o.at.slice(0, 10)}, every step passing${o.suggest?.why.length ? `: ${o.suggest.why.join('; ')}` : ''}.`;
-  return { routes: { [o.vendor]: { generations: { [o.generation]: g } } } };
+  g.basis = `Measured by the NPU check on ${o.pc ?? 'a PC'}${o.driver ? `, NPU driver ${o.driver}` : ''}, ${o.at.slice(0, 10)}, every step passing${known ? '' : `, on the most cautious of the route's values (its cap, memory and driver minimum unmeasured)`}${o.suggest?.why.length ? `: ${o.suggest.why.join('; ')}` : ''}.`;
+  if (known) return { routes: { [o.vendor]: { generations: { [o.generation]: g } } } };
+  const id = newGenerationId(o.vendor, o.device!);
+  return { routes: { [o.vendor]: { generations: { [id]: g } } }, devices: { [o.vendor]: { [o.device!]: id } } };
 }
 
 // ------------------------------------------------------------------------------------------------
