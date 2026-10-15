@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**AMD's NPU measured on battery: 20.7 mJ a token on a Krackan, and FastFlowLM's power modes alike there too, so the route still sets none.**
+
+### What changed
+
+- **spec/NPU-VENDORS.md and the amd route's notes** have the Krackan's run on battery. `npu-bench --profile full --energy` gave 20.7 mJ a token (6.6 W at rest, 11.6 W working), 13.1 tokens written a second against 14.4 on mains power, and a model load of 12.7 s against 5.4 s; the idle stop's rule still gives 5 minutes for chat. FastFlowLM's four `--pmode` values did the same jobs in the same time on battery, and none drew clearly less than the battery meter's own swing (several watts at rest from one run to the next), so the route starts FastFlowLM without one, as before. Whether a power mode saves less than such a meter can tell stays unverified.
+
+### For an agent
+
+- Nothing to do: no code or command changed.
+
 ## 2.74.5
 
 **The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, AMD's runs on a 16 GB Ryzen AI (XDNA 2 verified), a known maker's NPU of a generation setup doesn't know is tried instead of refused, and the benchmark times prompts the server hasn't seen.**
