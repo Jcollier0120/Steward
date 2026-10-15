@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.23
+
+**Kit 2.73.5: the kit sees one folder as one folder, however it's named.**
+
+### What changed
+
+- The kit's install, update and model-server checks now compare folders by their real paths, through a junction, a link or a Dev Drive mounted in a folder (the Steward's work folder, `%USERPROFILE%\.steward\work`, is often one). An update ends the programs still running from the old copy whichever way they were started. Uninstalling with `--purge` refuses a folder that holds your profile, or a whole drive mounted in a folder, however it's named. A model server started under the other spelling is still known as the manor's own, and never stopped as an orphan.
+- Agents take kit 2.73.5 as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 ## 0.36.22
 
 **The Steward's kit 2.73.4: an NPU that loads its model slowly is given the time its own settings allow.**

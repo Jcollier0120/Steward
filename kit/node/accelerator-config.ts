@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { acceleratorConfigFile, acceleratorId, acceleratorsHome, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
 import * as core from './core/index.js';
+import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -529,7 +530,8 @@ function readJsonObject(file: string): { raw?: Record<string, any> } {
   }
 }
 
-const isOwnFile = (file: string, env: NodeJS.ProcessEnv = process.env) => path.resolve(file).toLowerCase() === path.resolve(acceleratorConfigFile(env)).toLowerCase();
+/** `file` is the accelerators' own config.json, however each is spelled (spec/DEV-DRIVES.md). */
+const isOwnFile = (file: string, env: NodeJS.ProcessEnv = process.env) => samePath(file, acceleratorConfigFile(env));
 
 /**
  * config.json's content: {} when there is none, an error when it isn't readable JSON. The accelerators' own file is

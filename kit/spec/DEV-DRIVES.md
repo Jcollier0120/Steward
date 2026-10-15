@@ -24,11 +24,12 @@ What it cost, on the owner's PC, from 2026-10-13 to 10-14:
 
 ## The rules
 
-1. **Compare paths only by their real paths**, both sides through the same function, and without regard to case on Windows.
+1. **Compare paths only by their real paths**, both sides through the same function, and without regard to case on Windows. In Node, use the kit's `real-path.ts` (since kit 2.73.5), which does all of this: `realPath(p)`, `pathKey(p)` (a key for a map or a set), `samePath(a, b)`, `inside(p, dir)`, and `keyInside` on two keys.
    - Against git's paths, or any time a drive may be mounted in a folder, use `fs.realpathSync.native`: it gives the drive letter (`E:\...`), as git does. Plain `fs.realpathSync` follows junctions and links but stops at a drive mounted in a folder (`C:\DevData\...`).
    - Against `import.meta.url`, which node makes with plain `fs.realpathSync`, use that (rule 2).
-   - For a path that may not exist yet, resolve the deepest part that does and keep the rest (the Steward's `realOf` in `src/git.ts`, the kit's `realPlace` in `node/manor.ts`, Reeve's `realPath`).
+   - For a path that may not exist yet, resolve the deepest part that does and keep the rest (the Steward's `realOf` in `src/git.ts`, the kit's `realPath` in `node/real-path.ts`, Reeve's `realPath`).
    - Leave a share (`\\server\...`) as it is: resolving it can wake WSL.
+   - A process's program, as Windows names it (`Win32_Process.ExecutablePath`), is spelled as it was started: through the junction or the mounted folder if it was. Compare it by its real path too, or look for it under both spellings of its folder (the kit's `spellingsOf` in `node/native.ts`).
 2. **A script's run-as-itself check** is always:
    ```ts
    if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) { ... }
