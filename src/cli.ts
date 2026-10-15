@@ -5,7 +5,7 @@ import { serveSteward } from './agent.ts';
 import { installCli, TASK_NAME } from './kit/install.ts';
 import { allowUpdate, safeInstallCli } from './safeinstall.ts';
 import { remoteFor } from './lease.ts';
-import { claimVersion, employeeFor, loadClaims, releaseClaim, selfFor } from './claims.ts';
+import { claimVersion, employeeFor, loadClaims, pushesHere, releaseClaim, selfFor } from './claims.ts';
 import { kitClaimKey } from './stages/kitpart.ts';
 import { claimPort, clashes, portUses, releasePort } from './ports.ts';
 import { anyRepo } from './found.ts';
@@ -17,7 +17,7 @@ import type { StageResult } from './stages/common.ts';
 import type { Staff } from './stages/staff.ts';
 import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
-import { DEVELOPER_ONLY, makersOnly, makersOwn, makersPc, stewardActs } from './maker.ts';
+import { claimRefused, DEVELOPER_ONLY, makersOnly, makersPc, stewardActs } from './maker.ts';
 import { askRoundSoon, vouch } from './stages/vouch.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, KIT_CHANGES_DIR } from './entries.ts';
@@ -322,15 +322,12 @@ switch (cmd) {
     }
     // The kit is a part of the Steward's own repository, claimed under its own key (stages/kitpart.ts): Castellan's.
     const kit = who.toLowerCase() === 'kit';
-    if (kit && !makersPc()) {
-      console.error(makersOnly("Claiming a version of Castellan's kit"));
-      process.exitCode = 1;
-      break;
-    }
     const ctx = await context({ glance: false, team: false });
     const e = kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, who) ?? anyRepo(who));
-    // Off the maker's laptop, nothing of Castellan's own (maker.ts): Manor, the site, the Exchequer, any agent.
-    const theirs = e && !kit ? makersOwn({ name: e.name, repo: e.repo }, { byId: false }) : null;
+    // Off the maker's laptop, nothing of Castellan's own (maker.ts): Manor, the site, the Exchequer, any agent, the kit;
+    // unless GitHub says this PC's account can push there, as on the maker's other development PCs (claimRefused).
+    const canPush = pushesHere(ctx);
+    const theirs = e ? await claimRefused(e, { kit, canPush }) : kit && !makersPc() ? makersOnly("Claiming a version of Castellan's kit") : null;
     if (theirs) {
       console.error(theirs);
       process.exitCode = 1;
@@ -341,7 +338,7 @@ switch (cmd) {
       process.exitCode = 2;
       break;
     }
-    const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), ...(kit ? { part: 'kit' as const } : {}) });
+    const { claim, again } = await claimVersion(ctx, e, { branch: opt(rest, '--branch') ?? null, by: opt(rest, '--by') ?? 'claude', for: opt(rest, '--for') ?? '', minor: rest.includes('--minor'), canPush, ...(kit ? { part: 'kit' as const } : {}) });
     // A repository that writes its entries in changes/ (entries.ts): the work writes changes/<version>.md and leaves the
     // version files and the changelog alone; the Steward stamps them as it merges (stages/stamp.ts).
     const entry = (await usesChanges(ctx, e).catch(() => false)) ? `${kit ? KIT_CHANGES_DIR : CHANGES_DIR}/${claim.version}.md` : null;
@@ -354,14 +351,10 @@ switch (cmd) {
   }
   case 'release-version': {
     const kit = rest[0]?.toLowerCase() === 'kit';
-    if (kit && !makersPc()) {
-      console.error(makersOnly("Giving back a version of Castellan's kit"));
-      process.exitCode = 1;
-      break;
-    }
     const ctx = await context({ glance: false, team: false });
     const e = rest[0] ? (kit ? selfFor(ctx.settings) : (employeeFor(ctx.settings, rest[0]) ?? anyRepo(rest[0]))) : null;
-    const theirs = e && !kit ? makersOwn({ name: e.name, repo: e.repo }, { byId: false }) : null;
+    // As claim-version: the maker's own only on the maker's laptop, or where GitHub says this PC's account can push there.
+    const theirs = e ? await claimRefused(e, { kit, canPush: pushesHere(ctx) }) : kit && !makersPc() ? makersOnly("Giving back a version of Castellan's kit") : null;
     if (theirs) {
       console.error(theirs);
       process.exitCode = 1;

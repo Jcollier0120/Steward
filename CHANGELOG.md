@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.27
+
+**Your second development PC can claim versions of the manor's repositories.**
+
+### What's new
+
+- On a PC you develop on beside the one that merges and releases, `claim-version` and `release-version` now work for the manor's own repositories (and the kit, from a Steward clone) when GitHub says the account that PC is signed in with can push to them. Before, they were refused anywhere but the maker's laptop, so work started there couldn't take a version.
+- The claim goes straight to the repository's shared claims on GitHub, which the merging PC reads. If GitHub can't be reached, nothing is claimed, rather than a claim only that PC would know about.
+- Nothing else moves: merging, releasing, ports and recalls stay on the maker's laptop.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To claim from another PC, see "Except a version claim from the maker's other development PCs" in the README.
 ## 0.36.26
 
 **Kit 2.74.0: a page layout for the agents your AI assistant calls, taken from Reeve's page, so they all read alike.**
