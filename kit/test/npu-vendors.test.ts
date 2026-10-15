@@ -891,6 +891,15 @@ test("calibration: this PC's timeouts from setup's measurements, never under the
   assert.deepEqual(slow, { timeouts: { requestBaseMs: V.CALIBRATION.maxBaseMs, requestPerTokenMs: 1_000, coldLoadMs: V.CALIBRATION.maxColdLoadMs } });
   assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, arrow).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
   assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, arrow).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
+  // A route's own reading speed: FastFlowLM read 34 to 36 times faster than it wrote on a Krackan, so AMD's route
+  // reads at 30 times. Its --harden measurement (2026-10-15) gives a 35 s base, where the kit's 10 gave 90 s.
+  assert.equal(V.CALIBRATION.readPerWrite, 10);
+  assert.equal(arrow.readPerWrite, undefined, "Intel's route keeps the kit's");
+  const krackan = V.routeFor(V.NPU_CATALOG.routes.amd, 'xdna2');
+  assert.equal(krackan.readPerWrite, 30);
+  const harden = { coldMs: 26_000, warmMs: 1_310, tokensPerSecond: 9.7 };
+  assert.deepEqual(V.calibrate(harden, krackan), { timeouts: { requestBaseMs: 35_000, requestPerTokenMs: 250, coldLoadMs: 60_000 } });
+  assert.equal(V.calibrate(harden, { ...krackan, readPerWrite: undefined }).timeouts.requestBaseMs, 90_000);
 });
 
 test("sanity, not just an answer: nonsense chat (the same few characters over and over, or not what was asked) and embeddings that don't tell a cat from an invoice", () => {
@@ -968,6 +977,7 @@ test("setup on an NPU of a generation setup doesn't know: measured and calibrate
   const r = await setUpNpu(amd(), tools, world({ measured: { warmMs: 2_000, tokensPerSecond: 12 } }));
   assert.deepEqual(r.problems, []);
   assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, amd().route).timeouts);
+  assert.equal(amd().route.readPerWrite, 30, "calibrated at FastFlowLM's own reading speed");
   assert.equal(r.entry?.maxContextTokens, 4096);
   assert.equal(r.note, "The NPU (AMD NPU of a generation setup doesn't know yet, device 17F1) runs on guessed values: setup gave it the most cautious cap it has (4,096 tokens) and this PC's own timeouts, measured. It passed its test, so it's used; a kit update that knows this NPU may change them.");
   // Intel's: the NPU 3720's 2,048-token prompt, compiled so; its embeddings failing their test are said beside it.

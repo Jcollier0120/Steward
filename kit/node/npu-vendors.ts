@@ -67,6 +67,11 @@ export interface NpuRoute {
   maxContextTokens: number;
   caps: Partial<Record<ServeKind, number>>;
   timeouts: { requestBaseMs?: number; requestPerTokenMs?: number; coldLoadMs?: number };
+  /**
+   * How many times faster its server reads a prompt than it writes, measured and rounded down: calibrate's estimate of
+   * a full-cap read on a generation nobody has measured. CALIBRATION.readPerWrite where the route gives none.
+   */
+  readPerWrite?: number;
   quirks: Quirk[];
   /** The keeper restarts it when it holds too much (GenieX's kept memory). */
   recycle: boolean;
@@ -674,16 +679,17 @@ const roundUpTo = (n: number, step: number) => Math.ceil(n / step) * step;
 /**
  * This PC's timeouts from what setup measured on its NPU, for a generation nobody has measured (npu-check's rules,
  * from two requests rather than its dozen): a token's time twice what writing one took; a background request's base
- * twice a full-cap read (reading taken as 10 times writing: about 27 times on the Lunar Lake, 650–750 read and 24–28
- * written a second, and nearer 12 expected on the NPU 3720, whose compute falls further than its memory bandwidth)
- * and a warm answer; a cold load half again the first start's. Never under the route's starting values (a busy moment
- * doesn't shrink them), never over CALIBRATION's bounds; too slow when it writes under minTokensPerSecond.
+ * twice a full-cap read and a warm answer, reading taken as the route's readPerWrite times writing, else 10 (about 27
+ * times on the Lunar Lake, 650–750 read and 24–28 written a second, and nearer 12 expected on the NPU 3720, whose
+ * compute falls further than its memory bandwidth; AMD's route 30, FastFlowLM having read 34 to 36 times faster on a
+ * Krackan); a cold load half again the first start's. Never under the route's starting values (a busy moment doesn't
+ * shrink them), never over CALIBRATION's bounds; too slow when it writes under minTokensPerSecond.
  */
-export function calibrate(m: NpuMeasured, route: Pick<NpuRoute, 'maxContextTokens' | 'timeouts'>): { timeouts: Required<NpuRoute['timeouts']>; tooSlow?: string } {
+export function calibrate(m: NpuMeasured, route: Pick<NpuRoute, 'maxContextTokens' | 'timeouts' | 'readPerWrite'>): { timeouts: Required<NpuRoute['timeouts']>; tooSlow?: string } {
   const tps = Math.max(0.01, m.tokensPerSecond);
   const guess = route.timeouts;
   const perToken = roundUpTo((1000 / tps) * 2, 50);
-  const base = roundUpTo(((route.maxContextTokens / (tps * CALIBRATION.readPerWrite)) * 1000 + m.warmMs) * 2, 5_000);
+  const base = roundUpTo(((route.maxContextTokens / (tps * (route.readPerWrite ?? CALIBRATION.readPerWrite))) * 1000 + m.warmMs) * 2, 5_000);
   const cold = roundUpTo(m.coldMs * 1.5, 30_000);
   const timeouts = {
     requestBaseMs: Math.min(CALIBRATION.maxBaseMs, Math.max(guess.requestBaseMs ?? 0, base)),
