@@ -123,16 +123,17 @@ export interface NpuCheckOptions {
 
 /**
  * The route with its server pointed at another device (OpenVINO's --target_device): off the NPU its NPU-only
- * arguments (--max_prompt_len, its NPU plugin's settings in --plugin_config, and its embedding server's --max_length)
- * go. Its embedding server goes with it when it has a device argument too; one without stays on the NPU. A route
- * without a device argument runs on its NPU only.
+ * arguments (--max_prompt_len, its NPU plugin's settings in --plugin_config, the NPU's prefix caching turned off by
+ * --enable_prefix_caching, and its embedding server's --max_length) go, so the other device keeps OpenVINO's own.
+ * Its embedding server goes with it when it has a device argument too; one without stays on the NPU. A route without
+ * a device argument runs on its NPU only.
  */
 export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   const on = (args: string[]) => {
     const serve = [...args];
     serve[serve.indexOf('--target_device') + 1] = device.toUpperCase();
     if (device.toUpperCase() !== 'NPU') {
-      for (const flag of ['--max_prompt_len', '--plugin_config', '--max_length']) {
+      for (const flag of ['--max_prompt_len', '--plugin_config', '--enable_prefix_caching', '--max_length']) {
         const j = serve.indexOf(flag);
         if (j >= 0) serve.splice(j, 2);
       }
