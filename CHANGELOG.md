@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.53
+
+**Kit 2.77.1: on a PC with Intel's NPU 3720, search runs on the processor's graphics, over 20 times as fast for a query, with the same results.**
+
+### What changed
+
+- On a Meteor Lake or Arrow Lake-U PC (Intel's NPU 3720), the local AI's search model now runs on the processor's built-in graphics instead of the NPU. A search query answers in about 50 ms instead of 1.1 s, Reeve indexes 3.7 times as fast, and the results are the same. Chat stays on the NPU, no slower beside it. An Arrow Lake-S PC, whose processor may have no graphics, keeps search on the NPU.
+- The NPU check's hardening run now passes every step on the NPU 3720. Before, one step could ask a server an earlier step had left starting, and fail.
+- The kit the Steward hands out (2.77.1) brings this to every agent. The search change was merged after kit 2.75.2 without a release of its own: this release brings it. Other PCs are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a PC with the NPU 3720 already set up, each agent tries search on the graphics as it takes the new kit, and the graphics prepare the search model once, in 4 to 12 seconds. If chat or search doesn't answer properly that way, it keeps search where it was.
+
 ## 0.36.49
 
 **Updates go in on a busy PC: an agent slow to start after an update is no longer rolled back as broken, and the Steward pauses its rounds for a few minutes so Manor can update it.**

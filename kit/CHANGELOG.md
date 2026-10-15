@@ -2,9 +2,11 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.77.1
 
-**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
+**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it. `npu-check --harden` passes every step on it.**
+
+The embeddings on the graphics were merged after 2.75.2 without a release of their own: this release brings them.
 
 ### What's new
 
