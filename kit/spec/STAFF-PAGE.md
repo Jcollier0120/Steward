@@ -8,7 +8,9 @@ An agent that doesn't follow it yet keeps working; its page just reads different
 
 `StaffLayout` holds it:
 
-1. **Needs you** (`NeedsYou`), only while something does: a card each, its edge the colour of its badge, the most urgent first, each saying what to do and with the button that does it. When nothing needs you, it goes further down or away.
+1. **Needs you** (`NeedsYou`), only while something does: a card each, its edge the colour of its badge, the most urgent first, each saying what to do and with the button that does it. When nothing needs you, it goes further down or away. What belongs under the heading without being a need (a queue with nothing waiting, "No review queue yet") goes in its children, under the cards, and is never a card: a card is something to do.
+
+   Its heading is a `Section`'s plain heading (kit 2.74.3), not a larger one. The urgency is the cards' coloured edges and badges and the section's place at the top; a bigger heading would only make Needs you the odd one among the page's headings, and the loudest heading on the page would sit over "Nothing needs you right now" on a page that keeps it among its own sections.
 2. **At a glance** (`Glance`): three to five tiles, the first thing read. Each is a number or a word ("3", "9 of 11 OK", "Nothing"), a short line of what it's made of, and its colour (`success`, `caution`, `danger`, or plain). A tile goes to its section (`to`, the section's `tour`). Typical tiles: what needs you, how the agent's own work went, what is under way, what it saved.
 3. **Connect your AI** (`ConnectAI`): the agent is an MCP server. Until an AI tool is connected, the card is open: what the agent gives an AI, the one-press connect where the agent has one, each AI tool's setup as tabs, and the line for the AI's instructions. Once connected, it is one line ("✓ Your AI is connected to Reeve · Claude Code, last used 3 minutes ago") that opens again to connect another. The browser remembers the fold.
 4. **Kept** (`Kept`): what the agent read on this PC so the AI didn't have to: this month, last month and all time, then what each tool read, then how it is counted. Estimates, and said to be, at about 4 characters a token and the price per million input tokens in Settings.
@@ -28,7 +30,7 @@ An agent that doesn't follow it yet keeps working; its page just reads different
 | Part | What it draws |
 |---|---|
 | `StaffLayout` | The order above: `needsYou` (with `needs`), `glance`, `connect`, `kept`, then its children. |
-| `NeedsYou`, `Need` | Needs you: a card each, with its `tone` (danger, caution), badge `label`, `title`, `text`, `action` and anything longer as children; `empty` when nothing does. |
+| `NeedsYou`, `Need` | Needs you: a card each, with its `tone` (danger, caution), badge `label`, `title`, `text`, `action` and anything longer as children; `empty` when nothing does. `NeedsYou`'s own children go under the cards (or the empty line), inside the section. |
 | `Row` | One line of a list: `mark`, `title`, `meta`, `actions`, and `more` under it behind Details (`open` to start open). |
 | `Glance`, `GlanceTile` | The tiles: `label`, `value`, `note`, `tone`, `to` (a section's tour), or an `action` button instead. |
 | `ConnectAI`, `ClientSetup`, `ConnectedClient` | Connect your AI: `agent`, `connected`, `clients` or `status` for its line, `about`, `action`, `setups` (each AI tool's `where` and `text`), `instruction`, and any more as children. |
