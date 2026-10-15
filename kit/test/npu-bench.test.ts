@@ -21,6 +21,7 @@ const B = await import('./fixture/src/kit/npu-bench.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
+const { portablePath } = await import('./fixture/src/kit/setup.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
@@ -482,6 +483,48 @@ test('on a Snapdragon GenieX is the NPU only: --device GPU and --cap are refused
   assert.equal(cap.code, 2);
   assert.match(cap.report.marks[0].say, /no prompt cap to set/);
   assert.equal(s.fake.starts, 0);
+});
+
+test('--generation snapdragon-x on an X2: the X Elite played (its AI Hub build, from a folder of its own), the report says so, and it is never ranked', async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  const ran: { args: string[]; datadir: string | undefined }[] = [];
+  const run = async (_exe: string, args: string[], ro?: { env?: NodeJS.ProcessEnv }) => (ran.push({ args, datadir: ro?.env?.GENIEX_DATADIR }), { code: 0, out: '' });
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', generation: 'snapdragon-x', io: { ...s.opts.io, setup: { run } } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.played, 'snapdragon-x');
+  assert.equal(report.marks[0].code, 'played');
+  assert.match(report.marks[0].say, /played snapdragon-x: its numbers are that generation's code on this NPU, not that chip's: shown, never ranked$/);
+  assert.equal(report.ranked, false);
+  assert.equal(report.quality.passed, 24);
+  const dir = path.join(s.tools, 'played', 'snapdragon-x', 'geniex');
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf8')), { chipset: 'qualcomm-snapdragon-x-elite' });
+  assert.deepEqual(ran.map((r) => [r.args.slice(0, 3), r.datadir]), [[['--data-dir', dir, 'pull'], dir]], 'pulled into its own folder');
+  for (const c of s.fake.commands) assert.deepEqual(c.slice(1, 4), ['--data-dir', portablePath(dir), 'serve']);
+  assert.ok(s.lines.some((l) => /^Played: this Snapdragon X2 Elite .* plays the Snapdragon X \/ X Plus \/ X Elite \(Hexagon v73\).*Shown, never ranked\.$/.test(l)), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+
+  // Its own generation, named: an ordinary run, nothing played.
+  const own = await scene({ vendor: 'qualcomm' });
+  const mine = await B.npuBench({ ...own.opts, profile: 'quick', generation: 'snapdragon-x2' });
+  assert.equal(mine.code, 0, own.lines.join('\n'));
+  assert.equal(mine.report.run.played, undefined);
+  assert.ok(!mine.report.marks.some((m: any) => m.code === 'played'));
+});
+
+test('--generation is refused, before anything starts, for a newer Snapdragon on an older one and on any NPU but a Snapdragon', async () => {
+  const x1 = await scene({ vendor: 'qualcomm', npu: X2.replace('DEV_0FF0', 'DEV_0D0A').replace('X2 Elite Extreme - X2E94100', 'X Elite - X1E78100') });
+  const up = await B.npuBench({ ...x1.opts, generation: 'snapdragon-x2' });
+  assert.equal(up.code, 2);
+  assert.deepEqual(up.report.marks, [{ code: 'played', say: "the Snapdragon X2 Elite / X2 Plus (Hexagon v81) is newer than this NPU (v73): its Hexagon code doesn't run on an older one" }]);
+  assert.equal(x1.fake.starts, 0);
+  // An Intel NPU's server builds for the NPU it finds: another generation would be its starting values alone.
+  const lunar = await scene();
+  const values = await B.npuBench({ ...lunar.opts, generation: 'meteor-lake' });
+  assert.equal(values.code, 2);
+  assert.match(values.report.marks[0].say, /^only a Snapdragon plays another generation in the benchmark/);
+  assert.equal(lunar.fake.starts, 0);
+  assert.deepEqual(B.parseBenchArgs(['--generation', 'snapdragon-x']), { generation: 'snapdragon-x' });
+  assert.match((B.parseBenchArgs(['--generation']) as any).error, /--generation takes an older Snapdragon to play on this one/);
 });
 
 test('a candidate chats only unless --vision says it sees: pulled as its own type, found in its own folder', () => {
