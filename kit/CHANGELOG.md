@@ -30,6 +30,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do: the Smith, else Reeve, runs the refresh in its look, and an agent that keeps the servers itself with `keeperLook` gets it the same way. A PC with an NPU 3720 set up by an earlier kit takes the new command once its NPU is idle; its first start with it compiles once, in about a minute. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
+## 2.74.4
+**One process for every PowerShell, not two: powershell.exe shares the page's windowless console, as git and gh do since 2.73.2.**
+
+### What changed
+
+- **ps.ts**: the PowerShell worker and a script on its own (`oneShot`) start powershell.exe with `psStart()`, `windowsHide: !sharesConsole()` (console.ts). In a page started by this kit's `open`, powershell.exe shares the page's windowless console instead of getting a console host (conhost.exe) of its own, and what it starts with no window of its own shares it too. Its output is piped as before. Measured on a page whose 4 scripts (3 in the worker, 1 on its own) each start `cmd /c ver`: 11 processes before, 9 now, none of them a console host. The worker goes after 2 minutes with nothing to run, so an agent that runs a script every round started 2 processes for its worker each round; now 1.
+- A shared console's output code page is UTF-8 once a script has set `[Console]::OutputEncoding` (every script on its own does). Console programs started from that page later, and which print in the console's code page when their output is piped, then print UTF-8, as Node reads it.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- A PowerShell script that starts a console program with `System.Diagnostics.ProcessStartInfo` and `CreateNoWindow = $true` still gives that program a console host of its own. Leave `CreateNoWindow` off (`$false`) and it shares powershell.exe's console, which has no window.
 
 ## 2.74.3
 

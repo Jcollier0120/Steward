@@ -3,10 +3,17 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { sharesConsole } from './console.ts';
 
 const PRELUDE = "$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; " +
   'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }\n';
 const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
+
+/**
+ * How powershell.exe is started (kit 2.74.4): sharing the page's windowless console when it has one (console.ts), so
+ * it starts no console host (conhost.exe) of its own beside it; hidden when there's none. Its output is piped either way.
+ */
+export const psStart = (shares = sharesConsole()) => ({ windowsHide: !shares });
 
 /**
  * Runs a Windows PowerShell 5.1 script and returns what it printed. 5.1, not pwsh 7: it is on every Windows PC, and
@@ -68,7 +75,7 @@ class Worker {
 
   constructor() {
     const source = readFileSync(new URL('./ps-worker.ps1', import.meta.url), 'utf8');
-    this.proc = spawn('powershell.exe', [...PS_ARGS, '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], { windowsHide: true });
+    this.proc = spawn('powershell.exe', [...PS_ARGS, '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')], psStart());
     this.proc.stdout.setEncoding('utf8').on('data', (d: string) => this.read(d));
     this.proc.stderr.resume();
     this.proc.stdin.on('error', () => this.end());
@@ -175,7 +182,7 @@ export function oneShot(script: string, timeoutMs: number): Promise<string> {
   }
   const cleanup = () => file && rmSync(file, { force: true });
   return new Promise<string>((resolve, reject) => {
-    const p = spawn('powershell.exe', [...PS_ARGS, ...how], { windowsHide: true });
+    const p = spawn('powershell.exe', [...PS_ARGS, ...how], psStart());
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
