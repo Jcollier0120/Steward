@@ -351,13 +351,13 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
     }
   };
   let entry: AcceleratorEntry | undefined;
-  // Setup's test request and measuring aren't made here (the caller's own steps make them): their lines, which would
-  // say a model answered, aren't printed (kit 2.74.1 printed "answered on the NPU" for a model that never loaded).
-  const unasked = /a test question on the NPU|on this NPU \(this kind|answered on the NPU:/;
   const r = await setUpNpu(plan, tools, {
     ...io,
+    // No test question is asked here, nor a measurement taken (the caller measures the server, on whichever device it
+    // runs on): setup's lines about them aren't this run's, and its "answered on the NPU" only says what was set up.
     log: (l) => {
-      if (!unasked.test(l)) log(`  ${l}`);
+      if (/^(asking .* (a test question|for a test embedding)|measuring .*) on (the|this) NPU\b/.test(l)) return;
+      log(`  ${l.replace(/ answered on the NPU: /, ' is set up for: ')}`);
     },
     download: (dl, progress) => time('download', () => (io.download ?? download)(dl, progress)),
     unpack: (zip, into) => {

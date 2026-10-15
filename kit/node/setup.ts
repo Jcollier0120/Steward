@@ -1227,7 +1227,7 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
  * then one answer about a picture when it serves vision, and one short chat answer, which must say "ready" as asked (and
  * nothing degenerate). Chat goes last: a server that holds one model at a time (FastFlowLM) is left holding the chat
  * model, which most work asks for, and setup's measuring after this times it warm, not its switch back (8 to 9 s on an
- * XDNA 2, which kit 2.74.1 measured as a short answer, warm, and wrote timeouts five times too long from). Problems in
+ * XDNA 2, which kit 2.74.3 and before measured as a short answer, warm, and wrote timeouts five times too long from). Problems in
  * words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is
  * given 15, or `timeoutMs` (the NPU check's forced timeout).
  */
