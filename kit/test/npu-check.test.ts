@@ -348,6 +348,81 @@ test('a model that answers nonsense on the NPU fails the check at its first answ
   const { saysReady } = await import('./fixture/src/kit/setup.ts');
   assert.deepEqual(['<think>\n\n</think>\n\nready', 'Ready.', '?option?option', 'hydrated hydrated', '<think>ready'].map(saysReady), [true, true, false, false, false]);
 });
+test("FastFlowLM up without its model: /api/ps says it holds none, the log says why, and an answer that is only an error keeps its words", async () => {
+  const S = await import('./fixture/src/kit/npu-server.ts');
+  // FastFlowLM 1.0.7 on an XDNA 2 that couldn't hold its model (2026-10-15): its port open, every model listed.
+  let holds = false;
+  const port = await freePort();
+  const flm = createServer((req, res) => {
+    if (req.url === '/api/ps') return res.writeHead(200, { 'content-type': 'application/json' }).end(holds ? '{"models":[{"name":"qwen3-it:4b"}]}' : '{"error":"[json.exception.invalid_iterator.207] cannot use key() for non-object iterators"}');
+    if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"qwen3-it:4b"}]}');
+    req.resume();
+    req.on('end', () => res.writeHead(200, { 'content-type': 'application/json' }).end(holds ? '{"choices":[{"message":{"content":"ready"}}]}' : '{"error":"Failed to load qwen3-it:4b model!"}'));
+  });
+  await new Promise<void>((r) => flm.listen(port, '127.0.0.1', r));
+  const acc = (exe: string) => ({ id: 'npu', kind: 'npu', name: 'NPU', slots: 1, maxContextTokens: 4096, quirks: [], chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'qwen3-it:4b', startCommand: [exe, 'serve', 'qwen3-it:4b'] } }) as any;
+  try {
+    const c = S.serverClient(acc('C:\\tools\\servers\\fastflowlm-1.0.7\\flm.exe'));
+    assert.equal(await c.answers(), true, '/v1/models answers either way');
+    assert.equal(await c.loaded(), false);
+    const a = await c.ask('Reply with the single word: ready', 16, 5000);
+    assert.equal(a.ok, false);
+    assert.match(a.error!, /Failed to load qwen3-it:4b model/, 'its words, not "null"');
+    holds = true;
+    assert.equal(await c.loaded(), true);
+    assert.equal((await c.ask('Reply with the single word: ready', 16, 5000)).answer, 'ready');
+    assert.equal(await S.serverClient(acc('C:\\servers\\ovms.exe')).loaded(), null, "a server that doesn't say");
+  } finally {
+    flm.closeAllConnections();
+    await new Promise((r) => flm.close(r));
+  }
+  // What it prints, from where the check's start began (the log is appended to across runs).
+  const log = path.join(home, 'flm-load.log');
+  writeFileSync(log, '[ERROR]  Failed to load model: an older run\n');
+  const from = S.logLength(log);
+  writeFileSync(log, '[FLM]  Loading model: C:\\Users\\x\\.flm\\models\\Qwen3-4B-Instruct-2507-NPU2\n[XRT] ERROR: Failed to submit command to hw queue (0xc01e0200):\n[ERROR]  Failed to load model: Failed to submit command to hw queue (0xc01e0200):\n[Error]  Failed to load default model: qwen3-it:4b\n', { flag: 'a' });
+  assert.equal(S.loadFailure(log, from), 'Failed to submit command to hw queue (0xc01e0200)');
+  assert.equal(S.loadFailure(log, S.logLength(log)), null);
+  assert.equal(S.loadFailure(path.join(home, 'no-such.log')), null);
+  assert.equal(S.logLength(path.join(home, 'no-such.log')), 0);
+});
+
+test("setup's test request asks about the picture first and chat last, so a server holding one model at a time is left holding chat; a model that didn't load fails it in its own words", async () => {
+  const { testNpuEntry } = await import('./fixture/src/kit/setup.ts');
+  // FastFlowLM: one model held, a switch on demand; `loads` false makes every load fail, as on a PC that can't hold it.
+  let held = 'qwen3-it:4b';
+  let loads = true;
+  const asked: string[] = [];
+  const port = await freePort();
+  const flm = createServer((req, res) => {
+    if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"qwen3-it:4b"},{"id":"qwen3vl-it:4b"}]}');
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      const model = JSON.parse(raw).model;
+      asked.push(model);
+      if (!loads) return res.writeHead(200, { 'content-type': 'application/json' }).end(`{"error":"Failed to load ${model} model!"}`);
+      held = model;
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: model === 'qwen3vl-it:4b' ? 'Red' : 'ready' } }] }));
+    });
+  });
+  await new Promise<void>((r) => flm.listen(port, '127.0.0.1', r));
+  const entry = { id: 'npu', name: 'NPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'qwen3-it:4b', startCommand: ['C:\\nowhere\\flm.exe', 'serve', 'qwen3-it:4b'] }, vision: { model: 'qwen3vl-it:4b' } } as any;
+  const dir = mkdtempSync(path.join(home, 'test-image-'));
+  try {
+    assert.deepEqual(await testNpuEntry(entry, { dir, timeoutMs: 10_000 }), []);
+    assert.deepEqual(asked, ['qwen3vl-it:4b', 'qwen3-it:4b']);
+    assert.equal(held, 'qwen3-it:4b', 'left holding the chat model');
+    loads = false;
+    const problems = await testNpuEntry(entry, { dir, timeoutMs: 10_000 });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /failed \(200\).*Failed to load qwen3vl-it:4b model/);
+  } finally {
+    flm.closeAllConnections();
+    await new Promise((r) => flm.close(r));
+  }
+});
+
 // ------------------------------------------------------------------------------------------------
 // The report's generation and its patch; --harden, setup's failures forced and its calibration checked
 
@@ -392,6 +467,49 @@ test('the patch: none for a rehearsal, a failed step, a verified generation; a c
   const g = p.routes.intel.generations['panther-lake'];
   assert.deepEqual([g.verified, g.maxContextTokens, g.caps, g.args['--max_prompt_len']], [true, 3072, { chat: 3072 }, '3072']);
   assert.equal(g.basis, 'Measured by the NPU check on Intel(R) Core(TM) Ultra X7 358H, NPU driver 32.0.100.5540, 2026-11-02, every step passing: 4096 tokens failed.');
+});
+
+// An Intel NPU whose PCI id npu-vendors.json doesn't list yet (a generation after Wildcat Lake, say), with the driver
+// the newest ones it knows need.
+const INTEL_NEW = 'npu2|32.0.100.5540|2026-08-28|Intel Corporation|PCI\\VEN_8086&DEV_ABCD&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
+
+test("an NPU of a generation setup doesn't know: its PCI id printed ready for devices, run on the most cautious values, and every step passing gives the patch that adds it", async () => {
+  const s = await scene({ cap: 2048 });
+  const { code, report } = await C.npuCheck({ ...s.opts, detection: parseDetection(`${X64}${INTEL_NEW}\n`) });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.generation, V.UNKNOWN_GENERATION);
+  const detect = report.steps.find((x) => x.step === 'detect')!;
+  assert.match(detect.say, /^Intel AI Boost \(Intel NPU of a generation setup doesn't know yet, device ABCD\), device ABCD, driver 32\.0\.100\.5540 of 2026-08-28: the manor can use it on guessed values, the most cautious its route has$/);
+  assert.deepEqual(detect.data!.unknownDevice, { vendor: 'intel', pciDevice: 'ABCD', devices: { intel: { ABCD: 'intel-abcd' } } });
+  assert.ok(s.lines.includes(`npu-vendors.json doesn't know device ABCD: add it to devices, under the generation it is (one it has, or the new one this check's patch adds when every step passes): {"devices":{"intel":{"ABCD":"intel-abcd"}}}`), s.lines.join('\n'));
+  // Its cap: the NPU 3720's, the smallest Intel's route has, compiled so (the fake refuses past it, as OpenVINO does).
+  const cap = report.steps.find((x) => x.step === 'cap')!;
+  assert.equal(cap.ok, true, cap.say);
+  const p = report.patch as any;
+  assert.deepEqual(p.devices, { intel: { ABCD: 'intel-abcd' } });
+  const g = p.routes.intel.generations['intel-abcd'];
+  const guessed = V.unknownGeneration(s.catalog.routes.intel)!;
+  assert.deepEqual([g.label, g.supported, g.verified, g.maxContextTokens, g.args['--max_prompt_len'], g.driverMin], ['Intel NPU, device ABCD', true, true, 2048, '2048', '32.0.100.5540']);
+  assert.deepEqual(g.timeouts, { ...guessed.timeouts, ...report.suggest!.timeouts });
+  assert.match(g.basis, /^Measured by the NPU check on Intel Core Ultra 7 258V, NPU driver 32\.0\.100\.5540, \d{4}-\d\d-\d\d, every step passing, on the most cautious of the route's values \(its cap, memory and driver minimum unmeasured\)/);
+  assert.ok(s.lines.some((x) => /^The change to npu-vendors.json this run supports \(it adds device ABCD to devices as a new generation, intel-abcd, verified on this NPU/.test(x)), s.lines.join('\n'));
+});
+
+test("the patch for an NPU setup doesn't know: a new generation for its PCI id; none for a Snapdragon (told by its name), a rehearsal or a failed step", () => {
+  const route = V.NPU_CATALOG.routes.amd;
+  const base = { vendor: 'amd' as const, generation: V.UNKNOWN_GENERATION, rehearsal: false, steps: [{ step: 'detect', ok: true, say: '' }], suggest: { timeouts: { requestBaseMs: 25_000 }, why: ['measured'] }, route, pc: 'AMD Ryzen AI 7 450', driver: '32.0.20101.3760', device: '17F1', at: '2026-11-02T10:00:00.000Z' };
+  const p = C.checkPatch(base) as any;
+  assert.deepEqual(p.devices, { amd: { '17F1': 'amd-17f1' } });
+  const g = p.routes.amd.generations['amd-17f1'];
+  assert.deepEqual([g.label, g.verified, g.maxContextTokens, g.caps, g.timeouts], ['AMD NPU, device 17F1', true, 4096, { chat: 4096, vision: 4096 }, { ...route.timeouts, requestBaseMs: 25_000 }]);
+  assert.equal(C.checkPatch({ ...base, device: null }), null);
+  assert.equal(C.checkPatch({ ...base, rehearsal: true }), null);
+  assert.equal(C.checkPatch({ ...base, steps: [{ step: 'first-answer', ok: false, say: '' }] }), null);
+  // A Snapdragon's ACPI id has a DEV_ too, but its generation is told by its name, in code.
+  const snapdragon = { vendor: 'qualcomm' as const, deviceId: 'ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0', name: 'Snapdragon X3 Elite - X3E96100 - Qualcomm Hexagon NPU' };
+  assert.equal(C.unknownDevice(snapdragon).devices, null);
+  assert.match(C.unknownDeviceSay(snapdragon), /no PCI id: a Snapdragon's generation is told by its name \("Snapdragon X3 Elite - X3E96100 - Qualcomm Hexagon NPU"\), in npu-vendors\.ts' npuGeneration/);
+  assert.equal(C.unknownDevice({ vendor: 'amd', deviceId: 'PCI\\VEN_1022&DEV_17f1&REV_10', name: 'NPU Compute Accelerator Device' }).devices!.amd['17F1'], 'amd-17f1');
 });
 
 /** --harden on the scene: its test requests answered by `answers` (by case), setup's measuring by `measured`. */

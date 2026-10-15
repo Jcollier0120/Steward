@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, statSync } from 'node:fs';
 import nodeHttp, { type IncomingMessage } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { chatBody, expandEnv, listsWhenLoaded, serverEnv, visionBody } from './accelerators.ts';
+import { chatBody, expandEnv, failedWithOk, listsWhenLoaded, reportsLoaded, serverEnv, visionBody } from './accelerators.ts';
 import type { Accelerator, AcceleratorEntry } from './accelerator-config.ts';
 import { runPowerShell } from './detect.ts';
 import { type NpuPlan, runProgram } from './npu-vendors.ts';
@@ -45,6 +45,29 @@ export async function startServer(entry: AcceleratorEntry, logFile: string): Pro
   child.on('error', (e) => appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`));
   child.unref();
   return { pid: child.pid, stop: () => (child.pid ? taskkill(child.pid) : Promise.resolve()) };
+}
+
+/** A log's length in bytes, or 0: where what a server prints next begins. */
+export const logLength = (logFile: string) => {
+  try {
+    return statSync(logFile).size;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * Why a server's model failed to load, as its log says after `from` (bytes): FastFlowLM's "Failed to load model: …"
+ * (on an XDNA 2 with 16 GB, "Failed to submit command to hw queue (0xc01e0200)": Windows couldn't page the model and
+ * its context in at once). Null when the log says nothing of it.
+ */
+export function loadFailure(logFile: string, from = 0): string | null {
+  try {
+    const m = /Failed to load model:\s*(.+)/i.exec(readFileSync(logFile).subarray(from).toString('utf8'));
+    return m ? m[1].trim().replace(/:$/, '').slice(0, 160) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -161,7 +184,9 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
       json = JSON.parse(text);
     } catch {}
     const raw = String(json?.choices?.[0]?.message?.content ?? '');
-    return { status: res.status, ok: res.ok && typeof json?.choices?.[0]?.message?.content === 'string', ms, raw, answer: withoutThink(raw), usage: json?.usage ?? null, error: res.ok ? null : text.slice(0, 300) };
+    const ok = res.ok && typeof json?.choices?.[0]?.message?.content === 'string';
+    // A 200 without an answer says why in its body (FastFlowLM's model that didn't load): kept, not "null".
+    return { status: res.status, ok, ms, raw, answer: withoutThink(raw), usage: json?.usage ?? null, error: ok ? null : text.slice(0, 300) || 'no answer in the reply' };
   };
 
   /**
@@ -192,7 +217,7 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
       } catch {}
       const raw = String(json?.choices?.[0]?.message?.content ?? '');
       const ok = res.ok && typeof json?.choices?.[0]?.message?.content === 'string';
-      return { status: res.status, ok, ms, raw, answer: withoutThink(raw), usage: json?.usage ?? null, error: res.ok ? (ok ? null : 'no answer in the reply') : text.slice(0, 300), streamed: false, firstTokenMs: null, tokensPerSecond: null };
+      return { status: res.status, ok, ms, raw, answer: withoutThink(raw), usage: json?.usage ?? null, error: ok ? null : res.ok && !failedWithOk(json) ? 'no answer in the reply' : text.slice(0, 300), streamed: false, firstTokenMs: null, tokensPerSecond: null };
     }
     const times: number[] = [];
     let raw = '';
@@ -285,9 +310,23 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
     }
     return false;
   };
+  /**
+   * Whether it holds a model, for a server that says (reportsLoaded: FastFlowLM, which serves on after its model failed
+   * to load); null for one that doesn't say, or didn't answer.
+   */
+  const loaded = async (timeoutMs = 5_000): Promise<boolean | null> => {
+    if (!reportsLoaded(ep.startCommand)) return null;
+    try {
+      const res = await http(`${ep.baseUrl}/api/ps`, { signal: AbortSignal.timeout(timeoutMs) });
+      const j: any = await res.json().catch(() => null);
+      return res.ok && Array.isArray(j?.models) && j.models.length > 0;
+    } catch {
+      return null;
+    }
+  };
   /** Stops the server the kit's own test request started (its started record names it), so nothing is left running. */
   const stopKitStarted = () => stopStartedAt(ep.baseUrl, listening, now);
-  return { ep, lists, ask, askStream, answers, listening, untilAnswers, untilGone, stopKitStarted };
+  return { ep, lists, ask, askStream, answers, listening, untilAnswers, loaded, untilGone, stopKitStarted };
 }
 
 /** One request: a prompt, and a picture with it for a vision model (a path or a `data:` URL). */

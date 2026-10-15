@@ -1,5 +1,5 @@
 {
-  "version": "castellan-npu-bench/1",
+  "version": "castellan-npu-bench/2",
   "about": "The NPU benchmark's suite (NPU-BENCHMARK.md): every prompt, grade and setting, the same on every PC. A change to any of it is a new version, and the website compares runs of one major version only.",
   "maxTokensAll": 1280,
   "tries": { "quick": 3, "full": 5 },

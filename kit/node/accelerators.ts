@@ -536,6 +536,16 @@ export function listsWhenLoaded(startCommand: string[] | undefined): boolean {
   return !!exe && /^ovms(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
 }
 
+/**
+ * Whether a server, by its program, says which model it holds at /api/ps (as Ollama does): FastFlowLM loads its model
+ * before it opens its port, and serves anyway when the load fails, /v1/models listing every model it knows either way.
+ * Its /api/ps lists the model it holds, and answers an error when it holds none (1.0.7, 2026-10-15).
+ */
+export function reportsLoaded(startCommand: string[] | undefined): boolean {
+  const exe = startCommand?.[0];
+  return !!exe && /^flm(\.exe)?$/i.test(path.win32.basename(expandEnv(exe)));
+}
+
 /** Whether an endpoint answers now, without starting it. */
 export async function ping(baseUrl: string, ms = PROBE_MS): Promise<boolean> {
   return (await probe(baseUrl, ms)) === 'ready';
@@ -747,11 +757,24 @@ export async function postJson(ep: Endpoint, route: string, body: unknown, timeo
   const ms = Math.round(performance.now() - t0);
   if (res.status >= 500) throw new AcceleratorDown(core.say.serverFailed(route, ep.baseUrl, res.status, text.slice(0, 200)));
   if (!res.ok) throw new Error(core.say.serverRefused(res.status, text.slice(0, 300)));
+  let json: any;
   try {
-    return { json: JSON.parse(text), ms };
+    json = JSON.parse(text);
   } catch {
     throw new Error(core.say.notJson(text.slice(0, 120)));
   }
+  if (failedWithOk(json)) throw new AcceleratorDown(core.say.serverFailed(route, ep.baseUrl, res.status, text.slice(0, 200)));
+  return { json, ms };
+}
+
+/**
+ * A 200 that carries only an error: the server failing, not answering. FastFlowLM answers so when its model didn't load
+ * (`{"error":"Failed to load qwen3-it:4b model!"}`, 1.0.7 on an XDNA 2 whose NPU couldn't hold the model, 2026-10-15),
+ * and tries the load again on every request; a request it won't take is a 400 ("Max length reached!"). Read as an
+ * answer, it was an empty one, and the work took it.
+ */
+export function failedWithOk(json: any): boolean {
+  return !!json && typeof json === 'object' && !Array.isArray(json) && json.error !== undefined && json.choices === undefined && json.data === undefined;
 }
 
 // ---------------------------------------------------------------- the servers' quirks

@@ -94,6 +94,17 @@ export function readPrompt(suite: Suite, tokens: number): string {
   return `${lines.join('\n')}\n\n${suite.read.question}`;
 }
 
+/**
+ * A prompt that shares no block with any request before it: a line of its own first. OpenVINO Model Server turns the
+ * NPU's prefix caching on, which keeps every whole block of a prompt it has read (128 tokens on an NPU 3720), so a
+ * prompt asked again, or one that starts as an earlier one did (readPrompt's lines all do), is mostly not read at all:
+ * 512 tokens took 0.74 s asked again, against 2.26 s new (Core Ultra 5 225U, 2026-10-14). Every read and job is asked
+ * this way, so its time is the whole prompt's, as an agent's new text is; GenieX's requests already start with a nonce.
+ */
+export function freshPrompt(prompt: string, tag: string): string {
+  return `[${tag}]\n${prompt}`;
+}
+
 const firstJson = (s: string): any => {
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return undefined;
@@ -385,7 +396,11 @@ export function candidateRoute(route: NpuRoute, id: string, o: { vision?: boolea
   const type = pull.indexOf('--model-type');
   if (type >= 0) pull[type + 1] = o.vision ? 'vlm' : 'llm';
   const kinds: NpuModel['kinds'] = o.vision ? ['chat', 'vision'] : ['chat'];
-  return { ...route, models: [{ ...base, id, kinds, pull, ...(base.present ? { present: swap(base.present) } : {}), size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
+  // A present file whose path doesn't name the model can't say where a candidate is (FastFlowLM's folders are its own
+  // names, Qwen3-4B-Instruct-2507-NPU2 for qwen3-it:4b): kept, it would find the route's own model, so the candidate
+  // would count as downloaded, never be pulled, and have that model's files measured as its own. Dropped instead.
+  const present = base.present && swap(base.present) !== base.present ? swap(base.present) : undefined;
+  return { ...route, models: [{ ...base, id, kinds, pull, present, size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
 }
 
 /** The route with only the model asked for (and its vision model, where the route has one beside it). */
@@ -622,6 +637,11 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
     return r;
   };
+  // Every read and job is asked fresh (freshPrompt): this run's tag, then a count, never the same twice.
+  type Question = { prompt: string; maxTokens: number };
+  const runTag = Math.random().toString(36).slice(2, 8);
+  let asked = 0;
+  const fresh = (q: Question) => (): Question => ({ ...q, prompt: freshPrompt(q.prompt, `bench ${runTag}-${++asked}`) });
   const loadAndAnswer = async () => {
     const t0 = now();
     const up = await client.untilAnswers(startLimit);
@@ -635,12 +655,13 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     log(`cold load: ${report.results.coldLoadMs === null ? `no correct answer (see ${logFile})` : `${(report.results.coldLoadMs / 1000).toFixed(1)} s to the first answer`}`);
     if (report.results.coldLoadMs === null) return finish(1, { code: 'start', say: `${route.server} didn't load and answer "ready": see ${logFile}` });
 
-    /** A measurement: warm-ups, then the tries, each one value from its answer (null when it failed). */
-    const tryTimes = async (q: { prompt: string; maxTokens: number }, value: (r: Streamed) => number | null, onEach?: (r: Streamed) => void) => {
-      for (let i = 0; i < suite.warmups; i++) await ask(q);
+    /** A measurement: warm-ups, then the tries, each one value from its answer (null when it failed); `q` a question, or one fresh each time. */
+    const tryTimes = async (q: Question | (() => Question), value: (r: Streamed) => number | null, onEach?: (r: Streamed) => void) => {
+      const next = typeof q === 'function' ? q : () => q;
+      for (let i = 0; i < suite.warmups; i++) await ask(next());
       const xs: number[] = [];
       for (let i = 0; i < tries; i++) {
-        const r = await ask(q);
+        const r = await ask(next());
         onEach?.(r);
         const v = r.ok ? value(r) : null;
         xs.push(v ?? Number.NaN);
@@ -652,17 +673,17 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     report.results.writeTokensPerSecond = await tryTimes(suite.write, (r) => r.tokensPerSecond ?? (r.usage?.completion_tokens ? r.usage.completion_tokens / (r.ms / 1000) : null));
     log(`writing: ${report.results.writeTokensPerSecond.median} tokens a second`);
     for (const n of suite.read.sizes) {
-      report.results.readFirstTokenMs[String(n)] = await tryTimes({ prompt: readPrompt(suite, n), maxTokens: suite.read.maxTokens }, (r) => r.firstTokenMs ?? r.ms);
+      report.results.readFirstTokenMs[String(n)] = await tryTimes(fresh({ prompt: readPrompt(suite, n), maxTokens: suite.read.maxTokens }), (r) => r.firstTokenMs ?? r.ms);
       log(`reading ${n} tokens: ${report.results.readFirstTokenMs[String(n)].median} ms to the first token`);
     }
     if (route.maxContextTokens * suite.read.capShare > Math.max(...suite.read.sizes)) {
-      const r = await ask({ prompt: readPrompt(suite, Math.round(route.maxContextTokens * suite.read.capShare) - suite.read.maxTokens), maxTokens: suite.read.maxTokens });
+      const r = await ask(fresh({ prompt: readPrompt(suite, Math.round(route.maxContextTokens * suite.read.capShare) - suite.read.maxTokens), maxTokens: suite.read.maxTokens })());
       report.results.readAtCap = { promptTokens: Number(r.usage?.prompt_tokens) || null, firstTokenMs: r.ok ? (r.firstTokenMs ?? r.ms) : null };
       log(`reading near the cap (${report.results.readAtCap.promptTokens ?? '?'} of ${route.maxContextTokens} tokens): ${report.results.readAtCap.firstTokenMs ?? 'no answer'} ms to the first token`);
     }
     for (const job of suite.jobs) {
       let passed = 0;
-      const m = await tryTimes({ prompt: promptOf(suite, job), maxTokens: job.maxTokens }, (r) => r.ms, (r) => {
+      const m = await tryTimes(fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens }), (r) => r.ms, (r) => {
         if (r.ok && grade(job.grade, r.answer)) passed++;
       });
       report.results.jobs[job.id] = { ...m, passed };
@@ -721,11 +742,11 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     if (profile === 'full') {
       // Holding speed: one job back to back, the first minute against the last.
       const job = jobById(suite.holding.job);
-      const q = { prompt: promptOf(suite, job), maxTokens: job.maxTokens };
+      const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
       const t0 = now();
       const done: { at: number; ms: number }[] = [];
       while (now() - t0 < suite.holding.minutes * 60_000) {
-        const r = await ask(q);
+        const r = await ask(q());
         if (!r.ok) break;
         done.push({ at: now() - t0, ms: r.ms });
       }
@@ -768,13 +789,13 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
           return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
         };
         const job = jobById(suite.energy.job);
-        const q = { prompt: promptOf(suite, job), maxTokens: job.maxTokens };
+        const q = fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens });
         let jobs = 0;
         let tokens = 0;
         const rest = await sample(suite.energy.restSeconds * 1000);
         const t0 = now();
         const load = await sample(suite.energy.loadMinutes * 60_000, async () => {
-          const r = await ask(q);
+          const r = await ask(q());
           if (r.ok) {
             jobs++;
             tokens += (Number(r.usage?.prompt_tokens) || 0) + (Number(r.usage?.completion_tokens) || 0);
