@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.34
+## 0.36.39
 
 **Fewer git commands again: projects' version queues, and pull requests that set no version.**
 
@@ -13,6 +13,45 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A pull request that sets no version above its branch is no longer read again every round while nothing about it has changed.
 - A branch with no version found at its head isn't read again until the branch moves.
 - The staff table reads a clone's branch correctly from git when the clone uses git's newer reftable format.
+## 0.36.36
+
+**Kit PRs no longer wait for a trial each: a queue of them is tried once, and a catch-up keeps the trial.**
+
+### What changed
+
+- Kit PRs waiting one behind another are tried on the agents together, once: the first one's trial tries the kit with each one queued after it merged in, in the order they merge. When every agent passes, they merge one after another without a trial each. When an agent fails, the first is tried alone, as before, so a failure is only held against the PR that brings it. On 14 October eight kit PRs waited for a trial each, one at a time, for hours.
+- A kit PR caught up with its branch keeps its trial when the catch-up changed only versions and changelogs (the kit's version, its changelog, version lines), as a vouch is kept. Before, every catch-up started its trial over on every agent.
+- An agent that fails a kit's trial the way a busy PC fails (a test killed, a folder still in use, a run stopped at its time limit), or that fails without the new kit too, is tried once more, alone, after the rest of the trial, and holds the PR only if it fails again. Two agents held a kit PR this way on 14 October.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Trials already kept are used as they are.
+
+## 0.36.33
+
+**A pull request that conflicts with its branch is caught up within minutes, not when the round next reaches it.**
+
+### What's new
+
+- Every 5 minutes, while one of the Steward's stage slots is free, it checks GitHub once for ready pull requests that conflict with their branch, and catches them up at once in that free slot. Until now only the round did that, one repository after another, and a long round (a vouch's tests, a kit trial on every agent) could leave a conflicting pull request, and every one queued behind it, waiting for hours.
+- It handles conflicts only. It merges nothing, tests nothing and leaves alone a repository another stage is working on. When it has caught one up, a round follows to merge it. A conflict it can't resolve goes back to whoever opened the pull request, as before.
+- While it works, the page shows it as a running stage named "conflicts". When nothing conflicts, it takes no slot at all.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Settings' "Catch PRs up" switches this off along with the round's catch-ups.
+## 0.36.32
+
+**It hands out kit 2.74.4: each PowerShell an agent starts is one process, not two.**
+
+### What changed
+
+- The kit 2.74.4: the PowerShell an agent's page starts shares the page's windowless console instead of starting a console host (conhost.exe) of its own beside it. Agents get it as they take the kit.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.31
 
 **Kit 2.74.3: on the pages of the agents your AI assistant calls, Needs you sits closer to the top and can show what waits under it.**

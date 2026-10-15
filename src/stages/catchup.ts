@@ -49,7 +49,8 @@ export const isKitPr = (pr: PrInfo) => pr.whose === 'steward' && pr.head.startsW
 export const catchUpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), `${e.id}-catchup`);
 
 const VERSION = /\d+\.\d+\.\d+/g;
-const sameButVersions = (a: string[], b: string[]) => a.length === b.length && a.every((l, i) => l.replace(VERSION, 'x.y.z').trimEnd() === b[i].replace(VERSION, 'x.y.z').trimEnd());
+/** Whether two runs of lines are the same but for the versions in them. Pure. */
+export const sameButVersions = (a: string[], b: string[]) => a.length === b.length && a.every((l, i) => l.replace(VERSION, 'x.y.z').trimEnd() === b[i].replace(VERSION, 'x.y.z').trimEnd());
 
 /**
  * A file's text with each conflict (diff3 markers) resolved where one side differs from their common ancestor only

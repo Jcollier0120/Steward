@@ -426,7 +426,7 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
     const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
     if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
     if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit, ...(alone ? { without: alone } : {}) });
   }
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
