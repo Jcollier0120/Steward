@@ -11,6 +11,7 @@ process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { heldQueues, keepVersionQueues, loadVersionQueues, queueHold } = await import('../src/version-queue.ts');
+const { workBlocks } = await import('../src/work-status.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { shareRemoteHeads } = await import('../src/kit/remote-heads.ts');
 const { reconcile, roundConditions } = await import('../src/alarms.ts');
@@ -255,6 +256,12 @@ test("the round says what holds the Steward's own queue and since when, and an a
   const turnIs = (status: 'here' | 'elsewhere') => ({ repos: { 'jcollier0120/steward': { repo: 'Jcollier0120/Steward', status, at: T } } });
   assert.deepEqual(heldQueues(loadVersionQueues(), turnIs('elsewhere')), []);
   assert.equal(heldQueues(loadVersionQueues(), turnIs('here')).length, 1);
+
+  // In the work status (GET /api/peer/work), for Manor's Work page: what holds the queue, since when, what waits.
+  assert.deepEqual(workBlocks(loadVersionQueues, () => turnIs('here')), [
+    { kind: 'version-queue', what: "Steward's version queue", by: '#21 (v0.4.1), a draft: review it, then mark it ready', since: T, repo: 'Jcollier0120/Steward', pr: 21, url: 'https://github.com/Jcollier0120/Steward/pull/21', waiting: ['#22', '#23'] },
+  ]);
+  assert.deepEqual(workBlocks(loadVersionQueues, () => turnIs('elsewhere')), [], "another PC's turn: that PC's to say");
 
   // A conflict holding it is the blocking alarm's, which names its files.
   assert.deepEqual(conditions([{ ...holds[0], hold: { ...holds[0].hold, why: `${CONFLICTS} in src/app.ts` } }]), []);

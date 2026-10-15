@@ -95,6 +95,10 @@ An agent works at a manor when Manor is installed here: its folder (`MANOR_HOME`
 
 Every kit agent's `GET /api/ping` answers what Manor needs to show it without starting anything: `app`, `name`, `version`, `pid`, `running` (on duty), and from kit 2.9.0 `stoppedSince` (when it went off duty, null while on) and `summary` ("On duty.", or "Off duty since 2 hours ago: its scheduled rounds are paused."), the same words as `status --json`; then its rounds (`lastRunAt`, `lastRunOk`, `nextRunAt`, `runningSince`, `rounds`) and the agent's own fields. So Manor runs an agent's status command only when its page doesn't answer.
 
+### What the agent is working on
+
+From kit 2.76.0, every kit agent's `GET /api/peer/work` answers its **work status** ([kit/spec/WORK-STATUS.md](kit/spec/WORK-STATUS.md)): what it may run at once, what it runs and what waits, in which of the PC's lines (the checks pace's turns, the work line, the first-round line, each accelerator's), its recent results by code tree, and what holds its work up. Manor's Work page gathers it from each agent on the PC, and over Manor's link from the licence's other PCs. The Steward adds its stages (Stages at once), each check run with its commit and tree, the whole suite and kit trials beside the rounds, and what holds each version queue.
+
 ### What the kit leaves in the data folder: round.json
 
 Each round an agent runs with schedule.ts's `every()` leaves its outcome in `round.json` in the agent's data folder (kit 2.8.0), the same in every agent, so the Surveyor reads one file per agent: `{ "rounds": { "<name>": { "started", "finished", "ok", "error", "everyMs", "next" } } }`, one entry per schedule by its `name` ("round" unless said). [spec/ROUND.md](kit/spec/ROUND.md) says the shape and when it is written. A round.json that can't be written never fails the round. The node part only, for now: the dotnet part has no scheduler.
