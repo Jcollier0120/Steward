@@ -13,14 +13,24 @@
       "arch": "arm64",
       "generations": {
         "snapdragon-x": {
-          "label": "Snapdragon X Elite / X Plus (Hexagon v73)",
+          "label": "Snapdragon X / X Plus / X Elite (Hexagon v73)",
           "supported": true,
-          "verified": false
+          "verified": false,
+          "hexagonArch": "v73",
+          "aiHubChipset": "qualcomm-snapdragon-x-elite"
         },
         "snapdragon-x2": {
           "label": "Snapdragon X2 Elite / X2 Plus (Hexagon v81)",
           "supported": true,
-          "verified": true
+          "verified": true,
+          "hexagonArch": "v81",
+          "aiHubChipset": "qualcomm-snapdragon-x2-elite"
+        },
+        "snapdragon-8cx": {
+          "label": "Snapdragon 8cx, 8c, 7c, SQ1–SQ3, 850 or 835 (Hexagon v68 or older)",
+          "supported": false,
+          "verified": false,
+          "why": "GenieX and Qualcomm AI Hub's model builds cover only the Snapdragon X and X2 (Hexagon v73 and v81), and llama.cpp's Hexagon backend runs at least v73 code, which an older Hexagon can't"
         }
       },
       "download": {
@@ -71,6 +81,35 @@
           "size": 4374952637,
           "licence": "Qwen3-VL-4B-Instruct: Apache-2.0; Qualcomm AI Hub's compiled W4A16 build: the base model's licence plus AI Hub's usage limitations (review)",
           "pinned": {
+            "snapdragon-x": {
+              "dir": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct",
+              "files": {
+                "embedding_weights.raw": {
+                  "size": 1555824640,
+                  "sha256": "ef223ee4c21e85d8387871bdfc0164979abe34a6d30dcc7b43abbde05904d750"
+                },
+                "part1_of_4.bin": {
+                  "size": 488951808,
+                  "sha256": "a1552f7c59984b76437bb6b097068d98ea2575c24e3761cb30389cca344c1d5d"
+                },
+                "part2_of_4.bin": {
+                  "size": 488464384,
+                  "sha256": "2353c6499000af987d0724c3050edbca07a9355c337bca1a52707b8a582b1d55"
+                },
+                "part3_of_4.bin": {
+                  "size": 488464384,
+                  "sha256": "658c46a453884b08727470fd318d03ffb193e2cfdfd474b731425e5f154b06fb"
+                },
+                "part4_of_4.bin": {
+                  "size": 886947840,
+                  "sha256": "b85b8c392c6e125c75f186b32127994d40875a7b9403b1a8aab0dad7f4d32685"
+                },
+                "vision_encoder.bin": {
+                  "size": 432021504,
+                  "sha256": "6456e9da5b6047e67a1dfd979fd7daa2dcb990f47066d13cd58e76baf0bf2c0b"
+                }
+              }
+            },
             "snapdragon-x2": {
               "dir": "%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct",
               "files": {
@@ -621,6 +660,13 @@
     }
   },
   "devices": {
+    "qualcomm": {
+      "0D0A": "snapdragon-x",
+      "0D19": "snapdragon-x",
+      "0FF0": "snapdragon-x2",
+      "104F": "snapdragon-x2",
+      "1050": "snapdragon-x2"
+    },
     "intel": {
       "7D1D": "meteor-lake",
       "AD1D": "arrow-lake",

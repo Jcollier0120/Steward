@@ -19,6 +19,30 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing to do: take the kit and release as usual.
 - On a Snapdragon already set up, the NPU refresh brings the embedding server's new command and cap in as the agent pins this kit, once it answers its test. Nothing is downloaded, and no index is rebuilt: the model and its vectors are the same.
 
+## 2.74.7
+
+**Older Snapdragons: every first-generation X is recognised and checked against its own model build, the Snapdragons before the X are refused before anything downloads, an X2 can play an X to test the X's code, and a server stopped is waited for until its port is free.**
+
+### What's new
+
+- **npu-vendors.ts, playing an older Snapdragon on a newer one**: `playGeneration(npu, generation)` says whether this NPU can play another generation: `own`, `played` (a Snapdragon playing an older Snapdragon), `values` (an Intel or AMD NPU, or Qualcomm's `unknown`: the starting values alone) or `refused`, with why. `playedRoute(route, played)` gives GenieX a data folder of its own (`playedDataDir`: `{tools}\played\<generation>\geniex`, its `--data-dir` before the command, and `GENIEX_DATADIR`), finds the model and checks its pins there, and gives the embedding server `GGML_HEXAGON_ARCH`, the played Hexagon. `setUpPlayed(played, tools)` writes that folder's `config.json` naming AI Hub's chip (other settings in it kept). `playedSay` says it in a sentence. `LEGACY_SNAPDRAGON` and `GENIEX_DATA_DIR` are exported.
+- **npu-check.ts `--generation snapdragon-x`** on a Snapdragon X2 plays the first X whole: AI Hub's X Elite build from that folder, and the embeddings on Hexagon v73 code. The report's `played` says the generation, folder, chip and Hexagon; it's a rehearsal, with no patch. A newer Snapdragon on an older one, or `snapdragon-8cx`, is refused (exit 2, step `play`) before anything is set up.
+- **npu-bench.ts `--generation <id>`** plays it the same way. The report's `run.played` (schema: optional) names it, the `played` mark keeps it off the board, and it is never ranked. On any NPU but a Snapdragon it is refused: there it would be another generation's starting values alone.
+- npu-vendors.json: each Snapdragon generation's `hexagonArch` (`v73`, `v81`) and `aiHubChipset` (`qualcomm-snapdragon-x-elite`, `qualcomm-snapdragon-x2-elite`), on `NpuGeneration`.
+
+### What changed
+
+- **`npuGeneration` knows every first-generation X by name**: the plain X's and X Plus's part numbers (`X1` and five digits: X124100, X126100, X126101), "Snapdragon X -", alongside `X1E`/`X1P`, "X Elite", "X Plus" and the dev kit's X1E001DE. The X2's names (including E2E94100, X2000096, XG002002, EG102004, XG201032) are tested first. A name that doesn't say which Snapdragon is told by its ACPI device id, in npu-vendors.json's new `devices.qualcomm`: `0D0A` and `0D19` the X, `0FF0`, `104F` and `1050` the X2. Where both say, the name wins.
+- **The Snapdragons before the X are refused**: a new generation, `snapdragon-8cx` (8cx Gen 1 to 3, 8c, 7c and 7c+, SQ1 to SQ3, 850, 835, and a Hexagon seen only by its driver on the older `npu|` line), `supported: false`, with its reason in plain words. Before, such a PC was tried on guessed values and downloaded GenieX and its 4.4 GB model before its test request could fail. A Snapdragon newer than setup knows is still tried on guessed values.
+- **The X Elite's model build is pinned** (`pinned["snapdragon-x"]`, six files), so setup on an X checks GenieX's pull of it file by file, as on the X2.
+- npu-check.ts: an unknown Snapdragon's line now points to `devices.qualcomm` by its ACPI id, where its name doesn't say.
+- **A server stopped is gone only once its port refuses a connection** (npu-server.ts' `refusedConnection`, which `listening`, `untilGone`, `stopStartedAt` and the NPU check's own waits now use). Before, any failed request counted as gone, a timeout included. GenieX killed on the X2 Elite was gone in 71 ms, but its port stayed bound about 2 s: requests timed out for the first second, then were reset. The benchmark's start again came too soon, GenieX couldn't bind its port ("Only one usage of each socket address"), and the cached load failed with "no correct answer".
+- Spec: NPU-VENDORS.md (Detection, The Snapdragons before the X, Playing an older Snapdragon on a newer one, Verified and not), NPU-BENCHMARK.md (`--generation`, `run.played`).
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Setup on a first-generation X now reads and checks the model's six files (4.3 GB) after its pull, as it does on an X2.
+
 ## 2.74.6
 
 **Paced checks get the share Manor's checksPace gives them, not the agent's gentle cap too, and a test's own waits stretch with the pace: a test takes longer instead of failing. An AMD NPU of a generation nobody has measured gets a 35 s base, not 90 s, and Intel's other NPUs get prompt settings estimated from the NPU 3720, their prefix cache off.**

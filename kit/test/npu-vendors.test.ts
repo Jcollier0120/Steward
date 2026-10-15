@@ -31,6 +31,9 @@ delete V.NPU_CATALOG.routes.intel.models[0].pinned;
 const intelEmbed = V.NPU_CATALOG.routes.intel.embedServer!.model as import('./fixture/src/kit/npu-vendors.ts').NpuEmbedPull;
 const intelEmbedPins = intelEmbed.pinned!;
 delete intelEmbed.pinned;
+// And the X Elite's build of GenieX's model (4.3 GB), which the tests setting up an X pull as fakes.
+const xElitePins = V.NPU_CATALOG.routes.qualcomm.models[0].pinned!['snapdragon-x'];
+delete V.NPU_CATALOG.routes.qualcomm.models[0].pinned!['snapdragon-x'];
 
 // What DETECT_PS prints for each NPU (the ComputeAccelerator class, as Heiward's NpuHardware.cs reads it). The
 // Snapdragon line is this laptop's (2026-10-07); the Intel and AMD ones are as Windows names those devices, with the
@@ -114,12 +117,64 @@ test('generations: a Snapdragon by its part number or name, Intel and AMD by the
   assert.equal(g('qualcomm', 'Snapdragon(R) X2 Elite - X2E88100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x2');
   assert.equal(g('qualcomm', 'Snapdragon(R) X2 Plus - X2P42100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x2');
   assert.equal(g('qualcomm', 'Snapdragon(R) X Plus - X1P64100 - Qualcomm(R) Hexagon(TM) NPU'), 'snapdragon-x');
-  assert.equal(g('qualcomm', 'Qualcomm(R) Hexagon(TM) NPU'), V.UNKNOWN_GENERATION, 'no part number: not one setup knows, so tried on guessed values');
+  assert.equal(g('qualcomm', 'Qualcomm(R) Hexagon(TM) NPU', 'ACPI\\VEN_QCOM&DEV_ABCD&SUBSYS_CRD09999&REV_0001\\2&1&0'), V.UNKNOWN_GENERATION, 'no part number, and an id it doesn\'t know: tried on guessed values');
   assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_17F1'), V.UNKNOWN_GENERATION);
   assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_1502'), 'xdna');
   assert.equal(g('intel', 'Intel(R) AI Boost', 'PCI\\VEN_8086&DEV_AD1D'), 'arrow-lake');
   assert.equal(g('amd', 'NPU Compute Accelerator Device', 'PCI\\VEN_1022&DEV_17F0'), 'xdna2');
   assert.ok(V.compareVersions('32.0.100.3104', '32.0.100.3104') === 0 && V.compareVersions('32.0.100.10', '32.0.100.9') > 0 && V.compareVersions('31.9', '32') < 0);
+});
+
+test('every Snapdragon by its name as Windows gives it, the X2 first; a generic name by its ACPI id; the ones before the X refused', () => {
+  const g = (device: string, deviceId = 'ACPI\\VEN_QCOM&DEV_ABCD&SUBSYS_CRD09999&REV_0001\\2&1&0') => V.npuGeneration('qualcomm', { device, deviceId });
+  const NPU_ = ' - Qualcomm(R) Hexagon(TM) NPU';
+  // The plain X, the X Plus and the X Elite, by every part number Windows names them with (and the dev kit's X1E001DE).
+  for (const name of [
+    'Snapdragon(R) X - X124100', 'Snapdragon(R) X - X126100', 'Snapdragon(R) X - X126101',
+    'Snapdragon(R) X Plus - X126100', 'Snapdragon(R) X Plus - X1P42100', 'Snapdragon(R) X Plus - X1P46100', 'Snapdragon(R) X Plus - X1P64100', 'Snapdragon(R) X Plus - X1P66100',
+    'Snapdragon(R) X Elite - X1E78100', 'Snapdragon(R) X Elite - X1E80100', 'Snapdragon(R) X Elite - X1E84100', 'Snapdragon(R) X Elite - X1P62100', 'Snapdragon(R) X Elite - X1E001DE',
+    'Snapdragon X - X126100',
+  ]) assert.equal(g(name + NPU_), 'snapdragon-x', name);
+  // The X2s: tested before the first X, so an X2 Elite's part number never reads as an X's.
+  for (const name of [
+    'Snapdragon(R) X2 Elite Extreme - X2E94100', 'Snapdragon(R) X2 Elite Extreme - E2E94100', 'Snapdragon(R) X2 Elite Extreme - X2000096', 'Snapdragon(R) X2 Elite Extreme - XG002002',
+    'Snapdragon(R) X2 Elite - EG102004', 'Snapdragon(R) X2 Elite - XG201032', 'Snapdragon(R) X2 Elite - X2E78100', 'Snapdragon(R) X2 Elite - X2E88100', 'Snapdragon(R) X2 Plus - X2P42100',
+  ]) assert.equal(g(name + NPU_), 'snapdragon-x2', name);
+  // A name that doesn't say which Snapdragon: its ACPI id, as Qualcomm's drivers bind (qcnspmcdm8380.inf for the X, 8480 for the X2).
+  const generic = 'Qualcomm(R) Hexagon(TM) NPU';
+  const acpi = (dev: string) => `ACPI\\VEN_QCOM&DEV_${dev}&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0`;
+  for (const dev of ['0D0A', '0D19']) assert.equal(g(generic, acpi(dev)), 'snapdragon-x', dev);
+  for (const dev of ['0FF0', '104F', '1050']) assert.equal(g(generic, acpi(dev)), 'snapdragon-x2', dev);
+  assert.equal(g(generic, acpi('0d0a')), 'snapdragon-x', 'an id in any case');
+  assert.equal(parseNpus(NPU.x2.replace('Snapdragon(R) X2 Elite Extreme - X2E94100 - ', ''), 'arm64')[0].generation, 'snapdragon-x2', "this laptop's own id (DEV_0FF0), its name left out");
+  assert.deepEqual(V.NPU_CATALOG.devices.qualcomm, { '0D0A': 'snapdragon-x', '0D19': 'snapdragon-x', '0FF0': 'snapdragon-x2', '104F': 'snapdragon-x2', '1050': 'snapdragon-x2' });
+  // The name wins over the id: a Snapdragon it doesn't know by name is one it doesn't know, whatever id it lists.
+  assert.equal(g('Snapdragon(R) X3 Elite - X3E96100' + NPU_, acpi('0FF0')), V.UNKNOWN_GENERATION);
+  assert.equal(g('Snapdragon(R) X Elite - X1E78100' + NPU_, acpi('0FF0')), 'snapdragon-x');
+  // The Snapdragons before the X, by name, and a Hexagon seen only by its driver (the older npu| line, no device id).
+  for (const name of [
+    'Snapdragon(R) 8cx Gen 3 - Qualcomm(R) Hexagon(TM) NPU', 'Snapdragon(R) 8cx Gen 2', 'Qualcomm(R) Snapdragon(TM) 8cx', 'Snapdragon(R) 8c', 'Snapdragon(R) 7c+ Gen 3', 'Snapdragon(R) 7c Gen 2',
+    'Microsoft SQ1', 'Microsoft SQ2 - Qualcomm(R) Hexagon(TM) DSP', 'Microsoft SQ3', 'Snapdragon(R) 850', 'Qualcomm Snapdragon 835',
+  ]) assert.equal(g(name), V.LEGACY_SNAPDRAGON, name);
+  assert.equal(g(generic, ''), V.LEGACY_SNAPDRAGON, 'no device id at all: a Hexagon driver Windows lists no Neural processor for, which every X and X2 does');
+  assert.equal(g(generic, acpi('ABCD')), V.UNKNOWN_GENERATION, 'an id it doesn\'t know: tried on guessed values');
+});
+
+test('a Snapdragon before the X is refused plainly, before anything is downloaded: its work goes to the processor', async () => {
+  const SQ3 = 'cpu|12|8|Microsoft SQ3 @ 3.0 GHz\nram|17179869184\n';
+  const legacy = parseNpus('npu|1.0.3100.0|2022-05-01|Qualcomm(R) Hexagon(TM) NPU', 'arm64')[0];
+  assert.deepEqual([legacy.vendor, legacy.generation, legacy.supported, legacy.verified], ['qualcomm', V.LEGACY_SNAPDRAGON, false, false]);
+  assert.equal(legacy.why, "the Snapdragon 8cx, 8c, 7c, SQ1–SQ3, 850 or 835 (Hexagon v68 or older) NPU can't run the manor's models: GenieX and Qualcomm AI Hub's model builds cover only the Snapdragon X and X2 (Hexagon v73 and v81), and llama.cpp's Hexagon backend runs at least v73 code, which an older Hexagon can't");
+  const byName = parseNpus(NPU.x2.replace('Snapdragon(R) X2 Elite Extreme - X2E94100', 'Snapdragon(R) 8cx Gen 3').replace('DEV_0FF0', 'DEV_0C9A'), 'arm64')[0];
+  assert.equal(byName.generation, V.LEGACY_SNAPDRAGON);
+  assert.equal(byName.supported, false);
+  const tools = path.join(home, 'tools-8cx');
+  const plan = await planSetup({ detection: parseDetection(`npu|1.0.3100.0|2022-05-01|Qualcomm(R) Hexagon(TM) NPU\n${SQ3}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
+  assert.equal(plan.npu, null, 'nothing for the NPU: neither GenieX nor its 4.4 GB model');
+  assert.ok(!plan.downloads.some((d) => /geniex|:W4A16|hexagon|adreno/i.test(JSON.stringify(d))), JSON.stringify(plan.downloads));
+  assert.match(describePlan(plan).join('\n'), /\(npu\): not set up: the Snapdragon 8cx, 8c, 7c, SQ1–SQ3, 850 or 835 \(Hexagon v68 or older\) NPU can't run the manor's models: GenieX and Qualcomm AI Hub's model builds cover only/);
+  // A Snapdragon newer than setup knows is tried on guessed values, as before: never refused for being new.
+  assert.equal(parseNpus(NPU.x2.replace('X2 Elite Extreme - X2E94100', 'X3 Elite - X3E96100'), 'arm64')[0].supported, true);
 });
 
 // A known maker's NPU whose generation setup doesn't know: new hardware from Qualcomm, Intel or AMD before a kit update
@@ -587,6 +642,99 @@ test("a pulled model's files are checked against their pinned SHA-256s for this 
   assert.match((await V.checkPinned(m, 'g', { tools: home })).join(), /a\.bin is missing/);
   const x2 = V.NPU_CATALOG.routes.qualcomm.models[0].pinned!['snapdragon-x2'];
   assert.equal(Object.keys(x2.files).length, 6, 'the X2 Elite build of Qwen3-VL-4B, as measured on this laptop');
+  // The X Elite's build, AI Hub's for the first X (pulled on this laptop as an X Elite, 2026-10-15): its own context
+  // binaries, the same embedding weights.
+  const x1 = xElitePins;
+  assert.equal(x1.dir, x2.dir);
+  assert.deepEqual(Object.keys(x1.files), Object.keys(x2.files));
+  assert.deepEqual([x1.files['part1_of_4.bin'].size, x1.files['part1_of_4.bin'].sha256], [488951808, 'a1552f7c59984b76437bb6b097068d98ea2575c24e3761cb30389cca344c1d5d']);
+  assert.deepEqual(x1.files['embedding_weights.raw'], x2.files['embedding_weights.raw']);
+});
+
+/** Why a play was refused, or a failure to say it wasn't. */
+const refusedWhy = (p: ReturnType<typeof V.playGeneration>) => (p.kind === 'refused' ? p.why : `not refused: ${p.kind}`);
+
+test("an X2 plays an X Elite: GenieX on a data folder of its own that names AI Hub's X Elite, its pins checked there, the embeddings on Hexagon v73", async () => {
+  const real = V.NPU_CATALOG.routes.qualcomm;
+  const q = { ...real, models: [{ ...real.models[0], pinned: { ...real.models[0].pinned, 'snapdragon-x': xElitePins } }] };
+  // What each generation is played by: its Hexagon and AI Hub's name for its chip.
+  assert.deepEqual(Object.fromEntries(Object.entries(q.generations).map(([id, g]) => [id, [g.hexagonArch, g.aiHubChipset]])), {
+    'snapdragon-x': ['v73', 'qualcomm-snapdragon-x-elite'],
+    'snapdragon-x2': ['v81', 'qualcomm-snapdragon-x2-elite'],
+    'snapdragon-8cx': [undefined, undefined],
+  });
+  // Every generation a server runs on names its Hexagon: GGML_HEXAGON_ARCH is never empty (llama.cpp reads empty as arch 0).
+  for (const [id, g] of Object.entries(q.generations)) if (g.supported) assert.match(g.hexagonArch ?? '', /^v\d+$/, id);
+
+  const x2 = parseNpus(NPU.x2, 'arm64')[0];
+  const x1 = parseNpus(NPU.x1, 'arm64')[0];
+  const play = V.playGeneration(x2, 'snapdragon-x');
+  assert.equal(play.kind, 'played');
+  const p = (play as { played: import('./fixture/src/kit/npu-vendors.ts').Played }).played;
+  assert.deepEqual(p, { generation: 'snapdragon-x', on: 'snapdragon-x2', dataDir: '{tools}\\played\\snapdragon-x\\geniex', aiHubChipset: 'qualcomm-snapdragon-x-elite', hexagonArch: 'v73' });
+  assert.deepEqual(V.playGeneration(x2, 'snapdragon-x2'), { kind: 'own' });
+  // Refused: a newer Hexagon on an older one, a Snapdragon no server runs on, a generation the route hasn't, one whose
+  // own Hexagon isn't known (a Snapdragon setup doesn't know yet), and an NPU of a maker it doesn't know.
+  assert.equal(refusedWhy(V.playGeneration(x1, 'snapdragon-x2')), "the Snapdragon X2 Elite / X2 Plus (Hexagon v81) is newer than this NPU (v73): its Hexagon code doesn't run on an older one");
+  assert.match(refusedWhy(V.playGeneration(x2, V.LEGACY_SNAPDRAGON)), /^the Snapdragon 8cx, 8c, 7c, SQ1–SQ3, 850 or 835 \(Hexagon v68 or older\) can't be played: GenieX and Qualcomm AI Hub's model builds cover only/);
+  assert.match(refusedWhy(V.playGeneration(x2, 'meteor-lake')), /^Qualcomm's route has no generation meteor-lake \(it has snapdragon-x, snapdragon-x2, snapdragon-8cx, unknown\)/);
+  const x3 = parseNpus(NPU.x2.replace('X2 Elite Extreme - X2E94100', 'X3 Elite - X3E96100'), 'arm64')[0];
+  assert.match(refusedWhy(V.playGeneration(x3, 'snapdragon-x')), /this NPU's own Hexagon isn't known/);
+  assert.match(refusedWhy(V.playGeneration(parseNpus(NPU.other, 'x64')[0], 'snapdragon-x')), /a maker setup doesn't know/);
+  // Nothing is emulated on an Intel or AMD NPU (its server builds for the NPU it finds), nor in Qualcomm's guessed
+  // values: those run the generation's starting values alone.
+  assert.deepEqual(V.playGeneration(parseNpus(NPU.lunar, 'x64')[0], 'meteor-lake'), { kind: 'values' });
+  assert.deepEqual(V.playGeneration(x2, V.UNKNOWN_GENERATION), { kind: 'values' });
+
+  // The route as it plays: --data-dir before GenieX's command, its model found (and its pins checked) in that folder,
+  // GENIEX_DATADIR besides, and the embedding server's Hexagon code the X's.
+  const route = V.playedRoute(V.routeFor(q, 'snapdragon-x'), p);
+  assert.deepEqual(route.serve.slice(0, 3), ['--data-dir', '{tools}\\played\\snapdragon-x\\geniex', 'serve']);
+  assert.deepEqual(route.models[0].pull.slice(0, 4), ['--data-dir', '{tools}\\played\\snapdragon-x\\geniex', 'pull', 'qualcomm/Qwen3-VL-4B-Instruct:W4A16']);
+  assert.equal(route.models[0].present, '{tools}\\played\\snapdragon-x\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json');
+  assert.equal(route.models[0].pinned!['snapdragon-x'].dir, '{tools}\\played\\snapdragon-x\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct');
+  assert.deepEqual(route.env, { GENIEX_DATADIR: '{tools}\\played\\snapdragon-x\\geniex' });
+  assert.deepEqual(route.embedServer!.env, { ADSP_LIBRARY_PATH: '{tools}\\servers\\llama.cpp\\b11125-hexagon', GGML_HEXAGON_ARCH: 'v73' });
+  assert.deepEqual(q.serve.slice(0, 1), ['serve'], 'the route itself is left as it is');
+  assert.equal(q.embedServer!.env!.GGML_HEXAGON_ARCH, undefined, 'and natively llama.cpp finds the NPU\'s own Hexagon');
+
+  // Its config.json entry: GenieX started on that folder, the embeddings with GGML_HEXAGON_ARCH=v73.
+  const tools = mkdtempSync(path.join(home, 'played-'));
+  const dir = path.join(tools, 'played', 'snapdragon-x', 'geniex');
+  const entry = V.npuEntry(route, { tools, exe: 'C:\\GenieX CLI\\geniex.exe', embed: { exe: 'C:\\llama\\llama-server.exe', model: 'C:\\models\\e.gguf' } });
+  assert.deepEqual(entry.chat!.startCommand!.slice(0, 4), ['C:\\GenieX CLI\\geniex.exe', '--data-dir', dir, 'serve']);
+  assert.deepEqual(entry.chat!.env, { GENIEX_DATADIR: dir });
+  assert.deepEqual(entry.embed!.env, { ADSP_LIBRARY_PATH: path.join(tools, 'servers', 'llama.cpp', 'b11125-hexagon'), GGML_HEXAGON_ARCH: 'v73' });
+  assert.deepEqual(serverEnv(entry.embed!, {}).GGML_HEXAGON_ARCH, 'v73');
+
+  // Its folder names the X Elite to AI Hub; GenieX's own settings there are kept, and a byte-order mark read past.
+  assert.equal(V.setUpPlayed(p, tools), dir);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf8')), { chipset: 'qualcomm-snapdragon-x-elite' });
+  writeFileSync(path.join(dir, 'config.json'), '\uFEFF{"chipset":"qualcomm-snapdragon-x2-elite","skip_update":true}');
+  V.setUpPlayed(p, tools);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf8')), { chipset: 'qualcomm-snapdragon-x-elite', skip_update: true });
+  assert.match(V.playedSay(p, dir), /^this Snapdragon X2 Elite \/ X2 Plus \(Hexagon v81\) plays the Snapdragon X \/ X Plus \/ X Elite \(Hexagon v73\): GenieX serves AI Hub's qualcomm-snapdragon-x-elite build from .*played\\snapdragon-x\\geniex, and the embeddings run Hexagon v73 code/);
+
+  // The plan finds its model in that folder, never the real cache, and pulls it there.
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const support = { ...x2, generation: 'snapdragon-x', verified: false };
+  const plan = (files: string[]) => V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env: ENV, catalog: { ...V.NPU_CATALOG, routes: { ...V.NPU_CATALOG.routes, qualcomm: route } }, exists: disk(files) })!;
+  assert.equal(plan([G, 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json']).models[0].have, false, "the X2's own model in the real cache isn't the X Elite's");
+  const here = plan([G, path.join(dir, 'models', 'qualcomm', 'Qwen3-VL-4B-Instruct', 'geniex.json')]);
+  assert.equal(here.models[0].have, true);
+  assert.deepEqual(here.models[0].pull.slice(0, 3), ['--data-dir', dir, 'pull']);
+
+  // Its pins checked in that folder: small stand-ins with the pins' sizes and SHA-256s made to match them.
+  const models = path.join(dir, 'models', 'qualcomm', 'Qwen3-VL-4B-Instruct');
+  mkdirSync(models, { recursive: true });
+  const files: Record<string, { size: number; sha256: string }> = {};
+  for (const name of Object.keys(route.models[0].pinned!['snapdragon-x'].files)) {
+    writeFileSync(path.join(models, name), name);
+    files[name] = { size: name.length, sha256: await V.sha256File(path.join(models, name)) };
+  }
+  const standIn = { ...route.models[0], pinned: { 'snapdragon-x': { dir: route.models[0].pinned!['snapdragon-x'].dir, files } } };
+  assert.deepEqual(await V.checkPinned(standIn, 'snapdragon-x', { tools }), []);
+  assert.match((await V.checkPinned(route.models[0], 'snapdragon-x', { tools })).join(), /part1_of_4\.bin is 14 bytes, not 488951808/, "the real pins: the X Elite's build, which the stand-ins aren't");
 });
 
 test('setup as a command: asks with the size first; the NPU entry is written only after its test request, beside the card', async () => {
