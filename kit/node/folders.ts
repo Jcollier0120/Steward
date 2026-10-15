@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { pathKey } from './real-path.ts';
 
 /**
  * The folders Windows keeps for a person (Desktop, Documents, Downloads, Pictures, Music, Videos, Screenshots), where
@@ -90,12 +91,15 @@ export function knownFolders(): KnownFolders {
   return (known = foldersFrom(reg));
 }
 
-/** The paths given, each once (compared as Windows does, ignoring case), the empty ones left out. */
+/**
+ * The paths given, each once (compared as Windows does, ignoring case, and by their real paths: a folder reached
+ * through a junction or a mounted folder is one folder), the empty ones left out.
+ */
 export function uniqueFolders(list: (string | null | undefined | false)[]): string[] {
   const seen = new Set<string>();
   return list.filter((p): p is string => {
     if (!p) return false;
-    const k = path.resolve(p).toLowerCase();
+    const k = pathKey(p);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;

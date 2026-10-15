@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -18,6 +18,7 @@ const { mergeOne } = await import('../src/stages/merge.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
+const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const vouchStatus = { __typename: 'StatusContext', context: VOUCH_CONTEXT, state: 'SUCCESS' };
@@ -114,6 +115,65 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.equal(dirty.v.ok, false);
   assert.match(dirty.v.message, /uncommitted changes/);
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
+});
+
+test("steward vouch is stopped past its average time, with everything its checks started, and sets nothing; a pass is kept toward the average", async () => {
+  const f = fakeEmployee(path.join(tmp, 'slow'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/slow');
+  writeFileSync(path.join(f.checkout, 's.txt'), 's\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 's');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  // A test run that never ends, and a program it started that would write `marker` 3 s on, were it left running.
+  const marker = path.join(tmp, 'slow-left-running.txt');
+  const slow = path.join(tmp, 'slow.cjs');
+  writeFileSync(slow, `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran on'), 3000)`)}], { stdio: 'ignore' });\nsetTimeout(() => {}, 60_000);\n`);
+  const go = (test: string, overMs: number) => {
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 11, state: 'OPEN', headRefOid: sh(f.checkout, 'rev-parse', 'HEAD'), isCrossRepository: false });
+      if (a[0] === 'api') return ok('{}');
+    });
+    const e = employee(f.checkout, { fill: '', test: [test] });
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    const said: string[] = [];
+    return vouch(ctx, { dir: f.checkout, say: (l) => said.push(l), overMs }).then((v) => ({ v, r, e, said }));
+  };
+  const id = employee(f.checkout).id;
+  // Three whole-suite vouches of a tenth of a second: a limit of 1.6 s with 1.5 s over.
+  mkdirSync(path.dirname(vouchTimesFile()), { recursive: true });
+  writeFileSync(vouchTimesFile(), JSON.stringify({ [id]: { whole: [100, 100, 100], affected: [60_000, 60_000, 60_000] } }));
+
+  const t0 = Date.now();
+  const stopped = await go(`node "${slow}"`, 1500);
+  assert.equal(stopped.v.ok, false);
+  assert.match(stopped.v.message, /#11's checks failed at \w+: node .* was stopped at the run's time limit, 2 s, its last 3 whole-suite vouches' average of 0 s and 2 s more\. Nothing was recorded/);
+  assert.ok(Date.now() - t0 < 30_000, `stopped at its limit, not at the test's end (${Date.now() - t0} ms)`);
+  assert.ok(stopped.said.some((l) => /^time limit: 2 s, its last 3 whole-suite/.test(l)), stopped.said.join('\n'));
+  assert.ok(!stopped.r.gh.some((a) => a[0] === 'api'), 'no status set');
+  assert.deepEqual(vouchTimes()[id].whole, [100, 100, 100], 'a stopped run is no part of the average');
+  if (process.platform === 'win32') {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    assert.ok(!existsSync(marker), 'what the checks started was ended with them');
+  }
+
+  const passed = await go('node -e process.exit(0)', 60_000);
+  assert.equal(passed.v.ok, true, passed.v.message);
+  assert.equal(vouchTimes()[id].whole?.length, 4, 'a pass is kept toward the average');
+  assert.deepEqual(vouchTimes()[id].affected, [60_000, 60_000, 60_000], 'the affected runs apart');
+});
+
+test("a vouch's time limit: the average of the kind's last ten passes and five minutes, from the third; whole and affected apart", () => {
+  const times = { a: { whole: [10 * 60_000, 20 * 60_000, 30 * 60_000], affected: [60_000, 60_000] } };
+  assert.deepEqual(vouchLimit('a', 'whole', { times }), { ms: 25 * 60_000, why: "25 min, its last 3 whole-suite vouches' average of 20 min and 5 min more" });
+  assert.equal(vouchLimit('a', 'affected', { times }), null, 'two runs: no limit yet');
+  assert.equal(vouchLimit('b', 'whole', { times }), null, 'none yet');
+  writeFileSync(vouchTimesFile(), JSON.stringify({ c: { whole: [1, 'x', -5, null], affected: 'odd' }, d: 7 }));
+  assert.deepEqual(vouchTimes(), { c: { whole: [1] } }, 'what it can read');
+  for (let i = 1; i <= 12; i++) noteVouchTime('c', 'affected', i * 1000);
+  assert.deepEqual(vouchTimes().c.affected, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((s) => s * 1000), 'the last ten');
+  assert.deepEqual(vouchLimit('c', 'affected'), { ms: 7500 + 5 * 60_000, why: "5 min, its last 10 affected vouches' average of 8 s and 5 min more" });
+  noteVouchTime('c', 'whole', 0);
+  assert.deepEqual(vouchTimes().c.whole, [1], 'no time, no record');
 });
 
 test("after a vouch, the Steward running here is asked for a round now, with its server.json's token; nothing it says fails the vouch", async () => {
