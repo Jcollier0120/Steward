@@ -194,9 +194,41 @@ test("a new head of the PR whose kit and tools/kit.ts are the same keeps the tri
   again.c.settings.employees = [good];
   assert.equal(await kitTrialHold(again.c, me, pr({ headOid: caught })), null, again.c.lines.join('\n'));
   assert.ok(!again.c.lines.some((l) => l.includes('trial:')), again.c.lines.join('\n'));
-  assert.match(again.c.lines.join('\n'), /kit 1\.0\.1 was tried at [0-9a-f]{7}, and its kit and tools\/kit\.ts are the same at [0-9a-f]{7}: not tried again/);
+  assert.match(again.c.lines.join('\n'), /kit 1\.0\.1 was tried at [0-9a-f]{7}, and its kit and tools\/kit\.ts are the same at [0-9a-f]{7} but for versions and changelogs: not tried again/);
   const kept = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'));
   assert.deepEqual(kept[`7@${caught}`].mains, kept[`7@${head}`].mains);
+
+  // A push that adds a line to a kit file changes the kit: tried again.
+  writeFileSync(path.join(steward.checkout, 'kit', 'VERSION'), '1.0.2\n');
+  writeFileSync(path.join(steward.checkout, 'kit', 'CHANGELOG.md'), '# Kit\n\n## 1.0.2\n\nIts entry.\n');
+  writeFileSync(path.join(steward.checkout, 'kit', 'node', 'npu.ts'), "export const npu = 2;\n// Since kit 1.0.2.\n");
+  sh(steward.checkout, 'add', '-A');
+  sh(steward.checkout, 'commit', '--quiet', '-m', 'Kit 1.0.2: a line more');
+  const withLine = sh(steward.checkout, 'rev-parse', 'HEAD');
+  sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+  const lined = ctx();
+  lined.c.settings.employees = [good];
+  assert.equal(await kitTrialHold(lined.c, me, pr({ headOid: withLine })), null, lined.c.lines.join('\n'));
+  assert.ok(lined.c.lines.some((l) => l.startsWith('[good] kit 1.0.2 trial: done')), 'a line added to a kit file is a change: tried again');
+  // Caught up, a kit PR having merged below it: a new kit version, the kit's changelog, the Steward's version line, and
+  // the version in a kit file's line. Its verdict stands, at the new kit version.
+  writeFileSync(path.join(steward.checkout, 'kit', 'VERSION'), '1.0.3\n');
+  writeFileSync(path.join(steward.checkout, 'kit', 'CHANGELOG.md'), '# Kit\n\n## 1.0.3\n\nIts entry, renamed by the catch-up.\n\n## 1.0.2\n\nAnother PR\'s.\n');
+  writeFileSync(path.join(steward.checkout, 'kit', 'node', 'npu.ts'), "export const npu = 2;\n// Since kit 1.0.3.\n");
+  writeFileSync(path.join(steward.checkout, 'package.json'), '{ "version": "0.11.1" }\n');
+  sh(steward.checkout, 'add', '-A');
+  sh(steward.checkout, 'commit', '--quiet', '-m', 'Caught up: kit 1.0.3');
+  sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+  const versioned = sh(steward.checkout, 'rev-parse', 'HEAD');
+  const third = ctx();
+  third.c.settings.employees = [good];
+  assert.equal(await kitTrialHold(third.c, me, pr({ headOid: versioned })), null, third.c.lines.join('\n'));
+  assert.ok(!third.c.lines.some((l) => l.includes('trial:')), third.c.lines.join('\n'));
+  assert.match(third.c.lines.join('\n'), /kit 1\.0\.2 \(1\.0\.3 now\) was tried at [0-9a-f]{7}, and its kit and tools\/kit\.ts are the same at [0-9a-f]{7} but for versions and changelogs: not tried again/);
+  const now = JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${versioned}`];
+  assert.equal(now.kit, '1.0.3', 'kept at the kit version it carries now');
+  assert.equal(now.tree, sh(steward.checkout, 'rev-parse', `${versioned}:kit`), "its rollout's bump of the released kit finds it (trialpass.ts)");
+  assert.equal(now.from, `7@${withLine}`);
   sh(steward.checkout, 'reset', '--quiet', '--hard', head);
   sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
 });

@@ -49,7 +49,7 @@ import { withRepo } from './slots.ts';
  * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
  * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
  * (stages/trial.ts), each agent it fails moving with it in a ready PR of its own that pins the new kit and passes with
- * it there, or is labelled to say the agents change with it.
+ * it there, or is labelled to say the agents change with it. Kit PRs queued one behind another are tried together, once.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -562,6 +562,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // The kit's PRs (in the Steward's own repository) come first: one waits only for a lower one of the kit's, and the rest,
   // merged after it, are caught up to versions above it. The agents' PRs that take the new kit wait for it (prtest.ts).
   const kitQueue = new Map([...queue].filter(([n]) => prs.some((p) => p.number === n && raisesKit(p))));
+  // In the order they merge: the first one's trial tries those queued after it with it, once (trial.ts's combineKits).
+  const kitLine = [...kitQueue].sort((a, b) => compareVersions(a[1], b[1]) || a[0] - b[0]).flatMap(([n]) => prs.filter((p) => p.number === n));
   merge = merge.filter((pr) => {
     const v = queue.get(pr.number);
     const below = v ? lowestBelow(raisesKit(pr) ? kitQueue : queue, v) : null;
@@ -643,7 +645,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     let trial: string | null;
     try {
       // An agent that moves with the kit in a PR of its own doesn't hold it, and its line says so ("Manor moves with it in #135").
-      trial = await kitTrialHold(ctx, e, pr, { going: () => (trialGoing = true), note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
+      trial = await kitTrialHold(ctx, e, pr, { line: kitLine, going: () => (trialGoing = true), note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
     } catch (err) {
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
