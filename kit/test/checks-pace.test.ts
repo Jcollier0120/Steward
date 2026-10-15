@@ -21,9 +21,10 @@ const manorWith = (name: string, settings: unknown) => {
   return dir;
 };
 
-test("the cap by default: the gentle pace's, a quarter of the processor and two processors' worth at most", () => {
-  assert.equal(checksCap(18), 1111, '18 processors: two of them');
-  assert.equal(checksCap(16), 1250);
+test("the cap by default: a quarter of the processor and four processors' worth at most (the gentle pace's, two, up to 2.74.0)", () => {
+  assert.equal(checksCap(18), 2222, '18 processors: four of them');
+  assert.equal(checksCap(32), 1250, '32: four');
+  assert.equal(checksCap(16), 2500, 'sixteen: a quarter (four)');
   assert.equal(checksCap(8), 2500, 'eight: a quarter (two)');
   assert.equal(checksCap(4), 2500, 'four: a quarter (one)');
   assert.equal(checksCap(1), 2500);
@@ -45,12 +46,12 @@ test("the launcher's first word: the cap, memory per program and for the job, ru
 
 test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
   const none = path.join(home, 'no-manor');
-  assert.equal(checksPaceCap(none, {}, 18), 1111);
+  assert.equal(checksPaceCap(none, {}, 18), 2222);
   assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}, 18), 7000);
   assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}, 18), 0);
   assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}, 18), 0, '100%: no cap');
   assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}, 18), 1000, 'never under a tenth');
-  assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}, 18), 1111, 'anything else: as if unsaid');
+  assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}, 18), 2222, 'anything else: as if unsaid');
   assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}, 18), 0, "Settings' pace at full lifts it: the one switch");
   assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}, 18), 4000);
   assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }, 18), 6000, 'the variable says instead of Manor');

@@ -3,6 +3,7 @@ import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } f
 import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
+import { flushTree } from './flush.ts';
 import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, type InstallDeps } from './install.ts';
 import { ping } from './service.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
@@ -344,7 +345,11 @@ export function safeDeps(): SafeDeps {
       for (let i = 0; i < 40 && alive(pid); i++) await d.sleep(250);
       return !alive(pid);
     },
-    copy: (from, to) => cpSync(from, to, { recursive: true }),
+    // app.prev on the disk, as the release is before its swap (kit 2.73.3): what a rollback after a crash puts back.
+    copy: (from, to) => {
+      cpSync(from, to, { recursive: true });
+      flushTree(to);
+    },
     now: () => Date.now(),
     record: (u) => writeJson(unsafeFile(), { ...loadUnsafe(), [u.version]: u }),
     flagged: loadUnsafe,

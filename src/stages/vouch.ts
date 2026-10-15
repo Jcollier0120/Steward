@@ -6,9 +6,10 @@ import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
 import { assayedHead } from './assayed.ts';
-import { runChecks, type AffectedScope } from './bump.ts';
+import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
+import { noteVouchTime, vouchLimit } from './vouchtime.ts';
 import { hostFor } from '../hosts/index.ts';
 
 /**
@@ -19,7 +20,8 @@ import { hostFor } from '../hosts/index.ts';
  * HEAD, which must be the PR's head, with nothing uncommitted. Once they pass, it sets a commit status on that commit:
  * context VOUCH_CONTEXT, state success. Nothing is set when they fail. When the Assayer already passed the whole of the
  * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken;
- * and so is its affected pass, when the test files it ran take in every one the vouch would run itself.
+ * and so is its affected pass, when the test files it ran take in every one the vouch would run itself. Checks that run
+ * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts).
  *
  * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
  * record of who created the status), on the PR's current head, for a team PR from the repository itself that isn't the
@@ -97,9 +99,10 @@ export interface Vouched {
  * run there, and once they pass, the commit status set. Never vouches for what it didn't test.
  *
  * A branch with no PR at all is vouched for as it is pushed, once a version is claimed for it (claims.ts): the Steward's
- * round then opens its PR (branchesin.ts), and merges it as any vouched one.
+ * round then opens its PR (branchesin.ts), and merges it as any vouched one. `overMs` stands in for the time limit's
+ * five minutes over the average (a test's).
  */
-export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line: string) => void }): Promise<Vouched> {
+export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line: string) => void; overMs?: number }): Promise<Vouched> {
   const { run } = ctx;
   const url = originUrl(o.dir);
   const repo = originRepo(o.dir) ?? (url ? repoFromUrl(url) : null);
@@ -131,7 +134,7 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
  * The repository's checks run in the clone, and once they pass, the vouch set on `head`: null once it is, else why not
  * (their failure, or "its checks passed, but GitHub wouldn't take the status: …").
  */
-async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void }): Promise<string | null> {
+async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void; overMs?: number }): Promise<string | null> {
   // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
   // The Assayer already passed exactly this tree (assayed.ts), whole or the tests this change reaches: nothing run
@@ -145,8 +148,11 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
       : vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: assayed.chose }, o.head);
     return setVouch(ctx, e, o.repo, o.head, description);
   }
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}) });
+  // Stopped five minutes past its usual time (vouchtime.ts); a pass is kept toward that average.
+  const started = Date.now();
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind) => vouchLimit(e.id, kind, { overMs: o.overMs }) });
   if (failed) return failed;
+  noteVouchTime(e.id, checkKind(scope), Date.now() - started);
   return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
 }
 
@@ -172,7 +178,7 @@ export async function setVouch(ctx: Ctx, e: Employee, repo: string, head: string
  * A branch with no PR, vouched for as it is pushed: a version must be claimed for it (claims.ts), since its PR's title
  * and its place in the version queue come from that, and origin's head of it must be the clone's HEAD.
  */
-async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string; branch: string; head: string; say: (line: string) => void }): Promise<Vouched> {
+async function vouchBranch(ctx: Ctx, e: Employee, o: { dir: string; repo: string; branch: string; head: string; say: (line: string) => void; overMs?: number }): Promise<Vouched> {
   const claim = claimsOn(e.repo).find((c) => c.branch === o.branch);
   if (!claim) return { ok: false, message: `${o.branch} has no PR, and no version is claimed for it: claim one (claim-version ${e.id} --branch ${o.branch} --for "<what the work is>"), push, and vouch again; the Steward then opens its PR` };
   if (o.branch.startsWith('wright/') || o.branch.startsWith('steward/')) return { ok: false, message: `${o.branch} is ${o.branch.startsWith('wright/') ? "the Wright's" : "the Steward's"}: it opens its own PRs` };
