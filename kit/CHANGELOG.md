@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.73.4
+
+**An NPU's own timeouts are used: its requests run on them, and a model found still loading is given its cold load.**
+
+### What changed
+
+- **A request runs on its accelerator's own `timeouts`.** `core.requestTimeoutMs` has always taken an accelerator's `timeouts` in place of rules.json's, but npu.ts never passed them, so every request ran on the rules': 15 s plus 0.3 s a token, and 90 s more for a cold load. Now a route's own in npu-vendors.json (Intel's up to 60 s plus 0.4 s a token and a 360 s cold load on Meteor Lake and Arrow Lake, AMD's 120 s), and what setup measured on a generation nobody had measured and wrote into its entry (`calibrate`), are what its requests get. A Qualcomm NPU has none of its own, so its requests are unchanged.
+- **A server found still loading its model gets the cold-load allowance for its warm-up**, as one just started does (2.71.0): `requestBaseMs` plus the larger of rules.json's `coldLoadMs` and the accelerator's own. Before, when another agent had started the server, the warm-up got the caller's `timeoutMs` (a person's 20 s), or 105 s with none. That was too short for an NPU that compiles its model on first load, and the request was deferred while the model went on loading.
+- **A warm-up with no `timeoutMs` gets the same allowance**, for example the first request after the server's keepalive has unloaded the model. Before, it got rules.json's 105 s whatever the accelerator's own cold load.
+- **npu-bench's energy (`--energy`) is measured on a busy PC too.** Each window now takes at least one reading, and the working window lasts until a job has finished, with a reading taken after it. Before, a process held past a window's end before its first look took no reading, and the report said "the battery gave no discharge rate". This was also why its test failed now and then while other tests ran beside it.
+
+### For an agent
+
+- Nothing to do: requests on an Intel or AMD NPU, or on one setup measured, wait as long as its timeouts allow. A caller's own `timeoutMs` still decides a request, as before.
+
 ## 2.73.3
 **An install or a settings file written just before the PC crashes comes back whole, not as files full of nothing; and Intel's NPU 3720 is measured and verified, a short answer in 0.5 s, not 3.1.**
 

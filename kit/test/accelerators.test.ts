@@ -699,6 +699,50 @@ test('a busy server is waited on, never started twice, and looked at afresh each
   }
 });
 
+test("an accelerator's own timeouts: its requests run on them, and a server found still loading gets the cold-load allowance", async () => {
+  fresh();
+  noGames();
+  // The request (10 tokens) takes 600 ms, the warm-up (1 token) none.
+  const server = await fakeServer((b) => ({ text: 'warm', delayMs: b.max_tokens === 1 ? 0 : 600 }));
+  try {
+    const npu = (timeouts?: object) => new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: server.baseUrl, model: 'm' }, ...(timeouts ? { timeouts } : {}) }] }));
+    assert.equal((await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 })).text, 'warm', "on the rules' timeouts (15 s and more), it answers");
+    fresh();
+    // Its own (a fifth of a second for any answer, as a check might have measured) take the rules' place.
+    await assert.rejects(npu({ requestBaseMs: 200, requestPerTokenMs: 0 }).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), /timed out/);
+  } finally {
+    await server.close();
+  }
+
+  // GenieX found loading (another agent started it: 503 on /v1/models): a person's 300 ms request is waited
+  // through the warm-up that loads the model (800 ms), as after a start, instead of failing on its own timeout.
+  fresh();
+  let loading = true;
+  const seen: number[] = [];
+  const geniex = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    if (req.url === '/v1/models') return void res.writeHead(loading ? 503 : 200, { 'content-type': 'application/json' }).end(loading ? 'loading' : '{"data":[]}');
+    const body = JSON.parse(raw);
+    seen.push(body.max_tokens);
+    if (body.max_tokens === 1) await sleep(800);
+    if (!res.destroyed) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: 'loaded' }, finish_reason: 'stop' }] }));
+  });
+  await new Promise<void>((r) => geniex.listen(0, '127.0.0.1', r));
+  try {
+    const baseUrl = `http://127.0.0.1:${(geniex.address() as AddressInfo).port}`;
+    // Started a second time, this would exit with code 3, and the request would fail.
+    const model = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl, model: 'm', startCommand: [process.execPath, '-e', 'process.exit(3)'] } }] }));
+    setTimeout(() => (loading = false), 300);
+    const a = await model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10, timeoutMs: 300, lane: 'interactive' });
+    assert.equal(a.text, 'loaded');
+    assert.deepEqual(seen, [1, 10], 'the warm-up, then the request');
+  } finally {
+    geniex.closeAllConnections();
+    geniex.close();
+  }
+});
+
 test('every line full: background work is deferred, a person waiting still joins', async () => {
   fresh();
   noGames();
