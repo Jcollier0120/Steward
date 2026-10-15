@@ -146,11 +146,14 @@ async function settledKit(ctx: Ctx, newest: string | null, changelog: (kit: stri
   return urgent.length ? settleKit({ ...base, urgent }) : first;
 }
 
-/** A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. */
+/**
+ * A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. Or a
+ * kit PR a build left out (stage 'build': stages/build.ts): its head then, which doesn't board again until it moves.
+ */
 export interface RolloutHold {
   kit: string;
   head: string;
-  stage: 'bump' | 'push';
+  stage: 'bump' | 'push' | 'build';
   message: string;
   at: string;
 }

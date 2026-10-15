@@ -135,6 +135,10 @@ export class AzureDevOps implements SourceHost {
     return this.git(repo, 'patch', `/pullrequests/${n}`, { isDraft: false });
   }
 
+  draftPr(repo: string, n: number): Promise<Answer> {
+    return this.git(repo, 'patch', `/pullrequests/${n}`, { isDraft: true });
+  }
+
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);

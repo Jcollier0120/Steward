@@ -101,6 +101,24 @@ function stampFolder(dir: string, files: string[], changelog: string, name: stri
 }
 
 /**
+ * The fragments (changes/<branch>.md) in a worktree at a build's stack, stamped and committed there (stages/build.ts):
+ * one version for all of them, as a PR's stamp gives them (stampFragments), the version files settled to it. Null when
+ * there are none; else the version, or why it couldn't.
+ */
+export async function stampFragmentsAt(ctx: Ctx, e: Employee, dir: string, o: { released: string[]; taken: string[] }): Promise<{ version: string } | { error: string } | null> {
+  const fragments = fragmentsIn(dir, CHANGES_DIR);
+  if (!fragments.length) return null;
+  const base = agreedVersion(e.versionFiles.map((f) => [f, existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), 'utf8') : null] as [string, string | null]));
+  if (!('version' in base)) return { error: `its version can't be read: ${base.error}` };
+  const r = stampFragments(dir, fragments, CHANGELOG, e.name, { base: base.version, released: o.released, taken: o.taken });
+  if ('error' in r) return r;
+  const changed = [...settleVersion(dir, settledFiles(dir, e.versionFiles), r.version), CHANGELOG, ...fragments];
+  await git(ctx.run, dir, 'add', '-A', '--', ...new Set(changed));
+  await git(ctx.run, dir, 'commit', '--quiet', '-m', `${e.name} ${r.version}: version and changelog, stamped by the Steward`);
+  return { version: r.version };
+}
+
+/**
  * One pull request stamped before it merges, as the module's comment says. `released` are the employee's released
  * versions, `taken` the versions other open work holds (other PRs and claims); `kit` the same for the kit, in the
  * Steward's own repository. Never pushes to the employee's branch.

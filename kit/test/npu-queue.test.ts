@@ -14,12 +14,18 @@ import {
   readLine,
   withNpuTurn,
 } from './fixture/src/kit/npu-queue.ts';
+import { RULES } from './fixture/src/kit/rules.ts';
 
 // The node part's turns on a real disk. The spec's vectors run in vectors.test.ts.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-// Every test's lock folder is under one temporary folder, removed when the tests end.
+// Every test's lock folder is under one temporary folder, removed when the tests end. Windows can still have a file in
+// it open for a moment (a reader just exited), so the removal tries again, and a folder left behind fails nothing.
 const root = mkdtempSync(path.join(os.tmpdir(), 'fixture-queue-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(() => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  } catch {}
+});
 const scratch = () => path.join(mkdtempSync(path.join(root, 't-')), 'locks', 'npu');
 
 /** Holds the lock the way any holder does (a live pid), so waiters line up behind it. */
@@ -135,24 +141,39 @@ test(
       // tries (rules.json's removeTries × removeRetryMs). Run plainly (npm test), it is tested as before.
       (!!process.env.KIT_CHECKS_TURN && "at the checks pace the reader can be held back past the release's tries"),
   },
-  async () => {
+  async (t) => {
     const lockDir = scratch();
     let exited!: Promise<number | null>;
+    let said = '';
     await withNpuTurn(lockDir, async () => {
       // Opened the way Python's open() and .NET's File.ReadAllText do (sharing read and write, not
-      // delete), as a waiter in another tool checking the holder does, and held across the release.
+      // delete), as a waiter in another tool checking the holder does, and held across the release. It says how long
+      // it really held the file: on a busy PC, far longer than its 200 ms.
       const hold =
-        "$f = [IO.File]::Open($env:OWNER, 'Open', 'Read', 'ReadWrite'); [Console]::Out.WriteLine('open'); [Console]::Out.Flush();" +
-        ' Start-Sleep -Milliseconds 200; $f.Close()';
+        "$f = [IO.File]::Open($env:OWNER, 'Open', 'Read', 'ReadWrite'); $w = [Diagnostics.Stopwatch]::StartNew();" +
+        " [Console]::Out.WriteLine('open'); [Console]::Out.Flush(); Start-Sleep -Milliseconds 200; $f.Close();" +
+        " [Console]::Out.WriteLine('held ' + $w.ElapsedMilliseconds)";
       const reader = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', hold], {
         env: { ...process.env, OWNER: path.join(lockDir, 'owner.json') },
         stdio: ['ignore', 'pipe', 'inherit'],
       });
+      reader.stdout.on('data', (d) => (said += d));
       exited = new Promise((resolve) => reader.on('exit', resolve));
       await Promise.race([new Promise((r) => reader.stdout.once('data', r)), exited.then(() => assert.fail('the reader never opened owner.json'))]);
     });
-    assert.ok(!existsSync(lockDir), 'the lock is free when the turn ends, not when it goes stale');
+    const free = !existsSync(lockDir);
     assert.equal(await exited, 0);
+    // A reader held back past the release's tries (rules.json's removeTries × removeRetryMs) on a PC busy with other
+    // work (the Steward's whole suite beside its kit trials, unpaced) leaves the lock to go stale whatever the release
+    // does: that run can't tell, so it says so rather than fail. A reader that let go in time must find the lock free.
+    const held = Number(/held (\d+)/.exec(said)?.[1]);
+    const tries = RULES.lock.removeTries * RULES.lock.removeRetryMs;
+    if (!free && held > tries) {
+      rmSync(lockDir, { recursive: true, force: true });
+      t.skip(`the reader held owner.json ${held} ms, past the release's ${tries} ms of tries: the PC was too busy to tell`);
+      return;
+    }
+    assert.ok(free, `the lock is free when the turn ends, not when it goes stale (the reader held owner.json ${held} ms)`);
   },
 );
 

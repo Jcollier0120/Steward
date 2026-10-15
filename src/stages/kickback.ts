@@ -42,6 +42,8 @@ interface Kicked {
   at: string;
   /** The files it conflicted in: a comment is said again only when they change (none kept before 0.35.49: taken as the same). */
   files?: string[];
+  /** Dropped from a build (dropFromBuild), not sent back for a conflict: the build's time, as pipeline.json names it. */
+  build?: string;
 }
 
 const code = (s: string) => `\`${s}\``;
@@ -75,7 +77,7 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   const kept = readJson<Record<string, Kicked>>(kickbacksFile(), {});
   const was = kept[key];
   const sameFiles = (f?: string[]) => !f || (f.length === files.length && f.every((x) => files.includes(x)));
-  if (was && was.head === pr.headOid && (was.branch === (branchAt ?? '') || (!was.closed && sameFiles(was.files)))) return { note: was.note, closed: was.closed, sent: true };
+  if (was && !was.build && was.head === pr.headOid && (was.branch === (branchAt ?? '') || (!was.closed && sameFiles(was.files)))) return { note: was.note, closed: was.closed, sent: true };
   const where = `it conflicts with ${e.branch} in ${files.join(', ')}`;
   const author = authorOf(pr);
   let done: { note: string; closed: boolean } | null = null;
@@ -104,4 +106,42 @@ export async function kickBack(ctx: Ctx, e: Employee, pr: PrInfo, files: string[
   kept[key] = { head: pr.headOid, branch: branchAt ?? '', ...done, at: new Date().toISOString(), files };
   writeJson(kickbacksFile(), Object.fromEntries(Object.entries(kept).slice(-300)));
   return { ...done, sent: true };
+}
+
+/** What a build that dropped a PR says on it (dropFromBuild). */
+export function dropComment(pr: PrInfo, e: Pick<Employee, 'branch'>, o: { build: string; why: string; with: number[]; author: Author }): string {
+  const clash = o.with.length
+    ? `It clashed with ${o.with.length === 1 ? `#${o.with[0]}` : `one of ${o.with.map((n) => `#${n}`).join(', ')}`}, under it in the build, which passed without it`
+    : `It fails on ${code(e.branch)} as it is now, which moved on since it passed at its own head`;
+  const who = o.author === 'claude' ? 'Over to the Claude Code session that opened it' : `Over to you, @${pr.author}`;
+  return [
+    `The Steward took this out of ${o.build}: the build's checks failed with it, and passed without it.`,
+    '',
+    `${clash}: ${o.why}.`,
+    '',
+    `${who}: merge ${code(e.branch)} into ${code(pr.head)}, fix it, push (a merge commit, never a force-push), and mark it ready again. It goes into the next build. It is a draft until then, and the rest of the build left without it.`,
+  ].join('\n');
+}
+
+/**
+ * A PR a build dropped (stages/build.ts): it broke the build's checks together with the PRs under it, or on its branch
+ * as it is now. Turned back into a draft, with a comment that names what failed and the PR it clashed with, and kept
+ * in kickbacks.json beside the conflicts sent back, once for its head. Its author marks it ready again for the next
+ * build. What happened, for the round's line; `sent` when the comment was left on it.
+ */
+export async function dropFromBuild(ctx: Ctx, e: Employee, pr: PrInfo, o: { build: string; why: string; with: number[] }): Promise<{ note: string; sent: boolean }> {
+  const key = `${e.repo}#${pr.number}`;
+  const kept = readJson<Record<string, Kicked>>(kickbacksFile(), {});
+  const was = kept[key];
+  if (was?.build === o.build && was.head === pr.headOid) return { note: was.note, sent: true };
+  const host = hostFor(ctx, e);
+  const said = await failure(host.commentPr(e.repo, pr.number, dropComment(pr, e, { ...o, author: authorOf(pr) })));
+  const drafted = await failure(host.draftPr(e.repo, pr.number));
+  const clash = o.with.length ? ` with ${o.with.map((n) => `#${n}`).join(', ')}` : ` on ${e.branch}`;
+  const note = `dropped from ${o.build}: it failed${clash} (${o.why})${drafted ? `, but couldn't be turned back into a draft (${drafted})` : ', and is a draft again'}${said ? `; the Steward couldn't say so on it (${said})` : ''}`;
+  ctx.log(`[${e.id}] #${pr.number}: ${note}`);
+  if (said) return { note, sent: false };
+  kept[key] = { head: pr.headOid, branch: '', note, closed: false, at: new Date().toISOString(), build: o.build };
+  writeJson(kickbacksFile(), Object.fromEntries(Object.entries(kept).slice(-300)));
+  return { note, sent: true };
 }
