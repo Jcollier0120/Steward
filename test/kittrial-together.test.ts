@@ -12,9 +12,10 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-kit-together-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { kitTrialHold, kitTrialsFile, TOGETHER, triedWith, underLoad, UNDER_LOAD, KIT_BREAKS_LABEL } = await import('../src/stages/trial.ts');
+const { kitTrialHold, kitTrialsFile, TOGETHER, trialGoingAt, triedWith, underLoad, UNDER_LOAD, KIT_BREAKS_LABEL } = await import('../src/stages/trial.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
+type KitTrial = import('../src/stages/trial.ts').KitTrial;
 
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 const LOG = (...entries: string[]) => `# Kit\n\n${entries.map((e) => `## ${e}\n\nWhat ${e} brings.\n`).join('\n')}`;
@@ -176,4 +177,17 @@ test('what looks like load: a test killed, EBUSY, a run stopped at its time limi
   assert.ok(!underLoad(failed('npm test failed (exit 1): "the label" (Expected "NPU" to equal "the NPU"), twice')), "a test the kit breaks is the kit's");
   assert.ok(!underLoad({ ...failed('EBUSY'), outcome: 'done' as const }));
   assert.ok(!UNDER_LOAD.test('null !== undefined'));
+});
+
+test('a trial still going holds off catching up for conflicts: its own, one with agents to try once more, or one together at this head', () => {
+  const t = (o: Partial<KitTrial>): KitTrial => ({ ...o, kit: '1.0.1', failed: [], passed: 1, at: '2026-10-14T10:00:00Z' });
+  const [a, b] = [pr(7, head7), pr(8, head8)];
+  assert.ok(trialGoingAt(a, { [`7@${head7}`]: t({ pending: ['good'] }) }));
+  assert.ok(trialGoingAt(a, { [`7@${head7}`]: t({ retry: [{ id: 'busy', name: 'Busy', message: 'EBUSY' }] }) }), 'one to try once more');
+  assert.ok(!trialGoingAt(a, { [`7@${head7}`]: t({}) }), 'done');
+  const together = (left: Partial<KitTrial>, head = head8) => ({ [`${TOGETHER}7@${head7}+8@${head}`]: t({ ...left, members: [{ number: 7, head: head7, kit: '1.0.1', files: [] }, { number: 8, head, kit: '1.0.2', files: [] }] }) });
+  assert.ok(trialGoingAt(b, together({ pending: ['good'] })), 'tried together with the first');
+  assert.ok(!trialGoingAt(b, together({})), 'tried together, done');
+  assert.ok(!trialGoingAt(b, together({ pending: ['good'] }, head7)), 'together at another head of it');
+  assert.ok(!trialGoingAt(pr(8, head8, { files: ['src/app.ts'] }), together({ pending: ['good'] })), 'raises no kit');
 });
