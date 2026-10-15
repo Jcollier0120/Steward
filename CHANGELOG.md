@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.38
+
+**Kit 2.74.5: the NPU's local AI gets faster on PCs already set up, Intel's NPU 3720 writes about 13% faster, and a newer NPU is tried instead of refused.**
+
+### What changed
+
+- The kit the Steward hands out (2.74.5) brings a better NPU command to PCs set up by an older kit. Before, a PC kept the command it was set up with until its NPU was set up again. Now the agent that keeps the local AI running (the Smith, else Reeve) tries the new command while nobody is using the NPU, and switches to it only if it answers properly. On an Intel NPU 3720, a short question that took 3.1 s now takes 0.5 s.
+- On an Intel NPU 3720 (Core Ultra 200 series), the local AI writes about 13% faster and holds about 1.4 GB less memory after long, varied prompts. Its first start on a PC compiles once, in about a minute instead of half a minute.
+- An NPU from Intel, AMD or Qualcomm that setup doesn't know yet, such as a newer generation, is no longer refused. Setup tries it on the most cautious settings its maker's NPUs use, and keeps it only if it passes setup's test.
+- This brings together three NPU changes made on a second PC, under one version.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Agents get it as they pin the kit.
+
 ## 0.36.31
 
 **Kit 2.74.3: on the pages of the agents your AI assistant calls, Needs you sits closer to the top and can show what waits under it.**

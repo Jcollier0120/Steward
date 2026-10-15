@@ -75,7 +75,7 @@ An NPU the manor can't use is still recorded in `hardware.json` as an NPU (so a 
 
 A new NPU from Qualcomm, Intel or AMD whose PCI id (or Snapdragon name) isn't in `npu-vendors.json` used to be refused ("isn't one setup knows yet"), though its maker's server most likely runs on it. It is now **tried**, on guessed values. Its generation is `unknown` (`UNKNOWN_GENERATION`), which no catalog stores: `unknownGeneration` works it out from the route's supported generations, the most cautious of each (all through `routeFor`):
 
-- **the smallest cap** of any of them, never over the route's, with that generation's `args` (so OpenVINO's `--max_prompt_len` and prompt chunks match the cap: the NPU 3720's 2,048 and 128 on Intel), and each kind's cap at most that;
+- **the smallest cap** of any of them, never over the route's, with that generation's `args` (so OpenVINO's `--max_prompt_len` and prompt chunks match the cap: the NPU 3720's 2,048 and 128 on Intel, with its `BEST_PERF` and 32 cached blocks), and each kind's cap at most that;
 - **the longest timeouts and cold load**, each on its own (Intel: Arrow Lake-S's 60 s + 0.4 s a token and 360 s);
 - **the most memory** per kind (`memoryGb`), so the memory check is the strictest;
 - **the latest driver minimum** (Intel: Panther Lake's 32.0.100.5540, so an unknown Intel NPU needs it; AMD: the route's 32.0.203.311).

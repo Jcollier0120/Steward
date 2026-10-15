@@ -2,39 +2,9 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.74.5
 
-**Intel's NPU 3720 writes about 13% faster and holds 1.4 GB less after varied prompts.**
-
-### What changed
-
-- **npu-vendors.json, Intel's `meteor-lake` and `arrow-lake`** (the NPU 3720): `--plugin_config` is `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"128","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"32"}` (was the 128-token chunks alone). From 20 quick benchmarks on a Core Ultra 5 225U (2026-10-14):
-  - `BEST_PERF` writes 10.7–11.6 tokens a second against 9.6–10.5. The benchmark's jobs take 22.6–24.3 s against 26.0–27.8, five runs each and never overlapping, with the same reads and answers. Its first compile takes 57–62 s against 27–39, once per PC and driver.
-  - OpenVINO Model Server turns the NPU's prefix caching on by itself. Its 128 blocks left the server holding 5.2 GB after a dozen varied long prompts. 32 blocks (4,096 tokens) held 3.8 GB with the same times.
-- **`meteor-lake`'s cold load is 120 s** (was 60): the slowest first compile with `BEST_PERF`, 62 s, with half again. Its chat memory is 4.3 GB (was 3.9), the working set at the end of the benchmark. `arrow-lake` takes the same memory; its 360 s cold load stays.
-- Unchanged, as measured: 128-token chunks (64 read 1,740 tokens in 8.1 s against 6.3; 256 answered short in 0.78 s against 0.5) and the 2,048-token cap (3,072 held 0.4 GB more and read 5–10% slower; 4,096 held 1.0 GB more). `PREFILL_HINT` `STATIC`, static prefill attention and `NPU_TURBO` were no faster.
-- spec/NPU-VENDORS.md: the sweep's numbers, and how the prefix cache makes the benchmark's repeated reads faster than a new prompt's.
-
-### For an agent
-
-- Nothing to do. A PC set up by an earlier kit keeps its command until its NPU is set up again. Its next start with this command compiles once, in about a minute.
-
-## Unreleased (its version needs claiming on the main laptop)
-**A known maker's NPU of a generation setup doesn't know is tried on guessed values, the most cautious its route has, instead of refused.**
-
-### What changed
-
-- **npu-vendors.ts**: an NPU from Qualcomm, Intel or AMD whose PCI id (or Snapdragon name) isn't in `npu-vendors.json` is now generation `unknown` (`UNKNOWN_GENERATION`), not null. `unknownGeneration(route)` works its values out from the route's supported generations: the smallest cap (with that generation's `args`, so OpenVINO's `--max_prompt_len` matches), the longest timeouts and cold load, the most memory, the latest driver minimum; `verified: false`. `generationOf(route, id)` gives it, and `routeFor` takes it. `npuSupport` marks it `guessed: true` and labels it "AMD NPU of a generation setup doesn't know yet, device 17F1". On Intel that is 2,048 tokens, the NPU 3720's prompt chunks, 60 s + 0.4 s a token, a 360 s cold load and driver 32.0.100.5540; on AMD, XDNA 2's values. Qualcomm's 2,400-token cap is never raised. AMD's first XDNA (`1502`) and unknown makers are still refused. `MAKERS` is exported.
-- **setup.ts**: such an NPU goes through setup's test request and calibration like any unverified generation, and is kept only if it passes. Its note says it runs on guessed values (`npuGuessedNote`), kept in `npu-note.json` and shown by the report; the plan and the report say it is "tried on guessed values, the most cautious it has, and kept only if it passes its test".
-- **npu-check.ts**: on such an NPU, the detect step says it runs on guessed values and prints its PCI id ready for `devices` (`unknownDevice`, `unknownDeviceSay`; the report's `unknownDevice`). Every step passing gives a patch adding it as a new verified generation, `<maker>-<pci id>`, with its `devices` entry (`checkPatch`'s `device`). `--generation unknown` rehearses the guessed values.
-- spec/NPU-VENDORS.md: Detection (the guessed values, the note, and why FastFlowLM 1.0.7's `flm validate` isn't AMD's check: it looks for PCI `17F0` alone), the NPU check, and what's unverified.
-
-### For an agent
-
-- Nothing to do: take the kit and release as usual. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
-
-## Unreleased
-**A PC set up by an older kit gets this kit's NPU command: the keeper tests it when nobody uses the NPU, and writes it only when it answers.**
+**The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, and a known maker's NPU of a generation setup doesn't know is tried instead of refused.**
 
 ### What's new
 
@@ -46,11 +16,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What changed
 
-- **A command that changed between kits now reaches PCs already set up.** Before, it reached only PCs set up after it: setup leaves a configured NPU alone. An Intel NPU 3720 set up with the shipped command answered a short question in 3.1 s; with the chunked command, in 0.5 s. So the NPU 3720's prompt chunks (kit 2.73.3) reach the PCs set up before them, without setting them up again. Spec: ACCELERATORS.md (the keeper), NPU-VENDORS.md (A later kit's command).
+- **A command that changed between kits now reaches PCs already set up.** Before, it reached only PCs set up after it: setup leaves a configured NPU alone. An Intel NPU 3720 set up with the shipped command answered a short question in 3.1 s; with the chunked command, in 0.5 s. So the NPU 3720's prompt chunks (kit 2.73.3), and its settings below, reach the PCs set up before them, without setting them up again. Spec: ACCELERATORS.md (the keeper), NPU-VENDORS.md (A later kit's command).
+- **npu-vendors.json, Intel's `meteor-lake` and `arrow-lake`** (the NPU 3720): `--plugin_config` is `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"128","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"32"}` (was the 128-token chunks alone). From 20 quick benchmarks on a Core Ultra 5 225U (2026-10-14):
+  - `BEST_PERF` writes 10.7–11.6 tokens a second against 9.6–10.5. The benchmark's jobs take 22.6–24.3 s against 26.0–27.8, five runs each and never overlapping, with the same reads and answers. Its first compile takes 57–62 s against 27–39, once per PC and driver.
+  - OpenVINO Model Server turns the NPU's prefix caching on by itself. Its 128 blocks left the server holding 5.2 GB after a dozen varied long prompts. 32 blocks (4,096 tokens) held 3.8 GB with the same times.
+- **`meteor-lake`'s cold load is 120 s** (was 60): the slowest first compile with `BEST_PERF`, 62 s, with half again. Its chat memory is 4.3 GB (was 3.9), the working set at the end of the benchmark. `arrow-lake` takes the same memory; its 360 s cold load stays.
+- Unchanged, as measured: 128-token chunks (64 read 1,740 tokens in 8.1 s against 6.3; 256 answered short in 0.78 s against 0.5) and the 2,048-token cap (3,072 held 0.4 GB more and read 5–10% slower; 4,096 held 1.0 GB more). `PREFILL_HINT` `STATIC`, static prefill attention and `NPU_TURBO` were no faster.
+- **npu-vendors.ts**: an NPU from Qualcomm, Intel or AMD whose PCI id (or Snapdragon name) isn't in `npu-vendors.json` is now generation `unknown` (`UNKNOWN_GENERATION`), not null. `unknownGeneration(route)` works its values out from the route's supported generations: the smallest cap (with that generation's `args`, so OpenVINO's `--max_prompt_len` matches), the longest timeouts and cold load, the most memory, the latest driver minimum; `verified: false`. `generationOf(route, id)` gives it, and `routeFor` takes it. `npuSupport` marks it `guessed: true` and labels it "AMD NPU of a generation setup doesn't know yet, device 17F1". On Intel that is 2,048 tokens, the NPU 3720's plugin settings (its prompt chunks, `BEST_PERF` and 32 cached blocks), 60 s + 0.4 s a token, a 360 s cold load and driver 32.0.100.5540; on AMD, XDNA 2's values. Qualcomm's 2,400-token cap is never raised. AMD's first XDNA (`1502`) and unknown makers are still refused. `MAKERS` is exported.
+- **setup.ts**: such an NPU goes through setup's test request and calibration like any unverified generation, and is kept only if it passes. Its note says it runs on guessed values (`npuGuessedNote`), kept in `npu-note.json` and shown by the report; the plan and the report say it is "tried on guessed values, the most cautious it has, and kept only if it passes its test".
+- **npu-check.ts**: on such an NPU, the detect step says it runs on guessed values and prints its PCI id ready for `devices` (`unknownDevice`, `unknownDeviceSay`; the report's `unknownDevice`). Every step passing gives a patch adding it as a new verified generation, `<maker>-<pci id>`, with its `devices` entry (`checkPatch`'s `device`). `--generation unknown` rehearses the guessed values.
+- spec/NPU-VENDORS.md: the NPU 3720 sweep's numbers, and how the prefix cache makes the benchmark's repeated reads faster than a new prompt's; Detection (the guessed values, the note, and why FastFlowLM 1.0.7's `flm validate` isn't AMD's check: it looks for PCI `17F0` alone), the NPU check, and what's unverified.
 
 ### For an agent
 
-- Nothing to do: the Smith, else Reeve, runs it in its look. An agent that keeps the servers itself with `keeperLook` gets it the same way.
+- Nothing to do: the Smith, else Reeve, runs the refresh in its look, and an agent that keeps the servers itself with `keeperLook` gets it the same way. A PC with an NPU 3720 set up by an earlier kit takes the new command once its NPU is idle; its first start with it compiles once, in about a minute. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
 
 ## 2.74.3
 

@@ -141,7 +141,10 @@ test("a known maker's NPU of a generation setup doesn't know: tried on the most 
   );
   const ir = V.routeFor(intel, V.UNKNOWN_GENERATION);
   assert.equal(ir.serve[ir.serve.indexOf('--max_prompt_len') + 1], '2048', "OpenVINO compiles for the cap it's given");
-  assert.deepEqual(JSON.parse(ir.serve[ir.serve.indexOf('--plugin_config') + 1]), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128' });
+  // The NPU 3720's plugin settings as they are (its 128-token chunks among them), whatever it is tuned to.
+  const plugin = (r: { serve: string[] }) => JSON.parse(r.serve[r.serve.indexOf('--plugin_config') + 1]);
+  assert.deepEqual(plugin(ir), plugin(V.routeFor(intel, 'meteor-lake')));
+  assert.equal(plugin(ir).NPUW_LLM_PREFILL_CHUNK_SIZE, '128');
   for (const id of Object.keys(intel.generations)) {
     const r = V.routeFor(intel, id);
     assert.ok(ir.maxContextTokens <= r.maxContextTokens && ir.timeouts.coldLoadMs! >= r.timeouts.coldLoadMs! && ir.timeouts.requestPerTokenMs! >= r.timeouts.requestPerTokenMs!, `no more daring than ${id}`);
