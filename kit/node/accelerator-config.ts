@@ -634,11 +634,15 @@ export function applyChange(current: Record<string, any>, change: ConfigChange, 
   return next;
 }
 
-/** Written whole: a temporary file, then a rename (tried again while Windows refuses it for a moment), so a reader never sees half of it. */
+/**
+ * Written whole: a temporary file, on the disk before the rename (kit 2.73.3: a crash then leaves the old file or the
+ * new one, never one of NUL bytes), then the rename (tried again while Windows refuses it for a moment), so a reader
+ * never sees half of it.
+ */
 export function writeJsonWhole(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { flush: true });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, file);
