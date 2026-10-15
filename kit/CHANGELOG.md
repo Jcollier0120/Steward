@@ -23,10 +23,14 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - If your runner stretches a paced command's time limit by a fixed amount, use `slower` and `waitMs` from `pacedCommand()` instead: `timeoutMs * (paced.slower ?? 4) + (paced.waitMs ?? 0)`, as the Steward's run.ts does.
 - If you call `checksCap(processors)`, drop the argument: the default no longer depends on the processors.
 - Nothing else to do to take it.
-## Unreleased
+
+### What changed in the NPU benchmark
+
+Made on WEASELDEV02 (#255, #257, #258) and released first in this version.
+
 **The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, a candidate's report carries its files' SHA-256s, and its spec says how to run it on a PC.**
 
-### What changed
+#### What changed
 
 - **npu-bench.ts runs the route as setup does on this NPU's generation** (`routeFor`, as the NPU check already did). Before, it took the route's own values:
   - on a Meteor Lake NPU 3720, the report said cap 4096, while the server ran at the generation's 2048;
@@ -55,7 +59,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - drops the `streams` a route was said to declare in `npu-vendors.json`, which none does: the bench sees whether each answer was streamed and marks the run `not-streamed` (or `no-usage`) when not. Whether GenieX streams, with usage in its last chunk, is still to be checked on the X2 Elite;
   - gains **Running it on a PC**, a runbook an agent can follow unaided, with a Snapdragon section: the Steward's own kit, an Arm64 Node, the conditions, pausing the keeper and stopping the NPU's servers, the quick then full run, `--energy` on battery, and what to send back. On a Snapdragon it covers GenieX's quirks, its one model at a time, the 2,400-token cap and the ~8K prompt that bluescreened the X2 Elite, why `--device GPU` and `--cap` are refused there, and the streaming and energy still to be seen.
 
-### For an agent
+#### For an agent
 
 - Nothing to do.
 
