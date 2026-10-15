@@ -423,15 +423,15 @@
       "recycle": false,
       "idleStop": {
         "coldStartMs": {
-          "chat": 4000,
-          "embed": 4000
+          "chat": 6900,
+          "embed": 2800
         },
         "minutes": {
           "chat": 5,
           "embed": 5
         },
-        "basis": "Chat: started to its first answer in 4 s from the compile cache (--cache_dir) on a Lunar Lake, 2026-10-12; the first compile (31 to 41 s there, minutes on an NPU 3720) is once per PC and model, not per start. Embeddings: not timed apart; a 0.6B model from the same cache, taken as the chat model's 4 s. The NPU 3720's own start isn't measured: npu-check --idle measures it.",
-        "verify": "On a Lunar Lake laptop with 16 GB (Windows shows 15.3 to 15.9), with OpenVINO Model Server set up by setup: stop the manor's own NPU servers first (or let the keeper stop them), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It starts the chat and embedding servers through the kit, has the keeper stop both once the NPU has been unused a minute (idle-stop: their processes gone, the memory freed said), asks again as a person would with a 20 s timeout (idle-cold-answer: told the local AI is waking, answered within the cold load; the time is this PC's cold start), and checks a request in flight is never stopped (idle-in-flight). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
+        "basis": "The slowest measured, rounded up to a tenth of a second: npu-check --idle on the NPU 3720 (Core Ultra 5 225U, 2026-10-15), every step passing, its servers stopped by the keeper after a minute unused and woken by a person's request: chat started to its first answer in 6.85 s, embeddings in 2.74 s, from the compile cache (--cache_dir). On a Lunar Lake chat started in 4 s (2026-10-12), and its embeddings weren't timed apart. The first compile (31 to 41 s there, about a minute on an NPU 3720 with BEST_PERF) is once per PC and model, not per start. 20 times either cold start is under 5 minutes, so 5.",
+        "verify": "Run on the NPU 3720 (2026-10-15); still to run on a Lunar Lake laptop with 16 GB (Windows shows 15.3 to 15.9), with OpenVINO Model Server set up by setup: stop the manor's own NPU servers first (or let the keeper stop them), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It starts the chat and embedding servers through the kit, has the keeper stop both once the NPU has been unused a minute (idle-stop: their processes gone, the memory freed said), asks again as a person would with a 20 s timeout (idle-cold-answer: told the local AI is waking, answered within the cold load; the time is this PC's cold start), and checks a request in flight is never stopped (idle-in-flight). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
       },
       "embeddings": "on the NPU, through a second OpenVINO Model Server of its own (one process serves one task from the command line): OpenVINO's channel-wise INT4 Qwen3-Embedding-0.6B, last-token pooling, compiled for 2,048 tokens. The NPU compiles a fixed shape, so every request costs the full 2,048 and a longer one is refused (400); a dense 1,500-character chunk (UUIDs, hex, base64) is up to 1,338 tokens, so 1,024 wouldn't do. Its cap, 680 by the kit's estimate of 3 characters a token, keeps a request under 2,048 real tokens at nearly one a character. Measured on a Lunar Lake 2026-10-13: the graphics card's own results (OpenVINO, the same model), a query in 166 ms and 16 of Reeve's chunks in 2.6 s, against 5.9 s on the Arc through llama.cpp's Vulkan build, which setup gives the card",
       "embedServer": {
