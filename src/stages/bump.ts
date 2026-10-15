@@ -5,6 +5,7 @@ import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { whileAwake } from '../kit/awake.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
+import { codeAt, recordResult, withWork } from '../kit/work-status.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
@@ -17,7 +18,7 @@ import { installLines } from '../installscripts.ts';
 import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
-import { keepWhole } from '../whole.ts';
+import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 
@@ -146,8 +147,18 @@ export const needsNpmCi = (dir: string) =>
  * The PC is kept awake while they run (the kit's awake.ts, Steward 0.36.45): on 2026-10-15 it slept on its own for an
  * hour in the middle of a round's checks.
  */
-export function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
-  return whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
+  // A task in the Steward's work status (the kit's work-status.ts), with the commit and code tree it runs at; what it
+  // came to is kept by that tree, unless a kit under trial filled it (not the tree's own result) or it wasn't clean.
+  const { commit, tree } = await codeAt(dir);
+  const trial = !!o.env?.STEWARD_KIT;
+  const what = `${e.name}: ${o.doing ?? 'its checks'}`;
+  return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async () => {
+    const failed = await whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
+    const after = trial || !commit ? null : await codeAt(dir);
+    if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, ...(failed ? { note: failed.slice(0, 500) } : {}) });
+    return failed;
+  });
 }
 
 type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks };

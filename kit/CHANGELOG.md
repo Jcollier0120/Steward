@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 2.77.2
 
 **A graphics card's embedding server holds about 600 MB less: it starts with `-c 4096 -ub 512`, and a request to it is capped at 1,365 tokens (4,095 characters), with the same vectors and times.**
 
@@ -34,12 +34,29 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing to do for the agents of the manor: their longest input is Reeve's cluster item, about 2,060 characters, and Clerk's and Chamberlain's are cut at 600. An agent that embeds more than 4,095 characters at once on a card should chunk by `budget(0, 'embed')`.
 - A PC set up before keeps its embedding server's old flags and no cap until it's set up again (Manor's Set up local AI, or the Smith's Set up). Nothing rewrites a card's entry on its own.
 
-## Unreleased
+## 2.76.0
 
-**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
+**Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
 
 ### What's new
 
+- **work-status.ts**: `workStatus(extra)` builds an agent's status (shape version 1) from what the kit knows, plus what the agent adds. The kit's server answers it for every agent at `GET /api/peer/work`. The route is read-only, so Manor's link to other PCs passes it on as it is. `serve({ work })` gives the agent's own part: its `slots`, more `running`, `waiting` or `lines`, its `results`, and what is `blocked`.
+  - `pcLines()`: the PC's lines as they stand, each with who holds a place and who waits, since when:
+    - the checks pace's turns (`checks`);
+    - the kit pace's work line (`work`);
+    - the first-round line (`first-round`);
+    - each accelerator's line (`accelerator:<id>`).
+  - `pcLoad()`: the PC's name, processors and memory, how busy its processors are (0 to 1), its pace, and the checks pace's cap.
+  - `recordResult()`, `resultFor()`, `recentResults()`: what work came to, one per kind, repository and code tree (git's tree id, the same for the same code whatever the commit). The latest is kept in `work-results.json` (200 of them).
+  - `codeAt(dir)`: a checkout's commit and tree, and whether anything tracked has changed. It is read with git itself, apart from the agent's runner.
+- **work-tasks.ts**: an agent's tasks.
+  - `withWork(fields, fn)` runs `fn` as a task. `startWork(fields)` gives a handle to `waitIn(line)`, `running()`, `set()` and `done()`.
+  - A task started inside another is its part (`parent`). `outsideWork(fn)` makes work that outlives its task (a job beside the rounds) a task of its own.
+- **schedule.ts**: every scheduled round is a task. It waits in the first-round line or the work line, then runs, and the work its job does is its part.
+- **checks-pace.ts and checks-pace.cs**: the checks pace's turns are in sight.
+  - Each launcher that takes part in the turns writes `<pid>.run` in `checksRunsDir()` while it runs. The file says whether it waits for a turn or holds one, since when, and which agent, task and command it is for (`KIT_CHECKS_WHO`, which `pacedCommand` sets).
+  - `checksRuns()` reads the files, and removes those whose launcher has gone.
+  - The turns themselves work as before. The launcher's source changed, so each PC compiles it again once.
 - **npu-vendors.ts**: a generation's `embedArgs`, its embedding server's arguments that differ on it, replace those in the route's `embedServer.serve` as `args` do in `serve` (`routeFor`). An unknown generation takes none.
 
 ### What changed
@@ -51,6 +68,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### For an agent
 
+- Nothing to do: the route comes with the kit's server. To say more, pass `work: () => ({ slots, blocked, … })` to `serve()`, and wrap long work in `withWork` so that it shows as a task.
 - Nothing to do: take the kit and release as usual.
 - On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
 - The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.
