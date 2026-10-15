@@ -248,6 +248,32 @@ test('a folder Windows says is busy (a process that has just ended still holds i
   assert.equal(refusals, -1, 'it waited, and tried again');
 });
 
+test('the release is on the disk before it is swapped in, so a crash after the swap finds it whole', async () => {
+  const { f } = installed();
+  const order: string[] = [];
+  f.deps.flush = (dir) => {
+    assert.equal(readFileSync(path.join(dir, 'src', 'cli.ts'), 'utf8'), '// the new cli\n', 'flushed once copied');
+    order.push(`flush ${path.basename(dir)}`);
+  };
+  f.deps.rename = (from, to) => {
+    order.push(`rename ${path.basename(from)} ${path.basename(to)}`);
+    renameSync(from, to);
+  };
+  assert.equal(await install({}, f.deps), 0, f.lines.join('\n'));
+  assert.deepEqual(order, ['flush app.new', 'rename app app.old', 'rename app.new app']);
+
+  // Copied into an app that can't be moved: what it was copied into is flushed.
+  const held = installed();
+  const flushed: string[] = [];
+  held.f.deps.flush = (dir) => flushed.push(path.basename(dir));
+  held.f.deps.rename = (from, to) => {
+    if (from === held.app) throw busy();
+    renameSync(from, to);
+  };
+  assert.equal(await install({}, held.f.deps), 0, held.f.lines.join('\n'));
+  assert.deepEqual(flushed, ['app.new', 'app']);
+});
+
 test('when app can\'t be moved at all (a shell is in it), the release is copied into it, and what it no longer has removed', async () => {
   const { app, f } = installed();
   writeFileSync(path.join(app, 'src', 'gone.ts'), '// only in the old release\n');
