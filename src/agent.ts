@@ -28,6 +28,7 @@ import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
 import { loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
+import { keepHeads } from './heads.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -309,6 +310,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   watchWake(() => {
     if (rounds) startRound();
   });
+  // The manor's branch heads, shared with the other agents, kept fresh beside the rounds, however long one takes, and
+  // a moment after each merge (heads.ts). Not on a test's page, whose runner is its own: no test asks GitHub.
+  if (!o.run) keepHeads({ log: (line) => console.log(`heads: ${line}`) });
 
   /** What the page shows (src/web/types.ts's StewardView), in the kit's frame. */
   const pageData = () => {

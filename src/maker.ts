@@ -23,7 +23,8 @@ import { readJson } from './kit/store.ts';
  *   Steward's own releases and PRs and the releases repository are out of reach, and the page shows none of them;
  * - none of the maker's own repositories is looked after, claimed, merged or released (makersOwn): anything whose origin
  *   is the maker's account on GitHub (Manor, the site, the Exchequer, the releases repository, every agent), or that
- *   takes the id of one of Manor's agents (its shipped staff.json) or of the manor's own repositories;
+ *   takes the id of one of Manor's agents (its shipped staff.json) or of the manor's own repositories; except that the
+ *   maker's other development PCs, whose GitHub account can push to them, claim versions of them (claimRefused);
  * - the maker-only commands (claim-port, release-port, ports, mine) answer that they are the maker's only;
  * - it acts only while Developer options are on (stewardActs): it is a developer's hire, so with them off its rounds
  *   don't run, its buttons and commands say why, and its page has one plain line.
@@ -140,6 +141,23 @@ export function makersOwn(e: { id?: string; name?: string; repo: string }, o: { 
 
 /** What a maker-only command answers anywhere else. */
 export const makersOnly = (what: string) => `${what} is for the people who make Castellan, on their own PC: the Steward here looks after your repositories.`;
+
+/**
+ * Why a version may not be claimed (or given back) here for this repository, or for the Steward's kit (`kit`, with
+ * `e` the Steward's own repository); null when it may (Steward 0.36.27). The maker's laptop claims any, and anyone their
+ * own. Another PC claims one of the maker's only when GitHub says the account gh is signed in as can push to it
+ * (`canPush`): the maker's other development PCs, signed in as the maker, which work on the manor and open its PRs but
+ * never merge, release or deploy it. A customer can't push there, and no file or setting here says otherwise. A claim
+ * is only bookkeeping, kept in the repository's own claims ref (claims.ts), which takes that same push to write; off
+ * the maker's laptop it is written there or not at all. Merging, releasing, ports and recalls stay the maker's laptop's.
+ */
+export async function claimRefused(e: { name?: string; repo: string }, o: { kit?: boolean; makers?: boolean; canPush: (repo: string) => Promise<boolean> }): Promise<string | null> {
+  if (o.makers ?? makersPc()) return null;
+  const refused = o.kit ? makersOnly("Claiming a version of Castellan's kit") : makersOwn({ name: e.name, repo: e.repo }, { byId: false, makers: false });
+  if (!refused) return null;
+  if (makersRepo(e.repo) && (await o.canPush(e.repo).catch(() => false))) return null;
+  return makersRepo(e.repo) ? `${refused} (A maker's other PC claims it once gh is signed in to an account that can push to ${e.repo}.)` : refused;
+}
 
 /**
  * Whether the Steward may act now: always on the maker's laptop, where it is the release machinery and no switch holds

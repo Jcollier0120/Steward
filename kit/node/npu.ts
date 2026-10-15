@@ -458,12 +458,14 @@ export class Npu {
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
-            // A server just started (the keeper stopped it, unused) loads its model now: the first request waits for
-            // that, given at least the cold-load allowance, rather than failing on a person's short timeout.
-            if (warmed) await warmUp(acc, ep, server.started ? Math.max(opts.timeoutMs ?? 0, coldAllowanceMs(acc)) : opts.timeoutMs);
+            // A server just started (the keeper stopped it, unused), or found still loading, loads its model now: the
+            // first request waits for that, given at least the cold-load allowance, rather than failing on a person's
+            // short timeout.
+            if (warmed) await warmUp(acc, ep, fresh ? Math.max(opts.timeoutMs ?? 0, coldAllowanceMs(acc)) : opts.timeoutMs);
             // With no warm-up, a server just started or found busy may still be loading the model.
             const loading = !warmed && fresh;
-            const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading });
+            // The accelerator's own timeouts (a slower NPU's, or what its check measured) take the rules' place.
+            const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading, timeouts: acc.timeouts });
             const answer = await send(acc, ep, timeoutMs, loading);
             if (warmsUp(acc, work)) noteServed(acc.id, ep);
             return answer;
@@ -514,11 +516,10 @@ const warmsUp = (acc: Accelerator, work: Work) => acc.kind === 'npu' && work !==
  * the server failing. A warm model answers it in about 0.15 s.
  */
 async function warmUp(acc: Accelerator, ep: Endpoint, timeoutMs?: number): Promise<void> {
-  const allowance = RULES.accelerators.requestBaseMs + RULES.accelerators.coldLoadMs;
-  await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1), timeoutMs ?? allowance, { loading: true });
+  await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1), timeoutMs ?? coldAllowanceMs(acc), { loading: true });
 }
 
-/** How long a model just started may take to load: the request's base and the cold load, the accelerator's own where longer. */
+/** How long a model being loaded may take: the request's base and the cold load, the accelerator's own where longer. */
 const coldAllowanceMs = (acc: Accelerator) => RULES.accelerators.requestBaseMs + Math.max(RULES.accelerators.coldLoadMs, acc.timeouts?.coldLoadMs ?? 0);
 
 /** The pick (accelerators.ts), seeing this process's own requests already headed to each line. */
