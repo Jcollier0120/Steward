@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.32
+
+**It hands out kit 2.74.4: each PowerShell an agent starts is one process, not two.**
+
+### What changed
+
+- The kit 2.74.4: the PowerShell an agent's page starts shares the page's windowless console instead of starting a console host (conhost.exe) of its own beside it. Agents get it as they take the kit.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.20
 
 **The Steward's own tests run faster, so a vouch on one of its pull requests and the test run before each kit release finish sooner.**
