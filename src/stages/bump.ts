@@ -138,8 +138,11 @@ export const needsNpmCi = (dir: string) =>
  * `timeLimit` (a vouch's, vouchtime.ts) gives the whole run a time limit from its start, asked once it's known whether
  * it runs the whole suite or only the tests a change reaches: at once, unless `npm test` is picked, then as it is. A step
  * still running at the limit is stopped with everything it started, and the run fails saying so.
+ *
+ * `failed`, when given, is filled with the step that failed and the tests it failed (node --test's TAP), for a caller
+ * that weighs a second try against the first (wholesuite.ts).
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks }): Promise<string | null> {
   const started = Date.now();
   const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
   let limit: (TimeLimit & { at: number }) | null = null;
@@ -160,6 +163,8 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
   for (const step of e.test) {
     // Only the tests the change reaches (affected.ts), where the caller asks and `npm test` is a plain node --test.
     if (o.affected && step.trim() === 'npm test') steps.push(() => affectedSteps(ctx, dir, o.affected!, o.say));
+    // The whole suite, run as node itself so the checks pace sees its test runner (wholeTestSteps).
+    else if (step.trim() === 'npm test') steps.push(async () => wholeTestSteps(dir));
     else steps.push(step);
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
@@ -181,6 +186,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
       const tests = failedTests(output);
+      if (o.failed) Object.assign(o.failed, { step, tests: tests.map((t) => t.name), timedOut: !!r.timedOut });
       for (const t of tests) o.say(`  failed: ${t.name}${t.error ? ` (${t.error})` : ''}`);
       for (const line of tail(output, 25).split('\n')) o.say(`  ${line}`);
       try {
@@ -196,6 +202,26 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
   // The Steward's own checks passed whole: kept by tree, so a kit released from the same code doesn't run them again (whole.ts).
   await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
   return null;
+}
+
+/** What a failed run of the checks failed (runChecks' `failed`): its step, the tests it failed, and whether it ran out of time. */
+export interface FailedChecks {
+  step?: string;
+  tests?: string[];
+  timedOut?: boolean;
+}
+
+/**
+ * Whether two failed runs of the same checks failed only on flaky tests: both in the same test step, each naming the
+ * tests it failed, run to the end (not stopped at a time limit, which leaves tests unrun), and no test failing in both.
+ * Every test then passed in one run or the other. A failure not told by test (a typecheck, a step that failed outright)
+ * never counts. Pure.
+ */
+export function onlyFlaky(first: FailedChecks, again: FailedChecks): boolean {
+  if (!first.step || first.step !== again.step || first.timedOut || again.timedOut) return false;
+  if (!first.tests?.length || !again.tests?.length) return false;
+  const before = new Set(first.tests);
+  return !again.tests.some((t) => before.has(t));
 }
 
 /**
@@ -270,7 +296,7 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
   if ('whole' in p) {
     scope.chose = 'the whole suite';
     say(`npm test: the whole suite (${p.whole})`);
-    return ['npm test'];
+    return wholeTestSteps(dir);
   }
   const pretest = p.pretest ? ['npm run pretest'] : [];
   if (!p.files.length) {
@@ -281,6 +307,27 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
   scope.chose = `affected: ${p.files.length} of ${p.tests.length} test files`;
   say(`npm test: ${scope.chose} (${p.why})`);
   return [...pretest, ['node', ...p.flags, '--test', ...p.files.map((f) => `"${f}"`)].join(' ')];
+}
+
+/**
+ * What runs in place of `npm test` for the whole suite: its pretest, then the script's own `node <flags> --test <globs>`
+ * run as node itself, as only the tests a change reaches already were (affectedSteps). The checks pace then sees node's
+ * test runner and runs as many test files at once as its cap has room for (kit/node/checks-pace.ts,
+ * pacedTestConcurrency). Through npm it couldn't: node's runner started a file per processor but one, 17 on an 18-thread
+ * laptop, every one held to a third of the processor, and tests with timers of their own failed for want of it (the
+ * whole suite before kit 2.74.5's release, twice, on 2026-10-15). Its posttest after, as npm runs it, once the tests
+ * pass (the steps stop at the first that fails). `npm test` as it is when the script isn't a plain node --test. Pure but
+ * for package.json.
+ */
+export function wholeTestSteps(dir: string): string[] {
+  const scripts = scriptsIn(dir);
+  const plain = nodeTestScript(scripts.test);
+  if (!plain) return ['npm test'];
+  return [
+    ...(scripts.pretest ? ['npm run pretest'] : []),
+    ['node', ...plain.flags, '--test', ...plain.globs.map((g) => `"${g}"`)].join(' '),
+    ...(scripts.posttest ? ['npm run posttest'] : []),
+  ];
 }
 
 /** A `git diff` cut into each file's part, by its path (the b/ side; the a/ side for a deletion). Pure. */

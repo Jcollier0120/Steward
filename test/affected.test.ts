@@ -229,8 +229,8 @@ test("in a vouch's clone: npm test becomes node --test with only the files the b
   assert.deepEqual(await affectedSteps(ctx, checkout, none, () => {}), ['npm run pretest']);
   assert.equal(none.chose, 'no test reaches the change');
 
-  // A base git can't find: the whole suite.
+  // A base git can't find: the whole suite, as node itself too, so the checks pace sees its test runner.
   const lost: { base: string; chose?: string } = { base: 'origin/nowhere' };
-  assert.deepEqual(await affectedSteps(ctx, checkout, lost, () => {}), ['npm test']);
+  assert.deepEqual(await affectedSteps(ctx, checkout, lost, () => {}), ['npm run pretest', 'node --test "test/**/*.test.ts"']);
   assert.equal(lost.chose, 'the whole suite');
 });

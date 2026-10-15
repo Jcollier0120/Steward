@@ -4,10 +4,14 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## Unreleased
 
-**Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF`, its prefix cache off.**
+**A route can give calibrate its server's own reading speed (`readPerWrite`), and AMD's does: an AMD NPU of a generation nobody has measured gets a 35 s base, not 90 s. AMD's NPU measured on battery (20.7 mJ a token), its picture size, and setup's picture-first test request on a Krackan, none needing a change to the route's command. Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF`, its prefix cache off.**
 
 ### What changed
 
+- **`calibrate`** takes a full-cap read at the route's `readPerWrite` times the writing speed it measured, else `CALIBRATION.readPerWrite` (10) as before. npu-vendors.json's amd route says 30: FastFlowLM read 34 to 36 times faster than it wrote on a Krackan (472 to 512 tokens a second read, 13.1 to 14.4 written). On the Krackan's `--harden` measurement, that gives a 35 s base where 10 gave 90 s. It applies only where setup calibrates, on an AMD generation nobody has measured; XDNA 2 is verified and keeps its own timeouts. Intel's and Qualcomm's routes are unchanged.
+- **spec/NPU-VENDORS.md and the amd route's notes** have the Krackan's run on battery. `npu-bench --profile full --energy` gave 20.7 mJ a token (6.6 W at rest, 11.6 W working), 13.1 tokens written a second against 14.4 on mains power, and a model load of 12.7 s against 5.4 s; the idle stop's rule still gives 5 minutes for chat. FastFlowLM's four `--pmode` values did the same jobs in the same time on battery, and none drew clearly less than the battery meter's own swing (several watts at rest from one run to the next), so the route starts FastFlowLM without one, as before. Whether a power mode saves less than such a meter can tell stays unverified.
+- **spec/NPU-VENDORS.md** has `npu-check --harden` run again on the Krackan with kit 2.74.5, whose test request asks about the picture first: calibration timed chat warm in 1.31 s (9.18 s before, the switch back from the vision model) and wrote a 90 s base, not 105 s. Most of the 90 s was calibrate's reading estimate, a tenth of writing speed; with the route's `readPerWrite` (above), the same measurement gives 35 s.
+- **spec/NPU-VENDORS.md and the amd route's notes** have FastFlowLM's picture size (`--img-pre-resize`) measured. At its default, a height of 720, a desktop screen costs 960 tokens and 4.5 s an answer and a phone screen 270 tokens and 2.3 s, every answer right, including Reeve's own questions about a screen. The original size costs 2 to 10 times the tokens for nothing more right, and 480 misreads small text, so the route keeps the default. FastFlowLM keeps no prefix cache: each question about a picture reads all of it again.
 - **npu-vendors.json's Intel generations** (spec/NPU-VENDORS.md, Estimated). No Intel NPU beyond the Lunar Lake and the NPU 3720 will be run, so the others are estimated from the NPU 3720's sweep, scaled by the Lunar Lake's numbers.
   - **`lunar-lake` and `panther-lake`**: `--plugin_config` `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"512","GENERATE_HINT":"BEST_PERF"}`. That should be a short answer in 0.3–0.4 s rather than 0.72 s, and the jobs' prompts read 18–27% faster; on the NPU 3720 at their 4,096-token cap, 512 read about 3,500 tokens fastest too. The Lunar Lake's other values are as measured.
   - **`wildcat-lake`**: the NPU 3720's settings: 2,048-token cap, 128-token chunks, `BEST_PERF`, 3.8 GB. Its NPU 5 is 15–17 TOPS, about 1.4 times the NPU 3720, in laptops of 8 to 16 GB.
@@ -17,7 +21,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### For an agent
 
-- Nothing to do. On a Lunar Lake or NPU 3720 already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
+- Nothing to do. A PC already set up keeps the timeouts measured on it. Setup's next calibration on an AMD generation nobody has measured uses the new estimate.
+- On a Lunar Lake or NPU 3720 already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
 
 ## 2.74.5
 
