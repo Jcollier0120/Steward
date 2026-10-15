@@ -125,6 +125,14 @@ test('the route on another device: OpenVINO gets its --target_device, and off th
   assert.equal(es[es.indexOf('--target_device') + 1], 'CPU');
   assert.ok(!es.includes('--max_length') && es.includes('--pooling'));
   assert.deepEqual(C.routeOnDevice(intel, 'NPU').embedServer, intel.embedServer);
+  // The NPU 3720's runs on the processor's graphics (its generation's embedArgs): checking the NPU leaves it there, with
+  // its --max_length; checking the processor moves it with chat.
+  const meteor = V.routeFor(intel, 'meteor-lake');
+  assert.deepEqual(C.routeOnDevice(meteor, 'NPU').embedServer, meteor.embedServer);
+  const onNpu = C.routeOnDevice(meteor, 'NPU').embedServer!.serve;
+  assert.equal(onNpu[onNpu.indexOf('--target_device') + 1], 'GPU');
+  const onCpu = C.routeOnDevice(meteor, 'CPU').embedServer!.serve;
+  assert.equal(onCpu[onCpu.indexOf('--target_device') + 1], 'CPU');
   assert.throws(() => C.routeOnDevice(V.NPU_CATALOG.routes.qualcomm, 'CPU'), /NPU only/);
   assert.equal(C.routeOnDevice(V.NPU_CATALOG.routes.qualcomm, 'NPU'), V.NPU_CATALOG.routes.qualcomm);
 });
