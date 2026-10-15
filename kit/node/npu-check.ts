@@ -747,6 +747,11 @@ async function hardenSteps(c: {
   const stopAll = () => stopStartedAt(chatBase, answersAt(chatBase), now);
   const setUp = (plan: NpuPlan, io: Partial<NpuIo>) => setUpNpu(plan, tools, { ...o.io?.setup, log: (l) => log(`  ${l}`), measure: async () => null, ...io });
   const realTest = (name: string, e: AcceleratorEntry, real: () => Promise<string[]>) => (forced ? forced(name, e) : real());
+  /** Until a server answers at base (its port open, its model loading or not), or ms have passed. */
+  const untilAnswering = async (base: string, ms: number) => {
+    const t0 = now();
+    while (now() - t0 < ms && !(await answersAt(base)())) await new Promise((res) => setTimeout(res, 500));
+  };
 
   // A driver below the minimum: decided before anything runs, on this NPU (or one of the route's devices in a rehearsal).
   const firstId = Object.keys(c.catalog.devices[vendor] ?? {})[0];
@@ -770,6 +775,10 @@ async function hardenSteps(c: {
   // A test request given 1 s: the first load takes seconds anywhere.
   await stopAll();
   const t = await setUp(planOf(route, c.support), { testNpu: (e) => realTest('timeout', e, () => testNpuEntry(e, { timeoutMs: 1_000 })) });
+  // Given 1 s, the server setup started is still starting, and stopAll stops only a server that answers: wait for it to
+  // open its port, or it is left loading the route's model and answers the next case's test itself (on the NPU 3720 the
+  // nonsense case's server was never started, its test refused 404 by this one's, 2026-10-15).
+  if (!forced) await untilAnswering(chatBase, 60_000);
   await stopAll();
   const tOk = !t.entry && /in time/.test(t.note ?? '');
   add({ step: 'harden-timeout', ok: tOk, say: tOk ? `given 1 s, no NPU entry, noted "${t.note}"` : t.entry ? 'given 1 s, setup still wrote an NPU entry' : `given 1 s, no NPU entry, but noted "${t.note ?? 'nothing'}" (${t.problems.join('; ')})`, data: { note: t.note ?? null, problems: t.problems } });
