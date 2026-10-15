@@ -3,7 +3,7 @@
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
 ## 2.74.2
-**Paced test runs get room to finish: a time limit stretched as much as the cap slows them, and as many test files at once as the cap has room for.**
+**Paced runs go faster: the checks pace's cap is a third of the processor and three runs go at once; and paced test runs get room to finish, a time limit stretched as much as the cap slows them, as many test files at once as the cap has room for.**
 
 ### What's new
 
@@ -12,13 +12,17 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What changed
 
-- Nothing for a command that isn't `node --test`: its arguments, limits and environment are as they were.
+- **The checks pace's cap is a third of the processor by default** (`checksCap()`, now with no argument: 3333), whatever the PC's processors. It was the gentle pace's, a quarter and two processors' worth at most: 11% on an 18-thread laptop. Manor's `"checksPace"` and `KIT_CHECKS_PACE` still set it, and Settings' pace at full still lifts it.
+- **Three paced runs go at once on the PC** (`CHECKS_AT_ONCE`), not two. They share the one cap, so a third run takes no more of the processor; a short check no longer waits behind two long ones. A launcher of an older kit, asking two, takes one of the first two turns, so both kinds keep within three.
+- **Why:** on 2026-10-14 six paced runs waited for one of two turns, each held to two processors' worth, while the 18-thread laptop's processor was 28% busy with 20 GB of memory free. At a third, `pacedSlower` is 4 and a `node --test` runs 12 files at once there.
+- Nothing else for a command that isn't `node --test`: its arguments and environment are as they were.
 - **Why:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
 - npu-bench.ts: the energy measurement's load goes on, past its minutes if need be, until it has read the battery once after a job ended. On a PC held back, at the checks pace say, a short load could end before any job reached the model and read only the battery at rest. A real load lasts minutes, so the results are as before.
 
 ### For an agent
 
 - If your runner stretches a paced command's time limit by a fixed amount, use `slower` and `waitMs` from `pacedCommand()` instead: `timeoutMs * (paced.slower ?? 4) + (paced.waitMs ?? 0)`, as the Steward's run.ts does.
+- If you call `checksCap(processors)`, drop the argument: the default no longer depends on the processors.
 - Nothing else to do to take it.
 
 ## 2.73.2

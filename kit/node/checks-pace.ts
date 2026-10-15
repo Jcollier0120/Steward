@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gentleCap } from './gentle.ts';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { powershell, psQuote } from './ps.ts';
@@ -16,8 +15,7 @@ import { powershell, psQuote } from './ps.ts';
  * A paced command runs through a small launcher (checks-pace.cs, compiled once to an exe every agent on the PC shares, as
  * gentle.cs is to a DLL) that starts it, and every program it starts, in a job with
  *
- * - **a hard cap on the processor**: the gentle pace's, a quarter of it and two processors' worth at most
- *   (checksCap()), however many threads they run;
+ * - **a hard cap on the processor**: a third of it by default (checksCap()), however many threads they run;
  * - **a cap on memory**: per program and for the whole job (checksMemory()), so a runaway test fails rather than
  *   pages the PC;
  * - **below-normal priority**: they give way to whatever the person is doing;
@@ -38,17 +36,22 @@ import { powershell, psQuote } from './ps.ts';
  */
 
 /**
- * The cap by default, in hundredths of a percent: the gentle pace's (gentleCap()), a quarter of the processor and two
- * processors' worth at most. Measured on an 18-core laptop (kit 2.73.0), the Assayer's own suite on a quiet PC: the whole
- * PC peaked at 91% and the suite took 39 s with no cap, 43% and 65 s at this one. Half the processor, as this was first,
- * barely held it (the suite's own peak went from 57% to 49%).
+ * The cap by default, in hundredths of a percent: a third of the processor, however many processors it has (kit 2.74.2).
+ * Half, as it was first, barely held a test suite back (the Assayer's own suite peaked at 57% of an 18-core laptop's
+ * processor, 49% at half). The gentle pace's, from kit 2.73.0 (a quarter, two processors' worth at most: 11% there),
+ * held it too far back: on 2026-10-14 six paced runs waited for a turn while the PC was three quarters idle, and long
+ * suites crawled. A third keeps two thirds of the processor for the person and the agents.
  */
-export function checksCap(processors = os.availableParallelism()): number {
-  return gentleCap(processors);
+export function checksCap(): number {
+  return 3333;
 }
 
-/** How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, CHECKS_TURN_MS at most. */
-export const CHECKS_AT_ONCE = 2;
+/**
+ * How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, CHECKS_TURN_MS at most. Three
+ * from kit 2.74.2, two before: they share the one cap, so a third run adds no processor, it only stops a short check
+ * waiting behind two long ones.
+ */
+export const CHECKS_AT_ONCE = 3;
 /** How long a paced run may wait for a turn before it runs without one (checks-pace.cs' TURN_WAIT_MS). */
 export const CHECKS_TURN_MS = 20 * 60_000;
 /** The least a paced run's time limit is stretched by (pacedSlower): what it always was, for a quarter of the processor. */
@@ -66,9 +69,9 @@ export function pacedSlower(cap: number): number {
 
 /**
  * How many test files node's runner runs at once at the checks pace (kit 2.74.2): twice the processors the cap leaves,
- * two at least. Left to itself it starts one per processor but one, 17 on an 18-thread laptop, every one held to the
- * same two processors' worth and the job's memory: each crawls, and their own timeouts fire for want of a processor.
- * Twice keeps the cap busy while some wait on git or a timer.
+ * two at least (12 at a third of 18 processors). Left to itself it starts one per processor but one, 17 on an
+ * 18-thread laptop, every one held to the cap's share and the job's memory: at two processors' worth each crawled, and
+ * their own timeouts fired for want of a processor. Twice keeps the cap busy while some wait on git or a timer.
  */
 export function pacedTestConcurrency(cap: number, processors = os.availableParallelism()): number {
   return Math.max(2, 2 * Math.ceil((processors * cap) / 10_000));
@@ -109,12 +112,12 @@ export function checksLimits(cap: number, memory = checksMemory(), atOnce = CHEC
  * applies from the next command. Under node --test, none unless KIT_CHECKS_PACE says: a test's commands never build the
  * launcher in this PC's kit folder.
  */
-export function checksPaceCap(home = manorHome(), env: NodeJS.ProcessEnv = process.env, processors = os.availableParallelism()): number {
+export function checksPaceCap(home = manorHome(), env: NodeJS.ProcessEnv = process.env): number {
   if (env.NODE_TEST_CONTEXT && !env.KIT_CHECKS_PACE) return 0;
   const said = env.KIT_CHECKS_PACE?.trim() || (manorSetting(home, 'backgroundPace') === 'full' ? 'full' : manorSetting(home, 'checksPace'));
   if (said === 'full' || said === 'off' || said === '0' || said === 0) return 0;
   const n = typeof said === 'number' ? said : typeof said === 'string' ? Number(said.replace(/%$/, '')) : NaN;
-  if (!Number.isFinite(n)) return checksCap(processors);
+  if (!Number.isFinite(n)) return checksCap();
   if (n >= 100) return 0;
   return Math.round(Math.max(10, n) * 100);
 }
@@ -195,7 +198,7 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   const plain: Paced = { file, args, env: {} };
   const env = o.env ?? process.env;
   const processors = o.processors ?? os.availableParallelism();
-  const cap = checksPaceCap(o.home, env, processors);
+  const cap = checksPaceCap(o.home, env);
   if (!cap) return plain;
   if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: {}, slower: PACED_SLOWER_MIN, waitMs: 0 };
   const exe = await checksPaceLauncher(o.log);
