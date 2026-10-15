@@ -923,7 +923,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
       if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
         try {
-          const queues = await keepVersionQueues(ctx);
+          // Those the stage did something for (or failed partway) moved since its glance: their clones are fetched.
+          const queues = await keepVersionQueues(ctx, { moved: out.results.filter((r) => r.outcome === 'done' || r.outcome === 'failed').map((r) => r.id) });
           // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
           for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
         } catch (e) {
