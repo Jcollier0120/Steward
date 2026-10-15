@@ -245,11 +245,11 @@ export function readNpuNote(file = npuNoteFile()): { at: string; note: string } 
 
 // ---------------------------------------------------------------- shared files
 
-/** Written whole: a temporary file, then a rename, so a reader never sees half of it. */
+/** Written whole: a temporary file, on the disk before the rename (kit 2.73.3), then the rename, so a reader never sees half of it. */
 function writeWhole(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, core.sharedText(value));
+  writeFileSync(tmp, core.sharedText(value), { flush: true });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, file);

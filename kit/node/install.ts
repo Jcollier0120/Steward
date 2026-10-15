@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
+import { flushTree } from './flush.ts';
 import { endProcesses, keepOwnArch, nativeRelease, processesUnder, type NativeRelease } from './native.ts';
 import { inside, realPath, samePath } from './real-path.ts';
 import { pageAt, ping, shutdown } from './service.ts';
@@ -92,6 +93,8 @@ export interface InstallDeps {
   out(line: string): void;
   /** Moves a folder (default: fs.renameSync); a test can make it fail. */
   rename?(from: string, to: string): void;
+  /** Writes a folder's files through to the disk before it is swapped in (default: flush.ts flushTree). */
+  flush?(dir: string): void;
   /** This PC's processor, as Node names it (default: process.arch): which native files are kept. */
   arch?: string;
   /** The processes running a program from under a folder (default: native.ts processesUnder). */
@@ -299,8 +302,9 @@ const isBusy = (e: unknown) => ['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJ
  * The release copied over a folder that can't be moved (a shell's or a program's current folder can't be,
  * though its contents can be changed), then whatever the release no longer has removed from it.
  */
-export function replaceContents(from: string, to: string): void {
+export function replaceContents(from: string, to: string, flush: (dir: string) => void = flushTree): void {
   cpSync(from, to, { recursive: true, force: true });
+  flush(to);
   const prune = (dir: string, ref: string) => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const there = path.join(ref, e.name);
@@ -377,6 +381,8 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     cpSync(d.root, next, { recursive: true });
     const noNative = keepOwnArch(next, release.native, d.arch);
     if (noNative) out(noNative);
+    // On the disk before the swap: a crash after it then finds the release whole, not files of NUL bytes (kit 2.73.3).
+    (d.flush ?? flushTree)(next);
   } catch (e) {
     rmSync(next, { recursive: true, force: true });
     return unchanged(`Couldn't copy the release to ${next} (${message(e)}). Nothing was changed.`);
@@ -391,7 +397,7 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     }
     // A shell or another program has it as its current folder: the folder stays, and its contents are replaced.
     try {
-      replaceContents(next, app);
+      replaceContents(next, app, d.flush ?? flushTree);
       inPlace = true;
       out(`${app} is held open (a shell or another program is in it), so the release was copied into it instead of swapped in.`);
     } catch (e2) {
