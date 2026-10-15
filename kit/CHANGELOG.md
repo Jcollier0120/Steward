@@ -10,6 +10,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - **setup.ts**: the embedding server on a graphics card (or the processor) starts with `-c 4096 -b 2048 -ub 512`, not `-c 8192 -b 2048 -ub 2048`. Its endpoint gets its own `maxContextTokens`, 1,365 (`EMBED_CAP`), below the card's: by the kit's estimate of 3 characters a token, an input under it is at most 4,095 characters, and so fits 4,096 tokens even at a token a character.
   - On a Radeon 860M (WEASELDEV03, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
+  - **On a Core Ultra 5 225U's Intel Graphics** (WEASELDEV02, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
+    - working set 1.37 GB against 1.97;
+    - private bytes 1.41 GB against 2.01;
+    - the card's shared memory 1.25 GB against 1.85;
+    - by llama.cpp's own buffers, the KV cache took 448 MiB against 896, and compute 26 + 12 MiB against 120 + 64.
+
+    The times were the same within noise:
+    - a query 145–147 ms against 137–138 (minimums 133–134 against 132–133);
+    - a 430-token chunk 759–766 ms against 749–759;
+    - 2,679 tokens 9.02–9.30 s against 9.06–9.10;
+    - a dense chunk at the new limit (4,095 characters, 3,379 tokens) 13.4–13.9 s against 13.5–13.8, answered in 7 passes of 512.
+
+    Every vector matched (cosine 1.000000), old against new, old against old, and new against new.
+  - `-b 2048` stays, as on Qualcomm's route (2.75.1). With embeddings, llama-server sets the batch to the micro-batch itself, 512, and warns so ("embeddings enabled with n_batch (2048) > n_ubatch (512)").
   - An input longer than a 512-token micro-batch is split across several, so nothing that fit before is refused by the server for its length.
   - The reranker keeps `-c 8192 -ub 2048`.
   - Sizing is unchanged. `serverContext` and `SERVER_GB` still count the embedding server as it was, so every card is sized as before. That estimate is now high for it: it counts 2.7 GB, and the Radeon's server held 1.3 GB.
@@ -19,6 +33,67 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do for the agents of the manor: their longest input is Reeve's cluster item, about 2,060 characters, and Clerk's and Chamberlain's are cut at 600. An agent that embeds more than 4,095 characters at once on a card should chunk by `budget(0, 'embed')`.
 - A PC set up before keeps its embedding server's old flags and no cap until it's set up again (Manor's Set up local AI, or the Smith's Set up). Nothing rewrites a card's entry on its own.
+
+## Unreleased
+
+**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
+
+### What's new
+
+- **npu-vendors.ts**: a generation's `embedArgs`, its embedding server's arguments that differ on it, replace those in the route's `embedServer.serve` as `args` do in `serve` (`routeFor`). An unknown generation takes none.
+
+### What changed
+
+- **npu-vendors.json's `meteor-lake`** (the NPU 3720 of Meteor Lake and Arrow Lake-U): `embedArgs` `{"--target_device": "GPU"}`, the same OpenVINO Model Server, model, pooling, `--max_length 2048` and port, on the processor's graphics. Measured on a Core Ultra 5 225U's Intel Graphics (2026-10-15, two runs each, spec/NPU-VENDORS.md, The NPU 3720's embeddings): a query in 49–50 ms against the NPU's 1.13 s; 16 of Reeve's chunks in 4.8 s against 18.0; a dense chunk (1,100–1,320 tokens) in 0.73–0.95 s against 2.5; vectors at cosine 0.997–0.999 to the NPU's, under the same model name, so Reeve's index stays. Beside the chat server with the route's command, chat wrote 13.1–13.3 tokens a second while the graphics indexed, as fast as alone, against 6.5–6.8 with both on the NPU. The NPU's entry still takes one request at a time, so chat waits for an indexing batch: about 5 s for 16 chunks, against 18 s on the NPU (about 40 for dense ones).
+  - Not chosen: the NPU at `--max_length` 512 answers a query in 0.27 s but refuses Reeve's dense chunks, so it would need a second server for queries; 1,024 saves 4–6% and refuses them too. The processor slowed chat by a fifth while indexing and held about 2.4 GB. llama.cpp's Vulkan build, setup's for a card, was slower on the same graphics, with another model's vectors. `NPUW_LLM_PREFILL_CHUNK_SIZE` in the embedding server's `--plugin_config` (128 or 256) stops OpenVINO Model Server at its start (0xC0000409), as before.
+  - Arrow Lake-S, the same NPU, keeps its embeddings on the NPU: its F models have no graphics. So does every other generation, and one setup doesn't know.
+- **npu-check.ts's `routeOnDevice`** leaves the embedding server where the route has it when the check runs on the NPU, so the NPU 3720's stays on the graphics; on the processor or the graphics it goes with chat, as before.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
+- The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.
+
+## 2.75.2
+
+**Automatic updates work on a busy PC: a page slow to start after an update is waited for instead of rolled back, a rollback never leaves the new page running over the old files, and an agent's rounds make room for Manor's update.**
+
+### What's new
+
+- **update-hold.ts**: while Manor has an automatic update due for the agent, a scheduled round waits (`every()`, and `runSoon()`'s rounds too), looking again every 30 s (`UPDATE_LOOK_MS`), its state's `waiting` saying "Manor to update it to <version>". Manor updates an agent only while it's idle, and looks every minute: an agent whose rounds ran back to back was never idle then, and its update waited for hours. It waits 5 minutes at most for a version (`UPDATE_HOLD_MS`), then the rounds go on, and wait again 30 minutes later (`UPDATE_HOLD_AGAIN_MS`). A round asked for (Run now) never waits.
+- `updateDue()` reads Manor's files: `updates.json` (a version newer than this one available, Manor's last look not cut short by a problem or the network, not one Manor has given up on after its three tries or waits to try again) and `settings.json` (the agent's automatic updates on). A version the agent's own install refuses (`unsafe-updates.json`) isn't due, nor is anything in a development checkout. `updateHold()` is the agent's one hold, shared by all its schedules; `updateHolder()` makes another; `compareVersions` compares dotted versions.
+- **native.ts**: `pagesFrom(app)` lists the Node processes running the page from an app folder (`<app>\src\cli.ts serve`, and the `open` that starts it) by their command lines, which `processesUnder` can't see, since Node runs from its own folder. `pagesIn(lines, app)` reads PowerShell's lines for it.
+
+### What changed
+
+- **install.ts**: after starting the page, an install waits 20 s for it as before (`PAGE_FIRST_MS`), then on while its process is still starting, up to 5 minutes (`PAGE_START_MS`). A page whose process has ended isn't waited for past the 20 s. Its line says `up, after <n> s: the PC is busy`, `didn't answer, and its process has ended`, or `still starting after 5 minutes`. `waitForPage(ok, app, d)` is exported, and `InstallDeps.pagesStarting` stands in for `pagesFrom` in a test. On 15 October the Steward's 0.36.46 and the Assayer's 0.4.2 took longer than 20 s to answer on a PC running a release's checks: each was rolled back and flagged as unsafe, and went on running over the older version's files.
+- **safeinstall.ts**: an install that gave up waiting for the page, whose page answers as the new version by the time it is judged, goes on to its probation, which judges it as any other. Before, it was rolled back and flagged.
+- **safeinstall.ts**: a rollback ends any page process still starting from app, and the `open` starting it (`endStartingPages`, in the real `endPage`), before it puts the version before back. Such a page has no `server.json` yet, so the rollback used to miss it, and it came up over the older files. The rollback then waits for the old page as an install does.
+- **safeinstall.ts**: once a version holds up for its probation, the flags of the versions before it are dropped (allowed again), and with them an agent's alarm for one. Their kept copies (`app.unsafe-<version>`) stay.
+
+### For an agent
+
+- Nothing to do for its schedule. An agent that starts rounds itself, beside its schedule (the Steward does, after a kit trial or on waking), asks `updateHold()` first and starts none while it answers: the schedule runs that round once the wait ends.
+- A PC already left with a newer page running over an older version's files, that version flagged, is set right by the agent's next release: its install ends the running page, puts the whole release in, and drops the old flag once the new version holds up. Until the agent runs this kit, its rounds don't wait for Manor, so its next update may still wait for an idle moment, or for Update in Manor.
+- A test that runs `every()` reads Manor's files from `MANOR_HOME` (else `%USERPROFILE%\.manor`): set it to a folder of the test's own when the test's agent id could have automatic updates on.
+
+## 2.75.1
+
+**On a Snapdragon, the embedding server beside GenieX holds 1.4 GB of the NPU's memory, not 2.9 GB, in the same time and to the same vectors, so chat, pictures and embeddings fit a 16 GB PC with room to spare.**
+
+### What changed
+
+- **npu-vendors.json's qualcomm route** (Qualcomm's alone; Intel's and AMD's routes, the graphics card's and the processor's llama-server, the keeper and `npuMemoryFit` are unchanged):
+  - **`embedServer.serve`**: `-c 4096 -ub 512`, not `-c 8192 -ub 2048`. Measured on the X2 Elite, 14 settings, each started fresh on a private port in the NPU's turn: 1,408 MB on the NPU against 2,876, a 2.0 GB working set against 4.4, 629 MB private against 1,567. A query took 30 ms, a 432-token chunk 131 ms and a 2,707-token text 1.0 s, as before, and the vectors matched (cosine 0.99999 or more). Beside a loaded GenieX the two hold 5,646 MB of the NPU's memory, against 7,114 MB. Windows lets one device hold about half a PC's memory, 7.8 GB on a 16 GB Snapdragon.
+  - **`caps.embed`: 1,365**, by the kit's estimate of 3 characters a token, so a request stays under the server's 4,096 real tokens even at one token a character. Embeddings had the route's 2,400 before. The longest input any agent sends is about 2,060 characters (Reeve's cluster items), an estimate of 687, so every request still goes to the NPU. A longer one goes to the next accelerator that makes embeddings.
+  - **`idleStop.coldStartMs.embed`: 3,000**, measured (1.3 to 3.0 s alone, 1.5 to 2.2 s beside a loaded GenieX), not the 10,000 assumed. A person waking it is told about 3 s; the minutes stay 5.
+- **spec/NPU-VENDORS.md** has the measurements (Memory on a 16 GB Snapdragon) and what stays as it was: GenieX's own 1.56 GB float32 embedding table, which GenieX 0.8.0 reads whole for vision-language models and won't take quantized; its 4,096-token context, AI Hub's only build; InternVL3.5-2B, smaller and faster but 19 of 24 on the quality items against 22, a must-pass one wrong; recycling GenieX sooner, which the 5-minute idle stop makes moot on a small PC; and no `memoryGb` for Qualcomm, which at the 40% share would leave embeddings off the NPU on every 16 GB Snapdragon. It also has the route run under a 16 GB PC's memory (a ballast on the X2 Elite, at 9.7 GB available and at 15.6 GB in all). Nothing failed at either level. The NPU held the same 5,646 MB as with no ballast (7,114 at the old setting), and the new setting left 1.6 GB more of the PC's memory.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- On a Snapdragon already set up, the NPU refresh brings the embedding server's new command and cap in as the agent pins this kit, once it answers its test. Nothing is downloaded, and no index is rebuilt: the model and its vectors are the same.
 
 ## 2.74.8
 

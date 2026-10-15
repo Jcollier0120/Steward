@@ -2,6 +2,38 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.49
+
+**Updates go in on a busy PC: an agent slow to start after an update is no longer rolled back as broken, and the Steward pauses its rounds for a few minutes so Manor can update it.**
+
+### What's new
+
+- Manor updates an agent only while it's idle. A Steward busy with one round after another could go hours without being idle when Manor looked, so its updates waited, or waited for you to press Update. Now, while Manor has an automatic update ready for the Steward, its rounds wait up to 5 minutes so the update can go in. If it hasn't gone in by then, the rounds go on, and wait again half an hour later. Run now never waits. Every agent gets the same with kit 2.75.2.
+
+### What changed
+
+- When an update starts an agent while the PC is busy (a release's checks running, say), its page can take more than 20 seconds to answer. The update used to take that for a broken release: it put the version before back, marked the new one unsafe and refused it from then on, and the new version kept running over the older version's files. On 15 October this happened to the Steward's 0.36.46 and the Assayer's 0.4.2. Now the update waits while the agent is still starting, up to 5 minutes, and one that answers late as the new version is kept, and checked as usual.
+- If an update does have to be rolled back, the new version is stopped completely first, even while it's still starting, so the version put back is the one that runs.
+- Once a newer version is installed and holds up, an older version marked unsafe no longer is, and its alarm goes away.
+
+### Before you update
+
+- If your Steward's update to 0.36.46 was rolled back (its page has an alarm saying so, and Manor shows 0.36.42 installed), this update sets it right: it stops the Steward that's running, installs 0.36.49 whole, and clears the 0.36.46 alarm once 0.36.49 holds up. Until 0.36.49 is running, the Steward doesn't pause its rounds for Manor yet, so if Manor keeps waiting for the Steward to be idle, press Update in Manor. Other agents rolled back the same way are set right by their next release.
+
+## 0.36.48
+
+**Kit 2.75.1: on a Snapdragon, the local AI's search model holds half the memory it did, so everything fits on a 16 GB PC.**
+
+### What changed
+
+- On a Snapdragon PC, the search model that runs on the NPU beside the chat model now holds 1.4 GB of memory instead of 2.9 GB. It answers just as fast and gives the same results, so existing search indexes carry over. Together the two models now hold 5.6 GB instead of 7.1 GB, comfortably inside what Windows lets the NPU hold on a 16 GB PC. Tried with only a 16 GB PC's worth of memory free, chat, pictures and search all kept working, and the two models left 1.6 GB more of it for everything else than before.
+- Waking the search model after a rest is now announced as taking about 3 seconds, as measured, instead of 10.
+- The kit the Steward hands out (2.75.1) brings this to every agent. Intel and AMD PCs are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a Snapdragon already set up, the agents switch the search model to its new settings as they update, with nothing to download.
+
 ## 0.36.46
 
 **A build whose checks fail no longer holds everything back: the Steward finds the pull request that broke it, takes it out, and ships the rest.**

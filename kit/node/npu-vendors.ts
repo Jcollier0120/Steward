@@ -100,6 +100,11 @@ export interface NpuGeneration {
   caps?: NpuRoute['caps'];
   /** Server arguments that differ on it: each flag's value in the route's `serve` replaced (OpenVINO's --max_prompt_len). */
   args?: Record<string, string>;
+  /**
+   * Its embedding server's arguments that differ on it, the same way in `embedServer.serve`: the NPU 3720's runs on the
+   * processor's graphics (`--target_device GPU`), which embeds a query in 50 ms against its NPU's 1.1 s.
+   */
+  embedArgs?: Record<string, string>;
   /** What its models hold of the PC's memory, where it differs from the route's (a shorter compiled prompt holds less). */
   memoryGb?: NpuRoute['memoryGb'];
   /** Why its values are what they are, in a sentence. */
@@ -482,13 +487,18 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
  */
 export function routeFor(route: NpuRoute, generation: string | null | undefined): NpuRoute {
   const g = generationOf(route, generation);
-  if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.memoryGb)) return route;
-  const serve = [...route.serve];
-  for (const [flag, value] of Object.entries(g.args ?? {})) {
-    const i = serve.indexOf(flag);
-    if (i >= 0) serve[i + 1] = value;
-  }
-  return { ...route, serve, maxContextTokens: g.maxContextTokens ?? route.maxContextTokens, caps: { ...route.caps, ...g.caps }, timeouts: { ...route.timeouts, ...g.timeouts }, ...(route.memoryGb || g.memoryGb ? { memoryGb: { ...route.memoryGb, ...g.memoryGb } } : {}) };
+  if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
+  const replaced = (args: string[], values: Record<string, string> | undefined) => {
+    const serve = [...args];
+    for (const [flag, value] of Object.entries(values ?? {})) {
+      const i = serve.indexOf(flag);
+      if (i >= 0) serve[i + 1] = value;
+    }
+    return serve;
+  };
+  const serve = replaced(route.serve, g.args);
+  const es = route.embedServer && g.embedArgs ? { embedServer: { ...route.embedServer, serve: replaced(route.embedServer.serve, g.embedArgs) } } : {};
+  return { ...route, serve, ...es, maxContextTokens: g.maxContextTokens ?? route.maxContextTokens, caps: { ...route.caps, ...g.caps }, timeouts: { ...route.timeouts, ...g.timeouts }, ...(route.memoryGb || g.memoryGb ? { memoryGb: { ...route.memoryGb, ...g.memoryGb } } : {}) };
 }
 
 // ------------------------------------------------------------------------------------------------

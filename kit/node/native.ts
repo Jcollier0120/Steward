@@ -229,6 +229,33 @@ export function processesUnder(dir: string): number[] {
     .filter((id) => Number.isInteger(id) && id > 0);
 }
 
+/**
+ * The Node processes running an agent's page from its app folder (kit 2.75.2): `node <app>\src\cli.ts serve`, and the
+ * `open` that starts it (the sign-in task's), by PowerShell's CIM, however `app` is spelled. Node runs from its own
+ * folder, so processesUnder can't see them: their command lines say. An install waits on while one is still starting
+ * (a busy PC can take minutes to bring a page up), and a rollback ends them before it puts the version before back.
+ */
+export function pagesFrom(app: string): number[] {
+  const r = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`],
+    { encoding: 'utf8', windowsHide: true, timeout: 60_000 },
+  );
+  return pagesIn(`${r.stdout ?? ''}`, app);
+}
+
+/** pagesFrom's reading of PowerShell's lines, "<pid> <command line>": the ones running `serve` or `open` from `app`'s src\cli. */
+export function pagesIn(lines: string, app: string): number[] {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pages = spellingsOf(app).map((d) => new RegExp(`(^|["\\s])${esc(d.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase())}\\\\src\\\\cli\\.[cm]?[jt]s"?\\s+(serve|open)\\s*$`));
+  return lines.split(/\r?\n/).flatMap((l) => {
+    const m = /^(\d+) (.*)$/.exec(l.trim());
+    if (!m) return [];
+    const line = m[2].replace(/\//g, '\\').toLowerCase();
+    return pages.some((p) => p.test(line)) ? [Number(m[1])] : [];
+  });
+}
+
 /** Ends processes by id (taskkill /F), each one's whole tree. */
 export function endProcesses(ids: number[]): void {
   if (!ids.length) return;

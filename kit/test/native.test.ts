@@ -291,3 +291,47 @@ test('npm run release carries both processors\' native files and their notices; 
   assert.equal(r.status, 1);
   assert.match(r.stderr, /never published unsigned/);
 });
+
+test("pagesIn: the Node processes running an app folder's page, serve or the open that starts it, however they're quoted; nothing else (kit 2.75.2)", { skip: process.platform !== 'win32' && 'Windows paths' }, async () => {
+  const { pagesIn } = await import('./fixture/src/kit/native.ts');
+  const app = String.raw`C:\Users\pat\.steward\app`;
+  const lines = [
+    String.raw`101 "C:\Program Files\nodejs\node.exe" "C:\Users\pat\.steward\app\src\cli.ts" serve`,
+    String.raw`102 node C:\Users\pat\.steward\app\src\cli.ts open`,
+    String.raw`103 "C:\Program Files\nodejs\node.exe" c:/users/pat/.steward/app/src/cli.js serve `,
+    // The install's probation watcher runs from app too, and is never a page.
+    String.raw`201 node C:\Users\pat\.steward\app\src\cli.ts install --watch-probation 0.36.49 --from 0.36.46 --since 1`,
+    String.raw`202 node C:\Users\pat\.steward-dev\app\src\cli.ts serve`,
+    String.raw`203 node C:\Users\pat\.steward\app.prev\src\cli.ts serve`,
+    String.raw`204 node C:\Users\pat\.reeve\app\src\cli.ts serve`,
+    String.raw`205 node D:\copy\C:\Users\pat\.steward\app\src\cli.ts serve`,
+    String.raw`206 node C:\Users\pat\.steward\app\src\cli.ts serve --port 1`,
+    '207',
+    '',
+    'not a process',
+  ].join('\r\n');
+  assert.deepEqual(pagesIn(lines, app), [101, 102, 103]);
+});
+
+test('pagesFrom finds a page process running from an app folder, and endProcesses ends it', { skip: process.platform !== 'win32' && 'needs PowerShell' }, async () => {
+  const { endProcesses, pagesFrom } = await import('./fixture/src/kit/native.ts');
+  const app = path.join(tmp, 'starting', 'app');
+  mkdirSync(path.join(app, 'src'), { recursive: true });
+  writeFileSync(path.join(app, 'src', 'cli.ts'), 'setInterval(() => {}, 1000);\n');
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [path.join(app, 'src', 'cli.ts'), 'serve'], { stdio: 'ignore', windowsHide: true });
+  try {
+    let found: number[] = [];
+    for (let i = 0; i < 20 && !found.includes(child.pid!); i++) {
+      found = pagesFrom(app);
+      if (!found.includes(child.pid!)) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.deepEqual(found, [child.pid], 'the page, and only it');
+    assert.deepEqual(pagesFrom(path.join(tmp, 'starting', 'other')), []);
+    endProcesses(found);
+    for (let i = 0; i < 20 && pagesFrom(app).length; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.deepEqual(pagesFrom(app), []);
+  } finally {
+    child.kill();
+  }
+});
