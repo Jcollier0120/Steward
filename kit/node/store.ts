@@ -22,9 +22,12 @@ const RENAME_WAIT_MS = 25;
 const sleepSync = (ms: number) => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /**
- * Writes JSON through a temporary file and a rename, so a reader never sees half a file. A rename Windows refuses
- * for a moment (EPERM, EACCES or EBUSY: about one in a thousand in %TEMP% or a scanned folder, as the Wright measured
- * for the Miller) is tried again every 25 ms, for up to half a second; after that, or on any other error, the
+ * Writes JSON through a temporary file and a rename, so a reader never sees half a file. The temporary file is on the
+ * disk before the rename (kit 2.73.3), about 1 ms more a write: Windows writes a rename to its journal at once and a
+ * file's contents a few seconds later, so after a crash a file written just before it was left the right size and all
+ * NUL bytes, read as missing. Now it is the old file or the new one. A rename Windows refuses for a moment (EPERM,
+ * EACCES or EBUSY: about one in a thousand in %TEMP% or a scanned folder, as the Wright measured for the Miller) is
+ * tried again every 25 ms, for up to half a second; after that, or on any other error, the
  * temporary file is removed and the error thrown. A file that holds exactly that JSON already is left as it is (kit
  * 2.71.3): no temporary file and no rename, its modified time as it was; `always` writes it all the same, for a
  * write whose time is read (a person's save of Settings). `rename` and `sleep` are for tests.
@@ -36,7 +39,7 @@ export function writeJson(file: string, value: unknown, o: { always?: boolean; r
   if (!o.always && holds(file, text)) return void fileCounts.unchanged++;
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
+  writeFileSync(tmp, text, { flush: true });
   forget(file);
   for (let t = 1; ; t++) {
     try {

@@ -15,6 +15,8 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.26
+
 **Kit 2.74.0: a page layout for the agents your AI assistant calls, taken from Reeve's page, so they all read alike.**
 
 ### What's new
@@ -24,6 +26,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.21
+
+**An update cut short by a crash no longer leaves an agent that can't start: what an update or a save writes is on the disk before it takes its place.**
+
+### What changed
+
+- The Steward hands out kit 2.73.3 and runs on it. When the PC went down seconds after Manor updated an agent, Windows had kept the swap of the agent's folder but not its files: they came back full of nothing (NUL bytes), and the agent's page couldn't start until it was installed again. Now each update writes the new version's files to the disk before swapping them in, and the copy kept for a rollback too.
+- The same for every settings and state file the Steward and the agents write: after a crash each is as it was before the save or as it was after, never empty. Each save takes about a millisecond longer.
+- Kit 2.73.3 also brings Intel's NPU 3720 tuning: on a PC with that NPU (Core Ultra Series 1, or 200U), the agents' local model answers a short question in about half a second instead of three, and the NPU check measures a real first compile. A PC whose NPU is already set up keeps its settings until it is set up again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent gets the same once the Steward moves it onto kit 2.73.3.
 
 ## 0.36.20
 
