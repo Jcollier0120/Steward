@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
@@ -10,7 +10,7 @@ import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFil
 import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
-import { failedTests, runLine, tail, type Runner } from '../run.ts';
+import { errorLines, failedTests, runLine, tail, type Runner } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
@@ -364,6 +364,39 @@ export function patchesByFile(patch: string): Map<string, string> {
 /** Where runChecks keeps the whole output of the step that failed in a worktree: beside it, as <worktree>.log. */
 export const checksLogOf = (dir: string) => `${dir}.log`;
 
+/** How many failed steps' outputs kit trials keep (kitTrialLogOf), the newest. */
+export const KEPT_TRIAL_LOGS = 40;
+
+/**
+ * Where a kit's trial keeps an agent's failed step's whole output: a file for each agent and kit, apart from the log
+ * beside its trial's worktree, which the agent's next try clears (its checks without the kit, its pair, another kit's
+ * trial). The trial's comment and the Wright's issue point to it.
+ */
+export const kitTrialLogOf = (s: Ctx['settings'], e: Employee, kit: string) => path.join(workRootOf(s), '_kit-trial-logs', `${e.id}-kit-${kit}.log`);
+
+/**
+ * The failed step's output beside a trial's worktree, copied to kitTrialLogOf (the oldest beyond KEPT_TRIAL_LOGS
+ * removed), and the first distinct lines in it that say what went wrong (errorLines). Null when there is none, or it
+ * couldn't be kept. Never throws.
+ */
+export function keepTrialLog(s: Ctx['settings'], e: Employee, kit: string, dir: string): { log: string; errors: string[] } | null {
+  try {
+    const text = readFileSync(checksLogOf(dir), 'utf8');
+    const log = kitTrialLogOf(s, e, kit);
+    mkdirSync(path.dirname(log), { recursive: true });
+    writeFileSync(log, text);
+    const all = readdirSync(path.dirname(log))
+      .filter((f) => f.endsWith('.log'))
+      .map((f) => path.join(path.dirname(log), f))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+    for (const old of all.slice(KEPT_TRIAL_LOGS)) rmSync(old, { force: true });
+    // Its first line names the step and its exit, then a blank one: what the step printed follows.
+    return { log, errors: errorLines(text.replace(/\r/g, '').split('\n').slice(2).join('\n')) };
+  } catch {
+    return null;
+  }
+}
+
 /** `: "name" (its error)`, for the tests that failed, so a failure's message (and its alarm) says which. */
 export function testsLine(tests: { name: string; error: string | null }[]): string {
   if (!tests.length) return '';
@@ -489,12 +522,14 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   if (first) {
     say(`its checks once more (${first})`);
     const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
+    // A trial's failed step kept apart, before its checks without the kit write theirs beside the worktree.
+    const kept = again && o.trial ? keepTrialLog(ctx.settings, e, o.kit, dir) : null;
     // A trial's failure isn't the kit's when the agent fails the very same way without it, on its main as it is. Failing
     // otherwise there (its own kit couldn't be fetched, say) says nothing, and the failure stands.
     const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
     if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
     if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
-    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit, ...(alone ? { without: alone } : {}) });
+    if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${kept?.log ?? checksLogOf(dir)}`, { version: next, base: baseCommit, ...(alone ? { without: alone } : {}), ...(kept?.errors.length ? { errors: kept.errors } : {}) });
   }
   // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';

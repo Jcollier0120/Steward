@@ -25,11 +25,25 @@ export const psStart = (shares = sharesConsole()) => ({ windowsHide: !shares });
  * The worker goes after IDLE_MS with nothing to run, and is replaced after MAX_SCRIPTS. A script that calls `exit` or
  * writes to the console itself, and any script while the worker can't run, gets its own powershell.exe as before
  * (oneShot).
+ *
+ * Its time limit (60 s unless the caller gives one) stretches as the checks pace slows the process (psPaced): a test
+ * run at the pace starts its own powershell.exe inside the pace's job, beside every other test file's, sharing a third
+ * of the processor, and .NET's start alone took longer than the keeper's 30 s there (2026-10-15).
  */
 export function powershell(script: string, opts: { timeoutMs?: number } = {}): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const timeoutMs = psPaced(opts.timeoutMs ?? 60_000);
   if (oneShotOnly || CALLS_EXIT.test(script) || WRITES_CONSOLE.test(script)) return oneShot(script, timeoutMs);
   return worker().run(script, timeoutMs).catch((e) => (e instanceof WorkerGone ? oneShot(script, e.timeLeft) : Promise.reject(e)));
+}
+
+/**
+ * `ms` stretched as the checks pace slows this process: checks-pace.ts' `paced`, the same variable (KIT_CHECKS_SLOWER,
+ * its CHECKS_SLOWER_ENV) read the same way, here since checks-pace.ts runs PowerShell itself (checks-pace.test.ts holds
+ * the two together). Unpaced, as an agent's own work runs, `ms` as it is. Pure.
+ */
+export function psPaced(ms: number, env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.KIT_CHECKS_SLOWER);
+  return Math.round(ms * (Number.isFinite(n) && n > 1 ? Math.min(n, 50) : 1));
 }
 
 /** `exit`, as a command: in a runspace it would drop the script's output and its exit code. */

@@ -16,7 +16,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
+const { askRoundSoon, passingTrouble, setVouch, STATUS_WAITS_MS, vouch } = await import('../src/stages/vouch.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -115,6 +115,45 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.equal(dirty.v.ok, false);
   assert.match(dirty.v.message, /uncommitted changes/);
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
+});
+
+test("the vouch's status is set again after GitHub's passing trouble (an answer cut short, a 5xx, the network), and waits between; a refusal of it, or trouble that lasts, gives up", async () => {
+  const e = employee(tmp);
+  const post = async (answers: { code: number; out?: string; err?: string }[]) => {
+    let i = 0;
+    const waited: number[] = [];
+    const r = runner((a) => (a[0] === 'api' ? { out: '', err: '', ...answers[Math.min(i++, answers.length - 1)] } : undefined));
+    const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp }), pause: async (ms: number) => void waited.push(ms) };
+    const why = await setVouch(ctx, e, e.repo, 'a'.repeat(40), 'npm test passed at aaaaaaa');
+    return { why, tries: r.gh.filter((a) => a[0] === 'api').length, waited, lines: ctx.lines.join('\n') };
+  };
+
+  // The vouch of 15 October 2026: GitHub's answer cut short, then set fine the second time.
+  const cut = await post([{ code: 1, err: 'unexpected end of JSON input' }, { code: 0, out: '{}' }]);
+  assert.equal(cut.why, null);
+  assert.equal(cut.tries, 2);
+  assert.deepEqual(cut.waited, [STATUS_WAITS_MS[0]]);
+  assert.match(cut.lines, /GitHub wouldn't take the status \(unexpected end of JSON input\): trying again in 2 s/);
+
+  const gateway = await post([{ code: 1, err: 'gh: Bad Gateway (HTTP 502)' }, { code: 1, err: 'Post "https://api.github.com/…": read: connection reset by peer' }, { code: 0, out: '{}' }]);
+  assert.equal(gateway.why, null);
+  assert.equal(gateway.tries, 3);
+
+  // Trouble that lasts: tried once and after each wait, then the last refusal says why.
+  const down = await post([{ code: 1, err: 'gh: Service Unavailable (HTTP 503)' }]);
+  assert.equal(down.why, "its checks passed, but GitHub wouldn't take the status: gh: Service Unavailable (HTTP 503)");
+  assert.equal(down.tries, 1 + STATUS_WAITS_MS.length);
+  assert.deepEqual(down.waited, STATUS_WAITS_MS);
+
+  // GitHub refusing the status itself: asked once.
+  for (const err of ['gh: Validation Failed (HTTP 422)', 'gh: Not Found (HTTP 404)', 'gh: Bad credentials (HTTP 401)', 'no such thing']) {
+    const refused = await post([{ code: 1, err }, { code: 0, out: '{}' }]);
+    assert.equal(refused.why, `its checks passed, but GitHub wouldn't take the status: ${err}`, err);
+    assert.equal(refused.tries, 1, err);
+  }
+  assert.equal(passingTrouble('Post "https://api.github.com/repos/x/y/statuses/z": dial tcp: lookup api.github.com: i/o timeout'), true);
+  assert.equal(passingTrouble('HTTP 500: Internal Server Error'), true);
+  assert.equal(passingTrouble('HTTP 403: Resource not accessible by integration'), false);
 });
 
 test("steward vouch is stopped past its average time, with everything its checks started, and sets nothing; a pass is kept toward the average", async () => {

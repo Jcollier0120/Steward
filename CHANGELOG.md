@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.54
+
+**Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors.**
+
+### What changed
+
+- **Catch-up and `## Unreleased` entries.** A PR whose changelog entry is `## Unreleased` is now caught up like one with a version: its entry stays on top, above the branch's new ones. Before, it went back to its author as a conflict.
+- **The branch's `## Unreleased` entries go into a caught-up PR's own.** When a PR with a version is caught up past an `## Unreleased` entry on its branch, the PR's entry takes it in. Its headline goes on to say "It also brings what wasn't released before: …", and each section's lines go under the section of the same name (What's new, What changed, then Before you update or For an agent). A "Nothing to do" gives way to a line that says more. Before, the Unreleased notes were left below the new version, where no release reads them.
+  - The same goes for the kit's changelog, and for the merge train. A catch-up that resolved only these keeps the PR's vouch, as before.
+- **A kit trial's comment quotes what failed.** Under each agent the new kit fails, the comment now shows the first few distinct error lines its checks printed. The same error from forty test files shows once.
+  - The failed step's whole output is kept in the work folder's `_kit-trial-logs`, one file for each agent and kit (the newest 40). It is still there after the agent's next try, which used to clear it. The comment and the Wright's issue point to it.
+- **A vouch gets past GitHub's passing trouble.** Sometimes GitHub's answer to the vouch's status is cut short, or is a server error, or the network drops. The vouch now tries again after 2, 5 and 10 s before it gives up. A refusal (no access, no such commit) still stops it at once. The Steward's own PR test sets its vouch the same way.
+- **Kit 2.77.4**: PowerShell's time limits stretch at the checks pace, so the kit's PowerShell tests no longer time out on a busy PC.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**

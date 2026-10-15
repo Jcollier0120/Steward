@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.77.4
+
+**PowerShell's time limits stretch at the checks pace, as a test's own waits do.**
+
+### What changed
+
+- **ps.ts**: `powershell(script, { timeoutMs })` stretches its time limit (60 s unless given) by as much as the checks pace slows the process (`psPaced`, which reads `KIT_CHECKS_SLOWER` as checks-pace.ts's `paced` does). A test run at the pace starts its own powershell.exe inside the pace's job, beside every other test file's, and .NET's start alone could pass the keeper's 30 s process query, or a script's 60 s, there. The keeper's and psQuote's tests timed out so on a busy PC. Unpaced, as an agent's own work runs, nothing changes.
+
+### For an agent
+
+- Nothing to do.
+
 ## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
