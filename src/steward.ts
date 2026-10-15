@@ -20,7 +20,7 @@ import { keepVersionQueues } from './version-queue.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
-import { merge, waitsBriefly } from './stages/merge.ts';
+import { conflictsWaiting, merge, mergeOne, NO_CONFLICTS, waitsBriefly } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { pruneClaims, shareClaims } from './claims.ts';
@@ -45,7 +45,7 @@ import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
-import { withRepo, withStageSlot } from './stages/slots.ts';
+import { repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
@@ -477,6 +477,68 @@ export async function approveJobsNow(ids: string[], o: { run?: Runner; owner?: O
     }
     return out;
   });
+}
+
+/**
+ * The ready PRs that conflict with their branch, caught up now, beside the rounds (merge.ts's mergeOne, conflictsOnly):
+ * a round reaches each repository in turn, one round at a time, and a long one (a vouch's tests, a kit trial) left a PR
+ * that conflicted waiting for hours. A glance at GitHub first, in no stage slot: a repository with no ready PR in
+ * conflict (conflictsWaiting), or one another stage is working on now (repoBusy), is left alone, and with none left
+ * nothing more is done. The rest in a stage slot of its own, "conflicts" (stages/slots.ts; none free: LockTimeout at
+ * once, and the next look tries again), each where this PC has its turn (lease.ts), under its lock. Nothing is merged,
+ * released or tested: the next round does that. Only while Settings say it merges by itself and catches up, online, and
+ * within GitHub's API budget at its pace (budget.ts). `begin`: told when it takes a slot, and the end it returns called
+ * once it gives the slot back. One line for each repository whose PRs it caught up, or handed a conflict on in.
+ */
+export async function conflictsNow(o: StageOptions & { begin?: () => () => void } = {}): Promise<EmployeeResult[]> {
+  const log = o.log ?? (() => {});
+  if (!stewardActs()) return [];
+  const given = loadSettings();
+  if (!given.byItself || !given.catchUp || !reposHere(given, o)) return [];
+  if (!(await (o.online ?? onlineNow)())) return [];
+  const b = loadBudget();
+  if (!gate(b, b.glanceCost ?? given.employees.length + 1, o.now?.() ?? new Date(), { paced: true }).go) return [];
+  const ctx = await context({ settings: given, run: o.run, log, owner: o.owner, scm: o.scm, now: o.now });
+  if (!ctx.glance) return [];
+  const self = selfEmployee(ctx, o);
+  const waiting = [...ctx.settings.employees, ...(self ? [self] : [])].filter((e) => !repoBusy(e.id) && conflictsWaiting(ctx, e).length);
+  if (!waiting.length) return [];
+  return withStageSlot(
+    'conflicts',
+    ctx.settings.stagesAtOnce,
+    async () => {
+      const end = o.begin?.();
+      try {
+        const t = await takeTurns(waiting, { run: ctx.run, settings: ctx.settings, log: ctx.log, deps: turnsDeps(o, ctx.run) });
+        ctx.lease = t.guard;
+        const out: EmployeeResult[] = [];
+        // takeTurns keeps one entry per id: matched by id, as the Steward may be its own employee.
+        for (const e of waiting.filter((x) => t.acting.some((a) => a.id === x.id))) {
+          // Taken by another stage since the glance: left to it.
+          if (repoBusy(e.id)) continue;
+          try {
+            const { merged: _m, held: _h, did: _d, waits: _w, lookAgain: _l, ...r } = await withRepo(log, e.id, () => mergeOne(ctx, e, { yes: true, team: true, conflictsOnly: true }));
+            if (r.message !== NO_CONFLICTS) out.push(r);
+          } catch (err) {
+            log(`[${e.id}] ${(err as Error).message}`);
+          }
+        }
+        // Caught up: Manor's version queues and the staff's table say so now, not at the next round.
+        if (out.some((r) => r.outcome === 'done') && !process.env.NODE_TEST_CONTEXT) {
+          try {
+            await keepVersionQueues(ctx);
+            await refreshStaff(ctx, { fetch: true });
+          } catch (err) {
+            log(`couldn't keep the version queues and the staff's table: ${(err as Error).message}`);
+          }
+        }
+        return out;
+      } finally {
+        end?.();
+      }
+    },
+    { waitMs: 0 },
+  );
 }
 
 /** Runs a stage in one of the stages' slots (stages/slots.ts), records it, and refreshes the staff's table; a round only when it did something. */

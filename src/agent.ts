@@ -12,7 +12,7 @@ import { run as realRun, type Runner } from './run.ts';
 import { teamOf, type Owner } from './team.ts';
 import { agentPages, loadSettings, SETTINGS_SPEC } from './settings.ts';
 import type { Staff, StaffRow } from './stages/staff.ts';
-import { approveJobsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
+import { approveJobsNow, conflictsNow, context, loadLastStage, loadStaff, refreshStaff, reposHere, runStage, type StageAsk } from './steward.ts';
 import { loadTending } from './tend.ts';
 import type { StaffView, StewardView } from './web/types.ts';
 import { allowUpdate } from './safeinstall.ts';
@@ -66,6 +66,12 @@ export const FIRST_ROUND_MS = 30_000;
 export const SOON_MS = 2 * 60_000;
 /** At most this many rounds in a row come sooner; then one at Settings' interval, so checks that never end don't keep the rounds quick. */
 export const SOON_IN_A_ROW = 3;
+
+/**
+ * How often the Steward looks for ready PRs that conflict with their branch, beside the rounds (steward.ts's
+ * conflictsNow); not within this long of a round beginning, whose own look just did the same.
+ */
+export const CONFLICTS_EVERY_MS = 5 * 60_000;
 
 /**
  * The wait before the next round, after one that did (`soon`) or didn't ask for it sooner, with `run` rounds in a row
@@ -223,6 +229,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
 
   /** The wait before the next round, when the last asked for it sooner (soonAfter); null: Settings' interval. */
   let sooner: number | null = null;
+  /** When the last round began (Date.now()), for the looks at the conflicts beside the rounds; 0 before the first. */
+  let roundBegan = 0;
   /** The rounds in a row that came sooner: after SOON_IN_A_ROW, one at Settings' interval (soonAfter). */
   let soonRun = 0;
   // The round (stages/round.ts): merge what's ready, the team's too, with what each PR asks for after; then
@@ -231,6 +239,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // Off the maker's laptop with Developer options off, no round runs: a developer's work (maker.ts).
     if (rounding() || slotsFull() || !stewardActs()) return;
     const end = begin('round');
+    roundBegan = Date.now();
     sooner = null;
     try {
       // A scheduled round looks only at what's new on GitHub; Run now looks at everyone. Scheduled while Settings say it
@@ -248,6 +257,31 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   };
   /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
   const startRound = () => void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  // Beside the rounds (steward.ts's conflictsNow): every few minutes, while a stage's slot is free, the ready PRs that
+  // conflict with their branch are caught up, rather than waiting for a round to reach their repository; a long round
+  // (a vouch's tests, a kit trial) left them waiting for hours. It takes a slot only once it finds one to catch up, and
+  // none at all while every slot is taken: the rounds' own work goes first. One caught up brings a round, to merge it.
+  let conflictsGoing = false;
+  const conflictsJob = async () => {
+    const s = loadSettings();
+    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs()) return;
+    if (Date.now() - roundBegan < CONFLICTS_EVERY_MS) return;
+    conflictsGoing = true;
+    try {
+      const done = await conflictsNow({ run: o.run, owner: o.owner, log: (line) => console.log(`conflicts: ${line}`), begin: () => begin('conflicts') });
+      for (const r of done) console.log(`conflicts: [${r.id}] ${r.message}`);
+      if (done.some((r) => r.outcome === 'done')) {
+        if (rounding() || slotsFull()) roundAfter = true;
+        else startRound();
+      }
+    } catch (e) {
+      if (!(e instanceof LockTimeout)) console.error(`${new Date().toISOString()} conflicts: ${(e as Error).message}`);
+    } finally {
+      conflictsGoing = false;
+    }
+  };
+  // Not under node --test: a test asks for a look itself.
+  if (!process.env.NODE_TEST_CONTEXT) setInterval(() => void conflictsJob(), CONFLICTS_EVERY_MS).unref();
   // A kit trial runs beside the rounds here (stages/trial.ts): once it ends, a round settles its PR at once, rather than
   // at the next tick. One the network cut short waits for the next tick, as before.
   trialsOnTheirOwn(({ cut }) => {
