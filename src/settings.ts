@@ -530,6 +530,16 @@ export const SETTINGS_SCHEMA: Field[] = [
         ],
       },
       { key: 'windowMinutes', kind: 'whole', min: 15, max: 360, unit: 'minutes', label: 'A build takes at most', advanced: true, help: 'Then it releases what it merged, and the rest waits for the next build.' },
+      {
+        key: 'bisectRuns',
+        kind: 'whole',
+        min: 0,
+        max: 6,
+        unit: 'test runs',
+        label: 'To find the PR that breaks a build, at most',
+        advanced: true,
+        help: "A repository's PRs that fail their checks together are halved this many times to find the one that broke them: it goes back to a draft and the rest leave. 3 finds it among up to 8 PRs. 0: the whole batch waits for the next build.",
+      },
     ],
   },
   {

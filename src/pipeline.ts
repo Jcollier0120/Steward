@@ -28,9 +28,14 @@ export interface BuildPipeline {
   kit: 'every' | 'first';
   /** A build's rounds go on at most this long; then the build releases what it merged, and ends. */
   windowMinutes: number;
+  /**
+   * A repository's stack that fails its checks (twice: once more for a flaky test) is halved at most this many times to
+   * find the PR that broke it (stages/build.ts). 0: none is looked for, and the stack waits for the next build.
+   */
+  bisectRuns: number;
 }
 
-export const DEFAULT_PIPELINE: BuildPipeline = { on: false, times: ['08:00', '13:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120 };
+export const DEFAULT_PIPELINE: BuildPipeline = { on: false, times: ['08:00', '13:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
 
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
@@ -42,13 +47,16 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
     ? [...new Set(r.times.filter((t): t is string => typeof t === 'string' && TIME.test(t.trim())).map((t) => t.trim().padStart(5, '0')))].sort()
     : d.times;
   const days = Array.isArray(r.days) ? DAYS.filter((x) => (r.days as unknown[]).includes(x)) : d.days;
-  const w = typeof r.windowMinutes === 'number' ? r.windowMinutes : typeof r.windowMinutes === 'string' && r.windowMinutes.trim() ? Number(r.windowMinutes) : Number.NaN;
+  const whole = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x) : Number.NaN);
+  const w = whole(r.windowMinutes);
+  const b = whole(r.bisectRuns);
   return {
     on: typeof r.on === 'boolean' ? r.on : d.on,
     times: times.length ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
     windowMinutes: Number.isInteger(w) ? Math.min(360, Math.max(15, w)) : d.windowMinutes,
+    bisectRuns: Number.isInteger(b) ? Math.min(6, Math.max(0, b)) : d.bisectRuns,
   };
 }
 

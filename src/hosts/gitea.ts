@@ -144,6 +144,14 @@ export class Gitea implements SourceHost {
     return ready === title ? a : this.repo(repo, 'PATCH', `/pulls/${n}`, { title: ready });
   }
 
+  /** A draft here is a title marked WIP. */
+  async draftPr(repo: string, n: number): Promise<Answer> {
+    const a = await this.repo(repo, 'GET', `/pulls/${n}`);
+    if (a.code !== 0) return a;
+    const title = String(parsed<any>(a.out)?.title ?? '');
+    return unwip(title) !== title ? a : this.repo(repo, 'PATCH', `/pulls/${n}`, { title: `WIP: ${title}` });
+  }
+
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);

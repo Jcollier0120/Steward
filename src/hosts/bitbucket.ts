@@ -167,6 +167,10 @@ export class Bitbucket implements SourceHost {
     return this.update(repo, n, { draft: false });
   }
 
+  draftPr(repo: string, n: number): Promise<Answer> {
+    return this.update(repo, n, { draft: true });
+  }
+
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);

@@ -122,6 +122,14 @@ export class GitLab implements SourceHost {
     return ready === title ? a : this.project(repo, 'PUT', `/merge_requests/${n}`, { title: ready });
   }
 
+  /** A draft here is a title marked Draft. */
+  async draftPr(repo: string, n: number): Promise<Answer> {
+    const a = await this.project(repo, 'GET', `/merge_requests/${n}`);
+    if (a.code !== 0) return a;
+    const title = String(parsed<any>(a.out)?.title ?? '');
+    return undraft(title) !== title ? a : this.project(repo, 'PUT', `/merge_requests/${n}`, { title: `Draft: ${title}` });
+  }
+
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);
