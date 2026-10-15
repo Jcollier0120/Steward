@@ -20,6 +20,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - The kit the Steward hands out (2.76.0) brings the same to every agent: their scheduled rounds and their place in the checks pace's turns show too.
+- Kit 2.76.0 also brings NPU work that wasn't released before. On Intel's NPU 3720, embeddings now run on the processor's graphics: a search answers in about 50 ms instead of 1.1 s, and Reeve indexes about 3.7 times as fast.
 
 ### Before you update
 
