@@ -25,6 +25,43 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.44
+
+**Kit 2.74.7: every first-generation Snapdragon X is recognised, the Snapdragons before it are turned down before anything downloads, and an X2 can stand in for an X.**
+
+### What's new
+
+- On a Snapdragon X2 laptop, the NPU check and the NPU benchmark can play a first-generation Snapdragon X (`--generation snapdragon-x`): they run the X's own model build and its NPU code on the X2, from a folder of their own, so the laptop's own local AI and its model are left alone. A played benchmark is shown, never ranked: it runs the X's code, not at an X's speed.
+
+### What changed
+
+- The kit the Steward hands out (2.74.7) recognises every first-generation Snapdragon X by the name Windows gives it, the plain X and X Plus included, and by its device id where the name doesn't say. On an X, setup now checks the model it downloads file by file against the X's own build, as it does on an X2.
+- On a Snapdragon from before the X (the 8cx, 8c, 7c, Microsoft's SQ1 to SQ3, the 850 and 835), setup now says plainly that its NPU can't run the manor's models, and why, before downloading anything. Before, it downloaded the NPU's server and a 4.4 GB model only for its test to fail. Its local AI runs on the graphics card or the processor instead, as it did once that test failed.
+- The NPU benchmark on a Snapdragon no longer fails its second start: it now waits until the stopped server has let go of its port before starting it again.
+- Steward 0.36.43's kit (2.74.6) also brought Intel's and AMD's NPU work, which its notes left out:
+  - Setup's first timeouts for an AMD NPU of a generation nobody has measured now allow for how fast its server actually reads: a 35 s base where it was 90 s.
+  - AMD's NPU has been measured on battery.
+  - On every Intel NPU, OpenVINO Model Server's prompt cache is now off.
+  - Intel's newer NPUs get prompt settings estimated from the ones measured.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and agents get it as they pin the kit. On a PC with an Intel NPU (Lunar Lake, or the NPU 3720) that's already set up, the NPU compiles its model once more as an agent takes this kit, for a minute or so.
+
+## 0.36.43
+
+**Kit 2.74.6: checks get the share of the processor Manor's Settings give them, and tests run at that pace take longer instead of failing.**
+
+### What changed
+
+- Checks the Steward and the other agents start (vouches, merge checks, kit trials, the Assayer's checks) were held by two limits at once: Manor's checks pace, and the agent's own gentle pace, which is far tighter. The gentle one won: two processors' worth, 11% on an 18-thread PC, so raising the checks pace in Manor's Settings did nothing for them. Now checks leave the agent's gentle limit and are held only by the checks pace.
+- The checks pace holds test runs to a share of the processor, a third unless Manor's Settings say otherwise. A run's overall time limit was already stretched to match, but the waits and timeouts a test sets itself weren't, so on a busy PC a test could fail with nothing wrong. Each paced run is now told how much slower it runs, and the kit's tests stretch their own waits and timeouts by that much. At the pace they take longer; at full speed nothing changes.
+- The kit the Steward hands out (2.74.6) brings this to every agent, for tests that use it.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and agents get it as they pin the kit.
+
 ## 0.36.42
 
 **Full test runs keep to the checks pace without starving their own tests, and a kit's release is no longer held by tests that fail at random.**

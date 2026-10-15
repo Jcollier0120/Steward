@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { until } from './until.ts';
+import { paced, until } from './until.ts';
 import { freePort } from './free-port.ts';
 
 // The house kit: the parts every agent shares. A copy runs on its own port and data folder.
@@ -77,7 +77,7 @@ test('the page answers on ::1 too, with the same host check, and stops there whe
   const http = await import('node:http');
   const onV6 = (host: string) =>
     new Promise<number | string>((resolve) => {
-      const req = http.get({ host: '::1', port, path: '/api/ping', headers: { host }, timeout: 2000 }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+      const req = http.get({ host: '::1', port, path: '/api/ping', headers: { host }, timeout: paced(2000) }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
       req.on('error', (e: NodeJS.ErrnoException) => resolve(e.code ?? 'error'));
     });
   const { close } = await serve({ port, icon: '<svg/>' });

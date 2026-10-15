@@ -4,6 +4,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writ
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { paced as testsPaced } from './until.ts';
 
 // The checks pace (checks-pace.ts, kit 2.70.0): test runs, type checks, installs and builds held to a share of the processor.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-checks-pace-'));
@@ -12,7 +13,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -76,6 +77,23 @@ test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap
   assert.deepEqual(withTestConcurrency('C:\\x\\vitest.cmd', ['--test'], 4), ['--test'], 'not node');
 });
 
+test("a test's own waits at the pace (kit 2.74.6): stretched as much as its run's time limit, as the paced command says; as they are unpaced", () => {
+  assert.equal(CHECKS_SLOWER_ENV, 'KIT_CHECKS_SLOWER');
+  assert.equal(checksSlower({ KIT_CHECKS_SLOWER: '4' }), 4);
+  assert.equal(checksSlower({ KIT_CHECKS_SLOWER: '9' }), 9);
+  assert.equal(checksSlower({}), 1, 'unpaced: its own time');
+  assert.equal(checksSlower({ KIT_CHECKS_SLOWER: 'x' }), 1);
+  assert.equal(checksSlower({ KIT_CHECKS_SLOWER: '0.5' }), 1, 'never quicker');
+  assert.equal(checksSlower({ KIT_CHECKS_SLOWER: '1000' }), 50, 'never past fifty');
+  assert.equal(paced(400, { KIT_CHECKS_SLOWER: '4' }), 1600);
+  assert.equal(paced(400, {}), 400);
+  // The tests' own helper reads the same variable the same way, without loading the kit.
+  for (const said of [undefined, '4', '9', '0.5', 'x', '1000']) {
+    const env = said === undefined ? {} : { KIT_CHECKS_SLOWER: said };
+    assert.equal(testsPaced(400, env), paced(400, env), `KIT_CHECKS_SLOWER=${said}`);
+  }
+});
+
 test('the launcher: one for the PC, beside the gentle DLL, a new one for a new source; compiled to a name of its own', () => {
   assert.match(path.basename(checksPaceExe('a')), /^checks-pace-[0-9a-f]{12}\.exe$/);
   assert.equal(path.basename(path.dirname(checksPaceExe('a'))), 'kit');
@@ -105,6 +123,7 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.deepEqual(p.args, [checksLimits(5000), process.execPath, 'x']);
   assert.deepEqual([p.slower, p.waitMs], [4, CHECKS_TURN_MS], 'half the processor: four times its time, and the wait for a turn');
   assert.equal(p.env.MSBUILDDISABLENODEREUSE, '1', ".NET's build servers don't stay behind in the job");
+  assert.equal(p.env.KIT_CHECKS_SLOWER, '4', 'told how much slower it runs, for its own waits');
   const tests = await pacedCommand(process.execPath, ['--test', 'a.test.ts'], { env: { KIT_CHECKS_PACE: '25' }, home: path.join(home, 'no-manor'), processors: 16 });
   assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for');
   const script = 'console.log(JSON.stringify([process.argv.slice(1), require("os").getPriority()])); console.error("e"); process.exit(7)';
