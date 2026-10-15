@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { APP } from '../app.ts';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { pidAlive } from './npu-queue.ts';
@@ -239,10 +238,13 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   if (!exe) return plain;
   const testArgs = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
   const slower = pacedSlower(cap);
+  // The agent's app.ts, read only now: imported at the top it would close a loop (an agent's app.ts reads its config,
+  // whose kit imports reach this file through accelerators.ts and apart.ts), and app.ts would run before its config had.
+  const { APP } = await import('../app.ts');
   return {
     file: exe,
     args: [checksLimits(cap), file, ...testArgs],
-    env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what) },
+    env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what, APP.id) },
     slower,
     waitMs: CHECKS_TURN_MS,
   };
@@ -258,14 +260,14 @@ export const CHECKS_WHO_ENV = 'KIT_CHECKS_WHO';
 export const checksRunsDir = () => path.join(path.dirname(locksDir), 'kit', 'checks-runs');
 
 /**
- * Who a paced run is, as its launcher writes it: the agent, the task it runs for (work-tasks.ts's currentWork(), or
- * nothing), and what it runs (`what`, else the program and its arguments, each path by its name), tab apart. Pure but
- * for the agent and the task.
+ * Who a paced run is, as its launcher writes it: the agent (`agent`, its APP.id), the task it runs for (work-tasks.ts's
+ * currentWork(), or nothing), and what it runs (`what`, else the program and its arguments, each path by its name), tab
+ * apart. Pure but for the task.
  */
-export function checksWho(file: string, args: string[], what?: string): string {
+export function checksWho(file: string, args: string[], what: string | undefined, agent: string): string {
   const named = (a: string) => (/[\\/]/.test(a) && a.length > 30 ? path.basename(a) : a);
   const said = (what?.trim() || [path.basename(file).replace(/\.exe$/i, ''), ...args.map(named)].join(' ')).replace(/[\t\r\n]+/g, ' ');
-  return [APP.id, currentWork() ?? '', said.slice(0, 200)].join('\t');
+  return [agent, currentWork() ?? '', said.slice(0, 200)].join('\t');
 }
 
 /** A check run on this PC as its launcher says: holding a turn (`turn`, its number), waiting for one, or running without. */

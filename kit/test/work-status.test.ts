@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +63,7 @@ test('withWork: the task current while it runs (its checks and the tasks it star
       inner = h.id;
       assert.equal(currentWork(), h.id);
       assert.equal(workTasks().find((t) => t.id === h.id)?.parent, outer.id, "the outer task's part");
-      assert.match(checksWho('C:\\Program Files\\nodejs\\node.exe', ['--test', 'C:\\work\\a long folder name\\test\\x.test.ts']), new RegExp(`^${APP.id}\\t${h.id}\\tnode --test x\\.test\\.ts$`));
+      assert.match(checksWho('C:\\Program Files\\nodejs\\node.exe', ['--test', 'C:\\work\\a long folder name\\test\\x.test.ts'], undefined, APP.id), new RegExp(`^${APP.id}\\t${h.id}\\tnode --test x\\.test\\.ts$`));
     });
     assert.equal(currentWork(), outer.id);
   });
@@ -73,7 +73,7 @@ test('withWork: the task current while it runs (its checks and the tasks it star
   const h = startWork({ kind: 'trial', what: 'trial' });
   assert.equal(inWork(h, () => currentWork()), h.id);
   h.done();
-  assert.equal(checksWho('npm', ['test'], 'Reeve\'s\tchecks\n'), `${APP.id}\t\tReeve's checks`, 'no task: none named; tabs and lines never break the line');
+  assert.equal(checksWho('npm', ['test'], 'Reeve\'s\tchecks\n', APP.id), `${APP.id}\t\tReeve's checks`, 'no task: none named; tabs and lines never break the line');
 });
 
 test("a launcher's file: where it stands, since when, and who started it; anything else is none", () => {
@@ -298,4 +298,25 @@ test('on Windows, a launcher says where it stands while it runs (a turn, since w
   assert.deepEqual([r!.state, r!.slot, r!.agent, r!.work, r!.what], ['turn', 0, APP.id, 'w1', 'its checks']);
   assert.ok(Math.abs(r!.since - Date.now()) < 120_000);
   assert.deepEqual(readdirSync(dir), [], 'gone once it ended');
+});
+
+test("the kit an agent's config reads never loads the agent's app.ts as it loads: app.ts reads its config first", () => {
+  // Reeve's config.ts imports accelerator-config.ts, and its app.ts imports config.ts. A kit module on the way from
+  // accelerator-config.ts that imported ../app.ts at its top closed a loop, and app.ts ran before config.ts had: kit
+  // 2.76.0's first try failed 41 of Reeve's test files so. Static imports only: one read at run time (await import) is fine.
+  const dir = path.join(import.meta.dirname, '..', 'node');
+  const importsOf = (f: string) => [...readFileSync(path.join(dir, f), 'utf8').matchAll(/^import\s(?!type\s)[^;]*?from '(\.\.?\/[^']+)';/gm)].map((m) => m[1]);
+  const from: Record<string, string | null> = { './accelerator-config.ts': null };
+  const queue = ['./accelerator-config.ts'];
+  while (queue.length) {
+    const f = queue.shift()!;
+    for (const d of importsOf(f)) {
+      let way = [f];
+      for (let p = from[f]; p; p = from[p]) way = [p, ...way];
+      assert.notEqual(d, '../app.ts', `${[...way, d].join(' -> ')}`);
+      // The node part's own files: another part's (./core/…) is only there once an agent's kit is filled.
+      if (d.startsWith('./') && !(d in from) && existsSync(path.join(dir, d))) (from[d] = f), queue.push(d);
+    }
+  }
+  assert.ok(Object.keys(from).includes('./checks-pace.ts'), 'the walk reaches checks-pace.ts, where the loop was');
 });
