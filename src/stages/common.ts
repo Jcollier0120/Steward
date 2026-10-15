@@ -35,6 +35,8 @@ export interface EmployeeResult {
   released?: boolean;
   /** A kit's trial ran only the tests the kit's change reaches (kitreach.ts): its rollout's bump runs them all. */
   partial?: boolean;
+  /** A kit's trial that failed: how its checks failed without the kit too, otherwise (bump.ts's withoutTheKit). */
+  without?: string;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
