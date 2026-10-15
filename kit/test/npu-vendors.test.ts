@@ -150,7 +150,8 @@ test("a known maker's NPU of a generation setup doesn't know: tried on the most 
     assert.ok(ir.maxContextTokens <= r.maxContextTokens && ir.timeouts.coldLoadMs! >= r.timeouts.coldLoadMs! && ir.timeouts.requestPerTokenMs! >= r.timeouts.requestPerTokenMs!, `no more daring than ${id}`);
   }
 
-  // AMD: XDNA 2's values, the only generation FastFlowLM runs on; the first XDNA (1502) stays refused.
+  // AMD: XDNA 2's cap, the only generation FastFlowLM runs on, with the route's own timeouts, never XDNA 2's measured
+  // (far quicker than a new generation may be); the first XDNA (1502) stays refused.
   const a = V.unknownGeneration(amd)!;
   assert.deepEqual([a.maxContextTokens, a.caps, a.timeouts, a.driverMin], [4096, { chat: 4096, vision: 4096 }, amd.timeouts, amd.driverMin]);
   const n = parseNpus(AMD_NEW, 'x64')[0];
@@ -814,7 +815,7 @@ test("setup on an NPU of a generation setup doesn't know: measured and calibrate
   const tools = path.join(home, 'guessed');
   let clock = 0;
   const world = (o: Parameters<typeof fakeNpuIo>[0], first: () => string[] = () => []) => ({ ...fakeNpuIo(o).io, clockMs: () => clock, testNpu: async () => ((clock += 90_000), first()) });
-  // AMD's next NPU, before a kit update adds its PCI id: FastFlowLM on XDNA 2's values, then this PC's own.
+  // AMD's next NPU, before a kit update adds its PCI id: FastFlowLM on XDNA 2's cap and the route's timeouts, then this PC's own.
   const amd = () => planFor(AMD_NEW, 'x64', tools);
   const r = await setUpNpu(amd(), tools, world({ measured: { warmMs: 2_000, tokensPerSecond: 12 } }));
   assert.deepEqual(r.problems, []);

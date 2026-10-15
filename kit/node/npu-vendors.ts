@@ -264,8 +264,9 @@ export function npuGeneration(vendor: NpuVendor, dev: Pick<NpuDevice, 'device' |
  * A generation of a maker setup doesn't know: the most cautious of the route's supported generations' values, each
  * as it runs (routeFor). The smallest cap, never over the route's (Qualcomm's 2,400 stays: an ~8K prompt bluescreened
  * the X2 Elite), with the server arguments of the generation it is from (OpenVINO compiles for its prompt length);
- * the longest timeouts and cold load; the most memory; the latest driver minimum. Never verified, so setup's test
- * request and calibration decide on the PC. Null when the route has no supported generation to start from.
+ * the longest timeouts and cold load, never under the route's own (its values for a generation nobody measured: AMD's
+ * XDNA 2 is measured far quicker than a new generation may be); the most memory; the latest driver minimum. Never
+ * verified, so setup's test request and calibration decide on the PC. Null when the route has no supported generation to start from.
  */
 export function unknownGeneration(route: NpuRoute): NpuGeneration | null {
   const known = Object.keys(route.generations).filter((id) => route.generations[id].supported);
@@ -280,7 +281,7 @@ export function unknownGeneration(route: NpuRoute): NpuGeneration | null {
   };
   const caps = most(runs.map((x) => x.r.caps), Math.min);
   for (const k of Object.keys(caps) as ServeKind[]) caps[k] = Math.min(caps[k]!, maxContextTokens);
-  const timeouts = most(runs.map((x) => x.r.timeouts), Math.max);
+  const timeouts = most([route.timeouts, ...runs.map((x) => x.r.timeouts)], Math.max);
   const memoryGb = most(runs.map((x) => x.r.memoryGb ?? {}), Math.max);
   const driverMin = runs.map((x) => x.g.driverMin ?? route.driverMin).filter((d): d is string => !!d).sort(compareVersions).pop();
   const args = smallest.r.maxContextTokens === maxContextTokens ? smallest.g.args : undefined;
@@ -294,7 +295,7 @@ export function unknownGeneration(route: NpuRoute): NpuGeneration | null {
     caps,
     ...(args ? { args } : {}),
     ...(Object.keys(memoryGb).length ? { memoryGb } : {}),
-    basis: `Guessed: the most cautious of ${known.join(', ')} (the smallest cap, the longest timeouts and cold load, the most memory, the latest driver), until setup's test request and calibration decide on the PC.`,
+    basis: `Guessed: the most cautious of ${known.join(', ')} (the smallest cap, the longest timeouts and cold load (never under the route's own), the most memory, the latest driver), until setup's test request and calibration decide on the PC.`,
   };
 }
 
