@@ -39,6 +39,7 @@ const NPU = {
   x2: 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU',
   x1: 'npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU',
   meteor: 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
+  arrowS: 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_AD1D&SUBSYS_00000000&REV_01\\3&11583659&0&58|Intel(R) AI Boost',
   lunar: 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
   panther: 'npu2|32.0.100.5540|2026-08-28|Intel Corporation|PCI\\VEN_8086&DEV_B03E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
   intelOldDriver: 'npu2|31.0.100.2016|2024-02-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
@@ -72,7 +73,9 @@ test('detection: every NPU Windows lists as a Neural processor, by maker and gen
   assert.equal(lunar.label, 'Core Ultra 200V, Lunar Lake (NPU 4)');
   assert.equal(lunar.driver, '32.0.100.4239');
   assert.equal(lunar.verified, true, 'the NPU check passed on a Lunar Lake (2026-10-12)');
-  assert.equal(at(NPU.meteor, 'x64').verified, false, 'never run on a Meteor Lake');
+  assert.equal(at(NPU.meteor, 'x64').verified, true, 'the NPU check passed on an Arrow Lake-U, whose NPU 3720 shows 7D1D (2026-10-14)');
+  assert.equal(at(NPU.meteor, 'x64').label, 'Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)');
+  assert.equal(at(NPU.arrowS, 'x64').verified, false, 'never run on an Arrow Lake-S');
   assert.equal(at(NPU.x2, 'arm64').verified, true, 'this laptop');
   assert.deepEqual(V.npuVendorOf('Qualcomm Technologies, Inc.', 'x'), 'qualcomm');
   assert.deepEqual(V.npuVendorOf('', 'Qualcomm(R) Hexagon(TM) NPU'), 'qualcomm', 'an older Hexagon line has no maker: its name says it');
@@ -563,11 +566,12 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's starting values: the NPU 3720 at a 2048-token prompt and generous timeouts, NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
-  for (const id of ['meteor-lake', 'arrow-lake', 'panther-lake', 'wildcat-lake']) {
+  assert.equal(g['meteor-lake'].verified, true, 'the NPU check passed on an Arrow Lake-U, whose NPU 3720 shows 7D1D (2026-10-14)');
+  for (const id of ['arrow-lake', 'panther-lake', 'wildcat-lake']) {
     assert.equal(g[id].verified, false, `${id} stays unverified until the NPU check passes on one`);
     assert.ok(g[id].basis, `${id} says where its values come from`);
   }
@@ -575,11 +579,23 @@ test("each Intel generation's starting values: the NPU 3720 at a 2048-token prom
   assert.equal(meteor.serve[meteor.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(meteor.maxContextTokens, 2048);
   assert.equal(meteor.caps.chat, 2048);
-  assert.deepEqual(meteor.timeouts, { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 });
-  assert.equal(meteor.memoryGb?.chat, 3.6);
+  assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 60_000 });
+  assert.equal(meteor.memoryGb?.chat, 3.9);
   assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
-  // A token every 400 ms covers 2.5 tokens a second; Lunar Lake's 24–26 and the NPU 3720's expected 5–8 are well inside.
-  assert.ok(1000 / meteor.timeouts.requestPerTokenMs! < 5);
+  // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
+  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). Lunar Lake keeps OpenVINO's, as measured.
+  const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
+  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128' });
+  assert.equal(plugin(V.routeFor(intel, 'arrow-lake')), plugin(meteor), 'Arrow Lake-S: the same NPU 3720');
+  assert.equal(plugin(intel), '{}');
+  // As measured: 200 ms a token covers half the 10.1 tokens a second it wrote.
+  assert.ok(1000 / meteor.timeouts.requestPerTokenMs! <= 10.1 / 2);
+  // The Arrow Lake-S, the same NPU unmeasured: the generous starting values. A token every 400 ms covers 2.5 a second.
+  const arrow = V.routeFor(intel, 'arrow-lake');
+  assert.deepEqual(arrow.timeouts, { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 });
+  assert.equal(arrow.maxContextTokens, 2048);
+  assert.equal(arrow.memoryGb?.chat, meteor.memoryGb?.chat);
+  assert.ok(1000 / arrow.timeouts.requestPerTokenMs! < 5);
   const panther = V.routeFor(intel, 'panther-lake');
   assert.ok(panther.timeouts.coldLoadMs! > intel.timeouts.coldLoadMs! && panther.timeouts.requestPerTokenMs! >= intel.timeouts.requestPerTokenMs!);
   assert.equal(panther.serve[panther.serve.indexOf('--max_prompt_len') + 1], intel.serve[intel.serve.indexOf('--max_prompt_len') + 1], "NPU 5 keeps Lunar Lake's prompt length");
@@ -590,7 +606,7 @@ test("each Intel generation's starting values: the NPU 3720 at a 2048-token prom
   // An NPU 3720 is planned with them.
   const plan = planFor(NPU.meteor, 'x64', 'C:\\t');
   assert.equal(plan.route.maxContextTokens, 2048);
-  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 360_000);
+  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 60_000);
 });
 
 test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
@@ -624,16 +640,16 @@ test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embe
 });
 
 test("calibration: this PC's timeouts from setup's measurements, never under the starting values, never past the bounds; too slow under 2 tokens a second", () => {
-  const meteor = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  const arrow = V.routeFor(V.NPU_CATALOG.routes.intel, 'arrow-lake');
   // Fast enough for the starting values: they stay.
-  assert.deepEqual(V.calibrate({ coldMs: 150_000, warmMs: 1_500, tokensPerSecond: 8 }, meteor), { timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 } });
+  assert.deepEqual(V.calibrate({ coldMs: 150_000, warmMs: 1_500, tokensPerSecond: 8 }, arrow), { timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 } });
   // Slower: a token twice its writing time, the base twice a full 2048-token read (at a tenth of the writing speed's time) and a warm answer, the cold load half again.
-  assert.deepEqual(V.calibrate({ coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 }, meteor), { timeouts: { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 } });
+  assert.deepEqual(V.calibrate({ coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 }, arrow), { timeouts: { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 } });
   // Past the bounds: held at them.
-  const slow = V.calibrate({ coldMs: 40 * 60_000, warmMs: 60_000, tokensPerSecond: 2.1 }, meteor);
+  const slow = V.calibrate({ coldMs: 40 * 60_000, warmMs: 60_000, tokensPerSecond: 2.1 }, arrow);
   assert.deepEqual(slow, { timeouts: { requestBaseMs: V.CALIBRATION.maxBaseMs, requestPerTokenMs: 1_000, coldLoadMs: V.CALIBRATION.maxColdLoadMs } });
-  assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, meteor).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
-  assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, meteor).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
+  assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, arrow).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
+  assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, arrow).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
 });
 
 test("sanity, not just an answer: nonsense chat (the same few characters over and over, or not what was asked) and embeddings that don't tell a cat from an invoice", () => {
@@ -668,12 +684,12 @@ test("setup on a generation nobody has measured: two more requests, and its entr
     // The test request takes the first load's time on this fake clock: 300 s.
     return { ...f.io, clockMs: () => clock, testNpu: async () => ((clock += 300_000), first()) };
   };
-  const meteor = () => planFor(NPU.meteor, 'x64', tools);
-  const r = await setUpNpu(meteor(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
+  const arrow = () => planFor(NPU.arrowS, 'x64', tools);
+  const r = await setUpNpu(arrow(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
   assert.deepEqual(r.problems, []);
   assert.deepEqual(r.measured, { coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 });
   assert.deepEqual(r.entry?.timeouts, { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 });
-  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, meteor().route).timeouts);
+  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, arrow().route).timeouts);
   assert.equal(r.note, undefined);
   // Lunar Lake's measured already: no measuring requests, the route's own timeouts.
   let asked = 0;
@@ -682,7 +698,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   assert.equal(lunar.entry?.timeouts?.requestPerTokenMs, V.NPU_CATALOG.routes.intel.timeouts.requestPerTokenMs);
 
   // Each failure: no entry, and a note in plain words for the accelerators' page.
-  const label = parseNpus(NPU.meteor, 'x64')[0].label;
+  const label = parseNpus(NPU.arrowS, 'x64')[0].label;
   const cases: [string, ReturnType<typeof world>, RegExp][] = [
     ['nonsense to the test request', world({}, () => ['chat answered nonsense ("?option?option?opt"), not "ready" as asked']), /its chat model doesn't run properly on it/],
     ['no answer in time', world({}, () => ["didn't answer in time (360 s): This operation was aborted"]), /it didn't answer its test in time/],
@@ -690,7 +706,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
     ['too slow', world({ measured: { warmMs: 9_000, tokensPerSecond: 1.2 } }), /it is too slow for the chat model/],
   ];
   for (const [what, io, re] of cases) {
-    const f = await setUpNpu(meteor(), tools, io);
+    const f = await setUpNpu(arrow(), tools, io);
     assert.equal(f.entry, undefined, what);
     assert.match(f.note!, re, what);
     assert.ok(f.note!.startsWith(`The NPU (${label}) isn't used: `), f.note);
@@ -713,7 +729,7 @@ test("an agent's io that extends NpuIo with a `now` of its own (a Date, as the S
   const tools = path.join(home, 'agent-io');
   let called = 0;
   const io: AgentIo = { ...fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }).io, now: () => (called++, new Date()) };
-  const r = await setUpNpu(planFor(NPU.meteor, 'x64', tools), tools, io);
+  const r = await setUpNpu(planFor(NPU.arrowS, 'x64', tools), tools, io);
   assert.deepEqual(r.problems, []);
   assert.ok(r.entry);
   assert.equal(called, 0);
