@@ -48,6 +48,12 @@ export interface QueuedPr {
    * Not ready, it holds nothing (it gave up its turn).
    */
   moved?: string;
+  /**
+   * Not one the merges take, in a repository the Steward merges in: opened by someone outside Settings' team, from a
+   * branch that isn't the Steward's (stages/staff.ts whosePr). Listed for Manor, but out of the merges' line: it holds
+   * nothing, and nothing waits for it.
+   */
+  outside?: boolean;
 }
 
 /**
@@ -105,9 +111,11 @@ const GIVES_WAY = /gives up its turn/;
  * What holds `queue` (lowest version first), or null when nothing does: the lowest PR that isn't ready, with at least
  * one ready PR above it. `held`: why the merge stage held each PR this round, by number, which says more than GitHub
  * does (a team PR untested, or failing its checks here). `before`: the hold kept from the last round, whose `since`
- * stands while the same PR holds it. One moved past the others holds nothing. Pure.
+ * stands while the same PR holds it. One moved past the others holds nothing; one the merges never take (`outside`)
+ * neither holds nor waits. Pure.
  */
-export function queueHold(queue: QueuedPr[], at: string, o: { held?: Map<number, string>; before?: QueueHold | null } = {}): QueueHold | null {
+export function queueHold(all: QueuedPr[], at: string, o: { held?: Map<number, string>; before?: QueueHold | null } = {}): QueueHold | null {
+  const queue = all.filter((q) => !q.outside);
   const stage = (q: QueuedPr) => o.held?.get(q.number) ?? null;
   const ready = (q: QueuedPr) => {
     const why = stage(q);
@@ -142,15 +150,19 @@ export const holdWords = (h: QueueHold) => `#${h.number} (v${h.version}, ${h.why
 /** How near the front a draft is told it is coming up: within the first three. */
 export const UPCOMING_WITHIN = 3;
 
-/** The drafts coming up in the queues: within UPCOMING_WITHIN of the front, or holding a ready PR back. Front first. Pure. */
+/**
+ * The drafts coming up in the queues: within UPCOMING_WITHIN of the front, or holding a ready PR back. Front first. In
+ * the merges' line only: one they never take (`outside`) neither comes up nor is held back. Pure.
+ */
 export function upcomingDrafts(repos: VersionQueue[]): UpcomingDraft[] {
   const out: UpcomingDraft[] = [];
   for (const r of repos) {
     if (!r.repo) continue;
-    r.queue.forEach((q, position) => {
+    const line = r.queue.filter((q) => !q.outside);
+    line.forEach((q, position) => {
       // Moved past the others: its author was told then, and it holds nothing back.
       if (!q.draft || q.moved) return;
-      const holds = r.queue.slice(position + 1).filter((x) => x.ready).map((x) => x.number);
+      const holds = line.slice(position + 1).filter((x) => x.ready).map((x) => x.number);
       if (position >= UPCOMING_WITHIN && !holds.length) return;
       out.push({ id: r.id, name: r.name, repo: r.repo!, number: q.number, url: q.url, title: q.title, version: q.version, position, holds, wright: !!q.wright, head: q.head });
     });
@@ -241,13 +253,17 @@ async function versionAt(ctx: Ctx, t: Target, ref: string): Promise<{ version: s
   return 'error' in v ? v : { version: v.version, files };
 }
 
-/** Its open PRs: from the round's glance for an employee, else asked of GitHub. Everyone's, not only the team's. */
-async function openPrs(ctx: Ctx, t: Target): Promise<PrInfo[]> {
-  if (!t.prs || !t.repo) return [];
+/**
+ * Its open PRs: from the round's glance for an employee, else asked of GitHub. Everyone's, not only the team's; `taken`:
+ * the numbers of those the merges take (the team's and the Steward's, as stages/merge.ts lists them).
+ */
+async function openPrs(ctx: Ctx, t: Target): Promise<{ prs: PrInfo[]; taken: Set<number> }> {
+  if (!t.prs || !t.repo) return { prs: [], taken: new Set() };
   const g = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee) : null;
   const raw = g ? g.prs : JSON.parse((await listOpenPrs(hostFor(ctx, { repo: t.repo }), t.repo)) || '[]');
   const authors = [...new Set(raw.map((p: any) => String(p?.author?.login ?? '')).filter(Boolean))] as string[];
-  return parsePrs(JSON.stringify(raw), authors);
+  const json = JSON.stringify(raw);
+  return { prs: parsePrs(json, authors), taken: new Set(parsePrs(json, ctx.settings.team).map((p) => p.number)) };
 }
 
 /**
@@ -287,8 +303,9 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   const v = same && before.version && before.files?.length ? { version: before.version, files: before.files } : same && !before.version && before.note ? { error: before.note } : await versionAt(ctx, t, ref);
   if ('error' in v) return empty(v.error, null, head);
   let prs: PrInfo[];
+  let taken: Set<number>;
   try {
-    prs = await openPrs(ctx, t);
+    ({ prs, taken } = await openPrs(ctx, t));
   } catch (err) {
     return empty(`couldn't list its PRs: ${(err as Error).message}`, v.version, head, v.files);
   }
@@ -314,7 +331,9 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
     if (!sets || compareVersions(sets, v.version) <= 0) continue;
     const why = holdReason(pr, t.branch);
     const to = movedTo(claims, pr);
-    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid, draft: pr.draft, wright: pr.labels.includes('wright'), ...(to && compareVersions(to, sets) > 0 ? { moved: to } : {}) });
+    // Where the Steward merges, one it never takes is outside its line (queueHold); elsewhere the order is the person's.
+    const outside = t.merges && !taken.has(pr.number);
+    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid, draft: pr.draft, wright: pr.labels.includes('wright'), ...(to && compareVersions(to, sets) > 0 ? { moved: to } : {}), ...(outside ? { outside } : {}) });
   }
   const line = inLine(queue);
   const ready = line.filter((q) => q.ready);

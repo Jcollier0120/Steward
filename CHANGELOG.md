@@ -18,6 +18,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - A moved pull request that isn't ready gives up its turn. One marked ready afterwards waits its turn at its new version, behind the pull requests it was moved past, rather than merging first at its old one.
 - The move is recorded with the version claims every PC shares, so another PC whose turn it is to merge in that repository honours it too.
+- A pull request by someone outside Settings' team, which the Steward never merges, no longer counts as holding a version queue. Its draft no longer raises an alarm or a heads-up, and the pull requests above it no longer count as waiting for it. It is still listed in the queue.
 - Settings' **A PR holding others up for** (it was "A conflicting PR holding others up for") now says it covers drafts and other pull requests that aren't ready, as the alarm already did.
 
 ### Before you update

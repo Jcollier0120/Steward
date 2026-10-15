@@ -89,6 +89,7 @@ export async function movePast(ctx: Ctx, e: Employee, number: number, o: { by?: 
   const r = kept.repos.find((x) => x.id === e.id);
   const first = r?.queue.find((q) => q.number === number);
   if (!r || !first) return { status: 404, message: `#${number} isn't in ${e.name}'s version queue as the last round found it: it sets no version above ${e.branch}'s, or it has merged or closed`, moved: [] };
+  if (first.outside) return { status: 409, message: `#${number} isn't the team's or the Steward's: the merges never take it, so it holds nothing back`, moved: [] };
   const numbers = [number, ...(r.held?.number === number ? (r.held.drafts ?? []) : [])];
   // As GitHub has them now: still open, and still not ready. Everyone's, not only the team's, as the queue lists them.
   let raw: unknown[];
