@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.77.6
+
+**Each accelerator's servers stop when that accelerator has been idle, whatever the others do. Before, a let-go of any accelerator's lock counted as use of all of them, so Reeve indexing on a graphics card kept the NPU's servers loaded, and the NPU kept a card's.**
+
+### What changed
+
+- **keeper.ts**: the Reaper's idle time for an accelerator counts only its own lock and line.
+  - `ownActivityMs(lockDirs)`: when the accelerator's own lock folder or line last changed.
+  - `locksActivityMs(lockDirs)`: when anyone last took or let go of any accelerator's lock (the folder every lock shares).
+  - `lastActivityMs(lockDirs)` is the later of the two, as before, for the quiet looks that wait for the whole PC (the Smith's, the NPU refresh's).
+  - A let-go leaves its time only on the shared folder, since the slot's folder is removed. So the Reaper counts that folder's time for an accelerator only when it saw the accelerator held, waited on or taken since its last look: at most a minute late, never early. At its first look, no later than `lock.staleMs` after the accelerator's lock was last taken.
+  - `ReaperDeps.locksActivityMs` is new and optional. A Reaper given only `lastActivityMs` works as before.
+- The idle-stop times (`npuIdleStopMinutes`, `gpuIdleStopMinutes`), `npuMemoryFit` and `NPU_MEMORY_SHARE` are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The keeper of a PC that runs on more than one accelerator now stops each one's servers on its own idle time.
+
 ## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**

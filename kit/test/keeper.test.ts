@@ -14,7 +14,7 @@ process.env.MANOR_HOME = path.join(home, 'no-manor'); // never this PC's Manor a
 process.env.SMITH_HOME = path.join(home, 'no-smith');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { Reaper, reapedServers, servesBase, lastActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
+const { Reaper, reapedServers, servesBase, lastActivityMs, locksActivityMs, ownActivityMs, UNANSWERED_MS, serverProcesses, wqlName } = await import('./fixture/src/kit/keeper.ts');
 const { QueueFull } = await import('./fixture/src/kit/npu-queue.ts');
 type Deps = ConstructorParameters<typeof Reaper>[0];
 
@@ -234,20 +234,166 @@ test("a GenieX on another port (--host) is not the one at the address", () => {
   assert.equal(servesBase('llama-server.exe -m x.gguf', 'http://127.0.0.1:8080'), true, "llama.cpp's default port");
 });
 
-test('the NPU was last used when its lock or line last changed', async () => {
-  const lock = path.join(home, 'locks', 'npu');
-  mkdirSync(path.join(home, 'locks', 'npu.queue'), { recursive: true });
+test("the NPU was last taken when its own lock or line last changed; anyone's let-go shows only on the folder every lock shares", async () => {
+  const locks = path.join(home, 'locks');
+  const lock = path.join(locks, 'npu');
+  const cardLock = path.join(locks, 'gpu-rtx');
+  mkdirSync(path.join(locks, 'npu.queue'), { recursive: true });
   // Each step's folders dated a minute back first, so the next change is later whatever the clock's resolution.
   const ago = (Date.now() - 60_000) / 1000;
   const age = (...dirs: string[]) => dirs.forEach((d) => utimesSync(d, ago, ago));
-  age(path.join(home, 'locks'), path.join(home, 'locks', 'npu.queue'));
-  const before = lastActivityMs(lock);
+  age(locks, path.join(locks, 'npu.queue'));
+  const before = ownActivityMs(lock);
   mkdirSync(lock);
-  assert.ok(lastActivityMs(lock) > before, 'taking the lock');
-  age(path.join(home, 'locks'), path.join(home, 'locks', 'npu.queue'), lock);
-  const taken = lastActivityMs(lock);
+  assert.ok(ownActivityMs(lock) > before, 'taking the lock');
+  age(locks, path.join(locks, 'npu.queue'), lock);
+  const taken = ownActivityMs(lock);
+  const sharedTaken = locksActivityMs(lock);
   rmSync(lock, { recursive: true });
-  assert.ok(lastActivityMs(lock) > taken, 'letting it go');
+  assert.ok(ownActivityMs(lock) <= taken, 'letting go leaves no time of its own');
+  assert.ok(locksActivityMs(lock) > sharedTaken, 'letting go shows on the shared folder');
+  assert.ok(lastActivityMs(lock) > taken, "the quiet look still sees anyone's let-go");
+  // A card's lock taken and let go: the shared folder moves, the NPU's own time doesn't.
+  age(locks);
+  const npuBefore = ownActivityMs(lock);
+  const sharedBefore = locksActivityMs(lock);
+  mkdirSync(cardLock);
+  rmSync(cardLock, { recursive: true });
+  assert.equal(ownActivityMs(lock), npuBefore, "the card's lock isn't the NPU's use");
+  assert.ok(locksActivityMs(lock) > sharedBefore);
+});
+
+/**
+ * A PC with the NPU's GenieX and a card's llama-server, both started at 0: each accelerator's own lock time, and the
+ * folder every lock shares. `take` and `letGo` move them as the kit's turn does: taking dates the slot's folder and the
+ * line's (the accelerator's own, and the shared folder), letting go only the shared folder. The keeper's turns too.
+ */
+function twoPc() {
+  const pc = {
+    clock: 0,
+    shared: 0,
+    own: { npu: 0, 'gpu-rtx': 0 } as Record<string, number>,
+    held: new Set<string>(),
+    procs: { [BASE]: [{ pid: 4242, startedMs: 0 }], [CARD]: [{ pid: 5151, startedMs: 0 }] } as Record<string, { pid: number; startedMs: number }[]>,
+    stopped: [] as string[],
+  };
+  const take = (id: string) => {
+    pc.held.add(id);
+    pc.own[id] = pc.shared = pc.clock;
+  };
+  const letGo = (id: string) => {
+    pc.held.delete(id);
+    pc.shared = pc.clock;
+  };
+  const deps: Deps = {
+    now: () => pc.clock,
+    processes: async (_program, base) => pc.procs[base] ?? [],
+    stop: (pid) => {
+      for (const [base, procs] of Object.entries(pc.procs)) {
+        if (procs.some((p) => p.pid === pid)) {
+          pc.stopped.push(base);
+          pc.procs[base] = [];
+        }
+      }
+    },
+    probe: async () => 'ready',
+    inUse: (s) => pc.held.has(s.acc.id),
+    lastActivityMs: (s) => pc.own[s.acc.id],
+    locksActivityMs: () => pc.shared,
+    withTurn: async (s, fn) => {
+      take(s.acc.id);
+      try {
+        return await fn();
+      } finally {
+        letGo(s.acc.id);
+      }
+    },
+    start: async () => {},
+    log: () => {},
+  };
+  return { pc, deps, take, letGo };
+}
+const npu5 = { ...server, idleMs: 5 * MIN };
+const card5 = { ...card, idleMs: 5 * MIN };
+/** One request on an accelerator, from `from` to `to` minutes. */
+const request = (t: ReturnType<typeof twoPc>, id: string, from: number, to: number) => {
+  t.pc.clock = from * MIN;
+  t.take(id);
+  t.pc.clock = to * MIN;
+  t.letGo(id);
+};
+
+test("a card busy alone doesn't keep the NPU's servers up: the NPU's idle clock counts only its own lock", async () => {
+  const t = twoPc();
+  const reaper = new Reaper(t.deps);
+  await reaper.look([npu5, card5]);
+  // Reeve indexes on the card between every look, so the shared folder moves each minute; one request on the NPU at 0.85 min.
+  const did: Record<number, string[]> = {};
+  for (let m = 1; m <= 7; m++) {
+    request(t, 'gpu-rtx', m - 0.4, m - 0.2);
+    if (m === 1) request(t, 'npu', 0.85, 0.9);
+    t.pc.clock = m * MIN;
+    did[m] = (await reaper.look([npu5, card5])).map((r) => r.did);
+  }
+  assert.deepEqual(did[5], ['answering', 'answering'], 'the NPU idle 4.1 min since it let go at 0.9');
+  assert.deepEqual(did[6], ['stopped', 'answering'], 'stopped 5 min after its own last use, whatever the card does');
+  assert.deepEqual(did[7], ['not-running', 'answering']);
+  assert.deepEqual(t.pc.stopped, [BASE]);
+});
+
+test("the NPU busy alone doesn't keep a card's servers up, and each one's own use keeps it", async () => {
+  const t = twoPc();
+  const reaper = new Reaper(t.deps);
+  await reaper.look([npu5, card5]);
+  const did: Record<number, string[]> = {};
+  for (let m = 1; m <= 6; m++) {
+    // The NPU used between every look, and held through the 3rd; one request on the card at 0.85 min.
+    request(t, 'npu', m - 0.4, m - 0.2);
+    if (m === 1) request(t, 'gpu-rtx', 0.85, 0.9);
+    if (m === 3) t.take('npu');
+    t.pc.clock = m * MIN;
+    did[m] = (await reaper.look([npu5, card5])).map((r) => r.did);
+    if (m === 3) t.letGo('npu');
+  }
+  assert.deepEqual(did[3], ['in-use', 'answering']);
+  assert.deepEqual(did[5], ['answering', 'answering'], 'the card idle 4.1 min since it let go at 0.9');
+  assert.deepEqual(did[6], ['answering', 'stopped'], 'the NPU, used each minute, stays; the card stops');
+  assert.deepEqual(t.pc.stopped, [CARD]);
+});
+
+test('a let-go counts from when it let go: a request seen held, and one taken and let go between two looks', async () => {
+  const t = twoPc();
+  const reaper = new Reaper(t.deps);
+  await reaper.look([npu5]);
+  // A long answer: taken at 0.5, seen held at 1, 2 and 3, let go at 3.5.
+  t.pc.clock = 0.5 * MIN;
+  t.take('npu');
+  for (const m of [1, 2, 3]) {
+    t.pc.clock = m * MIN;
+    assert.equal((await reaper.look([npu5]))[0].did, 'in-use');
+  }
+  t.pc.clock = 3.5 * MIN;
+  t.letGo('npu');
+  t.pc.clock = 8 * MIN;
+  assert.equal((await reaper.look([npu5]))[0].did, 'answering', 'idle 4.5 min since it let go, not 5 since last seen');
+  // A short one between two looks: taken at 8.2, let go at 8.4.
+  request(t, 'npu', 8.2, 8.4);
+  t.pc.clock = 13 * MIN;
+  assert.equal((await reaper.look([npu5]))[0].did, 'answering', 'idle 4.6 min since 8.4');
+  t.pc.clock = 14 * MIN;
+  assert.equal((await reaper.look([npu5]))[0].did, 'stopped');
+});
+
+test("a keeper that starts while a card is busy gives the NPU's last request no more than a holder's longest turn", async () => {
+  const t = twoPc();
+  t.pc.own.npu = 1 * MIN; // the NPU last taken at 1 min
+  t.pc.shared = 20 * MIN; // the card let go just now
+  t.pc.clock = 20 * MIN;
+  assert.equal((await new Reaper(t.deps).look([npu5]))[0].did, 'stopped', 'used until 11 min at the latest (lock.staleMs): idle since');
+  const u = twoPc();
+  u.pc.own.npu = 18 * MIN;
+  u.pc.shared = u.pc.clock = 20 * MIN;
+  assert.equal((await new Reaper(u.deps).look([npu5]))[0].did, 'answering', 'taken 2 min before: it may have let go just now');
 });
 
 test('holding too much: restarted once its working set reaches 9 GB with nobody using the NPU, never while in use', async () => {

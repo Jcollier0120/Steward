@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.59
+
+**Kit 2.77.6: the local AI's NPU unloads its models about five minutes after its last request, even while Reeve indexes on the graphics card.**
+
+### What changed
+
+- On a PC whose local AI runs on more than one accelerator (an NPU and a graphics card), each one's models now unload when that one has been idle. Before, work on any of them kept them all loaded, so Reeve indexing on the graphics card held the NPU's memory, and the NPU's chat held the card's.
+- How long each waits before it unloads is unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**
