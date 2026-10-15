@@ -205,25 +205,26 @@
       "arch": "x64",
       "generations": {
         "meteor-lake": {
-          "label": "Core Ultra Series 1, Meteor Lake (NPU 3720)",
+          "label": "Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)",
           "supported": true,
-          "verified": false,
+          "verified": true,
           "timeouts": {
-            "requestBaseMs": 60000,
-            "requestPerTokenMs": 400,
-            "coldLoadMs": 360000
+            "requestBaseMs": 15000,
+            "requestPerTokenMs": 200,
+            "coldLoadMs": 60000
           },
           "maxContextTokens": 2048,
           "caps": {
             "chat": 2048
           },
           "args": {
-            "--max_prompt_len": "2048"
+            "--max_prompt_len": "2048",
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\"}"
           },
           "memoryGb": {
-            "chat": 3.6
+            "chat": 3.9
           },
-          "basis": "Not measured: the NPU 3720 has about a quarter of Lunar Lake's compute (11 TOPS against 48) and slower memory, so from the Lunar Lake's numbers: prompts read at 150–200 tokens a second, 5–18 written, a first compile of 2–3 minutes. A 2,048-token compiled prompt halves the compile, the full-cap read (about 14 s) and the KV cache against 4,096, and holds 3.6 GB rather than 4.3; setup measures each PC and raises these when it's slower."
+          "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer; the slowest start to a first answer took 33 s, its compile included: 60 s allows half again; 3.88 GB working set. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4, the compile 34 s against 30. 256-token chunks answered short in 0.8 s, 512 in 1.4 s; the same answers in each. GENERATE_HINT BEST_PERF wrote no faster (11.5 tokens a second against 11.2) and doubled the compile (72 s). A 4,096-token prompt holds 4.7 GB, 0.8 GB more, past a 16 GB PC's room for chat and embeddings together."
         },
         "arrow-lake": {
           "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
@@ -239,12 +240,13 @@
             "chat": 2048
           },
           "args": {
-            "--max_prompt_len": "2048"
+            "--max_prompt_len": "2048",
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\"}"
           },
           "memoryGb": {
-            "chat": 3.6
+            "chat": 3.9
           },
-          "basis": "Not measured: Meteor Lake's NPU 3720, the same starting values."
+          "basis": "Not measured: the NPU 3720 measured under meteor-lake, with its prompt chunks and memory; the generous starting values stay until the NPU check runs on one."
         },
         "lunar-lake": {
           "label": "Core Ultra 200V, Lunar Lake (NPU 4)",
@@ -323,6 +325,8 @@
         "NPU",
         "--max_prompt_len",
         "4096",
+        "--plugin_config",
+        "{}",
         "--cache_dir",
         "{tools}\\models\\openvino\\.npu-cache"
       ],
