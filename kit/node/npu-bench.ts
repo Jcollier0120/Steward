@@ -385,7 +385,11 @@ export function candidateRoute(route: NpuRoute, id: string, o: { vision?: boolea
   const type = pull.indexOf('--model-type');
   if (type >= 0) pull[type + 1] = o.vision ? 'vlm' : 'llm';
   const kinds: NpuModel['kinds'] = o.vision ? ['chat', 'vision'] : ['chat'];
-  return { ...route, models: [{ ...base, id, kinds, pull, ...(base.present ? { present: swap(base.present) } : {}), size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
+  // A present file whose path doesn't name the model can't say where a candidate is (FastFlowLM's folders are its own
+  // names, Qwen3-4B-Instruct-2507-NPU2 for qwen3-it:4b): kept, it would find the route's own model, so the candidate
+  // would count as downloaded, never be pulled, and have that model's files measured as its own. Dropped instead.
+  const present = base.present && swap(base.present) !== base.present ? swap(base.present) : undefined;
+  return { ...route, models: [{ ...base, id, kinds, pull, present, size: 0, licence: `a candidate (${id}): its licence is checked before it ships`, pinned: undefined }] };
 }
 
 /** The route with only the model asked for (and its vision model, where the route has one beside it). */

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
 import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor, UNKNOWN_GENERATION } from './npu-vendors.ts';
-import { longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { loadFailure, logLength, longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
@@ -424,11 +424,26 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const stepMs = Math.max(10 * 60_000, coldMs * 2);
   // A first start on the NPU compiles the model: allow far more than the route's cold load.
   const firstStartLimit = Math.max(20 * 60_000, coldMs * 5);
+  const logFrom = logLength(logFile);
   let server = await start(entry, logFile);
   const up = await untilAnswers(firstStartLimit);
-  add({ step: 'start', ok: up !== null, ms: up ?? undefined, say: up !== null ? `${route.server} answered /v1/models${lists ? ' with its model loaded' : ''}` : `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`, data: { pid: server.pid, logFile } });
+  // Answering isn't holding a model: FastFlowLM serves on after its model failed to load, and says so at /api/ps.
+  const holds = up === null ? null : await client.loaded();
+  const whyNot = holds === false ? loadFailure(logFile, logFrom) : null;
+  add({
+    step: 'start',
+    ok: up !== null && holds !== false,
+    ms: up ?? undefined,
+    say:
+      up === null
+        ? `${route.server} didn't answer in ${firstStartLimit / 60_000} minutes: see ${logFile}`
+        : holds === false
+          ? `${route.server} answered /v1/models but holds no model: it failed to load${whyNot ? ` (${whyNot})` : ''}; see ${logFile}`
+          : `${route.server} answered /v1/models${lists || holds ? ' with its model loaded' : ''}`,
+    data: { pid: server.pid, logFile, ...(holds === false ? { loadFailure: whyNot } : {}) },
+  });
   try {
-    if (up === null) return finish(1);
+    if (up === null || holds === false) return finish(1);
     const first = await ask('Reply with the single word: ready', 16, firstStartLimit);
     timed.first = first.ms;
     // Answering isn't enough: a model that doesn't run properly on the NPU answers with nonsense.

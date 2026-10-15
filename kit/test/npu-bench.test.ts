@@ -512,9 +512,12 @@ test("a candidate's files are measured once it's pulled: each one in its folder,
   const onDisk = JSON.parse(readFileSync(s.opts.out, 'utf8'));
   assert.deepEqual(onDisk.run.files, want);
   assert.deepEqual(B.checkSchema(onDisk, B.REPORT_SCHEMA), []);
-  // FastFlowLM keeps its models its own way: its route has no `present`, so nothing says where to look.
+  // FastFlowLM keeps its models its own way: its route's `present` names its own folder for the model, not the id, so a
+  // candidate gets none (kept, it would find the route's own model and never be pulled), and nothing says where to look.
   const lines: string[] = [];
+  assert.match(V.NPU_CATALOG.routes.amd.models[0].present!, /Qwen3-4B-Instruct-2507-NPU2/);
   const amd = B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0];
+  assert.equal(amd.present, undefined);
   assert.equal(await B.candidateFiles(amd, { server: 'FastFlowLM', tools: s.tools, log: (l: string) => lines.push(l) }), null);
   assert.deepEqual(lines, ["the candidate's files: not measured, as FastFlowLM's route doesn't say where its models are"]);
 });
