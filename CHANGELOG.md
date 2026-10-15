@@ -30,6 +30,17 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.39
+
+**Fewer git commands again: projects' version queues, and pull requests that set no version.**
+
+### What changed
+
+- Version queues for Manor's projects (not just the agents) now fetch a repository only when its branch on GitHub has moved. The Steward checks this against the branch heads other agents share, instead of fetching every project each round.
+- A version queue that already has a branch's head keeps it without asking the clone again, and a repository the round has just merged or released to is always fetched, so its queue is never a round behind.
+- A pull request that sets no version above its branch is no longer read again every round while nothing about it has changed.
+- A branch with no version found at its head isn't read again until the branch moves.
+- The staff table reads a clone's branch correctly from git when the clone uses git's newer reftable format.
 ## 0.36.38
 
 **Kit 2.74.5: the NPU's local AI gets faster on PCs already set up, Intel's NPU 3720 writes about 13% faster, AMD's NPU runs on a 16 GB Ryzen AI, and a newer NPU is tried instead of refused.**

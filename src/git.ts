@@ -185,12 +185,15 @@ export function commonDir(repo: string): string | null {
 
 /**
  * The branch a clone has checked out, from its HEAD file (a worktree's own, in its gitdir), as `git branch
- * --show-current` says it: '' at a commit (detached). Null when the files don't say it plainly: then git is asked.
+ * --show-current` says it: '' at a commit (detached). Null when the files don't say it plainly (a reftable clone, whose
+ * HEAD file only says `refs/heads/.invalid`): then git is asked.
  */
 export function headBranch(repo: string): string | null {
   try {
     const dotGit = path.join(repo, '.git');
     if (!existsSync(dotGit)) return null;
+    const common = commonDir(repo);
+    if (!common || existsSync(path.join(common, 'reftable'))) return null;
     const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
     if (!gitdir) return null;
     const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
