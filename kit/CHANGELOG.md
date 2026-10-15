@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**Intel's NPU 3720 writes about 13% faster and holds 1.4 GB less after varied prompts.**
+
+### What changed
+
+- **npu-vendors.json, Intel's `meteor-lake` and `arrow-lake`** (the NPU 3720): `--plugin_config` is `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"128","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"32"}` (was the 128-token chunks alone). From 20 quick benchmarks on a Core Ultra 5 225U (2026-10-14):
+  - `BEST_PERF` writes 10.7–11.6 tokens a second against 9.6–10.5. The benchmark's jobs take 22.6–24.3 s against 26.0–27.8, five runs each and never overlapping, with the same reads and answers. Its first compile takes 57–62 s against 27–39, once per PC and driver.
+  - OpenVINO Model Server turns the NPU's prefix caching on by itself. Its 128 blocks left the server holding 5.2 GB after a dozen varied long prompts. 32 blocks (4,096 tokens) held 3.8 GB with the same times.
+- **`meteor-lake`'s cold load is 120 s** (was 60): the slowest first compile with `BEST_PERF`, 62 s, with half again. Its chat memory is 4.3 GB (was 3.9), the working set at the end of the benchmark. `arrow-lake` takes the same memory; its 360 s cold load stays.
+- Unchanged, as measured: 128-token chunks (64 read 1,740 tokens in 8.1 s against 6.3; 256 answered short in 0.78 s against 0.5) and the 2,048-token cap (3,072 held 0.4 GB more and read 5–10% slower; 4,096 held 1.0 GB more). `PREFILL_HINT` `STATIC`, static prefill attention and `NPU_TURBO` were no faster.
+- spec/NPU-VENDORS.md: the sweep's numbers, and how the prefix cache makes the benchmark's repeated reads faster than a new prompt's.
+
+### For an agent
+
+- Nothing to do. A PC set up by an earlier kit keeps its command until its NPU is set up again. Its next start with this command compiles once, in about a minute.
+
 ## 2.74.1
 
 **The checks pace allows four processors' worth, not two.**
