@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.56
+
+**Kit 2.77.3: on an AMD Ryzen AI PC, one smaller model answers chat and pictures on the NPU: faster, lighter, and a much smaller download.**
+
+### What changed
+
+- On an AMD Ryzen AI 300 PC, the local AI on the NPU now uses one model, Qwen3.5-2B, for both chat and pictures, instead of two 4B models. It writes about half again as fast, holds 0.4 GB less memory for chat and 1.2 GB less for pictures, and downloads 2.0 GB instead of 7.4 GB. It no longer pauses 8 to 9 seconds to switch models between a chat and a picture. On the quality checks it scored 22 of 24 against the 4B's 23, with every must-pass item right.
+- It takes about 1.7 seconds longer to start. Waking it after a rest is now announced as about 15 seconds, where the 4B's chat took about 7.
+- The kit the Steward hands out (2.77.3) brings this to every agent. Intel and Snapdragon PCs are unchanged.
+
+### Before you update
+
+- A PC already set up keeps using the two 4B models until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3.5-2B (2.0 GB). The 4B models stay on disk (7.4 GB) until you remove them: `flm remove qwen3-it:4b` and `flm remove qwen3vl-it:4b`.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**

@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 2.77.3
 
 **On an AMD Ryzen AI 300, one smaller model, Qwen3.5-2B, answers chat and pictures on the NPU. It writes half again as fast, holds 0.4 GB less of the PC's memory for chat and 1.2 GB less for pictures, downloads 2.0 GB instead of 7.4, and never switches models between a chat and a picture. It starts about 1.7 s slower.**
 
