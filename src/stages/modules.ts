@@ -91,18 +91,19 @@ const RENAME_MS = 15_000;
  * A folder just written, renamed to `to`; again, a little later each time, while Windows says it's in use (as npm's own
  * graceful-fs does), until RENAME_MS. Renaming a set the moment npm ci finished failed now and then with EPERM: one in
  * fifteen of the test's three installs, the folder's new files still open in Defender's scan. A `to` another process
- * finished meanwhile isn't waited for: the caller takes theirs.
+ * finished meanwhile isn't waited for: the caller takes theirs. `now` is a test's clock.
  */
-export async function renameWhenFree(from: string, to: string, o: { rename?: (a: string, b: string) => void; budgetMs?: number } = {}): Promise<void> {
+export async function renameWhenFree(from: string, to: string, o: { rename?: (a: string, b: string) => void; budgetMs?: number; now?: () => number } = {}): Promise<void> {
   const rename = o.rename ?? renameSync;
-  const end = Date.now() + (o.budgetMs ?? RENAME_MS);
+  const now = o.now ?? Date.now;
+  const end = now() + (o.budgetMs ?? RENAME_MS);
   for (let wait = 25; ; wait = Math.min(wait * 2, 1000)) {
     try {
       rename(from, to);
       return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '';
-      if (!IN_USE.has(code) || existsSync(path.join(to, '.ready')) || Date.now() + wait > end) throw err;
+      if (!IN_USE.has(code) || existsSync(path.join(to, '.ready')) || now() + wait > end) throw err;
       await new Promise((res) => setTimeout(res, wait));
     }
   }

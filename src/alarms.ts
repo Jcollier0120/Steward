@@ -9,6 +9,7 @@ import { BAILIFF_WAIT } from './review.ts';
 import { CONFLICTS } from './conflicts.ts';
 import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
+import type { SigningWait } from './signing.ts';
 import type { Migration } from './migrate.ts';
 import type { BuildLeft } from './stages/build.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
@@ -172,7 +173,8 @@ export interface FailedSelf {
 }
 
 /**
- * From the round: PRs held a while, releases the rounds gave up on, a round that couldn't run; and, while the rounds
+ * From the round: PRs held a while, releases the rounds gave up on, releases that wait until this PC can sign, a round
+ * that couldn't run; and, while the rounds
  * roll kits out, a bump or push they gave up on, and a new kit waiting a while for the Steward itself to carry it; and,
  * while they release the Steward's own versions, one of those that failed.
  */
@@ -187,6 +189,8 @@ export function roundConditions(o: {
   buildLeft?: Record<string, BuildLeft>;
   /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
+  /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
+  signingWaits?: Record<string, SigningWait>;
   /** Versions of the Steward its install rolled back (safeinstall.ts's unsafe-updates.json), by version. */
   unsafe?: Record<string, { version: string; from: string | null; why: string; at: string; kept: string | null }>;
   /** What the settings migration couldn't fill in (migrate.ts), until it finds it or Settings are saved. */
@@ -253,6 +257,23 @@ export function roundConditions(o: {
       title: `${e?.name ?? id}'s release failed at ${commit}, and the rounds won't try it again`,
       // Why, from its kept output: the round's line says only which command failed, and only in the round it failed.
       detail: [...(said ? [said] : []), ...failureDetail(e ? keptFailure(releaseDirOf(o.settings, e)) : null, said ?? ''), "Release it on the Steward's page once it's fixed, or push a new commit: the next round tries that."],
+      afterMs: 0,
+    });
+  }
+  // Releases that wait until this PC can sign (SimplySign Desktop not connected): one alarm for them all, raised at once,
+  // so the person connects it; it clears by itself once the round after releases them.
+  const signing = Object.entries(o.signingWaits ?? {}).flatMap(([id, w]) => {
+    const e = o.employees.find((x) => x.id === id);
+    return e ? [{ name: e.name, ...w }] : [];
+  });
+  if (signing.length) {
+    const first = signing.reduce((a, b) => (b.since < a.since ? b : a));
+    out.push({
+      id: 'signing:waits',
+      who: 'steward',
+      title: `${signing.map((w) => `${w.name} ${w.version}`).join(', ')} ${signing.length === 1 ? 'waits' : 'wait'} to be released until this PC can sign`,
+      detail: [`Why: ${first.why}`, `Nothing failed and nothing was built: the first round after it can sign releases ${signing.length === 1 ? 'it' : 'them'} by itself.`],
+      since: first.since,
       afterMs: 0,
     });
   }
