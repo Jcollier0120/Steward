@@ -400,7 +400,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     }
   }
   const sio: Partial<NpuIo> = o.io?.setup ?? {};
-  const { entry, problems: setupProblems, timed } = await setUpRoute(plan, tools, sio, log, now);
+  const { entry, problems: setupProblems, timed, power } = await setUpRoute(plan, tools, sio, log, now);
   const r = { problems: setupProblems };
   add({
     step: 'setup',
@@ -409,6 +409,23 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     say: r.problems.length ? r.problems.join('; ') : `${route.server} and ${plan.models.map((m) => m.id).join(', ')} are here${Object.keys(timed).length ? ` (${Object.entries(timed).map(([k, v]) => `${k} ${(v / 1000).toFixed(0)} s`).join(', ')})` : ', nothing to download'}`,
     data: { timed, downloadBytes: needs, exe: plan.exe },
   });
+  // The tool its server sets the NPU's power mode with, where the route has one: noted, never failed, as setup does.
+  // Every report says which way it went, so the reports count the PCs whose server can't set the mode.
+  if (power) {
+    const name = path.win32.basename(power.exe);
+    add({
+      step: 'power-tool',
+      ok: null,
+      say: power.missing
+        ? `${name} isn't on this PC (${power.exe}): ${route.server} can't set the NPU's power mode`
+        : power.broken
+          ? `${name} couldn't start (exit 0x${(power.code! >>> 0).toString(16).toUpperCase()}): ${route.server} can't set the NPU's power mode, so the NPU runs at its default mode; ${plan.powerTool!.broken}`
+          : power.code === 0
+            ? `${name} ran: ${route.server} can set the NPU's power mode`
+            : `${name} exited ${power.code}, which isn't the known failure: whether ${route.server} can set the NPU's power mode is unknown`,
+      data: { ...power },
+    });
+  }
   if (!entry) return finish(1);
 
   // Or, asked for, setup's hardening instead of the measurements.

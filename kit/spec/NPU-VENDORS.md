@@ -161,6 +161,14 @@ When it passes, its note says so in plain words, kept in `npu-note.json` and sho
 
 **FastFlowLM's `flm validate` was looked at as AMD's compatibility check, and isn't one** (read from FastFlowLM 1.0.7's source and `flm.exe`, not run: another session held the NPU). On Windows it asks WMI for `VEN_1022&DEV_17F0` alone, so any other PCI id is "no AMD device found"; its driver check compares only the driver version's fourth part against 32.0.203.304's; and its `--json` is `{"object":"npu_stack_validation","platform":"windows","amd_device_found":…,"npu_driver_ok":…,"ready":…}`. It would refuse exactly the NPUs this tries, so setup's test request decides instead. (`flm serve` also runs `xrt-smi configure --pmode` as it starts.)
 
+**Once FastFlowLM answers, setup checks AMD's `xrt-smi`, the tool FastFlowLM sets the NPU's power mode with.** This is the route's `powerTool`, checked by `checkPowerTool`.
+- **The problem:** `flm serve` runs `C:\Windows\System32\AMD\xrt-smi.exe configure --pmode` at each start and ignores the result. An older AMD NPU driver may have left its `xrt_core.dll` and `xrt_coreutil.dll` in `System32\AMD`. If so, xrt-smi loads them instead of the current driver's copies (in `System32`) and can't start: exit 0xC0000139, an entry point not found.
+- **Where it was found:** on the Krackan, 2026-10-15. Dell's factory image had left AMD's kipudrv 10.1109.8.196, of 2024, which no device used.
+- **The check:** setup runs `xrt-smi examine`, which only reads. It runs it from Node, where the loader's failure stays silent; from PowerShell's Start-Process it shows a dialog and waits for a click.
+- **On that exit:** the NPU is used all the same, at its default power mode. Its note says why: "The NPU (…) is used, at its default power mode: an older AMD NPU driver left its files in Windows\System32\AMD, … (an administrator's job, with pnputil /delete-driver)." Nothing on the PC is changed.
+- **The NPU check:** its report has a `power-tool` step on every run. The step is noted, never failed, so the reports count the PCs where this happens.
+- **The fix on the Krackan:** removing the old package (`pnputil /delete-driver oem73.inf`, as an administrator) fixed it. The real xrt-smi ran, and `configure --pmode` worked without an administrator.
+
 ## What setup does (NPU first, then graphics cards, then the processor)
 
 Manor's **Set up local AI**, `smith accelerators setup` and the Settings pages' Set up all run the kit's `setupCommand`:

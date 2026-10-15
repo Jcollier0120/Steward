@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why.** FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a PC where an older AMD NPU driver left its DLLs in `Windows\System32\AMD`, xrt-smi can't start, and the NPU runs at its default mode. This was found on the Krackan test PC, from a Dell factory image.
+
+### What's new
+
+- **npu-vendors.ts:**
+  - **A route's `powerTool`:** `exe`, `args` (read only), `brokenExit` and `broken`, the reason in plain words.
+  - **AMD's:** `%SystemRoot%\System32\AMD\xrt-smi.exe examine`, broken on exit 0xC0000139 (3221225785, as Node reports it).
+  - `planNpu` expands its path into the plan's `powerTool`.
+  - **`checkPowerTool(plan, io)`:** runs it once, from Node, so a loader failure stays silent rather than showing a dialog. It gives `{ exe, missing, code, broken }`, or null when the route has no power tool.
+- **setup.ts:**
+  - **`setUpNpu`:** once its server answered, it checks the power tool and returns the check as `power`.
+  - **On `broken`:** the NPU is still used, and `npuPowerNote` adds "The NPU (…) is used, at its default power mode: …" to its note (`npu-note.json`, the report's `npuNote`). Setup logs the exit.
+  - **Never:** it doesn't fail on it, and it changes nothing on the PC.
+- **npu-server.ts:** `setUpRoute` returns `power`. It doesn't time the power tool's run as an install.
+- **npu-check.ts:** a `power-tool` step, right after `setup`, on every route that has a power tool. Its `ok` is null, never a failure. It says whether the tool ran, couldn't start, or isn't on the PC, and its data is the check, so the reports count the PCs where this happens.
+- **spec/NPU-VENDORS.md:** the check, and how the Krackan was fixed.
+
+### For an agent
+
+Nothing to do. On an AMD NPU, the next setup checks xrt-smi by itself. On a PC with the old DLLs, the NPU's note says so.
+
 ## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
