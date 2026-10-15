@@ -567,16 +567,16 @@
           "verified": true,
           "timeouts": {
             "requestPerTokenMs": 150,
-            "requestBaseMs": 20000,
+            "requestBaseMs": 15000,
             "coldLoadMs": 30000
           },
-          "basis": "Measured by the NPU check on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, 2026-10-15, every step passing, its context 4,096 (--ctx-len): writes 13.8 tokens a second: 150 ms a token allows twice that; reading 3115 tokens took 6.6 s: a 20 s base allows twice that and a warm answer; the slowest start to a first answer took 16 s: 30 s allows half again. Switching between its chat and vision models costs 8 to 9 s either way (one model held at a time), inside each."
+          "basis": "Measured by the NPU check on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, 2026-10-15, Qwen3.5-2B for chat and vision, its context 4,096 (--ctx-len), every measuring step passing: writes 19.4 tokens a second: 150 ms a token allows twice that; reading 3,272 tokens took 4.1 s: a 15 s base allows twice that and a warm answer; the slowest start to a first answer took 17 s (the kit's test request, a picture and then chat): 30 s allows half again. One model answers chat and pictures, so nothing switches between them. Qwen3-4B's, before it: writes 13.8 tokens a second, 3,115 tokens read in 6.6 s, a 20 s base, and its switch to and from its vision model, 8 to 9 s, inside each."
         }
       },
       "driverMin": "32.0.203.311",
       "memoryGb": {
-        "chat": 4.5,
-        "vision": 5.3
+        "chat": 4.1,
+        "vision": 4.1
       },
       "download": {
         "file": "fastflowlm_1.0.7_windows_amd64.zip",
@@ -603,30 +603,18 @@
       },
       "models": [
         {
-          "id": "qwen3-it:4b",
+          "id": "qwen3.5:2b",
           "kinds": [
-            "chat"
-          ],
-          "pull": [
-            "pull",
-            "qwen3-it:4b"
-          ],
-          "present": "%USERPROFILE%\\.flm\\models\\Qwen3-4B-Instruct-2507-NPU2\\model.q4nx",
-          "size": 3300000000,
-          "licence": "Qwen3-4B-Instruct-2507: Apache-2.0 (FastFlowLM's NPU2 build)"
-        },
-        {
-          "id": "qwen3vl-it:4b",
-          "kinds": [
+            "chat",
             "vision"
           ],
           "pull": [
             "pull",
-            "qwen3vl-it:4b"
+            "qwen3.5:2b"
           ],
-          "present": "%USERPROFILE%\\.flm\\models\\Qwen3-VL-4B-Instruct-NPU2\\vision_weight.q4nx",
-          "size": 4100000000,
-          "licence": "Qwen3-VL-4B-Instruct: Apache-2.0 (FastFlowLM's NPU2 build)"
+          "present": "%USERPROFILE%\\.flm\\models\\Qwen3.5-2B-NPU2\\vision_weight.q4nx",
+          "size": 2015000000,
+          "licence": "Qwen3.5-2B: Apache-2.0 (FastFlowLM's NPU2 build)"
         }
       ],
       "maxContextTokens": 4096,
@@ -644,19 +632,19 @@
       "recycle": false,
       "idleStop": {
         "coldStartMs": {
-          "chat": 6600,
-          "vision": 15700
+          "chat": 15100,
+          "vision": 16600
         },
         "minutes": {
-          "chat": 5,
+          "chat": 6,
           "vision": 6
         },
-        "basis": "Chat: npu-check --idle on a Ryzen AI 7 350 (Krackan, 16 GB), 2026-10-15, every step passing: stopped to its first answer in 6.6 s (FastFlowLM loads the chat model before it opens its port), the keeper's stop freeing 4.3 GB. Vision: the same start, then its switch to the vision model and an answer, 15.7 s (timed apart the same day: 6.5 s to the port, 9.2 s to the first answer about a picture).",
+        "basis": "The slowest measured, rounded up to a tenth of a second, Qwen3.5-2B for chat and vision. Chat: npu-check --idle on a Ryzen AI 7 350 (Krackan, 16 GB), 2026-10-15, every step passing: stopped to its first answer in 15.0 s (FastFlowLM loads the model before it opens its port), the keeper's stop freeing 3.7 GB. Vision: the NPU check's kit-test the same day, the kit's test request on a stopped server, a picture and then chat, 16.5 s: the same server and model, so no switch. Started alike from Node, three times each, Qwen3.5-2B answered first in 11.8 to 12.4 s and Qwen3-4B in 10.1 to 10.7 s; Qwen3-4B's idleStop was 6.6 s for chat and 15.7 s for vision (its switch to the vision model, 9.2 s, included). All of these were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU: Qwen3-4B's server came up in 8.5 to 9.3 s then, against 4 to 6 s on the quiet PC that gave its 6.6 s, so they are on the slow side.",
         "verify": "On a Ryzen AI 300 (XDNA 2) laptop with 16 GB, with FastFlowLM set up by setup: stop the manor's own NPU server first (or let the keeper stop it), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
       },
       "embeddings": "not on the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms; embeddings go to the graphics card or the processor",
       "licence": "FastFlowLM: MIT (orchestration and CLI), NPU kernels free for any use including commercial; asks for \"Powered by FastFlowLM\" in the product's notices",
-      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server holds one model and switches to another on demand: 8 to 9 s from chat to vision or back, measured. Models are kept in %USERPROFILE%\\.flm\\models. Its context is --ctx-len 4096, the cap: FastFlowLM holds its whole context on the NPU from the start, and without it took the model's own, 40,960 tokens (Qwen3-4B's about 144 KB a token, 5.6 GB, on top of 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once (7.6 GB), that never loaded (XRT 0xc01e0200, the video memory manager couldn't page every allocation in at once), from a fresh start too; 4,096 loads in 4 to 6 s and holds 4.5 GB, 8,192 in 10.6 s and 5.1 GB, at the same speed (13.9 to 14.1 tokens a second). Its vision model at 4,096 holds 5.3 GB, and answered (red, as asked). A failed load doesn't stop it: it serves on, /v1/models listing every model it knows, and answers each request 200 with only {\"error\":\"Failed to load … model!\"} (it tries the load again each time); the kit takes that for the server failing (failedWithOk), and the NPU check asks /api/ps, which lists the model it holds (reportsLoaded). A prompt past its context is refused 400 (\"Max length reached!\"), the server still up. Its --pmode (powersaver, balanced, performance, the default, turbo) wrote and read at the same speed on mains power (14.0 tokens a second each) and on battery, where none drew clearly less than the battery meter's own swing, so the route sets none. On battery it used 20.7 mJ a token (npu-bench --energy), wrote 13.1 tokens a second and loaded in 12.7 s (5.4 s on mains power). A smaller --prefill-chunk-len than its 4,096 only read slower (3,000 tokens 7.3 s at 1,024, 9.5 s at 512, against 5.3 s). It reads 34 to 36 times faster than it writes (472 to 512 tokens a second read, 13.1 to 14.4 written, on mains power and on battery), so readPerWrite is 30: on a generation nobody has measured, calibrate takes a full-cap read at 30 times the writing speed it measured (the Krackan's --harden measurement gives a 35 s base, where the kit's 10 gave 90 s). Its --img-pre-resize default (2: a large picture scaled to a height of 720; a small one isn't enlarged) is kept: a 1920x1080 screen cost 960 tokens and 4.5 s an answer and a 1080x2400 phone screen 270 tokens and 2.3 s, every answer right, where the original size cost 2,080 and 2,600 tokens and twice to four times the time for nothing more right, and a height of 480 misread small text. It keeps no prefix cache: a request asked again costs the same. It streams a token a chunk, with its usage in the last (stream_options.include_usage)."
+      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server holds one model: Qwen3.5-2B answers chat and pictures alike, so nothing switches (the Qwen3-4B pair before it, one model for chat and one for vision, took 8 to 9 s to switch either way). Models are kept in %USERPROFILE%\\.flm\\models. Its context is --ctx-len 4096, the cap: FastFlowLM holds its whole context on the NPU from the start, and without it took the model's own, 40,960 tokens for Qwen3-4B (about 144 KB a token, 5.6 GB, on top of 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once (7.6 GB), that never loaded (XRT 0xc01e0200, the video memory manager couldn't page every allocation in at once), from a fresh start too; at 4,096 Qwen3-4B loaded in 4 to 6 s and held 4.5 GB, at 8,192 10.6 s and 5.1 GB, at the same speed (13.9 to 14.1 tokens a second), and its vision model held 5.3 GB. Qwen3.5-2B at 4,096 holds 3.7 GB started and 4.0 to 4.1 GB after jobs and pictures, writes 19.4 to 21.0 tokens a second and reads about 800. Its tokenizer has 248,320 entries against Qwen3's 151,936, so the same text is usually fewer tokens to it, and the kit's estimate of 3 characters a token stays on the safe side. FastFlowLM serves it with its thinking off. A failed load doesn't stop it: it serves on, /v1/models listing every model it knows, and answers each request 200 with only {\"error\":\"Failed to load … model!\"} (it tries the load again each time); the kit takes that for the server failing (failedWithOk), and the NPU check asks /api/ps, which lists the model it holds (reportsLoaded). A prompt past its context is refused 400 (\"Max length reached!\"), the server still up. Its power mode: at each start FastFlowLM runs C:\\Windows\\System32\\AMD\\xrt-smi.exe configure --pmode (performance by default) and ignores the result. On the Krackan that never ran: an older driver's xrt_coreutil.dll (2024) beside the newer xrt-smi.exe lacks a function it needs, so xrt-smi failed to load at every start (silently from Node, which the kit starts it from; with a dialog for each start from anywhere else). So its --pmode runs (powersaver, balanced, performance, turbo: the same speed on mains power, 14.0 tokens a second each, and on battery, none drawing clearly less than the battery meter's own swing) all ran in one mode, the driver's own, and say nothing of the modes: the route sets none until they're measured on a PC whose xrt-smi runs. With Qwen3-4B, in that one mode, on battery it used 20.7 mJ a token (npu-bench --energy), wrote 13.1 tokens a second and loaded in 12.7 s (5.4 s on mains power), and a smaller --prefill-chunk-len than its 4,096 only read slower (3,000 tokens 7.3 s at 1,024, 9.5 s at 512, against 5.3 s). It reads far faster than it writes: Qwen3-4B 34 to 36 times (472 to 512 tokens a second read, 13.1 to 14.4 written, on mains power and on battery), Qwen3.5-2B 41 times (795 and 19.4), so readPerWrite is 30: on a generation nobody has measured, calibrate takes a full-cap read at 30 times the writing speed it measured (the Krackan's --harden measurement gave a 35 s base with Qwen3-4B and 25 s with Qwen3.5-2B, where the kit's 10 gave 90 s). Its --img-pre-resize default (2: a large picture scaled to a height of 720; a small one isn't enlarged) is kept, measured with Qwen3-4B's vision model: a 1920x1080 screen cost 960 tokens and 4.5 s an answer and a 1080x2400 phone screen 270 tokens and 2.3 s, every answer right, where the original size cost 2,080 and 2,600 tokens and twice to four times the time for nothing more right, and a height of 480 misread small text. It keeps no prefix cache: a request asked again costs the same. It streams a token a chunk, with its usage in the last (stream_options.include_usage)."
     }
   },
   "devices": {
