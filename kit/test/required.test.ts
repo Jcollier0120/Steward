@@ -15,6 +15,7 @@ const { filled, onboardingProblems, requiredText, unmetRequired } = await import
 const { needsSettings, watchRequired } = await import('./fixture/src/kit/required.ts');
 const { every, roundFile } = await import('./fixture/src/kit/schedule.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
+const { fileCounts } = await import('./fixture/src/kit/file-cache.ts');
 const { pillOf } = await import('./fixture/src/kit/page.ts');
 type Onboarding = import('./fixture/src/kit/onboarding.ts').Onboarding;
 type Field = import('./fixture/src/kit/settings-kit.ts').Field;
@@ -106,6 +107,29 @@ test('a round held for its required settings is never silent: round.json and its
     assert.deepEqual([r.ok, r.waiting, r.error, r.next], [null, 'Thunderbird or Mail accounts', null, null]);
     assert.equal(job.state.waiting, 'Thunderbird or Mail accounts');
     assert.equal(job.state.nextRunAt, null);
+  } finally {
+    job.stop();
+    watchRequired(null);
+  }
+});
+
+test('a round held for the same reason is written once, not at every interval; a save that lets it run writes its round', async () => {
+  const spec = specOn(null);
+  watchRequired(spec, mail);
+  let ran = 0;
+  const job = every(20, async () => void ran++, { firstDelayMs: 0, name: 'held-once' });
+  try {
+    await until(() => readJson<any>(roundFile(), {}).rounds?.['held-once'], 10_000, 'round.json to say it was held');
+    const first = readJson<any>(roundFile(), {}).rounds['held-once'];
+    const writes = fileCounts.writes;
+    // Twenty intervals or so, all held for the same settings.
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(ran, 0);
+    assert.deepEqual(readJson<any>(roundFile(), {}).rounds['held-once'], first, 'the hold as it began');
+    assert.equal(fileCounts.writes - writes, 0, 'round.json not written again');
+    writeFileSync(spec.file(), JSON.stringify({ imapAccounts: ['me@example'] }));
+    await until(() => readJson<any>(roundFile(), {}).rounds?.['held-once']?.ok === true, 10_000, 'the round to run');
+    assert.ok(ran >= 1);
   } finally {
     job.stop();
     watchRequired(null);

@@ -17,7 +17,8 @@ import { hostFor } from './hosts/index.ts';
  * changes one). Kept in version-queues.json and served at GET /api/version-queues, which Manor shows.
  *
  * A repository's versions are read again only when its branch or one of its PRs has a new head commit: the round's
- * glance says so for the employees, and a project's are asked of git and GitHub each round.
+ * glance says so for the employees (an employee's clone is fetched only when its branch's head there isn't the
+ * glance's), and a project's are asked of git and GitHub each round.
  */
 
 export interface QueuedPr {
@@ -167,12 +168,16 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   const base: Omit<VersionQueue, 'version' | 'head' | 'files' | 'queue' | 'working' | 'latest' | 'note'> = { id: t.id, name: t.name, kind: t.kind, repo: t.repo, branch: t.branch, at };
   const empty = (note: string, version: string | null = null, head: string | null = null, files: string[] = []): VersionQueue => ({ ...base, version, head, files, queue: [], working: null, latest: null, note });
   if (!existsSync(t.checkout)) return empty(`no checkout at ${t.checkout}`);
-  // Its branch as its origin has it, or the clone's own branch when there is no origin to fetch from.
+  // Its branch as its origin has it, or the clone's own branch when there is no origin to fetch from. An employee's isn't
+  // fetched when the round's glance says origin's branch is at the commit the clone has already (common.ts's freshBranch).
   let ref = `origin/${t.branch}`;
-  try {
-    await fetchBranch(ctx.run, t.checkout, t.branch);
-  } catch {
-    if (!(await commitOf(ctx.run, t.checkout, ref))) ref = t.branch;
+  const glanced = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee)?.head : null;
+  if (!glanced || (await commitOf(ctx.run, t.checkout, ref)) !== glanced) {
+    try {
+      await fetchBranch(ctx.run, t.checkout, t.branch);
+    } catch {
+      if (!(await commitOf(ctx.run, t.checkout, ref))) ref = t.branch;
+    }
   }
   const head = await commitOf(ctx.run, t.checkout, ref);
   if (!head) return empty(`no branch ${t.branch} in ${t.checkout}`);

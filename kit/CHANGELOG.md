@@ -2,6 +2,362 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.1
+
+**The checks pace allows four processors' worth, not two.**
+
+### What changed
+
+- **`checksCap()`** is a quarter of the processor and four processors' worth at most (was the gentle pace's, `gentleCap()`: two at most). Up to eight processors nothing changes; on 18 the cap goes from 11% to 22%. A suite that starts a git for every step was too slow at two: the Steward's own took over an hour on an 18-processor laptop that was otherwise idle. The agents' own background pace (`gentleCap()`) is unchanged. spec/ROUND.md says so.
+
+### For an agent
+
+- Nothing to do: paced commands take the new cap as they start.
+
+## 2.74.0
+
+**A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
+
+### What's new
+
+- **spec/STAFF-PAGE.md**: the layout of an agent that serves MCP (Reeve, the Assayer): what needs you first, then at a glance, Connect your AI, Kept, then the agent's own sections. Plus the rules that keep such a page from becoming a data dump: a row is one line, long output opens beside the page rather than in it, what's fine is one line, counts go in headings.
+- **react/staff.tsx**, in the react part's index:
+  - `StaffLayout`: that order.
+  - `NeedsYou`: what the person must look at or do, a card each, its edge the colour of its badge.
+  - `Glance`: a row of tiles, each a number, a line and a colour, going to its section. Reeve's at a glance.
+  - `ConnectAI`: how to give an AI tool the agent's tools, as tabs per tool, the one-press connect where the agent has one, and the line for the AI's instructions. Open until an AI is connected, then one line naming it and when it last used the tools.
+  - `Kept`: what the agent read so the AI didn't have to, its three totals and what each part read.
+  - `Row`: one line of a list (its badge, name, what matters, its buttons), its details opening under it.
+  - `SidePanel` and `Output`: long output (a log, a failing test's output, a report) in a panel beside the page.
+  - `Paste` (text with Copy), `useFold` (a fold the browser remembers) and `showSection`.
+- Their styles are in `UI_CSS` (`ui-glance`, `ui-tile`, `ui-need`, `ui-line`, `ui-list-row`, `ui-connect`, `ui-kept`, `ui-paste`, `ui-output`, `ui-side-panel`), every colour a theme variable.
+
+### For an agent
+
+- Nothing changes until a page uses them. An agent that serves MCP lays its page out as spec/STAFF-PAGE.md says, with these parts in place of its own tiles, connect card and output blocks.
+
+## 2.73.5
+
+**Every folder the kit compares, it compares by its real path: through a junction, a link or a Dev Drive mounted in a folder, one folder is one folder.**
+
+### What's new
+
+- **`real-path.ts`**: `realPath(p)`, a path with its junctions, links and mounted folders followed (`realpathSync.native` of the deepest part that exists, the rest kept as given; a share such as `\\wsl.localhost\...` taken as it is, so WSL and the network are never woken; answers kept a minute), and `pathKey`, `samePath`, `inside` and `keyInside` to compare by it. `forgetRealPaths()` is for a test that makes a junction. spec/DEV-DRIVES.md's rule 1 points to it.
+- native.ts: `spellingsOf(dir)`, a folder as given and its real path when that's another.
+
+### What changed
+
+- install.ts: `--purge`'s guard compares the data folder with the profile and Windows' folders by their real paths, and refuses a whole drive mounted in a folder (`C:\DevData`, where `E:` is mounted). Before, a data folder named for the agent that held the profile through a junction passed as the agent's own, and would have been emptied. `install` knows its installed copy however its release and data folder are spelled.
+- An update ends the programs running from the app folder under either spelling (`processesUnder`): Windows names a process's program as it was started, through a junction or a mounted folder if it was.
+- keeper.ts: a model server's program (`sameProgram`) and the manor's servers folders (`manorOwns`, `manorServerDirs`) are compared by their real paths. A configured server whose process was started under the other spelling wasn't known as itself, and could be stopped as an orphan.
+- accelerators.ts, accelerator-config.ts: Reeve's older config.json is the accelerators' own when one's folder is a junction to the other's, so it's neither moved nor mirrored onto itself.
+- folders.ts: `uniqueFolders` lists a folder once however it's spelled.
+- manor.ts compares a project's checkout through `real-path.ts`, as it has since 2.73.1, now with its answers kept a minute.
+
+### For an agent
+
+- Take the kit and release as usual.
+- Compare your own folders with `samePath`, `inside` or `pathKey` from `./kit/real-path.ts`, not `path.resolve(...).toLowerCase()` (spec/DEV-DRIVES.md, rules 1 and 5).
+
+## 2.73.4
+
+**An NPU's own timeouts are used: its requests run on them, and a model found still loading is given its cold load.**
+
+### What changed
+
+- **A request runs on its accelerator's own `timeouts`.** `core.requestTimeoutMs` has always taken an accelerator's `timeouts` in place of rules.json's, but npu.ts never passed them, so every request ran on the rules': 15 s plus 0.3 s a token, and 90 s more for a cold load. Now a route's own in npu-vendors.json (Intel's up to 60 s plus 0.4 s a token and a 360 s cold load on Meteor Lake and Arrow Lake, AMD's 120 s), and what setup measured on a generation nobody had measured and wrote into its entry (`calibrate`), are what its requests get. A Qualcomm NPU has none of its own, so its requests are unchanged.
+- **A server found still loading its model gets the cold-load allowance for its warm-up**, as one just started does (2.71.0): `requestBaseMs` plus the larger of rules.json's `coldLoadMs` and the accelerator's own. Before, when another agent had started the server, the warm-up got the caller's `timeoutMs` (a person's 20 s), or 105 s with none. That was too short for an NPU that compiles its model on first load, and the request was deferred while the model went on loading.
+- **A warm-up with no `timeoutMs` gets the same allowance**, for example the first request after the server's keepalive has unloaded the model. Before, it got rules.json's 105 s whatever the accelerator's own cold load.
+- **npu-bench's energy (`--energy`) is measured on a busy PC too.** Each window now takes at least one reading, and the working window lasts until a job has finished, with a reading taken after it. Before, a process held past a window's end before its first look took no reading, and the report said "the battery gave no discharge rate". This was also why its test failed now and then while other tests ran beside it.
+
+### For an agent
+
+- Nothing to do: requests on an Intel or AMD NPU, or on one setup measured, wait as long as its timeouts allow. A caller's own `timeoutMs` still decides a request, as before.
+
+## 2.73.3
+**An install or a settings file written just before the PC crashes comes back whole, not as files full of nothing; and Intel's NPU 3720 is measured and verified, a short answer in 0.5 s, not 3.1.**
+
+### What's new
+
+- **`flush.ts`**: `flushTree(dir)` writes every file under a folder through to the disk (fsync) and says how many it flushed and how many it couldn't; `flushFile(file)` does one. A folder that is renamed into place is flushed first.
+
+### What changed
+
+- **install.ts**: the release copied to `app.new` is flushed before it is swapped in for `app`, and so is `app` after the release is copied into a folder that can't be moved (`replaceContents`, which now flushes what it copied into). Windows writes a rename at once and a file's contents a few seconds later: when a PC crashed right after an update, the agent's app folder came back with every file the right size and nothing in it but NUL bytes, and its page couldn't start until it was installed again. `InstallDeps.flush` stands in for the flush in tests.
+- **safeinstall.ts**: `app.prev`, the copy a rollback puts back, is flushed as it's made.
+- **store.ts** `writeJson`, accelerator-config.ts `writeJsonWhole` and the accelerators' shared files: the temporary file is flushed before the rename, so a crash leaves the old file or the new one. About 1 ms more a write (0.2 ms to 1.2 ms on the owner's laptop); a write that would change nothing still writes nothing.
+- An agent's app folder of 130 files flushes in about 0.03 s.
+
+### What changed for Intel's NPU 3720
+
+Written on the Intel laptop and released first in this version.
+
+- **npu-vendors.json, Intel's `meteor-lake`** (PCI `7D1D`, the NPU 3720 of Meteor Lake and Arrow Lake-U) is **verified**, by the NPU check on a Core Ultra 5 225U (Arrow Lake-U), every step passing: its timeouts are now 15 s + 0.2 s a token and a 60 s cold load (were 60 s + 0.4 s and 360 s), its chat memory 3.9 GB (was 3.6), and its label "Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)". A Core Ultra 200U showed Meteor Lake's PCI id, and Intel's driver serves `7D1D` and `AD1D` from one NPU 3720 section.
+- **The NPU 3720 reads a prompt 128 tokens at a time**: `meteor-lake` and `arrow-lake` carry `--plugin_config {"NPUW_LLM_PREFILL_CHUNK_SIZE":"128"}`. OpenVINO's default chunk of 1,024 tokens made every prompt cost a whole chunk: a one-line question took 3.1 s, two at once 6.4 s. Now 0.5 s and 1.2 s, the same answers word for word, a shorter compile and 0.2 GB less. The Intel route's command carries `--plugin_config {}` (the same graph as without it) so a generation's `args` can replace it, and `routeOnDevice` drops it off the NPU. The embedding server never gets it: there it hangs at its start.
+- `arrow-lake` (`AD1D`, Arrow Lake-S) stays unverified, on its generous starting values, with the NPU 3720's prompt chunks and memory.
+- **npu-check.ts measures a real compile**: its measurements serve from a compile cache of its own (`checkServe`: `.check-cache` beside the manor's `.npu-cache`), emptied before the first start, so the first load is a PC's first load or one after a driver update. From the manor's warm cache an NPU 3720 whose compile takes 30–48 s answered first in 9 s, and the check suggested a 30 s cold load. `--idle` and `--harden` keep the manor's cache. Its io takes `clearCache` for tests.
+- spec/NPU-VENDORS.md: the NPU 3720's numbers (chat, the prompt chunks, embeddings at each `--max_length`), the Arrow Lake-U run, and what's still unverified.
+
+### What an agent must do
+
+- Nothing: it takes the kit as usual.
+- A PC set up from now on gets the prompt chunks and the verified timeouts. One set up before keeps its config.json entry as it is (setup leaves a configured NPU alone): `accelerators setup npu` sets it up again with them, and its first start compiles once more.
+
+## 2.73.2
+**One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
+
+### What's new
+
+- **`console.ts`**: `sharesConsole()`, whether this process has a console the console programs it starts can share (asked once), and `hasConsole()`. Start git and gh with `windowsHide: !sharesConsole()`, not detached: in a page started by this kit they then share its windowless console. Started hidden, or from a page with no console, each one gets a console host (conhost.exe) of its own, detached or not. 40 git and gh calls from a page started 82 processes; sharing its console, 43.
+- service.ts: **`pageLaunch(node, entry)`**, how `open` starts the page: the program, its arguments and its spawn options.
+
+### What changed
+
+- **`open` starts the page with a console of its own, with no window.** On Windows it goes through `cmd /d /s /c "start "" /b …"`, cmd started hidden: the page keeps cmd's windowless console after cmd has exited, and `start` takes it out of the job Node puts what it starts in, so it outlives the process that ran `open`, as before. Its command line still names `src\cli.ts serve`, its output still goes to serve.log, its folder is still the data folder. Off Windows, and on a path holding `%` or `"`, it starts detached, as before. The page's one console host lasts as long as the page.
+- **unsigned-git.ts** also turns off `maintenance.auto`, so a test's throwaway commits no longer each start `git maintenance run --auto`: 20 commits started 62 processes, now 42. `UNSIGNED_KEYS` is now `OFF_KEYS`. test-git.ts and the Steward's checks get it as they are.
+- schedule.ts: a round on the clock (2.72.0) now says it's due exactly on its slot. Before, on a busy PC its `nextRunAt` could be a millisecond past the slot, because the wait read the time twice, and the clock's test then failed now and then. When it runs is unchanged.
+
+### For an agent
+
+- Nothing to do to take it: the page gets its console the next time it starts.
+- To save the processes, start git and gh in your runner with `windowsHide: !sharesConsole()` (from `./kit/console.ts`) and without `detached`. Keep other commands hidden: a program that opens a window would show it.
+
+## 2.73.1
+
+**Linked folders are fully supported: every script in the kit recognises itself through a junction, a symbolic link or a Dev Drive mounted in a folder.**
+
+### What's new
+
+- **spec/DEV-DRIVES.md**: why one folder has two spellings on a PC with a Dev Drive (`C:\DevData` is `E:\`), which calls give which, what went wrong on 2026-10-13, and the rules every agent follows: paths compared only by their real paths, the run-as-itself check's one form, temporary folders in tests taken by their real path, and what to tell a developer who moves onto a Dev Drive.
+
+### What changed
+
+- `card-check.ts`, and the kit's own `test/core-types.ts`, `test/turn-scenarios.ts` and `test/accelerator-scenarios.ts`, now compare their own path with the one they were started by through `realpathSync`, as `release.ts`, `npu-check.ts` and `npu-bench.ts` have since 2.71.1. Started from a linked folder, they did nothing and exited 0.
+- `manor.ts`: a project's checkout is compared with the others, and with the Steward's own, by its real path (`realPlace`, `realpathSync.native` of the deepest part that exists). One clone named through `C:\Projects` and by its Dev Drive's letter was two projects; a checkout inside the Steward's, spelled the other way, was let through.
+
+### For an agent
+
+- Take the kit and release as usual.
+- Check your own scripts for `path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`, or the `pathToFileURL(...).href === import.meta.url` form, and compare real paths instead (spec/DEV-DRIVES.md, rule 2). Started from a linked folder, such a script does nothing and exits 0.
+## 2.73.0
+
+**The checks pace holds to the gentle cap, with memory caps and turns, and the pace is the owner's setting alone: viewing a page, Run now or a fast vouch no longer lifts it.**
+
+### What's new
+
+- **`containSelf(own)`** (`node/gentle.ts`): for a long-lived process that doesn't run its work with `every()`, such as an MCP server, a page of its own or a scheduled job. It sets the process at the owner's pace, then reads the setting again every 5 minutes (`CONTAIN_CHECK_MS`). Call it first, before the process starts anything.
+- **Model servers start apart from the asker's job** (`node/apart.ts` `startApart()`, `checks-pace.exe apart`). They serve every agent. One started by a capped agent used to run at that agent's cap for as long as it lived; now it doesn't. Measured on this PC:
+  - it leaves every job that allows breakaway (the gentle job now does) and stays in the first that doesn't, such as Task Scheduler's or a terminal's;
+  - where Windows refuses, it starts as before.
+- **The PowerShell worker joins its agent's job** (`gentle.cs` `Join`). It made the job, so it was the one program the agent ran outside it.
+- **The checks pace's limits** (2.70.0's `pacedCommand`). The launcher's first word now carries them: `cap[,MB per program,MB for the job,runs at once]` (`checksLimits()`).
+  - **A cap on memory** (`checksMemory()`): each program gets an eighth of the PC's memory (2 to 6 GB), the whole job a quarter (4 to 12 GB). A runaway test fails rather than paging the PC.
+  - **A turn**: at most `CHECKS_AT_ONCE` (2) paced runs at once on the PC, from any agent or Claude session, through named mutexes `Local\kit-checks-turn-<n>`. The rest wait, 20 minutes at most, then run anyway.
+    - A run started inside another's (`KIT_CHECKS_TURN` set, as when the Assayer paces `steward vouch`) takes no turn.
+    - `KIT_CHECKS_TURN_NAME` gives a test turns of its own.
+
+### What changed
+
+- **One switch decides the pace** (`node/gentle.ts`): Manor's Settings `"backgroundPace"`, gentle or full.
+  - A page being looked at no longer lifts its agent's cap, or its round children's, for a minute after each request. What a page shows is now what the agent costs in the background. A visit no longer starts PowerShell twice, to lift the cap and set it again.
+  - Run now runs at the setting's pace too.
+  - `pageInUse()` stays but does nothing, so an agent that calls it (Chronicler) still builds.
+  - `paceProcess(p)` and `setPriorityFor(p)` lose their `asked` argument.
+- **The checks pace's cap is the gentle pace's** (`checksCap()` = `gentleCap()`: a quarter of the processor, two processors' worth at most), no longer half the processor.
+  - Measured on an 18-core laptop with the Assayer's suite (155 tests). On a quiet PC: no cap, the whole PC peaked at 91% (the suite's own 68%) in 39 s; at the gentle cap, 43% (16%) in 65 s. On a busy PC: no cap, 73 s and 57%; half the processor, 44 s and 49% (half barely held it); the gentle cap, 219 s and 17%.
+  - The suite's memory peaked at 0.8 GB.
+- **The checks cap follows the owner's setting** (`checksPaceCap()`). There is none when Manor's Settings pace is full. While the pace is gentle, settings.json `"checksPace"` (or `KIT_CHECKS_PACE`) may set it.
+- **`pacedCommand`'s `fast` is gone.** A run asked for by hand is paced like any other.
+
+### Before you update
+
+- An agent that starts its tests through `pacedCommand`:
+  - drops `fast`;
+  - should allow paced runs about four times their usual time (the Steward's `PACED_TIME`).
+- An agent that calls `paceProcess(p, asked)` or `setPriorityFor(p, asked, set)` drops the `asked` argument. Surveyor's `setPriorityFor(pace())` is fine as it is.
+- An agent with an MCP server, or a process of its own outside `every()` (Reeve, the Assayer, Manor's installs), calls `containSelf()` at its start.
+
+## 2.72.1
+
+**The graphics card on demand: beside an NPU, the card does only the work the NPU can't, and only while it's asked for.**
+
+This builds on 2.68.0, which it needs.
+
+### What's new
+
+- **The card on demand.** With Manor's "Use the graphics card for models when there's an NPU" off (its default), a graphics card beside an NPU now keeps the work no enabled NPU on the PC serves, instead of being left out altogether.
+  - Beside Intel's NPU, which can't run the vision model, the card does vision: the first vision request starts its server (`ensureServer`, as for any server), and the keeper stops it after `gpuIdleStopMinutes` unused (10 by default). The card's other servers stay stopped.
+  - Beside a Snapdragon's NPU, which chats, sees and makes embeddings, nothing is left for the card: it is left out, as before.
+  - An NPU whose chat or embeddings failed at setup (2.68.0's fallback) leaves that work to the card the same way; with no card, to the processor where it is set up for it.
+  - Vision with no card and no processor set up for it stays unavailable, with the same plain note as before ("no vision model …").
+- **`card-check.ts`**, a check for a real PC with an NPU that can't see and a card that can: a chat question (the NPU's), a vision question (the card's, its server seen to start), then the keeper's looks with a short idle time until that server is stopped as unused, not sooner; then chat again on the NPU, and none of the card's other servers started. It prints PASS or FAIL and exits 0 or 1; it changes nothing in config.json. `node <agent>\src\kit\card-check.ts [--idle-minutes 1] [--out <file>]`.
+- core: **`npuServes(list)`**, the kinds of work an enabled NPU in the list serves.
+- keeper.ts: **`cardOnDemand(accs, withNpu)`**, what each card still does while it's kept out beside the NPU (`[{ id, kinds }]`).
+- **Setup by the same rule.** With the switch off, setup sets up a card beside an NPU only for the work no NPU serves after the NPU's own setup and tests (core's new **`cardWorkBesideNpu(kinds, npu)`**, which `withoutGpuBesideNpu` uses too, so setup, requests and the keeper can't drift apart). On an Intel PC the card gets vision alone: its chat and embedding models (about 3.1 GB) aren't downloaded. The plan says so per card (`SetupPlan.leftToNpu`, `SetupTarget.leftToNpu`, and a line in `describePlan`).
+  - The NPU failing a kind at setup: the card is set up for that kind too, in setup's second pass (before the processor's, which still serves a PC with no card). The NPU failing outright: the card gets everything, as before.
+  - The switch turned on: the next Set up fills in the card's other kinds; nothing re-runs setup on the switch itself. A card the NPU leaves nothing to (a Snapdragon's) is set up whole, as before, so the switch stays offered for it.
+  - `setupCommand` reads the switch (manor.ts's `gpuWithNpu()`) unless given `gpuWithNpu`; with no Manor it's the agent's default (on), as before. `planSetup` takes `gpuWithNpu` (left out: every card, as before). Kinds asked for by name are set up as asked.
+
+### What changed
+
+- core: **`withoutGpuBesideNpu(list, false)`** keeps a card with only the work no enabled NPU serves (a copy; the same object when that's all it does; dropped when that's nothing). A reranker stays off the card beside an NPU. A vision endpoint on its chat endpoint's server keeps that server when chat goes.
+- keeper.ts: `reapedServers(…, { keepGpuOut })` marks `keptOut` only the card's servers for the NPU's work; the on-demand ones get the card's idle time like any other. `gpuKeptOut` is true when a card is kept out of any work. The keeper still never starts a stopped server itself.
+- npu.ts: `new Npu(cfg, { gpuWithNpu })` takes Manor's switch as a check gives it. A request for the card by name, for work the NPU does, still says the card isn't used beside the NPU.
+- setup.ts: a card set up again keeps the entries it had for the kinds left to the NPU (`keepingAddOns`, `keptKinds`), and their ports: an install whose card has its chat and embeddings keeps them, files and all; the keeper keeps them out. A card's kinds it had take their ports before one it gains, so a card set up again never moves a server it kept.
+- npu-server.ts: **`longFetch`**, fetch over node:http for a local server, limited only by the request's own signal. Node's fetch gave up after 300 s without headers (undici's headersTimeout), although `npu-check`'s steps allow 10 minutes: `serverClient` (the NPU check and the benchmark) now uses it, and a request past its limit still says "no answer in N s".
+
+### For an agent
+
+- Nothing: take the kit and release as usual. On an Intel PC with a graphics card, vision starts working with Manor's default settings, on the card, when something asks for it; nothing runs on the card otherwise.
+- An agent that runs setup (`setupCommand`) gets the switch read for it; one calling `planSetup` itself passes `gpuWithNpu` to follow it.
+- An agent that took "the switch off" to mean "no card at all" must now ask `withoutGpuBesideNpu` about the very list it routes: a card can keep part of its work. Reeve, which gives the NPU an embedder of its own, names its search index after the model its routed list embeds with from 0.17.56: take that Reeve first.
+
+## 2.72.0
+
+**Rounds on the manor's shared 30-minute clock: they don't drift, and each agent's schedules fall in a minute of their own.**
+
+It comes after 2.69.0 to 2.71.2, still waiting to be merged here, and touches none of their files but `kit/VERSION`.
+
+### What's new
+
+- **On the clock.** `every()` puts a schedule whose interval fits the shared clock (`fitsClock`: whole minutes that divide 30, or multiples of 30 minutes that divide the day: 1, 5, 10, 15, 30 minutes, 1, 3, 6, 12, 24 hours…) on its slots: multiples of the interval from local midnight, plus the schedule's phase (`nextOnClock`). The next round is the first slot at least half an interval after the last one ended, so a round that waited its turn or ran long keeps its slot.
+- **A phase for each schedule.** `clockPhase(id, name, everyMs)`: whole minutes under both the interval and 30 minutes, from the agent's id and the schedule's name, the same on every PC and at every start. An agent may give its own with `every()`'s `phaseMs`.
+- round.json's entries say the phase (`phaseMs`; spec/ROUND.md's new section, The clock).
+
+### What changed
+
+- The interval is kept to the whole second from a minute up (`wholeInterval`), so one worked out in another unit can't drift off the clock.
+- An interval off the clock (7 minutes, 5 hours, anything under a minute or not in whole minutes) keeps the old way: each wait counted from the last round, varied by ±10%.
+- The first round after a start keeps its stagger (2 to 15 minutes at a gentle pace).
+
+### For an agent
+
+- Nothing to do: take the kit. To share the clock, give a schedule an interval that fits it (an hour rather than 50 minutes).
+- An interval function must return the interval, not the time left until the next round: every() works out the wait itself. (Porter returned the time left, which put odd values in round.json's `everyMs`.)
+- A test that expects a 1-minute schedule's next round a whole minute after the last should use an interval off the clock (70 s): on it, the next round falls on the next minute.
+
+## 2.71.3
+
+**An agent's small files cost a stat, not a read, while they are unchanged, and a write that would change nothing writes nothing: Manor's pings, the pace and round.json stop touching the disk for nothing.**
+
+### What changed
+
+- **`writeJson` leaves a file that holds exactly that JSON as it is** (store.ts): no temporary file, no rename, its modified time as it was. A file whose size differs is never read for the comparison. `{ always: true }` writes all the same, for a write whose time is read; the settings kit's save uses it, so a person's save of Settings still moves the file's time (the Steward's migration notes go by it).
+- **Reads are kept by what a stat says** (new `file-cache.ts`: `readText`, `readJsonFile`, `statOf`, `holds`, and `fileCounts` for tests and measurements). A file unchanged since this process read it (the same modified time, change time, size and file id) costs one stat; any change is read again at once. A file modified within 2 s of being read (`SETTLED_MS`) is read every time until it settles, so two changes in one tick of the file system's clock are never missed. Files over 1 MB are never kept, and at most 256 are. `readJson` goes through it and still parses afresh at every call.
+- **Manor's settings.json**, read by `pace()`, `agentsAtOnce()`, `manorLink()`, `developerOptions()`, `gpuWithNpu()`, `notifyPrefs()` and `manorProjects()`, and **the agent's own settings** (`readSettings()`, so `needsSettings()`), `duty()` and `ownDeveloperOptions()` all read through it. Each still answers what the file says now: a change in Manor's Settings applies at the next request or round, as before.
+- **`/api/ping` reads no file** while nothing has changed: measured with the fixture agent (a settings spec, one schedule held for a required setting), a ping went from 8 reads and 15 other file calls to 0 reads and 12 stats.
+- **A round held for the person** (its required settings, or an ended trial) is written to round.json when the hold starts or what it waits for changes, not at every interval (spec/ROUND.md): its `started` and `finished` are when the hold began. A reader takes an entry with `waiting` for an agent waiting for the person, however old.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent that ages a file by its modified time, and writes it with `writeJson` with content that may not change, passes `{ always: true }`.
+
+## 2.71.2
+
+**A refused project's reason speaks of projects and the manor's own, never of employees.** To the person using the manor, the repositories in Manor's Settings are just their projects. They never think of the manor's own repositories as employees, so the refusal no longer says "an employee is looked after as staff".
+
+### What changed
+
+- **node/manor.ts:** `projectsFrom` gives "is <owner/name>, one of the manor's own: the manor looks after it itself, so it can't be a project", and for a checkout "is one of / inside one of / a folder holding one of the manor's own checkouts: the manor looks after those itself, so it can't be a project". The doc comments of `projectsFrom` and `manorProjects` call them the owner's projects. The rules themselves are unchanged.
+- **What an agent must do:** nothing, unless a test of its own matches the old words. Manor's server test matched the whole message: it now matches only up to "one of the manor's own" (Manor 0.16.144), so take that Manor before pinning this kit there.
+- **Its tests:** kit/test/manor.test.ts, which also checks that no refusal mentions an employee.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 2.71.1
+
+**Tests sign no commits (`unsigned-git.ts`, and `test-git.ts` for a test script's `--import`), and release builds are tested once, before a kit is published, not in every run.**
+
+### What's new
+
+- `unsigned-git.ts`: `unsignedGitVars(env)` gives the environment variables that turn git's `commit.gpgsign` and `tag.gpgsign` off (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`), after any the environment already has, and nothing when it has them; `unsignedGit(env)` adds them in place. With the person's own commit signing on (an SSH key, as the manor's owner has it), every throwaway commit a test makes starts ssh-keygen, and Defender scans each signing buffer: 461 in one run of the Steward's tests. The person's own settings are never touched.
+- `test-git.ts` sets them for a whole test run: `"test": "node --import=./src/kit/test-git.ts --test \"test/**/*.test.ts\""`. The `=` keeps the script one the Steward can narrow to the tests a change reaches. Nothing else imports it: it changes the environment as it loads.
+
+### What changed
+
+- The Steward runs every repository's checks with them, whatever the repository's test script says.
+- The kit's release tests build one release each, the minified one as released, and list the zip (`tar -t`) instead of unpacking it twice; the native test unpacks only what it checks. The other builds (readable, dirty, no announcement, native and dirty: there were five and two) run with `STEWARD_RELEASE_TESTS=1`: `npm run test:release`, and `tools/kit-release.ts --publish` before it publishes a kit (`--skip-release-tests` leaves them out). In the full suite under load the two tests took 524 s and 514 s, and set the time of every vouch.
+- The kit's tests that serve a page take a port nothing listens on (`kit/test/free-port.ts`: from 40000-48999, checked on 127.0.0.1 and ::1), never the fixture's own 17979. Every checkout's tests used 17979, so two test runs at once met there and one failed with EADDRINUSE.
+
+- `release.ts`, `npu-bench.ts` and `npu-check.ts` run when started from a folder reached through a junction or link: they compared the path they were started by with their own real path, and did nothing, silently, when the two differed.
+
+### For an agent
+
+- Nothing needed: the Steward's and the Assayer's checks already sign nothing. To make `npm test` run by hand sign nothing too, add `--import=./src/kit/test-git.ts` to its test script once it takes this kit.
+
+## 2.71.0
+
+**On a PC with little memory, the NPU's model server rests sooner when nobody uses it, and the first request after that waits for it to wake instead of failing.**
+
+### What's new
+
+- **The NPU's idle stop by the PC's memory** (`npu-vendors.json`'s `idleStop`, spec/NPU-VENDORS.md "Resting when unused"). With no `npuIdleStopMinutes` in config.json:
+  - under 20 GB of memory (`smallPcGb`; 16 GB shows as 15.3 to 15.9), each server stops after its route's own minutes: GenieX and its llama-server 5, OpenVINO Model Server's chat and embedding servers 5, FastFlowLM 10;
+  - 20 GB or more, or memory unknown: rules.json's 10, as before.
+  - A route's minutes are 20 times its cold start, never under 5 (`idleMinutesFor`): GenieX 15 s and OpenVINO Model Server 4 s measured, FastFlowLM taken as 30 s.
+  - `npuIdleStopMinutes` in config.json, when set, wins on any PC (0 never stops).
+  - None of the three servers can unload its model and keep running, so stopping is the unload. The next request starts it again.
+  - New in `npu-vendors.ts`: `idleMinutesFor`, `smallPc`, `routeOfServer`, `coldStartMsOf`, `npuIdleStopMinutes`; the route's `idleStop` (`coldStartMs`, `minutes`, `basis`, `verify`). `serversToReap` takes `ramBytes` (default the PC's).
+- **Callers can be told the local AI is waking.** `AskOptions.onWaking(w: Waking)` is called before a request waits for a server to start (`how: 'starting'`) or to finish loading (`'loading'`). `w.line` is a plain line for the person, such as "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer.", and `w.aboutMs` is the route's cold start. `wakingOf` builds it. `ensureServer` takes `onWaking` too.
+- **`npu-check.ts --idle`** (its steps in the new `node/npu-idle.ts`) runs the rest and the waking on a real NPU, each step passing or failing:
+  - idle-wake;
+  - idle-stop: the keeper's own look stops every server after a minute unused;
+  - idle-cold-answer: a person's 20 s request after that is told it's waking and answers within the cold load, and its cold start is printed as `idleStop` numbers;
+  - idle-in-flight: a request in flight is never stopped.
+  - `npu-vendors.json`'s Intel and AMD `idleStop.verify` say how to run it on a 16 GB Lunar Lake and a Ryzen AI 300.
+
+### What changed
+
+- **Intel's embedding server is stopped when idle.** It is a second OpenVINO Model Server holding 1.7 GB, and the keeper now stops it with the NPU's lock and idle time. Before, it ran until the PC restarted.
+- **An idle stop never races a request.** The keeper already stopped a server only in the accelerator's turn. Now a stop whose turn isn't had within 2 s (`TURN_AT_ONCE_MS`) gives way and reports `in-use`: someone took the accelerator after the keeper looked. A request arriving during a stop waits its turn, then starts the server again.
+- **The first request after a start gets the cold-load allowance.** After the kit starts an NPU server, its warm-up gets at least `requestBaseMs` plus the larger `coldLoadMs`, even when the caller's `timeoutMs` is shorter (Envoy's 20 s captions). Before, that first request could time out and fail while the model was loading.
+
+### What an agent must do
+
+- **The Smith and Reeve** (the keepers): take 2.71.0, and the rule applies where they keep.
+  - The Smith's Settings should show the NPU's idle minutes as the rule gives them on this PC (`npuIdleStopMinutes({program, kind, ramBytes, otherwise})`).
+  - It should write `npuIdleStopMinutes` to config.json only when the person changes it: a value there overrides the rule.
+- **Envoy**: pass `onWaking` on caption requests and show `w.line` where the person is waiting, in the setting-up card's style.
+- **Manor's chat**: it can show `w.line` in place of its own "getting the model ready".
+- Nothing else: config.json's format is unchanged, and an agent that does nothing gets the new timings and the longer first wait.
+
+## 2.70.0
+
+**The checks pace: test runs, type checks, installs and builds an agent starts can't peg the processor any more.**
+
+### What's new
+
+- **`node/checks-pace.ts`**: `pacedCommand(file, args, { fast })` gives the command to start instead, through a small launcher (`node/checks-pace.cs`, compiled once per PC to `<locks>\..\kit\checks-pace-<hash>.exe`, as `gentle.cs` is to a DLL). The launcher starts the command suspended, puts it in a job, and only then lets it run, so it and every program it starts are held by:
+  - a hard cap on the processor: half of it by default (`checksCap()`), two processors' worth at least;
+  - below-normal priority, which its programs take from it (a program may still raise its own).
+- **One job for the whole PC** (`Local\kit-checks-pace`): two check runs side by side share the cap rather than taking it twice. A process already in a job of another family gets a job of its own with the same cap. The job ends what is left in it once no launcher holds it: a test's server left running, or a command stopped on a timeout.
+- **The cap is a setting**: Manor's settings.json `"checksPace"` (or `KIT_CHECKS_PACE`), a percentage of the processor from 10 to 100, or `"full"` for none (`checksPaceCap()`). `fast: true` (a run the person asked to be quick) isn't paced, as Run now lifts the gentle pace. Under `node --test` nothing is paced unless `KIT_CHECKS_PACE` says, so a test never builds the launcher in the PC's kit folder.
+- Off Windows a paced command runs under `nice -n 10`. A launcher that can't be built leaves the command as it is, said once in the log: the pace never fails a check.
+
+Measured on an 18-core laptop (the Steward's own checks: its kit filled, a type check and its whole test suite): before, 60 s of 201 s at 98% or more; at half the processor, 1 s of 203 s (the rest of the PC's work on top, Windows Defender's scans of what the tests write among it).
+
+### Before you update
+
+- Nothing for an agent that doesn't start test runs or builds. One that does (the Assayer) adopts it by starting them through `pacedCommand`.
+
+## 2.69.1
+
+**An update is no longer rolled back because the network went down while it was installing.**
+
+### What changed
+
+- **The probation asks for the home page on 127.0.0.1** (`homePageUrl`, `homePageStatus`), as the ping always did, not at the page's `<agent>.localhost` name. Windows doesn't resolve `*.localhost` itself: it asks the network's DNS server (a home router answers 127.0.0.1). So while the network is down the name doesn't resolve, and a page that was up and answering was rolled back and flagged unsafe with "its home page didn't answer". On 2026-10-13 that happened to seven agents within the same minute: Windows logged that its DNS server stopped answering at 14:16:32Z, the moment the first one was rolled back. The page's server already takes 127.0.0.1 as its host.
+- **A home page that doesn't answer at all is asked again at each look**, and fails the probation only if it hasn't rendered by the end of it (90 s). An answer that's an error status still fails at once, and so do the wrong version answering and a page that stops answering its ping.
+  - The install's own settling (15 s) leaves the home page to the background watcher, which asks again.
+  - A rollback for a home page that never rendered keeps its old words, "its home page didn't answer", which the Steward's retry of such rollbacks reads.
+- `probation()` takes `homeLater`, for a settling whose end isn't its own to judge.
+
+### For an agent
+
+- Nothing: take the kit and release as usual. The fix works from the agent's next update on, since a release's own install runs the probation. `unsafe-updates.json` is unchanged, so versions flagged before stay flagged until they are allowed again (`install --allow-unsafe`, or the Steward's retry of such rollbacks).
+
 ## 2.68.0
 
 **Intel NPUs nobody has measured yet (Meteor Lake, Arrow Lake, Panther Lake, Wildcat Lake) are set up safely: setup measures each PC's NPU, checks that its answers make sense, and falls back quietly when it can't use it.**

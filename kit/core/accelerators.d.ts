@@ -331,10 +331,27 @@ export declare function ordered<A extends {
     memoryGb: number | null;
 }>(rules: Rules, list: A[], order: 'auto' | string[]): A[];
 /**
+ * The kinds of work an enabled NPU in the list serves (chat, vision, embeddings): none on a PC without one.
+ * @param {ReadonlyArray<{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }>} list
+ * @returns {Work[]}
+ */
+export declare function npuServes(list: ReadonlyArray<{
+    kind: AcceleratorKind;
+    enabled?: boolean;
+    chat?: unknown;
+    vision?: unknown;
+    embed?: unknown;
+}>): Work[];
+/**
  * Manor's "Use the graphics card for models when there's an NPU" (settings.json's `gpuWithNpu`) applied: when it's
- * false and the list has an NPU that serves something, every graphics card is left out, so none is ever a candidate,
- * not even the fallback when the NPU fails or is busy. The processor stays. With it true, or no NPU serving anything,
- * the list is unchanged: on a PC without an NPU the switch means nothing.
+ * false and the list has an NPU that serves something, a graphics card keeps only the work no enabled NPU here serves
+ * (kit 2.69.0: the card on demand), so it is never a candidate for the NPU's own work, not even the fallback when the
+ * NPU fails or is busy. On a PC whose NPU serves chat, vision and embeddings (a Snapdragon) every card is left out, as
+ * before; on one whose NPU can't see (Intel's), the card keeps vision alone: its server is started by the first vision
+ * request and stopped by the keeper once unused (gpuIdleStopMinutes). A reranker, an add-on no NPU serves, is left
+ * out with the rest, as before: the processor reranks. The processor stays. A card left with nothing is dropped; one
+ * left with part of its work is a copy (a vision endpoint on its chat endpoint's server keeps that server). With the
+ * switch true, or no NPU serving anything, the list is unchanged: on a PC without an NPU the switch means nothing.
  * @template {{ kind: AcceleratorKind, enabled?: boolean, chat?: unknown, vision?: unknown, embed?: unknown }} A
  * @param {A[]} list
  * @param {boolean} gpuWithNpu
@@ -347,6 +364,16 @@ export declare function withoutGpuBesideNpu<A extends {
     vision?: unknown;
     embed?: unknown;
 }>(list: A[], gpuWithNpu: boolean): A[];
+/**
+ * Of a graphics card's kinds, those it does beside an NPU that serves `npu`, with Manor's gpuWithNpu off: the routed
+ * work (chat, vision, embeddings) no NPU serves. The one rule requests (withoutGpuBesideNpu), the keeper and setup
+ * follow; a reranker is never among them.
+ * @template {string} K
+ * @param {readonly K[]} kinds
+ * @param {readonly string[]} npu
+ * @returns {K[]}
+ */
+export declare function cardWorkBesideNpu<K extends string>(kinds: readonly K[], npu: readonly string[]): K[];
 /**
  * The accelerators in a parsed config.json, or why there are none: REEVE_NOT_SET_UP when nothing serves
  * anything, unless some entries couldn't be read (then the config needs fixing, and they're named).

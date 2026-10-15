@@ -106,3 +106,28 @@ test('a repository that can\'t be read says why, and a project that is one of th
   assert.equal(q.repos[0].working, null);
   assert.match(q.repos[1].note ?? '', /^no checkout at /);
 });
+
+test("an employee whose branch on GitHub is where its clone has it already isn't fetched; one the glance says moved is", async () => {
+  const a = repoWithPrs('glanced');
+  const e = employee(a.checkout, { versionFiles: VERSION_FILES });
+  const git: string[][] = [];
+  const r = runner(() => undefined);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: (cmd, args, opts) => (cmd === 'git' && git.push(args), r.run(cmd, args, opts)), neutralDir: tmp });
+  const before = sh(a.checkout, 'rev-parse', 'origin/main');
+  ctx.glance = { at: '', stewardReleases: null, repos: { fake: { head: before, prs: [], releases: [] } }, errors: {} };
+  const q = await keepVersionQueues(ctx, { projects: [] });
+  assert.deepEqual([q.repos[0].version, q.repos[0].head], ['0.4.0', before]);
+  assert.ok(!git.some((x) => x.includes('fetch')), 'nothing fetched');
+
+  // Raised on GitHub: this clone's origin/main is still where it was, and the glance says otherwise.
+  for (const file of VERSION_FILES) writeFileSync(path.join(a.checkout, file), readFileSync(path.join(a.checkout, file), 'utf8').replaceAll('0.4.0', '0.4.1'));
+  sh(a.checkout, 'commit', '--quiet', '-am', 'Fake 0.4.1');
+  sh(a.checkout, 'push', '--quiet', 'origin', 'main');
+  const moved = sh(a.checkout, 'rev-parse', 'HEAD');
+  sh(a.checkout, 'update-ref', 'refs/remotes/origin/main', before);
+  ctx.glance.repos.fake.head = moved;
+  git.length = 0;
+  const again = await keepVersionQueues(ctx, { projects: [] });
+  assert.ok(git.some((x) => x.includes('fetch')), 'fetched');
+  assert.deepEqual([again.repos[0].version, again.repos[0].head], ['0.4.1', moved]);
+});

@@ -10,6 +10,8 @@ import { after, test } from 'node:test';
 const home = mkdtempSync(path.join(tmpdir(), 'kit-npu-vendors-'));
 process.env.REEVE_HOME = home;
 delete process.env.REEVE_CONFIG;
+// No Manor here: its "Use the graphics card for models when there's an NPU" switch reads as the agent's own default.
+process.env.MANOR_HOME = path.join(process.env.REEVE_HOME!, 'no-manor');
 delete process.env.ACCELERATORS_CONFIG;
 delete process.env.ACCELERATORS_HOME;
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'npu-agent', 'locks', 'npu');
@@ -37,6 +39,7 @@ const NPU = {
   x2: 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU',
   x1: 'npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU',
   meteor: 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
+  arrowS: 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_AD1D&SUBSYS_00000000&REV_01\\3&11583659&0&58|Intel(R) AI Boost',
   lunar: 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
   panther: 'npu2|32.0.100.5540|2026-08-28|Intel Corporation|PCI\\VEN_8086&DEV_B03E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
   intelOldDriver: 'npu2|31.0.100.2016|2024-02-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost',
@@ -70,7 +73,9 @@ test('detection: every NPU Windows lists as a Neural processor, by maker and gen
   assert.equal(lunar.label, 'Core Ultra 200V, Lunar Lake (NPU 4)');
   assert.equal(lunar.driver, '32.0.100.4239');
   assert.equal(lunar.verified, true, 'the NPU check passed on a Lunar Lake (2026-10-12)');
-  assert.equal(at(NPU.meteor, 'x64').verified, false, 'never run on a Meteor Lake');
+  assert.equal(at(NPU.meteor, 'x64').verified, true, 'the NPU check passed on an Arrow Lake-U, whose NPU 3720 shows 7D1D (2026-10-14)');
+  assert.equal(at(NPU.meteor, 'x64').label, 'Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)');
+  assert.equal(at(NPU.arrowS, 'x64').verified, false, 'never run on an Arrow Lake-S');
   assert.equal(at(NPU.x2, 'arm64').verified, true, 'this laptop');
   assert.deepEqual(V.npuVendorOf('Qualcomm Technologies, Inc.', 'x'), 'qualcomm');
   assert.deepEqual(V.npuVendorOf('', 'Qualcomm(R) Hexagon(TM) NPU'), 'qualcomm', 'an older Hexagon line has no maker: its name says it');
@@ -561,11 +566,12 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's starting values: the NPU 3720 at a 2048-token prompt and generous timeouts, NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
-  for (const id of ['meteor-lake', 'arrow-lake', 'panther-lake', 'wildcat-lake']) {
+  assert.equal(g['meteor-lake'].verified, true, 'the NPU check passed on an Arrow Lake-U, whose NPU 3720 shows 7D1D (2026-10-14)');
+  for (const id of ['arrow-lake', 'panther-lake', 'wildcat-lake']) {
     assert.equal(g[id].verified, false, `${id} stays unverified until the NPU check passes on one`);
     assert.ok(g[id].basis, `${id} says where its values come from`);
   }
@@ -573,11 +579,23 @@ test("each Intel generation's starting values: the NPU 3720 at a 2048-token prom
   assert.equal(meteor.serve[meteor.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(meteor.maxContextTokens, 2048);
   assert.equal(meteor.caps.chat, 2048);
-  assert.deepEqual(meteor.timeouts, { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 });
-  assert.equal(meteor.memoryGb?.chat, 3.6);
+  assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 60_000 });
+  assert.equal(meteor.memoryGb?.chat, 3.9);
   assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
-  // A token every 400 ms covers 2.5 tokens a second; Lunar Lake's 24–26 and the NPU 3720's expected 5–8 are well inside.
-  assert.ok(1000 / meteor.timeouts.requestPerTokenMs! < 5);
+  // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
+  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). Lunar Lake keeps OpenVINO's, as measured.
+  const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
+  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128' });
+  assert.equal(plugin(V.routeFor(intel, 'arrow-lake')), plugin(meteor), 'Arrow Lake-S: the same NPU 3720');
+  assert.equal(plugin(intel), '{}');
+  // As measured: 200 ms a token covers half the 10.1 tokens a second it wrote.
+  assert.ok(1000 / meteor.timeouts.requestPerTokenMs! <= 10.1 / 2);
+  // The Arrow Lake-S, the same NPU unmeasured: the generous starting values. A token every 400 ms covers 2.5 a second.
+  const arrow = V.routeFor(intel, 'arrow-lake');
+  assert.deepEqual(arrow.timeouts, { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 });
+  assert.equal(arrow.maxContextTokens, 2048);
+  assert.equal(arrow.memoryGb?.chat, meteor.memoryGb?.chat);
+  assert.ok(1000 / arrow.timeouts.requestPerTokenMs! < 5);
   const panther = V.routeFor(intel, 'panther-lake');
   assert.ok(panther.timeouts.coldLoadMs! > intel.timeouts.coldLoadMs! && panther.timeouts.requestPerTokenMs! >= intel.timeouts.requestPerTokenMs!);
   assert.equal(panther.serve[panther.serve.indexOf('--max_prompt_len') + 1], intel.serve[intel.serve.indexOf('--max_prompt_len') + 1], "NPU 5 keeps Lunar Lake's prompt length");
@@ -588,7 +606,7 @@ test("each Intel generation's starting values: the NPU 3720 at a 2048-token prom
   // An NPU 3720 is planned with them.
   const plan = planFor(NPU.meteor, 'x64', 'C:\\t');
   assert.equal(plan.route.maxContextTokens, 2048);
-  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 360_000);
+  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 60_000);
 });
 
 test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
@@ -622,16 +640,16 @@ test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embe
 });
 
 test("calibration: this PC's timeouts from setup's measurements, never under the starting values, never past the bounds; too slow under 2 tokens a second", () => {
-  const meteor = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  const arrow = V.routeFor(V.NPU_CATALOG.routes.intel, 'arrow-lake');
   // Fast enough for the starting values: they stay.
-  assert.deepEqual(V.calibrate({ coldMs: 150_000, warmMs: 1_500, tokensPerSecond: 8 }, meteor), { timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 } });
+  assert.deepEqual(V.calibrate({ coldMs: 150_000, warmMs: 1_500, tokensPerSecond: 8 }, arrow), { timeouts: { requestBaseMs: 60_000, requestPerTokenMs: 400, coldLoadMs: 360_000 } });
   // Slower: a token twice its writing time, the base twice a full 2048-token read (at a tenth of the writing speed's time) and a warm answer, the cold load half again.
-  assert.deepEqual(V.calibrate({ coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 }, meteor), { timeouts: { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 } });
+  assert.deepEqual(V.calibrate({ coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 }, arrow), { timeouts: { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 } });
   // Past the bounds: held at them.
-  const slow = V.calibrate({ coldMs: 40 * 60_000, warmMs: 60_000, tokensPerSecond: 2.1 }, meteor);
+  const slow = V.calibrate({ coldMs: 40 * 60_000, warmMs: 60_000, tokensPerSecond: 2.1 }, arrow);
   assert.deepEqual(slow, { timeouts: { requestBaseMs: V.CALIBRATION.maxBaseMs, requestPerTokenMs: 1_000, coldLoadMs: V.CALIBRATION.maxColdLoadMs } });
-  assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, meteor).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
-  assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, meteor).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
+  assert.equal(V.calibrate({ coldMs: 1, warmMs: 1, tokensPerSecond: 0.3 }, arrow).timeouts.requestPerTokenMs, V.CALIBRATION.maxPerTokenMs);
+  assert.match(V.calibrate({ coldMs: 60_000, warmMs: 2_000, tokensPerSecond: 1.5 }, arrow).tooSlow!, /wrote 1\.5 tokens a second, under the 2/);
 });
 
 test("sanity, not just an answer: nonsense chat (the same few characters over and over, or not what was asked) and embeddings that don't tell a cat from an invoice", () => {
@@ -666,12 +684,12 @@ test("setup on a generation nobody has measured: two more requests, and its entr
     // The test request takes the first load's time on this fake clock: 300 s.
     return { ...f.io, clockMs: () => clock, testNpu: async () => ((clock += 300_000), first()) };
   };
-  const meteor = () => planFor(NPU.meteor, 'x64', tools);
-  const r = await setUpNpu(meteor(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
+  const arrow = () => planFor(NPU.arrowS, 'x64', tools);
+  const r = await setUpNpu(arrow(), tools, world({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }));
   assert.deepEqual(r.problems, []);
   assert.deepEqual(r.measured, { coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4 });
   assert.deepEqual(r.entry?.timeouts, { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 });
-  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, meteor().route).timeouts);
+  assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, arrow().route).timeouts);
   assert.equal(r.note, undefined);
   // Lunar Lake's measured already: no measuring requests, the route's own timeouts.
   let asked = 0;
@@ -680,7 +698,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   assert.equal(lunar.entry?.timeouts?.requestPerTokenMs, V.NPU_CATALOG.routes.intel.timeouts.requestPerTokenMs);
 
   // Each failure: no entry, and a note in plain words for the accelerators' page.
-  const label = parseNpus(NPU.meteor, 'x64')[0].label;
+  const label = parseNpus(NPU.arrowS, 'x64')[0].label;
   const cases: [string, ReturnType<typeof world>, RegExp][] = [
     ['nonsense to the test request', world({}, () => ['chat answered nonsense ("?option?option?opt"), not "ready" as asked']), /its chat model doesn't run properly on it/],
     ['no answer in time', world({}, () => ["didn't answer in time (360 s): This operation was aborted"]), /it didn't answer its test in time/],
@@ -688,7 +706,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
     ['too slow', world({ measured: { warmMs: 9_000, tokensPerSecond: 1.2 } }), /it is too slow for the chat model/],
   ];
   for (const [what, io, re] of cases) {
-    const f = await setUpNpu(meteor(), tools, io);
+    const f = await setUpNpu(arrow(), tools, io);
     assert.equal(f.entry, undefined, what);
     assert.match(f.note!, re, what);
     assert.ok(f.note!.startsWith(`The NPU (${label}) isn't used: `), f.note);
@@ -711,7 +729,7 @@ test("an agent's io that extends NpuIo with a `now` of its own (a Date, as the S
   const tools = path.join(home, 'agent-io');
   let called = 0;
   const io: AgentIo = { ...fakeNpuIo({ measured: { warmMs: 3_000, tokensPerSecond: 4 } }).io, now: () => (called++, new Date()) };
-  const r = await setUpNpu(planFor(NPU.meteor, 'x64', tools), tools, io);
+  const r = await setUpNpu(planFor(NPU.arrowS, 'x64', tools), tools, io);
   assert.deepEqual(r.problems, []);
   assert.ok(r.entry);
   assert.equal(called, 0);
@@ -739,4 +757,116 @@ test("setup as a command, with no card: the NPU failing is no error; the process
   const good = fakeNpuIo();
   await setupCommand({ ...base, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' } });
   assert.equal(A.readNpuNote(noteFile), null);
+});
+
+// Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu, off by default): a card beside an NPU is
+// set up only for the work no NPU serves, the rule requests and the keeper follow (core.cardWorkBesideNpu), so its chat
+// and embedding models (about 3.1 GB on an Intel PC) aren't downloaded to sit unused.
+const LUNAR = () => parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
+const ARC = 'gpu-intel-r-arc-tm-140v-gpu-16gb';
+const ARC_VK = '  Vulkan0: Intel(R) Arc(TM) 140V GPU (16GB) (16384 MiB, 15000 MiB free)\n';
+const CHAT_GGUF = /Qwen3-4B-Instruct-2507-Q4_K_M\.gguf/;
+const EMBED_GGUF = /Qwen3-Embedding-0\.6B-Q8_0\.gguf/;
+/** What a setup run downloaded, by file. */
+const downloaded = (did: string[]) => did.filter((d) => d.startsWith('download '));
+/** setupCommand on an Intel PC with its Arc, on fakes: the config written and what it downloaded. */
+async function intelSetup(name: string, o: { gpuWithNpu: boolean; npu?: Parameters<typeof fakeNpuIo>[0] }) {
+  const file = path.join(home, `${name}-config.json`);
+  if (!existsSync(file)) writeFileSync(file, '{}');
+  const npu = fakeNpuIo(o.npu);
+  const log: string[] = [];
+  const r = await setupCommand({ ids: [], detection: LUNAR(), releases: async () => RELEASES, hfFiles: hf, configFile: file, home: path.join(home, name), env: ENV, yes: true, npuNoteFile: path.join(home, `${name}-note.json`), gpuWithNpu: o.gpuWithNpu, log: (l: string) => log.push(l), io: { ...npu.io, exists: (p: string) => disk()(p) || npu.io.exists(p), listDevices: async () => ARC_VK } });
+  const written = JSON.parse(readFileSync(file, 'utf8'));
+  const arc = written.accelerators?.find((a: any) => a.id === ARC);
+  const npuEntry = written.accelerators?.find((a: any) => a.kind === 'npu');
+  return { r, log, written, arc, npuEntry, did: npu.did };
+}
+const kindsOf = (a: any) => (['chat', 'vision', 'embed', 'rerank'] as const).filter((k) => a?.[k]);
+
+test('beside an Intel NPU, with the switch off, the card is planned for vision alone: only its model and mmproj are downloaded', async () => {
+  const tools = path.join(home, 'beside');
+  const off = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
+  assert.deepEqual(off.npu?.kinds, ['chat', 'embed']);
+  assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['vision'], ['chat', 'embed']]]);
+  assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'embed'] }]);
+  const files = off.downloads.map((d) => path.win32.basename(d.dest));
+  assert.ok(files.includes('Qwen3VL-4B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf'), files.join());
+  assert.ok(!files.some((f) => CHAT_GGUF.test(f) || EMBED_GGUF.test(f)), `no chat or embedding model for the card: ${files.join()}`);
+  assert.ok(describePlan(off).includes(`Intel(R) Arc(TM) 140V GPU (16GB) (${ARC}): chat and embed not set up on it: the NPU does those, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
+  // The switch on (or left out, as for an agent with no Manor): the card is set up for everything, as before.
+  const on = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: true });
+  assert.deepEqual(on.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['chat', 'vision', 'embed'], undefined]]);
+  assert.equal(on.leftToNpu, undefined);
+  assert.ok(on.downloadBytes - off.downloadBytes >= 2497281120 + 639150592, "the card's chat and embedding models: 3.1 GB more");
+  // Kinds asked for by name are set up as asked.
+  const asked = await planSetup({ detection: LUNAR(), ids: [ARC], kinds: ['chat', 'vision'], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
+  assert.deepEqual(asked.targets.map((t) => t.kinds), [['chat', 'vision']]);
+
+  const run = await intelSetup('beside-run', { gpuWithNpu: false });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
+  assert.deepEqual(kindsOf(run.arc), ['vision']);
+  const got = downloaded(run.did);
+  assert.ok(got.some((d) => /Qwen3VL-4B-Instruct-Q4_K_M\.gguf/.test(d)) && got.some((d) => /mmproj-Qwen3VL/.test(d)), got.join('\n'));
+  assert.ok(!got.some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), got.join('\n'));
+});
+
+test('the NPU failing its embeddings at setup: the card takes them, beside its vision; the NPU keeps its chat', async () => {
+  const run = await intelSetup('beside-noembed', { gpuWithNpu: false, npu: { embeds: false } });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat']);
+  assert.deepEqual(kindsOf(run.arc), ['vision', 'embed']);
+  assert.ok(run.log.some((l) => /^The graphics card takes the NPU's embed instead/.test(l)), run.log.join('\n'));
+  const got = downloaded(run.did);
+  assert.ok(got.some((d) => EMBED_GGUF.test(d)) && !got.some((d) => CHAT_GGUF.test(d)), got.join('\n'));
+  // The NPU failing outright: no NPU entry, and the card does everything, as before.
+  const none = await intelSetup('beside-nonpu', { gpuWithNpu: false, npu: { answers: false } });
+  assert.equal(none.npuEntry, undefined);
+  assert.deepEqual(kindsOf(none.arc), ['chat', 'vision', 'embed']);
+});
+
+test('the switch on: the card is set up for everything beside the NPU', async () => {
+  const run = await intelSetup('beside-on', { gpuWithNpu: true });
+  assert.equal(run.r.code, 0, run.log.join('\n'));
+  assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
+  assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed']);
+  assert.ok(downloaded(run.did).some((d) => CHAT_GGUF.test(d)));
+});
+
+test("the switch turned on later: setting up again fills in the card's chat and embeddings, and keeps the NPU as it was", async () => {
+  const first = await intelSetup('beside-later', { gpuWithNpu: false });
+  assert.deepEqual(kindsOf(first.arc), ['vision']);
+  const later = await intelSetup('beside-later', { gpuWithNpu: true });
+  assert.equal(later.r.code, 0, later.log.join('\n'));
+  assert.deepEqual(kindsOf(later.arc), ['chat', 'vision', 'embed']);
+  assert.deepEqual(later.npuEntry, first.npuEntry, 'the NPU set up before is left as it is');
+  assert.equal(later.arc.vision.baseUrl, first.arc.vision.baseUrl, 'the card keeps its vision port');
+  assert.ok(!later.did.some((d) => /OpenVINO|ovms/i.test(d)), later.did.join('\n'));
+});
+
+test('an install whose card already has its chat and embeddings keeps them when set up again with the switch off: nothing removed', async () => {
+  const before = await intelSetup('beside-kept', { gpuWithNpu: true });
+  assert.deepEqual(kindsOf(before.arc), ['chat', 'vision', 'embed']);
+  const again = await intelSetup('beside-kept', { gpuWithNpu: false });
+  assert.equal(again.r.code, 0, again.log.join('\n'));
+  assert.deepEqual(kindsOf(again.arc), ['chat', 'vision', 'embed']);
+  assert.deepEqual(again.arc.chat, before.arc.chat, 'its chat entry as it was');
+  assert.deepEqual(again.arc.embed, before.arc.embed, 'its embeddings entry as it was');
+  assert.notEqual(again.arc.vision.baseUrl, again.arc.chat.baseUrl);
+  assert.ok(!downloaded(again.did).some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), 'not downloaded again');
+  assert.deepEqual(validateAccelerators(again.written), []);
+});
+
+test('a Snapdragon, whose NPU serves all three: its card is set up whole, as before, with the switch off too', async () => {
+  const G = 'C:\\Users\\me\\AppData\\Local\\GenieX CLI\\geniex.exe';
+  const M = 'C:\\Users\\me\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct\\geniex.json';
+  const card = 'adapter|0|20803|4294967296|17179869184|0x00000000_0x0000c3c3|0|Qualcomm(R) Adreno(TM) X2-90 GPU\n';
+  const plan = (gpuWithNpu: boolean) => planSetup({ detection: parseDetection(`${card}${NPU.x2}\n${ARM}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: path.join(home, 'snap-beside'), env: ENV, exists: disk([G, M]), gpuWithNpu });
+  const off = await plan(false);
+  const on = await plan(true);
+  assert.deepEqual(off.npu?.kinds, ['chat', 'vision', 'embed']);
+  assert.deepEqual(off.targets.map((t) => [t.kinds, t.leftToNpu]), on.targets.map((t) => [t.kinds, t.leftToNpu]));
+  assert.equal(off.targets.length, 1);
+  assert.equal(off.leftToNpu, undefined);
+  assert.equal(off.downloadBytes, on.downloadBytes);
 });

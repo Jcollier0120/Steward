@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, statSync } from 'node:fs';
+import { copyFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import { isDeveloper } from './developer.ts';
-import { readJson, writeJson } from './store.ts';
+import { readText, statOf } from './file-cache.ts';
+import { writeJson } from './store.ts';
 
 /**
  * Settings a person changes on the agent's page (its Settings panel), never by editing a file.
@@ -454,9 +455,16 @@ export function schemaGaps(fields: Field[], defaults: unknown, at = ''): string[
 
 /** settings.json as an object, or null when there's none; `broken` when it's there but unreadable. */
 function readRaw(file: string): { raw: Record<string, unknown> | null; broken: boolean } {
-  if (!existsSync(file)) return { raw: null, broken: false };
-  const bad = Symbol('unreadable');
-  const raw = readJson<unknown>(file, bad);
+  // One stat while the file is unchanged (file-cache.ts): every ping asks, through needsSettings().
+  const s = statOf(file);
+  if (!s) return { raw: null, broken: false };
+  let raw: unknown = null;
+  try {
+    const text = readText(file, s);
+    if (text !== null) raw = JSON.parse(text.replace(/^﻿/, ''));
+  } catch {
+    // unreadable: broken
+  }
   return isObject(raw) ? { raw, broken: false } : { raw: null, broken: true };
 }
 
@@ -685,7 +693,8 @@ export async function saveSettingsReply<S extends object>(spec: SettingsSpec<S>,
     stored[k] = developer ? v : keepHidden(full(k), v, base[k]);
   }
   if (broken) copyFileSync(file, `${file}.broken`);
-  writeJson(file, stored);
+  // Always written: a save is one, and the Steward's migration notes go once Settings are saved (their time).
+  writeJson(file, stored, { always: true });
 
   const saved = spec.normalize(stored).settings;
   const changed = Object.keys(clean).filter((k) => JSON.stringify((saved as any)[k]) !== JSON.stringify((before.settings as any)[k]));

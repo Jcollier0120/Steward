@@ -128,7 +128,9 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   suite.energy.restSeconds = 0.05;
   suite.energy.loadMinutes = 0.002;
   suite.quiet.samples = 2;
-  suite.steady.maxSpread = 100; // a fake in this process answers in a millisecond or two, so its tries can't agree to 15%
+  // A fake in this process answers in a millisecond or two, so its tries can't agree to 15%; and on a busy PC, or one
+  // held to the checks pace's cap, one try now and then waits a tenth of a second for the processor: never noisy here.
+  suite.steady.maxSpread = Infinity;
   const lines: string[] = [];
   const cleared: string[] = [];
   // The battery reads higher once requests are arriving: working, against at rest.
@@ -325,4 +327,20 @@ test('a model that answers nonsense never gets past its first answer; a busy pro
   assert.ok(r2.report.results.energy!.loadMilliwatts > 4000);
   assert.ok(r2.report.results.energy!.jobs > 0);
   assert.ok(r2.report.results.energy!.millijoulesPerToken! > 0);
+});
+
+test('energy on a PC busy enough to hold the bench past its windows: a reading at rest, and readings working until a job is done', async () => {
+  const busy = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? 10000 : 4000) });
+  // From the first reading on, every look at the clock is ten minutes later: each window has passed at its first look.
+  let late = 0;
+  let reading = false;
+  const now = () => performance.now() + (reading ? (late += 600_000) : 0);
+  const io = { ...busy.opts.io, now, dischargeRate: async () => ((reading = true), busy.opts.io.dischargeRate()) };
+  const r = await B.npuBench({ ...busy.opts, io, profile: 'quick', energy: true });
+  assert.equal(r.code, 0);
+  const e = r.report.results.energy!;
+  assert.ok(e, 'measured, not "the battery gave no discharge rate"');
+  assert.equal(e.restMilliwatts, 4000);
+  assert.ok(e.loadMilliwatts > 4000, 'read while working');
+  assert.ok(e.jobs > 0);
 });

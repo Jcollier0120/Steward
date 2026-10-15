@@ -2,21 +2,36 @@ import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_pro
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
+import { pacedCommand } from './kit/checks-pace.ts';
+import { sharesConsole } from './kit/console.ts';
 import { gitExe } from './kit/git-exe.ts';
+import { endProcesses } from './kit/native.ts';
 
 /** What a command did: its exit code, and what it printed. */
 export interface Ran {
   code: number;
   out: string;
   err: string;
+  /** Stopped at its time limit, with everything it started. */
+  timedOut?: boolean;
 }
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
+  /**
+   * A time limit as it is, not lengthened at the checks pace: a vouch's (stages/vouchtime.ts), measured on the clock as
+   * its runs were, paced. The command stops at the earlier of it and its usual limit.
+   */
+  limitMs?: number;
   /** Written to its standard input, which is then closed (git credential fill reads its question there). */
   input?: string;
+  /**
+   * At the kit's checks pace (kit/checks-pace.ts): it and every program it starts held to a share of the processor, at
+   * below-normal priority. For test runs, type checks, installs and builds, so they never peg the processor.
+   */
+  paced?: boolean;
 }
 
 /**
@@ -110,23 +125,36 @@ export function useDotnet(dir: string): void {
   dotnetDir = undefined;
 }
 
+const WINDOWS = process.platform === 'win32';
+/** In the background: no terminal, so neither its input nor its output is one. */
+const BACKGROUND = WINDOWS && !process.stdin.isTTY && !process.stdout.isTTY;
+/** git and gh, the Steward's most frequent commands, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
+const SHARING = new Set(['git', 'gh']);
+
 /**
- * Without a console of its own to share (the Steward running in the background, Steward 0.35.11), a command starts
- * detached: Windows gives a console program started from a process with none a console host (conhost.exe) of its own,
- * a second process for every git and gh, all day. Detached, it has none, and the programs it starts open no window.
- * From a terminal (the CLI) it shares the terminal's, as before, so Ctrl+C stops what it started.
+ * How a command is started on Windows. git and gh share the Steward's console when it has one (kit/console.ts, Steward
+ * 0.36.14): its page's, which keeps a windowless one from the way the kit starts it (kit 2.72.2), or a terminal's, so
+ * Ctrl+C stops what it started. Hidden, each would get a console host (conhost.exe) of its own: a second process for
+ * every git, all day. With none to share in the background (a page an older kit started), detached (Steward 0.35.11).
+ * Everything else starts hidden, as ever.
  */
-const DETACHED = process.platform === 'win32' && !process.stdin.isTTY && !process.stdout.isTTY;
-/** The commands that start detached: git and gh, the Steward's most frequent, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
-const QUIET_WHEN_DETACHED = new Set(['git', 'gh']);
+export function startOptions(cmd: string, o: { shares: boolean; background: boolean }): { windowsHide: boolean; detached: boolean } {
+  const sharing = SHARING.has(cmd);
+  return { windowsHide: !(sharing && o.shares), detached: sharing && !o.shares && o.background };
+}
 
 /**
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
-const runPlain: Runner = (cmd, args, opts = {}) => {
-  const [file, argv] = resolveCommand(cmd, args);
-  const env = { ...process.env, ...opts.env };
+/** How much longer a command run at the checks pace may take than its time limit says. */
+export const PACED_TIME = 4;
+
+const runPlain: Runner = async (cmd, args, opts = {}) => {
+  const [resolved, resolvedArgs] = resolveCommand(cmd, args);
+  const paced = opts.paced ? await pacedCommand(resolved, resolvedArgs) : null;
+  const [file, argv] = paced ? [paced.file, paced.args] : [resolved, resolvedArgs];
+  const env = { ...process.env, ...paced?.env, ...opts.env };
   const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
   if (dotnetDir === undefined) dotnetDir = dotnetWithSdk();
   env[pathKey] = [nodeDir, dotnetDir, env[pathKey] ?? ''].filter(Boolean).join(path.delimiter);
@@ -137,20 +165,39 @@ const runPlain: Runner = (cmd, args, opts = {}) => {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
   }
+  // At the checks pace a command gets four times its time: held to the gentle cap below everything else, and waiting its
+  // turn behind other runs, it takes longer (the Assayer's suite on a busy PC: 73 s free, 219 s paced), and a run stopped
+  // for that would be taken for a failure.
+  const usual = (opts.timeoutMs ?? 20 * 60_000) * (paced && paced.file !== resolved ? PACED_TIME : 1);
+  const timeout = Math.max(1, Math.min(usual, opts.limitMs ?? usual));
   return new Promise((resolve) => {
+    let timedOut = false;
+    let timer: NodeJS.Timeout | undefined;
     const child = execFile(
       file,
       argv,
-      // execFile hands its options to spawn, detached among them, though its type doesn't name it.
-      { cwd: opts.cwd, env, windowsHide: true, timeout: opts.timeoutMs ?? 20 * 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...{ detached: DETACHED && QUIET_WHEN_DETACHED.has(cmd) } } as ExecFileOptionsWithStringEncoding,
+      // execFile hands its options to spawn, detached among them, though its type doesn't name it. On Windows the time
+      // limit is our own timer (below), so it ends the whole tree.
+      { cwd: opts.cwd, env, timeout: WINDOWS ? 0 : timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
+        clearTimeout(timer);
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
         const err = [String(stderr ?? ''), e && typeof e.code !== 'number' ? String(e.message) : ''].filter(Boolean).join('\n');
-        resolve({ code, out: String(stdout ?? ''), err });
+        if (!WINDOWS && e?.killed && e.signal === 'SIGTERM') timedOut = true;
+        resolve({ code, out: String(stdout ?? ''), err, ...(timedOut ? { timedOut } : {}) });
       },
     );
+    // At its time limit a command is ended with everything it started (taskkill /T), while it still holds them together:
+    // execFile's own limit ends only the program it started, and a test run under npm, or under the pace's launcher, ran on.
+    if (WINDOWS && child.pid) {
+      const pid = child.pid;
+      timer = setTimeout(() => {
+        timedOut = true;
+        endProcesses([pid]);
+      }, timeout);
+    }
     if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 };
@@ -159,7 +206,7 @@ const runPlain: Runner = (cmd, args, opts = {}) => {
 export const run: Runner = signedIn(runPlain);
 
 /** A command line from an employee's settings, run in its folder. */
-export const runLine = (runner: Runner, line: string, opts: RunOptions = {}) => {
+export const runLine = (runner: Runner, line: string, opts: RunOptions = {}): Promise<Ran> => {
   const [cmd, ...args] = splitCommand(line);
   if (!cmd) return Promise.resolve({ code: 2, out: '', err: 'no command' });
   return runner(cmd, args, opts);

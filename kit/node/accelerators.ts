@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { alive, startApart } from './apart.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
 import { powershell } from './ps.ts';
+import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -103,7 +105,7 @@ export function acceleratorConfigFile(env: NodeJS.ProcessEnv = process.env): str
 export function legacyConfigFile(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
   if (env.ACCELERATORS_CONFIG || env.REEVE_CONFIG || env.REEVE_HOME) return null;
   const found = [path.join(home, '.reeve'), path.join(home, '.npu-agent')].map((d) => path.join(d, 'config.json')).find((f) => existsSync(f));
-  return found && path.resolve(found) !== path.resolve(acceleratorConfigFile(env)) ? found : null;
+  return found && !samePath(found, acceleratorConfigFile(env)) ? found : null;
 }
 
 /**
@@ -243,11 +245,11 @@ export function readNpuNote(file = npuNoteFile()): { at: string; note: string } 
 
 // ---------------------------------------------------------------- shared files
 
-/** Written whole: a temporary file, then a rename, so a reader never sees half of it. */
+/** Written whole: a temporary file, on the disk before the rename (kit 2.73.3), then the rename, so a reader never sees half of it. */
 function writeWhole(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, core.sharedText(value));
+  writeFileSync(tmp, core.sharedText(value), { flush: true });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, file);
@@ -626,18 +628,27 @@ export interface ServerReady {
  * everyone after) and given 30 s to take connections: once per server, however many requests wait on it.
  * `logFile` takes what a server it starts prints (appended), and `env` is that server's environment: the keeper's
  * restarts (keeper.ts) keep a log per server; a request's start keeps none, as before.
+ * `onWaking` is told, before any waiting, that the server is being started (it wasn't running: the keeper stopped it
+ * when nobody used it) or is busy loading: the request will wait for its model to load. A throw from it is ignored.
  */
-export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv } = {}): Promise<ServerReady> {
+export async function ensureServer(ep: Endpoint, opts: { start?: boolean; waitMs?: number; readyMs?: number; logFile?: string; env?: NodeJS.ProcessEnv; onWaking?: (how: 'starting' | 'loading') => void } = {}): Promise<ServerReady> {
   const readyMs = opts.readyMs ?? READY_WAIT_MS;
   const lists = { listsWhenLoaded: listsWhenLoaded(ep.startCommand) };
   const state = await probe(ep.baseUrl, PROBE_MS, lists);
   if (state === 'ready') return { started: false, waited: false };
+  const waking = (how: 'starting' | 'loading') => {
+    try {
+      opts.onWaking?.(how);
+    } catch {}
+  };
   if (state === 'busy') {
+    waking('loading');
     await untilReady(ep.baseUrl, readyMs, lists);
     return { started: false, waited: true };
   }
   if (opts.start === false) throw new ServerNotRunning(core.say.serverNotRunning(ep.baseUrl));
   if (!ep.startCommand?.length) throw new AcceleratorDown(core.say.noStartCommand(ep.baseUrl));
+  waking('starting');
   let pending = starting.get(ep.baseUrl);
   if (!pending) {
     pending = start(ep, opts.waitMs ?? START_WAIT_MS, readyMs, opts).finally(() => starting.delete(ep.baseUrl));
@@ -664,16 +675,26 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
   let spawnError: Error | undefined;
   let exited: number | null | undefined;
   let log: number | undefined;
+  /** Started apart (apart.ts): its process id, watched for an early exit rather than its exit event. */
+  let apart: number | null = null;
   try {
     if (o.logFile) {
       mkdirSync(path.dirname(o.logFile), { recursive: true });
       log = openSync(o.logFile, 'a');
     }
-    const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env: serverEnv(ep, o.env ?? process.env) });
-    child.on('error', (e) => (spawnError = e));
-    child.on('exit', (code) => (exited = code));
-    child.unref();
-    if (child.pid) noteStarted({ pid: child.pid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
+    const env = serverEnv(ep, o.env ?? process.env);
+    // Apart from the asker's job (apart.ts, kit 2.73.0): it serves every agent, at no asker's cap.
+    const apartPid = await startApart(cmd, args, { cwd: os.homedir(), env, ...(log === undefined ? {} : { out: log }) });
+    if (apartPid) {
+      apart = apartPid;
+      noteStarted({ pid: apartPid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
+    } else {
+      const child = spawn(cmd, args, { detached: true, stdio: log === undefined ? 'ignore' : ['ignore', log, log], windowsHide: true, cwd: os.homedir(), env });
+      child.on('error', (e) => (spawnError = e));
+      child.on('exit', (code) => (exited = code));
+      child.unref();
+      if (child.pid) noteStarted({ pid: child.pid, program: cmd, base: ep.baseUrl, atMs: Date.now() });
+    }
   } catch (e) {
     spawnError = e as Error;
   } finally {
@@ -691,6 +712,7 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
       return { started: true, waited: true };
     }
     // GenieX exits at once (code 0) when another server holds its port: it is down only if nothing answers.
+    if (apart && exited === undefined && !alive(apart)) exited = null;
     if (exited !== undefined) throw new AcceleratorDown(core.say.exitedWhileStarting(program, exited, ep.baseUrl));
   }
   throw new AcceleratorDown(core.say.didNotAnswer(program, ep.baseUrl, Math.round(waitMs / 1000)));

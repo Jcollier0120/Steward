@@ -72,6 +72,19 @@ test('a bump: a worktree of origin/main on steward/kit-<version>, kit.json and t
   assert.equal(sh(s.checkout, 'rev-list', '--count', `origin/main..${branch}`), '1');
 });
 
+test("a rollout's bump the kit reaches nothing in is still made, its checks but no tests run; a trial's isn't tried", async () => {
+  const s = setup();
+  const pins: unknown[] = [];
+  const reach = async (_e: unknown, pin: { kit: string; parts: string[] | null }) => (pins.push(pin), { none: 'nothing it takes from the kit (node, core, spec) changes from 1.0.0' });
+  const res = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom, reach });
+  assert.equal(res.outcome, 'done', `${res.message}\n${s.ctx.lines.join('\n')}`);
+  assert.deepEqual(pins, [{ kit: '1.0.0', parts: ['node'] }], 'asked from the kit its branch pins');
+  assert.ok(s.ctx.lines.some((l) => l.includes('no tests for the kit: nothing it takes')), s.ctx.lines.join('\n'));
+  const tried = await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom, reach, trial: true, base: 'origin/main' });
+  assert.equal(tried.outcome, 'skipped');
+  assert.match(tried.message, /not tried, nothing it takes/);
+});
+
 test('push: the branch goes to origin (never forced) and a PR is opened with the title and the changelog', async () => {
   const s = setup();
   assert.equal((await bumpOne(s.ctx, s.e, { kit: '1.0.1', kitFrom })).outcome, 'done');

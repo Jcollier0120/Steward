@@ -7,7 +7,7 @@
  *
  *   npm run accelerator-vectors       (node kit/test/accelerator-scenarios.ts --write)
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as core from '../core/index.js';
@@ -320,7 +320,9 @@ export function makeAcceleratorVectors() {
   };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run as itself, compared by real paths: a folder reached through a junction or a Dev Drive mount spells argv[1] one way
+// and import.meta.url (always the real path) another, and a plain comparison would do nothing (spec/DEV-DRIVES.md).
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const text = `${JSON.stringify(makeAcceleratorVectors(), null, 1)}\n`;
   if (process.argv.includes('--write')) {
     writeFileSync(new URL('../spec/accelerator-vectors.json', import.meta.url), text);

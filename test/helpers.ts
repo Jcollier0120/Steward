@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { developerProForTests } from '../src/kit/developer-pro.ts';
 import { makersPcForTests } from '../src/maker.ts';
 import { run as realRun, type Ran, type Runner } from '../src/run.ts';
@@ -43,11 +45,91 @@ const PKG = (v: string) => `{\n  "name": "fake",\n  "version": "${v}",\n  "priva
 const LOCK = (v: string) => `{\n  "name": "fake",\n  "version": "${v}",\n  "lockfileVersion": 3,\n  "requires": true,\n  "packages": {\n    "": {\n      "name": "fake",\n      "version": "${v}"\n    }\n  }\n}\n`;
 const APP = (v: string) => `export const APP = {\n  id: 'fake',\n  name: 'Fake',\n  role: 'Stands in for a hire',\n  version: '${v}',\n};\n`;
 
+type FakeOptions = { version?: string; kit?: string | null; files?: Record<string, string> };
+
 /**
  * A fake employee: a bare "origin" with a main branch, and the person's clone of it beside it. `files`
  * are added to the first commit; `kit` writes kit.json (null for none).
+ *
+ * Building one takes eight git commands, a second or more on Windows, and a test file makes a dozen or more: so the first
+ * of each kind is built (buildFake) and kept as it was made (keepFake), and the rest are copies of it. Every copy is
+ * given a first commit of its own (rootCommit), as building it afresh did: the Steward keeps what it found by commit (a
+ * PR's checks, a bump's hold, a kickback), and two fake employees sharing one would hand one test's records to the next.
  */
-export function fakeEmployee(dir: string, o: { version?: string; kit?: string | null; files?: Record<string, string> } = {}): { origin: string; checkout: string } {
+export function fakeEmployee(dir: string, o: FakeOptions = {}): { origin: string; checkout: string } {
+  const origin = path.join(dir, 'origin.git');
+  const checkout = path.join(dir, 'Fake');
+  const kind = JSON.stringify([o.version ?? '0.4.0', o.kit === undefined ? '1.0.0' : o.kit, o.files ?? {}]);
+  const kept = fakes.get(kind);
+  if (!kept) {
+    buildFake(dir, o);
+    if (kept === undefined) fakes.set(kind, keepFake(origin, checkout));
+    return { origin, checkout };
+  }
+  kept.tree ??= sh(kept.checkout, 'rev-parse', 'HEAD^{tree}');
+  cpSync(kept.origin, origin, { recursive: true });
+  cpSync(kept.checkout, checkout, { recursive: true });
+  // The clone's remote is its own origin (git writes the path with each backslash doubled).
+  const config = path.join(checkout, '.git', 'config');
+  const url = (p: string) => `url = ${p.replace(/\\/g, '\\\\')}\n`;
+  const text = readFileSync(config, 'utf8');
+  if (!text.includes(url(kept.url))) throw new Error(`fakeEmployee: no "${url(kept.url).trim()}" in the clone's .git/config to point at ${origin}`);
+  writeFileSync(config, text.replace(url(kept.url), () => url(origin)));
+  const sha = rootCommit([path.join(checkout, '.git'), origin], kept.tree, 'Fake 0.4.0');
+  for (const ref of [path.join(origin, 'refs', 'heads', 'main'), path.join(checkout, '.git', 'refs', 'heads', 'main'), path.join(checkout, '.git', 'refs', 'remotes', 'origin', 'main')]) writeFileSync(ref, `${sha}\n`);
+  // Its reflogs named the first one's commit.
+  rmSync(path.join(checkout, '.git', 'logs'), { recursive: true, force: true });
+  return { origin, checkout };
+}
+
+/** A fake employee as it was built, kept for fakeEmployee to copy: `url`, the origin its clone names; `tree`, its commit's. */
+type KeptFake = { origin: string; checkout: string; url: string; tree?: string };
+/** The first of each kind of fake employee, by its options: null for a kind built afresh each time (keepFake). */
+const fakes = new Map<string, KeptFake | null>();
+let fakesDir: string | undefined;
+process.on('exit', () => fakesDir && rmSync(fakesDir, { recursive: true, force: true }));
+
+/**
+ * A copy of a fake employee just built, before its test changes it. Null where git keeps its refs or its ids in a way
+ * rootCommit doesn't write (a ref table, SHA-256: init.defaultRefFormat, init.defaultObjectFormat), so that each one of
+ * the kind is built afresh, as before.
+ */
+function keepFake(origin: string, checkout: string): KeptFake | null {
+  const main = [path.join(origin, 'refs', 'heads', 'main'), path.join(checkout, '.git', 'refs', 'heads', 'main')];
+  if (!main.every((ref) => existsSync(ref) && readFileSync(ref, 'utf8').trim().length === 40)) return null;
+  // Its copies' commits come after its own.
+  lastRoot = Math.max(lastRoot, Math.floor(Date.now() / 1000));
+  fakesDir ??= mkdtempSync(path.join(os.tmpdir(), 'steward-test-fakes-'));
+  const dir = path.join(fakesDir, String(fakes.size));
+  const kept = { origin: path.join(dir, 'origin.git'), checkout: path.join(dir, 'Fake'), url: origin };
+  cpSync(origin, kept.origin, { recursive: true });
+  cpSync(checkout, kept.checkout, { recursive: true });
+  return kept;
+}
+
+/** The time of the last first commit rootCommit wrote, in seconds. */
+let lastRoot = 0;
+
+/**
+ * A first commit of `tree`, as `git commit` writes one (zlib over "commit <size>\0" and its text), put in each of
+ * `gitDirs`' objects without a git process: its id. Its time is a second after the last one's at least, so two written
+ * in the same second differ.
+ */
+function rootCommit(gitDirs: string[], tree: string, message: string): string {
+  lastRoot = Math.max(Math.floor(Date.now() / 1000), lastRoot + 1);
+  const who = `Test <test@example.invalid> ${lastRoot} +0000`;
+  const text = `tree ${tree}\nauthor ${who}\ncommitter ${who}\n\n${message}\n`;
+  const object = Buffer.from(`commit ${Buffer.byteLength(text)}\0${text}`);
+  const sha = createHash('sha1').update(object).digest('hex');
+  for (const g of gitDirs) {
+    mkdirSync(path.join(g, 'objects', sha.slice(0, 2)), { recursive: true });
+    writeFileSync(path.join(g, 'objects', sha.slice(0, 2), sha.slice(2)), deflateSync(object));
+  }
+  return sha;
+}
+
+/** A fake employee built with git, as fakeEmployee describes. */
+function buildFake(dir: string, o: FakeOptions): { origin: string; checkout: string } {
   const origin = path.join(dir, 'origin.git');
   const checkout = path.join(dir, 'Fake');
   mkdirSync(dir, { recursive: true });
@@ -119,7 +201,7 @@ export const ok = (out: unknown): Ran => ({ code: 0, out: typeof out === 'string
 
 export function ctxFor(o: { employees: Employee[]; workRoot: string; run: Runner; released?: string[]; neutralDir: string; team?: string[] }): Ctx & { lines: string[] } {
   const lines: string[] = [];
-  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, stagesAtOnce: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, mergeTrain: false, afterRelease: [], rollout: true, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true, makersPc: true, buildPipeline: DEFAULT_PIPELINE };
+  const settings: Settings = { employees: o.employees, team: o.team ?? ['Jcollier0120'], workRoot: o.workRoot, releaseAfterMerge: false, stewardRepo: 'Jcollier0120/Steward', parallel: 2, stagesAtOnce: 2, byItself: false, roundMinutes: 10, alarms: { on: true, toast: false, waitingHours: 24, blockingHours: 1, problemHours: 6, tastingHours: 6 }, wrightReview: { on: true, maxLines: 600, sensitive: ['jobs/**', '**/*.ps1'] }, catchUp: false, mergeTrain: false, afterRelease: [], rollout: true, rolloutQuietHours: 2, rolloutMaxWaitHours: 12, buildPipeline: DEFAULT_PIPELINE, releaseSelf: true, mergeSelf: true, stewardCheckout: path.join(o.neutralDir, 'no-steward-checkout'), tasteBeforeRelease: true, fileWork: true, tend: false, releasesCastellan: true, releasesRepo: 'Jcollier0120/Manor-releases', dotnetRoot: '', sourceControl: 'auto', wrightHere: true, makersPc: true };
   return {
     settings,
     run: o.run,

@@ -45,8 +45,11 @@ test("the version: a PR's own stays while it's new; else the next free one above
   assert.deepEqual(v({ head: '0.4.10', from: '0.4.10' }), { version: '0.4.11', why: 'it asks for a release, and v0.4.10 is already released' });
 });
 
-/** An employee whose main moved on (0.4.1, released, and a licence in its lock) under a PR that set 0.4.1 too. */
-function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts': 'export const feature = 1;\n' }, o: { base?: Record<string, string>; main?: Record<string, string> } = {}) {
+/**
+ * An employee whose main moved on (0.4.1, released, and a licence in its lock) under a PR that set 0.4.1 too. Both
+ * branches go to origin in one push, with any more refs `o.push` names.
+ */
+function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts': 'export const feature = 1;\n' }, o: { base?: Record<string, string>; main?: Record<string, string>; push?: string[] } = {}) {
   const dir = path.join(home, name);
   const { checkout } = fakeEmployee(dir, { version: '0.4.0', files: o.base });
   const write = (f: string, t: string) => writeFileSync(path.join(checkout, f), t);
@@ -60,7 +63,6 @@ function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts
   for (const [f, t] of Object.entries(prFiles)) write(f, t);
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', 'Fake 0.4.1: a feature');
-  sh(checkout, 'push', '--quiet', 'origin', 'claude/feature');
   const headOid = sh(checkout, 'rev-parse', 'HEAD');
   // main: someone else's 0.4.1, released, and a licence beside the lock's version.
   sh(checkout, 'switch', '--quiet', 'main');
@@ -70,7 +72,7 @@ function moved(name: string, prFiles: Record<string, string> = { 'src/feature.ts
   for (const [f, t] of Object.entries(o.main ?? {})) write(f, t);
   sh(checkout, 'add', '-A');
   sh(checkout, 'commit', '--quiet', '-m', 'Fake 0.4.1: all rights reserved');
-  sh(checkout, 'push', '--quiet', 'origin', 'main');
+  sh(checkout, 'push', '--quiet', 'origin', 'claude/feature', 'main', ...(o.push ?? []));
   const pr: PrInfo = { number: 21, title: 'Fake 0.4.1: a feature', url: 'https://github.com/Jcollier0120/Fake/pull/21', head: 'claude/feature', base: 'main', author: 'Jcollier0120', whose: 'team', headOid, after: { steps: ['release', 'install'] } as any, afterError: null, mergeable: 'CONFLICTING', mergeState: 'DIRTY', draft: false, checks: 'none', labels: [], changed: 10, files: [], fork: false };
   return { dir, checkout, pr, read };
 }
@@ -334,8 +336,7 @@ test('the round: a caught-up PR the Steward tests itself is tested at its new he
 // conflicts beyond its versions is closed, and the next round's rollout bumps again from the branch's head.
 /** moved()'s PR, as a kit PR of the Steward's (Reeve#39's case: a team PR took its version on main). */
 function kitPr(name: string, prFiles?: Record<string, string>) {
-  const m = moved(name, prFiles);
-  sh(m.checkout, 'push', '--quiet', 'origin', `${m.pr.headOid}:refs/heads/steward/kit-1.0.1`);
+  const m = moved(name, prFiles, { push: ['claude/feature:refs/heads/steward/kit-1.0.1'] });
   const pr: PrInfo = { ...m.pr, number: 39, title: "Fake 0.4.1: the Steward's kit 1.0.1", head: 'steward/kit-1.0.1', whose: 'steward', author: 'Jcollier0120', after: null };
   return { ...m, pr };
 }
@@ -458,6 +459,9 @@ test("the round: a vouched PR caught up only in its version lines merges in the 
   assert.doesNotMatch(ctx.lines.join('\n'), /testing it here/, 'no checks run');
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '21', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', now]]);
   assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges without being tested again\.$/);
+  // Its new head has the vouch too, so the Assayer doesn't install and test it again.
+  const vouches = r.gh.filter((a) => a[0] === 'api' && a.includes('POST'));
+  assert.deepEqual(vouches, [['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${now}`, '-f', 'state=success', '-f', 'context=steward/tested', '-f', `description=checks passed at ${pr.headOid.slice(0, 7)}, carried to ${now.slice(0, 7)} (only versions and changelogs changed)`]]);
 });
 
 test('the round: a PR with no vouch and never tested here is caught up as before, and tested at its new head', async () => {
@@ -470,6 +474,7 @@ test('the round: a PR with no vouch and never tested here is caught up as before
   assert.equal(c.done, true, c.note);
   assert.equal(c.carried, undefined);
   assert.match(r.gh.find((a) => a[1] === 'comment')!.at(-1)!, /It merges once its checks pass at the new head\.$/);
+  assert.ok(!r.gh.some((a) => a[0] === 'api' && a.includes('POST')), 'nothing carried, so no vouch');
 });
 
 test("a kit PR whose branch already carries that kit, or a newer one, is closed: it has nothing left to do", async () => {

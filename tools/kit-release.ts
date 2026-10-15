@@ -3,7 +3,13 @@
  * Builds the kit's release, from the kit as committed:
  *
  *   npm run kit-release                artifacts\kit\kit-<version>.zip and artifacts\kit\SHA256SUMS.txt
- *   npm run kit-release -- --publish   builds it, then makes the GitHub release kit-v<version> with both files
+ *   npm run kit-release -- --publish   runs the release tests, builds it, then makes the GitHub release kit-v<version>
+ *                                      with both files (--skip-release-tests leaves the tests out)
+ *   npm run test:release               the release tests alone
+ *
+ * The release tests are every build the kit's `npm run release` can make (minified, readable, dirty, with and without
+ * an announcement and native files), from kit\ as it is here: STEWARD_RELEASE_TESTS=1 on kit\test's release tests. A
+ * PR's tests build one release each, so the rest is tested here, once, before a kit that carries release.ts goes out.
  *
  * The zip holds VERSION, CHANGELOG.md, LICENSE (the kit's MIT license) and the parts (node\, web\, spec\, core\ and
  * dotnet\), as kit\ has them at HEAD (git archive), never the kit's tests. Every agent's tools/kit.ts downloads it, checks
@@ -12,7 +18,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { changelogBetween, KIT_META, kitVersionOf, PARTS } from '../src/kitfiles.ts';
@@ -87,11 +93,35 @@ function publish(b: ReturnType<typeof build>): number {
   return r.status ?? 1;
 }
 
+/** The kit's tests that build releases, and the part of their names that picks those tests out. */
+export const RELEASE_TESTS = { files: ['kit/test/install.test.ts', 'kit/test/native.test.ts'], pattern: '^npm run release' };
+
+/** The release tests, every build in them (STEWARD_RELEASE_TESTS=1), the fixture's kit filled first: their exit code. */
+function releaseTests(): number {
+  const fill = spawnSync(process.execPath, ['tools/kit.ts', '--from', 'kit', '--root', 'kit/test/fixture'], { cwd: root, stdio: 'inherit', windowsHide: true });
+  if (fill.status !== 0) return fill.status ?? 1;
+  const r = spawnSync(process.execPath, ['--import=./src/kit/test-git.ts', '--test', `--test-name-pattern=${RELEASE_TESTS.pattern}`, ...RELEASE_TESTS.files], {
+    cwd: root,
+    stdio: 'inherit',
+    windowsHide: true,
+    env: { ...process.env, STEWARD_RELEASE_TESTS: '1' },
+  });
+  return r.status ?? 1;
+}
+
 function main(args: string[]): number {
-  const unknown = args.filter((a) => a !== '--publish');
+  const unknown = args.filter((a) => !['--publish', '--tests', '--skip-release-tests'].includes(a));
   if (unknown.length) {
-    console.error(`kit-release: unknown ${unknown.join(' ')}\nUsage: npm run kit-release [-- --publish]`);
+    console.error(`kit-release: unknown ${unknown.join(' ')}\nUsage: npm run kit-release [-- --publish [--skip-release-tests]] | npm run test:release`);
     return 2;
+  }
+  if (args.includes('--tests')) return releaseTests();
+  if (args.includes('--publish') && !args.includes('--skip-release-tests')) {
+    const t = releaseTests();
+    if (t !== 0) {
+      console.error(`Not published: the release tests failed (exit ${t}). Fix them, or publish with --skip-release-tests.`);
+      return 1;
+    }
   }
   let built: ReturnType<typeof build>;
   try {
@@ -103,4 +133,4 @@ function main(args: string[]): number {
   return args.includes('--publish') ? publish(built) : 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) process.exitCode = main(process.argv.slice(2));

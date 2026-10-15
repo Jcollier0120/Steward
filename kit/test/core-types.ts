@@ -7,7 +7,7 @@
  *   npm run core-types        (node kit/test/core-types.ts --write)
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -61,7 +61,9 @@ export function makeCoreTypes(): Record<string, string> {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run as itself, compared by real paths: a folder reached through a junction or a Dev Drive mount spells argv[1] one way
+// and import.meta.url (always the real path) another, and a plain comparison would do nothing (spec/DEV-DRIVES.md).
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   try {
     const types = makeCoreTypes();
     if (process.argv.includes('--write')) {

@@ -3,17 +3,20 @@ import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
+import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
-import { affectedTests, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
+import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
 import { stewardToolFile, takesTool, TOOL } from '../kitsource.ts';
-import { failedTests, runLine, tail } from '../run.ts';
+import { failedTests, runLine, tail, type Runner } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { agreedVersion, bumpPatch, setVersion } from '../versions.ts';
-import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, clearWorkDir, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
-import { linkSharedModules } from './modules.ts';
+import { bumpBranch, bumpDirOf, checkoutOf, mapLimit, networkNote, NOT_ON_KIT, result, freshWorktree, workRootOf, type Ctx, type EmployeeResult, type KitFold } from './common.ts';
+import { installLines } from '../installscripts.ts';
+import { guardPackages, linkSharedModules } from './modules.ts';
 import { readPin } from './staff.ts';
 import { recordTested } from '../tested.ts';
+import { keepWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 
@@ -51,8 +54,9 @@ export interface BumpOptions {
    */
   trial?: boolean;
   /**
-   * A trial's: what the kit changes for the employee (kitreach.ts), given its pin and whether its tools/kit.ts changes.
-   * Nothing it takes: it isn't tried. Some files: only the tests they reach run.
+   * A trial's and the rollout's: what the kit changes for the employee (kitreach.ts), given its pin and whether its
+   * tools/kit.ts changes. Nothing it takes: a trial doesn't try it, and a rollout's bump runs its checks but no tests.
+   * Some files: only the tests they reach run.
    */
   reach?: (e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean) => Promise<KitReach>;
   /**
@@ -130,10 +134,26 @@ export const needsNpmCi = (dir: string) =>
  * from the set installed once for its lockfile (modules.ts), else `npm ci` there; a .NET one restores its own packages
  * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
+ *
+ * `timeLimit` (a vouch's, vouchtime.ts) gives the whole run a time limit from its start, asked once it's known whether
+ * it runs the whole suite or only the tests a change reaches: at once, unless `npm test` is picked, then as it is. A step
+ * still running at the limit is stopped with everything it started, and the run fails saying so.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null }): Promise<string | null> {
+  const started = Date.now();
+  const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
+  let limit: (TimeLimit & { at: number }) | null = null;
+  let limited = !o.timeLimit;
   const before: string[] = [];
-  if (needsNpmCi(dir) && !(await linkSharedModules(ctx, dir, o.say))) before.push('npm ci --no-audit --no-fund');
+  if (needsNpmCi(dir)) {
+    // No package's install script runs unless Settings allow it; one that isn't holds the checks (installscripts.ts).
+    const g = await guardPackages(ctx, e, dir, o.doing ?? 'its checks');
+    if (g.held) {
+      o.say(`packages held: ${g.held}`);
+      return `its packages weren't installed: ${g.held}`;
+    }
+    if (!(await linkSharedModules(ctx, dir, o.say, g.plan))) before.push(...installLines(g.plan));
+  }
   if (e.fill) before.push(e.fill);
   // Each test step worked out once the dependencies and the kit are in place, so the kit's files are there to follow.
   const steps: (string | (() => Promise<string[]>))[] = [...before];
@@ -143,23 +163,38 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     else steps.push(step);
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
+    if (!limited && (!picks || o.affected!.chose !== undefined)) {
+      limited = true;
+      const t = o.timeLimit!(checkKind(picks ? o.affected : undefined));
+      if (t) {
+        limit = { ...t, at: started + t.ms };
+        o.say(`time limit: ${t.why}`);
+      }
+    }
+    const left = limit ? limit.at - Date.now() : undefined;
+    if (limit && left! <= 0) return `${step} wasn't started: the run was at its time limit, ${limit.why}`;
     const t0 = Date.now();
-    const r = await runLine(ctx.run, step, { cwd: dir, env: o.env });
-    o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
+    // and each would start ssh-keygen and git maintenance.
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
+    o.say(`${step}: ${r.code === 0 ? 'ok' : r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
       const tests = failedTests(output);
       for (const t of tests) o.say(`  failed: ${t.name}${t.error ? ` (${t.error})` : ''}`);
       for (const line of tail(output, 25).split('\n')) o.say(`  ${line}`);
       try {
-        writeFileSync(checksLogOf(dir), `${step} (exit ${r.code})\n\n${output}`);
+        writeFileSync(checksLogOf(dir), `${step} (${r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`})\n\n${output}`);
         o.say(`  its whole output: ${checksLogOf(dir)}`);
       } catch (err) {
         o.say(`  couldn't keep its output: ${(err as Error).message}`);
       }
+      if (r.timedOut) return `${step} was stopped at ${limit ? `the run's time limit, ${limit.why}` : `its time limit, after ${duration(Date.now() - t0)}`}${testsLine(tests)}`;
       return `${step} failed (exit ${r.code})${testsLine(tests)}${networkNote(output)}`;
     }
   }
+  // The Steward's own checks passed whole: kept by tree, so a kit released from the same code doesn't run them again (whole.ts).
+  await keepWhole(ctx.run, e, { dir, chose: o.affected?.chose, env: o.env });
   return null;
 }
 
@@ -174,27 +209,41 @@ export interface AffectedScope {
   chose?: string;
 }
 
+/** What a run of the checks ran: the whole suite, or only the tests a change reaches (none, at times). */
+export type CheckKind = 'whole' | 'affected';
+
+/** A scope's kind once `npm test` is picked: whole without one, or when the whole suite was picked. */
+export const checkKind = (scope?: AffectedScope): CheckKind => (scope?.chose && scope.chose !== 'the whole suite' ? 'affected' : 'whole');
+
+/** A run's time limit, and why it is that, in words. */
+export interface TimeLimit {
+  ms: number;
+  why: string;
+}
+
+/** A duration in words: seconds under two minutes, else minutes. */
+export const duration = (ms: number) => (ms < 120_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
+
+/** What an AffectedScope takes of `npm test` (affectedPick): the whole suite and why, or the test files of all of them. */
+export type TestPick = { whole: string } | { files: string[]; tests: string[]; why: string; flags: string[]; pretest: boolean };
+
 /**
- * What runs in place of `npm test` for an AffectedScope: its pretest, then `node <its flags> --test <the affected files>`;
- * nothing when no test reaches the change; `npm test` itself when the script isn't a plain node --test, the change can't
- * be read, or it reaches everything. Never throws.
+ * What an AffectedScope takes of `npm test` in `dir`: the test files the change reaches (none when it reaches no test),
+ * with the script's flags and whether it has a pretest; or the whole suite, and why: the script isn't a plain node
+ * --test, the change can't be read, or it reaches everything. A vouch's own run (affectedSteps), and what an Assayer's
+ * affected pass must take in to stand in for it (assayed.ts). Never throws.
  */
-export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope, say: (line: string) => void): Promise<string[]> {
-  const whole = (why: string) => {
-    scope.chose = 'the whole suite';
-    say(`npm test: the whole suite (${why})`);
-    return ['npm test'];
-  };
+export async function affectedPick(run: Runner, dir: string, scope: AffectedScope): Promise<TestPick> {
   try {
     const scripts = scriptsIn(dir);
     const plain = nodeTestScript(scripts.test);
-    if (!plain) return whole("its test script isn't a plain node --test");
+    if (!plain) return { whole: "its test script isn't a plain node --test" };
     let changed = scope.changed;
     let patches = new Map<string, string>();
     if (!changed) {
-      const names = await gitMaybe(ctx.run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
-      const patch = await gitMaybe(ctx.run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
-      if (names === null || patch === null) return whole(`git couldn't compare it with ${scope.base}`);
+      const names = await gitMaybe(run, dir, 'diff', '--name-status', '--no-renames', `${scope.base}...HEAD`);
+      const patch = await gitMaybe(run, dir, 'diff', '--no-renames', '-U0', `${scope.base}...HEAD`);
+      if (names === null || patch === null) return { whole: `git couldn't compare it with ${scope.base}` };
       changed = names
         .split('\n')
         .map((l) => l.trim().split('\t'))
@@ -202,19 +251,36 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
         .map(([status, file]) => ({ status, path: file }));
       patches = patchesByFile(patch);
     }
-    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '' });
-    if (a.all) return whole(a.why);
-    if (!a.files.length) {
-      scope.chose = 'no test reaches the change';
-      say(`npm test: skipped, no test reaches the change (${a.why})`);
-      return scripts.pretest ? ['npm run pretest'] : [];
-    }
-    scope.chose = `affected: ${a.files.length} of ${a.tests.length} test files`;
-    say(`npm test: ${scope.chose} (${a.why})`);
-    return [...(scripts.pretest ? ['npm run pretest'] : []), ['node', ...plain.flags, '--test', ...a.files.map((f) => `"${f}"`)].join(' ')];
+    // The Steward's own repository fills its kit from its kit\: a kit file reaches its copies there.
+    const kitFrom = kitFromOf(dir, scripts);
+    const a = affectedTests({ dir, changed, testGlobs: plain.globs, patchOf: (f) => patches.get(f) ?? '', ...(kitFrom ? { kitFrom } : {}) });
+    if (a.all) return { whole: a.why };
+    return { files: a.files, tests: a.tests, why: a.why, flags: plain.flags, pretest: !!scripts.pretest };
   } catch (err) {
-    return whole(`couldn't work out which: ${(err as Error).message}`);
+    return { whole: `couldn't work out which: ${(err as Error).message}` };
   }
+}
+
+/**
+ * What runs in place of `npm test` for an AffectedScope (affectedPick): its pretest, then `node <its flags> --test <the
+ * affected files>`; nothing when no test reaches the change; `npm test` itself for the whole suite. Never throws.
+ */
+export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope, say: (line: string) => void): Promise<string[]> {
+  const p = await affectedPick(ctx.run, dir, scope);
+  if ('whole' in p) {
+    scope.chose = 'the whole suite';
+    say(`npm test: the whole suite (${p.whole})`);
+    return ['npm test'];
+  }
+  const pretest = p.pretest ? ['npm run pretest'] : [];
+  if (!p.files.length) {
+    scope.chose = 'no test reaches the change';
+    say(`npm test: skipped, no test reaches the change (${p.why})`);
+    return pretest;
+  }
+  scope.chose = `affected: ${p.files.length} of ${p.tests.length} test files`;
+  say(`npm test: ${scope.chose} (${p.why})`);
+  return [...pretest, ['node', ...p.flags, '--test', ...p.files.map((f) => `"${f}"`)].join(' ')];
 }
 
 /** A `git diff` cut into each file's part, by its path (the b/ side; the a/ side for a deletion). Pure. */
@@ -243,6 +309,28 @@ export function repin(text: string, kit: string): string {
   return pinText({ ...JSON.parse(text.replace(/^﻿/, '')), kit });
 }
 
+/** How a trial's result begins when the agent fails its checks without the kit as well (trial.ts counts it apart). */
+export const WITHOUT_THE_KIT = 'fails its checks without kit';
+
+/**
+ * A trial's worktree put back as its main has it (nothing was committed: the bump's files and the kit filled from the
+ * PR go, its node_modules stays), and the same checks run there, once: the failure they give, or null when they pass.
+ * On 2026-10-13 kit 2.69.0 "failed" 22 agents for a reason that was this PC's (its work folder had moved to a drive
+ * where esbuild follows no link), and Reeve for 4 tests failing on its main: each held the kit, and every Steward PR
+ * behind it, though none was the kit's doing.
+ */
+async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line: string) => void; affected?: AffectedScope }): Promise<string | null> {
+  try {
+    await git(ctx.run, dir, 'reset', '--quiet', '--hard', 'HEAD');
+    await git(ctx.run, dir, 'clean', '-fdxq', '-e', 'node_modules');
+  } catch (err) {
+    o.say(`couldn't put it back as its main has it, to run its checks without the kit: ${(err as Error).message}`);
+    return null;
+  }
+  o.say('its checks without the kit, as its main has it, to see whether the kit is why they fail');
+  return runChecks(ctx, e, dir, { ...o, doing: 'its checks without the kit' });
+}
+
 export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<EmployeeResult> {
   const { run } = ctx;
   const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
@@ -269,20 +357,22 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   const tool = takesTool(e.fill) ? (existsSync(toolFile) ? readFileSync(toolFile, 'utf8') : null) : undefined;
   if (tool === null) return result(e, 'refused', `the Steward has no ${TOOL} to hand out (${toolFile})`);
 
-  // A trial of an agent the kit changes nothing for isn't tried: its checks would run its own main's code (kitreach.ts).
-  const reach = o.trial && o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
-  if (reach && 'none' in reach) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
-  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : undefined;
+  // What the kit changes for it (kitreach.ts): a trial's, and the rollout's (0.35.68). A trial of an agent the kit
+  // changes nothing for isn't tried: its checks would run its own main's code. The rollout still bumps it, with its fill,
+  // typecheck and pretest but no tests; one whose kit files change runs the tests they reach, as its trial did.
+  const reach = o.reach ? await o.reach(e, pin, tool !== undefined && lf((await showFile(run, repo, base, TOOL)) ?? '') !== lf(tool)) : null;
+  if (reach && 'none' in reach && o.trial) return result(e, 'skipped', `kit ${pin.kit} → ${o.kit}: not tried, ${reach.none}`, { base: baseCommit });
+  const scope: AffectedScope | undefined = reach && 'files' in reach ? { base: baseCommit, changed: reach.files } : reach && 'none' in reach ? { base: baseCommit, changed: [] } : undefined;
   if (reach && 'all' in reach) say(`all its checks: ${reach.all}`);
+  if (reach && 'none' in reach) say(`no tests for the kit: ${reach.none}`);
 
   const branch = o.trial ? trialBranch(o.kit) : fold ? fold.head : bumpBranch(o.kit);
   if (!o.trial && !fold && (await onOrigin(run, repo, branch))) return result(e, 'refused', `${branch} is already on origin: merge or close its PR first (a bump is never force-pushed)`);
   // A bump made here before and not pushed is made again, from scratch.
   const dir = o.trial ? trialDirOf(ctx.settings, e) : bumpDirOf(ctx.settings, e);
   for (const line of await removeWorktree(run, repo, dir, branch)) say(line);
-  clearWorkDir(ctx.settings, dir);
   rmSync(checksLogOf(dir), { force: true });
-  await git(run, repo, 'worktree', 'add', '--quiet', '--no-track', '-b', branch, dir, base);
+  await freshWorktree(run, ctx.settings, repo, dir, base, '--no-track', '-b', branch);
   say(`worktree ${dir} on ${branch}, from ${base} (${baseCommit.slice(0, 7)})`);
 
   writeFileSync(path.join(dir, 'kit.json'), repin(pinRaw!, o.kit));
@@ -327,13 +417,18 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // the same checks on the same files but for the version, so they aren't run a second time.
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope });
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
   if (first) {
     say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say, affected: scope });
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
+    // A trial's failure isn't the kit's when the agent fails the very same way without it, on its main as it is. Failing
+    // otherwise there (its own kit couldn't be fetched, say) says nothing, and the failure stands.
+    const alone = again && o.trial ? await withoutTheKit(ctx, e, dir, { say, affected: scope }) : null;
+    if (alone && alone === again) return result(e, 'skipped', `${WITHOUT_THE_KIT} ${o.kit} too, so not the kit's doing: ${alone}`, { base: baseCommit });
+    if (alone) say(`without the kit it fails otherwise (${alone}): the failure stands`);
     if (again) return result(e, 'failed', `${again}${again === first ? ', twice' : ` (the first time: ${first})`}; ${o.trial ? '' : `the worktree is left at ${dir}, `}the failed step's whole output in ${checksLogOf(dir)}`, { version: next, base: baseCommit });
   }
-  // Only some of its tests ran: its rollout's bump runs them all (no trial pass is kept for it).
+  // Only the tests the kit reaches ran: its rollout's bump runs the same ones, so the trial's pass is kept all the same.
   const partial = !!scope?.chose && scope.chose !== 'the whole suite';
   if (o.trial) return result(e, 'done', `kit ${pin.kit} → ${o.kit}: checks passed${partial ? ` (${scope!.chose})` : ''}${first ? ` on a second try (the first: ${first})` : ''}`, { version: next, base: baseCommit, ...(partial ? { partial } : {}) });
   const secondTry = tried ? ` in the kit's trial (${tried}), not run again` : first ? ` on a second try (the first: ${first}; its output is in ${checksLogOf(dir)})` : '';

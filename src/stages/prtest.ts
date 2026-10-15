@@ -5,9 +5,10 @@ import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { runChecks, type AffectedScope } from './bump.ts';
-import { checkoutOf, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
-import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
+import { openPrs, parsePrs, readPin, VOUCH_CONTEXT, type PrInfo } from './staff.ts';
+import { setVouch, vouchDescription } from './vouch.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -173,6 +174,33 @@ export async function testAtHead(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tes
   return tested;
 }
 
+/**
+ * carryTested, and the vouch set on the new head too (a team PR from the repository itself), as vouchedHere does for a
+ * pass here: a catch-up's or a stamp's head that changed only version lines and changelogs carries this PC's standing,
+ * and without the vouch on GitHub the Assayer would install and test it again. A status GitHub won't take is only a line
+ * in the log.
+ */
+export async function carryVouched(ctx: Ctx, e: Employee, pr: PrInfo, head: string, why: string): Promise<Tested> {
+  const tested = carryTested(e, pr, head, why);
+  if (pr.whose !== 'team' || pr.fork) return tested;
+  const description = `checks passed at ${pr.headOid.slice(0, 7)}, carried to ${head.slice(0, 7)} (only versions and changelogs changed)`;
+  const refused = await setVouch(ctx, e, e.repo, head, description);
+  ctx.log(`[${e.id}] #${pr.number}: ${refused ?? `its new head ${head.slice(0, 7)} has the vouch (${VOUCH_CONTEXT}) carried from ${pr.headOid.slice(0, 7)}`}`);
+  return tested;
+}
+
+/**
+ * A team PR from the repository itself that passed here gets the vouch on its head, as `steward vouch` sets it
+ * (vouch.ts's setVouch): the Assayer vouches for any team PR head without one, and would otherwise install and test it a
+ * second time. A failure sets nothing, and a status GitHub won't take is only a line in the log: the result stands.
+ */
+async function vouchedHere(ctx: Ctx, e: Employee, pr: PrInfo, scope: AffectedScope | undefined, tested: Tested): Promise<Tested> {
+  if (pr.whose !== 'team' || pr.fork || !pr.headOid) return tested;
+  const why = await setVouch(ctx, e, e.repo, pr.headOid, vouchDescription(e, scope, pr.headOid, " in the Steward's test"));
+  ctx.log(`[${e.id}] #${pr.number}: ${why ?? `its head ${pr.headOid.slice(0, 7)} has the vouch (${VOUCH_CONTEXT}), so it isn't tested again elsewhere`}`);
+  return tested;
+}
+
 async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const now = () => new Date().toISOString();
   if (!e.test.length) return { ok: false, note: `Settings give ${e.name} no checks to test it with`, at: now() };
@@ -184,22 +212,21 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const branch = (await commitOf(run, repo, `origin/${e.branch}`)) ?? undefined;
   const dir = prDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, pr.headOid);
+  await freshWorktree(run, ctx.settings, repo, dir, pr.headOid, '--detach');
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {
     const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
     // Only the tests its change reaches (affected.ts), unless Settings say the whole suite.
     const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
-    const failed = await runChecks(ctx, e, dir, { say, ...affected });
+    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
     const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
-    if (!failed) return { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch };
+    if (!failed) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch });
     say(`#${pr.number}: its checks once more (${failed})`);
-    const again = await runChecks(ctx, e, dir, { say, ...affected });
+    const again = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
     return again
       ? { ok: false, note: `its checks failed here at ${sha}, twice: ${again}`, at: now(), branch }
-      : { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch };
+      : await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

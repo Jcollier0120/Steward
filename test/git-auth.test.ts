@@ -90,9 +90,11 @@ test('a fetch over https carries the sign-in in its environment, asked of the he
   const fill = f.calls.find((c) => c.args[0] === 'credential')!;
   assert.equal(fill.opts.input, 'protocol=https\nhost=github.com\n\n');
   assert.equal(fill.opts.env?.GCM_INTERACTIVE, 'never');
+  // After the settings the environment already gives (the test run's own, kit/node/test-git.ts).
+  const n = Number(process.env.GIT_CONFIG_COUNT) || 0;
   for (const c of f.gits()) {
-    assert.equal(c.opts.env?.GIT_CONFIG_VALUE_1, HEADER);
-    assert.equal(c.opts.env?.GIT_CONFIG_KEY_0, 'credential.helper');
+    assert.equal(c.opts.env?.[`GIT_CONFIG_VALUE_${n + 1}`], HEADER);
+    assert.equal(c.opts.env?.[`GIT_CONFIG_KEY_${n}`], 'credential.helper');
     assert.ok(!c.args.join(' ').includes('s3cret') && !c.args.join(' ').includes(HEADER.slice(-10)), 'nothing secret in argv');
   }
   assert.deepEqual(f.gits()[0].args, args, 'the command itself unchanged');

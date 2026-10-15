@@ -79,7 +79,11 @@ function fakePc(o: { lastUse?: number; inUse?: boolean; state?: 'ready' | 'loadi
 test("a program's name reaches Windows' process list as text: quotes, curly quotes, $( ) and backticks stay in the name", async () => {
   assert.equal(wqlName("a'b\\c.exe"), "Name='a\\'b\\\\c.exe'");
   assert.equal(wqlName('llama-server.exe'), "Name='llama-server.exe'");
-  // Run for real: a name made to end the string early finds no process, and runs nothing.
+  // Run for real: a name made to end the string early finds no process, and runs nothing. The PowerShell worker up and its
+  // CIM cmdlets loaded first, with time to spare: at the checks pace on a busy PC that alone can take most of the 30 s a
+  // query is allowed.
+  const { powershell } = await import('./fixture/src/kit/ps.ts');
+  await powershell("Get-CimInstance Win32_OperatingSystem | Out-Null; 'ready'", { timeoutMs: 180_000 });
   for (const name of ["x\u2019; Write-Output INJECTED; \u2019y.exe", "x'; Write-Output INJECTED; 'y.exe", 'x$(Write-Output INJECTED)`n.exe', 'x" ; Write-Output INJECTED ; ".exe']) {
     assert.deepEqual(await serverProcesses(`C:\\nowhere\\${name}`, BASE), [], name);
   }
@@ -392,7 +396,7 @@ test("gpuWithNpu off keeps a card's servers out, by the core's rule: only beside
   const kept = serversToReap(raw, { withNpu: false });
   assert.deepEqual(kept.map((s) => [s.acc.id, !!s.keptOut]), [['npu', false], ['gpu-rtx', true]]);
   assert.deepEqual(serversToReap(raw, { withNpu: true }).map((s) => !!s.keptOut), [false, false]);
-  assert.deepEqual(serversToReap(raw).map((s) => s.idleMs), [10 * MIN, 10 * MIN], "rules.json's keeper defaults");
+  assert.deepEqual(serversToReap(raw, { ramBytes: 64 * 1024 ** 3 }).map((s) => s.idleMs), [10 * MIN, 10 * MIN], "rules.json's keeper defaults");
   assert.deepEqual(serversToReap({ ...raw, npuIdleStopMinutes: 3, gpuIdleStopMinutes: 0 }).map((s) => s.idleMs), [3 * MIN, 0]);
 });
 
@@ -469,4 +473,152 @@ test('who keeps the servers: the Smith where its app folder is, else Reeve', asy
   assert.equal(keeper({ SMITH_HOME: smith }), 'reeve');
   mkdirSync(path.join(smith, 'app'), { recursive: true });
   assert.equal(keeper({ SMITH_HOME: smith }), 'smith');
+});
+
+// ---------------------------------------------------------------- the NPU's idle stop by this PC's memory (kit 2.71.0)
+
+const GB = 1024 ** 3;
+const OVMS = 'C:\\Users\\x\\.manor\\accelerators\\servers\\ovms-2026.4.1\\ovms.exe';
+const FLM = 'C:\\Users\\x\\.manor\\accelerators\\servers\\fastflowlm-1.0.7\\flm.exe';
+const HEXAGON = 'C:\\Users\\x\\.manor\\accelerators\\servers\\llama.cpp\\b11125-hexagon\\llama-server.exe';
+const npuRaw = (chat: string, embed?: string) => ({
+  accelerators: [
+    { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: 'http://127.0.0.1:18183', model: 'c', startCommand: [chat, '--port', '18183'] }, ...(embed ? { embed: { baseUrl: 'http://127.0.0.1:18186', model: 'e', startCommand: [embed, '--port', '18186'] } } : {}) },
+    { id: 'gpu-rtx', kind: 'gpu', name: 'RTX', slots: 2, chat: { baseUrl: CARD, model: 'q', startCommand: [LLAMA, '--port', '18191'] } },
+  ],
+});
+
+test("the NPU's idle stop by this PC's memory: under 20 GB, each server's route's own minutes; bigger, rules.json's 10; config.json's npuIdleStopMinutes wins either way", async () => {
+  const { serversToReap } = await import('./fixture/src/kit/keeper.ts');
+  const idle = (raw: Record<string, any>, ramBytes: number | null) => serversToReap(raw, { withNpu: true, ramBytes }).map((s) => [s.base, (s.idleMs ?? -1) / MIN]);
+  const intel = npuRaw(OVMS, OVMS);
+  // A 16 GB laptop, as Windows shows it: OpenVINO Model Server's chat and its embedding server after 5 minutes each.
+  assert.deepEqual(idle(intel, 15.6 * GB), [['http://127.0.0.1:18183', 5], ['http://127.0.0.1:18186', 5], [CARD, 10]], 'the card keeps gpuIdleStopMinutes');
+  assert.deepEqual(idle(intel, 12 * GB).map(([, m]) => m), [5, 5, 10]);
+  assert.deepEqual(idle(npuRaw(FLM), 15.6 * GB).map(([, m]) => m), [10, 10], "FastFlowLM's slower start: 10");
+  assert.deepEqual(idle(npuRaw(GENIEX, HEXAGON), 15.6 * GB).map(([, m]) => m), [5, 5, 10], 'GenieX, and its llama-server on the Hexagon');
+  assert.deepEqual(idle(npuRaw('C:\\mine\\my-server.exe'), 15.6 * GB).map(([, m]) => m), [10, 10], 'a server no route runs keeps the default');
+  // Bigger, or memory unknown: as before.
+  assert.deepEqual(idle(intel, 32 * GB).map(([, m]) => m), [10, 10, 10]);
+  assert.deepEqual(idle(intel, 24 * GB).map(([, m]) => m), [10, 10, 10]);
+  assert.deepEqual(idle(intel, null).map(([, m]) => m), [10, 10, 10]);
+  // The owner's word, on any PC: longer, shorter, or never.
+  assert.deepEqual(idle({ ...intel, npuIdleStopMinutes: 240 }, 15.6 * GB).map(([, m]) => m), [240, 240, 10]);
+  assert.deepEqual(idle({ ...intel, npuIdleStopMinutes: 2 }, 64 * GB).map(([, m]) => m), [2, 2, 10]);
+  assert.deepEqual(idle({ ...intel, npuIdleStopMinutes: 0 }, 15.6 * GB).map(([, m]) => m), [0, 0, 10]);
+  // A value the keeper can't take is no word at all: the rule's.
+  assert.deepEqual(idle({ ...intel, npuIdleStopMinutes: -3 }, 15.6 * GB).map(([, m]) => m), [5, 5, 10]);
+});
+
+test("Intel's embedding server (a second OpenVINO Model Server) is looked after with the NPU's lock and idle time; npu-embed still exits by itself", () => {
+  const list = reapedServers(npuRaw(OVMS, OVMS).accelerators as any, 'C:\\logs', { npuMs: 7 * MIN, otherMs: 5 * MIN }, 'C:\\locks\\npu');
+  const embed = list.find((s) => s.base === 'http://127.0.0.1:18186')!;
+  assert.ok(embed, list.map((s) => s.base).join(', '));
+  assert.deepEqual([embed.program, embed.lockDirs, embed.idleMs, embed.recycle, embed.spec.logFile], [OVMS, ['C:\\locks\\npu'], 7 * MIN, undefined, 'C:\\logs\\npu.embed.log']);
+  const python = reapedServers(npuRaw(OVMS, 'C:\\Python\\python.exe').accelerators as any, 'C:\\logs', { npuMs: 7 * MIN }, 'C:\\locks\\npu');
+  assert.equal(python.some((s) => s.base === 'http://127.0.0.1:18186'), false);
+});
+
+// ---------------------------------------------------------------- an idle stop never races a request
+
+test('an idle stop never races a request: one in flight keeps its server; one that took the NPU after the look makes the stop give way; one arriving during the stop waits, then starts it again', async () => {
+  const { reaperTurn } = await import('./fixture/src/kit/keeper.ts');
+  const { lineState, withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
+  const { until } = await import('./until.ts');
+  const lockDir = path.join(home, 'race', 'locks', 'npu');
+  const s = { ...server, lockDirs: [lockDir] };
+  const line = () => lineState([lockDir]);
+  const pc = { clock: 20 * MIN, procs: [{ pid: 4242, startedMs: 0 }] as { pid: number; startedMs: number }[], stopped: [] as number[], started: 0, keeperHolds: false, requestHolds: false, overlap: false, blind: false, keeperGate: Promise.resolve(), log: [] as string[] };
+  const gate = () => {
+    let open!: () => void;
+    const p = new Promise<void>((r) => (open = r));
+    return { p, open };
+  };
+  const deps: Deps = {
+    now: () => pc.clock,
+    processes: async () => pc.procs,
+    stop: (pid) => {
+      if (pc.requestHolds) pc.overlap = true;
+      pc.stopped.push(pid);
+      pc.procs = pc.procs.filter((p) => p.pid !== pid);
+    },
+    probe: async () => 'ready',
+    // The look's view of the line; `blind` stands for a request taking the NPU just after the look.
+    inUse: () => !pc.blind && (line().held > 0 || line().waiting > 0),
+    lastActivityMs: () => 0,
+    withTurn: (sv, fn) =>
+      reaperTurn(sv.lockDirs, async () => {
+        pc.keeperHolds = true;
+        try {
+          await pc.keeperGate;
+          return await fn();
+        } finally {
+          pc.keeperHolds = false;
+        }
+      }),
+    start: async () => {},
+    log: (l) => pc.log.push(l),
+  };
+  const reaper = new Reaper(deps, { idleMs: 10 * MIN });
+  /** A request in the NPU's turn, as an agent's: its server started again if it isn't running, held until `held`. */
+  const request = (held: Promise<void>) =>
+    withAcceleratorTurn(
+      [lockDir],
+      async () => {
+        pc.requestHolds = true;
+        if (pc.keeperHolds) pc.overlap = true;
+        if (!pc.procs.length) {
+          pc.started++;
+          pc.procs = [{ pid: 5151, startedMs: pc.clock }];
+        }
+        await held;
+        const answered = pc.procs.length > 0;
+        pc.requestHolds = false;
+        return answered;
+      },
+      { lane: 'interactive', who: 'agent', waitMs: 20_000 },
+    );
+
+  // 1. In flight: the look finds the NPU held, and stops nothing.
+  const g1 = gate();
+  const r1 = request(g1.p);
+  await until(() => line().held === 1, 10_000, 'the request holding the NPU');
+  assert.deepEqual(await reaper.look([s]), [{ base: BASE, did: 'in-use' }]);
+  g1.open();
+  assert.equal(await r1, true, 'its server ran to its answer');
+  assert.deepEqual(pc.stopped, []);
+
+  // 2. The look found it idle, but a request took the NPU first: the keeper waits behind it, and then gives way.
+  pc.clock += 11 * MIN;
+  pc.blind = true;
+  const g2 = gate();
+  const r2 = request(g2.p);
+  await until(() => line().held === 1, 10_000, 'the request holding the NPU');
+  const look2 = reaper.look([s]);
+  await until(() => line().waiting === 1, 10_000, 'the keeper waiting behind the request');
+  pc.clock += 3_000; // the request's turn takes its time
+  g2.open();
+  assert.equal(await r2, true);
+  assert.deepEqual(await look2, [{ base: BASE, did: 'in-use' }], 'the NPU was used in the meantime: nothing stopped');
+  assert.deepEqual(pc.stopped, []);
+  pc.blind = false;
+  pc.clock += 5 * MIN;
+  assert.deepEqual(await reaper.look([s]), [{ base: BASE, did: 'answering' }], 'its idle time counts again from that use');
+
+  // 3. Idle at last: the keeper stops it in its turn, and a request arriving meanwhile waits, then starts it again.
+  pc.clock += 6 * MIN;
+  const kg = gate();
+  pc.keeperGate = kg.p;
+  const look3 = reaper.look([s]);
+  await until(() => pc.keeperHolds, 10_000, 'the keeper holding the NPU');
+  const r3 = request(Promise.resolve());
+  await until(() => line().waiting === 1, 10_000, 'the request waiting behind the keeper');
+  assert.equal(pc.started, 0, 'nothing starts while the keeper holds the NPU');
+  kg.open();
+  const [stopped] = await look3;
+  assert.equal(stopped.did, 'stopped');
+  assert.deepEqual(pc.stopped, [4242]);
+  assert.equal(await r3, true, 'the request answered, on the server it started again');
+  assert.equal(pc.started, 1);
+  assert.equal(pc.overlap, false, 'the keeper and a request never held the NPU at once');
 });

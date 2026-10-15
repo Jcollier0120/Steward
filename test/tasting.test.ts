@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 // through; otherwise it waits, with the reason, and the next round asks again. It never deadlocks: no Aletaster, an
 // Aletaster off duty for Developer options, one that predates the tasting or doesn't answer, and the Aletaster's own
 // release all go without a tasting, and say so. A hold that lasts is an alarm.
-const home = mkdtempSync(path.join(os.tmpdir(), 'steward-tasting-'));
+const home = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-tasting-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 process.env.STEWARD_HOME = home;
 process.env.WRIGHT_HOME = path.join(home, 'no-wright');
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -198,7 +198,7 @@ test("in a release: a hold publishes nothing and asks again next round; a pass r
   const { checkout } = fakeEmployee(dir, { version: '0.4.1', kit: '1.0.0' });
   const marker = path.join(dir, 'released');
   const e = employee(checkout, { release: `node -e "require('fs').writeFileSync(process.argv[1], '')" "${marker}"` });
-  const { run } = runner((a) => (a[0] === 'release' && a[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : undefined));
+  const { run } = runner((a) => (a[0] === 'release' && a[1] === 'list' ? ok([...(existsSync(marker) ? [{ tagName: 'v0.4.1', isDraft: false }] : []), { tagName: 'v0.4.0', isDraft: false }]) : undefined));
   const ctx = ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
 
   ctx.tasting = deps(aletasterHttp({ post: { status: 200, body: tasting({ repo: e.repo, verdict: 'fail', reason: 'versions disagree', release: false }) } }).http);

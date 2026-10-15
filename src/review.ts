@@ -3,6 +3,7 @@ import type { Employee, Settings } from './settings.ts';
 import { checkoutOf, type Ctx } from './stages/common.ts';
 import type { PrInfo } from './stages/staff.ts';
 import { hostFor } from './hosts/index.ts';
+import { allowedInstallScripts, allowedToRun, lockPackages, named, runsOnInstall, type LockPackage } from './installscripts.ts';
 
 /**
  * The Steward's look at the Wright's drafts, in code (no model): the Wright opens every pull request as a draft, so
@@ -85,7 +86,7 @@ export const ALWAYS_REVIEWED = ['.claude/**', '**/CLAUDE.md', '**/AGENTS.md', '*
  * otherwise pass the very look it changed. By employee id.
  */
 export const GUARDS: Record<string, string[]> = {
-  steward: ['src/review.ts', 'src/settings.ts', 'src/stages/merge.ts', 'src/stages/trial.ts', 'src/safeinstall.ts'],
+  steward: ['src/review.ts', 'src/settings.ts', 'src/stages/merge.ts', 'src/stages/trial.ts', 'src/safeinstall.ts', 'src/installscripts.ts', 'src/stages/modules.ts'],
   wright: ['src/worker.ts', 'src/workers.ts', 'src/settings.ts'],
   bailiff: ['src/review.ts', 'src/worker.ts', 'src/settings.ts'],
 };
@@ -119,18 +120,87 @@ export function dependenciesOf(text: string | null): string | null {
   }
 }
 
-/** Why its dependencies stop the Steward: package.json's dependencies or install scripts differ between its head and where it started. */
-export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
-  if (!pr.files.some((f) => /(^|\/)package\.json$/i.test(f))) return null;
+const PACKAGE_JSON = /(^|\/)package\.json$/i;
+const PACKAGE_LOCK = /(^|\/)package-lock\.json$/i;
+
+/** A PR's head fetched, and where it started (its merge base with the branch), to compare files at; null start when there's none. */
+async function endsOf(ctx: Ctx, e: Employee, pr: PrInfo): Promise<{ repo: string; head: string; start: string | null }> {
   const repo = checkoutOf(e);
   await fetchFor(ctx.run, repo, pr.headOid, hostFor(ctx, e).prRef(pr));
   const head = pr.headOid || 'FETCH_HEAD';
-  const start = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, head))?.trim();
-  if (!start) return "the Steward couldn't find where it started, to compare its dependencies";
-  for (const f of pr.files.filter((x) => /(^|\/)package\.json$/i.test(x))) {
-    if (dependenciesOf(await showFile(ctx.run, repo, head, f)) !== dependenciesOf(await showFile(ctx.run, repo, start, f))) return `it changes the dependencies or install scripts in ${f}`;
+  const start = (await gitMaybe(ctx.run, repo, 'merge-base', `origin/${e.branch}`, head))?.trim() || null;
+  return { repo, head, start };
+}
+
+/**
+ * What a lockfile at a PR's head brings that it didn't have where it started: packages whose names are new to the
+ * repository, and packages that run something as they install (installscripts.ts) that didn't at that version before,
+ * the allowed ones' new versions aside (the install allows them anyway). Pure.
+ */
+export function lockfileNews(start: string | null, head: string | null, allowed: string[]): { added: LockPackage[]; scripts: LockPackage[] } {
+  const after = lockPackages(head);
+  if (!after) return { added: [], scripts: [] };
+  const before = lockPackages(start) ?? [];
+  const names = new Set(before.map((p) => p.name.toLowerCase()));
+  const ran = new Set(runsOnInstall(before).map(named));
+  const once = (list: LockPackage[]) => {
+    const seen = new Set<string>();
+    return list.filter((p) => !seen.has(named(p)) && !!seen.add(named(p)));
+  };
+  return {
+    added: once(after.filter((p) => !names.has(p.name.toLowerCase()))),
+    scripts: once(runsOnInstall(after).filter((p) => !ran.has(named(p)) && !allowedToRun(p, allowed))),
+  };
+}
+
+const some = (list: LockPackage[]) => `${list.slice(0, 5).map(named).join(', ')}${list.length > 5 ? `, and ${list.length - 5} more` : ''}`;
+
+/** What a PR's lockfiles bring, in words, or null when nothing new: the packages new to the repository, and new install scripts. */
+async function lockfileWords(ctx: Ctx, e: Employee, pr: PrInfo, ends: { repo: string; head: string; start: string | null }): Promise<string | null> {
+  for (const f of pr.files.filter((x) => PACKAGE_LOCK.test(x))) {
+    const was = ends.start ? await showFile(ctx.run, ends.repo, ends.start, f) : null;
+    const news = lockfileNews(was, await showFile(ctx.run, ends.repo, ends.head, f), allowedInstallScripts(ctx.settings));
+    const parts = [
+      ...(news.scripts.length ? [`${news.scripts.length === 1 ? 'a package' : 'packages'} with an install script not on "Install scripts allowed" (${some(news.scripts)})`] : []),
+      ...(news.added.length ? [`${news.added.length === 1 ? 'a package' : 'packages'} new to the repository (${some(news.added)})`] : []),
+    ];
+    if (parts.length) return `its ${f} brings ${parts.join(', and ')}`;
   }
   return null;
+}
+
+/** Why its dependencies stop the Steward: package.json's dependencies or install scripts differ between its head and where it started, or its lockfile brings new packages or install scripts (lockfileNews). */
+export async function dependencyHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
+  if (!pr.files.some((f) => PACKAGE_JSON.test(f) || PACKAGE_LOCK.test(f))) return null;
+  const ends = await endsOf(ctx, e, pr);
+  if (!ends.start) return "the Steward couldn't find where it started, to compare its dependencies";
+  for (const f of pr.files.filter((x) => PACKAGE_JSON.test(x))) {
+    if (dependenciesOf(await showFile(ctx.run, ends.repo, ends.head, f)) !== dependenciesOf(await showFile(ctx.run, ends.repo, ends.start, f))) return `it changes the dependencies or install scripts in ${f}`;
+  }
+  return lockfileWords(ctx, e, pr, ends);
+}
+
+/** The lockfile holds already worked out, by repository, head and Settings' list: the same head says the same each round. */
+const lockLooks = new Map<string, string | null>();
+
+/**
+ * Why any PR, whoever wrote it, waits for the owner for its lockfile (merge.ts's holdReason): its package-lock.json
+ * brings a package with an install script Settings don't allow, or a package whose name is new to the repository. A
+ * rogue package gets in through exactly such a change, and every install of it would run its script; the Steward's own
+ * installs refuse it too (installscripts.ts), but a person decides whether it belongs. The owner looks, then merges it
+ * themselves or labels it OWNER_DONE_LABEL. Null when its lockfiles bring nothing new, or none changed.
+ */
+export async function lockfileHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
+  if (!pr.files.some((f) => PACKAGE_LOCK.test(f)) || pr.labels.includes(OWNER_DONE_LABEL)) return null;
+  const key = `${e.repo}@${pr.headOid}:${allowedInstallScripts(ctx.settings).join(',')}`;
+  if (pr.headOid && lockLooks.has(key)) return lockLooks.get(key)!;
+  const ends = await endsOf(ctx, e, pr);
+  // Not kept: the next round, its branch fetched again, may find it.
+  if (!ends.start) return "the Steward couldn't find where it started, to compare its package-lock.json";
+  const words = await lockfileWords(ctx, e, pr, ends);
+  const why = words ? `${words}: look at ${words.includes('install script') ? 'them, and what their scripts run' : 'them'}, then merge it yourself or label it ${OWNER_DONE_LABEL}` : null;
+  if (pr.headOid) lockLooks.set(key, why);
+  return why;
 }
 
 /** The comment the Steward leaves when it marks one ready: what it looked at (and, with the Bailiff, the commit it approved). */

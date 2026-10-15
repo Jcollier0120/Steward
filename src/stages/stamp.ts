@@ -6,9 +6,9 @@ import { CHANGELOG } from '../kit/notes.ts';
 import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { settledFiles, settleVersion } from './catchup.ts';
-import { checkoutOf, clearWorkDir, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, freshWorktree, workRootOf, type Ctx } from './common.ts';
 import { KIT_CHANGELOG, KIT_VERSION_FILE, kitVersionText, repinKit } from './kitpart.ts';
-import { carryTested } from './prtest.ts';
+import { carryVouched } from './prtest.ts';
 import type { PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 
@@ -116,8 +116,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
   if (pr.headOid && (await git(run, repo, 'rev-parse', head)).trim() !== pr.headOid) return { done: false, note: 'its branch moved since this round listed it' };
   const dir = stampDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, head);
+  await freshWorktree(run, ctx.settings, repo, dir, head, '--detach');
   try {
     const kitRepo = existsSync(path.join(dir, KIT_VERSION_FILE));
     const own = listed(dir, CHANGES_DIR);
@@ -175,7 +174,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     await git(run, dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${pr.head}`);
     const pushed = (await git(run, dir, 'rev-parse', 'HEAD')).trim();
     // Only versions and entries changed since the head it stood at: what passed there holds.
-    if (o.carry) carryTested(e, pr, pushed, o.carry);
+    if (o.carry) await carryVouched({ ...ctx, run }, e, pr, pushed, o.carry);
     const note = `stamped ${did.join('; ')}`;
     ctx.log(`[${e.id}] #${pr.number}: ${note}`);
     // Its title says the version it merges with.

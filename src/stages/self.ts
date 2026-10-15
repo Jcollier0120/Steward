@@ -8,10 +8,13 @@ import { commitOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '
 import { STEWARD_BRANCH, stewardMainFrom, type StewardMain } from '../glance.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { runLine, tail } from '../run.ts';
-import { exchequerNote, networkFailure, networkNote, passingFailure, clearWorkDir, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { exchequerNote, networkFailure, networkNote, passingFailure, freshWorktree, workRootOf, type Ctx, type EmployeeResult } from './common.ts';
+import { guardPackages, installPackages } from './modules.ts';
 import { releaseNeedsPackages } from './release.ts';
+import { linkSharedModules } from './modules.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor, must } from '../hosts/index.ts';
+import { wholeSuiteBefore } from './wholesuite.ts';
 
 /**
  * The Steward's own releases, in a round. The Steward's repository isn't an employee's, so this is kept apart from
@@ -28,6 +31,8 @@ import { hostFor, must } from '../hosts/index.ts';
  * A version that isn't above the newest release of its kind is never released (a person sees to that), and a Steward
  * version waits for the kit version on main to be released first. A release that fails is kept in self-failed.json
  * by its tag, with the commit: an alarm at once, and the rounds don't try it again until a new commit lands on main.
+ * A kit, which every agent takes, is released only once the Steward's whole suite has passed at its commit
+ * (wholesuite.ts), since its PRs ran only the tests each change reached; one that fails is held the same way.
  */
 
 export const selfFailedFile = () => dataFile('self-failed.json');
@@ -114,21 +119,25 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
   const at = step.commit.slice(0, 7);
   const dir = selfDirOf(ctx);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
   if (!(await commitOf(run, repo, step.commit))) await fetchBranch(run, repo, STEWARD_BRANCH);
   // Only a commit on origin's main, which the scripts need too ("HEAD isn't on origin yet").
   if ((await gitMaybe(run, repo, 'merge-base', '--is-ancestor', step.commit, `origin/${STEWARD_BRANCH}`)) === null) {
     await fetchBranch(run, repo, STEWARD_BRANCH);
     if ((await gitMaybe(run, repo, 'merge-base', '--is-ancestor', step.commit, `origin/${STEWARD_BRANCH}`)) === null) return selfResult('failed', `${at} isn't on origin/${STEWARD_BRANCH} in ${repo}`, { version: step.version, commit: at });
   }
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, step.commit);
+  await freshWorktree(run, ctx.settings, repo, dir, step.commit, '--detach');
   ctx.log(`[${APP.id}] releasing ${step.tag} from origin/${STEWARD_BRANCH} (${at}) in ${dir}`);
   try {
-    // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's.
-    if (step.what === 'steward' && releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
-      const ci = await runLine(run, 'npm ci --no-audit --no-fund', { cwd: dir, timeoutMs: 20 * 60_000 });
-      ctx.log(`[${APP.id}] npm ci: ${ci.code === 0 ? 'ok' : `exit ${ci.code}`}`);
-      if (ci.code !== 0) return selfResult('failed', `npm ci failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
+    // The Steward's release builds with esbuild (kit 2.17.0), its devDependency: its packages first, as an employee's,
+    // linked from the set installed for its lockfile where they can be (modules.ts), else installed.
+    // A kit's too: its release tests build the fixture's releases with it before it is published (tools/kit-release.ts).
+    if (releaseNeedsPackages(dir, SELF_COMMANDS.steward[0])) {
+      // No package's install script runs unless Settings allow it; one that isn't holds the release (installscripts.ts).
+      const g = await guardPackages(ctx, { id: APP.id, name: APP.name, repo: ctx.settings.stewardRepo }, dir, `the release of ${step.tag}`);
+      if (g.held) return selfResult('failed', `${g.held}, so ${step.tag} wasn't released`, { version: step.version, commit: at });
+      const say = (line: string) => ctx.log(`[${APP.id}] ${line}`);
+      const ci = (await linkSharedModules(ctx, dir, say, g.plan)) ? null : await installPackages(ctx, dir, g.plan, say);
+      if (ci) return selfResult('failed', `${ci.line.startsWith('npm ci') ? 'npm ci' : ci.line} failed (exit ${ci.code}), so ${step.tag} wasn't released${networkNote(`${ci.out}\n${ci.err}`)}`, { version: step.version, commit: at });
     }
     const commands = SELF_COMMANDS[step.what];
     let exchequer = '';
@@ -139,7 +148,7 @@ async function releaseStep(ctx: Ctx, repo: string, step: SelfStep): Promise<Empl
         if (dirty) return selfResult('failed', `the worktree at ${at} isn't clean (${dirty.split('\n').slice(0, 3).join(', ')}), so ${step.tag} wasn't released`, { version: step.version, commit: at });
       }
       // Its release goes to the releases repository too, as Settings say (MANOR_RELEASES_REPO, the kit's release.ts).
-      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings) });
+      const r = await runLine(run, line, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
       for (const l of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${APP.id}]   ${l}`);
       if (r.code !== 0) return selfResult('failed', `${line} failed (exit ${r.code}), so ${step.tag} wasn't released${networkNote(`${r.out}\n${r.err}`)}`, { version: step.version, commit: at });
       exchequer ||= exchequerNote(`${r.out}\n${r.err}`);
@@ -192,7 +201,13 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
         }
         let r: EmployeeResult;
         try {
-          r = await releaseStep(ctx, repo, step);
+          // A kit, which every agent takes, once the Steward's whole suite has passed at its commit (wholesuite.ts).
+          const held = step.what === 'kit' ? await wholeSuiteBefore(ctx, repo, step) : null;
+          if (held?.retry) {
+            results.push(selfResult('skipped', `${step.tag} waits for the next round: ${held.why}`, { version: step.version, commit: step.commit.slice(0, 7) }));
+            break;
+          }
+          r = held ? selfResult('failed', `${held.why}, so ${step.tag} wasn't released`, { version: step.version, commit: step.commit.slice(0, 7) }) : await releaseStep(ctx, repo, step);
         } catch (err) {
           r = selfResult('failed', `${step.tag}: ${(err as Error).message}`, { version: step.version, commit: step.commit.slice(0, 7) });
         }

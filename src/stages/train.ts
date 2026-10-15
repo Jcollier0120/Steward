@@ -4,11 +4,12 @@ import { aheadOf, fetchBranch, git, gitMaybe, removeWorktree } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
+import { headsMoved } from '../heads.ts';
 import { noteMerged } from '../strangers.ts';
 import { recordTested } from '../tested.ts';
 import { runChecks } from './bump.ts';
 import { isChangelog, isKitPin, lockBeside, mergeChangelogs, mergeKitPins, resolveVersionConflicts, settledFiles, settleVersion } from './catchup.ts';
-import { checkoutOf, forgetGlance, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, forgetGlance, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { checksOf, type PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
@@ -55,7 +56,7 @@ const stamped = (pr: PrInfo) => changeFiles(pr.files).length > 0 || changeFiles(
 
 /** Whether a PR can ride in a train. Pure. */
 export const canRide = (pr: PrInfo, branch: string) =>
-  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks !== 'failing' && (pr.mergeState !== 'BLOCKED' || pr.checks === 'pending') && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr) && !stamped(pr);
+  pr.whose === 'team' && !pr.fork && !pr.draft && pr.base === branch && !pr.afterError && !pr.after && pr.checks !== 'failing' && (pr.mergeState !== 'BLOCKED' || pr.checks === 'pending') && !!pr.headOid && !raisesKit(pr) && !isWrightPr(pr) && !ownerFirstHold(pr) && !pr.lockHold && !stamped(pr);
 
 /**
  * The train the version queue (`pending`: each PR's version, merge.ts's pendingVersions) makes: its PRs from the lowest
@@ -206,8 +207,7 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
 
   const dir = trainDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, base);
+  await freshWorktree(run, ctx.settings, repo, dir, base, '--detach');
   try {
     const rode: Car[] = [];
     let under = base;
@@ -293,6 +293,8 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     delete failed[e.id];
     writeJson(trainsFile(), failed);
     for (const c of rode) noteMerged(e, c.pr.number);
+    // Its new head shared with the other agents a moment from now (heads.ts).
+    headsMoved(e.repo);
     // Passed here before it merged: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit: at, stage: 'merge', branch: top.pr.head, pr: top.pr.number, version: top.version });
     const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
