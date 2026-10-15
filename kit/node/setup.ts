@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -1138,16 +1138,62 @@ export function embedSanity(vectors: unknown, dims?: number): string[] {
   return [];
 }
 
+/** `fn` in the NPU's turn, or at once when the caller holds it (`held`). */
+function inNpuTurn<T>(held: boolean, fn: (slot: number) => Promise<T>, opts: Parameters<typeof withAcceleratorTurn>[2]): Promise<T> {
+  return held ? fn(0) : withAcceleratorTurn(lockDirsOf({ id: 'npu', slots: 1 }), fn, opts);
+}
+
+/** This kit's version (its VERSION file: beside this file in an agent's kit, one folder up in the Steward's). */
+export function kitVersion(): string {
+  for (const f of ['./VERSION', '../VERSION']) {
+    try {
+      return readFileSync(new URL(f, import.meta.url), 'utf8').trim();
+    } catch {}
+  }
+  return 'unknown';
+}
+
+/**
+ * Which kit last wrote the NPU's command, or looked at it (npu-refresh.ts): `npu-refresh.json`, beside config.json.
+ * Setup writes `set-up` when it writes the NPU's entry; the keeper's look writes what it found.
+ */
+export interface NpuRefreshRecord {
+  kit: string;
+  at: string;
+  did: 'set-up' | 'current' | 'refreshed' | 'failed' | 'needs-setup' | 'not-route' | 'no-npu';
+  problems?: string[];
+}
+
+export const npuRefreshFile = (configFile: string) => path.join(path.dirname(configFile), 'npu-refresh.json');
+
+export function readNpuRefresh(configFile: string): NpuRefreshRecord | null {
+  try {
+    const r = JSON.parse(readFileSync(npuRefreshFile(configFile), 'utf8').replace(/^﻿/, ''));
+    return r && typeof r.kit === 'string' ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Never throws: without the record, the next look only looks again. */
+export function rememberNpuRefresh(configFile: string, r: NpuRefreshRecord): void {
+  try {
+    mkdirSync(path.dirname(configFile), { recursive: true });
+    writeFileSync(npuRefreshFile(configFile), JSON.stringify(r, null, 2) + '\n');
+  } catch {}
+}
+
 /**
  * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
  * then EMBED_TEST's three sentences, whose vectors must make sense (embedSanity). Problems in words; none when they do.
+ * `held`: the caller holds the NPU's turn already (npu-refresh.ts).
  */
-export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number } = {}): Promise<string[]> {
+export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held?: boolean } = {}): Promise<string[]> {
   const ep = readAccelerator(e)?.embed;
   if (!ep?.baseUrl) return ['the entry has no embedding server'];
   const problems: string[] = [];
-  await withAcceleratorTurn(
-    lockDirsOf({ id: 'npu', slots: 1 }),
+  await inNpuTurn(
+    !!o.held,
     async () => {
       const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
       await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000 });
@@ -1226,9 +1272,10 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
  * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
  * then one short chat answer, which must say "ready" as asked (and nothing degenerate), and one about a picture when it
  * serves vision. Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it)
- * may take minutes, so it is given 15, or `timeoutMs` (the NPU check's forced timeout).
+ * may take minutes, so it is given 15, or `timeoutMs` (the NPU check's forced timeout). `held`: the caller holds the
+ * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts).
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number } = {}): Promise<string[]> {
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
   const problems: string[] = [];
@@ -1236,8 +1283,8 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
   const limit = o.timeoutMs ?? 15 * 60_000;
   const t0 = Date.now();
-  await withAcceleratorTurn(
-    lockDirsOf({ id: 'npu', slots: 1 }),
+  await inNpuTurn(
+    !!o.held,
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
       await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit });
@@ -1457,6 +1504,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     log(`config.json not written: ${saved.problems.join('; ')}`);
     return { code: 1, plan };
   }
+  // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
+  if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
   const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
