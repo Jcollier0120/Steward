@@ -211,7 +211,7 @@
           "timeouts": {
             "requestBaseMs": 15000,
             "requestPerTokenMs": 200,
-            "coldLoadMs": 60000
+            "coldLoadMs": 120000
           },
           "maxContextTokens": 2048,
           "caps": {
@@ -219,12 +219,12 @@
           },
           "args": {
             "--max_prompt_len": "2048",
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
           },
           "memoryGb": {
-            "chat": 3.9
+            "chat": 4.3
           },
-          "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer; the slowest start to a first answer took 33 s, its compile included: 60 s allows half again; 3.88 GB working set. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4, the compile 34 s against 30. 256-token chunks answered short in 0.8 s, 512 in 1.4 s; the same answers in each. GENERATE_HINT BEST_PERF wrote no faster (11.5 tokens a second against 11.2) and doubled the compile (72 s). A 4,096-token prompt holds 4.7 GB, 0.8 GB more, past a 16 GB PC's room for chat and embeddings together."
+          "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4. Then 20 quick benchmarks on the same PC (npu-bench, 2026-10-14), each also reading prompts no cache had seen: in 64-token chunks a short answer took 0.35 s and 1,740 tokens 8.1 s; in 128, 0.5 s and 6.3 s; in 256, 0.78 s and 6.0 s; in 512, 1.43 s and 6.4 s; in 1,024, 3.1 s and 6.9 s: 128 stays. GENERATE_HINT BEST_PERF writes 10.7 to 11.6 tokens a second against 9.6 to 10.5, and the benchmark's jobs took 22.6 to 24.3 s against 26.0 to 27.8 (five runs against five, never overlapping), the same reads and answers; it doubles the first compile, 57 to 62 s against 27 to 39: the slowest start to a first answer took 62 s: 120 s allows half again. OpenVINO Model Server turns the NPU's prefix caching on, and its 128 blocks of 128 tokens left the server holding 5.2 GB after a dozen varied long prompts, against 3.2 GB without it; 32 blocks (4,096 tokens) kept every time and held 3.8 GB, 4.3 GB at the end of the benchmark. PREFILL_HINT STATIC read every prompt in 7.4 s; NPU_TURBO was no faster, and STATIC prefill attention read 15 to 20% slower. A 3,072-token prompt held 0.4 GB more and read 5 to 10% slower; a 4,096-token one 1.0 GB more, past a 16 GB PC's room for chat and embeddings together."
         },
         "arrow-lake": {
           "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
@@ -241,12 +241,12 @@
           },
           "args": {
             "--max_prompt_len": "2048",
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
           },
           "memoryGb": {
-            "chat": 3.9
+            "chat": 4.3
           },
-          "basis": "Not measured: the NPU 3720 measured under meteor-lake, with its prompt chunks and memory; the generous starting values stay until the NPU check runs on one."
+          "basis": "Not measured: the NPU 3720 measured under meteor-lake, with its prompt settings and memory; the generous starting values stay until the NPU check runs on one."
         },
         "lunar-lake": {
           "label": "Core Ultra 200V, Lunar Lake (NPU 4)",

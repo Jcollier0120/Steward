@@ -646,7 +646,7 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, 32 blocks cached, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; NPU 5 Lunar Lake's with margin, Lunar Lake as measured", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
@@ -659,13 +659,17 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   assert.equal(meteor.serve[meteor.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(meteor.maxContextTokens, 2048);
   assert.equal(meteor.caps.chat, 2048);
-  assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 60_000 });
-  assert.equal(meteor.memoryGb?.chat, 3.9);
+  // BEST_PERF's first compile took up to 62 s: 120 s allows half again.
+  assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 120_000 });
+  assert.equal(meteor.memoryGb?.chat, 4.3, 'the working set at the end of the benchmark, its prefix cache at 32 blocks');
   assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
   // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
-  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). Lunar Lake keeps OpenVINO's, as measured.
+  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). It writes with BEST_PERF, 10.7 to 11.6 tokens
+  // a second against 9.6 to 10.5, and keeps 32 blocks of prompts (4,096 tokens) cached, 3.8 GB against 5.2 with
+  // OpenVINO Model Server's 128. Lunar Lake keeps OpenVINO's, as measured.
   const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
-  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128' });
+  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128', GENERATE_HINT: 'BEST_PERF', NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS: '32' });
+  assert.ok(meteor.timeouts.coldLoadMs! >= 62_000 * 1.5, "the cold load covers BEST_PERF's first compile with half again");
   assert.equal(plugin(V.routeFor(intel, 'arrow-lake')), plugin(meteor), 'Arrow Lake-S: the same NPU 3720');
   assert.equal(plugin(intel), '{}');
   // As measured: 200 ms a token covers half the 10.1 tokens a second it wrote.
@@ -686,7 +690,7 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   // An NPU 3720 is planned with them.
   const plan = planFor(NPU.meteor, 'x64', 'C:\\t');
   assert.equal(plan.route.maxContextTokens, 2048);
-  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 60_000);
+  assert.equal(V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port }).timeouts?.coldLoadMs, 120_000);
 });
 
 test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
