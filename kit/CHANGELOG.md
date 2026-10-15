@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
+
+### What's new
+
+- **npu-vendors.ts**: a generation's `embedArgs`, its embedding server's arguments that differ on it, replace those in the route's `embedServer.serve` as `args` do in `serve` (`routeFor`). An unknown generation takes none.
+
+### What changed
+
+- **npu-vendors.json's `meteor-lake`** (the NPU 3720 of Meteor Lake and Arrow Lake-U): `embedArgs` `{"--target_device": "GPU"}`, the same OpenVINO Model Server, model, pooling, `--max_length 2048` and port, on the processor's graphics. Measured on a Core Ultra 5 225U's Intel Graphics (2026-10-15, two runs each, spec/NPU-VENDORS.md, The NPU 3720's embeddings): a query in 49–50 ms against the NPU's 1.13 s; 16 of Reeve's chunks in 4.8 s against 18.0; a dense chunk (1,100–1,320 tokens) in 0.73–0.95 s against 2.5; vectors at cosine 0.997–0.999 to the NPU's, under the same model name, so Reeve's index stays. Beside the chat server with the route's command, chat wrote 13.1–13.3 tokens a second while the graphics indexed, as fast as alone, against 6.5–6.8 with both on the NPU. The NPU's entry still takes one request at a time, so chat waits for an indexing batch: about 5 s for 16 chunks, against 18 s on the NPU (about 40 for dense ones).
+  - Not chosen: the NPU at `--max_length` 512 answers a query in 0.27 s but refuses Reeve's dense chunks, so it would need a second server for queries; 1,024 saves 4–6% and refuses them too. The processor slowed chat by a fifth while indexing and held about 2.4 GB. llama.cpp's Vulkan build, setup's for a card, was slower on the same graphics, with another model's vectors. `NPUW_LLM_PREFILL_CHUNK_SIZE` in the embedding server's `--plugin_config` (128 or 256) stops OpenVINO Model Server at its start (0xC0000409), as before.
+  - Arrow Lake-S, the same NPU, keeps its embeddings on the NPU: its F models have no graphics. So does every other generation, and one setup doesn't know.
+- **npu-check.ts's `routeOnDevice`** leaves the embedding server where the route has it when the check runs on the NPU, so the NPU 3720's stays on the graphics; on the processor or the graphics it goes with chat, as before.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
+- The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.
+
 ## 2.75.2
 
 **Automatic updates work on a busy PC: a page slow to start after an update is waited for instead of rolled back, a rollback never leaves the new page running over the old files, and an agent's rounds make room for Manor's update.**
