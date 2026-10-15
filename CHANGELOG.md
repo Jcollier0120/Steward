@@ -21,6 +21,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - It updates itself as usual, and agents get it as they pin the kit.
 - On a Ryzen AI PC whose NPU setup left out, run Manor's "Set up local AI" once after the agents have it, to bring the NPU in.
 
+## 0.36.36
+
+**Kit PRs no longer wait for a trial each: a queue of them is tried once, and a catch-up keeps the trial.**
+
+### What changed
+
+- Kit PRs waiting one behind another are tried on the agents together, once: the first one's trial tries the kit with each one queued after it merged in, in the order they merge. When every agent passes, they merge one after another without a trial each. When an agent fails, the first is tried alone, as before, so a failure is only held against the PR that brings it. On 14 October eight kit PRs waited for a trial each, one at a time, for hours.
+- A kit PR caught up with its branch keeps its trial when the catch-up changed only versions and changelogs (the kit's version, its changelog, version lines), as a vouch is kept. Before, every catch-up started its trial over on every agent.
+- An agent that fails a kit's trial the way a busy PC fails (a test killed, a folder still in use, a run stopped at its time limit), or that fails without the new kit too, is tried once more, alone, after the rest of the trial, and holds the PR only if it fails again. Two agents held a kit PR this way on 14 October.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Trials already kept are used as they are.
+
 ## 0.36.33
 
 **A pull request that conflicts with its branch is caught up within minutes, not when the round next reaches it.**
