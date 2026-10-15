@@ -1,7 +1,8 @@
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
-import { mapLimit, networkFailure, result, type Ctx, type EmployeeResult } from './common.ts';
+import { mapLimit, networkFailure, releaseDirOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { releaseOne } from './release.ts';
+import { keptSigningDown, noteSigningWaits } from '../signing.ts';
 import { clearTastingHold } from '../tasting.ts';
 import { takeFreshStart } from '../fresh-start.ts';
 import { withRepo } from './slots.ts';
@@ -15,7 +16,8 @@ import { withRepo } from './slots.ts';
  *
  * A release that fails isn't tried again at the same commit, round after round: the commit is kept in
  * round-failed.json, and the round says so until a person releases it (Release on the page, or `steward
- * release`), or a new commit on the branch is tried afresh.
+ * release`), or a new commit on the branch is tried afresh. Not one that waits until this PC can sign (signing.ts):
+ * nothing failed, and the round after the key can be reached releases it.
  */
 
 export const roundFailuresFile = () => dataFile('round-failed.json');
@@ -27,6 +29,9 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
   // After a fresh start (fresh-start.ts), each release that failed before is tried once more: it may have failed only
   // because the PC was going to sleep, shutting down or offline. Failing again, it stands as before.
   const retry = takeFreshStart('releases') ? new Set(Object.keys(failed)) : new Set<string>();
+  // One that failed only because the code-signing key couldn't be reached (as rounds before 0.36.30 kept those) isn't
+  // left to a person: it waits until this PC can sign, as a release that signs does now (signing.ts).
+  for (const e of employees) if (failed[e.id] && keptSigningDown(releaseDirOf(ctx.settings, e))) delete failed[e.id];
   // A few employees at a time (Settings' parallel); what failed is kept once all are done.
   const out = await mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
@@ -50,6 +55,8 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
     if (!r.again) clearTastingHold(r.id);
   }
   writeJson(roundFailuresFile(), failed);
+  // Those waiting until this PC can sign, for one alarm; the rest no longer wait (released, or something else holds them).
+  noteSigningWaits(Object.fromEntries(out.map((r) => [r.id, r.signing && r.version && r.commit ? { version: r.version, commit: r.commit, why: r.signing } : null])));
   return out;
 }
 
