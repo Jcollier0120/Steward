@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.75.2
+
+**Automatic updates work on a busy PC: a page slow to start after an update is waited for instead of rolled back, a rollback never leaves the new page running over the old files, and an agent's rounds make room for Manor's update.**
+
+### What's new
+
+- **update-hold.ts**: while Manor has an automatic update due for the agent, a scheduled round waits (`every()`, and `runSoon()`'s rounds too), looking again every 30 s (`UPDATE_LOOK_MS`), its state's `waiting` saying "Manor to update it to <version>". Manor updates an agent only while it's idle, and looks every minute: an agent whose rounds ran back to back was never idle then, and its update waited for hours. It waits 5 minutes at most for a version (`UPDATE_HOLD_MS`), then the rounds go on, and wait again 30 minutes later (`UPDATE_HOLD_AGAIN_MS`). A round asked for (Run now) never waits.
+- `updateDue()` reads Manor's files: `updates.json` (a version newer than this one available, Manor's last look not cut short by a problem or the network, not one Manor has given up on after its three tries or waits to try again) and `settings.json` (the agent's automatic updates on). A version the agent's own install refuses (`unsafe-updates.json`) isn't due, nor is anything in a development checkout. `updateHold()` is the agent's one hold, shared by all its schedules; `updateHolder()` makes another; `compareVersions` compares dotted versions.
+- **native.ts**: `pagesFrom(app)` lists the Node processes running the page from an app folder (`<app>\src\cli.ts serve`, and the `open` that starts it) by their command lines, which `processesUnder` can't see, since Node runs from its own folder. `pagesIn(lines, app)` reads PowerShell's lines for it.
+
+### What changed
+
+- **install.ts**: after starting the page, an install waits 20 s for it as before (`PAGE_FIRST_MS`), then on while its process is still starting, up to 5 minutes (`PAGE_START_MS`). A page whose process has ended isn't waited for past the 20 s. Its line says `up, after <n> s: the PC is busy`, `didn't answer, and its process has ended`, or `still starting after 5 minutes`. `waitForPage(ok, app, d)` is exported, and `InstallDeps.pagesStarting` stands in for `pagesFrom` in a test. On 15 October the Steward's 0.36.46 and the Assayer's 0.4.2 took longer than 20 s to answer on a PC running a release's checks: each was rolled back and flagged as unsafe, and went on running over the older version's files.
+- **safeinstall.ts**: an install that gave up waiting for the page, whose page answers as the new version by the time it is judged, goes on to its probation, which judges it as any other. Before, it was rolled back and flagged.
+- **safeinstall.ts**: a rollback ends any page process still starting from app, and the `open` starting it (`endStartingPages`, in the real `endPage`), before it puts the version before back. Such a page has no `server.json` yet, so the rollback used to miss it, and it came up over the older files. The rollback then waits for the old page as an install does.
+- **safeinstall.ts**: once a version holds up for its probation, the flags of the versions before it are dropped (allowed again), and with them an agent's alarm for one. Their kept copies (`app.unsafe-<version>`) stay.
+
+### For an agent
+
+- Nothing to do for its schedule. An agent that starts rounds itself, beside its schedule (the Steward does, after a kit trial or on waking), asks `updateHold()` first and starts none while it answers: the schedule runs that round once the wait ends.
+- A PC already left with a newer page running over an older version's files, that version flagged, is set right by the agent's next release: its install ends the running page, puts the whole release in, and drops the old flag once the new version holds up. Until the agent runs this kit, its rounds don't wait for Manor, so its next update may still wait for an idle moment, or for Update in Manor.
+- A test that runs `every()` reads Manor's files from `MANOR_HOME` (else `%USERPROFILE%\.manor`): set it to a folder of the test's own when the test's agent id could have automatic updates on.
+
 ## 2.75.1
 
 **On a Snapdragon, the embedding server beside GenieX holds 1.4 GB of the NPU's memory, not 2.9 GB, in the same time and to the same vectors, so chat, pictures and embeddings fit a 16 GB PC with room to spare.**

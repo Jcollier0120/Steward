@@ -9,6 +9,10 @@ import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
 import { FIRST_ROUND_WAITING, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
+import { updateHold } from './update-hold.ts';
+
+/** How often a scheduled round waiting for Manor's update looks again (update-hold.ts, kit 2.75.2). */
+export const UPDATE_LOOK_MS = 30_000;
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
 export interface RoundState {
@@ -298,6 +302,9 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * A round's work keeps the PC awake (awake.ts, kit 2.74.8): the job's `awake(what)` holds Windows from sleeping on its
  * own while it runs checks, merges or a release, until the function it returns is called, or the round ends. Only for
  * work: a round that only looks holds nothing, so the PC still sleeps between rounds.
+ *
+ * While Manor has an automatic update due for it (update-hold.ts, kit 2.75.2), a scheduled round waits a few minutes,
+ * looking again every UPDATE_LOOK_MS, its state's `waiting` saying so: Manor updates an agent only while it's idle.
  */
 export function every(
   everyMs: number | (() => number),
@@ -361,6 +368,14 @@ export function every(
       if (stopped) return;
       wait();
       recordHeld(opts.name ?? 'round', held, interval());
+      return;
+    }
+    // Manor has an automatic update due for it (update-hold.ts, kit 2.75.2): a scheduled round waits a few minutes, so
+    // Manor finds it idle and puts the update in, rather than rounds back to back keeping it busy all day. Asked for, never.
+    const forUpdate = asked ? null : updateHold();
+    if (forUpdate) {
+      waiting = forUpdate;
+      if (!stopped) waitFor(Math.min(UPDATE_LOOK_MS, interval()));
       return;
     }
     running = true;

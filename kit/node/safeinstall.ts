@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { APP, port } from '../app.ts';
 import { flushTree } from './flush.ts';
-import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, type InstallDeps } from './install.ts';
+import { appFolder, defaultDeps, install, readRelease, replaceContents, TASK_NAME, waitForPage, type InstallDeps } from './install.ts';
+import { endProcesses, pagesFrom } from './native.ts';
+import { compareVersions } from './update-hold.ts';
 import { ping } from './service.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 
@@ -20,7 +22,8 @@ import { dataFile, readJson, writeJson } from './store.ts';
  *    version flagged in unsafe-updates.json.
  * A flagged version is refused at once, nothing changed, by every install after (so Manor's automatic updates stop
  * after their few tries), until it is allowed again: `install --allow-unsafe` from the release, or the agent's own way
- * (the Steward's: Dismiss on its alarm). A newer version isn't flagged, and installs as usual.
+ * (the Steward's: Dismiss on its alarm). A newer version isn't flagged, and installs as usual; once it holds up, the
+ * flags of the versions before it are dropped (kit 2.75.2).
  * An install that changed nothing (the old page wouldn't stop, the copy couldn't be made) flags nothing: it is
  * tried again. A first install has no version before it to go back to.
  *
@@ -80,7 +83,8 @@ export interface SafeDeps extends InstallDeps {
   probationMs: number;
   /**
    * Ends the installed copy's page, whether or not it answers: the kit's shutdown, then its process, by server.json's
-   * pid, when it's still there. True once it has gone. A page that has stopped answering may still hold the port.
+   * pid, when it's still there, and any page process still starting from app (kit 2.75.2). True once they have gone.
+   * A page that has stopped answering may still hold the port.
    */
   endPage(): Promise<boolean>;
   copy(from: string, to: string): void;
@@ -210,11 +214,13 @@ async function rollBack(app: string, prev: string, kept: string, d: SafeDeps): P
   const ran = await d.schtasks(['/Run', '/TN', TASK_NAME]);
   if (ran.code !== 0) return null;
   const was = readRelease(app)?.version;
-  let v: string | null = null;
-  for (let waited = 0; waited < 20_000; waited += 500) {
-    v = await d.pingVersion();
-    if (v !== null && v === was) return v;
+  // Waited for as an install waits for its page (kit 2.75.2): a busy PC's slow start isn't taken for none.
+  let v = null as string | null;
+  await waitForPage(async () => (v = await d.pingVersion()) !== null, app, d);
+  // A page answering as another version a moment after the swap is given the 20 s it always was to become this one.
+  for (let waited = 0; v !== null && v !== was && waited < 20_000; waited += 500) {
     await d.sleep(500);
+    v = await d.pingVersion();
   }
   return v;
 }
@@ -254,6 +260,7 @@ export async function watchProbation(version: string, from: string, since: numbe
   const app = appFolder(d.dataDir);
   const why = d.now() - since < d.probationMs ? await probation(version, d, { since }) : null;
   if (!why) {
+    dropOlderFlags(version, d);
     d.out(`${APP.name} ${version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${app}.prev, to go back to by hand.`);
     return 0;
   }
@@ -262,6 +269,17 @@ export async function watchProbation(version: string, from: string, since: numbe
     return 0;
   }
   return goBack(version, from, why, d);
+}
+
+/**
+ * Once a version has held up for its probation, the versions before it that were flagged are allowed again (kit
+ * 2.75.2): Manor never installs an older one, and an agent's alarm for one (the Steward's) would stay up for nothing.
+ * Their kept copies (app.unsafe-<version>) stay for a look.
+ */
+function dropOlderFlags(version: string, d: SafeDeps): void {
+  for (const v of Object.keys(d.flagged())) {
+    if (compareVersions(v, version) < 0 && allowUpdate(v)) d.out(`${v} was flagged as unsafe: no longer, since ${version}, newer, holds up.`);
+  }
 }
 
 export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; allowUnsafe?: boolean; wait?: boolean } = {}, d: SafeDeps = safeDeps()): Promise<number> {
@@ -300,7 +318,11 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
     return code;
   }
   const from = before!.version;
-  if (code !== 0) return goBack(release.version, from, `its install failed (exit ${code}) once it was in place`, d);
+  // Its page answering as the new version by now, though the install gave up waiting for it (a busy PC's slow start),
+  // is no failed install: its probation judges it, as any other's (kit 2.75.2). The Steward's 0.36.46 was rolled back
+  // and flagged for answering late, and went on running over 0.36.42's files.
+  if (code !== 0 && (await d.pingVersion()) === release.version) out(`${APP.name} ${release.version}'s page answered late, after the install had stopped waiting for it (the PC is busy): its probation goes on.`);
+  else if (code !== 0) return goBack(release.version, from, `its install failed (exit ${code}) once it was in place`, d);
   // Its start waited for here; the rest, in the background, when a watcher can take it (kit 2.52.0).
   const since = d.now();
   const background = !opts.wait && !!d.watch && d.probationMs > SETTLE_MS;
@@ -315,13 +337,36 @@ export async function safeInstall(opts: { noStart?: boolean; dryRun?: boolean; a
     const late = await probation(release.version, d, { since });
     if (late) return goBack(release.version, from, late, d);
   }
+  dropOlderFlags(release.version, d);
   out(`${APP.name} ${release.version} held up for ${Math.round(d.probationMs / 1000)} s. ${from} stays in ${prev}, to go back to by hand.`);
   return 0;
+}
+
+/**
+ * Ends the page processes still starting from `app` (kit 2.75.2), and the `open` starting them, as the real endPage
+ * does after the kit's shutdown and server.json's pid: a page still starting has no server.json of its own yet, and
+ * would come up over the version a rollback puts back in app. The Steward's 0.36.46 did, and ran over 0.36.42's files.
+ * This process is never one of them. True once none is left.
+ */
+export async function endStartingPages(
+  app: string,
+  d: { pagesStarting(app: string): Promise<number[]>; endPrograms(ids: number[]): Promise<void>; sleep(ms: number): Promise<void> },
+): Promise<boolean> {
+  const starting = async () => (await d.pagesStarting(app)).filter((id) => id !== process.pid);
+  let left = await starting();
+  if (!left.length) return true;
+  await d.endPrograms(left);
+  for (let i = 0; i < 10 && left.length; i++) {
+    await d.sleep(1000);
+    left = await starting();
+  }
+  return !left.length;
 }
 
 /** The real things: the kit's install and its deps, the page's ping, the clock and the flags in the data folder. */
 export function safeDeps(): SafeDeps {
   const d = defaultDeps();
+  const pagesStarting = d.pagesStarting ?? (async (app: string) => pagesFrom(app));
   return {
     ...d,
     install: (opts) => install(opts, d),
@@ -334,16 +379,17 @@ export function safeDeps(): SafeDeps {
     endPage: async () => {
       await d.shutdown();
       const pid = readJson<{ pid?: number } | null>(dataFile('server.json'), null)?.pid;
-      if (typeof pid !== 'number' || pid === process.pid || !alive(pid)) return true;
       // server.json's pid may be stale, and Windows reuses pids: only a Node is ended.
-      if (!(await isNode(pid))) return true;
-      try {
-        process.kill(pid);
-      } catch {
-        // Gone meanwhile, or not ours to end: alive() says which.
+      if (typeof pid === 'number' && pid !== process.pid && alive(pid) && (await isNode(pid))) {
+        try {
+          process.kill(pid);
+        } catch {
+          // Gone meanwhile, or not ours to end: alive() says which.
+        }
+        for (let i = 0; i < 40 && alive(pid); i++) await d.sleep(250);
+        if (alive(pid)) return false;
       }
-      for (let i = 0; i < 40 && alive(pid); i++) await d.sleep(250);
-      return !alive(pid);
+      return endStartingPages(appFolder(d.dataDir), { pagesStarting, endPrograms: async (ids) => endProcesses(ids), sleep: d.sleep });
     },
     // app.prev on the disk, as the release is before its swap (kit 2.73.3): what a rollback after a crash puts back.
     copy: (from, to) => {
