@@ -5,6 +5,7 @@ import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
+import { updateHold } from './kit/update-hold.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { currentWork, inWork, startWork, workTasks } from './kit/work-tasks.ts';
 import { workBlocks } from './work-status.ts';
@@ -272,8 +273,15 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       end();
     }
   };
-  /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
-  const startRound = () => void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  /**
+   * A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). While Manor has
+   * an automatic update due for the Steward (the kit's update-hold.ts), none starts: the schedule's rounds wait a few
+   * minutes for it, so Manor finds the Steward idle, and its next look runs the round this one would have been.
+   */
+  const startRound = () => {
+    if (updateHold()) return;
+    void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  };
   // Beside the rounds (steward.ts's conflictsNow): every few minutes, while a stage's slot is free, the ready PRs that
   // conflict with their branch are caught up, rather than waiting for a round to reach their repository; a long round
   // (a vouch's tests, a kit trial) left them waiting for hours. It takes a slot only once it finds one to catch up, and
@@ -281,7 +289,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   let conflictsGoing = false;
   const conflictsJob = async () => {
     const s = loadSettings();
-    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs()) return;
+    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs() || updateHold()) return;
     if (Date.now() - roundBegan < CONFLICTS_EVERY_MS) return;
     conflictsGoing = true;
     try {
@@ -442,6 +450,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
           roundAfter = true;
           return { json: { started: false, queued: true, message: `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
         }
+        // Manor's automatic update due (startRound): the round waits for it, a few minutes at most.
+        if (updateHold()) return { json: { started: false, queued: true, message: 'Manor is about to update the Steward, so its rounds wait a few minutes for it: a round comes after.' } };
         startRound();
         return { json: { started: true, message: "The Steward's round has started: it merges the PR now if its turn has come." } };
       },

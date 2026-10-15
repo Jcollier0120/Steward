@@ -5,7 +5,7 @@ import path from 'node:path';
 import { APP, appRoot, dataDir, devCheckout, pageUrl } from '../app.ts';
 import { duty, setDuty } from './duty.ts';
 import { flushTree } from './flush.ts';
-import { endProcesses, keepOwnArch, nativeRelease, processesUnder, type NativeRelease } from './native.ts';
+import { endProcesses, keepOwnArch, nativeRelease, pagesFrom, processesUnder, type NativeRelease } from './native.ts';
 import { inside, realPath, samePath } from './real-path.ts';
 import { pageAt, ping, shutdown } from './service.ts';
 
@@ -101,6 +101,8 @@ export interface InstallDeps {
   programsIn?(dir: string): Promise<number[]>;
   /** Ends processes by id (default: native.ts endProcesses). */
   endPrograms?(ids: number[]): Promise<void>;
+  /** The page processes started from an app folder, still running: `serve` and the `open` that starts it (default: native.ts pagesFrom). */
+  pagesStarting?(app: string): Promise<number[]>;
 }
 
 export const appFolder = (data: string) => path.join(data, 'app');
@@ -248,6 +250,34 @@ async function waitFor(ok: () => Promise<boolean>, ms: number, d: InstallDeps): 
     await d.sleep(500);
   }
   return ok();
+}
+
+/** How long an install waits for the page it started, whatever: Task Scheduler may not have started its process yet. */
+export const PAGE_FIRST_MS = 20_000;
+/** How long it waits in all while the page's process is still starting (kit 2.75.2). */
+export const PAGE_START_MS = 5 * 60_000;
+/** How often it looks whether the page's process is still there, once PAGE_FIRST_MS has gone by. */
+const PAGE_LOOK_MS = 5_000;
+
+/**
+ * Waits for a page started from `app` to answer (`ok`), as an install's start and a rollback's do (kit 2.75.2):
+ * PAGE_FIRST_MS, then on while its process is still starting (native.ts pagesFrom), up to PAGE_START_MS in all. On a
+ * busy PC (a release's checks running beside every agent's rounds) a page can take minutes to come up: the 20 s an
+ * install gave it before took a slow start for a broken release, and rolled back releases that were fine (the
+ * Steward's 0.36.46 and the Assayer's 0.4.2, on 2026-10-15). A page whose process has ended isn't waited for.
+ * `waitedMs`: how long it was waited for, once past PAGE_FIRST_MS (0 within it); `gone`: it didn't answer, and no process of it is left.
+ */
+export async function waitForPage(ok: () => Promise<boolean>, app: string, d: InstallDeps): Promise<{ up: boolean; waitedMs: number; gone: boolean }> {
+  if (await waitFor(ok, PAGE_FIRST_MS, d)) return { up: true, waitedMs: 0, gone: false };
+  const starting = d.pagesStarting ?? (async (dir: string) => pagesFrom(dir));
+  for (let waited = PAGE_FIRST_MS; waited < PAGE_START_MS; waited += PAGE_LOOK_MS) {
+    if (!(await starting(app)).length) {
+      const up = await ok();
+      return { up, waitedMs: waited, gone: !up };
+    }
+    if (await waitFor(ok, PAGE_LOOK_MS, d)) return { up: true, waitedMs: waited + PAGE_LOOK_MS, gone: false };
+  }
+  return { up: false, waitedMs: PAGE_START_MS, gone: false };
 }
 
 /** Ends the installed copy's page process, if it's running, and waits until it has gone. `wasUp`: it was running. */
@@ -437,8 +467,17 @@ export async function install(opts: { noStart?: boolean; dryRun?: boolean } = {}
     const ran = await d.schtasks(['/Run', '/TN', TASK_NAME]);
     if (ran.code !== 0) started = `not started: schtasks /Run failed: ${ran.out}`;
     else {
-      up = await waitFor(() => d.ping(), 20_000, d);
-      started = up ? 'up' : `didn't answer within 20 s; see ${path.join(d.dataDir, 'serve.log')}`;
+      // A slow start on a busy PC is waited for while the page's process is there (waitForPage, kit 2.75.2).
+      const page = await waitForPage(() => d.ping(), app, d);
+      up = page.up;
+      const log = path.join(d.dataDir, 'serve.log');
+      started = up
+        ? page.waitedMs
+          ? `up, after ${Math.round(page.waitedMs / 1000)} s: the PC is busy`
+          : 'up'
+        : page.gone
+          ? `didn't answer, and its process has ended; see ${log}`
+          : `still starting after ${PAGE_START_MS / 60_000} minutes; see ${log}`;
     }
   }
 
