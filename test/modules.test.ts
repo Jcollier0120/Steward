@@ -120,10 +120,16 @@ test("a set's rename waits while Windows says its files are in use, and only the
   const gone = busy('ENOENT', 1);
   await assert.rejects(renameWhenFree('from', to, { rename: gone.rename }), /ENOENT/);
   assert.equal(gone.tries(), 1);
-  // Still in use when the time is up: its error.
+  // Still in use when the time is up: its error. On the test's clock, each try 40 ms, so a run held back by the checks
+  // pace can't spend the budget before the second try: at 80 ms, the next wait (50 ms) would pass the 100 ms.
+  let clock = 0;
   const stuck = busy('EPERM', Number.POSITIVE_INFINITY);
-  await assert.rejects(renameWhenFree('from', to, { rename: stuck.rename, budgetMs: 100 }), /EPERM/);
-  assert.ok(stuck.tries() > 1, 'it tried again');
+  const slowRename = () => {
+    clock += 40;
+    stuck.rename();
+  };
+  await assert.rejects(renameWhenFree('from', to, { rename: slowRename, budgetMs: 100, now: () => clock }), /EPERM/);
+  assert.equal(stuck.tries(), 2, 'it tried again, and stopped once the time was up');
   // Another process finished the set meanwhile: no wait, the caller takes theirs.
   mkdirSync(to, { recursive: true });
   writeFileSync(path.join(to, '.ready'), 'theirs');

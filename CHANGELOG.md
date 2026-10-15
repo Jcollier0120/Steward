@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.29
+
+**Tests, checks and builds run faster: they get a third of the processor, three at a time, and long test runs get the time they need.**
+
+### What changed
+
+- The checks pace now gives the test runs, type checks, installs and builds that the agents start a third of the processor, on any PC, and lets three run at once instead of two. Before, they had a quarter of the processor and never more than four processors' worth (two before 0.36.28): 22% on an 18-thread PC, 11% before. Checks waited in line while the PC sat mostly idle, and vouches, kit trials and releases took far longer than they needed. The other two thirds stay free for you. `"checksPace"` in Manor's settings.json still sets your own share.
+- The Steward used to give a paced run four times its usual time limit, which suits a quarter of the processor. With a smaller share, a big test suite could be stopped part way through, with nothing failed, and the vouch or check said only "Command failed". Now the time limit grows with how much the pace slows the run (four times at a third, nine at 11%), plus the 20 minutes it may wait for its turn.
+- The Steward's chosen tests now run as many test files at a time as their share of the processor has room for (12 at a third of 18 processors), not one per processor.
+- A command stopped at its time limit now says "stopped after N minutes, its time limit at the checks pace" instead of "Command failed" and its whole command line.
+- Two of the Steward's own tests, one for the NPU benchmark's energy reading and one for renaming a shared package set, failed now and then at the checks pace, with nothing wrong, and made a vouch or a kit release run again. They no longer depend on how fast the PC runs them.
+- This brings kit 2.74.2. It also carries the NPU benchmark's fixes made on another PC: it runs at each NPU generation's own prompt length, counts an energy figure only when the battery's reading can tell it, and runs on a Snapdragon's GenieX.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.28
 
 **A vouch that runs five minutes past its usual time is stopped, and check runs get twice the processor on a big PC.**

@@ -2,10 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
-**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, a candidate's report carries its files' SHA-256s, and its spec says how to run it on a PC.**
+## 2.74.2
+**Paced runs go faster: the checks pace's cap is a third of the processor and three runs go at once; and paced test runs get room to finish, a time limit stretched as much as the cap slows them, as many test files at once as the cap has room for.**
+
+### What's new
+
+- checks-pace.ts: **`pacedSlower(cap)`**, how many times its full-speed time limit a paced command may take: the whole processor against the share the cap leaves, 4 at least (9 for two of 18 processors). **`CHECKS_TURN_MS`**, the 20 minutes a run may wait for a turn. `pacedCommand()` gives both on what it returns, as `slower` and `waitMs` (left out when the command runs as it is).
+- **`pacedTestConcurrency(cap, processors)`** and **`withTestConcurrency(file, args, n)`**: a paced `node … --test …` (node itself, every argument before `--test` one of node's options, no concurrency of its own) gets `--test-concurrency` of twice the processors the cap leaves, 2 at least. `pacedCommand()` adds it. An npm script's node isn't seen, and `--test-concurrency` can't go in NODE_OPTIONS.
 
 ### What changed
+
+- **The checks pace's cap is a third of the processor by default** (`checksCap()`, now with no argument: 3333), whatever the PC's processors. It was a quarter and four processors' worth at most (2.74.1; two, the gentle pace's, up to 2.74.0): 22% on an 18-thread laptop. The agents' own background pace (`gentleCap()`) is unchanged. Manor's `"checksPace"` and `KIT_CHECKS_PACE` still set it, and Settings' pace at full still lifts it.
+- **Three paced runs go at once on the PC** (`CHECKS_AT_ONCE`), not two. They share the one cap, so a third run takes no more of the processor; a short check no longer waits behind two long ones. A launcher of an older kit, asking two, takes one of the first two turns, so both kinds keep within three.
+- **Why:** on 2026-10-14 six paced runs waited for one of two turns, held to two processors' worth, while the 18-thread laptop's processor was 28% busy with 20 GB of memory free. At a third, `pacedSlower` is 4 and a `node --test` runs 12 files at once there.
+- Nothing else changes for a command that isn't `node --test`: its arguments and environment are as they were.
+- **Why the time limit and the test files:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
+
+### For an agent
+
+- If your runner stretches a paced command's time limit by a fixed amount, use `slower` and `waitMs` from `pacedCommand()` instead: `timeoutMs * (paced.slower ?? 4) + (paced.waitMs ?? 0)`, as the Steward's run.ts does.
+- If you call `checksCap(processors)`, drop the argument: the default no longer depends on the processors.
+- Nothing else to do to take it.
+
+### What changed in the NPU benchmark
+
+Made on WEASELDEV02 (#255, #257, #258) and released first in this version.
+
+**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, a candidate's report carries its files' SHA-256s, and its spec says how to run it on a PC.**
+
+#### What changed
 
 - **npu-bench.ts runs the route as setup does on this NPU's generation** (`routeFor`, as the NPU check already did). Before, it took the route's own values:
   - on a Meteor Lake NPU 3720, the report said cap 4096, while the server ran at the generation's 2048;
@@ -34,7 +59,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - drops the `streams` a route was said to declare in `npu-vendors.json`, which none does: the bench sees whether each answer was streamed and marks the run `not-streamed` (or `no-usage`) when not. Whether GenieX streams, with usage in its last chunk, is still to be checked on the X2 Elite;
   - gains **Running it on a PC**, a runbook an agent can follow unaided, with a Snapdragon section: the Steward's own kit, an Arm64 Node, the conditions, pausing the keeper and stopping the NPU's servers, the quick then full run, `--energy` on battery, and what to send back. On a Snapdragon it covers GenieX's quirks, its one model at a time, the 2,400-token cap and the ~8K prompt that bluescreened the X2 Elite, why `--device GPU` and `--cap` are refused there, and the streaming and energy still to be seen.
 
-### For an agent
+#### For an agent
 
 - Nothing to do.
 
