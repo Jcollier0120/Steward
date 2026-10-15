@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- The checks pace now gives the test runs, type checks, installs and builds that the agents start a third of the processor, on any PC, and lets three run at once instead of two. Before, they had a quarter of the processor and never more than two processors' worth: 11% on an 18-thread PC. Checks waited in line while the PC sat mostly idle, and vouches, kit trials and releases took far longer than they needed. The other two thirds stay free for you. `"checksPace"` in Manor's settings.json still sets your own share.
+- The checks pace now gives the test runs, type checks, installs and builds that the agents start a third of the processor, on any PC, and lets three run at once instead of two. Before, they had a quarter of the processor and never more than four processors' worth (two before 0.36.28): 22% on an 18-thread PC, 11% before. Checks waited in line while the PC sat mostly idle, and vouches, kit trials and releases took far longer than they needed. The other two thirds stay free for you. `"checksPace"` in Manor's settings.json still sets your own share.
 - The Steward used to give a paced run four times its usual time limit, which suits a quarter of the processor. With a smaller share, a big test suite could be stopped part way through, with nothing failed, and the vouch or check said only "Command failed". Now the time limit grows with how much the pace slows the run (four times at a third, nine at 11%), plus the 20 minutes it may wait for its turn.
 - The Steward's chosen tests now run as many test files at a time as their share of the processor has room for (12 at a third of 18 processors), not one per processor.
 - A command stopped at its time limit now says "stopped after N minutes, its time limit at the checks pace" instead of "Command failed" and its whole command line.
@@ -18,6 +18,23 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.28
+
+**A vouch that runs five minutes past its usual time is stopped, and check runs get twice the processor on a big PC.**
+
+### What's new
+
+- **A time limit on `steward vouch`.** Once a repository has three vouches that passed, a vouch's checks are stopped when they have run five minutes longer than its last ten passing vouches took on average. Whole-suite runs and runs of only the tests a change reaches are averaged apart, since one takes a fraction of the other. A stopped vouch says so, with the limit and how it was worked out, and sets nothing: the Steward tests the PR itself before merging, as for any PR without a vouch. Before, a stuck vouch could run for 80 minutes.
+
+### What changed
+
+- A command stopped at its time limit is ended with every program it started, not only the one the Steward started: a test run under npm, or under the checks pace, used to run on.
+- Kit 2.74.1: test runs, type checks, installs and builds may use a quarter of the processor, up to four processors' worth, where it was two. On a PC with more than eight processors they finish sooner. The Steward's own tests had taken over an hour on an 18-processor laptop that was otherwise idle. Agents take it as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The time limit starts once three vouches of a repository have passed on this version.
 
 ## 0.36.20
 

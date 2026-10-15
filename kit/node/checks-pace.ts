@@ -39,8 +39,9 @@ import { powershell, psQuote } from './ps.ts';
  * The cap by default, in hundredths of a percent: a third of the processor, however many processors it has (kit 2.74.2).
  * Half, as it was first, barely held a test suite back (the Assayer's own suite peaked at 57% of an 18-core laptop's
  * processor, 49% at half). The gentle pace's, from kit 2.73.0 (a quarter, two processors' worth at most: 11% there),
- * held it too far back: on 2026-10-14 six paced runs waited for a turn while the PC was three quarters idle, and long
- * suites crawled. A third keeps two thirds of the processor for the person and the agents.
+ * held it too far back: the Steward's own suite took over an hour on that laptop, otherwise idle, and on 2026-10-14 six
+ * paced runs waited for a turn while the PC was three quarters idle. Four processors' worth (kit 2.74.1, 22% there) was
+ * still short of what the PC had to spare. A third keeps two thirds of the processor for the person and the agents.
  */
 export function checksCap(): number {
   return 3333;

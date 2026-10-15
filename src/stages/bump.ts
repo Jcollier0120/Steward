@@ -134,8 +134,16 @@ export const needsNpmCi = (dir: string) =>
  * from the set installed once for its lockfile (modules.ts), else `npm ci` there; a .NET one restores its own packages
  * as it builds), the kit, then each test command (Settings). The first that failed, or null when all passed. A bump
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
+ *
+ * `timeLimit` (a vouch's, vouchtime.ts) gives the whole run a time limit from its start, asked once it's known whether
+ * it runs the whole suite or only the tests a change reaches: at once, unless `npm test` is picked, then as it is. A step
+ * still running at the limit is stopped with everything it started, and the run fails saying so.
  */
-export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string }): Promise<string | null> {
+export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null }): Promise<string | null> {
+  const started = Date.now();
+  const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
+  let limit: (TimeLimit & { at: number }) | null = null;
+  let limited = !o.timeLimit;
   const before: string[] = [];
   if (needsNpmCi(dir)) {
     // No package's install script runs unless Settings allow it; one that isn't holds the checks (installscripts.ts).
@@ -155,22 +163,33 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: { env?: R
     else steps.push(step);
   }
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
+    if (!limited && (!picks || o.affected!.chose !== undefined)) {
+      limited = true;
+      const t = o.timeLimit!(checkKind(picks ? o.affected : undefined));
+      if (t) {
+        limit = { ...t, at: started + t.ms };
+        o.say(`time limit: ${t.why}`);
+      }
+    }
+    const left = limit ? limit.at - Date.now() : undefined;
+    if (limit && left! <= 0) return `${step} wasn't started: the run was at its time limit, ${limit.why}`;
     const t0 = Date.now();
     // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
     // and each would start ssh-keygen and git maintenance.
-    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true });
-    o.say(`${step}: ${r.code === 0 ? 'ok' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
+    o.say(`${step}: ${r.code === 0 ? 'ok' : r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
       const tests = failedTests(output);
       for (const t of tests) o.say(`  failed: ${t.name}${t.error ? ` (${t.error})` : ''}`);
       for (const line of tail(output, 25).split('\n')) o.say(`  ${line}`);
       try {
-        writeFileSync(checksLogOf(dir), `${step} (exit ${r.code})\n\n${output}`);
+        writeFileSync(checksLogOf(dir), `${step} (${r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`})\n\n${output}`);
         o.say(`  its whole output: ${checksLogOf(dir)}`);
       } catch (err) {
         o.say(`  couldn't keep its output: ${(err as Error).message}`);
       }
+      if (r.timedOut) return `${step} was stopped at ${limit ? `the run's time limit, ${limit.why}` : `its time limit, after ${duration(Date.now() - t0)}`}${testsLine(tests)}`;
       return `${step} failed (exit ${r.code})${testsLine(tests)}${networkNote(output)}`;
     }
   }
@@ -189,6 +208,21 @@ export interface AffectedScope {
   changed?: Changed[];
   chose?: string;
 }
+
+/** What a run of the checks ran: the whole suite, or only the tests a change reaches (none, at times). */
+export type CheckKind = 'whole' | 'affected';
+
+/** A scope's kind once `npm test` is picked: whole without one, or when the whole suite was picked. */
+export const checkKind = (scope?: AffectedScope): CheckKind => (scope?.chose && scope.chose !== 'the whole suite' ? 'affected' : 'whole');
+
+/** A run's time limit, and why it is that, in words. */
+export interface TimeLimit {
+  ms: number;
+  why: string;
+}
+
+/** A duration in words: seconds under two minutes, else minutes. */
+export const duration = (ms: number) => (ms < 120_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
 
 /** What an AffectedScope takes of `npm test` (affectedPick): the whole suite and why, or the test files of all of them. */
 export type TestPick = { whole: string } | { files: string[]; tests: string[]; why: string; flags: string[]; pretest: boolean };

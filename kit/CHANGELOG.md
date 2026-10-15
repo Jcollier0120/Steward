@@ -12,11 +12,11 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What changed
 
-- **The checks pace's cap is a third of the processor by default** (`checksCap()`, now with no argument: 3333), whatever the PC's processors. It was the gentle pace's, a quarter and two processors' worth at most: 11% on an 18-thread laptop. Manor's `"checksPace"` and `KIT_CHECKS_PACE` still set it, and Settings' pace at full still lifts it.
+- **The checks pace's cap is a third of the processor by default** (`checksCap()`, now with no argument: 3333), whatever the PC's processors. It was a quarter and four processors' worth at most (2.74.1; two, the gentle pace's, up to 2.74.0): 22% on an 18-thread laptop. The agents' own background pace (`gentleCap()`) is unchanged. Manor's `"checksPace"` and `KIT_CHECKS_PACE` still set it, and Settings' pace at full still lifts it.
 - **Three paced runs go at once on the PC** (`CHECKS_AT_ONCE`), not two. They share the one cap, so a third run takes no more of the processor; a short check no longer waits behind two long ones. A launcher of an older kit, asking two, takes one of the first two turns, so both kinds keep within three.
-- **Why:** on 2026-10-14 six paced runs waited for one of two turns, each held to two processors' worth, while the 18-thread laptop's processor was 28% busy with 20 GB of memory free. At a third, `pacedSlower` is 4 and a `node --test` runs 12 files at once there.
-- Nothing else for a command that isn't `node --test`: its arguments and environment are as they were.
-- **Why:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
+- **Why:** on 2026-10-14 six paced runs waited for one of two turns, held to two processors' worth, while the 18-thread laptop's processor was 28% busy with 20 GB of memory free. At a third, `pacedSlower` is 4 and a `node --test` runs 12 files at once there.
+- Nothing else changes for a command that isn't `node --test`: its arguments and environment are as they were.
+- **Why the time limit and the test files:** on 2026-10-14 the Steward vouched for Reeve's 60 test files at the pace on an 18-thread laptop. Node's runner started 17 files at once, all held to two processors' worth and sharing them with another run, and the runner's fixed four-times time limit (80 minutes) stopped it a third of the way through. Nothing had failed, but the vouch said only "Command failed".
 - npu-bench.ts: the energy measurement's load goes on, past its minutes if need be, until it has read the battery once after a job ended. On a PC held back, at the checks pace say, a short load could end before any job reached the model and read only the battery at rest. A real load lasts minutes, so the results are as before.
 
 ### For an agent
@@ -24,6 +24,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - If your runner stretches a paced command's time limit by a fixed amount, use `slower` and `waitMs` from `pacedCommand()` instead: `timeoutMs * (paced.slower ?? 4) + (paced.waitMs ?? 0)`, as the Steward's run.ts does.
 - If you call `checksCap(processors)`, drop the argument: the default no longer depends on the processors.
 - Nothing else to do to take it.
+
+## 2.74.1
+
+**The checks pace allows four processors' worth, not two.**
+
+### What changed
+
+- **`checksCap()`** is a quarter of the processor and four processors' worth at most (was the gentle pace's, `gentleCap()`: two at most). Up to eight processors nothing changes; on 18 the cap goes from 11% to 22%. A suite that starts a git for every step was too slow at two: the Steward's own took over an hour on an 18-processor laptop that was otherwise idle. The agents' own background pace (`gentleCap()`) is unchanged. spec/ROUND.md says so.
+
+### For an agent
+
+- Nothing to do: paced commands take the new cap as they start.
 
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
