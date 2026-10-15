@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
+import { pidAlive } from './npu-queue.ts';
 import { powershell, psQuote } from './ps.ts';
+import { currentWork } from './work-tasks.ts';
 
 /**
  * The checks pace (kit 2.70.0): test runs, type checks, installs and builds that an agent starts (the Steward's vouch,
@@ -26,6 +28,10 @@ import { powershell, psQuote } from './ps.ts';
  * has room for (pacedTestConcurrency), not one per processor. The command is told how much slower it runs, too
  * (CHECKS_SLOWER_ENV, kit 2.74.6), so a test's own waits and timeouts stretch as its run's limit does (paced): at the
  * checks pace a test should take longer, never fail.
+ *
+ * Every paced run says where it stands (kit 2.76.0): its launcher writes a file in checksRunsDir() while it waits for a
+ * turn, holds one or runs without, naming the agent and the task it runs for (checksWho), so an agent's work status
+ * (work-status.ts) and Manor's Work page show who holds the PC's turns and who waits, since when (checksRuns()).
  *
  * The job is one for the whole PC: check runs side by side (two vouches, a trial's tries) share the cap rather than
  * taking it twice, so together they never peg the processor either. The command leaves the agent's own gentle job first
@@ -221,7 +227,7 @@ export interface Paced {
  * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), and every command is
  * told how much slower it runs (CHECKS_SLOWER_ENV). Never throws.
  */
-export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; processors?: number } = {}): Promise<Paced> {
+export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; processors?: number; what?: string } = {}): Promise<Paced> {
   const plain: Paced = { file, args, env: {} };
   const env = o.env ?? process.env;
   const processors = o.processors ?? os.availableParallelism();
@@ -232,5 +238,95 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   if (!exe) return plain;
   const testArgs = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
   const slower = pacedSlower(cap);
-  return { file: exe, args: [checksLimits(cap), file, ...testArgs], env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower) }, slower, waitMs: CHECKS_TURN_MS };
+  // The agent's app.ts, read only now: imported at the top it would close a loop (an agent's app.ts reads its config,
+  // whose kit imports reach this file through accelerators.ts and apart.ts), and app.ts would run before its config had.
+  const { APP } = await import('../app.ts');
+  return {
+    file: exe,
+    args: [checksLimits(cap), file, ...testArgs],
+    env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what, APP.id) },
+    slower,
+    waitMs: CHECKS_TURN_MS,
+  };
+}
+
+// ---------------------------------------------------------------- the PC's check runs in sight (kit 2.76.0)
+
+/** The variables a launcher reads to say where it stands (checks-pace.cs): its folder, and who started it. */
+export const CHECKS_RUNS_ENV = 'KIT_CHECKS_RUNS';
+export const CHECKS_WHO_ENV = 'KIT_CHECKS_WHO';
+
+/** The folder every launcher on the PC says where it stands in, one `<pid>.run` each: beside the launcher. */
+export const checksRunsDir = () => path.join(path.dirname(locksDir), 'kit', 'checks-runs');
+
+/**
+ * Who a paced run is, as its launcher writes it: the agent (`agent`, its APP.id), the task it runs for (work-tasks.ts's
+ * currentWork(), or nothing), and what it runs (`what`, else the program and its arguments, each path by its name), tab
+ * apart. Pure but for the task.
+ */
+export function checksWho(file: string, args: string[], what: string | undefined, agent: string): string {
+  const named = (a: string) => (/[\\/]/.test(a) && a.length > 30 ? path.basename(a) : a);
+  const said = (what?.trim() || [path.basename(file).replace(/\.exe$/i, ''), ...args.map(named)].join(' ')).replace(/[\t\r\n]+/g, ' ');
+  return [agent, currentWork() ?? '', said.slice(0, 200)].join('\t');
+}
+
+/** A check run on this PC as its launcher says: holding a turn (`turn`, its number), waiting for one, or running without. */
+export interface ChecksRun {
+  /** The launcher's process id. */
+  pid: number;
+  state: 'turn' | 'waiting' | 'running';
+  /** Its turn's number, from 0, while it holds one. */
+  slot: number | null;
+  /** Since when (epoch ms): it holds its turn, waits, or runs. */
+  since: number;
+  /** The agent that started it, the task it is for (work-tasks.ts's id), and what it runs; empty when it didn't say. */
+  agent: string;
+  work: string;
+  what: string;
+}
+
+/** A launcher's `<pid>.run`, read; null when it isn't one. Pure. */
+export function parseChecksRun(name: string, text: string): ChecksRun | null {
+  const pid = Number(/^(\d+)\.run$/.exec(name)?.[1]);
+  const [head = '', who = ''] = text.replace(/^﻿/, '').split(/\r?\n/);
+  const m = /^(turn|waiting|running) (-?\d+) (\S+)$/.exec(head.trim());
+  const since = m ? Date.parse(m[3]) : NaN;
+  if (!pid || !m || !Number.isFinite(since)) return null;
+  const [agent = '', work = '', what = ''] = who.split('\t');
+  return { pid, state: m[1] as ChecksRun['state'], slot: m[1] === 'turn' && Number(m[2]) >= 0 ? Number(m[2]) : null, since, agent, work, what };
+}
+
+/**
+ * The check runs on this PC now (the launchers' files in `dir`), the longest held or waited first. A file whose launcher
+ * has gone (stopped, never let go) is removed on the way, or left when it can't be. Never throws.
+ */
+export function checksRuns(dir = checksRunsDir(), alive: (pid: number) => boolean = pidAlive): ChecksRun[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: ChecksRun[] = [];
+  for (const name of names) {
+    const pid = Number(/^(\d+)\.run$/.exec(name)?.[1]);
+    if (!pid) continue;
+    const file = path.join(dir, name);
+    if (!alive(pid)) {
+      try {
+        unlinkSync(file);
+      } catch {}
+      continue;
+    }
+    let text: string;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue; // gone meanwhile
+    }
+    // One being written at this moment reads as nothing: it says again at its next step.
+    const run = parseChecksRun(name, text);
+    if (run) out.push(run);
+  }
+  return out.sort((a, b) => a.since - b.since);
 }

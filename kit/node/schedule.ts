@@ -9,6 +9,7 @@ import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
 import { FIRST_ROUND_WAITING, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
+import { inWork, startWork } from './work-tasks.ts';
 import { updateHold } from './update-hold.ts';
 
 /** How often a scheduled round waiting for Manor's update looks again (update-hold.ts, kit 2.75.2). */
@@ -399,6 +400,8 @@ export function every(
     const queuedAt = started;
     let inLine: 'first' | 'work' | null = 'first';
     let used: { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null = null;
+    // The round as a task in the agent's work status (work-tasks.ts): in a line while it waits, the work it tracks its part.
+    const task = startWork({ kind: 'round', what: asked ? `${name}, asked for` : name });
     // The PC held awake for the round's work (awake.ts): every hold it took let go when it ends, at the latest.
     const holds: (() => void)[] = [];
     const awake = (what: string) => {
@@ -409,6 +412,7 @@ export function every(
     try {
       const run = async () => {
         inLine = null;
+        task.running();
         if (waiting === WORK_WAITING) waiting = null;
         started = Date.now();
         startedAt = started;
@@ -416,7 +420,7 @@ export function every(
         const u = { cpu: process.cpuUsage(), memory: process.memoryUsage.rss(), sampler: undefined as NodeJS.Timeout | undefined };
         u.sampler = setInterval(() => (u.memory = Math.max(u.memory, process.memoryUsage.rss())), 5_000).unref();
         used = u;
-        const work = job({ signal: controller.signal, awake });
+        const work = inWork(task, () => job({ signal: controller.signal, awake }));
         const late = new Promise<never>((_, reject) => {
           limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
         });
@@ -437,6 +441,7 @@ export function every(
       const inTurn = () => {
         if (asked || (typeof opts.light === 'function' ? opts.light() : opts.light)) return run();
         inLine = 'work';
+        task.waitIn('work');
         // Said while it waits, so a reader of its state (the Surveyor) never takes it for a schedule with nothing coming.
         waiting = WORK_WAITING;
         return inWorkTurn(p, run, { who: APP.id, doing: name, limitMs: limit, waitMs: Math.max(interval(), 60_000) });
@@ -446,7 +451,10 @@ export function every(
         limitMs: limit,
         onWait: (inLine) => {
           waiting = inLine ? FIRST_ROUND_WAITING : null;
-          if (inLine) firstNow = 'waiting';
+          if (inLine) {
+            firstNow = 'waiting';
+            task.waitIn('first-round');
+          }
         },
       });
       lastError = null;
@@ -470,6 +478,7 @@ export function every(
         else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
       }
     } finally {
+      task.done();
       for (const letGo of holds) letGo();
       firstNow = null;
       if (waiting === WORK_WAITING) waiting = null;

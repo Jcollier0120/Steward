@@ -2,6 +2,30 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.50
+
+**Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**
+
+### What's new
+
+- The Steward reports what it is doing right now, and Manor reads it from its page:
+  - each stage it runs, and how many it may run at once (Settings' Stages at once);
+  - each run of a repository's checks, with the repository and commit;
+  - the whole suite or a kit trial running beside the rounds, with the checks they run.
+- Work that waits says which line it waits in: a turn of the checks pace, the work line, the first-round line, or an accelerator.
+- It says what holds each version queue: the pull request that isn't ready, since when, and the pull requests waiting behind it.
+- What each run of the checks came to is kept by the code it ran on, so a pass on the same code can be found later, whatever the commit.
+- Manor 0.16.161 has a **Work** page that gathers this from every agent on the PC, and from the licence's other PCs when Other PCs is on.
+
+### What changed
+
+- The kit the Steward hands out (2.76.0) brings the same to every agent: their scheduled rounds and their place in the checks pace's turns show too.
+- Kit 2.76.0 also brings NPU work that wasn't released before. On Intel's NPU 3720, embeddings now run on the processor's graphics: a search answers in about 50 ms instead of 1.1 s, and Reeve indexes about 3.7 times as fast.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The checks pace's launcher is built again once, at the first check after the update.
+
 ## 0.36.49
 
 **Updates go in on a busy PC: an agent slow to start after an update is no longer rolled back as broken, and the Steward pauses its rounds for a few minutes so Manor can update it.**
