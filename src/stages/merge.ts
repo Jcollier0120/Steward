@@ -16,7 +16,7 @@ import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -49,7 +49,7 @@ import { withRepo } from './slots.ts';
  * commit, with the employee's own checks (stages/prtest.ts). The Steward's own PRs were tested by their bump. A team PR
  * to the Steward's own repository that raises the kit waits, too, until the new kit passes every agent's checks
  * (stages/trial.ts), each agent it fails moving with it in a ready PR of its own that pins the new kit and passes with
- * it there, or is labelled to say the agents change with it.
+ * it there, or is labelled to say the agents change with it. Kit PRs queued one behind another are tried together, once.
  *
  * With --yes --team, and Settings' catchUp on, a ready team PR that waits only on its branch having moved is caught up
  * (stages/catchup.ts): one that conflicts with its branch or is behind it, whose version is no longer new, or whose
@@ -321,6 +321,36 @@ export const givesWay = (e: Employee, hold: { pr: PrInfo; why: string }[]): Set<
 export const behindItsBranch = (pr: PrInfo, branch: string) =>
   (pr.whose === 'team' || isKitPr(pr)) && !pr.fork && !pr.draft && !pr.afterError && pr.base === branch && (pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY' || pr.mergeState === 'BEHIND');
 
+/** GitHub says it conflicts with its branch (not merely behind it). */
+export const conflictsWithBranch = (pr: PrInfo) => pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY';
+
+/** Why a look at the conflicts alone (conflictsOnly) left a repository as it was. */
+export const NO_CONFLICTS = 'no ready PR conflicts with its branch';
+
+/**
+ * Each PR the looks at the conflicts alone tried to catch up, by employee and number: its head and its branch's then.
+ * Tried again only once either moves, so a conflict that needs its author isn't tried every few minutes.
+ */
+const conflictTried = new Map<string, string>();
+const triedKey = (e: Employee, pr: PrInfo) => `${e.id}#${pr.number}`;
+const triedAt = (pr: PrInfo, branchHead: string | null) => `${pr.headOid}:${branchHead ?? ''}`;
+
+/**
+ * The PRs a look at the conflicts alone catches up (mergeOne's conflictsOnly, steward.ts's conflictsNow): ready ones
+ * that conflict with their branch (behindItsBranch, and conflictsWithBranch), whose conflict wasn't handed on at this head
+ * already (conflicts.ts handedOn), whose kit trial isn't going at this head (caught up, it would start again), and not
+ * tried already at this head and this branch head. `branchHead`: the branch's head on GitHub, from the glance.
+ */
+export const conflictsToCatch = (e: Employee, prs: PrInfo[], branchHead: string | null): PrInfo[] =>
+  prs.filter((pr) => behindItsBranch(pr, e.branch) && conflictsWithBranch(pr) && !handedOn(e.repo, pr.number, pr.headOid) && conflictTried.get(triedKey(e, pr)) !== triedAt(pr, branchHead) && !trialGoingAt(pr));
+
+/** An employee's PRs a look at the conflicts alone would catch up, from the stage's glance at GitHub; none without one. */
+export function conflictsWaiting(ctx: Ctx, e: Employee): PrInfo[] {
+  const g = glanceOf(ctx, e);
+  if (!g || !e.merges || hostIs(ctx, e) === 'git') return [];
+  return conflictsToCatch(e, parsePrs(JSON.stringify(g.prs), ctx.settings.team), g.head);
+}
+
 /** A team PR GitHub runs no checks on: the Steward tests it here before it merges it (stages/prtest.ts). */
 const untested = (pr: PrInfo) => pr.whose === 'team' && pr.checks === 'none';
 
@@ -408,8 +438,16 @@ export type MergeLook = EmployeeResult & { merged: PrInfo[]; held: Held[]; did?:
 export const lookAgainAfter = (o: { merged: number; held: Held[]; testedHere: boolean; gaveWay?: boolean }) =>
   o.testedHere || !!o.gaveWay || (o.merged > 0 && o.held.some((h) => !h.draft && (h.why === WORKING_OUT || h.why.startsWith('stacked on #'))));
 
-export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean }): Promise<MergeLook> {
+/**
+ * One look at an employee's PRs. `conflictsOnly` (steward.ts's conflictsNow, beside the rounds): only the ready PRs that
+ * conflict with their branch are caught up (conflictsToCatch), with the versions the others set kept free as a round
+ * keeps them; nothing is merged, retargeted, reviewed or tested, and the rest waits for the round.
+ */
+export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: boolean; conflictsOnly?: boolean }): Promise<MergeLook> {
   const { run } = ctx;
+  const only = !!o.conflictsOnly;
+  // The branch's head as the glance saw it, before a catch-up forgets the glance: what the PRs were tried against.
+  const branchHead = glanceOf(ctx, e)?.head ?? null;
   // The team's PRs have nothing to do with the kit; the Steward's exist only for an employee on it.
   if (!e.usesKit && !o.team) return { ...result(e, 'skipped', NOT_ON_KIT), merged: [], held: [] };
   // Worked with plain git (scm.ts): no pull requests anywhere to merge.
@@ -422,13 +460,13 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
   if (o.yes && !e.merges) return { ...result(e, 'skipped', `${prs.length} open PR${prs.length === 1 ? '' : 's'} (${prs.map((p) => `#${p.number}`).join(', ')}) ${NOT_MERGING}`, { url: prs[0].url }), merged: [], held: [] };
   // Stacked on a branch whose PR has merged: pointed at the employee's branch, so it joins the line below.
-  if (o.yes && o.team) await retargetStacked(ctx, e, prs);
+  if (o.yes && o.team && !only) await retargetStacked(ctx, e, prs);
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
-  if (o.yes && o.team && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
+  if (o.yes && o.team && !only && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   // GitHub still working out whether one merges (just retargeted, or pushed to): asked again, so it needn't wait a round.
-  if (o.yes) await askAgainWhetherMerges(ctx, e, prs);
+  if (o.yes && !only) await askAgainWhetherMerges(ctx, e, prs);
   // Whoever wrote it, one whose lockfile brings new packages or a new install script waits for the owner (review.ts).
-  if (o.yes) await lookAtLockfiles(ctx, e, prs);
+  if (o.yes && !only) await lookAtLockfiles(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch, { minAgeMinutes: ctx.settings.mergeMinAgeMinutes });
   let looked: ReturnType<Lookup> | null = null;
   const lookup: Lookup = () =>
@@ -451,6 +489,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   };
   // The ones a catch-up (stages/catchup.ts) could clear, after the merges.
   const catchable = new Map<number, PrInfo>(hold.filter((h) => behindItsBranch(h.pr, e.branch)).map((h) => [h.pr.number, h.pr]));
+  // Only the conflicts: none, and nothing more is looked at.
+  const conflicting = only ? conflictsToCatch(e, [...catchable.values()], branchHead) : [];
+  if (only && !(o.yes && o.team && ctx.settings.catchUp && conflicting.length)) return { ...result(e, 'skipped', NO_CONFLICTS), merged: [], held: [] };
   const failedHere: { pr: PrInfo; t: Tested }[] = [];
   const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
   for (const pr of mergeable) {
@@ -470,6 +511,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       // The first keeps its version; each after it gets one of its own.
       if (r.pr.whose === 'team' && r.pr.number !== Math.min(...same.map((x) => x.pr.number))) catchable.set(r.pr.number, r.pr);
     } else merge.push(r.pr);
+  }
+  // Only the conflicts: each caught up now, the versions the ready ones set kept free; the merges are the round's.
+  if (only) {
+    const caught = await catchUpAll(ctx, e, { catchable: new Map(conflicting.map((pr) => [pr.number, pr])), failedHere: [], ready, merged: [], held: [], lookup });
+    for (const pr of conflicting) conflictTried.set(triedKey(e, pr), triedAt(pr, branchHead));
+    return { ...result(e, caught.done ? 'done' : 'skipped', caught.lines.join('; '), { url: conflicting[0].url }), merged: [], held: [], did: caught.lines, waits: [] };
   }
   // Lowest version first: of the open PRs that set a new version, only the lowest merges; each above it waits its turn.
   // Merged out of order, the lower one would be left below its branch, to be given a new version and caught up. One
@@ -520,6 +567,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // The kit's PRs (in the Steward's own repository) come first: one waits only for a lower one of the kit's, and the rest,
   // merged after it, are caught up to versions above it. The agents' PRs that take the new kit wait for it (prtest.ts).
   const kitQueue = new Map([...queue].filter(([n]) => prs.some((p) => p.number === n && raisesKit(p))));
+  // In the order they merge: the first one's trial tries those queued after it with it, once (trial.ts's combineKits).
+  const kitLine = [...kitQueue].sort((a, b) => compareVersions(a[1], b[1]) || a[0] - b[0]).flatMap(([n]) => prs.filter((p) => p.number === n));
   merge = merge.filter((pr) => {
     const v = queue.get(pr.number);
     const below = v ? lowestBelow(raisesKit(pr) ? kitQueue : queue, v) : null;
@@ -601,7 +650,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     let trial: string | null;
     try {
       // An agent that moves with the kit in a PR of its own doesn't hold it, and its line says so ("Manor moves with it in #135").
-      trial = await kitTrialHold(ctx, e, pr, { going: () => (trialGoing = true), note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
+      trial = await kitTrialHold(ctx, e, pr, { line: kitLine, going: () => (trialGoing = true), note: (words) => notes.set(pr.number, notes.has(pr.number) ? `${notes.get(pr.number)}; ${words}` : words) });
     } catch (err) {
       trial = `couldn't try its kit on the agents: ${(err as Error).message}`;
     }
@@ -777,9 +826,9 @@ async function stampBefore(ctx: Ctx, e: Employee, pr: PrInfo, o: { ready: { pr: 
  * (the Steward tests it itself, so it can be merged this round: mergeLooks); and whether it handed on the conflict of a
  * PR that others waited their turn behind (it gives up its turn at the next look: givesWay).
  */
-async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean; gaveWay: boolean }> {
+async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrInfo>; failedHere: { pr: PrInfo; t: Tested }[]; ready: { pr: PrInfo; sets: string | null }[]; merged: PrInfo[]; held: Held[]; lookup: Lookup }): Promise<{ lines: string[]; testedHere: boolean; gaveWay: boolean; done: number }> {
   for (const { pr, t } of o.failedHere) if (pr.whose === 'team' && !pr.fork) o.catchable.set(pr.number, pr);
-  if (!o.catchable.size) return { lines: [], testedHere: false, gaveWay: false };
+  if (!o.catchable.size) return { lines: [], testedHere: false, gaveWay: false, done: 0 };
   const { released } = await o.lookup();
   const now = await commitOf(ctx.run, checkoutOf(e), `origin/${e.branch}`);
   for (const { pr, t } of o.failedHere) if (t.branch && t.branch === now) o.catchable.delete(pr.number);
@@ -788,6 +837,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
   const lines: string[] = [];
   let testedHere = false;
   let gaveWay = false;
+  let done = 0;
   const kitTaken: string[] = [];
   let kitReleases: string[] | null = null;
   const kitReleased = async () => (kitReleases ??= (await kitInfo(ctx.run, ctx.neutralDir, e.repo).catch(() => ({ released: [] as string[] }))).released);
@@ -813,6 +863,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     if (c.done) {
       // Its branch has moved: from here on it is read afresh, not from the glance.
       forgetGlance(ctx, e);
+      done++;
       if (pr.checks === 'none') testedHere = true;
     }
     // A conflict that needs judgement goes back to whoever wrote the PR (stages/kickback.ts), not to the person.
@@ -836,7 +887,7 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
     if (h && c.closed) o.held.splice(o.held.indexOf(h), 1);
     lines.push(c.done ? `#${pr.number} caught up: ${c.note}` : c.closed ? `#${pr.number} closed: ${c.note}` : `#${pr.number} not caught up: ${c.note}`);
   }
-  return { lines, testedHere, gaveWay };
+  return { lines, testedHere, gaveWay, done };
 }
 
 /** Why a catch-up didn't try: nothing the page's conflicts need to show. */
