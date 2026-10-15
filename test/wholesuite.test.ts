@@ -20,6 +20,9 @@ const { stewardEmployee } = await import('../src/stages/selfmerge.ts');
 const { keepWhole, ranWhole, wholePassOf } = await import('../src/whole.ts');
 const { alive } = await import('../src/kit/apart.ts');
 const { ctxFor, runner, sh } = await import('./helpers.ts');
+const { runChecks } = await import('../src/stages/bump.ts');
+const { resultFor } = await import('../src/kit/work-status.ts');
+const { workTasks } = await import('../src/kit/work-tasks.ts');
 const { until } = await import('../kit/test/until.ts');
 type WholeJob = import('../src/stages/wholesuite.ts').WholeJob;
 
@@ -297,4 +300,22 @@ test("a whole suite a Steward that is gone left running is ended, with the progr
     left.kill();
     writeFileSync(wholeJobFile(), 'null');
   }
+});
+
+test("every check run is a task in the Steward's work status, and what it came to is kept by its tree, not a trial's", async () => {
+  commit('tools/test.js', note('test', failTests));
+  const steward = stewardEmployee(ctx.settings, checkout);
+  const key = { kind: 'checks', repo: steward.repo, tree: tree() };
+  const seen: string[] = [];
+  const say = () => seen.push(...workTasks().map((t) => `${t.kind} ${t.what} ${t.tree === key.tree}`));
+  await runChecks(ctx, steward, checkout, { say, env: { STEWARD_KIT: path.join(home, 'trial-kit') }, doing: 'a kit trial' });
+  assert.equal(resultFor(key), null, "a trial's checks ran with a kit not the tree's own: not that tree's result");
+  writeFileSync(failTests, '');
+  assert.match((await runChecks(ctx, steward, checkout, { say, doing: 'its checks at main' })) ?? '', /npm test failed/);
+  unlinkSync(failTests);
+  assert.deepEqual({ ...resultFor(key), at: undefined, note: undefined }, { kind: 'checks', repo: steward.repo, tree: key.tree, commit: head(), ok: false, what: 'Steward: its checks at main', at: undefined, note: undefined });
+  assert.equal(await runChecks(ctx, steward, checkout, { say, doing: 'its checks at main' }), null);
+  assert.equal(resultFor(key)?.ok, true, 'the latest for the same code');
+  assert.ok(seen.includes('trial Steward: a kit trial true') && seen.includes('checks Steward: its checks at main true'), seen.join('\n'));
+  assert.deepEqual(workTasks(), [], 'each ended once it ran');
 });

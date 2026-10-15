@@ -298,6 +298,11 @@ test('stages side by side: a release beside a round, a third refused while both 
     assert.equal(both.body.full, true);
     assert.equal(both.body.running.stage, 'round', 'the first, for a page from before');
     assert.equal((await (await fetch(`${base()}/api/ping`)).json()).stage, 'round, release');
+    // Its work status, for Manor's Work page: the stages' slots, and each stage a task.
+    const work = await (await fetch(`${base()}/api/peer/work`)).json();
+    assert.deepEqual(work.slots, [{ kind: 'stage', name: 'Stages at once', of: 2, used: 2 }]);
+    assert.deepEqual(work.running.filter((t: { kind: string }) => t.kind === 'stage').map((t: { what: string }) => t.what), ['round', 'release']);
+    assert.ok(Array.isArray(work.blocked) && Array.isArray(work.lines), 'what holds the version queues, and the PC\'s lines');
     const third = await (await post('/api/stage/bump', page, { employees: ['fake'], kit: '1.0.0' })).json();
     assert.deepEqual(third, { started: false, message: 'round and release are running, as many stages as Settings allow at once (Stages at once); wait for one to finish.' });
     assert.deepEqual(await (await post('/api/run', page)).json(), { started: false, message: 'A round is running; wait for it to finish.' });
@@ -314,6 +319,8 @@ test('stages side by side: a release beside a round, a third refused while both 
   }
   const done = await (await fetch(`${base()}/api/page`)).json();
   assert.deepEqual([done.body.runs, done.body.full, done.body.running], [[], false, null]);
+  const idle = await (await fetch(`${base()}/api/peer/work`)).json();
+  assert.deepEqual([idle.slots[0].used, idle.running.filter((t: { kind: string }) => t.kind === 'stage')], [0, []], 'each stage ended with it');
 });
 
 test("a stage's POST takes the ticked employees and a well-formed kit only", () => {
