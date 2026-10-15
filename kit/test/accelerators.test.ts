@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { until } from './until.ts';
+import { paced, until } from './until.ts';
 
 // The kit's accelerators (Manor's docs/ACCELERATORS.md), the same in every agent: Reeve's config, the
 // order, the choosing, the slots, the failure markers, the game check, the fallback, the servers'
@@ -567,9 +567,10 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
   noGames();
   const refusing = await closedPort();
   const broken = await fakeServer(() => ({ status: 503 }));
-  // The slow server answers long after the requests' 3 s: room for a test run held to the checks pace, where 400 ms let
-  // the 503 and the NPU's own answer time out too (the whole suite before kit 2.74.5's release, 2026-10-15).
-  const slow = await fakeServer(() => ({ delayMs: 10_000 }));
+  // The slow server answers long after the requests' timeout, both stretched by the checks pace (paced): held to a third
+  // of the processor, 400 ms let the 503 and the NPU's own answer time out too (the whole suite before kit 2.74.5's
+  // release, 2026-10-15).
+  const slow = await fakeServer(() => ({ delayMs: paced(10_000) }));
   const good = await fakeServer(() => ({ text: 'from the NPU' }));
   try {
     const accs = [
@@ -578,7 +579,7 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
       gpu('gpu-slow', { memoryGb: 12, chat: { baseUrl: slow.baseUrl, model: 'm' } } as any),
       { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: good.baseUrl, model: 'm' } },
     ];
-    const ask = (order: string[]) => new Npu(config({ accelerators: accs, acceleratorOrder: order, requestTimeoutMs: 3000 })).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    const ask = (order: string[]) => new Npu(config({ accelerators: accs, acceleratorOrder: order, requestTimeoutMs: paced(1000) })).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
 
     const a = await ask(['gpu-broken', 'npu']);
     assert.equal(a.accelerator.id, 'npu');
@@ -673,7 +674,7 @@ test('a busy server is waited on, never started twice, and looked at afresh each
     // A model that loads too slowly (the warm-up times out) isn't the accelerator failing: nothing is
     // marked, the work is deferred, and this agent leaves the NPU alone a while.
     mode = 'ok';
-    warmMs = 800;
+    warmMs = paced(800);
     const model = new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: ep, quirks: ['prefix-leak'] }] }));
     await assert.rejects(model.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10, timeoutMs: 300 }), (e: Error) => e instanceof NpuBusy && /still loading its model/.test(e.message) && /not counted as a failure/.test(e.message));
     assert.equal(A.readFailure('npu'), null);
@@ -704,8 +705,9 @@ test('a busy server is waited on, never started twice, and looked at afresh each
 test("an accelerator's own timeouts: its requests run on them, and a server found still loading gets the cold-load allowance", async () => {
   fresh();
   noGames();
-  // The request (10 tokens) takes 600 ms, the warm-up (1 token) none.
-  const server = await fakeServer((b) => ({ text: 'warm', delayMs: b.max_tokens === 1 ? 0 : 600 }));
+  // The request (10 tokens) takes 600 ms, the warm-up (1 token) none: longer than its own 200 ms below, however late a
+  // busy PC fires that timer (paced).
+  const server = await fakeServer((b) => ({ text: 'warm', delayMs: b.max_tokens === 1 ? 0 : paced(600) }));
   try {
     const npu = (timeouts?: object) => new Npu(config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: server.baseUrl, model: 'm' }, ...(timeouts ? { timeouts } : {}) }] }));
     assert.equal((await npu().chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 })).text, 'warm', "on the rules' timeouts (15 s and more), it answers");
@@ -774,12 +776,12 @@ test('every line full: background work is deferred, a person waiting still joins
 test('embeddings go to an accelerator that serves them, and a server can be left alone when it is not running', async () => {
   fresh();
   const server = await fakeServer();
-  const slow = await fakeServer(() => ({ delayMs: 1500 }));
+  const slow = await fakeServer(() => ({ delayMs: paced(1500) }));
   try {
     // A person waiting sets a short timeout; past it, the server counts as timed out.
     const t0 = Date.now();
     await assert.rejects(new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: slow.baseUrl, model: 'e' } }] })).embed(['x'], { lane: 'interactive', timeoutMs: 300 }), /timed out/);
-    assert.ok(Date.now() - t0 < 1400, 'its own timeout, not the config\'s');
+    assert.ok(Date.now() - t0 < paced(1400), 'its own timeout, not the config\'s');
     fresh();
     const model = new Npu(config({ accelerators: [{ id: 'cpu', kind: 'cpu', embed: { baseUrl: server.baseUrl, model: 'e' } }] }, { npu: false, cards: [], cpuName: 'Oryon CPU' }));
     const r = await model.embed(['one', 'two']);
@@ -826,7 +828,7 @@ test("OpenVINO Model Server is ready once it lists its model: an empty /v1/model
       while (Date.now() - t0 < 600) await new Promise((r) => setTimeout(r, 50));
       listed = true;
     })();
-    assert.deepEqual(await A.ensureServer(ep, { readyMs: 10_000 }), { started: false, waited: true });
+    assert.deepEqual(await A.ensureServer(ep, { readyMs: paced(10_000) }), { started: false, waited: true });
     assert.ok(Date.now() - t0 >= 600);
     await loaded;
     listed = false;

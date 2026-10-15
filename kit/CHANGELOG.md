@@ -2,12 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.74.6
 
-**A route can give calibrate its server's own reading speed (`readPerWrite`), and AMD's does: an AMD NPU of a generation nobody has measured gets a 35 s base, not 90 s. AMD's NPU measured on battery (20.7 mJ a token), its picture size, and setup's picture-first test request on a Krackan, none needing a change to the route's command. Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF`, its prefix cache off.**
+**Paced checks get the share Manor's checksPace gives them, not the agent's gentle cap too, and a test's own waits stretch with the pace: a test takes longer instead of failing. An AMD NPU of a generation nobody has measured gets a 35 s base, not 90 s, and Intel's other NPUs get prompt settings estimated from the NPU 3720, their prefix cache off.**
+
+### What's new
+
+- **checks-pace.ts**: a paced command is told how much slower it runs, in `KIT_CHECKS_SLOWER` (`CHECKS_SLOWER_ENV`): its `pacedSlower`, 4 at a third of the processor or more. Under `nice` (off Windows), 4. `checksSlower(env)` reads it (1 when unpaced, 50 at most), and `paced(ms)` stretches a test's own wait or timeout by it. A run's time limit was already stretched that way since 2.74.2; the timeouts a test sets itself weren't, so at the pace a 400 ms timeout or a 10 s wait failed with nothing wrong (the Steward's whole suite before kit 2.74.5's release, twice, 2026-10-15).
 
 ### What changed
 
+- **checks-pace.cs**: the launcher starts the command out of the agent's own gentle job (`CREATE_BREAKAWAY_FROM_JOB`, which gentle.cs allows), then puts it in the checks job, as before. Before, a command an agent with the gentle pace started stayed in that agent's job too, so the gentle cap held it as well: two processors' worth, 11% of an 18-thread PC, whatever Manor's checksPace said (66% there on 2026-10-15). Where Windows refuses (a job that doesn't let it leave), it starts in the jobs it is in, as before. The launcher's source changed, so each PC compiles it again once.
+- The kit's own tests (kit/test): `until` waits its time stretched by the pace, and `paced` is exported beside it. The accelerators, console, card-on-demand, page and NPU-check tests stretch their own waits and timeouts. A test that shows something taking longer than a timeout stretches both, so the one stays longer than the other.
 - **`calibrate`** takes a full-cap read at the route's `readPerWrite` times the writing speed it measured, else `CALIBRATION.readPerWrite` (10) as before. npu-vendors.json's amd route says 30: FastFlowLM read 34 to 36 times faster than it wrote on a Krackan (472 to 512 tokens a second read, 13.1 to 14.4 written). On the Krackan's `--harden` measurement, that gives a 35 s base where 10 gave 90 s. It applies only where setup calibrates, on an AMD generation nobody has measured; XDNA 2 is verified and keeps its own timeouts. Intel's and Qualcomm's routes are unchanged.
 - **spec/NPU-VENDORS.md and the amd route's notes** have the Krackan's run on battery. `npu-bench --profile full --energy` gave 20.7 mJ a token (6.6 W at rest, 11.6 W working), 13.1 tokens written a second against 14.4 on mains power, and a model load of 12.7 s against 5.4 s; the idle stop's rule still gives 5 minutes for chat. FastFlowLM's four `--pmode` values did the same jobs in the same time on battery, and none drew clearly less than the battery meter's own swing (several watts at rest from one run to the next), so the route starts FastFlowLM without one, as before. Whether a power mode saves less than such a meter can tell stays unverified.
 - **spec/NPU-VENDORS.md** has `npu-check --harden` run again on the Krackan with kit 2.74.5, whose test request asks about the picture first: calibration timed chat warm in 1.31 s (9.18 s before, the switch back from the vision model) and wrote a 90 s base, not 105 s. Most of the 90 s was calibrate's reading estimate, a tenth of writing speed; with the route's `readPerWrite` (above), the same measurement gives 35 s.
@@ -21,7 +27,9 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### For an agent
 
-- Nothing to do. A PC already set up keeps the timeouts measured on it. Setup's next calibration on an AMD generation nobody has measured uses the new estimate.
+- Nothing to do: take the kit and release as usual.
+- A test of the agent's own that waits for something or sets a short timeout can use `paced(ms)` from `src/kit/checks-pace.ts`, so the checks pace makes it slower, never failing. It stretches only under a paced run (the Steward's vouch and merge checks, the Assayer's): run by hand it waits as written.
+- A PC already set up keeps the timeouts measured on it. Setup's next calibration on an AMD generation nobody has measured uses the new estimate.
 - On a Lunar Lake or NPU 3720 already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
 
 ## 2.74.5

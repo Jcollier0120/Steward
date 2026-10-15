@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { stillFor, until } from './until.ts';
+import { paced, stillFor, until } from './until.ts';
 
 // The graphics card on demand (kit 2.69.0): with Manor's gpuWithNpu off, beside an NPU, a card does only the work no
 // NPU here serves (vision beside Intel's NPU), its server started by a request and stopped by the keeper once unused;
@@ -448,7 +448,7 @@ test("longFetch: a slow answer is waited on as long as the request's own limit a
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     delayMs = 300;
-    const r = await longFetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"x":1}', signal: AbortSignal.timeout(10_000) });
+    const r = await longFetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"x":1}', signal: AbortSignal.timeout(paced(10_000)) });
     assert.equal(r.status, 200);
     assert.equal(r.headers.get('x-twice'), '1, 2');
     assert.equal((await r.json()).choices[0].message.content, 'got {"x":1}');

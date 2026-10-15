@@ -23,10 +23,13 @@ import { powershell, psQuote } from './ps.ts';
  *
  * and, since it is slower so (kit 2.74.2), **room to finish**: a runner stretches its time limit by as much as the cap
  * slows the work (pacedSlower) plus the wait for a turn, and node's test runner runs as many files at once as the cap
- * has room for (pacedTestConcurrency), not one per processor.
+ * has room for (pacedTestConcurrency), not one per processor. The command is told how much slower it runs, too
+ * (CHECKS_SLOWER_ENV, kit 2.74.6), so a test's own waits and timeouts stretch as its run's limit does (paced): at the
+ * checks pace a test should take longer, never fail.
  *
  * The job is one for the whole PC: check runs side by side (two vouches, a trial's tries) share the cap rather than
- * taking it twice, so together they never peg the processor either.
+ * taking it twice, so together they never peg the processor either. The command leaves the agent's own gentle job first
+ * (kit 2.74.6), which lets it: the checks pace is the cap that holds it, not the agent's own tighter one as well.
  *
  * Manor's Settings pace at full lifts it, as it lifts the agents' own (pace.ts): one switch for the whole manor. While
  * that is gentle, settings.json `"checksPace"` (or KIT_CHECKS_PACE) may set the cap: a percentage of the processor from
@@ -66,6 +69,28 @@ export const PACED_SLOWER_MIN = 4;
  */
 export function pacedSlower(cap: number): number {
   return cap > 0 ? Math.max(PACED_SLOWER_MIN, Math.round(10_000 / cap)) : 1;
+}
+
+/**
+ * The variable a paced command finds its pacedSlower in (kit 2.74.6): how many times longer it may take than at full
+ * speed. Unset when it runs as it is.
+ */
+export const CHECKS_SLOWER_ENV = 'KIT_CHECKS_SLOWER';
+
+/** How many times slower the checks pace runs this process (CHECKS_SLOWER_ENV): 1 when it isn't paced. Pure. */
+export function checksSlower(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env[CHECKS_SLOWER_ENV]);
+  return Number.isFinite(n) && n > 1 ? Math.min(n, 50) : 1;
+}
+
+/**
+ * `ms` stretched as the checks pace stretches this run (checksSlower): for a test's own wait or timeout, which at full
+ * speed is enough and at a third of the processor fails with nothing wrong (the whole suite before kit 2.74.5's release,
+ * 2026-10-15). A test that shows something taking *longer* than a timeout stretches both, so the one stays longer than
+ * the other. Pure.
+ */
+export function paced(ms: number, env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(ms * checksSlower(env));
 }
 
 /**
@@ -193,7 +218,8 @@ export interface Paced {
  * The command `file args` at the checks pace: through the launcher with its limits (checksPaceCap(), checksMemory(), a
  * turn), or as it is when the cap is off (Manor's "checksPace": "full") or the launcher can't be had. The environment
  * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done).
- * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency). Never throws.
+ * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), and every command is
+ * told how much slower it runs (CHECKS_SLOWER_ENV). Never throws.
  */
 export async function pacedCommand(file: string, args: string[], o: { home?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; processors?: number } = {}): Promise<Paced> {
   const plain: Paced = { file, args, env: {} };
@@ -201,9 +227,10 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   const processors = o.processors ?? os.availableParallelism();
   const cap = checksPaceCap(o.home, env);
   if (!cap) return plain;
-  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: {}, slower: PACED_SLOWER_MIN, waitMs: 0 };
+  if (process.platform !== 'win32') return { file: 'nice', args: ['-n', '10', file, ...args], env: { [CHECKS_SLOWER_ENV]: String(PACED_SLOWER_MIN) }, slower: PACED_SLOWER_MIN, waitMs: 0 };
   const exe = await checksPaceLauncher(o.log);
   if (!exe) return plain;
-  const paced = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
-  return { file: exe, args: [checksLimits(cap), file, ...paced], env: { MSBUILDDISABLENODEREUSE: '1' }, slower: pacedSlower(cap), waitMs: CHECKS_TURN_MS };
+  const testArgs = withTestConcurrency(file, args, pacedTestConcurrency(cap, processors));
+  const slower = pacedSlower(cap);
+  return { file: exe, args: [checksLimits(cap), file, ...testArgs], env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower) }, slower, waitMs: CHECKS_TURN_MS };
 }
