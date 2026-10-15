@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { dataDir } from './app.ts';
+import { DEFAULT_PIPELINE, normalizePipeline, type BuildPipeline } from './pipeline.ts';
 import { developerPro } from './kit/developer-pro.ts';
 import type { Field, SettingsSpec } from './kit/settings-kit.ts';
 import { agentUrl, manorHome, manorLink, manorProjects, originRepo, type ManorProject } from './kit/manor.ts';
@@ -114,6 +115,8 @@ export interface Settings {
   catchUp: boolean;
   /** In its rounds, a repository's ready PRs in the version queue are stacked, tested once and merged together (stages/train.ts). */
   mergeTrain: boolean;
+  /** The build pipeline (pipeline.ts): merged, tested and released together at set build times, not as each PR is ready. */
+  buildPipeline: BuildPipeline;
   /** Local pages POSTed after a stage releases something (upkeep.ts): Manor's update check, the Aletaster's Run now. */
   afterRelease: string[];
   /** In its rounds, each employee behind the newest kit release is bumped and its PR pushed (stages/rollout.ts). */
@@ -310,6 +313,7 @@ export const DEFAULT_SETTINGS: Settings = {
   installScripts: DEFAULT_INSTALL_SCRIPTS,
   catchUp: true,
   mergeTrain: true,
+  buildPipeline: DEFAULT_PIPELINE,
   tasteBeforeRelease: true,
   afterRelease: DEFAULT_AFTER_RELEASE,
   rollout: true,
@@ -483,6 +487,50 @@ export const SETTINGS_SCHEMA: Field[] = [
     label: 'Merges ready PRs together',
     tab: 'How it works',
     help: "Two or more of a repository's ready PRs are stacked lowest version first, tested once and merged together. Off: one at a time.",
+  },
+  {
+    key: 'buildPipeline',
+    kind: 'group',
+    tab: 'Build pipeline',
+    label: 'Build pipeline',
+    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs wait. Off: each PR merges and releases as soon as it is ready.",
+    fields: [
+      { key: 'on', kind: 'switch', label: 'Build at set times' },
+      {
+        key: 'times',
+        kind: 'list',
+        label: 'Build times',
+        help: 'Local times, like 08:00. A build the PC slept through begins once it wakes.',
+        item: { label: 'Time', maxLength: 5, pattern: '([01]?[0-9]|2[0-3]):[0-5][0-9]', patternHint: 'a time, like 13:00' },
+        minItems: 1,
+        maxItems: 12,
+      },
+      {
+        key: 'days',
+        kind: 'choices',
+        label: 'On these days',
+        options: [
+          { value: 'mon', label: 'Monday' },
+          { value: 'tue', label: 'Tuesday' },
+          { value: 'wed', label: 'Wednesday' },
+          { value: 'thu', label: 'Thursday' },
+          { value: 'fri', label: 'Friday' },
+          { value: 'sat', label: 'Saturday' },
+          { value: 'sun', label: 'Sunday' },
+        ],
+      },
+      {
+        key: 'kit',
+        kind: 'choice',
+        label: 'The newest kit goes into',
+        ...CASTELLAN,
+        options: [
+          { value: 'every', label: 'Every build' },
+          { value: 'first', label: "The day's first build" },
+        ],
+      },
+      { key: 'windowMinutes', kind: 'whole', min: 15, max: 360, unit: 'minutes', label: 'A build takes at most', advanced: true, help: 'Then it releases what it merged, and the rest waits for the next build.' },
+    ],
   },
   {
     key: 'affectedTests',
@@ -750,6 +798,7 @@ export function normalizeSettings(raw: unknown): { settings: Settings; problems:
       installScripts: Array.isArray(r.installScripts) ? [...new Set(strings(r.installScripts, []).map((n) => n.toLowerCase()).filter((n) => PACKAGE_NAME.test(n)))] : d.installScripts,
       catchUp: typeof r.catchUp === 'boolean' ? r.catchUp : d.catchUp,
       mergeTrain: typeof r.mergeTrain === 'boolean' ? r.mergeTrain : d.mergeTrain,
+      buildPipeline: normalizePipeline(r.buildPipeline),
       afterRelease: Array.isArray(r.afterRelease) ? strings(r.afterRelease, []).filter((u) => LOCAL_ACTION.test(u)) : d.afterRelease,
       rollout: typeof r.rollout === 'boolean' ? r.rollout : d.rollout,
       rolloutQuietHours: Number.isInteger(quietHours) ? Math.min(48, Math.max(0, quietHours)) : d.rolloutQuietHours,
