@@ -215,6 +215,27 @@ test("a vouch's time limit: the average of the kind's last ten passes and five m
   assert.deepEqual(vouchTimes().c.whole, [1], 'no time, no record');
 });
 
+test("an affected vouch reaching more test files than its usual ones gets that much more time, up to the whole suite's limit", () => {
+  const min = 60_000;
+  // Ten affected runs of 3 min, 20 test files each, kept with their files.
+  const times = { s: { affected: Array.from({ length: 10 }, () => ({ ms: 3 * min, files: 20 })) } };
+  assert.deepEqual(vouchLimit('s', 'affected', { times, files: 89 }), { ms: Math.round(3 * min * 89 / 20) + 5 * min, why: '18 min: its last 10 affected vouches took 3 min on average for 20 test files, this one runs 89, and 5 min more' });
+  assert.equal(vouchLimit('s', 'affected', { times, files: 12 })?.ms, 8 * min, 'fewer files than usual: their average as before');
+  assert.equal(vouchLimit('s', 'affected', { times })?.ms, 8 * min, 'files not known: as before');
+  // The whole suite's limit known: never past it, nor below its own.
+  const withWhole = { s: { ...times.s, whole: [12 * min, 12 * min, 12 * min] } };
+  assert.deepEqual(vouchLimit('s', 'affected', { times: withWhole, files: 140 }), { ms: 17 * min, why: "17 min, its last 3 whole-suite vouches' average of 12 min and 5 min more, as it runs 140 test files, more than the 20 its affected vouches usually run" });
+  assert.equal(vouchLimit('s', 'affected', { times: { s: { ...times.s, whole: [min, min, min] } }, files: 89 })?.ms, 8 * min, 'a whole suite quicker than its affected runs: their own limit stands');
+  // Runs kept before their files were (bare times) count in the average, but stretch nothing until three know theirs.
+  const older = { s: { affected: [3 * min, 3 * min, 3 * min, { ms: 3 * min, files: 20 }, { ms: 3 * min, files: 20 }] } };
+  assert.equal(vouchLimit('s', 'affected', { times: older, files: 89 })?.ms, 8 * min);
+  // Kept with its files when it ran only the affected tests; a whole-suite run as a bare time.
+  writeFileSync(vouchTimesFile(), JSON.stringify({ t: { affected: [60_000, { ms: 1, files: 0 }, { ms: 'x', files: 3 }] } }));
+  noteVouchTime('t', 'affected', 2 * min, 30);
+  noteVouchTime('t', 'whole', 4 * min, 152);
+  assert.deepEqual(vouchTimes().t, { affected: [60_000, { ms: 2 * min, files: 30 }], whole: [4 * min] }, 'what it can read, and the new runs');
+});
+
 test("after a vouch, the Steward running here is asked for a round now, with its server.json's token; nothing it says fails the vouch", async () => {
   const file = path.join(tmp, 'home', 'server.json');
   rmSync(file, { force: true });

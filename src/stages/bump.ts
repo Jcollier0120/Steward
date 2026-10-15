@@ -138,8 +138,9 @@ export const needsNpmCi = (dir: string) =>
  * runs them before its commit, and merge on a team PR GitHub runs no checks on.
  *
  * `timeLimit` (a vouch's, vouchtime.ts) gives the whole run a time limit from its start, asked once it's known whether
- * it runs the whole suite or only the tests a change reaches: at once, unless `npm test` is picked, then as it is. A step
- * still running at the limit is stopped with everything it started, and the run fails saying so.
+ * it runs the whole suite or only the tests a change reaches (and how many test files): at once, unless `npm test` is
+ * picked, then as it is. A step still running at the limit is stopped with everything it started, and the run fails
+ * saying so.
  *
  * `failed`, when given, is filled with the step that failed and the tests it failed (node --test's TAP), for a caller
  * that weighs a second try against the first (wholesuite.ts).
@@ -161,7 +162,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
   });
 }
 
-type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks };
+type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind, files?: number) => TimeLimit | null; failed?: FailedChecks };
 
 async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   const started = Date.now();
@@ -191,7 +192,7 @@ async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): P
   for (const s of steps) for (const step of typeof s === 'string' ? [s] : await s()) {
     if (!limited && (!picks || o.affected!.chose !== undefined)) {
       limited = true;
-      const t = o.timeLimit!(checkKind(picks ? o.affected : undefined));
+      const t = o.timeLimit!(checkKind(picks ? o.affected : undefined), picks ? o.affected!.files : undefined);
       if (t) {
         limit = { ...t, at: started + t.ms };
         o.say(`time limit: ${t.why}`);
@@ -254,6 +255,8 @@ export interface AffectedScope {
   /** The change itself, in place of the worktree's HEAD against `base`: a kit's trial's (kitreach.ts). */
   changed?: Changed[];
   chose?: string;
+  /** How many test files it ran, once `chose` says it ran only some: a vouch's time limit allows for them (vouchtime.ts). */
+  files?: number;
 }
 
 /** What a run of the checks ran: the whole suite, or only the tests a change reaches (none, at times). */
@@ -326,6 +329,7 @@ export async function affectedSteps(ctx: Ctx, dir: string, scope: AffectedScope,
     return pretest;
   }
   scope.chose = `affected: ${p.files.length} of ${p.tests.length} test files`;
+  scope.files = p.files.length;
   say(`npm test: ${scope.chose} (${p.why})`);
   return [...pretest, ['node', ...p.flags, '--test', ...p.files.map((f) => `"${f}"`)].join(' ')];
 }

@@ -148,11 +148,11 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
       : vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: assayed.chose }, o.head);
     return setVouch(ctx, e, o.repo, o.head, description);
   }
-  // Stopped five minutes past its usual time (vouchtime.ts); a pass is kept toward that average.
+  // Stopped five minutes past its usual time for as many test files (vouchtime.ts); a pass is kept toward that average.
   const started = Date.now();
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind) => vouchLimit(e.id, kind, { overMs: o.overMs }) });
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }) });
   if (failed) return failed;
-  noteVouchTime(e.id, checkKind(scope), Date.now() - started);
+  noteVouchTime(e.id, checkKind(scope), Date.now() - started, scope?.files);
   return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
 }
 
