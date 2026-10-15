@@ -10,7 +10,7 @@ import { workTasks, type Task, type WorkFields } from './work-tasks.ts';
 export { currentWork, inWork, outsideWork, startWork, withWork, type WorkFields, type WorkHandle } from './work-tasks.ts';
 
 /**
- * An agent's work status (kit 2.75.0, spec/WORK-STATUS.md): one shape every agent reports at GET /api/peer/work (the
+ * An agent's work status (kit 2.76.0, spec/WORK-STATUS.md): one shape every agent reports at GET /api/peer/work (the
  * kit's server answers it for every agent, server.ts), which Manor's Work page gathers from each agent on this PC, and
  * from each PC on the licence over Manor's link to other PCs. It says
  *

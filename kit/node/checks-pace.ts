@@ -30,7 +30,7 @@ import { currentWork } from './work-tasks.ts';
  * (CHECKS_SLOWER_ENV, kit 2.74.6), so a test's own waits and timeouts stretch as its run's limit does (paced): at the
  * checks pace a test should take longer, never fail.
  *
- * Every paced run says where it stands (kit 2.75.0): its launcher writes a file in checksRunsDir() while it waits for a
+ * Every paced run says where it stands (kit 2.76.0): its launcher writes a file in checksRunsDir() while it waits for a
  * turn, holds one or runs without, naming the agent and the task it runs for (checksWho), so an agent's work status
  * (work-status.ts) and Manor's Work page show who holds the PC's turns and who waits, since when (checksRuns()).
  *
@@ -248,7 +248,7 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   };
 }
 
-// ---------------------------------------------------------------- the PC's check runs in sight (kit 2.75.0)
+// ---------------------------------------------------------------- the PC's check runs in sight (kit 2.76.0)
 
 /** The variables a launcher reads to say where it stands (checks-pace.cs): its folder, and who started it. */
 export const CHECKS_RUNS_ENV = 'KIT_CHECKS_RUNS';

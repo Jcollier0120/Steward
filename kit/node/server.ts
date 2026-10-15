@@ -107,7 +107,7 @@ export interface ServeOptions {
   /** The agent's settings (its settings.ts): the page's Settings panel reads and saves them. */
   settings?: SettingsSpec;
   /**
-   * What the agent adds to its work status (work-status.ts, kit 2.75.0), GET /api/peer/work: its slots, its own lines,
+   * What the agent adds to its work status (work-status.ts, kit 2.76.0), GET /api/peer/work: its slots, its own lines,
    * its results and what holds its work up. The kit's own part (its rounds, the tasks it tracks with withWork, the PC's
    * lines and load) is there without it.
    */
@@ -227,7 +227,7 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     '/settings.css': webFile('/settings.css'),
     // A React page's bundle (react-page.ts): built from src/web/main.tsx in a checkout, as released otherwise.
     '/page.js': pageScript(),
-    // Its work status (work-status.ts, kit 2.75.0), for Manor's Work page: here, and from the PCs on the licence over
+    // Its work status (work-status.ts, kit 2.76.0), for Manor's Work page: here, and from the PCs on the licence over
     // Manor's link (GET /agents/<id>/work). Read only.
     '/api/peer/work': async () => ({ json: await workStatus(await opts.work?.()) }),
     ...opts.get,

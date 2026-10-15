@@ -16,7 +16,7 @@
 // inside another's run (KIT_CHECKS_TURN set: the Assayer pacing `steward vouch`, which paces its own steps) takes no turn,
 // or it would wait for itself. A turn not had within TURN_WAIT_MS is gone without: a check never waits forever.
 //
-// Runs in sight (kit 2.75.0): a launcher that takes part in the turns says where it stands in a file of its own,
+// Runs in sight (kit 2.76.0): a launcher that takes part in the turns says where it stands in a file of its own,
 // <KIT_CHECKS_RUNS>\<its process id>.run, so an agent's work status (work-status.ts) shows every check run on the PC:
 // its first line "waiting -1 <since>" while it waits, "turn <n> <since>" once it holds turn n, "running -1 <since>" when
 // it runs without one; its second KIT_CHECKS_WHO, as the agent that started it set it. Removed when it ends; one left by

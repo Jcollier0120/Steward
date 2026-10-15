@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { freePort } from './free-port.ts';
 import { until } from './until.ts';
 
-// An agent's work status (work-status.ts, kit 2.75.0): its tasks, the PC's lines, its results, at GET /api/peer/work.
+// An agent's work status (work-status.ts, kit 2.76.0): its tasks, the PC's lines, its results, at GET /api/peer/work.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-work-status-'));
 after(() => rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
 process.env.FIXTURE_HOME = path.join(home, 'data');

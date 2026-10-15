@@ -1,6 +1,6 @@
 # An agent's work status
 
-Since kit 2.75.0, every agent answers `GET /api/peer/work` on its page with its **work status**: what it may run at once, what it runs, what waits and in which line, the PC's shared lines, its recent results and what holds its work up. Manor's Work page gathers it from each agent on the PC, and, with Other PCs on, from each PC on the licence over Manor's link (`GET /agents/<id>/work`, which the other PC's Manor hands to its agent as `GET /api/peer/work`). It is read only.
+Since kit 2.76.0, every agent answers `GET /api/peer/work` on its page with its **work status**: what it may run at once, what it runs, what waits and in which line, the PC's shared lines, its recent results and what holds its work up. Manor's Work page gathers it from each agent on the PC, and, with Other PCs on, from each PC on the licence over Manor's link (`GET /agents/<id>/work`, which the other PC's Manor hands to its agent as `GET /api/peer/work`). It is read only.
 
 The kit's server answers it for every agent (`node/server.ts`), built by `workStatus()` (`node/work-status.ts`) from what the kit knows, with what the agent adds (`serve({ work })`). An agent in another language answers the same shape.
 

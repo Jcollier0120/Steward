@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
- * The work an agent's process has under way (kit 2.75.0, spec/WORK-STATUS.md): each piece of it as a task, running or
+ * The work an agent's process has under way (kit 2.76.0, spec/WORK-STATUS.md): each piece of it as a task, running or
  * waiting in a line, for its work status (work-status.ts), which Manor's Work page shows. The kit tracks its own (each
  * scheduled round, schedule.ts); an agent tracks the work it does inside them (the Steward's PR checks, its kit trials),
  * with withWork() around each. A task started inside another's withWork() is that task's part (`parent`), and a check
@@ -14,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 export interface WorkFields {
   /** Its kind: 'round', 'check', 'trial', 'whole-suite', 'merge', 'release', 'index'… one word, for the page to group by. */
   kind: string;
-  /** What it is, in words: "Reeve#212's checks", "kit 2.75.0 tried with Reeve". At most 200 characters. */
+  /** What it is, in words: "Reeve#212's checks", "kit 2.76.0 tried with Reeve". At most 200 characters. */
   what: string;
   /** The repository (owner/name), the commit and its code tree, and the pull request, when it works on one. */
   repo?: string;

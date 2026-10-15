@@ -221,7 +221,8 @@ test("a known maker's NPU of a generation setup doesn't know: tried on the most 
   const bolder = structuredClone(V.NPU_CATALOG);
   Object.assign(bolder.routes.qualcomm.generations['snapdragon-x2'], { maxContextTokens: 8192, caps: { chat: 8192, vision: 8192 } });
   bolder.routes.qualcomm.generations['snapdragon-x'].supported = false;
-  assert.deepEqual([V.unknownGeneration(bolder.routes.qualcomm)!.maxContextTokens, V.unknownGeneration(bolder.routes.qualcomm)!.caps], [2400, { chat: 2400, vision: 2400 }]);
+  // Its embeddings keep their own cap, their server's context being the same on every generation.
+  assert.deepEqual([V.unknownGeneration(bolder.routes.qualcomm)!.maxContextTokens, V.unknownGeneration(bolder.routes.qualcomm)!.caps], [2400, { chat: 2400, vision: 2400, embed: 1365 }]);
   const x3 = parseNpus(X3, 'arm64')[0];
   assert.deepEqual([x3.generation, x3.supported, x3.guessed, x3.label], [V.UNKNOWN_GENERATION, true, true, "Qualcomm NPU of a generation setup doesn't know yet, device 0FF0"]);
   assert.match(parseNpus(X3, 'x64')[0].why!, /GenieX runs on arm64 Windows/);
@@ -522,13 +523,24 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     startCommand: [
       portablePath(path.join(hexagon, 'llama-server.exe')),
       ...['--host', '127.0.0.1', '--port', '18182', '--device', 'HTP0', '-ngl', '99', '-m', portablePath(path.join(tools, 'models', 'Qwen3-Embedding-0.6B-Q8_0.gguf'))],
-      ...['--embeddings', '--pooling', 'last', '-c', '8192', '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf'],
+      // 4,096 tokens in 512-token micro-batches: 1.4 GB on the NPU, not the 2.9 GB of -c 8192 -ub 2048, in the same time.
+      ...['--embeddings', '--pooling', 'last', '-c', '4096', '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf'],
     ],
     // FastRPC finds the HTP library there, wherever the server is started from (the keeper starts it in the home folder).
     env: { ADSP_LIBRARY_PATH: portablePath(hexagon) },
+    maxContextTokens: 1365,
   },"the graphics card's model and index name: its vectors match the card's (cosine 0.999 measured), so an index carries over");
   assert.deepEqual(validateAccelerators({ accelerators: [ok.entry] }), []);
   assert.deepEqual(validateKeeperConfig({ accelerators: [ok.entry] }), []);
+  // Its cap keeps a request inside the server's context at one token a character (a longer one is refused, 400).
+  const ctx = Number(ok.entry!.embed!.startCommand![ok.entry!.embed!.startCommand!.indexOf('-c') + 1]);
+  assert.ok(ok.entry!.embed!.maxContextTokens! * RULES.tokens.charsPerToken < ctx, 'under -c real tokens at one a character');
+  const qAcc = (core.parseAccelerators(RULES, { accelerators: [ok.entry] }, null) as any).accelerators[0];
+  assert.equal(core.capFor(qAcc, 'embed'), 1365, "embeddings' own cap");
+  assert.equal(core.capFor(qAcc, 'chat'), 2400, "chat's stays the route's");
+  // The longest any agent sends: Reeve's cluster items, 2,000 characters and a prefix (its search chunks are 1,500).
+  assert.equal(core.candidates(RULES, [qAcc], { work: 'embed', tokens: core.estimateTokens(RULES, 'x'.repeat(2_060)), lane: 'background' }).list.length, 1, "Reeve's longest");
+  assert.equal(core.candidates(RULES, [qAcc], { work: 'embed', tokens: core.estimateTokens(RULES, 'x'.repeat(4_097)), lane: 'background' }).list.length, 0, 'past its cap: not a candidate');
 
   // Its embedding server failing leaves the NPU's chat as it is, without embeddings, and says why.
   for (const [what, o, re] of [

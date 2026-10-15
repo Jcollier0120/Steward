@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.75.0
+## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it.**
 
@@ -29,6 +29,23 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do: the route comes with the kit's server. To say more, pass `work: () => ({ slots, blocked, … })` to `serve()`, and wrap long work in `withWork` so that it shows as a task.
+
+## 2.75.1
+
+**On a Snapdragon, the embedding server beside GenieX holds 1.4 GB of the NPU's memory, not 2.9 GB, in the same time and to the same vectors, so chat, pictures and embeddings fit a 16 GB PC with room to spare.**
+
+### What changed
+
+- **npu-vendors.json's qualcomm route** (Qualcomm's alone; Intel's and AMD's routes, the graphics card's and the processor's llama-server, the keeper and `npuMemoryFit` are unchanged):
+  - **`embedServer.serve`**: `-c 4096 -ub 512`, not `-c 8192 -ub 2048`. Measured on the X2 Elite, 14 settings, each started fresh on a private port in the NPU's turn: 1,408 MB on the NPU against 2,876, a 2.0 GB working set against 4.4, 629 MB private against 1,567. A query took 30 ms, a 432-token chunk 131 ms and a 2,707-token text 1.0 s, as before, and the vectors matched (cosine 0.99999 or more). Beside a loaded GenieX the two hold 5,646 MB of the NPU's memory, against 7,114 MB. Windows lets one device hold about half a PC's memory, 7.8 GB on a 16 GB Snapdragon.
+  - **`caps.embed`: 1,365**, by the kit's estimate of 3 characters a token, so a request stays under the server's 4,096 real tokens even at one token a character. Embeddings had the route's 2,400 before. The longest input any agent sends is about 2,060 characters (Reeve's cluster items), an estimate of 687, so every request still goes to the NPU. A longer one goes to the next accelerator that makes embeddings.
+  - **`idleStop.coldStartMs.embed`: 3,000**, measured (1.3 to 3.0 s alone, 1.5 to 2.2 s beside a loaded GenieX), not the 10,000 assumed. A person waking it is told about 3 s; the minutes stay 5.
+- **spec/NPU-VENDORS.md** has the measurements (Memory on a 16 GB Snapdragon) and what stays as it was: GenieX's own 1.56 GB float32 embedding table, which GenieX 0.8.0 reads whole for vision-language models and won't take quantized; its 4,096-token context, AI Hub's only build; InternVL3.5-2B, smaller and faster but 19 of 24 on the quality items against 22, a must-pass one wrong; recycling GenieX sooner, which the 5-minute idle stop makes moot on a small PC; and no `memoryGb` for Qualcomm, which at the 40% share would leave embeddings off the NPU on every 16 GB Snapdragon. It also has the route run under a 16 GB PC's memory (a ballast on the X2 Elite, at 9.7 GB available and at 15.6 GB in all). Nothing failed at either level. The NPU held the same 5,646 MB as with no ballast (7,114 at the old setting), and the new setting left 1.6 GB more of the PC's memory.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- On a Snapdragon already set up, the NPU refresh brings the embedding server's new command and cap in as the agent pins this kit, once it answers its test. Nothing is downloaded, and no index is rebuilt: the model and its vectors are the same.
 
 ## 2.74.8
 

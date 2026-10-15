@@ -97,7 +97,7 @@ Every kit agent's `GET /api/ping` answers what Manor needs to show it without st
 
 ### What the agent is working on
 
-From kit 2.75.0, every kit agent's `GET /api/peer/work` answers its **work status** ([kit/spec/WORK-STATUS.md](kit/spec/WORK-STATUS.md)): what it may run at once, what it runs and what waits, in which of the PC's lines (the checks pace's turns, the work line, the first-round line, each accelerator's), its recent results by code tree, and what holds its work up. Manor's Work page gathers it from each agent on the PC, and over Manor's link from the licence's other PCs. The Steward adds its stages (Stages at once), each check run with its commit and tree, the whole suite and kit trials beside the rounds, and what holds each version queue.
+From kit 2.76.0, every kit agent's `GET /api/peer/work` answers its **work status** ([kit/spec/WORK-STATUS.md](kit/spec/WORK-STATUS.md)): what it may run at once, what it runs and what waits, in which of the PC's lines (the checks pace's turns, the work line, the first-round line, each accelerator's), its recent results by code tree, and what holds its work up. Manor's Work page gathers it from each agent on the PC, and over Manor's link from the licence's other PCs. The Steward adds its stages (Stages at once), each check run with its commit and tree, the whole suite and kit trials beside the rounds, and what holds each version queue.
 
 ### What the kit leaves in the data folder: round.json
 
