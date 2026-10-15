@@ -4,12 +4,40 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.77.1
 
-**The NPU 3720's embeddings run on the processor's graphics: a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it. `npu-check --harden` passes every step on it.**
+**`npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**
 
-The embeddings on the graphics were merged after 2.75.2 without a release of their own: this release brings them.
+### What changed
+
+- **npu-check.ts's `--harden`** waits, up to a minute, for the server the timeout case's setup started to answer before stopping it. Given 1 s, that server hadn't opened its port when the check stopped servers, and only a server that answers is stopped, so it was left loading the route's model, and the nonsense case's test asked it instead of starting its own: a 404 for the nonsense model, and the step failed (the NPU 3720, 2026-10-15). With it, every `--harden` step passes on the NPU 3720, the nonsense case too: OpenVINO's group-wise Qwen3-4B compiles there (its first load 125 s) and answers nonsense, as on the Lunar Lake, and setup leaves the NPU out.
+- **spec/NPU-VENDORS.md** gains Memory on a 16 GB Intel PC: on the NPU 3720, with the route's commands, chat held 3.20 GB and embeddings 1.16 GB on the NPU (1.14–1.27 on the graphics), 4.2–4.4 GB of the PC's available memory together, under the route's `memoryGb` (5.54) and the 6.2 GB budget; Windows lets the NPU hold 8.80 GB. Nothing changes: the Snapdragon's smaller embedding context (kit 2.75.1) saves nothing on OpenVINO's NPU.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+
+## 2.76.0
+
+**Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
 
 ### What's new
 
+- **work-status.ts**: `workStatus(extra)` builds an agent's status (shape version 1) from what the kit knows, plus what the agent adds. The kit's server answers it for every agent at `GET /api/peer/work`. The route is read-only, so Manor's link to other PCs passes it on as it is. `serve({ work })` gives the agent's own part: its `slots`, more `running`, `waiting` or `lines`, its `results`, and what is `blocked`.
+  - `pcLines()`: the PC's lines as they stand, each with who holds a place and who waits, since when:
+    - the checks pace's turns (`checks`);
+    - the kit pace's work line (`work`);
+    - the first-round line (`first-round`);
+    - each accelerator's line (`accelerator:<id>`).
+  - `pcLoad()`: the PC's name, processors and memory, how busy its processors are (0 to 1), its pace, and the checks pace's cap.
+  - `recordResult()`, `resultFor()`, `recentResults()`: what work came to, one per kind, repository and code tree (git's tree id, the same for the same code whatever the commit). The latest is kept in `work-results.json` (200 of them).
+  - `codeAt(dir)`: a checkout's commit and tree, and whether anything tracked has changed. It is read with git itself, apart from the agent's runner.
+- **work-tasks.ts**: an agent's tasks.
+  - `withWork(fields, fn)` runs `fn` as a task. `startWork(fields)` gives a handle to `waitIn(line)`, `running()`, `set()` and `done()`.
+  - A task started inside another is its part (`parent`). `outsideWork(fn)` makes work that outlives its task (a job beside the rounds) a task of its own.
+- **schedule.ts**: every scheduled round is a task. It waits in the first-round line or the work line, then runs, and the work its job does is its part.
+- **checks-pace.ts and checks-pace.cs**: the checks pace's turns are in sight.
+  - Each launcher that takes part in the turns writes `<pid>.run` in `checksRunsDir()` while it runs. The file says whether it waits for a turn or holds one, since when, and which agent, task and command it is for (`KIT_CHECKS_WHO`, which `pacedCommand` sets).
+  - `checksRuns()` reads the files, and removes those whose launcher has gone.
+  - The turns themselves work as before. The launcher's source changed, so each PC compiles it again once.
 - **npu-vendors.ts**: a generation's `embedArgs`, its embedding server's arguments that differ on it, replace those in the route's `embedServer.serve` as `args` do in `serve` (`routeFor`). An unknown generation takes none.
 
 ### What changed
@@ -18,11 +46,10 @@ The embeddings on the graphics were merged after 2.75.2 without a release of the
   - Not chosen: the NPU at `--max_length` 512 answers a query in 0.27 s but refuses Reeve's dense chunks, so it would need a second server for queries; 1,024 saves 4–6% and refuses them too. The processor slowed chat by a fifth while indexing and held about 2.4 GB. llama.cpp's Vulkan build, setup's for a card, was slower on the same graphics, with another model's vectors. `NPUW_LLM_PREFILL_CHUNK_SIZE` in the embedding server's `--plugin_config` (128 or 256) stops OpenVINO Model Server at its start (0xC0000409), as before.
   - Arrow Lake-S, the same NPU, keeps its embeddings on the NPU: its F models have no graphics. So does every other generation, and one setup doesn't know.
 - **npu-check.ts's `routeOnDevice`** leaves the embedding server where the route has it when the check runs on the NPU, so the NPU 3720's stays on the graphics; on the processor or the graphics it goes with chat, as before.
-- **npu-check.ts's `--harden`** waits, up to a minute, for the server the timeout case's setup started to answer before stopping it. Given 1 s, that server hadn't opened its port when the check stopped servers, and only a server that answers is stopped, so it was left loading the route's model, and the nonsense case's test asked it instead of starting its own: a 404 for the nonsense model, and the step failed (the NPU 3720, 2026-10-15). With it, every `--harden` step passes on the NPU 3720, the nonsense case too: OpenVINO's group-wise Qwen3-4B compiles there (its first load 125 s) and answers nonsense, as on the Lunar Lake, and setup leaves the NPU out.
-- **spec/NPU-VENDORS.md** gains Memory on a 16 GB Intel PC: on the NPU 3720, with the route's commands, chat held 3.20 GB and embeddings 1.16 GB on the NPU (1.14–1.27 on the graphics), 4.2–4.4 GB of the PC's available memory together, under the route's `memoryGb` (5.54) and the 6.2 GB budget; Windows lets the NPU hold 8.80 GB. Nothing changes: the Snapdragon's smaller embedding context (kit 2.75.1) saves nothing on OpenVINO's NPU.
 
 ### For an agent
 
+- Nothing to do: the route comes with the kit's server. To say more, pass `work: () => ({ slots, blocked, … })` to `serve()`, and wrap long work in `withWork` so that it shows as a task.
 - Nothing to do: take the kit and release as usual.
 - On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
 - The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.

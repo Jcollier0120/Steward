@@ -4,17 +4,41 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.53
 
-**Kit 2.77.1: on a PC with Intel's NPU 3720, search runs on the processor's graphics, over 20 times as fast for a query, with the same results.**
+**Kit 2.77.1: the NPU check's hardening run passes every step on Intel's NPU 3720.**
 
 ### What changed
 
-- On a Meteor Lake or Arrow Lake-U PC (Intel's NPU 3720), the local AI's search model now runs on the processor's built-in graphics instead of the NPU. A search query answers in about 50 ms instead of 1.1 s, Reeve indexes 3.7 times as fast, and the results are the same. Chat stays on the NPU, no slower beside it. An Arrow Lake-S PC, whose processor may have no graphics, keeps search on the NPU.
-- The NPU check's hardening run now passes every step on the NPU 3720. Before, one step could ask a server an earlier step had left starting, and fail.
-- The kit the Steward hands out (2.77.1) brings this to every agent. The search change was merged after kit 2.75.2 without a release of its own: this release brings it. Other PCs are unchanged.
+- The NPU check's hardening run now passes every step on Intel's NPU 3720 (Meteor Lake and Arrow Lake-U). Before, one of its steps could ask a server that an earlier step had left starting, and fail.
+- How much memory the local AI holds on a 16 GB PC with the NPU 3720 is now measured and written down: chat and search together hold about 4.3 GB, inside what setup allows. Nothing changes for it.
+- The kit the Steward hands out (2.77.1) brings this to every agent.
 
 ### Before you update
 
-- Nothing: it updates itself as usual. On a PC with the NPU 3720 already set up, each agent tries search on the graphics as it takes the new kit, and the graphics prepare the search model once, in 4 to 12 seconds. If chat or search doesn't answer properly that way, it keeps search where it was.
+- Nothing: it updates itself as usual.
+
+## 0.36.50
+
+**Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**
+
+### What's new
+
+- The Steward reports what it is doing right now, and Manor reads it from its page:
+  - each stage it runs, and how many it may run at once (Settings' Stages at once);
+  - each run of a repository's checks, with the repository and commit;
+  - the whole suite or a kit trial running beside the rounds, with the checks they run.
+- Work that waits says which line it waits in: a turn of the checks pace, the work line, the first-round line, or an accelerator.
+- It says what holds each version queue: the pull request that isn't ready, since when, and the pull requests waiting behind it.
+- What each run of the checks came to is kept by the code it ran on, so a pass on the same code can be found later, whatever the commit.
+- Manor 0.16.161 has a **Work** page that gathers this from every agent on the PC, and from the licence's other PCs when Other PCs is on.
+
+### What changed
+
+- The kit the Steward hands out (2.76.0) brings the same to every agent: their scheduled rounds and their place in the checks pace's turns show too.
+- Kit 2.76.0 also brings NPU work that wasn't released before. On Intel's NPU 3720, embeddings now run on the processor's graphics: a search answers in about 50 ms instead of 1.1 s, and Reeve indexes about 3.7 times as fast.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The checks pace's launcher is built again once, at the first check after the update.
 
 ## 0.36.49
 
