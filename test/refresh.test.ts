@@ -67,7 +67,7 @@ function raise(from: string, to: string): void {
   sh(fake.checkout, 'commit', '--quiet', '-am', `Fake ${to}`);
   sh(fake.checkout, 'push', '--quiet', 'origin', 'main');
 }
-const siteHead = () => sh(site.checkout, 'ls-remote', 'origin', 'refs/heads/main').split(/\s+/)[0];
+const siteHead = () => sh(site.origin, 'rev-parse', 'refs/heads/main');
 const siteNotes = () => sh(site.checkout, '--git-dir', site.origin, 'show', 'main:notes.txt');
 const refreshes = (out: Awaited<ReturnType<typeof round>>) => out.results.filter((x) => x.message.startsWith('refresh: '));
 const alarms = () => JSON.parse(readFileSync(path.join(home, 'alarms.json'), 'utf8')).open.map((a: any) => a.id) as string[];

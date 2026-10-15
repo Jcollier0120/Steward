@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { clearWorkDir } from '../src/stages/common.ts';
 
 // A work folder Settings point at the person's own projects: the Steward clears only the worktrees it made there.
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-workdir-'));
+const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-workdir-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 test("clearWorkDir removes only a worktree in the work folder, never a clone of someone's own or a folder outside", () => {

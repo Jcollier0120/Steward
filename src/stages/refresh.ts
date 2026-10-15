@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
-import { commitOf, fetchBranch, git, gitMaybe, realOf, unlinkModules } from '../git.ts';
+import { commitOf, fetchBranch, git, gitMaybe, pruneWorktrees, realOf, unlinkModules, worktreeRecords } from '../git.ts';
 import { runLine, tail, type Ran } from '../run.ts';
 import type { Employee } from '../settings.ts';
 import { keepFailure } from '../failure.ts';
@@ -58,8 +58,12 @@ const sameDir = (a: string, b: string) => spelled(a) === spelled(b) || spelled(r
  */
 async function keptWorktree(ctx: Ctx, repo: string, dir: string, commit: string): Promise<boolean> {
   if (!existsSync(path.join(dir, '.git'))) return false;
-  const list = await gitMaybe(ctx.run, repo, 'worktree', 'list', '--porcelain');
-  if (!list?.split('\n').some((l) => l.startsWith('worktree ') && sameDir(l.slice('worktree '.length).trim(), dir))) return false;
+  // Git's records, from its files when they say them plainly (git.ts worktreeRecords), else from `git worktree list`.
+  const records = worktreeRecords(repo);
+  const listed = records
+    ? records.flatMap((w) => (w.path ? [w.path] : []))
+    : (await gitMaybe(ctx.run, repo, 'worktree', 'list', '--porcelain'))?.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice('worktree '.length).trim());
+  if (!listed?.some((p) => sameDir(p, dir))) return false;
   if ((await gitMaybe(ctx.run, dir, 'checkout', '--quiet', '--force', '--detach', commit)) === null) return false;
   return (await gitMaybe(ctx.run, dir, 'clean', '--quiet', '-fd')) !== null;
 }
@@ -146,7 +150,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
       keepFailure(dir, ci.line, ci.code, `${ci.out}\n${ci.err}`);
       return done('failed', `${ci.line} failed (exit ${ci.code}) at ${at}, so ${command} wasn't run, and nothing was pushed${networkNote(`${ci.out}\n${ci.err}`)}`, { commit: at });
     }
-    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000, paced: !ctx.fast });
+    const r = await runLine(run, command, { cwd: dir, timeoutMs: 20 * 60_000, paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) say(`  ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, command, r.code, `${r.out}\n${r.err}`);
@@ -182,7 +186,7 @@ export async function refreshOne(ctx: Ctx, e: Employee, what: string): Promise<E
 async function dropWorktree(ctx: Ctx, repo: string, dir: string): Promise<void> {
   unlinkModules(dir);
   clearWorkDir(ctx.settings, dir);
-  await gitMaybe(ctx.run, repo, 'worktree', 'prune');
+  await pruneWorktrees(ctx.run, repo);
 }
 
 /** Releases whose refresh waits for the round that comes sooner, and since when. */

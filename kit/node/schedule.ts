@@ -252,7 +252,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * At the manor's pace (pace.ts, kit 2.43.3; gentle unless Manor's Settings say full), the agent runs gentle from
  * the start, and a scheduled round too: below-normal priority, and Heiward's efficiency mode, very low disk priority
- * and processor cap (gentle.ts, kit 2.50.0); a round someone asked for lifts them while it runs. A schedule's first
+ * and processor cap (gentle.ts, kit 2.50.0); a round someone asked for runs at the same pace (kit 2.73.0). A schedule's first
  * round (none has gone through: round.json's wentThrough) waits its
  * turn in one line with the other agents' first rounds, one at a time. While it waits, its state says so (waiting,
  * firstRound), and the page shows the agent settling into the manor. A round the person asks for never waits.
@@ -324,14 +324,15 @@ export function every(
     const p = phase(ms);
     return p === null ? ended + ms * jitter : nextOnClock(ended + ms / 2, ms, p);
   };
-  const waitFor = (ms: number) => {
-    dueAt = Date.now() + ms;
+  /** Waits `ms` from `now`: the same now the wait was worked out from, so a slot on the clock is due on it, not a moment past. */
+  const waitFor = (ms: number, now = Date.now()) => {
+    dueAt = now + ms;
     timer = setTimeout(tick, ms);
   };
   const wait = () => {
     jitter = 0.9 + Math.random() * 0.2;
     const now = Date.now();
-    waitFor(Math.max(0, dueAfter(now) - now));
+    waitFor(Math.max(0, dueAfter(now) - now), now);
   };
 
   const tick = async (asked = false) => {
@@ -367,9 +368,10 @@ export function every(
     const controller = new AbortController();
     const limit = typeof opts.timeoutMs === 'function' ? opts.timeoutMs() : opts.timeoutMs ?? roundTimeLimit(interval());
     let limitTimer: NodeJS.Timeout | undefined;
-    // The manor's pace (pace.ts): a scheduled round at below-normal priority, and an agent's first in its turn.
+    // The manor's pace (pace.ts), the owner's setting: a round, asked for or not, at it (kit 2.73.0); a scheduled
+    // agent's first in its turn.
     const p = pace();
-    void paceProcess(p, asked);
+    void paceProcess(p);
     const name = opts.name ?? 'round';
     // The heavy first round, asked for or not; only a scheduled one waits its turn.
     const isFirst = !firstRoundDone(name);
@@ -452,8 +454,6 @@ export function every(
       lastOffline = offline;
       running = false;
       startedAt = null;
-      // Someone's round is over: back to the pace.
-      if (asked) void paceProcess(pace());
       const ended = Date.now();
       lastEnded = ended;
       // A round still running when stop() was called must not set up the next one.
@@ -512,7 +512,8 @@ export function every(
     reschedule(): void {
       if (stopped || running || lastEnded === null) return;
       clearTimeout(timer);
-      waitFor(Math.max(0, dueAfter(lastEnded) - Date.now()));
+      const now = Date.now();
+      waitFor(Math.max(0, dueAfter(lastEnded) - now), now);
     },
     get running() {
       return running;

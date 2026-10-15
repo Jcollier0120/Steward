@@ -2,9 +2,9 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.15
+## 0.36.34
 
-**Fewer git commands again: projects' version queues, release turns and pull requests that set no version.**
+**Fewer git commands again: projects' version queues, and pull requests that set no version.**
 
 ### What changed
 
@@ -12,8 +12,182 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - A version queue that already has a branch's head keeps it without asking the clone again, and a repository the round has just merged or released to is always fetched, so its queue is never a round behind.
 - A pull request that sets no version above its branch is no longer read again every round while nothing about it has changed.
 - A branch with no version found at its head isn't read again until the branch moves.
-- Renewing a release turn writes its small record directly, without four extra git commands each time.
 - The staff table reads a clone's branch correctly from git when the clone uses git's newer reftable format.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.28
+
+**A vouch that runs five minutes past its usual time is stopped, and check runs get twice the processor on a big PC.**
+
+### What's new
+
+- **A time limit on `steward vouch`.** Once a repository has three vouches that passed, a vouch's checks are stopped when they have run five minutes longer than its last ten passing vouches took on average. Whole-suite runs and runs of only the tests a change reaches are averaged apart, since one takes a fraction of the other. A stopped vouch says so, with the limit and how it was worked out, and sets nothing: the Steward tests the PR itself before merging, as for any PR without a vouch. Before, a stuck vouch could run for 80 minutes.
+
+### What changed
+
+- A command stopped at its time limit is ended with every program it started, not only the one the Steward started: a test run under npm, or under the checks pace, used to run on.
+- Kit 2.74.1: test runs, type checks, installs and builds may use a quarter of the processor, up to four processors' worth, where it was two. On a PC with more than eight processors they finish sooner. The Steward's own tests had taken over an hour on an 18-processor laptop that was otherwise idle. Agents take it as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The time limit starts once three vouches of a repository have passed on this version.
+## 0.36.27
+
+**Your second development PC can claim versions of the manor's repositories.**
+
+### What's new
+
+- On a PC you develop on beside the one that merges and releases, `claim-version` and `release-version` now work for the manor's own repositories (and the kit, from a Steward clone) when GitHub says the account that PC is signed in with can push to them. Before, they were refused anywhere but the maker's laptop, so work started there couldn't take a version.
+- The claim goes straight to the repository's shared claims on GitHub, which the merging PC reads. If GitHub can't be reached, nothing is claimed, rather than a claim only that PC would know about.
+- Nothing else moves: merging, releasing, ports and recalls stay on the maker's laptop.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To claim from another PC, see "Except a version claim from the maker's other development PCs" in the README.
+## 0.36.26
+
+**Kit 2.74.0: a page layout for the agents your AI assistant calls, taken from Reeve's page, so they all read alike.**
+
+### What's new
+
+- The kit the Steward hands out (2.74.0) has a shared page layout for agents that serve MCP, like Reeve and the Assayer: what needs you first, then a row of tiles at a glance, connecting your AI, what was kept out of its context, then the agent's own sections. Lists show one line per item; details and long output open beside the page instead of filling it. Agents take it up as they pin kit 2.74.0, the Assayer first.
+## 0.36.25
+
+**The other agents see a merge within seconds, however long the Steward's round takes.**
+
+### What changed
+
+- The Steward shares the branches of your repositories on GitHub with the other agents, so they needn't ask GitHub themselves. Reeve uses them to bring each clone's main up to a merge. Before, they were read only as a round began, and a long round (one trying a new kit can take hours) left them out of date: the agents asked GitHub again, and Reeve couldn't tell a clone was behind.
+- Now the Steward's page also reads them on its own every 5 minutes, unless a round just did, and 10 seconds after each pull request it merges.
+- It costs about one of GitHub's 5,000 points an hour per read, and only happens while the Steward merges and releases by itself and is on duty. It never touches the tenth of GitHub's limit the Steward keeps spare.
+## 0.36.24
+
+**The Steward starts fewer git commands when it takes its turn in a repository or shares a version claim, and when it clears its work folders, so its rounds put less load on your PC.**
+
+### What changed
+
+- Writing the turn record or the shared version claims to a repository's remote used to start four git commands to build the commit before the push. The Steward now writes that small commit itself, and only the push still goes through git. The push's compare-and-swap is the same as before, so two PCs still can't both take a turn. The commit is the same one git would have made.
+- Reading a turn record or the claims back no longer starts git to read the file. The Steward reads it from the objects it already has, and asks git only when they're packed.
+- Clearing a stage's worktree used to list every worktree with git, remove it, and then always tidy up git's records of worktrees. The Steward now reads those records from git's own files and tidies up only when a worktree folder has gone missing. A folder that isn't there anymore costs no git command at all. Worktrees under a junction or a Dev Drive, and ones deleted by hand, are still found and cleared as before.
+- The Steward's own tests of these parts run faster: on the owner's laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
+## 0.36.23
+
+**Kit 2.73.5: the kit sees one folder as one folder, however it's named.**
+
+### What changed
+
+- The kit's install, update and model-server checks now compare folders by their real paths, through a junction, a link or a Dev Drive mounted in a folder (the Steward's work folder, `%USERPROFILE%\.steward\work`, is often one). An update ends the programs still running from the old copy whichever way they were started. Uninstalling with `--purge` refuses a folder that holds your profile, or a whole drive mounted in a folder, however it's named. A model server started under the other spelling is still known as the manor's own, and never stopped as an orphan.
+- Agents take kit 2.73.5 as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+## 0.36.22
+
+**The Steward's kit 2.73.4: an NPU that loads its model slowly is given the time its own settings allow.**
+
+### What changed
+
+- On a PC with an Intel or AMD NPU, the agents' local AI requests now wait as long as that NPU's own settings allow. Before, they all waited the same short time, so a slower NPU's answers, or its first answer while it prepared its model, could be cut off and the work put off until later. The timings setup measured for an NPU nobody had measured before are used now too.
+- When one agent finds the NPU still loading its model because another agent just woke it, it now waits for the load to finish, as it already did when it woke the NPU itself.
+- On a PC with a Qualcomm NPU, nothing changes.
+- The NPU benchmark's battery measurement no longer comes out empty when the PC is busy.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The agents get it as each takes kit 2.73.4.
+## 0.36.21
+
+**An update cut short by a crash no longer leaves an agent that can't start: what an update or a save writes is on the disk before it takes its place.**
+
+### What changed
+
+- The Steward hands out kit 2.73.3 and runs on it. When the PC went down seconds after Manor updated an agent, Windows had kept the swap of the agent's folder but not its files: they came back full of nothing (NUL bytes), and the agent's page couldn't start until it was installed again. Now each update writes the new version's files to the disk before swapping them in, and the copy kept for a rollback too.
+- The same for every settings and state file the Steward and the agents write: after a crash each is as it was before the save or as it was after, never empty. Each save takes about a millisecond longer.
+- Kit 2.73.3 also brings Intel's NPU 3720 tuning: on a PC with that NPU (Core Ultra Series 1, or 200U), the agents' local model answers a short question in about half a second instead of three, and the NPU check measures a real first compile. A PC whose NPU is already set up keeps its settings until it is set up again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent gets the same once the Steward moves it onto kit 2.73.3.
+
+## 0.36.20
+
+**The Steward's own tests run faster, so a vouch on one of its pull requests and the test run before each kit release finish sooner.**
+
+### What changed
+
+- The Steward's tests no longer build each stand-in repository from scratch with eight git commands. They build the first of each kind once and copy it for the rest, each copy with a first commit of its own. Its slowest test files take about a quarter less time: on the owner's laptop, the merge guard's tests went from 30 to 22 seconds and the catch-up's from 80 to 59. The whole set of seven slowest files went from 218 to 181 seconds.
+- A few tests make several of their stand-in pull requests in one push instead of one push each.
+- Nothing the Steward does outside its tests changed.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.19
+
+**A vouch no longer tests code again when the Assayer already ran the tests the change reaches, not just the whole suite.**
+
+### What changed
+
+- When a session checks its work with the Assayer's `affected` check (only the tests the change reaches) and commits exactly that, `steward vouch` now takes that pass instead of running the tests a second time. It does so when the test files the Assayer ran include every one the vouch would pick itself against `origin/<branch>`, and every other check (the typecheck and the rest) ran in full. Its status then says so: `npm test (affected: 12 of 126 test files, the Assayer's)`.
+- If the Assayer ran fewer test files than the vouch would, or doesn't say which (Vitest and Jest pick their own), or Settings have the vouch run the whole suite while the Assayer ran only some, the vouch runs the checks itself, as before. A full Assayer pass is still taken as it was.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Assayer records which test files an affected check ran from its 0.3.35 on. Until then, only its full checks stand in for a vouch.
+
+## 0.36.18
+**Half the processes for its git and gh calls: they share its page's console instead of each starting a console host of its own.**
+
+### What changed
+
+- The Steward's page now keeps a console with no window, and the git and gh commands it runs all day share it. Before, Windows started a console host (conhost.exe) beside every one of them: 40 git and gh calls started 82 processes, and now start 43. In a trace of the Steward's rounds, console hosts were 40% of everything it started.
+- The tests it runs (a kit's trial, a vouch, a pull request's test) no longer start git's upkeep after each of their throwaway commits, which made a third of the processes a test's commits started.
+- With the Steward's kit 2.73.2, every agent's page gets the same console the next time it starts. The agents start sharing it once they take that kit and start their git that way.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The change takes effect when its page restarts after the update.
+
+## 0.36.17
+
+**Releases go out again on a PC whose folders are on a Dev Drive: the Steward works in its work folder by its real path, and a release that published nothing is no longer called released.**
+
+### What changed
+
+- The Steward now works in its work folder by its real path, wherever the folder is reached through a junction, a symbolic link or a Dev Drive mounted in a folder. From the evening of 2026-10-13, when the owner's work folder became a junction to a Dev Drive, every agent's release ran its release command there and did nothing: the kit's release script didn't recognise itself through the junction and exited without building or publishing. The Steward reported each one released, round after round, and every other round failed with "a missing but already registered worktree".
+- A release command that finishes without making the agent's GitHub release is now a failed release on the PC that releases Castellan too, as it already was everywhere else, rather than "released". Such a release raises the usual alarm and waits for a person or a new commit, instead of reporting success.
+- A folder the Steward made in its work folder is recognised as its own however its path is spelled, so one a stopped stage left behind is still cleared.
+- The Steward hands out kit 2.73.1: the kit's scripts recognise themselves through junctions and Dev Drive mounts too, and the kit's new spec/DEV-DRIVES.md sets out how every agent compares paths.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you set the Work folder in settings.json to a Dev Drive's own letter to get releases going, you can leave it: it now works either way.
+## 0.36.13
+
+**The Steward's checks go easier on your PC: a quarter of the processor at most, a cap on memory, two runs at a time, and your Settings as the only switch.**
+
+### What's new
+
+- Checks can't take all your memory. Each program gets at most an eighth of the PC's memory (2 to 6 GB), and all the checks together a quarter (4 to 12 GB). A test that runs away fails instead of slowing the whole PC.
+- At most two check runs go at once on the PC, from the Steward, the Assayer or a Claude session. The rest wait their turn, 20 minutes at most.
+- Local AI model servers no longer run at the limits of whichever agent started them, so they answer every agent at full speed.
+
+### What changed
+
+- Tests, type checks, installs and release builds the Steward runs now use at most a quarter of your processor (two cores' worth at most), the same share as the agents' own background work. Before, they could use half.
+  - Measured on an 18-core laptop with the Assayer's test suite on a quiet PC: before, the whole PC peaked at 91% and the suite took 39 seconds; now it peaks at 43% and takes 65 seconds.
+  - The Steward allows checks four times their usual time before it gives up on one.
+- Your background pace in Manor's Settings decides how hard the Steward and the agents work. At Full speed, checks run at full speed too. While it's gentle, `"checksPace"` in Manor's settings.json can give checks a different share.
+- Nothing else lifts it:
+  - `steward vouch --fast` is gone (it says so and vouches at the usual pace);
+  - looking at an agent's page no longer lifts its limits, so the page shows what the agent really costs in the background;
+  - Run now runs at your pace.
+- Brings the Steward's kit 2.73.0.
 
 ### Before you update
 

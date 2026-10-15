@@ -183,6 +183,30 @@ test('compare-and-swap: of two PCs writing over the same commit, one wins and th
   assert.equal(((await R.readRef(realRun, r, 'refs/manor/x', 'x.json')) as { text: string }).text, '1');
 });
 
+test("a written ref's commit is the one git's own commands make, and reads back from loose objects, fetched ones or a pack", async () => {
+  const r = { ...remote(), scratch: path.join(home, 'scratch-same.git') };
+  const text = '{\n  "name": "Kanzlei Müller"\n}\n';
+  const message = 'Clerk: released from LAPTOP until 2026-10-08T12:30:00.000Z';
+  const w = await R.writeRef(realRun, r, 'refs/manor/same', 'same.json', text, null, message);
+  assert.equal(w.kind, 'ok');
+  const sha = (w as { sha: string }).sha;
+  // Made again by git's hash-object, mktree and commit-tree, dated as that one: the same commit.
+  const when = /^committer .* (\d+ [+-]\d{4})$/m.exec(sh(r.url, 'cat-file', 'commit', sha))![1];
+  const git = (args: string[], o: { input?: string; env?: Record<string, string> } = {}) => execFileSync('git', args, { cwd: r.url, encoding: 'utf8', windowsHide: true, input: o.input, env: { ...process.env, ...o.env } }).trim();
+  const blob = git(['hash-object', '-w', '--stdin'], { input: text });
+  const tree = git(['mktree'], { input: `100644 blob ${blob}\tsame.json\n` });
+  const who = { GIT_AUTHOR_NAME: 'Castellan Steward', GIT_AUTHOR_EMAIL: 'steward@manor.invalid', GIT_AUTHOR_DATE: when, GIT_COMMITTER_NAME: 'Castellan Steward', GIT_COMMITTER_EMAIL: 'steward@manor.invalid', GIT_COMMITTER_DATE: when };
+  assert.equal(git(['commit-tree', tree, '-m', message], { env: who }), sha);
+  git(['fsck', '--strict', '--no-dangling']);
+
+  const read = async (x: RemoteRepo) => ((await R.readRef(realRun, x, 'refs/manor/same', 'same.json')) as { text: string | null }).text;
+  assert.equal(await read(r), text, 'from the objects it wrote');
+  const other = { ...r, scratch: path.join(home, 'scratch-other.git') };
+  assert.equal(await read(other), text, 'fetched into another scratch repository');
+  sh(other.scratch, 'repack', '-a', '-d', '-q');
+  assert.equal(await read(other), text, 'packed there');
+});
+
 test('Do it here, Keep it on this PC and Unpin write the turn to this PC', async () => {
   const r = remote();
   await write(r, { pc: B.id });
@@ -372,15 +396,16 @@ test('a throwaway ref against a real remote, when STEWARD_REAL_REMOTE names one'
 });
 
 test("an unchanged turn record isn't read again, and a checkout's remote is read from its config without git", async () => {
-  const r = remote();
+  const r = { ...remote(), scratch: path.join(home, 'scratch-kept.git') };
   await write(r, { pc: B.id });
   const asked: string[][] = [];
   const counting: Runner = (cmd, args, opts) => (asked.push(args), realRun(cmd, args, opts));
   const o = { me: A, checkout: false, now: T0, ttlMs: TTL };
   const first = await L.turnOne(counting, r, emp('clerk', r), o);
   assert.equal(first.status, 'elsewhere');
-  const reads = asked.filter((a) => a.includes('show') || a.includes('cat-file')).length;
-  assert.ok(reads > 0, 'the record is read the first time');
+  assert.equal(first.record?.pc, B.id, 'the record is read the first time');
+  // Read from the scratch repository's files, without git: with them gone, reading it again would fetch it.
+  rmSync(r.scratch, { recursive: true, force: true });
   asked.length = 0;
   const again = await L.turnOne(counting, r, emp('clerk', r), { ...o, kept: first });
   assert.deepEqual([again.status, again.sha, again.record], [first.status, first.sha, first.record]);
@@ -473,21 +498,4 @@ test("a round's two looks at the turns are one guard: each employee is asked of 
   assert.deepEqual([...g.skip], ['porter']);
   assert.equal(await g.ok(emp('nobody', r1)), false, 'no look took a turn for it');
   assert.equal(L.joinGuards(null, first.guard), first.guard);
-});
-
-test("a turn's commit made from Node is the very commit git makes of it, and git reads it", async () => {
-  const bare = path.join(home, 'objects-here.git');
-  sh(home, 'init', '--quiet', '--bare', bare);
-  const text = '{\n  "pc": "é"\n}\n';
-  const at = T0 + 1234;
-  const mine = R.commitHere(bare, 'release-pc.json', text, 'Clerk: released from LAPTOP until then', at);
-  assert.match(mine ?? '', /^[0-9a-f]{40}$/);
-  const when = `@${Math.floor(at / 1000)} +0000`;
-  const git = (args: string[], input?: string) => execFileSync('git', args, { cwd: bare, encoding: 'utf8', windowsHide: true, input, env: { ...process.env, GIT_AUTHOR_NAME: 'Castellan Steward', GIT_AUTHOR_EMAIL: 'steward@manor.invalid', GIT_COMMITTER_NAME: 'Castellan Steward', GIT_COMMITTER_EMAIL: 'steward@manor.invalid', GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } }).trim();
-  const blob = git(['hash-object', '-w', '--stdin'], text);
-  const tree = git(['mktree'], `100644 blob ${blob}\trelease-pc.json\n`);
-  const theirs = git(['commit-tree', tree, '-m', 'Clerk: released from LAPTOP until then']);
-  assert.equal(mine, theirs);
-  assert.equal(sh(bare, 'show', `${mine}:release-pc.json`), text.trim());
-  assert.equal(R.commitHere(bare, 'release-pc.json', text, 'again', at) === mine, false, 'another message, another commit');
 });

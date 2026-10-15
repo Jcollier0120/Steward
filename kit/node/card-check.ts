@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -182,7 +182,9 @@ export function parseCardCheckArgs(argv: string[]): (CardCheckOptions & { out?: 
   return o;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run as itself, compared by real paths: a folder reached through a junction or a Dev Drive mount spells argv[1] one way
+// and import.meta.url (always the real path) another, and a plain comparison would do nothing (spec/DEV-DRIVES.md).
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseCardCheckArgs(process.argv.slice(2));
   if ('error' in o) {
     console.error(`${o.error}\nUsage: node card-check.ts [--idle-minutes 1] [--out <file>]`);

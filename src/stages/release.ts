@@ -170,7 +170,7 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       }
     }
     // The kit's release publishes to the releases repository only on the PC that releases Castellan (MANOR_RELEASES_REPO).
-    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: !ctx.fast });
+    const r = await runLine(run, e.release, { cwd: dir, timeoutMs: 30 * 60_000, env: releasesRepoEnv(ctx.settings), paced: true });
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
@@ -186,9 +186,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: { kit: string | null;
       if (tagged) return result(e, 'failed', `${e.release} finished, but the tag v${version} couldn't be pushed to its origin: ${tagged}${networkNote(tagged)}`, { version, commit: commit.slice(0, 7) });
     }
     // A repository's own release command must make the GitHub release, or the next round would run it again: one that
-    // didn't is a failed release, which the rounds then leave to the person at that commit. (Castellan's own agents, and
-    // one released only on this PC, are known to.)
-    else if (!byGit && !ctx.settings.releasesCastellan && !releasedHere(e)) {
+    // didn't is a failed release, which the rounds then leave to the person at that commit. On the PC that releases
+    // Castellan too: from 2026-10-13 to 10-14 kit 2.69.1's release.ts did nothing under a work folder reached through a
+    // junction and still exited 0, and every round reported its agents released. (One released only on this PC has no
+    // GitHub release.)
+    else if (!byGit && !releasedHere(e)) {
       const now = await releasedOf(ctx, e).catch(() => null);
       if (now && !now.some((x) => x.version === version)) {
         keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
