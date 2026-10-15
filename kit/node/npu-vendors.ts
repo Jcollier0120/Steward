@@ -12,8 +12,8 @@ import type { AcceleratorEntry, Quirk, ServeKind } from './accelerator-config.ts
  * is an OpenAI-compatible server behind the kit's usual contract (ACCELERATORS.md), so nothing past setup knows which.
  *
  * Detection is modelled on Heiward's NpuHardware.cs: the devices Windows lists as Neural processors (the
- * ComputeAccelerator class), told apart by maker and name; the generation by the part number in the name (Qualcomm)
- * or the PCI device id (Intel, AMD). Everything here is pure or takes its outside world as arguments, so tests run on
+ * ComputeAccelerator class), told apart by maker and name; the generation by the part number in the name (Qualcomm,
+ * else its ACPI device id) or the PCI device id (Intel, AMD). Everything here is pure or takes its outside world as arguments, so tests run on
  * fixtures; setup.ts does the downloading.
  */
 
@@ -99,6 +99,10 @@ export interface NpuGeneration {
   memoryGb?: NpuRoute['memoryGb'];
   /** Why its values are what they are, in a sentence. */
   basis?: string;
+  /** A Snapdragon's Hexagon version (`v73`, `v81`): the code llama.cpp's Hexagon backend runs on it (GGML_HEXAGON_ARCH, when played). */
+  hexagonArch?: string;
+  /** The chip Qualcomm AI Hub builds its models for (`qualcomm-snapdragon-x-elite`): GenieX's config.json chipset, when played. */
+  aiHubChipset?: string;
 }
 
 /**
@@ -185,7 +189,10 @@ export interface NpuIdleStop {
 export interface NpuCatalog {
   idleStop: NpuIdleStop;
   routes: Record<NpuVendor, NpuRoute>;
-  /** PCI device ids (4 hex digits, upper case) to generations, for the makers whose name doesn't say it. */
+  /**
+   * Device ids (4 hex digits, upper case) to generations: Intel's and AMD's PCI ids, whose names don't say it; a
+   * Snapdragon's ACPI ids (`ACPI\VEN_QCOM&DEV_0FF0`), for a name that doesn't say which Snapdragon ("Hexagon NPU").
+   */
   devices: Partial<Record<NpuVendor, Record<string, string>>>;
 }
 
@@ -235,7 +242,7 @@ export function npuVendorOf(manufacturer: string | null | undefined, name: strin
   return null;
 }
 
-/** The PCI device id in a PnP device id (`…&DEV_643E&…`), upper case; null when it has none. */
+/** The device id in a PnP device id (PCI's `…&DEV_643E&…`, or a Snapdragon's ACPI `…&DEV_0FF0&…`), upper case; null when it has none. */
 export const pciDevice = (deviceId: string) => /DEV_([0-9A-F]{4})/i.exec(deviceId)?.[1]?.toUpperCase() ?? null;
 
 /**
@@ -246,17 +253,32 @@ export const pciDevice = (deviceId: string) => /DEV_([0-9A-F]{4})/i.exec(deviceI
 export const UNKNOWN_GENERATION = 'unknown';
 
 /**
- * Which generation: a Snapdragon by its part number or name (X1E/X1P or "X Elite"/"X Plus" are the first, X2E/X2P or
- * "X2 Elite"/"X2 Plus" the second), Intel and AMD by their PCI device id (npu-vendors.json's `devices`).
- * UNKNOWN_GENERATION when it's none setup knows.
+ * The Snapdragons before the X (8cx Gen 1 to 3, 8c, 7c and 7c+, Microsoft's SQ1 to SQ3, 850 and 835), whose Hexagon
+ * (v68 or older) no NPU server here runs on: npu-vendors.json's `snapdragon-8cx`, refused with its `why` before
+ * anything is downloaded.
+ */
+export const LEGACY_SNAPDRAGON = 'snapdragon-8cx';
+
+/**
+ * Which generation. A Snapdragon by its name first, as Windows gives it: the X2's (X2E/X2P part numbers, "X2 Elite",
+ * "X2 Plus"), then the first X's (X1E/X1P, and the plain X's and X Plus's X1 and five digits: "Snapdragon X - X126100";
+ * "X Elite", "X Plus", "Snapdragon X -"), then the Snapdragons before it (LEGACY_SNAPDRAGON). A name that doesn't say
+ * which Snapdragon ("Qualcomm Hexagon NPU") is told by its ACPI device id (npu-vendors.json's `devices`), and an older
+ * Hexagon line's (a Hexagon driver Windows lists no Neural processor for, detect.ts' `npu|`, with no device id) is a
+ * Snapdragon before the X: every X and X2 lists its NPU as one. Intel and AMD by their PCI device id. UNKNOWN_GENERATION
+ * when it's none setup knows (a newer Snapdragon by a name it doesn't know, say).
  */
 export function npuGeneration(vendor: NpuVendor, dev: Pick<NpuDevice, 'device' | 'deviceId'>, catalog: NpuCatalog = NPU_CATALOG): string {
-  if (vendor === 'qualcomm') {
-    if (/\bX2[EP]\d|\bX2 (Elite|Plus)\b/i.test(dev.device)) return 'snapdragon-x2';
-    if (/\bX1[EP]\d|\bX (Elite|Plus)\b/i.test(dev.device)) return 'snapdragon-x';
-    return UNKNOWN_GENERATION;
-  }
   const id = pciDevice(dev.deviceId);
+  if (vendor === 'qualcomm') {
+    const name = dev.device;
+    if (/\bX2[EP]\d|\bX2 (Elite|Plus)\b/i.test(name)) return 'snapdragon-x2';
+    if (/\bX1[EP]\d|\bX1\d{5}\b|\bX (Elite|Plus)\b|\bSnapdragon(\((R|TM)\))? X -/i.test(name)) return 'snapdragon-x';
+    if (/\b(8cx|8c|7c|SQ[1-3])\b|\bSnapdragon\b.*\b(850|835)\b/i.test(name)) return LEGACY_SNAPDRAGON;
+    if (/\bSnapdragon\b/i.test(name)) return UNKNOWN_GENERATION;
+    if (id) return catalog.devices.qualcomm?.[id] || UNKNOWN_GENERATION;
+    return dev.deviceId ? UNKNOWN_GENERATION : LEGACY_SNAPDRAGON;
+  }
   return (id && catalog.devices[vendor]?.[id]) || UNKNOWN_GENERATION;
 }
 
@@ -462,6 +484,111 @@ export function routeFor(route: NpuRoute, generation: string | null | undefined)
     if (i >= 0) serve[i + 1] = value;
   }
   return { ...route, serve, maxContextTokens: g.maxContextTokens ?? route.maxContextTokens, caps: { ...route.caps, ...g.caps }, timeouts: { ...route.timeouts, ...g.timeouts }, ...(route.memoryGb || g.memoryGb ? { memoryGb: { ...route.memoryGb, ...g.memoryGb } } : {}) };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Playing an older Snapdragon on a newer one (npu-check's and npu-bench's --generation)
+
+/** Where GenieX keeps its config.json, its AI Hub cache and its models when nothing says otherwise. */
+export const GENIEX_DATA_DIR = '%USERPROFILE%\\.cache\\geniex';
+
+/**
+ * An older Snapdragon played on a newer one: GenieX run against a data folder of its own (`GENIEX_DATADIR`, and its
+ * `--data-dir` before the command), whose config.json names the older chip to AI Hub, so it pulls and serves that
+ * chip's model build, checked against that generation's pins in that folder, never the real cache; and the embedding
+ * server's Hexagon code built for the older Hexagon (GGML_HEXAGON_ARCH, which llama.cpp's Hexagon backend reads in
+ * place of the one it finds). It runs the older chip's code on this NPU: what it measures is that code, never the older
+ * chip's speed or memory.
+ */
+export interface Played {
+  /** The generation played. */
+  generation: string;
+  /** This NPU's own. */
+  on: string;
+  /** GenieX's data folder for it, {tools} not yet filled in (playedRoute's; setUpPlayed fills it). */
+  dataDir: string;
+  aiHubChipset: string;
+  hexagonArch: string;
+}
+
+/** A played generation's GenieX data folder: {tools}\played\<generation>\geniex, kept apart from the real cache. */
+export const playedDataDir = (generation: string) => `{tools}\\played\\${generation}\\geniex`;
+
+/** A Hexagon version's number (`v73` is 73), or null when it isn't one. */
+const hexagonOf = (arch: string | undefined) => (arch && /^v\d+$/i.test(arch) ? Number(arch.slice(1)) : null);
+
+/**
+ * Whether this NPU can play `generation` (npu-check's and npu-bench's --generation): `own` for its own; `played` when it
+ * emulates it, a Snapdragon playing an older Snapdragon whose Hexagon and AI Hub chip npu-vendors.json names; `values`
+ * when it can only run that generation's starting values (routeFor), which emulates nothing (an Intel or AMD NPU, whose
+ * server builds for the NPU it finds; Qualcomm's `unknown`); `refused`, and why in words, for a generation its route
+ * hasn't, one no server runs (LEGACY_SNAPDRAGON), a newer Hexagon on an older one (its code doesn't run there), or a
+ * Snapdragon whose own Hexagon isn't known.
+ */
+export function playGeneration(
+  npu: Pick<NpuSupport, 'vendor' | 'generation' | 'label'>,
+  generation: string,
+  catalog: NpuCatalog = NPU_CATALOG,
+): { kind: 'own' } | { kind: 'values' } | { kind: 'played'; played: Played } | { kind: 'refused'; why: string } {
+  if (!npu.vendor) return { kind: 'refused', why: 'this NPU is from a maker setup doesn\'t know: nothing can be played on it' };
+  if (generation === npu.generation) return { kind: 'own' };
+  const route = catalog.routes[npu.vendor];
+  const want = generationOf(route, generation);
+  if (!want) return { kind: 'refused', why: `${MAKERS[npu.vendor]}'s route has no generation ${generation} (it has ${[...Object.keys(route.generations), UNKNOWN_GENERATION].join(', ')})` };
+  if (!want.supported) return { kind: 'refused', why: `the ${want.label} can't be played: ${want.why ?? 'no model server runs on it'}` };
+  if (npu.vendor !== 'qualcomm' || generation === UNKNOWN_GENERATION) return { kind: 'values' };
+  const own = generationOf(route, npu.generation);
+  const ownArch = hexagonOf(own?.hexagonArch);
+  const wantArch = hexagonOf(want.hexagonArch);
+  if (!want.aiHubChipset || wantArch === null) return { kind: 'refused', why: `npu-vendors.json doesn't name ${generation}'s Hexagon and AI Hub chip, so it can't be played` };
+  if (ownArch === null) return { kind: 'refused', why: `this NPU's own Hexagon isn't known (${npu.label}), so whether it runs ${want.hexagonArch} code isn't either` };
+  if (wantArch > ownArch) return { kind: 'refused', why: `the ${want.label} is newer than this NPU (${own!.hexagonArch}): its Hexagon code doesn't run on an older one` };
+  return { kind: 'played', played: { generation, on: npu.generation!, dataDir: playedDataDir(generation), aiHubChipset: want.aiHubChipset, hexagonArch: want.hexagonArch! } };
+}
+
+/**
+ * The route as it plays an older Snapdragon (Played): GenieX's serve and pulls with its own data folder (`--data-dir`
+ * before the command, and GENIEX_DATADIR), its models found and their pins checked there, and the embedding server
+ * given GGML_HEXAGON_ARCH, the played Hexagon (never empty: llama.cpp reads an empty one as arch 0). The route's other
+ * values are the played generation's (routeFor, before this).
+ */
+export function playedRoute(route: NpuRoute, p: Played): NpuRoute {
+  const real = GENIEX_DATA_DIR.toLowerCase();
+  const move = (s: string) => (s.toLowerCase().startsWith(real) ? p.dataDir + s.slice(real.length) : s);
+  const dir = ['--data-dir', p.dataDir];
+  const models = route.models.map((m) => ({
+    ...m,
+    pull: [...dir, ...m.pull],
+    ...(m.present ? { present: move(m.present) } : {}),
+    ...(m.pinned ? { pinned: Object.fromEntries(Object.entries(m.pinned).map(([g, pin]) => [g, { ...pin, dir: move(pin.dir) }])) } : {}),
+  }));
+  const es = route.embedServer;
+  return {
+    ...route,
+    serve: [...dir, ...route.serve],
+    env: { ...route.env, GENIEX_DATADIR: p.dataDir },
+    models,
+    ...(es ? { embedServer: { ...es, env: { ...es.env, GGML_HEXAGON_ARCH: p.hexagonArch } } } : {}),
+  };
+}
+
+/** Writes a played generation's GenieX config.json (its AI Hub chip), so GenieX pulls and serves that chip's build; the folder, filled in. */
+export function setUpPlayed(p: Played, tools: string): string {
+  const dir = expandRoute(p.dataDir, { tools });
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'config.json');
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+  } catch {}
+  if (config.chipset !== p.aiHubChipset) writeFileSync(file, JSON.stringify({ ...config, chipset: p.aiHubChipset }, null, 2) + '\n');
+  return dir;
+}
+
+/** How a run says what it plays, in a sentence: `dir`, its data folder filled in (setUpPlayed's). */
+export function playedSay(p: Played, dir: string = p.dataDir, catalog: NpuCatalog = NPU_CATALOG): string {
+  const g = catalog.routes.qualcomm.generations;
+  return `this ${g[p.on]?.label ?? p.on} plays the ${g[p.generation]?.label ?? p.generation}: GenieX serves AI Hub's ${p.aiHubChipset} build from ${dir}, and the embeddings run Hexagon ${p.hexagonArch} code. Its numbers are that code's on this NPU, not that chip's speed`;
 }
 
 /**

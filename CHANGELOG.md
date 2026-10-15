@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.44
+
+**Kit 2.74.7: every first-generation Snapdragon X is recognised, the Snapdragons before it are turned down before anything downloads, and an X2 can stand in for an X.**
+
+### What's new
+
+- On a Snapdragon X2 laptop, the NPU check and the NPU benchmark can play a first-generation Snapdragon X (`--generation snapdragon-x`): they run the X's own model build and its NPU code on the X2, from a folder of their own, so the laptop's own local AI and its model are left alone. A played benchmark is shown, never ranked: it runs the X's code, not at an X's speed.
+
+### What changed
+
+- The kit the Steward hands out (2.74.7) recognises every first-generation Snapdragon X by the name Windows gives it, the plain X and X Plus included, and by its device id where the name doesn't say. On an X, setup now checks the model it downloads file by file against the X's own build, as it does on an X2.
+- On a Snapdragon from before the X (the 8cx, 8c, 7c, Microsoft's SQ1 to SQ3, the 850 and 835), setup now says plainly that its NPU can't run the manor's models, and why, before downloading anything. Before, it downloaded the NPU's server and a 4.4 GB model only for its test to fail. Its local AI runs on the graphics card or the processor instead, as it did once that test failed.
+- The NPU benchmark on a Snapdragon no longer fails its second start: it now waits until the stopped server has let go of its port before starting it again.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and agents get it as they pin the kit.
+
 ## 0.36.38
 
 **Kit 2.74.5: the NPU's local AI gets faster on PCs already set up, Intel's NPU 3720 writes about 13% faster, AMD's NPU runs on a 16 GB Ryzen AI, and a newer NPU is tried instead of refused.**

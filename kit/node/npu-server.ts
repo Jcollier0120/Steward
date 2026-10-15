@@ -71,8 +71,21 @@ export function loadFailure(logFile: string, from = 0): string | null {
 }
 
 /**
+ * Whether a request's failure says nothing listens there: only a refused connection does. A server just stopped keeps
+ * its port a moment longer: GenieX killed on the X2 Elite (2026-10-15) was gone in 71 ms, but its port stayed bound
+ * about 2 s, timing requests out for the first second, then resetting them, before refusing. A server started on the
+ * port meanwhile can't bind it ("Only one usage of each socket address").
+ */
+export function refusedConnection(e: any): boolean {
+  const errors = [e, e?.cause, ...(e?.errors ?? []), ...(e?.cause?.errors ?? [])];
+  const codes = errors.map((x) => x?.code).filter((c) => c !== undefined && c !== null);
+  return codes.length > 0 && codes.every((c) => c === 'ECONNREFUSED');
+}
+
+/**
  * Stops the server at `base` that the kit started (its started record names it), and waits up to 30 s for it to stop
- * answering, so nothing is left running. `answers` says whether something answers there within the time given.
+ * taking connections, so nothing is left running. `answers` says whether something listens there within the time given
+ * (refusedConnection: a request that times out or is reset still finds the port held).
  */
 export async function stopStartedAt(base: string, answers: (timeoutMs: number) => Promise<boolean>, now: () => number): Promise<void> {
   if (!(await answers(1_000))) return;
@@ -283,13 +296,14 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
       return false;
     }
   };
-  // Taking connections at all: what a server stopped no longer does.
+  // Taking connections at all: what a server stopped no longer does. Only a refused connection says so (refusedConnection):
+  // one that times out or is reset is a port still held, by a server answering slowly or one just stopped.
   const listening = async (timeoutMs = 1_000) => {
     try {
       await (await http(`${ep.baseUrl}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      return !refusedConnection(e);
     }
   };
   /** How long until it answers (with its model loaded), or null past the deadline. */

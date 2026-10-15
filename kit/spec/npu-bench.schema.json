@@ -81,7 +81,8 @@
           "additionalProperties": { "type": "object", "required": ["size", "sha256"], "properties": { "size": { "type": "number" }, "sha256": { "type": "string" } } }
         },
         "streamed": { "type": ["boolean", "null"] },
-        "usageReported": { "type": ["boolean", "null"] }
+        "usageReported": { "type": ["boolean", "null"] },
+        "played": { "type": "string", "description": "Only on a played run (--generation): the older Snapdragon's generation this NPU played. Never ranked." }
       }
     },
     "results": {
