@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -20,6 +20,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const C = await import('./fixture/src/kit/npu-check.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
+const { portablePath } = await import('./fixture/src/kit/setup.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 258V\nram|34359738368\n';
@@ -524,6 +525,39 @@ test("the patch for an NPU setup doesn't know: a new generation for its PCI id; 
   assert.equal(C.unknownDevice({ vendor: 'amd', deviceId: 'PCI\\VEN_1022&DEV_17f1&REV_10', name: 'NPU Compute Accelerator Device' }).devices!.amd['17F1'], 'amd-17f1');
 });
 
+test('a server just stopped holds its port a moment: it is gone only once a connection is refused, never on a timeout or a reset', async () => {
+  const S = await import('./fixture/src/kit/npu-server.ts');
+  // GenieX killed on the X2 Elite (2026-10-15): gone in 71 ms, its port bound about 2 s more, timing requests out for
+  // the first second, then resetting them, then refusing. A restart in that time couldn't bind the port.
+  const port = await freePort();
+  const sockets: import('node:net').Socket[] = [];
+  let seen = 0;
+  const held = net.createServer((sock) => {
+    sockets.push(sock);
+    seen++;
+    if (seen === 1) return; // taken, never answered: the request times out
+    sock.resetAndDestroy(); // then reset
+    if (seen === 3) held.close(); // then refused
+  });
+  await new Promise<void>((r) => held.listen(port, '127.0.0.1', r));
+  try {
+    const c = S.serverClient({ id: 'npu', kind: 'npu', name: 'NPU', slots: 1, maxContextTokens: 2400, quirks: [], chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'm' } } as any);
+    assert.equal(await c.untilGone(), true);
+    assert.equal(seen, 3, 'a timeout and two resets, each taken for a port still held');
+    assert.equal(await c.listening(), false);
+  } finally {
+    for (const s of sockets) s.destroy();
+  }
+  // What a refused connection looks like to each way the kit asks: Node's fetch (its cause) and longFetch (node:http).
+  const failure = async (f: () => Promise<unknown>) => f().then(() => null, (e) => e);
+  assert.equal(S.refusedConnection(await failure(() => fetch(`http://127.0.0.1:${port}/v1/models`))), true);
+  assert.equal(S.refusedConnection(await failure(() => S.longFetch(`http://127.0.0.1:${port}/v1/models`))), true);
+  assert.equal(S.refusedConnection(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), false);
+  assert.equal(S.refusedConnection(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })), false);
+  assert.equal(S.refusedConnection(new AggregateError([Object.assign(new Error('a'), { code: 'ECONNREFUSED' }), Object.assign(new Error('b'), { code: 'ECONNREFUSED' })])), true);
+  assert.equal(S.refusedConnection(new Error('something else')), false);
+});
+
 /** --harden on the scene: its test requests answered by `answers` (by case), setup's measuring by `measured`. */
 async function harden(answers: Record<string, string[]>, measured: { warmMs: number; tokensPerSecond: number } | null, more: Record<string, unknown> = {}) {
   const s = await scene({ cap: 1536 });
@@ -605,6 +639,129 @@ test('--generation on a real NPU of another generation: the NPU plays it, with i
   const own = await harden({ timeout: ["didn't answer in time (1 s): aborted"], nonsense: ['chat answered nonsense ("?")'] }, { warmMs: 830, tokensPerSecond: 17 }, { generation: 'lunar-lake' });
   assert.equal(own.report.rehearsal, false);
   assert.equal(own.report.generation, 'lunar-lake');
+});
+
+// The owner's Snapdragon X2 Elite and an X Elite, as detection reads them (npu-vendors.test.ts).
+const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+const X1 = 'npu2|30.0.140.1000|2025-03-01|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0D0A&SUBSYS_CRD08380&REV_0001\\2&DABA3FF&0|Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Hexagon(TM) NPU';
+const ARM = 'cpu|12|18|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm Oryon(TM) CPU\nram|51127103488\n';
+
+/**
+ * A Snapdragon's check on fake servers: GenieX "installed" in a scratch %LOCALAPPDATA% and its pull a fake (what it ran
+ * and with which GENIEX_DATADIR kept), a fake GenieX and a fake llama-server for its embeddings, each on a free port.
+ */
+async function snapdragonScene(npu: string) {
+  const port = await freePort();
+  const ePort = await freePort();
+  const catalog = structuredClone(V.NPU_CATALOG);
+  const q = catalog.routes.qualcomm;
+  q.port = port;
+  q.embedServer!.port = ePort;
+  delete q.models[0].pinned; // its pull is a fake that leaves no files: the played folder's pins are checked in npu-vendors.test.ts
+  const tools = mkdtempSync(path.join(home, 'tools-'));
+  const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(localappdata|userprofile)$/i.test(k)));
+  Object.assign(env, { REEVE_HOME: home, LOCALAPPDATA: path.join(tools, 'local'), USERPROFILE: path.join(tools, 'profile') });
+  const exe = V.serverExe(q, tools, env);
+  mkdirSync(path.dirname(exe), { recursive: true });
+  writeFileSync(exe, '');
+  const fake = fakeOvms(port, { cap: q.maxContextTokens });
+  const ran: { args: string[]; datadir: string | undefined }[] = [];
+  const started: any[] = [];
+  const tested: any[] = [];
+  const inputs: string[] = [];
+  const lines: string[] = [];
+  const startEmbed = async () => {
+    const server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"qwen3-embedding-0.6b-gguf"}]}');
+        inputs.push(JSON.parse(body).input);
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ embedding: new Array(1024).fill(0.01) }] }));
+        // The kit's started record would name it for the check to stop; this fake stops after the two it times.
+        if (inputs.length === 2) setImmediate(() => (server.closeAllConnections(), server.close()));
+      });
+    });
+    await new Promise<void>((r) => server.listen(ePort, '127.0.0.1', r));
+  };
+  const opts = {
+    yes: true,
+    tools,
+    catalog,
+    env,
+    detection: parseDetection(`${ARM}${npu}\n`),
+    out: path.join(tools, 'report.json'),
+    log: (l: string) => lines.push(l),
+    io: {
+      setup: {
+        run: async (_exe: string, args: string[], ro?: { env?: NodeJS.ProcessEnv }) => (ran.push({ args, datadir: ro?.env?.GENIEX_DATADIR }), { code: 0, out: '' }),
+        download: async () => {},
+        unpack: (_zip: string, into: string) => {
+          mkdirSync(into, { recursive: true });
+          writeFileSync(path.join(into, 'llama-server.exe'), '');
+        },
+        overlay: (_from: string, _into: string, files: string[]) => files.length,
+      },
+      start: async (e: any) => {
+        started.push(e);
+        fake.starts++;
+        await fake.start();
+        return { pid: 4242, stop: fake.stop };
+      },
+      memory: async () => ({ workingSetBytes: 5.8 * 1024 ** 3, privateBytes: 1.6 * 1024 ** 3 }),
+      kitTest: async (e: any) => (tested.push(e), [] as string[]),
+      embedTest: async (e: any) => (tested.push(e), await startEmbed(), [] as string[]),
+    },
+  };
+  return { tools, fake, ran, started, tested, inputs, lines, opts };
+}
+
+test("--generation snapdragon-x on an X2: the X Elite played whole (AI Hub's X Elite build from a folder of its own, the embeddings on Hexagon v73), verifying nothing", async () => {
+  const s = await snapdragonScene(X2);
+  const { code, report } = await C.npuCheck({ ...s.opts, generation: 'snapdragon-x' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.steps.map((x: any) => x.step), ['detect', 'requirements', 'setup', 'start', 'first-answer', 'warm', 'speed', 'read', 'cap', 'two-at-once', 'memory', 'restart', 'kit-test', 'embed']);
+  assert.equal(report.generation, 'snapdragon-x');
+  assert.equal(report.rehearsal, true);
+  assert.equal(report.patch, null, 'a played run verifies nothing');
+  assert.equal((report.npu as any).generation, 'snapdragon-x2', 'the NPU is still the X2 it is');
+  const dir = path.join(s.tools, 'played', 'snapdragon-x', 'geniex');
+  assert.deepEqual(report.played, { generation: 'snapdragon-x', on: 'snapdragon-x2', dataDir: dir, aiHubChipset: 'qualcomm-snapdragon-x-elite', hexagonArch: 'v73' });
+  assert.ok(s.lines.some((l) => l.startsWith('Played: this Snapdragon X2 Elite / X2 Plus (Hexagon v81) plays the Snapdragon X / X Plus / X Elite (Hexagon v73)') && l.includes(dir)), s.lines.join('\n'));
+  // Its folder names the X Elite to AI Hub; the real cache is left alone.
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, 'config.json'), 'utf8')), { chipset: 'qualcomm-snapdragon-x-elite' });
+  assert.equal(existsSync(path.join(s.tools, 'profile', '.cache', 'geniex')), false);
+  // GenieX pulled its model into that folder: --data-dir before the command, and GENIEX_DATADIR as well.
+  assert.deepEqual(s.ran.map((r) => [r.args.slice(0, 4), r.datadir]), [[['--data-dir', dir, 'pull', 'qualcomm/Qwen3-VL-4B-Instruct:W4A16'], dir]]);
+  // Started on it, each time, as the kit's own start does (its entry's paths as config.json keeps them).
+  assert.equal(s.started.length, 2, 'a first start, and a start again');
+  for (const e of s.started) {
+    assert.deepEqual(e.chat.startCommand.slice(1, 4), ['--data-dir', portablePath(dir), 'serve']);
+    assert.equal(e.chat.env.GENIEX_DATADIR, portablePath(dir));
+  }
+  // The embeddings: llama.cpp's Hexagon backend told to run the X's v73 code, as the kit starts it.
+  const embedEntry = s.tested.at(-1);
+  assert.deepEqual(embedEntry.embed.env, { ADSP_LIBRARY_PATH: portablePath(path.join(s.tools, 'servers', 'llama.cpp', 'b11125-hexagon')), GGML_HEXAGON_ARCH: 'v73' });
+  assert.equal(report.steps.at(-1)!.ok, true);
+  assert.equal(s.inputs.length, 2);
+});
+
+test('--generation on a Snapdragon refuses a newer one on an older NPU, and one no server runs, before anything is set up', async () => {
+  const older = await snapdragonScene(X1);
+  const up = await C.npuCheck({ ...older.opts, generation: 'snapdragon-x2' });
+  assert.equal(up.code, 2);
+  assert.deepEqual([up.report.steps.at(-1)!.step, up.report.steps.at(-1)!.ok], ['play', false]);
+  assert.equal(up.report.steps.at(-1)!.say, "the Snapdragon X2 Elite / X2 Plus (Hexagon v81) is newer than this NPU (v73): its Hexagon code doesn't run on an older one");
+  assert.equal(up.report.played, null);
+  assert.deepEqual(older.ran, [], 'nothing set up');
+  assert.equal(existsSync(path.join(older.tools, 'played')), false, 'no folder made for it');
+
+  const legacy = await snapdragonScene(X2);
+  const no = await C.npuCheck({ ...legacy.opts, generation: 'snapdragon-8cx' });
+  assert.equal(no.code, 2);
+  assert.equal(no.report.steps.at(-1)!.step, 'play');
+  assert.match(no.report.steps.at(-1)!.say, /can't be played: GenieX and Qualcomm AI Hub's model builds cover only the Snapdragon X and X2/);
+  assert.equal(legacy.fake.starts, 0);
 });
 
 test('a server already on the route\'s port: on the NPU the check refuses, in a rehearsal its servers move beside it', async () => {
