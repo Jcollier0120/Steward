@@ -24,8 +24,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing changes until a page uses them. An agent that serves MCP lays its page out as spec/STAFF-PAGE.md says, with these parts in place of its own tiles, connect card and output blocks.
 
-## Unreleased (its version needs claiming on the main laptop)
-**Intel's NPU 3720 measured and verified: a short answer in 0.5 s, not 3.1, by reading prompts 128 tokens at a time; Arrow Lake-U named; the NPU check times a real compile.**
 ## 2.73.5
 
 **Every folder the kit compares, it compares by its real path: through a junction, a link or a Dev Drive mounted in a folder, one folder is one folder.**
