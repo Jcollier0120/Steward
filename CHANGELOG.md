@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.33
+
+**A pull request that conflicts with its branch is caught up within minutes, not when the round next reaches it.**
+
+### What's new
+
+- Every 5 minutes, while one of the Steward's stage slots is free, it checks GitHub once for ready pull requests that conflict with their branch, and catches them up at once in that free slot. Until now only the round did that, one repository after another, and a long round (a vouch's tests, a kit trial on every agent) could leave a conflicting pull request, and every one queued behind it, waiting for hours.
+- It handles conflicts only. It merges nothing, tests nothing and leaves alone a repository another stage is working on. When it has caught one up, a round follows to merge it. A conflict it can't resolve goes back to whoever opened the pull request, as before.
+- While it works, the page shows it as a running stage named "conflicts". When nothing conflicts, it takes no slot at all.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Settings' "Catch PRs up" switches this off along with the round's catch-ups.
+
 ## 0.36.21
 
 **An update cut short by a crash no longer leaves an agent that can't start: what an update or a save writes is on the disk before it takes its place.**
