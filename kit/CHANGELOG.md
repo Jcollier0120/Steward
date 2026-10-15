@@ -22,6 +22,21 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do.
 
+## Unreleased (its version needs claiming on the main laptop)
+**Intel's NPU 3720 measured and verified: a short answer in 0.5 s, not 3.1, by reading prompts 128 tokens at a time; Arrow Lake-U named; the NPU check times a real compile.**
+
+### What changed
+
+- **npu-vendors.json, Intel's `meteor-lake`** (PCI `7D1D`, the NPU 3720 of Meteor Lake and Arrow Lake-U) is **verified**, by the NPU check on a Core Ultra 5 225U (Arrow Lake-U), every step passing: its timeouts are now 15 s + 0.2 s a token and a 60 s cold load (were 60 s + 0.4 s and 360 s), its chat memory 3.9 GB (was 3.6), and its label "Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)". A Core Ultra 200U showed Meteor Lake's PCI id, and Intel's driver serves `7D1D` and `AD1D` from one NPU 3720 section.
+- **The NPU 3720 reads a prompt 128 tokens at a time**: `meteor-lake` and `arrow-lake` carry `--plugin_config {"NPUW_LLM_PREFILL_CHUNK_SIZE":"128"}`. OpenVINO's default chunk of 1,024 tokens made every prompt cost a whole chunk: a one-line question took 3.1 s, two at once 6.4 s. Now 0.5 s and 1.2 s, the same answers word for word, a shorter compile and 0.2 GB less. The Intel route's command carries `--plugin_config {}` (the same graph as without it) so a generation's `args` can replace it, and `routeOnDevice` drops it off the NPU. The embedding server never gets it: there it hangs at its start.
+- `arrow-lake` (`AD1D`, Arrow Lake-S) stays unverified, on its generous starting values, with the NPU 3720's prompt chunks and memory.
+- **npu-check.ts measures a real compile**: its measurements serve from a compile cache of its own (`checkServe`: `.check-cache` beside the manor's `.npu-cache`), emptied before the first start, so the first load is a PC's first load or one after a driver update. From the manor's warm cache an NPU 3720 whose compile takes 30–48 s answered first in 9 s, and the check suggested a 30 s cold load. `--idle` and `--harden` keep the manor's cache. Its io takes `clearCache` for tests.
+- spec/NPU-VENDORS.md: the NPU 3720's numbers (chat, the prompt chunks, embeddings at each `--max_length`), the Arrow Lake-U run, and what's still unverified.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. A PC set up from now on gets the prompt chunks and the verified timeouts. One set up before keeps its config.json entry as it is (setup leaves a configured NPU alone): `accelerators setup npu` sets it up again with them, and its first start compiles once more.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
