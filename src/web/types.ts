@@ -6,6 +6,8 @@ import type { TurnsView } from '../lease.ts';
 import type { Host } from '../scm.ts';
 import type { StageResult } from '../stages/common.ts';
 import type { PrInfo, Staff, StaffRow } from '../stages/staff.ts';
+import type { WholeJob } from '../stages/wholesuite.ts';
+import type { HeldQueue } from '../version-queue.ts';
 
 /**
  * What the Steward's page shows, as /api/page's `body` (agent.ts's viewData()). Types only: the browser's bundle
@@ -84,4 +86,8 @@ export interface StewardView {
   alarms?: AlarmState;
   /** The staff's pages as the last round left them (tending.json); undefined when Settings switch it off. */
   tending?: TendState;
+  /** What holds each version queue the Steward merges, and since when (version-queue.ts's queueHold). */
+  queueHolds?: HeldQueue[];
+  /** The whole suite before a kit's release, beside the rounds (stages/wholesuite.ts): the last one, or null. */
+  wholeSuite?: WholeJob | null;
 }
