@@ -2,6 +2,16 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.30
+
+**Releases that need code signing wait for SimplySign instead of failing.**
+
+### What changed
+
+- Before it starts a release that signs (an agent's native files, or Manor's setup), the Steward now checks that this PC can sign. While it can't, because SimplySign Desktop isn't connected, the release waits: nothing is built and nothing fails. Once SimplySign is connected, the next round releases it by itself.
+- All the releases waiting to be signed share one alarm, raised at once so you know to connect SimplySign. It clears by itself once they're released. They are no longer filed as failures that the rounds won't try again, and none is handed to the Wright: there's nothing in the code to fix.
+- A release that loses SimplySign partway through its build waits the same way.
+- Releases that failed earlier only because SimplySign wasn't connected are tried again: they wait for it like the rest.
 ## 0.36.29
 
 **Tests, checks and builds run faster: they get a third of the processor, three at a time, and long test runs get the time they need.**
