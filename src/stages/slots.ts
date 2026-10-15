@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync } from 'node:fs';
 import { LockTimeout, withLock } from '../kit/lock.ts';
 import { dataFile } from '../kit/store.ts';
+import { outsideWork, withWork } from '../kit/work-tasks.ts';
 
 /**
  * Stages side by side. Settings' stagesAtOnce stages run at the same time on this PC, the page's and a terminal's
@@ -87,8 +88,10 @@ export async function withRepo<T>(log: (line: string) => void, id: string, fn: (
 /**
  * Runs `fn` as work of its own named `name`, apart from the stage that started it: it holds none of that stage's
  * repositories, so it waits for each like any other stage once that stage has gone on (a kit trial beside the rounds).
+ * It is a task of its own in the work status (the kit's work-status.ts), not the stage's: the checks it runs its parts.
  */
-export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> => held.exit(() => inStage.run(name, fn));
+export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
+  held.exit(() => inStage.run(name, () => outsideWork(() => withWork({ kind: name.replace(/\s+/g, '-'), what: name }, fn))));
 
 /** Whether another stage is working on employee `id`'s repository now: then a look at it leaves its clone alone. */
 export const repoBusy = (id: string): boolean => !held.getStore()?.has(id) && existsSync(repoLock(id));

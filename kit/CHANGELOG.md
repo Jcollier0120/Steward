@@ -24,6 +24,67 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do: take the kit and release as usual. On a 20 GB PC or bigger, nothing changes.
+## 2.76.0
+
+**Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**
+
+### What's new
+
+- **work-status.ts**: `workStatus(extra)` builds an agent's status (shape version 1) from what the kit knows, plus what the agent adds. The kit's server answers it for every agent at `GET /api/peer/work`. The route is read-only, so Manor's link to other PCs passes it on as it is. `serve({ work })` gives the agent's own part: its `slots`, more `running`, `waiting` or `lines`, its `results`, and what is `blocked`.
+  - `pcLines()`: the PC's lines as they stand, each with who holds a place and who waits, since when:
+    - the checks pace's turns (`checks`);
+    - the kit pace's work line (`work`);
+    - the first-round line (`first-round`);
+    - each accelerator's line (`accelerator:<id>`).
+  - `pcLoad()`: the PC's name, processors and memory, how busy its processors are (0 to 1), its pace, and the checks pace's cap.
+  - `recordResult()`, `resultFor()`, `recentResults()`: what work came to, one per kind, repository and code tree (git's tree id, the same for the same code whatever the commit). The latest is kept in `work-results.json` (200 of them).
+  - `codeAt(dir)`: a checkout's commit and tree, and whether anything tracked has changed. It is read with git itself, apart from the agent's runner.
+- **work-tasks.ts**: an agent's tasks.
+  - `withWork(fields, fn)` runs `fn` as a task. `startWork(fields)` gives a handle to `waitIn(line)`, `running()`, `set()` and `done()`.
+  - A task started inside another is its part (`parent`). `outsideWork(fn)` makes work that outlives its task (a job beside the rounds) a task of its own.
+- **schedule.ts**: every scheduled round is a task. It waits in the first-round line or the work line, then runs, and the work its job does is its part.
+- **checks-pace.ts and checks-pace.cs**: the checks pace's turns are in sight.
+  - Each launcher that takes part in the turns writes `<pid>.run` in `checksRunsDir()` while it runs. The file says whether it waits for a turn or holds one, since when, and which agent, task and command it is for (`KIT_CHECKS_WHO`, which `pacedCommand` sets).
+  - `checksRuns()` reads the files, and removes those whose launcher has gone.
+  - The turns themselves work as before. The launcher's source changed, so each PC compiles it again once.
+- **npu-vendors.ts**: a generation's `embedArgs`, its embedding server's arguments that differ on it, replace those in the route's `embedServer.serve` as `args` do in `serve` (`routeFor`). An unknown generation takes none.
+
+### What changed
+
+- **npu-vendors.json's `meteor-lake`** (the NPU 3720 of Meteor Lake and Arrow Lake-U): `embedArgs` `{"--target_device": "GPU"}`, the same OpenVINO Model Server, model, pooling, `--max_length 2048` and port, on the processor's graphics. Measured on a Core Ultra 5 225U's Intel Graphics (2026-10-15, two runs each, spec/NPU-VENDORS.md, The NPU 3720's embeddings): a query in 49–50 ms against the NPU's 1.13 s; 16 of Reeve's chunks in 4.8 s against 18.0; a dense chunk (1,100–1,320 tokens) in 0.73–0.95 s against 2.5; vectors at cosine 0.997–0.999 to the NPU's, under the same model name, so Reeve's index stays. Beside the chat server with the route's command, chat wrote 13.1–13.3 tokens a second while the graphics indexed, as fast as alone, against 6.5–6.8 with both on the NPU. The NPU's entry still takes one request at a time, so chat waits for an indexing batch: about 5 s for 16 chunks, against 18 s on the NPU (about 40 for dense ones).
+  - Not chosen: the NPU at `--max_length` 512 answers a query in 0.27 s but refuses Reeve's dense chunks, so it would need a second server for queries; 1,024 saves 4–6% and refuses them too. The processor slowed chat by a fifth while indexing and held about 2.4 GB. llama.cpp's Vulkan build, setup's for a card, was slower on the same graphics, with another model's vectors. `NPUW_LLM_PREFILL_CHUNK_SIZE` in the embedding server's `--plugin_config` (128 or 256) stops OpenVINO Model Server at its start (0xC0000409), as before.
+  - Arrow Lake-S, the same NPU, keeps its embeddings on the NPU: its F models have no graphics. So does every other generation, and one setup doesn't know.
+- **npu-check.ts's `routeOnDevice`** leaves the embedding server where the route has it when the check runs on the NPU, so the NPU 3720's stays on the graphics; on the processor or the graphics it goes with chat, as before.
+
+### For an agent
+
+- Nothing to do: the route comes with the kit's server. To say more, pass `work: () => ({ slots, blocked, … })` to `serve()`, and wrap long work in `withWork` so that it shows as a task.
+- Nothing to do: take the kit and release as usual.
+- On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
+- The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.
+
+## 2.75.2
+
+**Automatic updates work on a busy PC: a page slow to start after an update is waited for instead of rolled back, a rollback never leaves the new page running over the old files, and an agent's rounds make room for Manor's update.**
+
+### What's new
+
+- **update-hold.ts**: while Manor has an automatic update due for the agent, a scheduled round waits (`every()`, and `runSoon()`'s rounds too), looking again every 30 s (`UPDATE_LOOK_MS`), its state's `waiting` saying "Manor to update it to <version>". Manor updates an agent only while it's idle, and looks every minute: an agent whose rounds ran back to back was never idle then, and its update waited for hours. It waits 5 minutes at most for a version (`UPDATE_HOLD_MS`), then the rounds go on, and wait again 30 minutes later (`UPDATE_HOLD_AGAIN_MS`). A round asked for (Run now) never waits.
+- `updateDue()` reads Manor's files: `updates.json` (a version newer than this one available, Manor's last look not cut short by a problem or the network, not one Manor has given up on after its three tries or waits to try again) and `settings.json` (the agent's automatic updates on). A version the agent's own install refuses (`unsafe-updates.json`) isn't due, nor is anything in a development checkout. `updateHold()` is the agent's one hold, shared by all its schedules; `updateHolder()` makes another; `compareVersions` compares dotted versions.
+- **native.ts**: `pagesFrom(app)` lists the Node processes running the page from an app folder (`<app>\src\cli.ts serve`, and the `open` that starts it) by their command lines, which `processesUnder` can't see, since Node runs from its own folder. `pagesIn(lines, app)` reads PowerShell's lines for it.
+
+### What changed
+
+- **install.ts**: after starting the page, an install waits 20 s for it as before (`PAGE_FIRST_MS`), then on while its process is still starting, up to 5 minutes (`PAGE_START_MS`). A page whose process has ended isn't waited for past the 20 s. Its line says `up, after <n> s: the PC is busy`, `didn't answer, and its process has ended`, or `still starting after 5 minutes`. `waitForPage(ok, app, d)` is exported, and `InstallDeps.pagesStarting` stands in for `pagesFrom` in a test. On 15 October the Steward's 0.36.46 and the Assayer's 0.4.2 took longer than 20 s to answer on a PC running a release's checks: each was rolled back and flagged as unsafe, and went on running over the older version's files.
+- **safeinstall.ts**: an install that gave up waiting for the page, whose page answers as the new version by the time it is judged, goes on to its probation, which judges it as any other. Before, it was rolled back and flagged.
+- **safeinstall.ts**: a rollback ends any page process still starting from app, and the `open` starting it (`endStartingPages`, in the real `endPage`), before it puts the version before back. Such a page has no `server.json` yet, so the rollback used to miss it, and it came up over the older files. The rollback then waits for the old page as an install does.
+- **safeinstall.ts**: once a version holds up for its probation, the flags of the versions before it are dropped (allowed again), and with them an agent's alarm for one. Their kept copies (`app.unsafe-<version>`) stay.
+
+### For an agent
+
+- Nothing to do for its schedule. An agent that starts rounds itself, beside its schedule (the Steward does, after a kit trial or on waking), asks `updateHold()` first and starts none while it answers: the schedule runs that round once the wait ends.
+- A PC already left with a newer page running over an older version's files, that version flagged, is set right by the agent's next release: its install ends the running page, puts the whole release in, and drops the old flag once the new version holds up. Until the agent runs this kit, its rounds don't wait for Manor, so its next update may still wait for an idle moment, or for Update in Manor.
+- A test that runs `every()` reads Manor's files from `MANOR_HOME` (else `%USERPROFILE%\.manor`): set it to a folder of the test's own when the test's agent id could have automatic updates on.
 
 ## 2.75.1
 

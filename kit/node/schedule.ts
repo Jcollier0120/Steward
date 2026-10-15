@@ -9,6 +9,11 @@ import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
 import { FIRST_ROUND_WAITING, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
+import { inWork, startWork } from './work-tasks.ts';
+import { updateHold } from './update-hold.ts';
+
+/** How often a scheduled round waiting for Manor's update looks again (update-hold.ts, kit 2.75.2). */
+export const UPDATE_LOOK_MS = 30_000;
 
 /** One schedule's rounds, as /api/ping and the page's status pill give them (ISO times). */
 export interface RoundState {
@@ -298,6 +303,9 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * A round's work keeps the PC awake (awake.ts, kit 2.74.8): the job's `awake(what)` holds Windows from sleeping on its
  * own while it runs checks, merges or a release, until the function it returns is called, or the round ends. Only for
  * work: a round that only looks holds nothing, so the PC still sleeps between rounds.
+ *
+ * While Manor has an automatic update due for it (update-hold.ts, kit 2.75.2), a scheduled round waits a few minutes,
+ * looking again every UPDATE_LOOK_MS, its state's `waiting` saying so: Manor updates an agent only while it's idle.
  */
 export function every(
   everyMs: number | (() => number),
@@ -363,6 +371,14 @@ export function every(
       recordHeld(opts.name ?? 'round', held, interval());
       return;
     }
+    // Manor has an automatic update due for it (update-hold.ts, kit 2.75.2): a scheduled round waits a few minutes, so
+    // Manor finds it idle and puts the update in, rather than rounds back to back keeping it busy all day. Asked for, never.
+    const forUpdate = asked ? null : updateHold();
+    if (forUpdate) {
+      waiting = forUpdate;
+      if (!stopped) waitFor(Math.min(UPDATE_LOOK_MS, interval()));
+      return;
+    }
     running = true;
     let started = Date.now();
     let error: string | null = null;
@@ -384,6 +400,8 @@ export function every(
     const queuedAt = started;
     let inLine: 'first' | 'work' | null = 'first';
     let used: { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null = null;
+    // The round as a task in the agent's work status (work-tasks.ts): in a line while it waits, the work it tracks its part.
+    const task = startWork({ kind: 'round', what: asked ? `${name}, asked for` : name });
     // The PC held awake for the round's work (awake.ts): every hold it took let go when it ends, at the latest.
     const holds: (() => void)[] = [];
     const awake = (what: string) => {
@@ -394,6 +412,7 @@ export function every(
     try {
       const run = async () => {
         inLine = null;
+        task.running();
         if (waiting === WORK_WAITING) waiting = null;
         started = Date.now();
         startedAt = started;
@@ -401,7 +420,7 @@ export function every(
         const u = { cpu: process.cpuUsage(), memory: process.memoryUsage.rss(), sampler: undefined as NodeJS.Timeout | undefined };
         u.sampler = setInterval(() => (u.memory = Math.max(u.memory, process.memoryUsage.rss())), 5_000).unref();
         used = u;
-        const work = job({ signal: controller.signal, awake });
+        const work = inWork(task, () => job({ signal: controller.signal, awake }));
         const late = new Promise<never>((_, reject) => {
           limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
         });
@@ -422,6 +441,7 @@ export function every(
       const inTurn = () => {
         if (asked || (typeof opts.light === 'function' ? opts.light() : opts.light)) return run();
         inLine = 'work';
+        task.waitIn('work');
         // Said while it waits, so a reader of its state (the Surveyor) never takes it for a schedule with nothing coming.
         waiting = WORK_WAITING;
         return inWorkTurn(p, run, { who: APP.id, doing: name, limitMs: limit, waitMs: Math.max(interval(), 60_000) });
@@ -431,7 +451,10 @@ export function every(
         limitMs: limit,
         onWait: (inLine) => {
           waiting = inLine ? FIRST_ROUND_WAITING : null;
-          if (inLine) firstNow = 'waiting';
+          if (inLine) {
+            firstNow = 'waiting';
+            task.waitIn('first-round');
+          }
         },
       });
       lastError = null;
@@ -455,6 +478,7 @@ export function every(
         else console.error(`${new Date().toISOString()} run failed: ${(e as Error).stack ?? e}`);
       }
     } finally {
+      task.done();
       for (const letGo of holds) letGo();
       firstNow = null;
       if (waiting === WORK_WAITING) waiting = null;

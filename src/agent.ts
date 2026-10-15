@@ -5,7 +5,10 @@ import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
 import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
+import { updateHold } from './kit/update-hold.ts';
 import { serve, type Handler } from './kit/server.ts';
+import { currentWork, inWork, startWork, workTasks } from './kit/work-tasks.ts';
+import { workBlocks } from './work-status.ts';
 import { afterWords } from './after.ts';
 import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
@@ -125,15 +128,29 @@ export function gatePosts(posts: Record<string, Handler>, acts: () => boolean = 
 export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: GetJson; turns?: TurnsDeps } = {}) {
   /** The stages running in this process, side by side (stages/slots.ts): at most Settings' stagesAtOnce. */
   let runs: { stage: string; since: string }[] = [];
-  /** A stage begun: it shows on the page until the returned end() is called, which starts what waited for a free slot. */
+  /**
+   * A stage begun: it shows on the page until the returned end() is called, which starts what waited for a free slot.
+   * It is a task in the work status (the kit's work-status.ts) meanwhile, `end.task`, whose parts are the work run in it
+   * (inStage): a scheduled round is the schedule's task already (the kit's every()), and none of its own.
+   */
   const begin = (stage: string) => {
     const r = { stage, since: new Date().toISOString() };
+    const task = stage === 'round' && scheduledRound() ? null : startWork({ kind: 'stage', what: stage });
     runs = [...runs, r];
-    return () => {
+    const end = () => {
+      task?.done();
       runs = runs.filter((x) => x !== r);
       afterRunning();
     };
+    return Object.assign(end, { task });
   };
+  /** Whether this runs in the schedule's round (the kit's every() makes each a task named for it, kind round). */
+  const scheduledRound = () => {
+    const now = currentWork();
+    return !!now && workTasks().some((t) => t.id === now && t.kind === 'round' && /^round\b/.test(t.what));
+  };
+  /** `fn` run as the stage's work: what it starts, a check run among them, is the stage's part. */
+  const inStage = <T,>(end: ReturnType<typeof begin>, fn: () => T): T => (end.task ? inWork(end.task, fn) : fn());
   /** Every slot taken: a stage asked for now waits, or is refused. */
   const slotsFull = () => runs.length >= loadSettings().stagesAtOnce;
   const rounding = () => runs.some((r) => r.stage === 'round');
@@ -147,7 +164,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   /** The employees' jobs approved now (steward.ts's approveJobsNow), as the stage "jobs". */
   const approveNow = (ids: string[]) => {
     const end = begin('jobs');
-    void approveJobsNow(ids, { run: o.run, owner: o.owner, log: (line) => console.log(`jobs: ${line}`) })
+    void inStage(end, () => approveJobsNow(ids, { run: o.run, owner: o.owner, log: (line) => console.log(`jobs: ${line}`) }))
       .then((done) => done.forEach((r) => console.log(`jobs: [${r.id}] ${r.message}`)))
       .catch((e) => console.error(`${new Date().toISOString()} jobs: ${(e as Error).message}`))
       .finally(end);
@@ -201,7 +218,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   const start = (stage: 'bump' | 'push' | 'merge' | 'release', ask: StageAsk) => {
     if (slotsFull()) return { json: { started: false, message: `${runningWords()} ${isAre()} running, as many stages as Settings allow at once (Stages at once); wait for one to finish.` } };
     const end = begin(stage);
-    void runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) })
+    void inStage(end, () => runStage(stage, ask, { run: o.run, owner: o.owner, log: (line) => console.log(`${stage}: ${line}`) }))
       .catch((e) => console.error(`${new Date().toISOString()} ${stage}: ${(e as Error).message}`))
       .finally(end);
     return { json: { started: true } };
@@ -248,7 +265,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       const look = lookNext;
       lookNext = [];
       const ask: StageAsk = full ? { full, ...extra } : loadSettings().byItself ? (look.length ? { look } : {}) : { tendOnly: true };
-      const out = await runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      const out = await inStage(end, () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) }));
       ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
@@ -256,8 +273,15 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       end();
     }
   };
-  /** A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). */
-  const startRound = () => void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  /**
+   * A round as the schedule runs one, now, beside the schedule (whose next tick passes while it runs). While Manor has
+   * an automatic update due for the Steward (the kit's update-hold.ts), none starts: the schedule's rounds wait a few
+   * minutes for it, so Manor finds the Steward idle, and its next look runs the round this one would have been.
+   */
+  const startRound = () => {
+    if (updateHold()) return;
+    void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
+  };
   // Beside the rounds (steward.ts's conflictsNow): every few minutes, while a stage's slot is free, the ready PRs that
   // conflict with their branch are caught up, rather than waiting for a round to reach their repository; a long round
   // (a vouch's tests, a kit trial) left them waiting for hours. It takes a slot only once it finds one to catch up, and
@@ -265,7 +289,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   let conflictsGoing = false;
   const conflictsJob = async () => {
     const s = loadSettings();
-    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs()) return;
+    if (conflictsGoing || !s.byItself || !s.catchUp || slotsFull() || !duty().onDuty || !stewardActs() || updateHold()) return;
     if (Date.now() - roundBegan < CONFLICTS_EVERY_MS) return;
     conflictsGoing = true;
     try {
@@ -353,6 +377,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     // The whole suite beside the rounds ends with the Steward, with everything it started (stages/wholesuite.ts).
     onStop: () => endWholeSuite(),
     ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
+    // Its work status (GET /api/peer/work, the kit's work-status.ts), for Manor's Work page: its stages' slots beside the
+    // kit's, and what holds a repository's work up (workBlocks).
+    work: () => ({ slots: [{ kind: 'stage', name: 'Stages at once', of: loadSettings().stagesAtOnce, used: runs.length }], blocked: workBlocks() }),
     get: gateGets({
       // The page is drawn in the browser (src/web, the kit's react part): its first data comes with it, and it asks
       // /api/page again every few seconds while a stage runs, and after each button.
@@ -423,6 +450,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
           roundAfter = true;
           return { json: { started: false, queued: true, message: `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
         }
+        // Manor's automatic update due (startRound): the round waits for it, a few minutes at most.
+        if (updateHold()) return { json: { started: false, queued: true, message: 'Manor is about to update the Steward, so its rounds wait a few minutes for it: a round comes after.' } };
         startRound();
         return { json: { started: true, message: "The Steward's round has started: it merges the PR now if its turn has come." } };
       },
