@@ -6,7 +6,7 @@ import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } f
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu } from './npu-vendors.ts';
+import { NPU_CATALOG, type NpuCatalog, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -367,20 +367,24 @@ export function routeWithModel(route: NpuRoute, id: string): NpuRoute {
   return { ...route, models: [m, ...route.models.filter((x) => x !== m && x.kinds.includes('vision') && !m.kinds.includes('vision'))] };
 }
 
-/** The route's server given its own compile cache for the run (emptied before the first start), and a cap, where it has those. */
+/**
+ * The route's server given its own compile cache for the run (emptied before the first start), and a cap, where it has
+ * those. Off the NPU nothing is compiled for a cap (routeOnDevice drops it), so there `cap` is only where the long read
+ * goes: the same as an NPU run's, so the two compare.
+ */
 export function benchServe(route: NpuRoute, o: { device: string; cap?: number }): NpuRoute {
   const serve = [...route.serve];
+  const p = serve.indexOf('--max_prompt_len');
+  if (o.cap && p < 0 && o.device.toUpperCase() === 'NPU') throw new Error(`${route.server} on the ${o.device} has no prompt cap to set`);
+  const compiled = o.cap && p >= 0 ? o.cap : undefined;
+  if (compiled) serve[p + 1] = String(compiled);
   const c = serve.indexOf('--cache_dir');
-  if (c >= 0) serve[c + 1] = `${path.win32.dirname(serve[c + 1])}\\.bench-cache-${o.device.toLowerCase()}${o.cap ? `-${o.cap}` : ''}`;
-  let maxContextTokens = route.maxContextTokens;
-  if (o.cap) {
-    const p = serve.indexOf('--max_prompt_len');
-    if (p < 0) throw new Error(`${route.server} on the ${o.device} has no prompt cap to set`);
-    serve[p + 1] = String(o.cap);
-    maxContextTokens = o.cap;
-  }
-  return { ...route, serve, maxContextTokens };
+  if (c >= 0) serve[c + 1] = `${path.win32.dirname(serve[c + 1])}\\.bench-cache-${o.device.toLowerCase()}${compiled ? `-${compiled}` : ''}`;
+  return { ...route, serve, maxContextTokens: o.cap ?? route.maxContextTokens };
 }
+
+/** How much more than at rest working must draw for its energy to count: the battery's rate wobbles by about this much. */
+export const ENERGY_MIN_EXTRA = { milliwatts: 1_000, share: 0.1 };
 
 // ------------------------------------------------------------------------------------------------
 // The run
@@ -485,7 +489,8 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   if (!npu?.supported) return finish(1, { code: 'setup', say: `the manor can't use this NPU: ${npu?.why ?? 'unknown'}` });
   let route: NpuRoute;
   try {
-    route = routeOnDevice(catalog.routes[vendor], device);
+    // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
+    route = routeOnDevice(routeFor(catalog.routes[vendor], npu.generation), device);
     if (o.candidate) route = candidateRoute(route, o.candidate);
     else if (o.model) route = routeWithModel(route, o.model);
     route = benchServe(route, { device, cap: o.cap });
@@ -503,7 +508,8 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   // 2. Its server and models, as setup does them.
   const tools = o.tools ?? toolsHome(env);
   const support: NpuSupport = npu;
-  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
+  // The route is this generation's already: planned as it is, so the generation's own cap doesn't undo --cap.
+  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: { ...route, generations: {} } } } })!;
   const needs = (!plan.installed ? (plan.download?.size ?? 0) : 0) + (plan.runtime?.size ?? 0) + plan.models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0);
   const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have);
   if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
@@ -683,8 +689,12 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
         const seconds = (now() - t0) / 1000;
         if (rest !== null && load !== null) {
           const extraJoules = ((load - rest) / 1000) * seconds;
-          report.results.energy = { restMilliwatts: Math.round(rest), loadMilliwatts: Math.round(load), jobs, tokens, millijoulesPerToken: tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
-          log(`energy: ${report.results.energy.millijoulesPerToken} mJ a token (${Math.round(rest)} mW at rest, ${Math.round(load)} mW working)`);
+          // Working that draws no clearly more than rest is the battery's reading wobbling, not the model's energy:
+          // on the Lunar Lake laptop the rate read 28 W at rest, nearly twice its real drain, and less working (NPU-BENCHMARK.md).
+          const clear = load - rest >= Math.max(ENERGY_MIN_EXTRA.milliwatts, rest * ENERGY_MIN_EXTRA.share);
+          report.results.energy = { restMilliwatts: Math.round(rest), loadMilliwatts: Math.round(load), jobs, tokens, millijoulesPerToken: clear && tokens ? Number(((extraJoules * 1000) / tokens).toFixed(3)) : null };
+          if (clear) log(`energy: ${report.results.energy.millijoulesPerToken} mJ a token (${Math.round(rest)} mW at rest, ${Math.round(load)} mW working)`);
+          else log(`energy: not counted: working read ${Math.round(load)} mW against ${Math.round(rest)} mW at rest, too little more for the battery's reading to tell the model's share`);
         } else log('energy: the battery gave no discharge rate');
       }
     }

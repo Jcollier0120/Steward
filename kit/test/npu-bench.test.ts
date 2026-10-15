@@ -18,9 +18,11 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const B = await import('./fixture/src/kit/npu-bench.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
+const { routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
+const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 256V\nram|16849174528\n';
 const SUITE = B.SUITE;
 
@@ -106,13 +108,13 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
     s.closeAllConnections();
     await new Promise((r) => s.close(r));
   };
-  return { seen, start, stop, starts: 0 };
+  return { seen, start, stop, starts: 0, commands: [] as string[][] };
 }
 
 const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', brightness: 60, windowsBuild: '26200', make: 'HP', model: 'HP OmniBook X Laptop 17-dd0xxx' };
 
 /** The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not minutes. */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null } = {}) {
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string } = {}) {
   const port = await freePort();
   const catalog = structuredClone(V.NPU_CATALOG);
   catalog.routes.intel.port = port;
@@ -146,13 +148,14 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     suite,
     kitVersion: '2.62.0',
     env: { ...process.env, REEVE_HOME: home },
-    detection: parseDetection(`${X64}${LUNAR}\n`),
+    detection: parseDetection(`${X64}${o.npu ?? LUNAR}\n`),
     out: path.join(tools, 'report.json'),
     log: (l: string) => lines.push(l),
     io: {
       setup: { run: async () => ({ code: 0, out: '' }) },
-      start: async () => {
+      start: async (e: any) => {
         fake.starts++;
+        fake.commands.push(e.chat.startCommand);
         await fake.start();
         return { pid: 4242, stop: fake.stop };
       },
@@ -250,6 +253,11 @@ test("the route for a run: its own compile cache, a cap where the server has one
   assert.equal(r.serve[r.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(r.maxContextTokens, 2048);
   assert.throws(() => B.benchServe(V.NPU_CATALOG.routes.qualcomm, { device: 'NPU', cap: 2048 }), /no prompt cap/);
+  // Off the NPU nothing is compiled for a cap: --cap only places the long read, as an NPU run at that cap would.
+  const gpu = B.benchServe(routeOnDevice(intel, 'GPU'), { device: 'GPU', cap: 2048 });
+  assert.equal(gpu.maxContextTokens, 2048);
+  assert.ok(!gpu.serve.includes('--max_prompt_len'));
+  assert.equal(gpu.serve[gpu.serve.indexOf('--cache_dir') + 1], '{tools}\\models\\openvino\\.bench-cache-gpu');
   const c = B.candidateRoute(intel, 'Castellan-AI/Qwen3-1.7B-int4-cw-ov');
   assert.equal(c.models.length, 1);
   assert.ok(c.models[0].pull.includes('Castellan-AI/Qwen3-1.7B-int4-cw-ov'));
@@ -327,4 +335,46 @@ test('a model that answers nonsense never gets past its first answer; a busy pro
   assert.ok(r2.report.results.energy!.loadMilliwatts > 4000);
   assert.ok(r2.report.results.energy!.jobs > 0);
   assert.ok(r2.report.results.energy!.millijoulesPerToken! > 0);
+});
+
+test("a generation with its own cap is run, reported and read near at it; --cap isn't undone by it; a GPU run says nothing of the NPU", async () => {
+  const gen = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  assert.notEqual(gen.maxContextTokens, V.NPU_CATALOG.routes.intel.maxContextTokens, "Meteor Lake's NPU 3720 compiles a shorter prompt than the route's");
+  const capOf = (cmd: string[]) => cmd[cmd.indexOf('--max_prompt_len') + 1];
+  const own = await scene({ npu: METEOR });
+  const r = await B.npuBench({ ...own.opts, profile: 'quick' });
+  assert.equal(r.code, 0, own.lines.join('\n'));
+  assert.equal(r.report.run.cap, gen.maxContextTokens, "the generation's cap, not the route's");
+  assert.equal(capOf(own.fake.commands[0]), String(gen.maxContextTokens));
+  assert.ok(r.report.results.readAtCap, own.lines.join('\n'));
+  assert.ok(own.lines.some((l) => l.startsWith(`reading near the cap (`) && l.includes(` of ${gen.maxContextTokens} tokens)`)), own.lines.join('\n'));
+
+  const asked = await scene({ npu: METEOR });
+  const r2 = await B.npuBench({ ...asked.opts, profile: 'quick', cap: 4096 });
+  assert.equal(r2.report.run.cap, 4096);
+  assert.equal(capOf(asked.fake.commands[0]), '4096', '--cap is what the server compiles');
+
+  // On the graphics card: no cap compiled, the long read at the NPU's, and setup's lines aren't about the NPU.
+  const card = await scene({ npu: METEOR });
+  const r3 = await B.npuBench({ ...card.opts, profile: 'quick', device: 'GPU' });
+  assert.equal(r3.code, 0, card.lines.join('\n'));
+  assert.equal(r3.report.run.cap, null);
+  assert.ok(!card.fake.commands[0].includes('--max_prompt_len'));
+  assert.ok(card.lines.some((l) => l.includes(` of ${gen.maxContextTokens} tokens)`)), 'comparable with the NPU run');
+  assert.deepEqual(card.lines.filter((l) => /on (the|this) NPU/.test(l)), []);
+  assert.ok(card.lines.some((l) => /OpenVINO Model Server is set up for: chat/.test(l)), card.lines.join('\n'));
+});
+
+test("an energy figure only when working draws clearly more than rest: the battery's wobble isn't the model's energy", async () => {
+  for (const [rest, work] of [
+    [28_373, 29_970], // the Lunar Lake laptop's NPU run: 2.3 mJ a token, from a reading at rest nearly twice the real drain
+    [29_346, 29_019], // its graphics card's: less working than resting
+  ]) {
+    const s = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? work : rest) });
+    const r = await B.npuBench({ ...s.opts, profile: 'quick', energy: true });
+    assert.equal(r.code, 0);
+    assert.equal(r.report.results.energy!.millijoulesPerToken, null, `${rest} → ${work} mW`);
+    assert.equal(r.report.results.energy!.restMilliwatts, rest, 'what was read is kept');
+    assert.ok(s.lines.some((l) => /^energy: not counted: working read \d+ mW against \d+ mW at rest/.test(l)), s.lines.join('\n'));
+  }
 });

@@ -2,6 +2,26 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it.**
+
+### What changed
+
+- **npu-bench.ts runs the route as setup does on this NPU's generation** (`routeFor`, as the NPU check already did). Before, it took the route's own values:
+  - on a Meteor Lake NPU 3720, the report said cap 4096, while the server ran at the generation's 2048;
+  - its read "near the cap" asked for about 3,700 tokens and got no answer.
+  - The generation's timeouts and server arguments now apply too.
+- **`--cap` is no longer undone by a generation with its own cap.** The bench's route went through `planNpu`, which put the generation's `--max_prompt_len` back. It is now planned as it is. Off the NPU, `--cap` sets where the long read goes instead of being refused. Without it, a graphics card's long read is at the NPU's cap, so the two runs compare.
+- **An energy figure counts only when working reads clearly more than rest**: by 1 W and by a tenth of the rest reading (`ENERGY_MIN_EXTRA`).
+  - On the Lunar Lake laptop the battery's rate gave 2.3 mJ a token, and on its graphics card a negative figure, both reported as if they counted.
+  - Such a run now keeps both readings, with `millijoulesPerToken: null`, and its log says why.
+- **npu-server.ts' `setUpRoute`** (the bench's and the NPU check's setup step) no longer passes on setup's "asking … a test question on the NPU" and "measuring … on this NPU" lines, since it asks and measures nothing itself. Setup's "answered on the NPU: chat, embed" becomes "is set up for: chat, embed". A graphics-card run no longer says it asked the NPU.
+- spec/NPU-BENCHMARK.md says all of the above.
+
+### For an agent
+
+- Nothing to do.
+
 ## 2.73.2
 **One process for every git, not two: a page keeps a windowless console its git and gh can share, and a test's commits start no upkeep.**
 
