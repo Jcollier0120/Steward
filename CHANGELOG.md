@@ -2,6 +2,15 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.25
+
+**The other agents see a merge within seconds, however long the Steward's round takes.**
+
+### What changed
+
+- The Steward shares the branches of your repositories on GitHub with the other agents, so they needn't ask GitHub themselves. Reeve uses them to bring each clone's main up to a merge. Before, they were read only as a round began, and a long round (one trying a new kit can take hours) left them out of date: the agents asked GitHub again, and Reeve couldn't tell a clone was behind.
+- Now the Steward's page also reads them on its own every 5 minutes, unless a round just did, and 10 seconds after each pull request it merges.
+- It costs about one of GitHub's 5,000 points an hour per read, and only happens while the Steward merges and releases by itself and is on duty. It never touches the tenth of GitHub's limit the Steward keeps spare.
 ## 0.36.24
 
 **The Steward starts fewer git commands when it takes its turn in a repository or shares a version claim, and when it clears its work folders, so its rounds put less load on your PC.**
