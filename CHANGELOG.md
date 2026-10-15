@@ -2,6 +2,16 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.24
+
+**The Steward starts fewer git commands when it takes its turn in a repository or shares a version claim, and when it clears its work folders, so its rounds put less load on your PC.**
+
+### What changed
+
+- Writing the turn record or the shared version claims to a repository's remote used to start four git commands to build the commit before the push. The Steward now writes that small commit itself, and only the push still goes through git. The push's compare-and-swap is the same as before, so two PCs still can't both take a turn. The commit is the same one git would have made.
+- Reading a turn record or the claims back no longer starts git to read the file. The Steward reads it from the objects it already has, and asks git only when they're packed.
+- Clearing a stage's worktree used to list every worktree with git, remove it, and then always tidy up git's records of worktrees. The Steward now reads those records from git's own files and tidies up only when a worktree folder has gone missing. A folder that isn't there anymore costs no git command at all. Worktrees under a junction or a Dev Drive, and ones deleted by hand, are still found and cleared as before.
+- The Steward's own tests of these parts run faster: on the owner's laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
 ## 0.36.23
 
 **Kit 2.73.5: the kit sees one folder as one folder, however it's named.**
