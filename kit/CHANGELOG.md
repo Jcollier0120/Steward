@@ -4,11 +4,12 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## Unreleased
 
-**AMD's NPU measured on battery: 20.7 mJ a token on a Krackan, and FastFlowLM's power modes alike there too, so the route still sets none.**
+**AMD's NPU measured on battery: 20.7 mJ a token on a Krackan, and FastFlowLM's power modes alike there too, so the route still sets none. Setup's picture-first test request checked on it: calibration times chat warm.**
 
 ### What changed
 
 - **spec/NPU-VENDORS.md and the amd route's notes** have the Krackan's run on battery. `npu-bench --profile full --energy` gave 20.7 mJ a token (6.6 W at rest, 11.6 W working), 13.1 tokens written a second against 14.4 on mains power, and a model load of 12.7 s against 5.4 s; the idle stop's rule still gives 5 minutes for chat. FastFlowLM's four `--pmode` values did the same jobs in the same time on battery, and none drew clearly less than the battery meter's own swing (several watts at rest from one run to the next), so the route starts FastFlowLM without one, as before. Whether a power mode saves less than such a meter can tell stays unverified.
+- **spec/NPU-VENDORS.md** has `npu-check --harden` run again on the Krackan with kit 2.74.5, whose test request asks about the picture first: calibration timed chat warm in 1.31 s (9.18 s before, the switch back from the vision model) and wrote a 90 s base, not 105 s. Most of the 90 s is calibrate's reading estimate, a tenth of writing speed; FastFlowLM reads about 34 times faster than it writes, but the Krackan's own timeouts don't come from calibrate.
 
 ### For an agent
 
