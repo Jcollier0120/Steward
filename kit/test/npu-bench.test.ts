@@ -518,3 +518,19 @@ test("a candidate's files are measured once it's pulled: each one in its folder,
   assert.equal(await B.candidateFiles(amd, { server: 'FastFlowLM', tools: s.tools, log: (l: string) => lines.push(l) }), null);
   assert.deepEqual(lines, ["the candidate's files: not measured, as FastFlowLM's route doesn't say where its models are"]);
 });
+
+test('energy on a PC busy enough to hold the bench past its windows: a reading at rest, and readings working until a job is done', async () => {
+  const busy = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? 10000 : 4000) });
+  // From the first reading on, every look at the clock is ten minutes later: each window has passed at its first look.
+  let late = 0;
+  let reading = false;
+  const now = () => performance.now() + (reading ? (late += 600_000) : 0);
+  const io = { ...busy.opts.io, now, dischargeRate: async () => ((reading = true), busy.opts.io.dischargeRate()) };
+  const r = await B.npuBench({ ...busy.opts, io, profile: 'quick', energy: true });
+  assert.equal(r.code, 0);
+  const e = r.report.results.energy!;
+  assert.ok(e, 'measured, not "the battery gave no discharge rate"');
+  assert.equal(e.restMilliwatts, 4000);
+  assert.ok(e.loadMilliwatts > 4000, 'read while working');
+  assert.ok(e.jobs > 0);
+});

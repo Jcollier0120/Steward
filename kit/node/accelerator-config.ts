@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { acceleratorConfigFile, acceleratorId, acceleratorsHome, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
 import * as core from './core/index.js';
+import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -529,7 +530,8 @@ function readJsonObject(file: string): { raw?: Record<string, any> } {
   }
 }
 
-const isOwnFile = (file: string, env: NodeJS.ProcessEnv = process.env) => path.resolve(file).toLowerCase() === path.resolve(acceleratorConfigFile(env)).toLowerCase();
+/** `file` is the accelerators' own config.json, however each is spelled (spec/DEV-DRIVES.md). */
+const isOwnFile = (file: string, env: NodeJS.ProcessEnv = process.env) => samePath(file, acceleratorConfigFile(env));
 
 /**
  * config.json's content: {} when there is none, an error when it isn't readable JSON. The accelerators' own file is
@@ -634,11 +636,15 @@ export function applyChange(current: Record<string, any>, change: ConfigChange, 
   return next;
 }
 
-/** Written whole: a temporary file, then a rename (tried again while Windows refuses it for a moment), so a reader never sees half of it. */
+/**
+ * Written whole: a temporary file, on the disk before the rename (kit 2.73.3: a crash then leaves the old file or the
+ * new one, never one of NUL bytes), then the rename (tried again while Windows refuses it for a moment), so a reader
+ * never sees half of it.
+ */
 export function writeJsonWhole(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { flush: true });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, file);
