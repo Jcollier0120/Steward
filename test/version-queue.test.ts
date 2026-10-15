@@ -10,9 +10,14 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-vq-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { keepVersionQueues, loadVersionQueues } = await import('../src/version-queue.ts');
+const { heldQueues, keepVersionQueues, loadVersionQueues, queueHold } = await import('../src/version-queue.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { shareRemoteHeads } = await import('../src/kit/remote-heads.ts');
+const { reconcile, roundConditions } = await import('../src/alarms.ts');
+const { DEFAULT_SETTINGS } = await import('../src/settings.ts');
+const { CONFLICTS } = await import('../src/conflicts.ts');
+const { GAVE_WAY } = await import('../src/stages/merge.ts');
+type QueuedPr = import('../src/version-queue.ts').QueuedPr;
 
 const VERSION_FILES = ['package.json', 'package-lock.json', 'src/app.ts'];
 const green = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }];
@@ -185,4 +190,73 @@ test("a project's clone isn't fetched while remote-heads.json says its branch on
     if (was === undefined) delete process.env.MANOR_HOME;
     else process.env.MANOR_HOME = was;
   }
+});
+
+const T = '2026-10-15T08:00:00.000Z';
+const later = (min: number) => new Date(Date.parse(T) + min * 60_000);
+const queued = (number: number, version: string, o: Partial<QueuedPr> = {}): QueuedPr => ({ number, title: `#${number}`, url: `https://github.com/Jcollier0120/Steward/pull/${number}`, version, ready: true, why: null, head: `h${number}`, ...o });
+const turn = (n: number, v: string) => `its turn comes after #${n} (v${v}): the lowest version merges first`;
+
+test('what holds a version queue: its lowest PR not ready, with ready PRs waiting behind it, since the first round that saw it', () => {
+  const draft = queued(233, '0.36.41', { ready: false, why: 'a draft', draft: true });
+  const queue = [draft, queued(266, '0.36.43'), queued(268, '0.36.44')];
+  const first = queueHold(queue, T);
+  assert.deepEqual(first, { number: 233, title: '#233', url: 'https://github.com/Jcollier0120/Steward/pull/233', version: '0.36.41', why: 'a draft', draft: true, behind: [266, 268], since: T });
+  assert.equal(queueHold(queue, later(90).toISOString(), { before: first })?.since, T, 'the same PR holding it: since it first did');
+
+  // Marked ready but untested here: the merge stage's reason is the one said, and the PRs waiting their turn behind it
+  // count as ready.
+  const held = new Map([[233, 'untested: its checks run here first'], [266, turn(233, '0.36.41')], [268, turn(233, '0.36.41')]]);
+  const untested = queueHold([{ ...draft, ready: true, why: null, draft: false }, ...queue.slice(1)], later(90).toISOString(), { held, before: first });
+  assert.deepEqual([untested?.number, untested?.why, untested?.draft, untested?.behind, untested?.since], [233, 'untested: its checks run here first', false, [266, 268], T]);
+
+  // Another PR holding it: since starts over.
+  const failing = queueHold([queued(266, '0.36.43', { ready: false, why: 'checks failing' }), queued(268, '0.36.44')], later(120).toISOString(), { before: first });
+  assert.deepEqual([failing?.number, failing?.behind, failing?.since], [266, [268], later(120).toISOString()]);
+
+  assert.equal(queueHold([draft, queued(266, '0.36.43', { ready: false, why: 'a draft', draft: true })], T), null, 'nothing ready behind it: nothing waits');
+  assert.equal(queueHold([queued(266, '0.36.43'), draft], T), null, 'a draft above the ready ones holds nothing');
+  assert.equal(queueHold([queued(250, '0.36.40', { ready: false, why: CONFLICTS }), ...queue.slice(1)], T, { held: new Map([[250, GAVE_WAY]]) }), null, 'one that gives up its turn holds nothing');
+  assert.equal(queueHold([], T), null);
+});
+
+test("the round says what holds the Steward's own queue and since when, and an alarm is raised once it has held more than an hour", async () => {
+  const s = repoWithPrs('steward-own');
+  const shas = { 21: s.make(21, '0.4.1'), 22: s.make(22, '0.4.2'), 23: s.make(23, '0.4.3') };
+  const prs = [listed('Jcollier0120/Steward', 21, shas[21], { isDraft: true }), listed('Jcollier0120/Steward', 22, shas[22]), listed('Jcollier0120/Steward', 23, shas[23])];
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : undefined));
+  const self = employee(s.checkout, { id: 'steward', name: 'Steward', repo: 'Jcollier0120/Steward' });
+  const ctx = ctxFor({ employees: [], workRoot: path.join(tmp, 'work5'), run: r.run, neutralDir: tmp });
+
+  // The Steward's own repository is no employee of its own: its queue is read as the merge stage's `self`.
+  let q = await keepVersionQueues(ctx, { projects: [], self, now: () => later(0) });
+  const own = q.repos.find((x) => x.id === 'steward')!;
+  assert.deepEqual([own.held?.number, own.held?.draft, own.held?.behind, own.held?.since], [21, true, [22, 23], T]);
+  assert.ok(ctx.lines.some((l) => /^\[steward\] #21 \(v0\.4\.1, .+\) holds its version queue: #22, #23 wait behind it, since 2026-10-15T08:00:00\.000Z$/.test(l)), ctx.lines.join('\n'));
+
+  // An hour and a half on, the merge stage's reason for it, and the same since.
+  q = await keepVersionQueues(ctx, { projects: [], self, now: () => later(90), held: [{ employee: self, prs: [{ number: 21, why: 'a draft: review it, then mark it ready' }] }] });
+  const holds = heldQueues(loadVersionQueues());
+  assert.deepEqual(holds.map((h) => [h.id, h.repo, h.hold.number, h.hold.why, h.hold.since]), [['steward', 'Jcollier0120/Steward', 21, 'a draft: review it, then mark it ready', T]]);
+
+  const settings = structuredClone(DEFAULT_SETTINGS);
+  const round = { stage: 'round' as const, started: T, finished: T, kit: null, asked: {}, results: [], log: [] };
+  const conditions = (queueHolds: typeof holds) => roundConditions({ round, held: [], failedReleases: {}, queueHolds, employees: [], settings }).filter((c) => c.id.startsWith('queue:'));
+  const c = conditions(holds);
+  assert.deepEqual(c.map((x) => [x.id, x.who, x.url, x.since]), [['queue:Jcollier0120/Steward#21', 'steward', 'https://github.com/Jcollier0120/Steward/pull/21', T]]);
+  const empty = { at: null, watching: {}, open: [], cleared: [] };
+  assert.equal(reconcile(empty, c, later(59)).raised.length, 0, 'not within the hour');
+  const raised = reconcile(empty, c, later(61)).raised;
+  assert.equal(raised.length, 1);
+  assert.equal(raised[0].title, 'Steward #21 (v0.4.1) has held its version queue for 1 hour or more: #22, #23 wait behind it');
+  assert.ok(raised[0].detail.some((d) => d.startsWith('Mark it ready once it is done')), raised[0].detail.join('\n'));
+
+  // A conflict holding it is the blocking alarm's, which names its files.
+  assert.deepEqual(conditions([{ ...holds[0], hold: { ...holds[0].hold, why: `${CONFLICTS} in src/app.ts` } }]), []);
+
+  // Marked ready: nothing holds it, and the alarm goes.
+  prs[0] = listed('Jcollier0120/Steward', 21, shas[21]);
+  q = await keepVersionQueues(ctx, { projects: [], self, now: () => later(120) });
+  assert.equal(q.repos.find((x) => x.id === 'steward')?.held, undefined);
+  assert.deepEqual(heldQueues(loadVersionQueues()), []);
 });
