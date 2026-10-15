@@ -454,6 +454,13 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
   );
 }
 
+/** A build time: "18:00" today, else "Mon 18:00". */
+export function buildAt(iso: string, now = Date.now()): string {
+  const d = new Date(iso);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toDateString() === new Date(now).toDateString() ? hm : `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${hm}`;
+}
+
 /**
  * What a round does, and when it comes, in words: the round line, and the question Run now asks. With no repositories
  * here (steward.ts's reposHere) a round only keeps the staff's pages up (tend.ts), or, with that off, has nothing to do.
@@ -482,7 +489,9 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
       ? r.tend
         ? `It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
         : 'It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. Run now does one round.'
-      : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
+      : r.build
+        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'} Between builds, a round every ${r.minutes} minutes only looks.${after}`
+        : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
   return { what, when };
 }
 
