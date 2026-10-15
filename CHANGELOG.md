@@ -18,6 +18,21 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.40's build pipeline too, if that wasn't released on its own.
+
+## 0.36.43
+
+**Kit 2.74.6: checks get the share of the processor Manor's Settings give them, and tests run at that pace take longer instead of failing.**
+
+### What changed
+
+- Checks the Steward and the other agents start (vouches, merge checks, kit trials, the Assayer's checks) were held by two limits at once: Manor's checks pace, and the agent's own gentle pace, which is far tighter. The gentle one won: two processors' worth, 11% on an 18-thread PC, so raising the checks pace in Manor's Settings did nothing for them. Now checks leave the agent's gentle limit and are held only by the checks pace.
+- The checks pace holds test runs to a share of the processor, a third unless Manor's Settings say otherwise. A run's overall time limit was already stretched to match, but the waits and timeouts a test sets itself weren't, so on a busy PC a test could fail with nothing wrong. Each paced run is now told how much slower it runs, and the kit's tests stretch their own waits and timeouts by that much. At the pace they take longer; at full speed nothing changes.
+- The kit the Steward hands out (2.74.6) brings this to every agent, for tests that use it.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and agents get it as they pin the kit.
+
 ## 0.36.42
 
 **Full test runs keep to the checks pace without starving their own tests, and a kit's release is no longer held by tests that fail at random.**

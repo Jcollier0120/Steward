@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { paced } from './until.ts';
 
 // The NPU check (npu-check.ts): setup's steps timed, then the server measured, against a fake OpenVINO Model Server in
 // this process. Nothing is downloaded or started, and no real config.json, server or lock is touched.
@@ -107,12 +108,15 @@ async function scene(o: { cap?: number; dieOverCap?: boolean; answer?: string; e
   return { port, catalog, tools, exe, fake, ran, lines, opts };
 }
 
-test('the route on another device: OpenVINO gets its --target_device, and off the NPU loses --max_prompt_len and its NPU plugin settings; GenieX has no other', () => {
+test('the route on another device: OpenVINO gets its --target_device, and off the NPU loses --max_prompt_len, its NPU plugin settings and the NPU\'s prefix caching off; GenieX has no other', () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const cpu = C.routeOnDevice(intel, 'cpu');
   assert.equal(cpu.serve[cpu.serve.indexOf('--target_device') + 1], 'CPU');
   assert.ok(!cpu.serve.includes('--max_prompt_len'));
   assert.ok(!cpu.serve.includes('--plugin_config'));
+  assert.ok(intel.serve.includes('--enable_prefix_caching'));
+  assert.ok(!cpu.serve.includes('--enable_prefix_caching'), "the CPU keeps OpenVINO's own prefix caching");
+  assert.ok(!cpu.serve.includes('false'), 'and the flag goes with its value');
   assert.ok(!C.routeOnDevice(V.routeFor(intel, 'meteor-lake'), 'GPU').serve.includes('--plugin_config'), "the NPU 3720's prompt chunks stay on the NPU");
   assert.deepEqual(C.routeOnDevice(intel, 'NPU').serve, intel.serve);
   // Its embedding server, OpenVINO too, goes with it, and loses the NPU's fixed --max_length.
@@ -330,7 +334,7 @@ test("the server is started from its entry's command with its %VARIABLES% expand
   const mark = path.join(dir, 'ran');
   const entry = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [`%NPU_CHECK_TEST_NODE%\\${path.basename(process.execPath)}`, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, 'ok')`] } };
   const s = await C.startServer(entry as any, path.join(dir, 'server.log'));
-  for (let i = 0; i < 200 && !existsSync(mark); i++) await new Promise((r) => setTimeout(r, 25));
+  for (let i = 0; i < paced(200) && !existsSync(mark); i++) await new Promise((r) => setTimeout(r, 25));
   await s.stop();
   delete process.env.NPU_CHECK_TEST_NODE;
   assert.equal(existsSync(mark), true, readFileSync(path.join(dir, 'server.log'), 'utf8'));
@@ -410,11 +414,11 @@ test("setup's test request asks about the picture first and chat last, so a serv
   const entry = { id: 'npu', name: 'NPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'qwen3-it:4b', startCommand: ['C:\\nowhere\\flm.exe', 'serve', 'qwen3-it:4b'] }, vision: { model: 'qwen3vl-it:4b' } } as any;
   const dir = mkdtempSync(path.join(home, 'test-image-'));
   try {
-    assert.deepEqual(await testNpuEntry(entry, { dir, timeoutMs: 10_000 }), []);
+    assert.deepEqual(await testNpuEntry(entry, { dir, timeoutMs: paced(10_000) }), []);
     assert.deepEqual(asked, ['qwen3vl-it:4b', 'qwen3-it:4b']);
     assert.equal(held, 'qwen3-it:4b', 'left holding the chat model');
     loads = false;
-    const problems = await testNpuEntry(entry, { dir, timeoutMs: 10_000 });
+    const problems = await testNpuEntry(entry, { dir, timeoutMs: paced(10_000) });
     assert.equal(problems.length, 1);
     assert.match(problems[0], /failed \(200\).*Failed to load qwen3vl-it:4b model/);
   } finally {

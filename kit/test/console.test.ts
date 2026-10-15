@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { hasConsole, sharesConsole } from '../node/console.ts';
 import { freePort } from './free-port.ts';
+import { paced } from './until.ts';
 
 // kit 2.72.2: the page keeps a windowless console its git and gh share, instead of each getting a console host of its own.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'console-test-'));
@@ -53,8 +54,8 @@ writeFileSync(process.env.CONSOLE_TEST_OUT, JSON.stringify({ has, args: process.
   );
   const started = async (how: ReturnType<typeof pageLaunch>, out: string) => {
     spawn(how.file, how.args, { ...how.options, stdio: 'ignore', cwd: tmp, env: { ...process.env, CONSOLE_TEST_OUT: out } }).unref();
-    for (let i = 0; i < 100 && !existsSync(out); i++) await new Promise((r) => setTimeout(r, 100));
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < paced(100) && !existsSync(out); i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < paced(20); i++) {
       try {
         return JSON.parse(readFileSync(out, 'utf8'));
       } catch {
