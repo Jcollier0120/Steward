@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -679,7 +679,7 @@ export function describePlan(p: SetupPlan): string[] {
   if (p.dropNpu) lines.push("NPU (npu): removed from config.json. It's the GenieX server install wrote by default, and this PC has no NPU it can run on, so requests tried it first and failed.");
   if (p.npu) {
     const n = p.npu;
-    lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${n.support.verified ? '' : ' (not yet tried on this kind of NPU)'}`);
+    lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${untried(n.support)}`);
     lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
@@ -981,6 +981,18 @@ export function npuNoteFor(label: string, what: 'chat' | 'embed', reason: string
     : `The NPU (${label}) makes no embeddings: ${reason}. The graphics card or the processor makes them instead.`;
 }
 
+/**
+ * The note for an NPU of a generation setup doesn't know, kept because it passed its test on guessed values (the
+ * route's most cautious: unknownGeneration): the cap it was given, and whether its timeouts are this PC's own.
+ */
+export function npuGuessedNote(label: string, cap: number, measured: boolean): string {
+  return `The NPU (${label}) runs on guessed values: setup gave it the most cautious cap it has (${cap.toLocaleString('en-US')} tokens) and ${measured ? "this PC's own timeouts, measured" : 'the longest timeouts it has'}. It passed its test, so it's used; a kit update that knows this NPU may change them.`;
+}
+
+/** How a plan or report says an NPU hasn't run on real hardware: its generation unverified, or one setup doesn't know (its label says so). */
+const untried = (s: { verified: boolean; guessed?: boolean }) =>
+  s.guessed ? ' (tried on guessed values, the most cautious it has, and kept only if it passes its test)' : s.verified ? '' : ' (not yet tried on this kind of NPU)';
+
 /** A failed test's problems as the reason a person reads. */
 export function plainReason(problems: string[], what: 'chat' | 'embed'): string {
   const s = problems.join('; ');
@@ -993,7 +1005,7 @@ export function plainReason(problems: string[], what: 'chat' | 'embed'): string 
 export interface NpuSetup {
   entry?: AcceleratorEntry;
   problems: string[];
-  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't. */
+  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't; or that it runs on guessed values (npuGuessedNote). */
   note?: string;
   /** What setup measured, on a generation nobody had (calibrate): its timeouts come from it. */
   measured?: NpuMeasured;
@@ -1102,6 +1114,8 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     }
   }
   io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
+  // A generation setup doesn't know passed on guessed values: it's used, and the person is told so (npu-note.json).
+  if (n.support.guessed) note = [npuGuessedNote(label, n.route.maxContextTokens, !!measured), note].filter(Boolean).join(' ');
   return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}) };
 }
 
@@ -1138,16 +1152,62 @@ export function embedSanity(vectors: unknown, dims?: number): string[] {
   return [];
 }
 
+/** `fn` in the NPU's turn, or at once when the caller holds it (`held`). */
+function inNpuTurn<T>(held: boolean, fn: (slot: number) => Promise<T>, opts: Parameters<typeof withAcceleratorTurn>[2]): Promise<T> {
+  return held ? fn(0) : withAcceleratorTurn(lockDirsOf({ id: 'npu', slots: 1 }), fn, opts);
+}
+
+/** This kit's version (its VERSION file: beside this file in an agent's kit, one folder up in the Steward's). */
+export function kitVersion(): string {
+  for (const f of ['./VERSION', '../VERSION']) {
+    try {
+      return readFileSync(new URL(f, import.meta.url), 'utf8').trim();
+    } catch {}
+  }
+  return 'unknown';
+}
+
+/**
+ * Which kit last wrote the NPU's command, or looked at it (npu-refresh.ts): `npu-refresh.json`, beside config.json.
+ * Setup writes `set-up` when it writes the NPU's entry; the keeper's look writes what it found.
+ */
+export interface NpuRefreshRecord {
+  kit: string;
+  at: string;
+  did: 'set-up' | 'current' | 'refreshed' | 'failed' | 'needs-setup' | 'not-route' | 'no-npu';
+  problems?: string[];
+}
+
+export const npuRefreshFile = (configFile: string) => path.join(path.dirname(configFile), 'npu-refresh.json');
+
+export function readNpuRefresh(configFile: string): NpuRefreshRecord | null {
+  try {
+    const r = JSON.parse(readFileSync(npuRefreshFile(configFile), 'utf8').replace(/^﻿/, ''));
+    return r && typeof r.kit === 'string' ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Never throws: without the record, the next look only looks again. */
+export function rememberNpuRefresh(configFile: string, r: NpuRefreshRecord): void {
+  try {
+    mkdirSync(path.dirname(configFile), { recursive: true });
+    writeFileSync(npuRefreshFile(configFile), JSON.stringify(r, null, 2) + '\n');
+  } catch {}
+}
+
 /**
  * The embedding server's test request, as testNpuEntry's: in the NPU's turn, the server started if it isn't running,
  * then EMBED_TEST's three sentences, whose vectors must make sense (embedSanity). Problems in words; none when they do.
+ * `held`: the caller holds the NPU's turn already (npu-refresh.ts).
  */
-export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number } = {}): Promise<string[]> {
+export async function testNpuEmbed(e: AcceleratorEntry, o: { dims?: number; held?: boolean } = {}): Promise<string[]> {
   const ep = readAccelerator(e)?.embed;
   if (!ep?.baseUrl) return ['the entry has no embedding server'];
   const problems: string[] = [];
-  await withAcceleratorTurn(
-    lockDirsOf({ id: 'npu', slots: 1 }),
+  await inNpuTurn(
+    !!o.held,
     async () => {
       const s = { baseUrl: ep.baseUrl!, model: ep.model, startCommand: ep.startCommand, ...(ep.env ? { env: ep.env } : {}) };
       await ensureServer(s, { waitMs: 120_000, readyMs: 5 * 60_000 });
@@ -1224,11 +1284,15 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
 
 /**
  * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
- * then one short chat answer, which must say "ready" as asked (and nothing degenerate), and one about a picture when it
- * serves vision. Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it)
- * may take minutes, so it is given 15, or `timeoutMs` (the NPU check's forced timeout).
+ * then one answer about a picture when it serves vision, and one short chat answer, which must say "ready" as asked (and
+ * nothing degenerate). Chat goes last: a server that holds one model at a time (FastFlowLM) is left holding the chat
+ * model, which most work asks for, and setup's measuring after this times it warm, not its switch back (8 to 9 s on an
+ * XDNA 2, which kit 2.74.4 and before measured as a short answer, warm, and wrote timeouts five times too long from). Problems in
+ * words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is
+ * given 15, or `timeoutMs` (the NPU check's forced timeout). `held`: the caller holds the
+ * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts).
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number } = {}): Promise<string[]> {
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
   const problems: string[] = [];
@@ -1236,20 +1300,20 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
   const limit = o.timeoutMs ?? 15 * 60_000;
   const t0 = Date.now();
-  await withAcceleratorTurn(
-    lockDirsOf({ id: 'npu', slots: 1 }),
+  await inNpuTurn(
+    !!o.held,
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
       await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit });
-      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
-      if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
-      else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
         const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, img, 'What colour is this picture? One word.', 8), limit, { loading: true });
         if (typeof text(r.json) !== 'string') problems.push(`vision gave no answer (${JSON.stringify(r.json).slice(0, 160)})`);
       }
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
+      if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
+      else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
   ).catch((err: any) => {
@@ -1446,8 +1510,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
     } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
   }
-  // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole.
-  const plain = plan.npu ? (r.npu?.note ?? plan.npuPlain ?? null) : plan.npuPlain;
+  // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole on
+  // values setup knows. An NPU kept on guessed values says so, beside the plan's own note (its embeddings left off).
+  const said = r.npu?.entry && r.npu.note && plan.npuPlain ? `${r.npu.note} ${plan.npuPlain}` : r.npu?.note;
+  const plain = plan.npu ? (said ?? plan.npuPlain ?? null) : plan.npuPlain;
   const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
   if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
   if (plain) log(`note: ${plain}`);
@@ -1457,6 +1523,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
     log(`config.json not written: ${saved.problems.join('; ')}`);
     return { code: 1, plan };
   }
+  // The NPU's command is this kit's now: a keeper on an older kit leaves it alone (npu-refresh.ts).
+  if (entries.some((e) => e.kind === 'npu')) rememberNpuRefresh(configFile, { kit: kitVersion(), at: new Date().toISOString(), did: 'set-up' });
   const read = readAccelerators(raw);
   const order = orderAccelerators(read.accelerators, read.order).map((a) => a.id);
   const changed = [...entries.map((e) => e.id), ...(plan.dropNpu ? ['npu removed'] : [])];
@@ -1513,7 +1581,7 @@ export function printReport(r: AcceleratorReport, out: (s: string) => void = con
   const npuServer = n?.vendor === 'qualcomm' ? `; GenieX ${d.geniex ? `at ${d.geniex}` : 'not installed'}` : '';
   out(
     n
-      ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${n.verified ? '' : ' (not yet tried on this kind of NPU)'}` : `not used: ${n.why}`}`
+      ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${untried(n)}` : `not used: ${n.why}`}`
       : "  no NPU (Windows lists no Neural processor)",
   );
   if (r.npuNote) out(`    ${r.npuNote}`);

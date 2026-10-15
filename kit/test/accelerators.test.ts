@@ -835,6 +835,49 @@ test("OpenVINO Model Server is ready once it lists its model: an empty /v1/model
   }
 });
 
+test("FastFlowLM's model that didn't load: its 200 carrying only an error is the server failing, and the request goes to the next; a request it won't take is a 400, as before", async () => {
+  fresh();
+  noGames();
+  assert.equal(A.reportsLoaded(['C:\\Users\\x\\.manor\\accelerators\\servers\\fastflowlm-1.0.7\\flm.exe', 'serve', 'qwen3-it:4b']), true);
+  assert.equal(A.reportsLoaded(['%USERPROFILE%\\servers\\FLM.EXE']), true);
+  assert.equal(A.reportsLoaded(['C:\\servers\\ovms.exe']), false);
+  assert.equal(A.reportsLoaded(undefined), false);
+  assert.equal(A.failedWithOk({ error: 'Failed to load qwen3-it:4b model!' }), true);
+  assert.equal(A.failedWithOk({ choices: [{ message: { content: 'ready' } }] }), false);
+  assert.equal(A.failedWithOk({ data: [], error: null }), false, 'embeddings carry data');
+  assert.equal(A.failedWithOk([{ error: 'x' }]), false);
+  // As FastFlowLM 1.0.7 does on an XDNA 2 that couldn't hold its model (2026-10-15): /v1/models lists every model it
+  // knows, a chat request gets 200 and an error, and a prompt past its context a 400.
+  const flm = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    if (req.url === '/v1/models') return res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"qwen3-it:4b"}]}');
+    const body = JSON.parse(raw);
+    if (body.max_tokens === 999) return res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"Max length reached!","type":"model_error","code":400}}');
+    res.writeHead(200, { 'content-type': 'application/json' }).end('{"error":"Failed to load qwen3-it:4b model!"}');
+  });
+  await new Promise<void>((r) => flm.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${(flm.address() as AddressInfo).port}`;
+  const good = await fakeServer(() => ({ text: 'from the card' }));
+  try {
+    await assert.rejects(A.postJson({ baseUrl, model: 'qwen3-it:4b' }, '/v1/chat/completions', { max_tokens: 8 }, 5000), (e: Error) => e instanceof A.AcceleratorDown && /\(200\).*Failed to load qwen3-it:4b model/.test(e.message));
+    await assert.rejects(A.postJson({ baseUrl, model: 'qwen3-it:4b' }, '/v1/chat/completions', { max_tokens: 999 }, 5000), (e: Error) => !(e instanceof A.AcceleratorDown) && /Max length reached/.test(e.message));
+    // Before, the work took an empty answer from the NPU; now the NPU is marked failed and the card answers.
+    const accs = [
+      { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl, model: 'qwen3-it:4b' } },
+      gpu('gpu-good', { chat: { baseUrl: good.baseUrl, model: 'm' } } as any),
+    ];
+    const a = await new Npu(config({ accelerators: accs, acceleratorOrder: ['npu', 'gpu-good'] })).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    assert.equal(a.text, 'from the card');
+    assert.equal(a.fellBackFrom?.id, 'npu');
+    assert.match(A.readFailure('npu')!.reason, /Failed to load/);
+  } finally {
+    flm.closeAllConnections();
+    await new Promise((r) => flm.close(r));
+    await good.close();
+  }
+});
+
 test('a server that is not running is started from its startCommand: %NAME% expanded, detached, in the home folder', async () => {
   fresh();
   const port = await closedPort();

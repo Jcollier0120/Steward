@@ -29,6 +29,8 @@ const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 256V\nram|16849174528\n';
 const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
 const ARM = 'cpu|12|18|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm Oryon(TM) CPU\nram|51127103488\n';
 const SUITE = B.SUITE;
+/** The line freshPrompt puts first in every read and job: the run's tag and a count. */
+const FRESH = /^\[bench [a-z0-9]*-\d+\]\n/;
 
 /** A right answer to every quality question, by id: each must pass its own grade. */
 const RIGHT: Record<string, string> = {
@@ -85,8 +87,9 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
   const seen: any[] = [];
   const pictures: { url: string; pngFile: boolean }[] = [];
   let server: Server | null = null;
-  const answerFor = (prompt: string) => {
+  const answerFor = (asked: string) => {
     if (o.wrong) return o.wrong;
+    const prompt = asked.replace(FRESH, '');
     if (prompt === SUITE.short.prompt) return 'ready';
     if (prompt === SUITE.write.prompt) return Array.from({ length: 100 }, (_, i) => `n${i + 1}`).join(', ');
     if (prompt.endsWith(SUITE.read.question)) return '42';
@@ -340,6 +343,37 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.match(B.marksFor(noisy, SUITE)[0].say, /more than 15%: short answer/);
 });
 
+test("every read and job is a prompt the server hasn't seen, so no prefix cache answers it; the short answer, writing and quality are the same each time", async () => {
+  assert.equal(B.freshPrompt('Read this.', 'bench a1-7'), '[bench a1-7]\nRead this.');
+  const s = await scene();
+  const { code } = await B.npuBench(s.opts);
+  assert.equal(code, 0, s.lines.join('\n'));
+  const asked: string[] = s.fake.seen.map((j) => j.messages.at(-1).content).filter((c) => typeof c === 'string');
+  assert.equal(new Set(asked.filter((p) => FRESH.test(p))).size, asked.filter((p) => FRESH.test(p)).length, 'never the same twice');
+  // Each size's warm-up and tries: the same text under a first line of its own, which also keeps two sizes from sharing
+  // their first lines (readPrompt's 1,024 tokens start as its 512 do).
+  const reads = asked.filter((p) => p.endsWith(SUITE.read.question));
+  for (const n of SUITE.read.sizes) {
+    const these = reads.filter((p) => p.replace(FRESH, '') === B.readPrompt(SUITE, n));
+    assert.equal(these.length, SUITE.warmups + SUITE.tries.full, `${n} tokens`);
+    assert.ok(these.every((p) => FRESH.test(p)));
+    assert.equal(new Set(these).size, these.length, `${n} tokens: two reads, two prompts`);
+  }
+  assert.equal(reads.length, SUITE.read.sizes.length * (SUITE.warmups + SUITE.tries.full) + 1, 'and the read near the cap');
+  assert.ok(reads.every((p) => FRESH.test(p)));
+  // The jobs too, and holding speed's triage jobs after them.
+  for (const job of SUITE.jobs) {
+    const these = asked.filter((p) => p.replace(FRESH, '') === B.promptOf(SUITE, job));
+    assert.ok(these.length >= SUITE.warmups + SUITE.tries.full, job.id);
+    assert.ok(these.every((p) => FRESH.test(p)), job.id);
+    assert.equal(new Set(these).size, these.length, job.id);
+  }
+  // Shorter than a block, or graded rather than timed: asked as they are.
+  assert.ok(asked.filter((p) => p === SUITE.short.prompt).length > SUITE.tries.full);
+  assert.equal(asked.filter((p) => p === SUITE.write.prompt).length, SUITE.warmups + SUITE.tries.full);
+  for (const item of SUITE.quality) assert.ok(asked.includes(B.promptOf(SUITE, item)), item.id);
+});
+
 test("a server that doesn't stream or count tokens is measured all the same, and marked so it isn't ranked", async () => {
   const s = await scene({ stream: false, usage: false });
   const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick' });
@@ -512,9 +546,12 @@ test("a candidate's files are measured once it's pulled: each one in its folder,
   const onDisk = JSON.parse(readFileSync(s.opts.out, 'utf8'));
   assert.deepEqual(onDisk.run.files, want);
   assert.deepEqual(B.checkSchema(onDisk, B.REPORT_SCHEMA), []);
-  // FastFlowLM keeps its models its own way: its route has no `present`, so nothing says where to look.
+  // FastFlowLM keeps its models its own way: its route's `present` names its own folder for the model, not the id, so a
+  // candidate gets none (kept, it would find the route's own model and never be pulled), and nothing says where to look.
   const lines: string[] = [];
+  assert.match(V.NPU_CATALOG.routes.amd.models[0].present!, /Qwen3-4B-Instruct-2507-NPU2/);
   const amd = B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0];
+  assert.equal(amd.present, undefined);
   assert.equal(await B.candidateFiles(amd, { server: 'FastFlowLM', tools: s.tools, log: (l: string) => lines.push(l) }), null);
   assert.deepEqual(lines, ["the candidate's files: not measured, as FastFlowLM's route doesn't say where its models are"]);
 });

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
 import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
@@ -9,10 +9,12 @@ import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
+import { refreshNpu } from './npu-refresh.ts';
 import { npuIdleStopMinutes } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
+import { kitVersion, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 /**
  * Keeping the model servers (spec/ACCELERATORS.md, "Keeping the servers"): whoever keeps them (the Smith; Reeve
@@ -596,9 +598,9 @@ function holdingAll<T>(dirs: string[], fn: () => Promise<T>): Promise<T> {
  * makes anyone wait; QueueFull or LockTimeout else. On a card with more than one slot, it then holds the others
  * too (free, since nobody waits), so no request starts on the server it stops.
  */
-export function reaperTurn<T>(lockDirs: string | string[], fn: () => Promise<T>, who = 'keeper'): Promise<T> {
+export function reaperTurn<T>(lockDirs: string | string[], fn: () => Promise<T>, who = 'keeper', staleMs?: number): Promise<T> {
   const dirs = [lockDirs].flat();
-  return withAcceleratorTurn(dirs, (slot) => holdingAll(dirs.filter((_, i) => i !== slot), fn), { who, lane: 'background', waitMs: RULES.keeper.turnWaitMs, maxAhead: RULES.keeper.turnMaxAhead });
+  return withAcceleratorTurn(dirs, (slot) => holdingAll(dirs.filter((_, i) => i !== slot), fn), { who, lane: 'background', waitMs: RULES.keeper.turnWaitMs, maxAhead: RULES.keeper.turnMaxAhead, ...(staleMs ? { staleMs } : {}) });
 }
 
 /** Appends a line to a log, never throwing. */
@@ -690,9 +692,60 @@ export async function refreshHardware(o: { file?: string; detect?: () => Promise
   return true;
 }
 
+/** How long nobody may have used the NPU before its command is changed under it (npu-refresh.ts). */
+export const NPU_REFRESH_QUIET_MS = 2 * 60_000;
+
+let npuRefresh: Promise<void> | null = null;
+let npuDetected: Promise<Detection> | null = null;
+
+/**
+ * The NPU's servers brought up to this kit's command (npu-refresh.ts): looked at once for each kit version, in the
+ * background, so a look never waits for it; while someone uses the NPU, a later look tries again. What it changed, or
+ * why it couldn't, goes in the keeper's log. This PC is asked once in the process, however many looks it takes.
+ */
+export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): void {
+  if (npuRefresh) return;
+  const logFile = o.logFile ?? reaperLog();
+  const dirs = kitLockDirsOf({ id: 'npu', slots: 1 });
+  npuRefresh = refreshNpu({
+    kit: kitVersion(),
+    configFile: acceleratorConfigFile(),
+    tools: toolsHome(),
+    now: Date.now,
+    detect: () =>
+      (npuDetected ??= detect().catch((e) => {
+        npuDetected = null;
+        throw e;
+      })),
+    idle: () => {
+      const l = lineState(dirs);
+      return !l.held && !l.waiting && Date.now() - lastActivityMs(dirs) >= NPU_REFRESH_QUIET_MS;
+    },
+    // A first compile with a new command can take minutes: the turn isn't taken as a dead holder's meanwhile.
+    withTurn: (fn) => reaperTurn(dirs, fn, o.who ?? 'keeper', 40 * 60_000),
+    stopServer: async (program, base) => {
+      for (const p of await serverProcesses(program, base)) {
+        try {
+          process.kill(p.pid);
+        } catch {}
+      }
+      for (let i = 0; i < 40 && (await serverProcesses(program, base)).length; i++) await sleep(250);
+    },
+    testChat: (e) => testNpuEntry(e, { held: true }),
+    testEmbed: (e, dims) => testNpuEmbed(e, { dims, held: true }),
+    log: (line) => logLine(logFile, line),
+  })
+    .then(() => {})
+    .catch((e: any) => logLine(logFile, `the NPU's command couldn't be looked at: ${e?.message ?? e}`))
+    .finally(() => (npuRefresh = null));
+}
+
 /** One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the next look. */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
-  if (!o.config) await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
+  if (!o.config) {
+    await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
+    startNpuRefresh();
+  }
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
   const looked = await reaper.look(servers);
   const orphans = await reaper.orphans(servers);
