@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -18,10 +19,15 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const B = await import('./fixture/src/kit/npu-bench.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
+const { routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
+const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 256V\nram|16849174528\n';
+// The owner's Snapdragon laptop, as detection reads it (npu-vendors.test.ts).
+const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+const ARM = 'cpu|12|18|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm Oryon(TM) CPU\nram|51127103488\n';
 const SUITE = B.SUITE;
 
 /** A right answer to every quality question, by id: each must pass its own grade. */
@@ -53,6 +59,10 @@ const RIGHT: Record<string, string> = {
   triage: '{"label": "billing", "urgent": true}',
   reply: 'Of course! Saturday is fine. The ladder will be by the side gate from nine.',
   summary: 'The cellar is now dry and usable. The works cost $18,400 in total, under the $20,000 budget. The door and window still need attention.',
+  red: 'Red.',
+  halves: 'left blue, right yellow',
+  number: '472',
+  count: '3',
 };
 
 async function freePort(): Promise<number> {
@@ -63,11 +73,17 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** A fake OpenVINO Model Server that knows the suite's right answers (or answers `wrong`), streamed or not. */
+/**
+ * A fake OpenVINO Model Server (or GenieX: the same OpenAI routes) that knows the suite's right answers (or answers
+ * `wrong`), streamed or not. Each picture a request carries is looked at as it arrives: its URL, and whether that is a
+ * PNG file on this PC, as GenieX reads one.
+ */
 function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: boolean } = {}) {
   const answers = new Map<string, string>();
   for (const item of [...SUITE.quality, ...SUITE.jobs]) answers.set(B.promptOf(SUITE, item), RIGHT[item.id]);
+  for (const v of SUITE.vision) answers.set(v.prompt, RIGHT[v.id]);
   const seen: any[] = [];
+  const pictures: { url: string; pngFile: boolean }[] = [];
   let server: Server | null = null;
   const answerFor = (prompt: string) => {
     if (o.wrong) return o.wrong;
@@ -85,7 +101,10 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
         const j = JSON.parse(body);
         seen.push(j);
         const content = j.messages.at(-1).content;
-        const text = answerFor(typeof content === 'string' ? content : '');
+        const parts: any[] = Array.isArray(content) ? content : [];
+        const url = parts.find((p) => p.type === 'image_url')?.image_url?.url;
+        if (typeof url === 'string') pictures.push({ url, pngFile: !/^data:/.test(url) && existsSync(url) && readFileSync(url).subarray(1, 4).toString() === 'PNG' });
+        const text = answerFor(typeof content === 'string' ? content : (parts.find((p) => p.type === 'text')?.text ?? ''));
         const pieces = text.split(/(?<=\s)/);
         const usage = o.usage === false ? undefined : { prompt_tokens: Math.round(JSON.stringify(j.messages).length / 4), completion_tokens: pieces.length };
         if (j.stream && o.stream !== false) {
@@ -106,22 +125,34 @@ function fakeOvms(port: number, o: { stream?: boolean; wrong?: string; usage?: b
     s.closeAllConnections();
     await new Promise((r) => s.close(r));
   };
-  return { seen, start, stop, starts: 0 };
+  return { seen, pictures, start, stop, starts: 0, commands: [] as string[][] };
 }
 
 const PLUGGED = { onBattery: false, batteryPercent: 80, powerMode: 'balanced', brightness: 60, windowsBuild: '26200', make: 'HP', model: 'HP OmniBook X Laptop 17-dd0xxx' };
 
-/** The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not minutes. */
-async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null } = {}) {
+/**
+ * The catalog on a free port, a scratch tools home with the server "installed", and a suite that holds for moments, not
+ * minutes. On a Snapdragon (`vendor: 'qualcomm'`), GenieX is "installed" where its installer puts it, in a scratch
+ * %LOCALAPPDATA%, and its embedding server is left out: the benchmark asks for no embeddings.
+ */
+async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; busy?: number; conditions?: typeof PLUGGED; rate?: (working: boolean) => number | null; npu?: string; vendor?: 'intel' | 'qualcomm' } = {}) {
   const port = await freePort();
+  const vendor = o.vendor ?? 'intel';
   const catalog = structuredClone(V.NPU_CATALOG);
-  catalog.routes.intel.port = port;
-  delete catalog.routes.intel.models[0].pinned; // its pull is a fake that leaves no files to check
+  const route = catalog.routes[vendor];
+  route.port = port;
+  for (const m of route.models) delete m.pinned; // its pull is a fake that leaves no files to check
   const tools = mkdtempSync(path.join(home, 'tools-'));
-  const exe = V.serverExe(catalog.routes.intel, tools);
+  let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
+  if (vendor === 'qualcomm') {
+    delete route.embedServer;
+    env = Object.fromEntries(Object.entries(env).filter(([k]) => !/^(localappdata|userprofile)$/i.test(k)));
+    Object.assign(env, { LOCALAPPDATA: path.join(tools, 'local'), USERPROFILE: path.join(tools, 'profile') });
+  }
+  const exe = V.serverExe(route, tools, env);
   mkdirSync(path.dirname(exe), { recursive: true });
   writeFileSync(exe, '');
-  for (const f of catalog.routes.intel.runtime!.files) writeFileSync(path.join(path.dirname(exe), f), '');
+  for (const f of route.runtime?.files ?? []) writeFileSync(path.join(path.dirname(exe), f), '');
   const fake = fakeOvms(port, o);
   const suite = structuredClone(SUITE);
   suite.holding.minutes = 0.002;
@@ -145,14 +176,15 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
     catalog,
     suite,
     kitVersion: '2.62.0',
-    env: { ...process.env, REEVE_HOME: home },
-    detection: parseDetection(`${X64}${LUNAR}\n`),
+    env,
+    detection: parseDetection(vendor === 'qualcomm' ? `${ARM}${o.npu ?? X2}\n` : `${X64}${o.npu ?? LUNAR}\n`),
     out: path.join(tools, 'report.json'),
     log: (l: string) => lines.push(l),
     io: {
       setup: { run: async () => ({ code: 0, out: '' }) },
-      start: async () => {
+      start: async (e: any) => {
         fake.starts++;
+        fake.commands.push(e.chat.startCommand);
         await fake.start();
         return { pid: 4242, stop: fake.stop };
       },
@@ -250,6 +282,11 @@ test("the route for a run: its own compile cache, a cap where the server has one
   assert.equal(r.serve[r.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(r.maxContextTokens, 2048);
   assert.throws(() => B.benchServe(V.NPU_CATALOG.routes.qualcomm, { device: 'NPU', cap: 2048 }), /no prompt cap/);
+  // Off the NPU nothing is compiled for a cap: --cap only places the long read, as an NPU run at that cap would.
+  const gpu = B.benchServe(routeOnDevice(intel, 'GPU'), { device: 'GPU', cap: 2048 });
+  assert.equal(gpu.maxContextTokens, 2048);
+  assert.ok(!gpu.serve.includes('--max_prompt_len'));
+  assert.equal(gpu.serve[gpu.serve.indexOf('--cache_dir') + 1], '{tools}\\models\\openvino\\.bench-cache-gpu');
   const c = B.candidateRoute(intel, 'Castellan-AI/Qwen3-1.7B-int4-cw-ov');
   assert.equal(c.models.length, 1);
   assert.ok(c.models[0].pull.includes('Castellan-AI/Qwen3-1.7B-int4-cw-ov'));
@@ -290,8 +327,9 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.equal(report.results.energy, null, 'no energy without --energy');
   assert.equal(s.fake.starts, 2, 'a cold start, and a start again from the cache');
   assert.match(s.cleared[0], /\.bench-cache-npu$/);
-  // Every request was streamed, with the server's usage asked for.
+  // Every request was streamed, with the server's usage asked for; Intel's route has no quirks, so none starts with a nonce.
   assert.ok(s.fake.seen.every((j) => j.stream === true && j.stream_options?.include_usage === true));
+  assert.ok(s.fake.seen.every((j) => j.messages[0].role === 'user'));
   assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
   // Nothing in it names the person or the PC.
   assert.doesNotMatch(readFileSync(s.opts.out, 'utf8'), new RegExp(process.env.USERNAME ?? 'no-user-name-here', 'i'));
@@ -327,6 +365,158 @@ test('a model that answers nonsense never gets past its first answer; a busy pro
   assert.ok(r2.report.results.energy!.loadMilliwatts > 4000);
   assert.ok(r2.report.results.energy!.jobs > 0);
   assert.ok(r2.report.results.energy!.millijoulesPerToken! > 0);
+});
+
+test("a generation with its own cap is run, reported and read near at it; --cap isn't undone by it; a GPU run says nothing of the NPU", async () => {
+  const gen = V.routeFor(V.NPU_CATALOG.routes.intel, 'meteor-lake');
+  assert.notEqual(gen.maxContextTokens, V.NPU_CATALOG.routes.intel.maxContextTokens, "Meteor Lake's NPU 3720 compiles a shorter prompt than the route's");
+  const capOf = (cmd: string[]) => cmd[cmd.indexOf('--max_prompt_len') + 1];
+  const own = await scene({ npu: METEOR });
+  const r = await B.npuBench({ ...own.opts, profile: 'quick' });
+  assert.equal(r.code, 0, own.lines.join('\n'));
+  assert.equal(r.report.run.cap, gen.maxContextTokens, "the generation's cap, not the route's");
+  assert.equal(capOf(own.fake.commands[0]), String(gen.maxContextTokens));
+  assert.ok(r.report.results.readAtCap, own.lines.join('\n'));
+  assert.ok(own.lines.some((l) => l.startsWith(`reading near the cap (`) && l.includes(` of ${gen.maxContextTokens} tokens)`)), own.lines.join('\n'));
+
+  const asked = await scene({ npu: METEOR });
+  const r2 = await B.npuBench({ ...asked.opts, profile: 'quick', cap: 4096 });
+  assert.equal(r2.report.run.cap, 4096);
+  assert.equal(capOf(asked.fake.commands[0]), '4096', '--cap is what the server compiles');
+
+  // On the graphics card: no cap compiled, the long read at the NPU's, and setup's lines aren't about the NPU.
+  const card = await scene({ npu: METEOR });
+  const r3 = await B.npuBench({ ...card.opts, profile: 'quick', device: 'GPU' });
+  assert.equal(r3.code, 0, card.lines.join('\n'));
+  assert.equal(r3.report.run.cap, null);
+  assert.ok(!card.fake.commands[0].includes('--max_prompt_len'));
+  assert.ok(card.lines.some((l) => l.includes(` of ${gen.maxContextTokens} tokens)`)), 'comparable with the NPU run');
+  assert.deepEqual(card.lines.filter((l) => /on (the|this) NPU/.test(l)), []);
+  assert.ok(card.lines.some((l) => /OpenVINO Model Server is set up for: chat/.test(l)), card.lines.join('\n'));
+});
+
+test("an energy figure only when working draws clearly more than rest: the battery's wobble isn't the model's energy", async () => {
+  for (const [rest, work] of [
+    [28_373, 29_970], // the Lunar Lake laptop's NPU run: 2.3 mJ a token, from a reading at rest nearly twice the real drain
+    [29_346, 29_019], // its graphics card's: less working than resting
+  ]) {
+    const s = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? work : rest) });
+    const r = await B.npuBench({ ...s.opts, profile: 'quick', energy: true });
+    assert.equal(r.code, 0);
+    assert.equal(r.report.results.energy!.millijoulesPerToken, null, `${rest} → ${work} mW`);
+    assert.equal(r.report.results.energy!.restMilliwatts, rest, 'what was read is kept');
+    assert.ok(s.lines.some((l) => /^energy: not counted: working read \d+ mW against \d+ mW at rest/.test(l)), s.lines.join('\n'));
+  }
+});
+
+test("a run on a Snapdragon: GenieX's nonce first in every request, and each picture a file it reads, not a data: URL", async () => {
+  const geniex = V.NPU_CATALOG.routes.qualcomm;
+  assert.deepEqual(geniex.quirks, ['prefix-leak', 'image-path'], "the quirks come from GenieX's route, as the kit's own requests take them");
+  const s = await scene({ vendor: 'qualcomm' });
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.equal(report.run.server, `GenieX ${geniex.version}`);
+  assert.equal(report.run.cap, geniex.maxContextTokens);
+  assert.equal(report.quality.passed, 24);
+  // GenieX leaks state between requests that share a prompt's start, and the benchmark asks the same prompt a warm-up
+  // and three or five times over: every request starts with a nonce of its own, as an agent's do.
+  const nonces = s.fake.seen.map((j) => (j.messages[0].role === 'system' ? /^\[req [a-z0-9]+\]/.exec(j.messages[0].content)?.[0] : undefined));
+  assert.ok(nonces.every(Boolean), 'a nonce first in every request');
+  assert.equal(new Set(nonces).size, nonces.length, 'never the same twice');
+  const shorts = s.fake.seen.filter((j) => j.messages.at(-1).content === SUITE.short.prompt);
+  assert.ok(shorts.length >= SUITE.warmups + SUITE.tries.quick, 'the same prompt, asked again and again');
+  // Each picture as a PNG file, its path sent, there while GenieX reads it: a warm-up, then the four graded.
+  assert.equal(s.fake.pictures.length, SUITE.warmups + SUITE.vision.length);
+  for (const p of s.fake.pictures) {
+    assert.doesNotMatch(p.url, /^data:/);
+    assert.ok(path.isAbsolute(p.url), p.url);
+    assert.ok(p.pngFile, `${p.url}: a PNG file on this PC`);
+  }
+  assert.deepEqual(report.vision, { passed: 4, of: 4, items: report.vision!.items });
+  assert.deepEqual(report.vision!.items.map((x: any) => x.id), SUITE.vision.map((v: any) => v.id), 'the warm-up is no item');
+  assert.ok(s.fake.pictures.every((p) => !existsSync(p.url)), 'the pictures are gone after the run');
+  assert.ok(s.lines.some((l) => /^GenieX's requests as the kit sends them: a nonce first in every request \(prefix-leak\); each picture as a file/.test(l)), s.lines.join('\n'));
+  assert.deepEqual(B.checkSchema(JSON.parse(readFileSync(s.opts.out, 'utf8')), B.REPORT_SCHEMA), []);
+});
+
+test('on a Snapdragon GenieX is the NPU only: --device GPU and --cap are refused before anything starts', async () => {
+  const s = await scene({ vendor: 'qualcomm' });
+  const gpu = await B.npuBench({ ...s.opts, device: 'GPU' });
+  assert.equal(gpu.code, 2);
+  assert.match(gpu.report.marks[0].say, /GenieX runs on the NPU only/);
+  const cap = await B.npuBench({ ...s.opts, cap: 4096 });
+  assert.equal(cap.code, 2);
+  assert.match(cap.report.marks[0].say, /no prompt cap to set/);
+  assert.equal(s.fake.starts, 0);
+});
+
+test('a candidate chats only unless --vision says it sees: pulled as its own type, found in its own folder', () => {
+  const geniex = V.NPU_CATALOG.routes.qualcomm;
+  const text = B.candidateRoute(geniex, 'ai-hub-models/Qwen3-4B-Instruct-2507');
+  assert.deepEqual(text.models.map((m: any) => m.kinds), [['chat']], "not the kinds of GenieX's model, which sees");
+  assert.deepEqual(text.models[0].pull, ['pull', 'ai-hub-models/Qwen3-4B-Instruct-2507', '--model-type', 'llm', '--skip-update']);
+  // GenieX's folder drops the id's :tag, so the route's model's folder isn't taken for the candidate's.
+  assert.equal(text.models[0].present, '%USERPROFILE%\\.cache\\geniex\\models\\ai-hub-models\\Qwen3-4B-Instruct-2507\\geniex.json');
+  const sees = B.candidateRoute(geniex, 'qualcomm/Qwen3-VL-4B-Instruct-2:W8A16', { vision: true });
+  assert.deepEqual(sees.models[0].kinds, ['chat', 'vision']);
+  assert.deepEqual(sees.models[0].pull, ['pull', 'qualcomm/Qwen3-VL-4B-Instruct-2:W8A16', '--model-type', 'vlm', '--skip-update'], 'renamed once, not again inside the new name');
+  assert.equal(sees.models[0].present, '%USERPROFILE%\\.cache\\geniex\\models\\qualcomm\\Qwen3-VL-4B-Instruct-2\\geniex.json');
+  // FastFlowLM's tags are its models' names: the whole id is renamed.
+  assert.deepEqual(B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0].pull, ['pull', 'qwen3-it:1.7b']);
+  const intel = B.candidateRoute(V.NPU_CATALOG.routes.intel, 'Castellan-AI/Qwen3-1.7B-int4-cw-ov');
+  assert.equal(intel.models[0].present, '{tools}\\models\\openvino\\Castellan-AI\\Qwen3-1.7B-int4-cw-ov\\graph.pbtxt');
+  assert.throws(() => B.candidateRoute(V.NPU_CATALOG.routes.intel, 'a/b', { vision: true }), /has no vision/);
+  assert.deepEqual(B.parseBenchArgs(['--candidate', 'a/b', '--vision']), { candidate: 'a/b', vision: true });
+  assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
+});
+
+test("a text candidate on a Snapdragon is pulled as one and asked no pictures; with --vision it's asked them, not the route's model", async () => {
+  const C = 'ai-hub-models/Qwen3-4B-Instruct-2507';
+  for (const vision of [false, true]) {
+    const s = await scene({ vendor: 'qualcomm' });
+    const pulls: string[][] = [];
+    const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', candidate: C, vision, io: { ...s.opts.io, setup: { run: async (_exe: string, args: string[]) => (pulls.push(args), { code: 0, out: '' }) } } });
+    assert.equal(code, 0, s.lines.join('\n'));
+    assert.equal(report.run.candidate, true);
+    assert.equal(report.run.model, C);
+    assert.deepEqual(pulls, [['pull', C, '--model-type', vision ? 'vlm' : 'llm', '--skip-update']]);
+    assert.ok(s.fake.seen.every((j) => j.model === C), 'every request names the candidate');
+    if (vision) {
+      assert.deepEqual([report.vision!.passed, report.vision!.of], [4, 4]);
+      assert.equal(s.fake.pictures.length, SUITE.warmups + SUITE.vision.length);
+    } else {
+      assert.equal(report.vision, null, 'a text model has no vision column');
+      assert.deepEqual(s.fake.pictures, []);
+    }
+  }
+});
+
+test("a candidate's files are measured once it's pulled: each one in its folder, by size and SHA-256; FastFlowLM's aren't, and its log says so", async () => {
+  const C = 'ai-hub-models/Qwen3-4B-Instruct-2507';
+  const s = await scene({ vendor: 'qualcomm' });
+  // Where GenieX's pull puts it, in the scene's %USERPROFILE%: its folder drops no tag, as this id has none.
+  const dir = path.join(s.opts.env.USERPROFILE!, '.cache', 'geniex', 'models', 'ai-hub-models', 'Qwen3-4B-Instruct-2507');
+  const written: Record<string, Buffer> = { 'geniex.json': Buffer.from('{"model_type": "llm"}'), 'part1_of_1.bin': Buffer.alloc(70_000, 7), 'tokenizer/tokenizer.json': Buffer.from('{}') };
+  const pull = async () => {
+    for (const [name, bytes] of Object.entries(written)) {
+      mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      writeFileSync(path.join(dir, name), bytes);
+    }
+    return { code: 0, out: '' };
+  };
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', candidate: C, io: { ...s.opts.io, setup: { run: pull } } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  const want = Object.fromEntries(Object.entries(written).map(([name, bytes]) => [name, { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }]));
+  assert.deepEqual(report.run.files, want, 'every file, a folder inside it too, named as in the folder');
+  assert.ok(s.lines.some((l) => l === "the candidate's files: 3 measured (1 MB), each one's size and SHA-256 in the report"), s.lines.join('\n'));
+  const onDisk = JSON.parse(readFileSync(s.opts.out, 'utf8'));
+  assert.deepEqual(onDisk.run.files, want);
+  assert.deepEqual(B.checkSchema(onDisk, B.REPORT_SCHEMA), []);
+  // FastFlowLM keeps its models its own way: its route has no `present`, so nothing says where to look.
+  const lines: string[] = [];
+  const amd = B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0];
+  assert.equal(await B.candidateFiles(amd, { server: 'FastFlowLM', tools: s.tools, log: (l: string) => lines.push(l) }), null);
+  assert.deepEqual(lines, ["the candidate's files: not measured, as FastFlowLM's route doesn't say where its models are"]);
 });
 
 test('energy on a PC busy enough to hold the bench past its windows: a reading at rest, and readings working until a job is done', async () => {
