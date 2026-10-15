@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.42
+
+**Full test runs keep to the checks pace without starving their own tests, and a kit's release is no longer held by tests that fail at random.**
+
+### What changed
+
+- When the Steward runs a repository's whole test suite (before releasing a kit, or for a change that reaches every test), it now starts the test runner itself instead of going through `npm test`. The checks pace can then see how many test files run at once and limit them to what its share of the processor allows. Through `npm test` it couldn't: on an 18-thread laptop 17 test files started together, all within a third of the processor, and tests that time themselves failed. The repository's pretest and posttest still run, before and after, as `npm test` runs them.
+- Before a kit is released, its whole suite runs a second time when the first run fails, as before. The kit was then held whenever the second run failed too, even when a different test failed each time, each passing in the other run. Those are tests failing at random, not a real problem, so the kit is now released. A test that fails in both runs still holds it. On 15 October kit 2.74.5 was held this way, and the Steward's own release waited behind it.
+- Two of the kit's tests that failed on a busy PC now allow for one: the test of moving to the next accelerator when one is slow, and the test that starts pages with a console of their own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.38
 
 **Kit 2.74.5: the NPU's local AI gets faster on PCs already set up, Intel's NPU 3720 writes about 13% faster, AMD's NPU runs on a 16 GB Ryzen AI, and a newer NPU is tried instead of refused.**

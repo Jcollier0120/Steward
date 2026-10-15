@@ -567,7 +567,9 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
   noGames();
   const refusing = await closedPort();
   const broken = await fakeServer(() => ({ status: 503 }));
-  const slow = await fakeServer(() => ({ delayMs: 1500 }));
+  // The slow server answers long after the requests' 3 s: room for a test run held to the checks pace, where 400 ms let
+  // the 503 and the NPU's own answer time out too (the whole suite before kit 2.74.5's release, 2026-10-15).
+  const slow = await fakeServer(() => ({ delayMs: 10_000 }));
   const good = await fakeServer(() => ({ text: 'from the NPU' }));
   try {
     const accs = [
@@ -576,7 +578,7 @@ test('fallback: a refused connection, a 5xx or a timeout marks the accelerator f
       gpu('gpu-slow', { memoryGb: 12, chat: { baseUrl: slow.baseUrl, model: 'm' } } as any),
       { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: good.baseUrl, model: 'm' } },
     ];
-    const ask = (order: string[]) => new Npu(config({ accelerators: accs, acceleratorOrder: order, requestTimeoutMs: 400 })).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
+    const ask = (order: string[]) => new Npu(config({ accelerators: accs, acceleratorOrder: order, requestTimeoutMs: 3000 })).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 });
 
     const a = await ask(['gpu-broken', 'npu']);
     assert.equal(a.accelerator.id, 'npu');
