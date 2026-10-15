@@ -7,6 +7,7 @@ import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
 import { powershell } from './ps.ts';
+import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -104,7 +105,7 @@ export function acceleratorConfigFile(env: NodeJS.ProcessEnv = process.env): str
 export function legacyConfigFile(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
   if (env.ACCELERATORS_CONFIG || env.REEVE_CONFIG || env.REEVE_HOME) return null;
   const found = [path.join(home, '.reeve'), path.join(home, '.npu-agent')].map((d) => path.join(d, 'config.json')).find((f) => existsSync(f));
-  return found && path.resolve(found) !== path.resolve(acceleratorConfigFile(env)) ? found : null;
+  return found && !samePath(found, acceleratorConfigFile(env)) ? found : null;
 }
 
 /**
@@ -244,11 +245,11 @@ export function readNpuNote(file = npuNoteFile()): { at: string; note: string } 
 
 // ---------------------------------------------------------------- shared files
 
-/** Written whole: a temporary file, then a rename, so a reader never sees half of it. */
+/** Written whole: a temporary file, on the disk before the rename (kit 2.73.3), then the rename, so a reader never sees half of it. */
 function writeWhole(file: string, value: unknown): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  writeFileSync(tmp, core.sharedText(value));
+  writeFileSync(tmp, core.sharedText(value), { flush: true });
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(tmp, file);
