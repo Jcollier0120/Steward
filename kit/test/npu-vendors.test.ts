@@ -199,7 +199,12 @@ test('config entries per vendor: one server on its own port, its caps and timeou
   assert.equal(core.candidates(RULES, [ieAcc], { work: 'embed', tokens: 700, lane: 'background' }).list.length, 0, 'past its cap: not a candidate');
 
   const a = V.npuEntry(V.NPU_CATALOG.routes.amd, { tools, exe: `${tools}\\servers\\fastflowlm-1.0.7\\flm.exe` });
-  assert.deepEqual(a.chat!.startCommand!.slice(1), ['serve', 'qwen3-it:4b', '--port', '18184']);
+  assert.deepEqual(a.chat!.startCommand!.slice(1), ['serve', 'qwen3-it:4b', '--port', '18184', '--ctx-len', '4096']);
+  // FastFlowLM holds its whole context from the start: its own default (the model's 40,960) didn't load on a 16 GB
+  // XDNA 2. Its context is the cap, never more (memory nothing uses) nor less (a request the cap lets through, refused).
+  const amd = V.NPU_CATALOG.routes.amd;
+  assert.equal(Number(amd.serve[amd.serve.indexOf('--ctx-len') + 1]), amd.maxContextTokens);
+  assert.ok(Object.values(amd.caps).every((c) => c! <= amd.maxContextTokens));
   assert.deepEqual(a.vision, { model: 'qwen3vl-it:4b' }, "FastFlowLM switches models on its one server");
 
   // Every agent reads them the same way: the core takes the caps per kind and the timeouts.

@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**AMD's NPU runs: FastFlowLM is started with the cap as its context, which a 16 GB Ryzen AI could never load at its default; a model that didn't load is a failure, not an empty answer. XDNA 2 verified on a Krackan.**
+
+### What changed
+
+- **npu-vendors.json's amd route** starts FastFlowLM with `--ctx-len 4096`, the cap. FastFlowLM holds its whole context from its start, and its default is the model's own, 40,960 tokens for Qwen3-4B (about 5.6 GB beside 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once, that never loaded (XRT 0xc01e0200), so setup's test request failed and the NPU was left out. At 4,096 it starts in 4 to 6 s and holds 4.5 GB (5.3 GB with its vision model), as fast as at 8,192 (about 14 tokens a second).
+- **XDNA 2 is verified**: the NPU check passed every step on that Krackan (NPU driver 32.0.20102.3930), with `--harden` and `--idle`. Its own timeouts are the check's (20 s + 0.15 s a token, a cold load 30 s), and its models' memory is measured (`memoryGb`: chat 4.5, vision 5.3).
+- **FastFlowLM's idle stop** comes from its measured cold start, 6.6 s (vision 15.7 s, its switch from chat included), not the 30 s taken: on a PC under 20 GB the keeper stops it after 5 minutes unused (6 for vision), not 10.
+- **`postJson`** takes a 200 that carries only an error (`failedWithOk`) for the server failing (`AcceleratorDown`): the accelerator is marked and the request goes to the next. FastFlowLM answers so when its model didn't load, and serves on; before, the work took an empty answer from the NPU.
+- **The NPU check's start** fails when FastFlowLM answers `/v1/models` but holds no model (its `/api/ps`: `reportsLoaded`), with the reason from its log (`loadFailure`). Its setup step no longer prints that a model answered when it asked nothing, and an answer that is only an error keeps its words in the report, not "null".
+- **Setup's test request** asks about the picture first and chat last: a server holding one model at a time is left holding chat, and setup's measuring after it times chat warm. On FastFlowLM it timed the switch back from the vision model (9.2 s against 1.3 s) and wrote timeouts five times too long.
+- **The amd route's models name their files** (`present`), so `npu-check --no-setup` finds them.
+- **spec/NPU-VENDORS.md** has the Krackan's run, and what is still unverified on AMD.
+
+### For an agent
+
+- Nothing to do. A Ryzen AI PC whose setup left the NPU out gets it the next time setup runs (Manor's "Set up local AI"), which writes the NPU's entry afresh with the new command.
+
 ## 2.74.1
 
 **The checks pace allows four processors' worth, not two.**

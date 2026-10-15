@@ -1224,9 +1224,12 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
 
 /**
  * The test request: in the NPU's turn (its lock and line, as every request), its server started if it isn't running,
- * then one short chat answer, which must say "ready" as asked (and nothing degenerate), and one about a picture when it
- * serves vision. Problems in words; none when each answered. A model's first load on the NPU (OpenVINO compiles it)
- * may take minutes, so it is given 15, or `timeoutMs` (the NPU check's forced timeout).
+ * then one answer about a picture when it serves vision, and one short chat answer, which must say "ready" as asked (and
+ * nothing degenerate). Chat goes last: a server that holds one model at a time (FastFlowLM) is left holding the chat
+ * model, which most work asks for, and setup's measuring after this times it warm, not its switch back (8 to 9 s on an
+ * XDNA 2, which kit 2.74.1 measured as a short answer, warm, and wrote timeouts five times too long from). Problems in
+ * words; none when each answered. A model's first load on the NPU (OpenVINO compiles it) may take minutes, so it is
+ * given 15, or `timeoutMs` (the NPU check's forced timeout).
  */
 export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
@@ -1241,15 +1244,15 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
       await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit });
-      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
-      if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
-      else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
         const r = await postJson(v, '/v1/chat/completions', visionBody(kitAcc, v, img, 'What colour is this picture? One word.', 8), limit, { loading: true });
         if (typeof text(r.json) !== 'string') problems.push(`vision gave no answer (${JSON.stringify(r.json).slice(0, 160)})`);
       }
+      const c = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: 'Reply with the single word: ready' }], 32), limit, { loading: true });
+      if (typeof text(c.json) !== 'string') problems.push(`chat gave no answer (${JSON.stringify(c.json).slice(0, 160)})`);
+      else if (!saysReady(text(c.json))) problems.push(`chat answered nonsense ("${withoutThinking(text(c.json)).slice(0, 40)}"), not "ready": the model doesn't run properly on this NPU`);
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
   ).catch((err: any) => {

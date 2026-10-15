@@ -504,10 +504,20 @@
         "xdna2": {
           "label": "Ryzen AI 300 and later: Strix Point, Krackan, Strix Halo, Gorgon Point (XDNA 2)",
           "supported": true,
-          "verified": false
+          "verified": true,
+          "timeouts": {
+            "requestPerTokenMs": 150,
+            "requestBaseMs": 20000,
+            "coldLoadMs": 30000
+          },
+          "basis": "Measured by the NPU check on AMD Ryzen AI 7 350 w/ Radeon 860M (Krackan, 16 GB), NPU driver 32.0.20102.3930, 2026-10-15, every step passing, its context 4,096 (--ctx-len): writes 13.8 tokens a second: 150 ms a token allows twice that; reading 3115 tokens took 6.6 s: a 20 s base allows twice that and a warm answer; the slowest start to a first answer took 16 s: 30 s allows half again. Switching between its chat and vision models costs 8 to 9 s either way (one model held at a time), inside each."
         }
       },
       "driverMin": "32.0.203.311",
+      "memoryGb": {
+        "chat": 4.5,
+        "vision": 5.3
+      },
       "download": {
         "file": "fastflowlm_1.0.7_windows_amd64.zip",
         "url": "https://github.com/ROCm/FastFlowLM/releases/download/v1.0.7/fastflowlm_1.0.7_windows_amd64.zip",
@@ -524,7 +534,9 @@
         "serve",
         "{model}",
         "--port",
-        "{port}"
+        "{port}",
+        "--ctx-len",
+        "4096"
       ],
       "env": {
         "FLM_DISABLE_UPDATE_CHECK": "1"
@@ -539,6 +551,7 @@
             "pull",
             "qwen3-it:4b"
           ],
+          "present": "%USERPROFILE%\\.flm\\models\\Qwen3-4B-Instruct-2507-NPU2\\model.q4nx",
           "size": 3300000000,
           "licence": "Qwen3-4B-Instruct-2507: Apache-2.0 (FastFlowLM's NPU2 build)"
         },
@@ -551,6 +564,7 @@
             "pull",
             "qwen3vl-it:4b"
           ],
+          "present": "%USERPROFILE%\\.flm\\models\\Qwen3-VL-4B-Instruct-NPU2\\vision_weight.q4nx",
           "size": 4100000000,
           "licence": "Qwen3-VL-4B-Instruct: Apache-2.0 (FastFlowLM's NPU2 build)"
         }
@@ -569,19 +583,19 @@
       "recycle": false,
       "idleStop": {
         "coldStartMs": {
-          "chat": 30000,
-          "vision": 30000
+          "chat": 6600,
+          "vision": 15700
         },
         "minutes": {
-          "chat": 10,
-          "vision": 10
+          "chat": 5,
+          "vision": 6
         },
-        "basis": "Not measured: FastFlowLM loads a 3.3 GB model onto the NPU at its start, taken as 30 s until npu-check --idle times it on an XDNA 2.",
-        "verify": "On a Ryzen AI 300 (XDNA 2) laptop with 16 GB, with FastFlowLM set up by setup: stop the manor's own NPU server first (or let the keeper stop it), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). Its steps pass or fail: idle-wake, idle-stop (the keeper stops FastFlowLM once the NPU has been unused a minute, its process gone), idle-cold-answer (a person's request after that is told the local AI is waking and answers within the cold load) and idle-in-flight (a request in flight is never stopped). It prints FastFlowLM's measured cold start and the idleStop numbers it gives: put them here in place of the 30 s taken, and FastFlowLM's restarts and idle stops leave the unverified list in NPU-VENDORS.md."
+        "basis": "Chat: npu-check --idle on a Ryzen AI 7 350 (Krackan, 16 GB), 2026-10-15, every step passing: stopped to its first answer in 6.6 s (FastFlowLM loads the chat model before it opens its port), the keeper's stop freeing 4.3 GB. Vision: the same start, then its switch to the vision model and an answer, 15.7 s (timed apart the same day: 6.5 s to the port, 9.2 s to the first answer about a picture).",
+        "verify": "On a Ryzen AI 300 (XDNA 2) laptop with 16 GB, with FastFlowLM set up by setup: stop the manor's own NPU server first (or let the keeper stop it), then run node <agent>\\src\\kit\\npu-check.ts --idle --yes from any agent that has the kit (2.71.0 or later). It passes or fails each step and prints the idleStop numbers its cold start gives; if they differ from these, change coldStartMs and minutes here."
       },
       "embeddings": "not on the NPU: FastFlowLM's embedding model is EmbeddingGemma, under Gemma's terms; embeddings go to the graphics card or the processor",
       "licence": "FastFlowLM: MIT (orchestration and CLI), NPU kernels free for any use including commercial; asks for \"Powered by FastFlowLM\" in the product's notices",
-      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server switches between its models on demand, as GenieX does. Models are kept in %USERPROFILE%\\.flm\\models."
+      "notes": "A portable zip, unpacked into the tools home: no installer, no administrator. AMD's NPU driver 32.0.203.311 or later (an administrator installs drivers). One server holds one model and switches to another on demand: 8 to 9 s from chat to vision or back, measured. Models are kept in %USERPROFILE%\\.flm\\models. Its context is --ctx-len 4096, the cap: FastFlowLM holds its whole context on the NPU from the start, and without it took the model's own, 40,960 tokens (Qwen3-4B's about 144 KB a token, 5.6 GB, on top of 3.3 GB of weights). On a Ryzen AI 7 350 with 16 GB, where Windows lets a device hold half the PC's memory at once (7.6 GB), that never loaded (XRT 0xc01e0200, the video memory manager couldn't page every allocation in at once), from a fresh start too; 4,096 loads in 4 to 6 s and holds 4.5 GB, 8,192 in 10.6 s and 5.1 GB, at the same speed (13.9 to 14.1 tokens a second). Its vision model at 4,096 holds 5.3 GB, and answered (red, as asked). A failed load doesn't stop it: it serves on, /v1/models listing every model it knows, and answers each request 200 with only {\"error\":\"Failed to load … model!\"} (it tries the load again each time); the kit takes that for the server failing (failedWithOk), and the NPU check asks /api/ps, which lists the model it holds (reportsLoaded). A prompt past its context is refused 400 (\"Max length reached!\"), the server still up. Its --pmode (powersaver, balanced, performance, the default, turbo) wrote and read at the same speed on mains power (14.0 tokens a second each); a smaller --prefill-chunk-len than its 4,096 only read slower (3,000 tokens 7.3 s at 1,024, 9.5 s at 512, against 5.3 s). It streams a token a chunk, with its usage in the last (stream_options.include_usage)."
     }
   },
   "devices": {
