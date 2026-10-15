@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.48
+
+**Kit 2.75.1: on a Snapdragon, the local AI's search model holds half the memory it did, so everything fits on a 16 GB PC.**
+
+### What changed
+
+- On a Snapdragon PC, the search model that runs on the NPU beside the chat model now holds 1.4 GB of memory instead of 2.9 GB. It answers just as fast and gives the same results, so existing search indexes carry over. Together the two models now hold 5.6 GB instead of 7.1 GB, comfortably inside what Windows lets the NPU hold on a 16 GB PC.
+- Waking the search model after a rest is now announced as taking about 3 seconds, as measured, instead of 10.
+- The kit the Steward hands out (2.75.1) brings this to every agent. Intel and AMD PCs are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a Snapdragon already set up, the agents switch the search model to its new settings as they update, with nothing to download.
+
 ## 0.36.43
 
 **Kit 2.74.6: checks get the share of the processor Manor's Settings give them, and tests run at that pace take longer instead of failing.**

@@ -59,7 +59,35 @@ Measured on the X2 Elite (2026-10-12), Reeve's search eval on GamerNexus (9 ques
 | A 1,600-character chunk | 124 ms | 265 ms | (128 tokens at most) |
 | Indexing GamerNexus, gentle pace | 31 min | about 65 min | 3 min |
 
-Its vectors match the card's (cosine 0.9990–0.9998 on the same texts), so it keeps the card's model name, `qwen3-embedding-0.6b-gguf`, and an index made by either serves both. Several requests at once are slower on the Hexagon, not faster (`--parallel 4`: 702 ms a chunk), so it takes one at a time. It holds about 2.8 GB of the NPU's memory beside GenieX's model (604 MB model, 896 MB context, 1.3 GB compute) and is stopped when idle, as GenieX is.
+Its vectors match the card's (cosine 0.9990–0.9998 on the same texts), so it keeps the card's model name, `qwen3-embedding-0.6b-gguf`, and an index made by either serves both. Several requests at once are slower on the Hexagon, not faster (`--parallel 4`: 702 ms a chunk), so it takes one at a time. It holds 1.4 GB of the NPU's memory beside GenieX's model (604 MB model, 448 MB context, 302 MB compute; 2.9 GB through kit 2.75.0: below) and is stopped when idle, as GenieX is.
+
+### Memory on a 16 GB Snapdragon (kit 2.75.1)
+
+Snapdragon X and X2 PCs start at 16 GB, which Windows shows as about 15.6, and the Hexagon has no memory of its own. Windows lets one device hold about half the PC's memory at once (7.8 GB there). Through kit 2.75.0, GenieX's model and the embedding server held 6.9 GB of that between them, and their processes up to 10 GB of the PC's.
+
+The embedding server's context and micro-batch decide most of what it holds: its compute buffer grows with `-ub` (about 0.65 MB a token, 1.3 GB at 2,048) and its KV cache with `-c` (896 MB at 8,192). Measured on the X2 Elite (2026-10-15, b11125), each setting started fresh in the NPU's turn on a private port, every request with a fresh nonce, then 100 of Reeve's chunks:
+
+| `-c` / `-ub` | On the NPU | Working set | Private | A query | A 432-token chunk | 1,156 dense tokens | 2,707 tokens |
+|---|---|---|---|---|---|---|---|
+| 8,192 / 2,048 (through kit 2.75.0) | 2,876 MB | 4,383 MB | 1,567 MB | 30 ms | 118–139 ms | 399–488 ms | 1.0–1.2 s |
+| 8,192 / 512 | 1,860 MB | 2,449 MB | 635 MB | 31 ms | 136 ms | 417 ms | 1.0 s |
+| **4,096 / 512 (now)** | **1,408 MB** | **1,996 MB** | **629 MB** | 30 ms | 131 ms | 397 ms | 1.0 s |
+| 3,072 / 512 | 1,294 MB | 1,883 MB | 628 MB | 31 ms | 133–136 ms | 402–410 ms | 1.0 s |
+| 2,048 / 512 | 1,182 MB | 1,763 MB | 624 MB | 31 ms | 136–137 ms | 412–421 ms | refused |
+| 2,048 / 256 | 1,032 MB | 1,471 MB | 478 MB | 30–37 ms | 139–149 ms | 376–488 ms | refused |
+
+Every setting gave the same vectors (cosine 0.99999 or more to the old setting's, on a query, a code chunk, a dense one and a long one), and every one stayed up through inputs longer than its context, refusing them plainly (400). A smaller `-ub` costs no time: with last-token pooling an input longer than a micro-batch is read in several. The context, 4,096, keeps room for the longest input any agent sends: Reeve's cluster items, 2,000 characters and a prefix (its search chunks are 1,500, Chamberlain's and Clerk's 600). Its cap (`caps.embed`, 1,365 by the kit's estimate of 3 characters a token) keeps a request under 4,096 real tokens at one token a character, as Intel's 680 keeps one under 2,048; through kit 2.75.0 embeddings had the route's 2,400. A context of 3,072 would save another 114 MB for less room. The server starts in 1.3 to 3.0 s alone and in 1.5 to 2.2 s beside a loaded GenieX (healthy, then a first vector in 30 ms more), so `idleStop.coldStartMs.embed` is now 3,000, not the 10,000 assumed.
+
+Beside GenieX, its model loaded and a picture read, measured together (three times, and the old setting twice): 5,646 MB on the NPU and a 7.6 GB working set, against 7,114 MB and 9.1 GB at the old setting. That was after short inputs: once it has read a long one, the embedding server's own working set grows to 4.4 GB at the old setting and to 2.0 GB at the new (the table above). These are Qualcomm's own: the embedding server's arguments, cap and cold start are the route's, and Intel's and AMD's routes, the graphics card's and the processor's llama-server, the keeper and `npuMemoryFit` are as they were.
+
+What stays as it was, and why:
+- **GenieX's own 4.2 GB on the NPU and 1.6 GB of private memory.** The private memory is the model's embedding table, 151,936 × 2,560 in float32 (1.56 GB), which GenieX 0.8.0's vision-language path reads whole (its `PrecomputedEmbeddingProvider`; the memory-mapped `QuantizedLut` in its core serves only its text-only models). Written as uint16 in the model's own input encoding it would be 0.78 GB and exact, but GenieX reads no such table: `native`, `ufixed16` and `uint16` as the table's `datatype` in the model's three configs were each ignored (2026-10-15). It needs GenieX to map the table, or take it quantized, for vision-language models.
+- **GenieX's context.** AI Hub's NPU builds of Qwen3-VL-4B are compiled for 4,096 tokens only, and their KV cache is 288 MB of it, so a 2,560-token build (compiled with the owner's AI Hub account) would save perhaps 0.1 to 0.2 GB.
+- **A smaller chat model.** InternVL3.5-2B (Apache-2.0, AI Hub's only smaller NPU build for X and X2) held 2.7 GB on the NPU and a 4.0 GB working set, wrote 71 tokens a second against 41, and did the benchmark's three jobs in 2.5 s against 6.2. But it answered 19 of the 24 quality items against Qwen3-VL-4B's 22, one that must pass wrong ("Sure, I'm ready." for "ready"), and the pictures as Qwen3-VL-4B did (3 of 4). Screened with the benchmark's suite on a private port, not ranked: not taken.
+- **Recycling GenieX sooner on a small PC.** Each `--keepalive` unload and reload keeps 351 MB more on the NPU (4,238, 4,589 and 4,940 MB), but on a PC under 20 GB the keeper stops GenieX after 5 minutes unused, long before its keepalive (3,600 s) unloads anything, so the 9 GB recycle isn't reached there.
+- **No `memoryGb` for Qualcomm.** By working set, as Intel's is measured, chat holds 5.7 GB and embeddings 2.0; at the NPU's 40% share a 16 GB PC's budget is 6.2 GB, so `npuMemoryFit` would leave embeddings off the NPU on every 16 GB Snapdragon, the room this change makes for them, and on the processor they'd hold about as much of the same memory.
+
+Not run on a 16 GB Snapdragon: these were measured on the 48 GB X2 Elite (its NPU's memory is counted the same way), and the 16 GB figures are worked out from them.
 
 ## Detection
 
@@ -121,7 +149,7 @@ Conservative where nothing has been measured. The NPU always has one slot.
 
 | Maker | Cap (prompt and answer) | Background request | Cold load | Why |
 |---|---|---|---|---|
-| Qualcomm | 2,400 tokens, chat and vision | the rules' 15 s + 0.3 s a token | the rules' 90 s | measured on the X2 Elite: an ~8K prompt bluescreened it; GenieX writes ~34 tokens a second |
+| Qualcomm | 2,400 tokens, chat and vision; 1,365 for embeddings (by the kit's estimate: 4,096 real tokens) | the rules' 15 s + 0.3 s a token | the rules' 90 s | measured on the X2 Elite: an ~8K prompt bluescreened it; GenieX writes ~34 tokens a second. The embedding server's context is 4,096 tokens (Memory on a 16 GB Snapdragon) |
 | Intel | 4,096 tokens, chat; 680 for embeddings (by the kit's estimate: 2,048 real tokens) | 30 s + 0.3 s a token | 180 s | OpenVINO's NPU pipeline is compiled for a prompt length (`--max_prompt_len 4096`); measured on a Lunar Lake: about 25–28 tokens a second, a first load with its compile 41 s, 3,492 tokens read in 4.5 s; the NPU 3720's own values are its generations' (below). The embedding server is compiled for 2,048 tokens (Embeddings on Intel's NPU) |
 | AMD | 4,096 tokens, chat and vision | 20 s + 0.4 s a token; XDNA 2's own 20 s + 0.15 s | 120 s; XDNA 2's own 30 s | FastFlowLM holds its whole context from its start, so it is started with the cap (`--ctx-len 4096`): its own default, the model's 40,960 tokens, never loaded on a 16 GB Krackan (below). Measured there: about 14 tokens a second, 3,115 tokens read in 6.6 s, a start to a first answer 4 to 16 s, 3,827 answered and 4,352 refused plainly |
 
@@ -199,7 +227,7 @@ When, with no `npuIdleStopMinutes` in config.json (`npu-vendors.json`'s `idleSto
 | Under 20 GB of memory (8, 12 and 16 GB laptops; Windows shows 16 GB as 15.3 to 15.9) | its route's own minutes: GenieX and its llama-server 5, OpenVINO Model Server's two 5, FastFlowLM 5 (6 for its vision model) |
 | 20 GB or more, or memory unknown | rules.json's `npuIdleStopMinutes`, 10, as before |
 
-A route's minutes are 20 times its cold start (stopped to its first answer), never under 5: waking it costs at most a twentieth of the quiet spell it ends, and a conversation's pauses, or an agent's rounds a minute apart, never pay it. GenieX starts and loads in 9 to 15 s (measured), so 5; OpenVINO Model Server starts from its compile cache in 4 s on a Lunar Lake and 6.9 s on an NPU 3720, its embeddings in 2.8 s there (measured; the first compile is once per PC), so 5; FastFlowLM starts and loads its chat model in 6.6 s on an XDNA 2 (measured), so 5, and its vision model, its switch from chat included, in 15.7 s, so 6 (through kit 2.74.4 it wasn't measured, taken as 30 s, so 10). `npuIdleStopMinutes` in config.json (the Smith's Settings) overrides the rule on any PC, either way: 240 keeps it longer, 0 never stops it.
+A route's minutes are 20 times its cold start (stopped to its first answer), never under 5: waking it costs at most a twentieth of the quiet spell it ends, and a conversation's pauses, or an agent's rounds a minute apart, never pay it. GenieX starts and loads in 9 to 15 s (measured), so 5, and its llama-server answers in 2 to 3 s (measured; through kit 2.75.0 taken as 10 s), so 5; OpenVINO Model Server starts from its compile cache in 4 s on a Lunar Lake and 6.9 s on an NPU 3720, its embeddings in 2.8 s there (measured; the first compile is once per PC), so 5; FastFlowLM starts and loads its chat model in 6.6 s on an XDNA 2 (measured), so 5, and its vision model, its switch from chat included, in 15.7 s, so 6 (through kit 2.74.4 it wasn't measured, taken as 30 s, so 10). `npuIdleStopMinutes` in config.json (the Smith's Settings) overrides the rule on any PC, either way: 240 keeps it longer, 0 never stops it.
 
 An idle stop never races a request: the keeper stops a server only holding the NPU's turn, joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
@@ -277,7 +305,8 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 - the pinned SHA-256 of GenieX 0.7.0's installer (downloaded to a scratch folder) and of every Qwen3-VL-4B model file;
 - GenieX 0.8.0 (2026-10-07, the Smith's scout's first try): its installer's SHA-256 as GitHub publishes it, the silent per-user install over 0.7.0, the test request (chat and vision) on the route's own arguments and on the PC's configured entry, and every pinned Qwen3-VL-4B file unchanged under it;
 - the test request, chat and vision, through the kit, in the NPU's turn: answered in 14 s;
-- the keeper's GenieX handling (measured since kit 2.6.0).
+- the keeper's GenieX handling (measured since kit 2.6.0);
+- the embedding server's memory (2026-10-15, GenieX 0.8.0, b11125): 14 settings of `-c` and `-ub`, 26 starts, the same vectors at each; `-c 4096 -ub 512` beside a loaded GenieX three times, 5,646 MB on the NPU together, and `-c 8192 -ub 2048` twice, 7,114 MB (Memory on a 16 GB Snapdragon). InternVL3.5-2B screened against Qwen3-VL-4B with the benchmark's suite.
 
 **Run on an Intel Lunar Lake** (Core Ultra 7 256V, PCI `643E`, NPU driver 32.0.100.4512, 2026-10-12), the NPU check passing every step:
 - setup from nothing: OpenVINO Model Server 2026.4.1's zip, the Visual C++ runtime beside it (the PC had it in System32 too, from Office; Windows loaded the copies beside `ovms.exe`), the model's pull;
@@ -312,6 +341,7 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones), and on a first-generation Snapdragon X (its model build and its speed);
+- a 16 GB Snapdragon running chat, pictures and embeddings on the NPU beside the manor's agents (worked out from the X2 Elite's measurements: Memory on a 16 GB Snapdragon), and the embedding server's `-c 4096 -ub 512` on the first generation's Hexagon (v73);
 - Intel beyond Lunar Lake and Arrow Lake-U: Meteor Lake itself (verified through the Arrow Lake-U, which shares its NPU and PCI id, but not run on one), Arrow Lake-S and -H, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);
 - the prompt settings estimated from the NPU 3720 (Estimated, above): Lunar Lake's and Panther Lake's 512-token chunks and `BEST_PERF`, their prefix cache off, and Wildcat Lake's NPU 3720 settings. Only a benchmark on the Lunar Lake can check any of them;
 - Embeddings on the NPU 3720 against the graphics card (llama.cpp Vulkan) for Reeve's indexing;
