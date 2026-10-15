@@ -2,6 +2,24 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.6
+
+**Paced checks get the share Manor's checksPace gives them, not the agent's gentle cap too, and a test's own waits stretch with the pace: a test takes longer instead of failing.**
+
+### What's new
+
+- **checks-pace.ts**: a paced command is told how much slower it runs, in `KIT_CHECKS_SLOWER` (`CHECKS_SLOWER_ENV`): its `pacedSlower`, 4 at a third of the processor or more. Under `nice` (off Windows), 4. `checksSlower(env)` reads it (1 when unpaced, 50 at most), and `paced(ms)` stretches a test's own wait or timeout by it. A run's time limit was already stretched that way since 2.74.2; the timeouts a test sets itself weren't, so at the pace a 400 ms timeout or a 10 s wait failed with nothing wrong (the Steward's whole suite before kit 2.74.5's release, twice, 2026-10-15).
+
+### What changed
+
+- **checks-pace.cs**: the launcher starts the command out of the agent's own gentle job (`CREATE_BREAKAWAY_FROM_JOB`, which gentle.cs allows), then puts it in the checks job, as before. Before, a command an agent with the gentle pace started stayed in that agent's job too, so the gentle cap held it as well: two processors' worth, 11% of an 18-thread PC, whatever Manor's checksPace said (66% there on 2026-10-15). Where Windows refuses (a job that doesn't let it leave), it starts in the jobs it is in, as before. The launcher's source changed, so each PC compiles it again once.
+- The kit's own tests (kit/test): `until` waits its time stretched by the pace, and `paced` is exported beside it. The accelerators, console, card-on-demand, page and NPU-check tests stretch their own waits and timeouts. A test that shows something taking longer than a timeout stretches both, so the one stays longer than the other.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- A test of the agent's own that waits for something or sets a short timeout can use `paced(ms)` from `src/kit/checks-pace.ts`, so the checks pace makes it slower, never failing. It stretches only under a paced run (the Steward's vouch and merge checks, the Assayer's): run by hand it waits as written.
+
 ## 2.74.5
 
 **The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, AMD's runs on a 16 GB Ryzen AI (XDNA 2 verified), a known maker's NPU of a generation setup doesn't know is tried instead of refused, and the benchmark times prompts the server hasn't seen.**

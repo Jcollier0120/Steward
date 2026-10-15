@@ -161,7 +161,13 @@ public static class KitChecksPace
         int cap = limits.Cap;
         var si = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)), dwFlags = STARTF_USESTDHANDLES, hStdInput = GetStdHandle(-10), hStdOutput = GetStdHandle(-11), hStdError = GetStdHandle(-12) };
         ProcessInformation pi;
-        if (!CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS, IntPtr.Zero, null, ref si, out pi))
+        // Out of the agent's own gentle job first (gentle.cs lets a program leave it), so the checks pace's cap is the one
+        // that holds the command, not the agent's tighter one as well (kit 2.74.6): the Steward's checks were held to its
+        // gentle cap, two processors' worth, whatever Manor's checksPace said. If Windows refuses (a job that doesn't let
+        // it leave), in the jobs it is in, as before.
+        uint flags = CREATE_SUSPENDED | BELOW_NORMAL_PRIORITY_CLASS;
+        if (!CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi)
+            && !CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags, IntPtr.Zero, null, ref si, out pi))
         {
             int err = Marshal.GetLastWin32Error();
             Console.Error.WriteLine("checks-pace: couldn't start " + line + " (Windows error " + err + ")");

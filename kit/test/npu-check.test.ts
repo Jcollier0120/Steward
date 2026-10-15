@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { paced } from './until.ts';
 
 // The NPU check (npu-check.ts): setup's steps timed, then the server measured, against a fake OpenVINO Model Server in
 // this process. Nothing is downloaded or started, and no real config.json, server or lock is touched.
@@ -330,7 +331,7 @@ test("the server is started from its entry's command with its %VARIABLES% expand
   const mark = path.join(dir, 'ran');
   const entry = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [`%NPU_CHECK_TEST_NODE%\\${path.basename(process.execPath)}`, '-e', `require('fs').writeFileSync(${JSON.stringify(mark)}, 'ok')`] } };
   const s = await C.startServer(entry as any, path.join(dir, 'server.log'));
-  for (let i = 0; i < 200 && !existsSync(mark); i++) await new Promise((r) => setTimeout(r, 25));
+  for (let i = 0; i < paced(200) && !existsSync(mark); i++) await new Promise((r) => setTimeout(r, 25));
   await s.stop();
   delete process.env.NPU_CHECK_TEST_NODE;
   assert.equal(existsSync(mark), true, readFileSync(path.join(dir, 'server.log'), 'utf8'));
@@ -410,11 +411,11 @@ test("setup's test request asks about the picture first and chat last, so a serv
   const entry = { id: 'npu', name: 'NPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'qwen3-it:4b', startCommand: ['C:\\nowhere\\flm.exe', 'serve', 'qwen3-it:4b'] }, vision: { model: 'qwen3vl-it:4b' } } as any;
   const dir = mkdtempSync(path.join(home, 'test-image-'));
   try {
-    assert.deepEqual(await testNpuEntry(entry, { dir, timeoutMs: 10_000 }), []);
+    assert.deepEqual(await testNpuEntry(entry, { dir, timeoutMs: paced(10_000) }), []);
     assert.deepEqual(asked, ['qwen3vl-it:4b', 'qwen3-it:4b']);
     assert.equal(held, 'qwen3-it:4b', 'left holding the chat model');
     loads = false;
-    const problems = await testNpuEntry(entry, { dir, timeoutMs: 10_000 });
+    const problems = await testNpuEntry(entry, { dir, timeoutMs: paced(10_000) });
     assert.equal(problems.length, 1);
     assert.match(problems[0], /failed \(200\).*Failed to load qwen3vl-it:4b model/);
   } finally {
