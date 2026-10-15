@@ -126,12 +126,16 @@ export interface Need {
 /**
  * Needs you: what the person must look at or do, a card each, at the top of the page (StaffLayout's `needsYou`, drawn
  * only while anything does). `empty` is said when nothing does, for a page that keeps the section among its own.
+ * `children` go under the cards (or the empty line): quiet things that belong under the heading without being a need,
+ * such as a queue with nothing waiting. Its heading is a `Section`'s, so it sits like every other section's.
  */
-export function NeedsYou({ items, empty = 'Nothing needs you right now.', tour = 'needs-you' }: { items: Need[]; empty?: ReactNode; tour?: string }) {
+export function NeedsYou({ items, empty = 'Nothing needs you right now.', tour = 'needs-you', children }: { items: Need[]; empty?: ReactNode; tour?: string; children?: ReactNode }) {
   return (
     <section className="ui-section ui-gap-md ui-needs" data-tour={tour} aria-label="Needs you">
       <div className="ui-section-head">
-        <h2 className="ui-heading">Needs you</h2>
+        <div className="ui-section-name">
+          <h2>Needs you</h2>
+        </div>
       </div>
       {items.length ? (
         items.map((n) => (
@@ -153,6 +157,7 @@ export function NeedsYou({ items, empty = 'Nothing needs you right now.', tour =
       ) : (
         <p className="card muted">{empty}</p>
       )}
+      {children}
     </section>
   );
 }

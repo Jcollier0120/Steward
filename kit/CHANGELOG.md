@@ -2,7 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.74.0
+## 2.74.3
+
+**The staff page's Needs you: its heading sits like every other section's, and it takes what belongs under it without being a need.**
+
+### What's new
+
+- **`NeedsYou` takes children**, drawn inside its section under the cards, or under the empty line when nothing needs you. For quiet things that belong under the heading without counting as a need: Reeve's review queues with nothing waiting, its "No review queue yet".
+
+### What changed
+
+- **Needs you's heading is a `Section`'s.** Its h2 was straight in `.ui-section-head`, so page.ts's `h2` top margin (26px) stacked on `.ui-section`'s own (22px): about 48px of space above Needs you at the top of the page. It is now in `.ui-section-name`, as `Section` draws it, with no margin of its own, and it is the plain section heading rather than the larger `ui-heading`: the cards' edges and badges carry the urgency (spec/STAFF-PAGE.md says why).
+
+### For an agent
+
+- Nothing to do: a page drawing `NeedsYou` gets the spacing as it pins this kit. Anything it draws just after Needs you that belongs under its heading can move into its children.
 
 **A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
 
