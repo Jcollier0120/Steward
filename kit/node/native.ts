@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { realPath } from './real-path.ts';
 
 /**
  * An agent's native files (kit 2.62.0, spec/RELEASES.md "Native files"): a program of its own that isn't Node (Envoy's
@@ -200,14 +201,26 @@ export function runBuild(root: string, script: string, arch: Arch): { code: numb
 }
 
 /**
- * The processes running a program from under `dir` (an installed copy's native files), by PowerShell's CIM: their ids.
- * An install ends them before it moves the app folder, which Windows won't move while a program in it runs.
+ * The folders a program under `dir` can be named by: `dir` as given, and its real path when that's another
+ * (spec/DEV-DRIVES.md). Windows names a process's program as it was started, so one started through a junction or a
+ * mounted folder is under the one spelling, and one started from its real path (import.meta.url) under the other.
+ */
+export function spellingsOf(dir: string): string[] {
+  const given = path.resolve(dir);
+  const real = realPath(given);
+  return real.toLowerCase() === given.toLowerCase() ? [given] : [given, real];
+}
+
+/**
+ * The processes running a program from under `dir` (an installed copy's native files), by PowerShell's CIM: their ids,
+ * however `dir` is spelled (spellingsOf). An install ends them before it moves the app folder, which Windows won't move
+ * while a program in it runs.
  */
 export function processesUnder(dir: string): number[] {
-  const like = `${dir.replace(/[\\/]+$/, '')}\\*`.replace(/'/g, "''").replace(/\[/g, '`[').replace(/\]/g, '`]');
+  const like = (d: string) => `$_.ExecutablePath -like '${`${d.replace(/[\\/]+$/, '')}\\*`.replace(/'/g, "''").replace(/\[/g, '`[').replace(/\]/g, '`]')}'`;
   const r = spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter "ExecutablePath IS NOT NULL" | Where-Object { $_.ExecutablePath -like '${like}' } | ForEach-Object { $_.ProcessId }`],
+    ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter "ExecutablePath IS NOT NULL" | Where-Object { ${spellingsOf(dir).map(like).join(' -or ')} } | ForEach-Object { $_.ProcessId }`],
     { encoding: 'utf8', windowsHide: true, timeout: 60_000 },
   );
   return `${r.stdout ?? ''}`

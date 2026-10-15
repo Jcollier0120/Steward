@@ -23,6 +23,7 @@ import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
 import { BAILIFF_WAIT, bailiffHold, dependencyHold, isWrightDraft, lockfileHold, ownerFirstHold, reviewedComment, reviewHold } from '../review.ts';
 import { openPrs, parsePrs, type PrInfo } from './staff.ts';
+import { headsMoved } from '../heads.ts';
 import { noteMerged } from '../strangers.ts';
 import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conflicts.ts';
 import { hostFor, must } from '../hosts/index.ts';
@@ -651,6 +652,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     merged.push(pr);
     // This Steward's merge, not someone else's (strangers.ts).
     noteMerged(e, pr.number);
+    // Its new head shared with the other agents a moment from now, not at the next round's glance (heads.ts).
+    headsMoved(e.repo);
     // Its branch has moved: from here on it is read afresh, not from the glance.
     forgetGlance(ctx, e);
     ctx.log(`[${e.id}] merged #${pr.number} (${pr.head}${mine ? '' : `, ${pr.author}'s`}${notes.has(pr.number) ? `; ${notes.get(pr.number)}` : ''})`);
