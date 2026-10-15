@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -10,7 +10,7 @@ import type { Employee } from '../src/settings.ts';
 // and its kit\ filled by a PowerShell script of its own. It goes through every stage (bump, push, merge, release,
 // staff) with git for real and gh standing in, and gets nothing of a Node agent's: no npm, no tools/kit.ts. A bump's
 // version is claimed (claims.ts), in a Steward home of the test's own.
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'));
+const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-dotnet-'))); // its real path, as git spells it (a Dev Drive mounted in a folder)
 after(() => rmSync(tmp, { recursive: true, force: true }));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
@@ -183,7 +183,9 @@ test('a .NET employee on master, through every stage: bump, push, merge, release
   assert.ok(!existsSync(workTree), "the bump's worktree is removed after the merge");
 
   // release: from origin/master at the merged commit, in a worktree of its own, with its release command.
-  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v1.7.0', isDraft: false, publishedAt: '2026-10-02T00:00:00Z' }]) : undefined));
+  // GitHub has v1.7.1 once its release command has run.
+  const before = { tagName: 'v1.7.0', isDraft: false, publishedAt: '2026-10-02T00:00:00Z' };
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(existsSync(released) ? [{ tagName: 'v1.7.1', isDraft: false }, before] : [before]) : undefined));
   const rel = await releaseOne({ ...ctx, run: r.run }, e, { kit: '1.0.1' });
   assert.equal(rel.outcome, 'done', `${rel.message}\n${ctx.lines.join('\n')}`);
   assert.equal(rel.version, '1.7.1');

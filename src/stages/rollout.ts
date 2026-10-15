@@ -10,7 +10,8 @@ import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
-import { releasedTool } from './trialpass.ts';
+import { kitReach, type KitReach } from './kitreach.ts';
+import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -37,9 +38,113 @@ import { releasedTool } from './trialpass.ts';
  * hands out the tools/kit.ts released with the new kit instead, read from the kit's tag in its own clone (0.35.29): the
  * kit goes out in the round that released it, not after Manor's update and the Steward's restart. Only when that can't
  * be read does the rollout wait for Manor to install the Steward's new release.
+ *
+ * A new kit settles before it goes out (0.35.68): kits came in bursts, fifteen in a day and a half, and each one was
+ * rolled out to every agent (a bump, its checks, a PR, a merge, a release, a Manor install and a site refresh each),
+ * though the next kit came an hour later and did it all again. Now only the newest kit goes, once it has gone Settings'
+ * rolloutQuietHours without a newer one, and never later than rolloutMaxWaitHours after the oldest kit released since
+ * the last one rolled out (rollout-settle.json). A kit whose changelog entry's bold line starts with "Urgent" goes at
+ * once. While the newest settles, the kit rolled out last still reaches those behind it, and its folds, as before.
  */
 
 export const rolloutFailedFile = () => dataFile('rollout-failed.json');
+
+/** The kit rolled out last, and when the round chose it: what the next kit's settling counts from. */
+export const rolloutSettleFile = () => dataFile('rollout-settle.json');
+
+export interface RolloutSettled {
+  kit: string;
+  at: string;
+}
+
+const loadRolled = (): string | null => {
+  const s = readJson<Partial<RolloutSettled> | null>(rolloutSettleFile(), null);
+  return typeof s?.kit === 'string' && KIT_VERSION.test(s.kit) ? s.kit : null;
+};
+
+/** Whether the kit's changelog entry (its `## <kit>` section, or the whole text when it has none) is marked urgent: its bold line starts with "Urgent". Pure. */
+export function urgentIn(changelog: string | null, kit: string): boolean {
+  if (!changelog) return false;
+  const text = changelog.replace(/\r\n/g, '\n');
+  const heads = [...text.matchAll(/^## +\[?v?(\d+\.\d+\.\d+)\]?.*$/gm)];
+  const at = heads.findIndex((h) => h[1] === kit);
+  const entry = at >= 0 ? text.slice(heads[at].index!, heads[at + 1]?.index ?? text.length) : heads.length ? '' : text;
+  const bold = /^\*\*(.+?)\*\*/m.exec(entry);
+  return !!bold && /^urgent\b/i.test(bold[1].trim());
+}
+
+/** The released kits newer than the one rolled out last, up to the newest, oldest first. Pure. */
+export function pendingKits(o: { newest: string; released: string[]; rolled: string | null }): string[] {
+  return [...new Set([...o.released, o.newest])]
+    .filter((v) => compareVersions(v, o.newest) <= 0 && (!o.rolled || compareVersions(v, o.rolled) > 0))
+    .sort(compareVersions);
+}
+
+export interface Settle {
+  /** The kit the round rolls out: the newest once it has settled, else the one rolled out last (null when there's none). */
+  kit: string | null;
+  /** The newest kit, while it settles, and when it goes (ms). */
+  settling: { kit: string; until: number } | null;
+  /** The urgent kit that sends the newest at once, if one does. */
+  urgent: string | null;
+}
+
+/**
+ * Which kit a round rolls out: the newest once it has gone `quietHours` without a newer release, or once `maxWaitHours`
+ * have passed since the oldest kit released after the one rolled out last (`rolled`), or at once when one of those is
+ * urgent. A kit with no published time counts as old enough. Until then, `rolled`, if it is released. Pure.
+ */
+export function settleKit(o: { newest: string | null; released: string[]; published: Record<string, string>; rolled: string | null; urgent: string[]; quietHours: number; maxWaitHours: number; now: number }): Settle {
+  const go = (kit: string | null, urgent: string | null = null): Settle => ({ kit, settling: null, urgent });
+  if (!o.newest) return go(null);
+  if (o.rolled && compareVersions(o.rolled, o.newest) >= 0) return go(o.newest);
+  const pending = pendingKits({ newest: o.newest, released: o.released, rolled: o.rolled });
+  const urgent = pending.find((v) => o.urgent.includes(v));
+  if (urgent) return go(o.newest, urgent);
+  const time = (v: string) => {
+    const t = Date.parse(o.published[v] ?? '');
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const quiet = time(o.newest) + o.quietHours * 3600_000;
+  const longest = Math.min(...pending.map(time)) + o.maxWaitHours * 3600_000;
+  const until = Math.min(quiet, longest);
+  if (o.now >= until) return go(o.newest);
+  return { kit: o.rolled && o.released.includes(o.rolled) ? o.rolled : null, settling: { kit: o.newest, until }, urgent: null };
+}
+
+/** A time of day, as the log writes it (HH:MM, this PC's time). Pure. */
+const clock = (ms: number) => {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/** The one line a round logs while the newest kit settles. Pure. */
+export const settlingLine = (s: NonNullable<Settle['settling']>, rolled: string | null) =>
+  `kit ${s.kit} settles until ${clock(s.until)}${rolled ? ` (kit ${rolled} still reaches those behind it)` : ''}`;
+
+/**
+ * The kit this round rolls out, for `rollout`: settleKit over the kit's releases (ctx.kit) and the kit rolled out last,
+ * reading the changelogs of the kits waiting (only while the newest settles) for an urgent one.
+ */
+async function settledKit(ctx: Ctx, newest: string | null, changelog: (kit: string) => Promise<string | null>, now = Date.now()): Promise<Settle> {
+  const rolled = loadRolled();
+  const base = {
+    newest,
+    released: ctx.kit?.released ?? [],
+    published: ctx.kit?.published ?? {},
+    rolled,
+    quietHours: ctx.settings.rolloutQuietHours ?? 2,
+    maxWaitHours: ctx.settings.rolloutMaxWaitHours ?? 12,
+    now,
+  };
+  const first = settleKit({ ...base, urgent: [] });
+  if (!first.settling || !newest) return first;
+  const urgent: string[] = [];
+  for (const k of pendingKits({ newest, released: base.released, rolled })) {
+    if (urgentIn(await changelog(k).catch(() => null), k)) urgent.push(k);
+  }
+  return urgent.length ? settleKit({ ...base, urgent }) : first;
+}
 
 /**
  * A bump or push that failed in a round: for which kit, at which head of the employee's branch, and what it said. Or a
@@ -92,6 +197,8 @@ export interface RolloutPlan {
   why: string | null;
   /** True when it waits only for this Steward to carry the kit: an alarm once that lasts. */
   waitsForSteward: boolean;
+  /** While the newest kit settles: one line that says until when (and `kit` is the one rolled out last, or null). */
+  settling?: string;
   /** Bumped and pushed now, each with its branch's head; `fold`, onto its kit PR open for an older kit. */
   bump: { employee: Employee; head: string; fold?: KitFold }[];
   /** Not now, and why; `held` for one whose bump failed at this head. */
@@ -99,9 +206,9 @@ export interface RolloutPlan {
 }
 
 /** Whether a round's rollout can do anything at all: Settings, a kit release, the Steward carrying it. Pure. */
-export function rolloutGate(o: { on: boolean; kit: string | null; ownKit: string | null }): { kit: string } | { why: string; waitsForSteward: boolean } {
+export function rolloutGate(o: { on: boolean; kit: string | null; ownKit: string | null; settling?: string }): { kit: string } | { why: string; waitsForSteward: boolean } {
   if (!o.on) return { why: '"Rolls out a new kit by itself" is off in Settings', waitsForSteward: false };
-  if (!o.kit) return { why: 'no kit release to roll out', waitsForSteward: false };
+  if (!o.kit) return { why: o.settling ?? 'no kit release to roll out', waitsForSteward: false };
   if (o.ownKit && compareVersions(o.ownKit, o.kit) < 0) {
     return { why: `kit ${o.kit} waits for this Steward to carry it (it carries ${o.ownKit}, and a bump hands out its tools/kit.ts): Manor installs the Steward's next release`, waitsForSteward: true };
   }
@@ -109,11 +216,12 @@ export function rolloutGate(o: { on: boolean; kit: string | null; ownKit: string
 }
 
 /** Which employees a round bumps to the newest kit, and why the others aren't. Pure. */
-export function planRollout(o: { on: boolean; kit: string | null; ownKit: string | null; employees: Employee[]; facts: Record<string, RolloutFacts>; failed: Record<string, RolloutHold> }): RolloutPlan {
+export function planRollout(o: { on: boolean; kit: string | null; ownKit: string | null; settling?: string; employees: Employee[]; facts: Record<string, RolloutFacts>; failed: Record<string, RolloutHold> }): RolloutPlan {
   const gate = rolloutGate(o);
-  if ('why' in gate) return { kit: null, why: gate.why, waitsForSteward: gate.waitsForSteward, bump: [], skip: [] };
+  const settling = o.settling ? { settling: o.settling } : {};
+  if ('why' in gate) return { kit: null, why: gate.why, waitsForSteward: gate.waitsForSteward, bump: [], skip: [], ...settling };
   const kit = gate.kit;
-  const plan: RolloutPlan = { kit, why: null, waitsForSteward: false, bump: [], skip: [] };
+  const plan: RolloutPlan = { kit, why: null, waitsForSteward: false, bump: [], skip: [], ...settling };
   for (const e of o.employees) {
     const f = o.facts[e.id];
     const skip = (why: string, held?: boolean) => void plan.skip.push({ employee: e, why, ...(held ? { held } : {}) });
@@ -189,20 +297,26 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx), or for a program
   // missing for a moment that is back (Git updating itself), is let go.
   for (const [id, h] of Object.entries(failed)) if (passingFailure(h.message)) delete failed[id];
+  // The newest kit, once it has settled; until then the one rolled out last, to those still behind it.
+  const settle = ctx.settings.rollout ? await settledKit(ctx, o.kit, o.changelog) : { kit: o.kit, settling: null, urgent: null };
+  const target = settle.kit;
+  const settling = settle.settling ? settlingLine(settle.settling, target) : undefined;
+  if (settling) ctx.log(`rollout: ${settling}`);
+  if (settle.urgent) ctx.log(`rollout: kit ${settle.urgent} is urgent, so kit ${o.kit} goes out now`);
   // A kit newer than this Steward's: its tools/kit.ts read from the kit's release, so nothing waits for the Steward's update.
   let ownKit = o.ownKit;
   let tool: string | undefined;
-  if (o.kit && ownKit && ctx.settings.rollout && compareVersions(ownKit, o.kit) < 0) {
-    const text = await releasedTool(ctx, o.kit).catch(() => null);
+  if (target && ownKit && ctx.settings.rollout && compareVersions(ownKit, target) < 0) {
+    const text = await releasedTool(ctx, target).catch(() => null);
     if (text) {
-      tool = path.join(workRootOf(ctx.settings), `_kit-tool-${o.kit}.ts`);
+      tool = path.join(workRootOf(ctx.settings), `_kit-tool-${target}.ts`);
       mkdirSync(path.dirname(tool), { recursive: true });
       writeFileSync(tool, text);
-      ctx.log(`rollout: this Steward carries kit ${ownKit}, so each bump hands out the tools/kit.ts released with kit ${o.kit}`);
-      ownKit = o.kit;
+      ctx.log(`rollout: this Steward carries kit ${ownKit}, so each bump hands out the tools/kit.ts released with kit ${target}`);
+      ownKit = target;
     }
   }
-  const gate = rolloutGate({ on: ctx.settings.rollout, kit: o.kit, ownKit });
+  const gate = rolloutGate({ on: ctx.settings.rollout, kit: target, ownKit, ...(settling ? { settling } : {}) });
   const facts: Record<string, RolloutFacts> = {};
   if (!('why' in gate)) {
     for (const e of employees.filter((x) => x.usesKit)) {
@@ -213,7 +327,9 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       }
     }
   }
-  const plan = planRollout({ on: ctx.settings.rollout, kit: o.kit, ownKit, employees, facts, failed });
+  const plan = planRollout({ on: ctx.settings.rollout, kit: target, ownKit, ...(settling ? { settling } : {}), employees, facts, failed });
+  // The newest kit went: the next one settles from here.
+  if (plan.kit && plan.kit === o.kit && !settling && loadRolled() !== plan.kit) writeJson(rolloutSettleFile(), { kit: plan.kit, at: new Date().toISOString() } satisfies RolloutSettled);
   if (plan.why) {
     if (plan.waitsForSteward) ctx.log(`rollout: ${plan.why}`);
     if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
@@ -238,7 +354,14 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
       // The entry names the kit alone, and the PR's body points at the kit's changelog.
     }
     const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}) });
+    // Each bump runs the tests the kit reaches from the kit its branch pins, as the kit's trial did (kitreach.ts), not the
+    // whole suite: read from the kit's tag in the Steward's clone. Without the clone, or the tag, each runs them all.
+    const clone = stewardClone(ctx);
+    const reach = clone
+      ? async (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean): Promise<KitReach> =>
+          (await releasedTree(ctx, kit)) ? kitReach(ctx, { repo: clone, head: `refs/tags/kit-v${kit}`, pin, toolChanged }) : { all: `kit ${kit}'s release couldn't be read` }
+      : undefined;
+    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
     const ready = bumped.filter((r) => r.outcome === 'done');
     for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
       // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.

@@ -13,16 +13,23 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { prChecksFile } = await import('../src/stages/prtest.ts');
+const { VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 
 const green = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }];
 const VERSION_FILES = ['package.json', 'package-lock.json', 'src/app.ts'];
 
-/** A fake employee at 0.4.0, and PRs made on it: each a branch from `from` (main), pushed as refs/pull/<n>/head. */
+type PrOptions = { version?: string; files?: Record<string, string>; from?: string };
+
+/**
+ * A fake employee at 0.4.0, and PRs made on it: each a branch from `from` (main), pushed as refs/pull/<n>/head. makeAll
+ * makes several in one push.
+ */
 function employeeWithPrs(name: string) {
   const f = fakeEmployee(path.join(tmp, name), { version: '0.4.0' });
   const base = sh(f.checkout, 'rev-parse', 'HEAD');
-  const make = (n: number, o: { version?: string; files?: Record<string, string>; from?: string } = {}) => {
+  /** PR n's commit, the checkout left on it: its sha. */
+  const commit = (n: number, o: PrOptions) => {
     sh(f.checkout, 'switch', '--quiet', '--detach', o.from ?? base);
     if (o.version) for (const file of VERSION_FILES) writeFileSync(path.join(f.checkout, file), readFileSync(path.join(f.checkout, file), 'utf8').replaceAll('0.4.0', o.version));
     for (const [file, text] of Object.entries(o.files ?? { [`change-${n}.txt`]: `#${n}\n` })) {
@@ -31,12 +38,17 @@ function employeeWithPrs(name: string) {
     }
     sh(f.checkout, 'add', '-A');
     sh(f.checkout, 'commit', '--quiet', '-m', `#${n}`);
-    const sha = sh(f.checkout, 'rev-parse', 'HEAD');
-    sh(f.checkout, 'push', '--quiet', '--force', 'origin', `${sha}:refs/pull/${n}/head`);
-    sh(f.checkout, 'switch', '--quiet', 'main');
-    return sha;
+    return sh(f.checkout, 'rev-parse', 'HEAD');
   };
-  return { ...f, base, make };
+  /** PRs by their numbers, each made as make makes one, and pushed together: each one's head by its number. */
+  const makeAll = (prs: Record<number, PrOptions>): Record<number, string> => {
+    const shas = Object.fromEntries(Object.entries(prs).map(([n, o]) => [n, commit(Number(n), o)]));
+    sh(f.checkout, 'push', '--quiet', '--force', 'origin', ...Object.entries(shas).map(([n, sha]) => `${sha}:refs/pull/${n}/head`));
+    sh(f.checkout, 'switch', '--quiet', 'main');
+    return shas;
+  };
+  const make = (n: number, o: PrOptions = {}) => makeAll({ [n]: o })[n];
+  return { ...f, base, make, makeAll };
 }
 
 const listed = (n: number, sha: string, o: Record<string, unknown> = {}) => ({
@@ -66,6 +78,7 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
     if (args[0] === 'pr' && args[1] === 'list') return ok([listed(7, head, { statusCheckRollup: [] })]);
     if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
     if (args[0] === 'pr' && args[1] === 'merge') return ok('');
+    if (args[0] === 'api' && args.includes('POST')) return ok({});
   });
   const round = () => {
     const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-untested'), run: r.run, neutralDir: tmp });
@@ -95,6 +108,27 @@ test("a team PR GitHub runs no checks on is tested here at its head first: a fai
   // The head tested here, and only that one: one pushed since is refused by GitHub.
   assert.deepEqual(r.gh.filter((a) => a[1] === 'merge'), [['pr', 'merge', '7', '--repo', 'Jcollier0120/Fake', '--merge', '--match-head-commit', head]]);
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(prChecksFile(), 'utf8'))), [`fake#7@${broken}`, `fake#7@${head}`], 'kept by commit');
+  // Its pass set the vouch on that head, as steward vouch would, so the Assayer doesn't test it again; the failure set none.
+  const vouches = r.gh.filter((a) => a[0] === 'api' && a.includes('POST'));
+  assert.deepEqual(vouches, [['api', '-X', 'POST', `repos/Jcollier0120/Fake/statuses/${head}`, '-f', 'state=success', '-f', `context=${VOUCH_CONTEXT}`, '-f', `description=${e.test[0]} passed in the Steward's test at ${head.slice(0, 7)}`]]);
+  assert.match(fixed.lines, new RegExp(`#7: its head ${head.slice(0, 7)} has the vouch`));
+});
+
+test("a pass here whose vouch GitHub won't take still merges; the log says why", async () => {
+  const f = employeeWithPrs('no-status');
+  const sha = f.make(9, { files: { feature: 'yes\n' } });
+  const e = employee(f.checkout, { fill: '', test: ['node -e process.exit(0)'] });
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([listed(9, sha, { statusCheckRollup: [] })]);
+    if (args[0] === 'release' && args[1] === 'list') return ok([{ tagName: 'v0.4.0', isDraft: false }]);
+    if (args[0] === 'pr' && args[1] === 'merge') return ok('');
+    if (args[0] === 'api' && args.includes('POST')) return { code: 1, out: '', err: 'HTTP 403: Resource not accessible' };
+  });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-no-status'), run: r.run, neutralDir: tmp });
+  const m = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(m.outcome, 'done');
+  assert.equal(m.message, `merged #9 (checks passed here at ${sha.slice(0, 7)})`);
+  assert.match(ctx.lines.join('\n'), /#9: its checks passed, but GitHub wouldn't take the status: HTTP 403/);
 });
 
 test('a check that fails once and passes on a second try merges the PR, and says so', async () => {
@@ -126,13 +160,7 @@ test("a team PR whose CI passes on GitHub isn't tested here again", async () => 
 
 test('a version a team PR sets must be new: not released, above its branch, and no other ready PR\'s; a merge before it is counted', async () => {
   const f = employeeWithPrs('versions');
-  const shas: Record<number, string> = {
-    7: f.make(7, { version: '0.4.1' }),
-    8: f.make(8, { version: '0.4.2' }),
-    9: f.make(9, { version: '0.4.2' }),
-    10: f.make(10, { version: '0.3.9' }),
-    11: f.make(11),
-  };
+  const shas = f.makeAll({ 7: { version: '0.4.1' }, 8: { version: '0.4.2' }, 9: { version: '0.4.2' }, 10: { version: '0.3.9' }, 11: {} });
   const e = employee(f.checkout, { fill: '' });
   const releases = [{ tagName: 'v0.4.1', isDraft: false }, { tagName: 'v0.4.0', isDraft: false }];
   const prs = Object.entries(shas).map(([n, sha]) => listed(Number(n), sha));
@@ -153,8 +181,7 @@ test('a version a team PR sets must be new: not released, above its branch, and 
   // #12 sets 0.4.6 and #13 0.4.5, both new: the lowest version merges first, whatever the PR numbers, so #13 goes and
   // #12 waits its turn; at the next round, main at 0.4.5, #12 is still above it and merges.
   const g = employeeWithPrs('after-a-merge');
-  const twelve = g.make(12, { version: '0.4.6' });
-  const thirteen = g.make(13, { version: '0.4.5' });
+  const { 12: twelve, 13: thirteen } = g.makeAll({ 12: { version: '0.4.6' }, 13: { version: '0.4.5' } });
   let open = [listed(12, twelve), listed(13, thirteen)];
   const s = runner((args) => {
     if (args[0] === 'pr' && args[1] === 'list') return ok(open);
@@ -176,13 +203,7 @@ test('a version a team PR sets must be new: not released, above its branch, and 
 
 test('a lower version holds the ones above it even while it waits itself, a draft too; a PR that sets no version goes first; a closed draft gives up its place', async () => {
   const f = employeeWithPrs('order');
-  const shas: Record<number, string> = {
-    15: f.make(15, { version: '0.4.7' }),
-    16: f.make(16, { version: '0.4.8' }),
-    17: f.make(17, { version: '0.4.6' }),
-    18: f.make(18),
-    19: f.make(19, { version: '0.4.9' }),
-  };
+  const shas = f.makeAll({ 15: { version: '0.4.7' }, 16: { version: '0.4.8' }, 17: { version: '0.4.6' }, 18: {}, 19: { version: '0.4.9' } });
   const e = employee(f.checkout, { fill: '' });
   const red = [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }];
   let prs = [listed(15, shas[15], { statusCheckRollup: red }), listed(16, shas[16]), listed(17, shas[17], { isDraft: true }), listed(18, shas[18]), listed(19, shas[19])];
@@ -214,8 +235,7 @@ test('drafts wait, whatever their checks', async () => {
 
 test("a PR below a kit PR's version merges before it, rather than waiting for the kit's trial and being caught up after", async () => {
   const f = employeeWithPrs('below-kit');
-  const kitPr = f.make(20, { version: '0.4.6', files: { 'kit/VERSION': '1.0.1\n' } });
-  const fix = f.make(21, { version: '0.4.5' });
+  const { 20: kitPr, 21: fix } = f.makeAll({ 20: { version: '0.4.6', files: { 'kit/VERSION': '1.0.1\n' } }, 21: { version: '0.4.5' } });
   const prs = [listed(20, kitPr, { files: [{ path: 'kit/VERSION' }] }), listed(21, fix)];
   const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : args[0] === 'release' && args[1] === 'list' ? ok([{ tagName: 'v0.4.0', isDraft: false }]) : args[1] === 'merge' ? ok('') : undefined));
   const e = employee(f.checkout, { fill: '' });

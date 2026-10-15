@@ -3,7 +3,7 @@ import path from 'node:path';
 import { NOT_PUBLISHED, type ExchequerOptions } from '../kit/exchequer.ts';
 import { isNetworkError, online } from '../kit/net.ts';
 import { expandEnv } from '../kit/settings-kit.ts';
-import { commitOf, fetchBranch } from '../git.ts';
+import { addWorktree, commitOf, fetchBranch, gitMaybe, realOf } from '../git.ts';
 import type { Glance, RepoGlance } from '../glance.ts';
 import { gitGlance, type Host } from '../scm.ts';
 import type { TastingDeps } from '../tasting.ts';
@@ -294,19 +294,40 @@ export function notHiredHere(e: Pick<Employee, 'installed' | 'name'>): string | 
   const app = path.resolve(expandEnv(e.installed));
   return existsSync(app) ? null : `${e.name} isn't installed on this PC (no ${e.installed}), and the Steward doesn't install it again by itself: hire it in Manor to have it back`;
 }
-export const workRootOf = (s: Settings) => path.resolve(expandEnv(s.workRoot));
+/**
+ * The work folder at its real path, links and junctions followed (git.ts realOf). Git records a worktree by its real
+ * path, and a script's own path (import.meta.url) is its real path: under a work folder reached through a junction or
+ * a Dev Drive mounted in a folder (2026-10-13), worktrees were left registered every other round, and kit 2.69.1's
+ * release.ts never started (its run-directly check compared the two paths), so each release did nothing and exited 0.
+ */
+export const workRootOf = (s: Settings) => realOf(expandEnv(s.workRoot));
 /**
  * Clears a work folder the Steward made, before it makes it again. Only a folder in the work folder itself, and only
  * a git worktree (its .git a file, as git worktree add makes it) or, in the Steward's own work folder, what's left of
  * one. A clone of someone's own (its .git a folder), or anything else in a work folder Settings point elsewhere (a
  * folder of the person's projects, say), is never deleted: the worktree add after then fails on it, and says so.
+ * Whether it deleted the folder: git still has it registered (freshWorktree prunes that).
  */
-export function clearWorkDir(s: Settings, dir: string): void {
-  if (!existsSync(dir) || path.dirname(dir) !== workRootOf(s)) return;
+export function clearWorkDir(s: Settings, dir: string): boolean {
+  // Compared by real paths: a folder named through the junction or mount the work folder is reached by is still in it.
+  const root = workRootOf(s).toLowerCase();
+  if (!existsSync(dir) || realOf(path.dirname(dir)).toLowerCase() !== root) return false;
   const git = path.join(dir, '.git');
   const worktree = existsSync(git) && statSync(git).isFile();
-  const ownRoot = workRootOf(s).toLowerCase() === path.resolve(DEFAULT_SETTINGS.workRoot).toLowerCase();
-  if (worktree || (ownRoot && !existsSync(git))) rmSync(dir, { recursive: true, force: true });
+  const ownRoot = root === realOf(DEFAULT_SETTINGS.workRoot).toLowerCase();
+  if (!worktree && !(ownRoot && !existsSync(git))) return false;
+  rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+/**
+ * A worktree of `repo` made afresh at `dir` in the work folder: `git worktree add --quiet <opts> <dir> <commit>`, after
+ * clearing what a stage stopped half way left there. Cleared by Node, that folder stays registered with git, which then
+ * refuses to add a worktree there again ("a missing but already registered worktree"), round after round: git's record
+ * of it is pruned with it. addWorktree prunes too when the folder went some other way.
+ */
+export async function freshWorktree(run: Runner, s: Settings, repo: string, dir: string, commit: string, ...opts: string[]): Promise<void> {
+  if (clearWorkDir(s, dir)) await gitMaybe(run, repo, 'worktree', 'prune');
+  await addWorktree(run, repo, dir, commit, ...opts);
 }
 /** The Steward's worktree for an employee's bump, and the one for its release. */
 export const bumpDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s), e.id);

@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { removeWorktree } from '../src/git.ts';
 import type { Runner } from '../src/run.ts';
 import { runChecks } from '../src/stages/bump.ts';
-import { KEEP_SETS, modulesRootOf, packagesKey, pruneSets } from '../src/stages/modules.ts';
+import { KEEP_SETS, letterlessBy, letterlessMounts, modulesRootOf, onLetterlessDrive, packagesKey, pruneSets } from '../src/stages/modules.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // One node_modules for every worktree whose packages are the same: installed once, linked into each with a junction,
 // and only the link removed with the worktree.
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-modules-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
+// The temp folder may be on a drive with no letter (a Dev Drive), where nothing is linked: these tests link.
+letterlessBy(() => false);
+after(() => letterlessBy(null));
 
 const lock = (name: string, version: string, deps: Record<string, string> = { typescript: '^7.0.2' }) =>
   JSON.stringify({ name, version, lockfileVersion: 3, requires: true, packages: { '': { name, version, devDependencies: deps }, 'node_modules/typescript': { version: '7.0.2' } } }, null, 2);
@@ -157,9 +160,51 @@ test('a set that fails to install leaves the worktree to npm ci itself, as befor
   const c = path.join(tmp, 'c');
   project(c, 'clerk', '0.4.0', { typescript: '^7.9.9' });
   const lines: string[] = [];
-  assert.equal(await runChecks(ctx, e, c, { say: (l) => lines.push(l) }), 'npm ci --no-audit --no-fund failed (exit 1)');
+  assert.equal(await runChecks(ctx, e, c, { say: (l) => lines.push(l) }), 'npm ci --ignore-scripts --no-audit --no-fund failed (exit 1)');
   assert.equal(ci.length, 2, 'once for the set, once in the worktree');
   assert.equal(path.resolve(ci[1]).toLowerCase(), path.resolve(c).toLowerCase());
+});
+
+test('on a drive with no letter nothing is linked: esbuild follows no link there, so the worktree runs npm ci itself', async () => {
+  // mountvol's listing: a volume mounted only in a folder is letterless; one with a letter too isn't.
+  const listing = [
+    'Possible values for VolumeName along with current mount points are:',
+    '',
+    '    \\\\?\\Volume{4e8b7678-e67e-48e5-ad9c-891966b4e81a}\\',
+    '        C:\\',
+    '',
+    '    \\\\?\\Volume{700cb533-41b4-4f65-932b-5f9525f6e2c7}\\',
+    '        C:\\DevData\\',
+    '',
+    '    \\\\?\\Volume{ab49f3fd-4923-43f5-9316-80ce488f0a38}\\',
+    '        D:\\',
+    '        C:\\Projects\\',
+    '',
+    '    \\\\?\\Volume{b9f919d8-de5e-4ce2-ac0a-b09ebff2491b}\\',
+    '        *** NO MOUNT POINTS ***',
+  ].join('\r\n');
+  assert.deepEqual(letterlessMounts(listing), ['c:\\devdata']);
+  const real = realpathSync.native(tmp).toLowerCase();
+  assert.equal(onLetterlessDrive(tmp, [path.dirname(real)]), true);
+  assert.equal(onLetterlessDrive(tmp, [`${path.dirname(real)}x`]), false, 'a folder whose name merely begins the same');
+  assert.equal(onLetterlessDrive(tmp, []), false);
+  assert.equal(onLetterlessDrive(path.join(tmp, 'not-there'), [path.dirname(real)]), false, 'unreadable: as before');
+  const { run, ci } = npmStandIn();
+  const e = employee(tmp, { fill: '' });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-mounted'), run, neutralDir: tmp });
+  const d = path.join(tmp, 'mounted');
+  project(d, 'porter', '0.4.1');
+  const { linkSharedModules } = await import('../src/stages/modules.ts');
+  const said: string[] = [];
+  letterlessBy((p) => path.resolve(p).toLowerCase() === path.resolve(d).toLowerCase());
+  try {
+    assert.equal(await linkSharedModules(ctx, d, (l) => said.push(l)), false);
+  } finally {
+    letterlessBy(() => false);
+  }
+  assert.equal(ci.length, 0, 'no shared set installed');
+  assert.equal(existsSync(path.join(d, 'node_modules')), false);
+  assert.match(said.join('\n'), /a drive with no letter/);
 });
 
 test('removing a worktree removes its link, never the packages it points to', async () => {
@@ -177,7 +222,7 @@ test('removing a worktree removes its link, never the packages it points to', as
   assert.equal(readFileSync(path.join(set, 'typescript', 'marker.txt'), 'utf8'), 'kept');
 });
 
-test('the sets most lately used are kept, and a half-done install a day old goes', () => {
+test('the sets most lately used are kept, and a half-done install goes: a day old, or its process gone', () => {
   const root = path.join(tmp, 'prune');
   const now = Date.now();
   const sets = Array.from({ length: KEEP_SETS + 2 }, (_, i) => (i.toString(16).padStart(16, '0')));
@@ -189,8 +234,13 @@ test('the sets most lately used are kept, and a half-done install a day old goes
   mkdirSync(path.join(root, `${sets[0]}.tmp-1-abc`));
   const old = new Date(now - 2 * 24 * 3600_000);
   utimesSync(path.join(root, `${sets[0]}.tmp-1-abc`), old, old);
-  assert.deepEqual(pruneSets(root, undefined, now).sort(), [...sets.slice(KEEP_SETS), `${sets[0]}.tmp-1-abc`].sort());
+  // One from a process that's gone, an hour old; one from a process still at it.
+  mkdirSync(path.join(root, `${sets[1]}.tmp-2-def`));
+  mkdirSync(path.join(root, `${sets[1]}.tmp-3-fed`));
+  const alive = (pid: number) => pid === 3;
+  assert.deepEqual(pruneSets(root, undefined, now, alive).sort(), [...sets.slice(KEEP_SETS), `${sets[0]}.tmp-1-abc`, `${sets[1]}.tmp-2-def`].sort());
   assert.ok(existsSync(path.join(root, sets[0])));
+  assert.ok(existsSync(path.join(root, `${sets[1]}.tmp-3-fed`)), 'an install going on is left');
 });
 
 test("a Next.js project's packages aren't linked from a shared set: its build refuses a link out of the project", async () => {
@@ -208,4 +258,18 @@ test("a Next.js project's packages aren't linked from a shared set: its build re
   assert.match(said.join('\n'), /its own \(npm ci\)/);
   writeFileSync(path.join(site, 'package.json'), JSON.stringify({ name: 'agent', version: '0.1.0', devDependencies: { typescript: '^7.0.2' } }));
   assert.equal(sharesModules(site), true, 'any other project shares, as before');
+});
+
+test("a repository's checks run with git signing nothing and starting no upkeep (kit/unsigned-git.ts), after the settings its caller gives", async () => {
+  const seen: (Record<string, string | undefined> | undefined)[] = [];
+  const run: Runner = async (_cmd, _args, opts) => {
+    seen.push(opts?.env);
+    return ok('');
+  };
+  const e = employee(tmp, { fill: '', test: ['npm test'] });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-unsigned'), run, neutralDir: tmp });
+  const d = path.join(tmp, 'unsigned');
+  mkdirSync(d, { recursive: true });
+  assert.equal(await runChecks(ctx, e, d, { env: { STEWARD_TRIAL: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.autocrlf', GIT_CONFIG_VALUE_0: 'false' }, say: () => {} }), null);
+  assert.deepEqual(seen, [{ STEWARD_TRIAL: '1', GIT_CONFIG_COUNT: '4', GIT_CONFIG_KEY_0: 'core.autocrlf', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false', GIT_CONFIG_KEY_2: 'tag.gpgsign', GIT_CONFIG_VALUE_2: 'false', GIT_CONFIG_KEY_3: 'maintenance.auto', GIT_CONFIG_VALUE_3: 'false' }]);
 });

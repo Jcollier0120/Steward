@@ -11,7 +11,7 @@ import type { Employee, Settings } from '../settings.ts';
 import { agreedVersion } from '../versions.ts';
 import { runChecks } from './bump.ts';
 import { isKitPr } from './catchup.ts';
-import { checkoutOf, clearWorkDir, interrupted, workRootOf, type Ctx } from './common.ts';
+import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { dropFromBuild } from './kickback.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { loadRolloutFailures, rolloutFailedFile, type RolloutHold } from './rollout.ts';
@@ -226,8 +226,7 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
 
   const dir = buildDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
-  clearWorkDir(ctx.settings, dir);
-  await git(run, repo, 'worktree', 'add', '--quiet', '--detach', dir, base);
+  await freshWorktree(run, ctx.settings, repo, dir, base, '--detach');
   const say = (line: string) => ctx.log(`[${e.id}] build: ${line}`);
   try {
     const baseVersion = versionIn(dir, e);

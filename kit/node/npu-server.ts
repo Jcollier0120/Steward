@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, openSync } from 'node:fs';
+import nodeHttp, { type IncomingMessage } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { chatBody, expandEnv, listsWhenLoaded, serverEnv, visionBody } from './accelerators.ts';
 import type { Accelerator, AcceleratorEntry } from './accelerator-config.ts';
 import { runPowerShell } from './detect.ts';
@@ -92,9 +94,50 @@ export interface Streamed extends Asked {
 
 export const withoutThink = (s: string) => s.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
 
-/** Talking to one server: asking it, plainly or streamed, and whether it answers. */
+/**
+ * fetch for a local model server, limited only by the request's own signal. Node's fetch gives up on a server that
+ * sends no headers for 300 s (undici's headersTimeout), whatever the signal allows: a slow NPU reading a long prompt
+ * answers all at once, after that, and the check's steps allow 10 minutes. This is node:http, which waits as long as
+ * the signal lets it; an https URL goes to fetch. A timed-out request fails as fetch's does (a TimeoutError).
+ */
+export const longFetch: typeof fetch = (input, init = {}) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+  if (url.protocol !== 'http:') return fetch(input, init);
+  const signal = init.signal ?? undefined;
+  return new Promise<Response>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((v, k) => (headers[k] = v));
+    let got: IncomingMessage | undefined;
+    const abort = () => {
+      got?.destroy(signal!.reason);
+      req.destroy(signal!.reason);
+    };
+    const done = () => signal?.removeEventListener('abort', abort);
+    // A connection of its own each time: a kept-alive one may be to a server stopped and started again since.
+    const req = nodeHttp.request(url, { method: init.method ?? 'GET', headers, agent: false }, (res) => {
+      got = res;
+      res.on('close', done);
+      const h = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) if (v !== undefined) for (const one of Array.isArray(v) ? v : [v]) h.append(k, one);
+      const status = res.statusCode ?? 0;
+      const empty = [101, 204, 205, 304].includes(status) || init.method === 'HEAD';
+      if (empty) res.resume();
+      resolve(new Response(empty ? null : (Readable.toWeb(res) as ReadableStream<Uint8Array>), { status, statusText: res.statusMessage ?? '', headers: h }));
+    });
+    signal?.addEventListener('abort', abort, { once: true });
+    req.on('error', (e) => {
+      done();
+      reject(signal?.aborted ? signal.reason : e);
+    });
+    if (init.body !== undefined && init.body !== null) req.end(typeof init.body === 'string' ? init.body : Buffer.from(init.body as ArrayBuffer));
+    else req.end();
+  });
+};
+
+/** Talking to one server: asking it, plainly or streamed, and whether it answers. Its requests are longFetch's unless `http` is given. */
 export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: () => number } = {}) {
-  const http = o.http ?? fetch;
+  const http = o.http ?? longFetch;
   const now = o.now ?? (() => performance.now());
   const ep = { ...acc.chat!, baseUrl: acc.chat!.baseUrl! };
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];

@@ -52,7 +52,7 @@ export function passedInTrial(trials: Record<string, TrialPasses>, o: { id: stri
 }
 
 /** The Steward's own clone here: its employee's checkout, else Settings' stewardCheckout; null when there's none. */
-function stewardClone(ctx: Ctx): string | null {
+export function stewardClone(ctx: Ctx): string | null {
   const me = ctx.settings.employees.find((e) => e.id === APP.id);
   const dirs = [me ? checkoutOf(me) : null, ctx.settings.stewardCheckout || null];
   return dirs.find((d): d is string => !!d && existsSync(path.join(d, '.git'))) ?? null;

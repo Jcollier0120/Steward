@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
@@ -649,18 +649,27 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
       if (!report.conditions.onBattery) log('energy: not measured, as the PC is plugged in (unplug it and run again with --energy)');
       else {
         const rate = o.io?.dischargeRate ?? dischargeRate;
+        // Readings for `ms`, at least one, and with work `during`, until a job has finished and a reading came after
+        // it: a PC busy enough to hold this process past a short window still reads the rate, and reads it working.
         const sample = async (ms: number, during?: () => Promise<void>) => {
           const xs: number[] = [];
           const t0 = now();
           let busyWork: Promise<void> | null = null;
           let stop = false;
+          let finished = 0;
           if (during)
             busyWork = (async () => {
-              while (!stop) await during();
+              while (!stop)
+                try {
+                  await during();
+                } finally {
+                  finished++;
+                }
             })();
-          while (now() - t0 < ms) {
+          for (;;) {
             const v = await rate();
             if (v !== null && v > 0) xs.push(v);
+            if (now() - t0 >= ms && (!during || finished > 0)) break;
             await sleep(5_000);
           }
           stop = true;
@@ -759,7 +768,7 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
   return o;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
     console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id>] [--cap <tokens>] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);

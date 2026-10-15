@@ -39,7 +39,7 @@ test('round.json is in the data folder', () => {
 test('a round that goes through is recorded: started, finished, ok, no error, the interval, the next due, and what it used', async () => {
   setDuty(true);
   const before = Date.now();
-  const job = every(60_000, async () => void (await new Promise((r) => setTimeout(r, 20))), { firstDelayMs: 50_000 });
+  const job = every(70_000, async () => void (await new Promise((r) => setTimeout(r, 20))), { firstDelayMs: 50_000 });
   try {
     await oneRound(job);
     const r = file().rounds?.round;
@@ -53,7 +53,7 @@ test('a round that goes through is recorded: started, finished, ok, no error, th
     assert.ok(Date.parse(r.finished) - Date.parse(r.started) >= 15, 'finished is when the round ended');
     assert.equal(r.ok, true);
     assert.equal(r.error, null);
-    assert.equal(r.everyMs, 60_000);
+    assert.equal(r.everyMs, 70_000);
     assert.equal(r.next, job.state.nextRunAt);
     assert.ok(Date.parse(r.next!) > Date.now() + 50_000, 'the next is about an interval on');
   } finally {

@@ -1,5 +1,7 @@
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { deflateSync, inflateSync } from 'node:zlib';
 import type { Ran, Runner } from './run.ts';
 
 /** A git or gh command that failed: its words and what it said. */
@@ -181,6 +183,25 @@ export function commonDir(repo: string): string | null {
   return existsSync(common) ? path.resolve(own, readFileSync(common, 'utf8').trim()) : own;
 }
 
+/**
+ * The branch a clone has checked out, from its HEAD file (a worktree's own, in its gitdir), as `git branch
+ * --show-current` says it: '' at a commit (detached). Null when the files don't say it plainly: then git is asked.
+ */
+export function headBranch(repo: string): string | null {
+  try {
+    const dotGit = path.join(repo, '.git');
+    if (!existsSync(dotGit)) return null;
+    const gitdir = lstatSync(dotGit).isDirectory() ? dotGit : /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))?.[1]?.trim();
+    if (!gitdir) return null;
+    const head = readFileSync(path.join(path.resolve(repo, gitdir), 'HEAD'), 'utf8').trim();
+    const ref = /^ref:\s*refs\/heads\/(\S+)$/.exec(head);
+    if (ref) return ref[1];
+    return SHA.test(head) ? '' : null;
+  } catch {
+    return null;
+  }
+}
+
 /** packed-refs' names and commits (a peeled line, `^…`, belongs to the tag above it and isn't a ref). */
 function readPacked(common: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -193,29 +214,111 @@ function readPacked(common: string): Map<string, string> {
   return out;
 }
 
+/** A repository's git folder: a clone's common one (a worktree's is its main clone's), or a bare repository itself. */
+const gitFolderOf = (repo: string) => commonDir(repo) ?? (existsSync(path.join(repo, 'HEAD')) && existsSync(path.join(repo, 'objects')) ? repo : null);
+
+/** Whether a git folder's objects are plainly SHA-1: its config names no other object format. */
+const plainSha1 = (common: string) => !/objectformat/i.test(readFileSync(path.join(common, 'config'), 'utf8'));
+
 /**
  * Whether the clone has an object, from its files alone (no git started): a loose object, or a name in a pack's index
  * (version 2: a fan-out table of 256 counts, then the sorted names, searched by halves with small reads). False when
  * the files don't say it plainly (another object format, an older index, alternates, anything unreadable): then the
  * caller fetches, as before. A bare repository (the turns' scratch one) is its own git folder.
  */
-export function hasObject(repo: string, sha: string): boolean {
+export const hasObject = (repo: string, sha: string): boolean => objectHere(repo, sha) === true;
+
+/**
+ * hasObject, telling "not there" from "the files don't say": false only when they say it plainly (SHA-1 objects, no
+ * alternates, every pack's index one it reads), null otherwise. Then git is asked whether it has it.
+ */
+export function objectHere(repo: string, sha: string): boolean | null {
   try {
-    if (!SHA.test(sha)) return false;
-    const common = commonDir(repo) ?? (existsSync(path.join(repo, 'HEAD')) && existsSync(path.join(repo, 'objects')) ? repo : null);
-    if (!common) return false;
+    if (!SHA.test(sha)) return null;
+    const common = gitFolderOf(repo);
+    if (!common) return null;
     const objects = path.join(common, 'objects');
     if (existsSync(path.join(objects, sha.slice(0, 2), sha.slice(2)))) return true;
+    let plain = existsSync(objects) && !existsSync(path.join(objects, 'info', 'alternates')) && plainSha1(common);
     const packs = path.join(objects, 'pack');
-    if (!existsSync(packs)) return false;
+    if (!existsSync(packs)) return plain ? false : null;
     const want = Buffer.from(sha, 'hex');
-    return readdirSync(packs).some((f) => f.endsWith('.idx') && inPackIndex(path.join(packs, f), want));
+    for (const f of readdirSync(packs)) {
+      if (!f.endsWith('.idx')) continue;
+      const found = inPackIndex(path.join(packs, f), want);
+      if (found) return true;
+      if (found === null) plain = false;
+    }
+    return plain ? false : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function inPackIndex(file: string, want: Buffer): boolean {
+/**
+ * A loose object's type and content, read from the repository's files (no git started), its name checked against what
+ * they hold. Null when it isn't loose there, or isn't plainly one (packed, another object format, anything unreadable):
+ * then git is asked.
+ */
+export function looseObject(repo: string, sha: string): { type: string; body: Buffer } | null {
+  try {
+    if (!SHA.test(sha)) return null;
+    const common = gitFolderOf(repo);
+    if (!common) return null;
+    const file = path.join(common, 'objects', sha.slice(0, 2), sha.slice(2));
+    if (!existsSync(file)) return null;
+    const raw = inflateSync(readFileSync(file));
+    if (createHash('sha1').update(raw).digest('hex') !== sha) return null;
+    const nul = raw.indexOf(0);
+    const head = nul > 0 ? /^(blob|tree|commit|tag) (\d+)$/.exec(raw.toString('latin1', 0, nul)) : null;
+    if (!head || Number(head[2]) !== raw.length - nul - 1) return null;
+    return { type: head[1], body: raw.subarray(nul + 1) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes an object into the repository as git writes a loose one, with no git started: `<type> <size>\0<content>`,
+ * deflated, named by its SHA-1, written aside and renamed in (one that's there already is only freshened, as git does,
+ * so a prune doesn't take it). Its name, or null when the repository's objects aren't plainly SHA-1 or the files
+ * can't be written: then git makes it.
+ */
+export function writeLooseObject(repo: string, type: 'blob' | 'tree' | 'commit', body: Buffer): string | null {
+  try {
+    const common = gitFolderOf(repo);
+    if (!common || !plainSha1(common)) return null;
+    const raw = Buffer.concat([Buffer.from(`${type} ${body.length}\0`), body]);
+    const sha = createHash('sha1').update(raw).digest('hex');
+    const dir = path.join(common, 'objects', sha.slice(0, 2));
+    const file = path.join(dir, sha.slice(2));
+    if (existsSync(file)) {
+      try {
+        const now = new Date();
+        utimesSync(file, now, now);
+      } catch {
+        // Still there to push: only a prune weeks from now would miss the newer time.
+      }
+      return sha;
+    }
+    mkdirSync(dir, { recursive: true });
+    const tmp = path.join(dir, `tmp_obj_${process.pid}_${randomBytes(4).toString('hex')}`);
+    writeFileSync(tmp, deflateSync(raw));
+    try {
+      renameSync(tmp, file);
+    } catch (err) {
+      rmSync(tmp, { force: true });
+      // Another writer's same object got there first: it's the same bytes.
+      if (!existsSync(file)) throw err;
+    }
+    return sha;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a pack's index names the object: null when it isn't an index this reads (not version 2, cut short). */
+function inPackIndex(file: string, want: Buffer): boolean | null {
   const fd = openSync(file, 'r');
   try {
     const at = (pos: number, len: number) => {
@@ -223,16 +326,16 @@ function inPackIndex(file: string, want: Buffer): boolean {
       return readSync(fd, b, 0, len, pos) === len ? b : null;
     };
     const head = at(0, 8);
-    if (!head || head.readUInt32BE(0) !== 0xff744f63 || head.readUInt32BE(4) !== 2) return false;
+    if (!head || head.readUInt32BE(0) !== 0xff744f63 || head.readUInt32BE(4) !== 2) return null;
     const first = want[0];
     const fan = at(8 + Math.max(0, first - 1) * 4, first ? 8 : 4);
-    if (!fan) return false;
+    if (!fan) return null;
     let lo = first ? fan.readUInt32BE(0) : 0;
     let hi = first ? fan.readUInt32BE(4) : fan.readUInt32BE(0);
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
       const name = at(8 + 256 * 4 + mid * 20, 20);
-      if (!name) return false;
+      if (!name) return null;
       const c = name.compare(want);
       if (c === 0) return true;
       if (c < 0) lo = mid + 1;
@@ -268,9 +371,67 @@ export async function worktrees(run: Runner, repo: string): Promise<Worktree[]> 
   return list;
 }
 
+/**
+ * Git's records of a clone's linked worktrees, read from its files (`<common>/worktrees/<id>/gitdir`) with no git
+ * started: each one's folder as `git worktree list` gives it, and whether `git worktree prune` would clear the record
+ * (the worktree's .git gone, or a record git can't read). Null when the files don't say it plainly: then git is asked.
+ */
+export function worktreeRecords(repo: string): { path: string | null; gone: boolean }[] | null {
+  try {
+    const common = commonDir(repo);
+    if (!common) return null;
+    const admin = path.join(common, 'worktrees');
+    if (!existsSync(admin)) return [];
+    const records = readdirSync(admin).map((id) => {
+      let file = '';
+      try {
+        file = readFileSync(path.join(admin, id, 'gitdir'), 'utf8').trim();
+      } catch {
+        // Not a record git reads: a prune clears it.
+      }
+      if (!file) return { path: null, gone: true };
+      // A relative record (worktree.useRelativePaths) is from the record's own folder.
+      const dotGit = path.resolve(admin, id, file);
+      return { path: dotGit.replace(/[\\/]\.git$/, ''), gone: !existsSync(dotGit) };
+    });
+    // Two records of one folder: a prune clears one of them, so git is asked.
+    const paths = records.flatMap((w) => (w.path ? [w.path.replace(/[\\/]+/g, '/').toLowerCase()] : []));
+    return new Set(paths).size === paths.length ? records : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `git worktree prune`, when it has anything to clear: skipped when git's records (worktreeRecords) show every
+ * worktree's .git still there, as after a `git worktree remove`, which takes its own record with it.
+ */
+export async function pruneWorktrees(run: Runner, repo: string): Promise<void> {
+  const records = worktreeRecords(repo);
+  if (records && !records.some((w) => w.gone)) return;
+  await gitMaybe(run, repo, 'worktree', 'prune');
+}
+
 /** Whether a branch exists on origin (asks origin itself). */
 export async function onOrigin(run: Runner, repo: string, branch: string): Promise<boolean> {
   return ((await gitMaybe(run, repo, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`)) ?? '').trim() !== '';
+}
+
+/**
+ * `git worktree add --quiet <opts> <dir> <commit>`. git refuses a folder that's gone while it's still registered ("is a
+ * missing but already registered worktree"): a stage stopped half way by a sign-out, its folder then cleared, or one
+ * deleted by hand. On 2026-10-13 that stopped the Steward's kit trial and Reeve's release for hours. On that refusal,
+ * git's records of vanished worktrees are pruned and the add tried once more.
+ */
+export async function addWorktree(run: Runner, repo: string, dir: string, commit: string, ...opts: string[]): Promise<void> {
+  const add = () => git(run, repo, 'worktree', 'add', '--quiet', ...opts, dir, commit);
+  try {
+    await add();
+  } catch (err) {
+    if (!(err instanceof CommandFailed) || !/missing but already registered worktree/i.test(err.message)) throw err;
+    await gitMaybe(run, repo, 'worktree', 'prune');
+    await add();
+  }
 }
 
 /** A worktree's node_modules when it is a link (a junction): removed, and never what it points to. */
@@ -283,38 +444,41 @@ export function unlinkModules(dir: string): void {
   }
 }
 
-/** A folder as the disk has it, through any junction or link on its way (as git lists worktrees), as far as it exists. */
-function realOf(p: string): string {
-  const rest: string[] = [];
-  for (let at = path.resolve(p); ; ) {
-    try {
-      return path.join(realpathSync.native(at), ...rest);
-    } catch {
-      const up = path.dirname(at);
-      if (up === at) return path.resolve(p);
-      rest.unshift(path.basename(at));
-      at = up;
-    }
+/**
+ * A path with its links and junctions followed, as git records a worktree's: the deepest part that exists resolved, the
+ * rest kept. The Steward's work folder (~\.steward\work) became a junction to another drive on 2026-10-13, and git
+ * listed its worktrees there: none matched, so none was removed, and clearWorkDir's deletes left them registered.
+ */
+export function realOf(p: string): string {
+  const abs = path.resolve(p);
+  try {
+    return realpathSync.native(abs);
+  } catch {
+    const up = path.dirname(abs);
+    return up === abs ? abs : path.join(realOf(up), path.basename(abs));
   }
 }
 
-const norm = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
-const samePath = (a: string, b: string) => norm(a) === norm(b) || norm(realOf(a)) === norm(realOf(b));
+const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 
 /**
  * Removes the Steward's worktree at `dir` and its branch, when there are any: only a worktree that is the
- * repo's, at that folder, and only a branch under steward/. Never the person's own.
+ * repo's, at that folder (by its real path, links followed), and only a branch under steward/. Never the person's own.
  */
 export async function removeWorktree(run: Runner, repo: string, dir: string, branch?: string): Promise<string[]> {
   const did: string[] = [];
-  const wt = (await worktrees(run, repo)).find((w) => samePath(w.path, dir));
+  const real = realOf(dir);
+  // Git's records, from its files when they say them plainly (no git started), else from `git worktree list`.
+  const listed: { path: string | null }[] = worktreeRecords(repo) ?? (await worktrees(run, repo));
+  const wt = listed.find((w) => w.path !== null && (samePath(w.path, dir) || samePath(realOf(w.path), real)));
   // Its node_modules may be a junction to packages other worktrees share (stages/modules.ts): the link goes first, alone.
   unlinkModules(dir);
   if (wt) {
     await git(run, repo, 'worktree', 'remove', '--force', dir);
     did.push(`removed the worktree ${dir}`);
   }
-  await gitMaybe(run, repo, 'worktree', 'prune');
+  // Records of worktrees whose folders went some other way: cleared, when there are any.
+  await pruneWorktrees(run, repo);
   if (branch?.startsWith('steward/') && (await branchExists(run, repo, branch))) {
     await git(run, repo, 'branch', '-D', branch);
     did.push(`deleted the branch ${branch}`);

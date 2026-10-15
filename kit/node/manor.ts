@@ -3,6 +3,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { readJsonFile, readText } from './file-cache.ts';
+import { keyInside, pathKey } from './real-path.ts';
 import { themeNamed } from './themes.ts';
 
 /**
@@ -56,10 +58,17 @@ export function manorLink(home = manorHome()): ManorLink | null {
 /** Manor's link, and whether its settings say gpuWithNpu at all (true or false). */
 function readManor(home: string): { link: ManorLink; saysGpuWithNpu: boolean; notify: unknown } | null {
   const file = path.join(home, 'settings.json');
-  if (!existsSync(file) || !existsSync(path.join(home, 'app'))) return null;
+  // One stat while settings.json is unchanged (file-cache.ts): every ping and page load asks.
+  let text: string | null;
+  try {
+    text = readText(file);
+  } catch {
+    text = '';
+  }
+  if (text === null || !existsSync(path.join(home, 'app'))) return null;
   let raw: { name?: unknown; port?: unknown; theme?: unknown; developerOptions?: unknown; gpuWithNpu?: unknown; notify?: unknown } = {};
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
+    const parsed = JSON.parse(text.replace(/^﻿/, ''));
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) raw = parsed;
   } catch {
     // Unreadable settings: Manor uses its defaults, and so does this link.
@@ -287,9 +296,6 @@ const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const branchOk = (b: string) => b.length <= 100 && !b.startsWith('-') && !/[\s~^:?*[\\\u0000-\u001f\u007f]|\.\.|\/\/|@\{|^\/|\/$|\.lock$|^@$/.test(b);
 /** A file inside the checkout, as a relative path: no drive or leading separator, no "." or ".." part, nothing Windows refuses. */
 const insideFile = (f: string) => f.length <= 200 && !/^[\\/]|^[a-z]:/i.test(f) && !/[\u0000-\u001f<>:"|?*]/.test(f) && f.split(/[\\/]/).every((part) => part && part !== '.' && part !== '..');
-/** A path as Windows compares them: whole, without a separator at the end, in one case. */
-const samePlace = (p: string) => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
-const within = (inner: string, outer: string) => inner === outer || inner.startsWith(outer.endsWith('\\') ? outer : outer + '\\');
 
 /** owner/name from a GitHub remote's URL (https or ssh), or null for anything else. */
 export function githubRepo(url: string): string | null {
@@ -321,11 +327,7 @@ export function originRepo(checkout: string): string | null {
 
 /** A JSON file's contents, or null when it's missing or unreadable. */
 function jsonAt(file: string): unknown {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8').replace(/^﻿/, ''));
-  } catch {
-    return null;
-  }
+  return readJsonFile<unknown>(file, null);
 }
 
 const listOf = (v: unknown, key: string): Record<string, unknown>[] => {
@@ -380,7 +382,7 @@ export function manorOwn(o: { home?: string; staffFile?: string; stewardHome?: s
  * (Manor shows them with its other settings' problems). Manor's own settings and every agent read them with this, so
  * the rules are the same everywhere. An entry is { "name", "checkout", "repo"?, "branch"?, "test"?, "versionFiles"?,
  * "cleanBranches"?, "merges"?, "release"? }; one whose checkout or repository is the manor's own (`own`, manorOwn()) is refused, as is a
- * checkout inside one of the Steward's or holding one: an employee is looked after as staff, never as a project.
+ * checkout inside one of the Steward's or holding one: the manor looks after its own itself, never as a project.
  * Whether the checkout is there isn't checked here: a project whose clone has gone stays listed, and the page says so.
  */
 export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = []): ManorProject[] {
@@ -390,7 +392,7 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
     return [];
   }
   const ownRepos = new Set(own.repos.map((r) => r.toLowerCase()));
-  const ownCheckouts = own.checkouts.map(samePlace);
+  const ownCheckouts = own.checkouts.map(pathKey);
   const projects: ManorProject[] = [];
   const given = (v: unknown) => v !== undefined && v !== null && v !== '';
   raw.forEach((entry: unknown, i) => {
@@ -444,23 +446,23 @@ export function projectsFrom(raw: unknown, own: ManorOwn, problems: string[] = [
       if (!repo || !versionFiles.length) return wrong('says how to "release", but needs a "repo" and its "versionFiles" for that');
       release = e.release.trim();
     }
-    const place = samePlace(checkout);
+    const place = pathKey(checkout);
     if (projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) return wrong('has the name of one listed before it');
-    if (projects.some((p) => samePlace(p.checkout) === place)) return wrong('has the checkout of one listed before it');
-    const steward = ownCheckouts.find((c) => within(place, c) || within(c, place));
+    if (projects.some((p) => pathKey(p.checkout) === place)) return wrong('has the checkout of one listed before it');
+    const steward = ownCheckouts.find((c) => keyInside(place, c) || keyInside(c, place));
     if (steward !== undefined) {
-      const how = place === steward ? 'one of' : within(place, steward) ? 'inside one of' : 'a folder holding one of';
-      return wrong(`is ${how} the Steward's employees' checkouts: an employee is looked after as staff, never as a project`);
+      const how = place === steward ? 'one of' : keyInside(place, steward) ? 'inside one of' : 'a folder holding one of';
+      return wrong(`is ${how} the manor's own checkouts: the manor looks after those itself, so it can't be a project`);
     }
     const theirs = [repo, originRepo(checkout)].find((r) => r && ownRepos.has(r.toLowerCase()));
-    if (theirs) return wrong(`is ${theirs}, one of the manor's own: an employee is looked after as staff, never as a project`);
+    if (theirs) return wrong(`is ${theirs}, one of the manor's own: the manor looks after it itself, so it can't be a project`);
     projects.push({ name, checkout, repo, branch, test, versionFiles, cleanBranches, merges, release });
   });
   return projects;
 }
 
 /**
- * The manor's non-employee projects on this PC (projectsFrom, against manorOwn()), read afresh: none when Manor isn't
+ * The owner's projects on this PC (projectsFrom, against manorOwn()), read afresh: none when Manor isn't
  * installed here, its settings can't be read, or they list none. An agent that cleans up and fixes repositories works on
  * these as well as on the staff, and never treats one as staff: no kit, no Steward, no merge or release of its own.
  */

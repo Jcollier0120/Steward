@@ -1,11 +1,12 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
 import { calibrate, CALIBRATION, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
-import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
@@ -23,7 +24,11 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * x64 programs on): its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only in
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
- *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]
+ *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]
+ *
+ * `--idle` runs the NPU's idle stop instead of the measurements (npu-idle.ts): the keeper stops the servers once the NPU
+ * goes unused, a person's request after that is told the local AI is waking and answers, and a request in flight is
+ * never stopped. Each a step that passes or fails.
  */
 
 export interface CheckStep {
@@ -77,6 +82,10 @@ export interface NpuCheckOptions {
    * against what it measured. Each a step that passes or fails; instead of the measurements.
    */
   harden?: boolean;
+  /** The NPU's idle stop, run for real (npu-idle.ts' idleSteps), instead of the measurements. */
+  idle?: boolean;
+  /** --idle's idle time for the keeper (a minute by default). */
+  idleMs?: number;
   /** Install the server and models when they're missing (default); false checks only what's there. */
   setup?: boolean;
   /** Download without asking. */
@@ -99,8 +108,12 @@ export interface NpuCheckOptions {
     embedTest?: (entry: AcceleratorEntry) => Promise<string[]>;
     /** --harden's test requests (its cases: timeout, nonsense, calibrate), in place of setup's own. */
     hardenTest?: (kase: string, entry: AcceleratorEntry) => Promise<string[]>;
+    /** --idle's PC: the kit's requests, the keeper's looks, the servers' memory (npu-idle.ts' realIdleDeps). */
+    idle?: IdleDeps;
     /** Whether a port is free (portFree): the route's own, or one a rehearsal moves to. */
     portFree?: (port: number) => Promise<boolean>;
+    /** Empties the check's own compile cache before its first start (checkServe). */
+    clearCache?: (dir: string) => void;
     now?: () => number;
   };
 }
@@ -110,15 +123,16 @@ export interface NpuCheckOptions {
 
 /**
  * The route with its server pointed at another device (OpenVINO's --target_device): off the NPU its NPU-only
- * arguments (--max_prompt_len, and its embedding server's --max_length) go. Its embedding server goes with it when
- * it has a device argument too; one without stays on the NPU. A route without a device argument runs on its NPU only.
+ * arguments (--max_prompt_len, its NPU plugin's settings in --plugin_config, and its embedding server's --max_length)
+ * go. Its embedding server goes with it when it has a device argument too; one without stays on the NPU. A route
+ * without a device argument runs on its NPU only.
  */
 export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   const on = (args: string[]) => {
     const serve = [...args];
     serve[serve.indexOf('--target_device') + 1] = device.toUpperCase();
     if (device.toUpperCase() !== 'NPU') {
-      for (const flag of ['--max_prompt_len', '--max_length']) {
+      for (const flag of ['--max_prompt_len', '--plugin_config', '--max_length']) {
         const j = serve.indexOf(flag);
         if (j >= 0) serve.splice(j, 2);
       }
@@ -131,6 +145,23 @@ export function routeOnDevice(route: NpuRoute, device: string): NpuRoute {
   }
   const es = route.embedServer;
   return { ...route, serve: on(route.serve), ...(es?.serve.includes('--target_device') ? { embedServer: { ...es, serve: on(es.serve) } } : {}) };
+}
+
+/**
+ * The route's servers given the check's own compile cache (OpenVINO's --cache_dir), emptied before the first start:
+ * the first load compiles, as on a PC that has never run the model, or after a driver update (whose compiler can't
+ * use the old compile), and the start again loads that compile. From the manor's warm cache an NPU 3720 whose
+ * compile took 30 to 48 s answered first in 9 s, and the check suggested a 30 s cold load (2026-10-14).
+ */
+export function checkServe(route: NpuRoute): NpuRoute {
+  const own = (args: string[]) => {
+    const serve = [...args];
+    const c = serve.indexOf('--cache_dir');
+    if (c >= 0) serve[c + 1] = `${path.win32.dirname(serve[c + 1])}\\.check-cache`;
+    return serve;
+  };
+  const es = route.embedServer;
+  return { ...route, serve: own(route.serve), ...(es ? { embedServer: { ...es, serve: own(es.serve) } } : {}) };
 }
 
 /** Whether nothing answers or listens on 127.0.0.1's port. */
@@ -236,7 +267,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const env = o.env ?? process.env;
   const catalog = o.catalog ?? NPU_CATALOG;
   const now = o.io?.now ?? (() => performance.now());
-  const http = o.io?.fetch ?? fetch;
+  const http = o.io?.fetch ?? longFetch;
   const steps: CheckStep[] = [];
   const add = (s: CheckStep) => {
     steps.push(s);
@@ -322,6 +353,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'ports', ok: false, say: e.message });
     return finish(2);
   }
+  // The measurements compile the model in a cache of their own (the idle stop and hardening keep the manor's).
+  if (!o.idle && !o.harden) route = checkServe(route);
   report.server = `${route.server} ${route.version}`;
   const tools = o.tools ?? toolsHome(env);
   const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : playing ? { ...npu!, generation, verified: false } : npu!;
@@ -363,6 +396,19 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   // 3. The server on the NPU, measured.
   const acc = readAccelerator(entry) as Accelerator;
   const client = serverClient(acc, { http, now });
+
+  // Or, asked for, the NPU's idle stop run for real instead.
+  if (o.idle) {
+    const logDir = path.join(tools, 'servers', 'logs');
+    try {
+      await idleSteps({ entry, route, vendor, deps: o.io?.idle ?? realIdleDeps(entry, { logFile: path.join(logDir, 'npu-check-idle.log') }), add, log, idleMs: o.idleMs, logDir });
+    } finally {
+      await client.stopKitStarted();
+      const eb = acc.embed?.baseUrl;
+      if (eb && eb !== client.ep.baseUrl) await stopStartedAt(eb, serverClient({ ...acc, chat: { ...acc.chat!, baseUrl: eb } } as Accelerator, { http, now }).listening, now);
+    }
+    return finish(steps.some((s) => s.ok === false) ? 1 : 0);
+  }
   const { ep, lists, ask, answers, listening, untilAnswers } = client;
   const logFile = path.join(tools, 'servers', 'logs', `npu-check-${vendor}.log`);
   const start = o.io?.start ?? startServer;
@@ -370,6 +416,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'start', ok: false, say: `something already answers at ${ep.baseUrl} (the keeper's server?): stop it first, so the check measures a start of its own` });
     return finish(1);
   }
+  const cacheArg = route.serve.indexOf('--cache_dir');
+  if (cacheArg >= 0) (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(route.serve[cacheArg + 1].replace('{tools}', tools));
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;
   // What a measured request may take: a slow device is measured, not cut off.
   const stepMs = Math.max(10 * 60_000, coldMs * 2);
@@ -721,16 +769,17 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
       if (!v) return { error: '--generation takes a generation of the route (meteor-lake, lunar-lake…)' };
       o.generation = v;
     } else if (a === '--harden') o.harden = true;
+    else if (a === '--idle') o.idle = true;
     else if (a === '--out') o.out = argv[++i];
     else return { error: `unknown argument ${a}` };
   }
   return o;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseCheckArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--out <file>]`);
+    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]`);
     process.exit(2);
   }
   const { code } = await npuCheck(o);

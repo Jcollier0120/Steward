@@ -23,7 +23,7 @@ delete process.env.STEWARD_CUSTOMER;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const maker = await import('../src/maker.ts');
-const { DEVELOPER_ONLY, isMakersUuid, makersIds, makersOwn, makersPc, makersPcForTests, makersRepo, stewardActs, uuidIn } = maker;
+const { claimRefused, DEVELOPER_ONLY, isMakersUuid, makersIds, makersOwn, makersPc, makersPcForTests, makersRepo, stewardActs, uuidIn } = maker;
 const { DEFAULT_SETTINGS, SETTINGS_SPEC, inEffect, normalizeSettings, releasesRepoEnv } = await import('../src/settings.ts');
 const { candidates, lookAfter } = await import('../src/found.ts');
 const { claimVersion } = await import('../src/claims.ts');
@@ -134,6 +134,35 @@ test("a customer's PC: no version of Castellan's repositories or kit is claimed,
   assert.ok('employee' in employeeFor(agent.checkout, [], { origin: () => 'Jcollier0120/Toller', internal: new Set(), staff: new Set() }), "the maker's laptop takes it on");
 });
 
+test("the maker's other development PCs claim versions of Castellan's own where GitHub says their account can push, and nothing else of Castellan's", async () => {
+  const asked: string[] = [];
+  const push = (yes: boolean) => async (repo: string) => (asked.push(repo), yes);
+  const manor = { name: 'Manor', repo: 'Jcollier0120/Manor' };
+  assert.equal(await claimRefused(manor, { makers: true, canPush: push(false) }), null, "the maker's laptop claims any");
+  assert.equal(await claimRefused({ name: 'app', repo: 'me/app' }, { makers: false, canPush: push(false) }), null, 'anyone their own');
+  assert.deepEqual(asked, [], 'and GitHub is asked for neither');
+  assert.equal(await claimRefused(manor, { makers: false, canPush: push(true) }), null, "an account that can push there: the maker's");
+  assert.deepEqual(asked, ['Jcollier0120/Manor']);
+  assert.match(
+    (await claimRefused(manor, { makers: false, canPush: push(false) }))!,
+    /^Manor is one of Castellan's own repositories, which only its makers look after: the Steward here looks after yours\. \(A maker's other PC claims it once gh is signed in to an account that can push to Jcollier0120\/Manor\.\)$/,
+  );
+  const unasked = async (): Promise<boolean> => {
+    throw new Error('gh: not signed in');
+  };
+  assert.match((await claimRefused(manor, { makers: false, canPush: unasked }))!, /^Manor is one of Castellan's own/, "GitHub can't be asked: refused");
+  // The kit, a part of the Steward's repository: the same; a kit of someone else's Steward is never Castellan's.
+  const steward = { name: 'Steward', repo: 'Jcollier0120/Steward' };
+  assert.equal(await claimRefused(steward, { kit: true, makers: false, canPush: push(true) }), null);
+  assert.match((await claimRefused(steward, { kit: true, makers: false, canPush: push(false) }))!, /^Claiming a version of Castellan's kit is for the people who make Castellan.*can push to Jcollier0120\/Steward/);
+  assert.equal(
+    await claimRefused({ name: 'steward', repo: 'me/steward' }, { kit: true, makers: false, canPush: push(true) }),
+    "Claiming a version of Castellan's kit is for the people who make Castellan, on their own PC: the Steward here looks after your repositories.",
+  );
+  // Nothing else of Castellan's moves there: its repositories still aren't looked after, merged or released.
+  assert.match(makersOwn(manor, { makers: false })!, /is one of Castellan's own repositories/);
+});
+
 test("Developer options off on a customer's PC: nothing runs, its reads and buttons say why, and its page is one plain line", async () => {
   customer();
   developerOptions(false);
@@ -191,7 +220,8 @@ test("the maker-only commands, and the developer's, answer in a sentence on a cu
   const cli = path.join(import.meta.dirname, '..', 'src', 'cli.ts');
   const run = (...args: string[]) => {
     try {
-      return { code: 0, out: execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', stdio: 'pipe', env: { ...process.env, STEWARD_CUSTOMER: '1' } }) };
+      // Outside any clone: in a Steward clone whose account can push to it, `claim-version kit` is a maker's other PC's.
+      return { code: 0, out: execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', stdio: 'pipe', cwd: home, env: { ...process.env, STEWARD_CUSTOMER: '1' } }) };
     } catch (e: any) {
       return { code: e.status as number, out: `${e.stdout}${e.stderr}` };
     }

@@ -4,11 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { until } from './until.ts';
+import { freePort } from './free-port.ts';
 
 // The house kit: the parts every agent shares. A copy runs on its own port and data folder.
 const home = mkdtempSync(path.join(os.tmpdir(), 'fixture-test-'));
 process.env.FIXTURE_HOME = home;
-process.env.FIXTURE_PORT = String(40000 + Math.floor(Math.random() * 9000));
+process.env.FIXTURE_PORT = String(await freePort());
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 after(() => rmSync(home, { recursive: true, force: true }));
 
@@ -95,7 +96,7 @@ test("rounds are recorded: the last to end and whether it went through, the next
   setDuty(true);
   let fail = false;
   let release: () => void = () => {};
-  const job = every(60_000, async () => {
+  const job = every(70_000, async () => {
     await new Promise<void>((r) => (release = r));
     if (fail) throw new Error('no network');
   }, { firstDelayMs: 50_000, name: 'mill' });

@@ -24,7 +24,9 @@ type Employee = import('../src/settings.ts').Employee;
 
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 // An agent's test that relies on what the kit says: its main expects npu = 1, its PR kit 1.0.1's npu = 2 (the node part fills src/kit itself).
-const check = (n: number) => `import { readFileSync } from 'node:fs';\nprocess.exit(readFileSync('src/kit/npu.ts', 'utf8').includes('npu = ${n}') ? 0 : 1);\n`;
+// Its main passes with whatever kit 1.0.0 fills here (or none), so the trial's run without the kit (bump.ts's
+// withoutTheKit) finds the failure the kit's: only kit 1.0.1's npu = 2 tells them apart.
+const check = (n: number) => `import { existsSync, readFileSync } from 'node:fs';\nconst t = existsSync('src/kit/npu.ts') ? readFileSync('src/kit/npu.ts', 'utf8') : '';\nprocess.exit(t.includes('npu = 2') === (${n} === 2) ? 0 : 1);\n`;
 
 // The Steward: kit 1.0.1 in kit\ (npu = 2), as PR #7's head.
 const steward = fakeEmployee(path.join(tmp, 'steward'), { kit: null, files: { 'kit/VERSION': '1.0.1\n', 'kit/node/npu.ts': 'export const npu = 2;\n', 'tools/kit.ts': kitTool } });

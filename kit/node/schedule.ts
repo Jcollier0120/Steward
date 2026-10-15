@@ -44,8 +44,10 @@ export interface RoundRecord {
   offline?: boolean;
   /** The thrown error's message, its first line, at most 500 characters; null when it went through. */
   error: string | null;
-  /** The interval between rounds when the round ended (each wait varies by ±10% about it). */
+  /** The interval between rounds when the round ended (on the clock since kit 2.72.0; off it, each wait varies by ±10% about it). */
   everyMs: number;
+  /** On the clock (kit 2.72.0): how far into each of its slots its rounds fall, in milliseconds (clockPhase). Absent off the clock. */
+  phaseMs?: number;
   /** When the next scheduled round is due; null off duty, or once stopped (as /api/ping's nextRunAt). */
   next: string | null;
   /** A round held for the agent's required settings (required.ts), or because the trial has ended (license-check.ts): what it waits for, in words. `ok` is null then. */
@@ -60,6 +62,61 @@ export interface RoundRecord {
   cpuMs?: number;
   /** The most memory the agent's process held in the round, in megabytes, sampled every few seconds. Since kit 2.56.0. */
   memoryMb?: number;
+}
+
+/** The manor's shared clock (kit 2.72.0): the agents' rounds fall on its 30-minute slots, or on a divisor or multiple of them. */
+export const CLOCK_MS = 30 * 60_000;
+const DAY_MS = 24 * 3_600_000;
+
+/**
+ * An interval as the scheduler keeps it: to the whole second from a minute up, so one worked out in another unit
+ * (29.99999 minutes, 0.4999999 hours) can't drift off the clock. Under a minute, as given.
+ */
+export const wholeInterval = (ms: number) => (ms >= 60_000 ? Math.round(ms / 1000) * 1000 : ms);
+
+/**
+ * Whether an interval fits the shared clock: whole minutes, and a divisor of 30 minutes (1, 2, 3, 5, 6, 10, 15 or 30
+ * minutes) or a multiple of it that divides the day (1, 2, 3, 4, 6, 8, 12 or 24 hours, 90 minutes…). One that doesn't
+ * (7 minutes, 5 hours) keeps the old way: each wait counted from the last round, varied by ±10%.
+ */
+export function fitsClock(everyMs: number): boolean {
+  const ms = wholeInterval(everyMs);
+  if (ms < 60_000 || ms % 60_000 !== 0) return false;
+  if (ms <= CLOCK_MS) return CLOCK_MS % ms === 0;
+  return ms % CLOCK_MS === 0 && DAY_MS % ms === 0;
+}
+
+/** FNV-1a, 32 bits: the same number for the same text on every PC. */
+function hash(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+/**
+ * How far into each of its slots a schedule's rounds fall: a whole number of minutes, the same for an agent's schedule
+ * on every PC and at every start, under both its interval and the 30-minute clock (a 5-minute round 0–4 minutes into
+ * each slot, an hourly or 6-hourly one 0–29). So the staff spread over the clock instead of all reaching for the PC
+ * in the same minute.
+ */
+export function clockPhase(who: string, name: string, everyMs: number): number {
+  const minutes = Math.min(wholeInterval(everyMs), CLOCK_MS) / 60_000;
+  return (hash(`${who}/${name}`) % minutes) * 60_000;
+}
+
+/**
+ * A schedule's first slot on the clock at or after `notBefore`: `phaseMs` past a multiple of `everyMs`, counted from
+ * local midnight, so a 30-minute round falls at :00 and :30 plus its phase, and a 6-hourly one at 00:00, 06:00, 12:00
+ * and 18:00 plus it, in this PC's time.
+ */
+export function nextOnClock(notBefore: number, everyMs: number, phaseMs: number): number {
+  const ms = wholeInterval(everyMs);
+  const offset = new Date(notBefore).getTimezoneOffset() * 60_000;
+  const local = notBefore - offset;
+  return Math.ceil((local - phaseMs) / ms) * ms + phaseMs + offset;
 }
 
 /** A round that ran past its time limit: every() lets it go, records it, and the next round tries again. */
@@ -106,6 +163,20 @@ function recordRound(name: string, record: RoundRecord): void {
     roundFileWarned = true;
     console.error(`${new Date().toISOString()} couldn't keep the round in round.json (said once; the rounds go on): ${roundError(e)}`);
   }
+}
+
+/**
+ * A round held for the person (its trial over, or its required settings still to fill in), kept in round.json when the
+ * hold starts or what it waits for changes. While it holds for the same reason its entry stays as it was, `started`
+ * and `finished` when the hold began (kit 2.71.3): before, it was written again at each interval, a rename an interval
+ * for nothing.
+ */
+function recordHeld(name: string, waiting: string, everyMs: number): void {
+  const was = readJson<unknown>(roundFile(), {});
+  const r = isObject(was) && isObject(was.rounds) ? was.rounds[name] : null;
+  if (isObject(r) && r.ok === null && r.waiting === waiting && r.everyMs === everyMs && r.error === null && r.next === null && r.turn === undefined) return;
+  const now = new Date().toISOString();
+  recordRound(name, { started: now, finished: now, ok: null, waiting, error: null, everyMs, next: null });
 }
 
 /**
@@ -170,11 +241,18 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * Staggered: Manor may start every agent at once, so the first round comes a while after start (random: 2 to 15
  * minutes at a gentle pace, kit 2.50.0, so a PC that has just started isn't ground down by every agent at once; 30 s
- * to 3 min at a full pace), and each later wait varies by ±10%, so the staff don't all reach for the NPU together.
+ * to 3 min at a full pace).
+ *
+ * On the clock (kit 2.72.0): an interval that fits the manor's shared 30-minute clock (fitsClock: 5, 10, 15 or 30
+ * minutes, 1, 3 or 6 hours…) puts each later round on its slots (nextOnClock), at the schedule's own phase (clockPhase:
+ * whole minutes from the agent's id and the schedule's name, unless `phaseMs` says), and at least half an interval
+ * after the last round ended. So rounds don't drift, and the staff don't all fire in the same minute. Any other
+ * interval keeps the old way: each wait counted from when the last round ended, varied by ±10%, so the staff don't
+ * all reach for the NPU together.
  *
  * At the manor's pace (pace.ts, kit 2.43.3; gentle unless Manor's Settings say full), the agent runs gentle from
  * the start, and a scheduled round too: below-normal priority, and Heiward's efficiency mode, very low disk priority
- * and processor cap (gentle.ts, kit 2.50.0); a round someone asked for lifts them while it runs. A schedule's first
+ * and processor cap (gentle.ts, kit 2.50.0); a round someone asked for runs at the same pace (kit 2.73.0). A schedule's first
  * round (none has gone through: round.json's wentThrough) waits its
  * turn in one line with the other agents' first rounds, one at a time. While it waits, its state says so (waiting,
  * firstRound), and the page shows the agent settling into the manor. A round the person asks for never waits.
@@ -201,8 +279,9 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *
  * Its rounds never stop silently (kit 2.34.0):
  * - Held for its required settings (required.ts), a scheduled round runs nothing, but is still recorded: round.json
- *   says `"ok": null, "waiting": "<what>"` at each interval, and its state says `waiting`, so a reader sees a reason
- *   and a schedule still going, never silence.
+ *   says `"ok": null, "waiting": "<what>"` from the first round held (written again only when what it waits for
+ *   changes, kit 2.71.3), and its state says `waiting`, so a reader sees a reason and a schedule still going, never
+ *   silence.
  * - A round that runs past its time limit (`timeoutMs`, a number or a function read at each round; else
  *   roundTimeLimit(), three intervals and at least two hours) is let go: its job's signal is aborted, it is recorded
  *   as failed with `"timedOut": true`, and the next round is scheduled, which tries again. A hung await (a request
@@ -218,7 +297,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
 export function every(
   everyMs: number | (() => number),
   job: (round: { signal: AbortSignal }) => Promise<void>,
-  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean) } = {},
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number } = {},
 ) {
   let running = false;
   let timer: NodeJS.Timeout | undefined;
@@ -236,14 +315,24 @@ export function every(
   /** Its first round now: waiting in line, running, or none (RoundState's firstRound). */
   let firstNow: RoundState['firstRound'] = null;
   let jitter = 1;
-  const interval = () => (typeof everyMs === 'function' ? everyMs() : everyMs);
-  const waitFor = (ms: number) => {
-    dueAt = Date.now() + ms;
+  const interval = () => wholeInterval(typeof everyMs === 'function' ? everyMs() : everyMs);
+  /** Its phase on the clock at the interval now; null when the interval doesn't fit the clock. */
+  const phase = (ms = interval()) => (!fitsClock(ms) ? null : opts.phaseMs !== undefined ? ((opts.phaseMs % ms) + ms) % ms : clockPhase(APP.id, opts.name ?? 'round', ms));
+  /** When the round after one that ended at `ended` is due: its next slot on the clock, or an interval on, varied. */
+  const dueAfter = (ended: number) => {
+    const ms = interval();
+    const p = phase(ms);
+    return p === null ? ended + ms * jitter : nextOnClock(ended + ms / 2, ms, p);
+  };
+  /** Waits `ms` from `now`: the same now the wait was worked out from, so a slot on the clock is due on it, not a moment past. */
+  const waitFor = (ms: number, now = Date.now()) => {
+    dueAt = now + ms;
     timer = setTimeout(tick, ms);
   };
   const wait = () => {
     jitter = 0.9 + Math.random() * 0.2;
-    waitFor(interval() * jitter);
+    const now = Date.now();
+    waitFor(Math.max(0, dueAfter(now) - now), now);
   };
 
   const tick = async (asked = false) => {
@@ -266,8 +355,7 @@ export function every(
     if (held) {
       if (stopped) return;
       wait();
-      const now = new Date().toISOString();
-      recordRound(opts.name ?? 'round', { started: now, finished: now, ok: null, waiting: held, error: null, everyMs: interval(), next: null });
+      recordHeld(opts.name ?? 'round', held, interval());
       return;
     }
     running = true;
@@ -280,9 +368,10 @@ export function every(
     const controller = new AbortController();
     const limit = typeof opts.timeoutMs === 'function' ? opts.timeoutMs() : opts.timeoutMs ?? roundTimeLimit(interval());
     let limitTimer: NodeJS.Timeout | undefined;
-    // The manor's pace (pace.ts): a scheduled round at below-normal priority, and an agent's first in its turn.
+    // The manor's pace (pace.ts), the owner's setting: a round, asked for or not, at it (kit 2.73.0); a scheduled
+    // agent's first in its turn.
     const p = pace();
-    void paceProcess(p, asked);
+    void paceProcess(p);
     const name = opts.name ?? 'round';
     // The heavy first round, asked for or not; only a scheduled one waits its turn.
     const isFirst = !firstRoundDone(name);
@@ -365,8 +454,6 @@ export function every(
       lastOffline = offline;
       running = false;
       startedAt = null;
-      // Someone's round is over: back to the pace.
-      if (asked) void paceProcess(pace());
       const ended = Date.now();
       lastEnded = ended;
       // A round still running when stop() was called must not set up the next one.
@@ -380,6 +467,7 @@ export function every(
         ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
+        ...(phase() !== null ? { phaseMs: phase()! } : {}),
         next: state().nextRunAt,
         ...(waitedMs >= 1000 ? { waitedMs } : {}),
         ...measured,
@@ -424,7 +512,8 @@ export function every(
     reschedule(): void {
       if (stopped || running || lastEnded === null) return;
       clearTimeout(timer);
-      waitFor(Math.max(0, lastEnded + interval() * jitter - Date.now()));
+      const now = Date.now();
+      waitFor(Math.max(0, dueAfter(lastEnded) - now), now);
     },
     get running() {
       return running;
