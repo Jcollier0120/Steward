@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,7 @@ import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, t
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, routeFor } from './npu-vendors.ts';
+import { expandRoute, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, routeFor, sha256File } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -396,6 +396,33 @@ export function routeWithModel(route: NpuRoute, id: string): NpuRoute {
 }
 
 /**
+ * A candidate's files, measured, as `pinned` would list them: every file in its model's folder (where its `present`
+ * file is, GenieX's %USERPROFILE%\.cache\geniex\models\<org>\<name>, say), by its name there, with its size and
+ * SHA-256. Null where the route doesn't say where its models are (FastFlowLM's), or the folder has no files; the log
+ * says which.
+ */
+export async function candidateFiles(m: Pick<NpuModel, 'present'>, o: { server: string; tools: string; env?: Record<string, string | undefined>; log: (line: string) => void; hash?: (file: string) => Promise<string> }): Promise<BenchReport['run']['files']> {
+  if (!m.present) {
+    o.log(`the candidate's files: not measured, as ${o.server}'s route doesn't say where its models are`);
+    return null;
+  }
+  const dir = path.win32.dirname(expandRoute(m.present, { tools: o.tools, env: o.env }));
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir, { encoding: 'utf8', recursive: true }).filter((n) => statSync(path.join(dir, n)).isFile()).sort();
+  } catch {}
+  if (!names.length) {
+    o.log(`the candidate's files: not measured, as ${dir} ${existsSync(dir) ? 'has none' : "isn't there"}`);
+    return null;
+  }
+  const files: NonNullable<BenchReport['run']['files']> = {};
+  for (const n of names) files[n.split(path.sep).join('/')] = { size: statSync(path.join(dir, n)).size, sha256: await (o.hash ?? sha256File)(path.join(dir, n)) };
+  const bytes = Object.values(files).reduce((a, f) => a + f.size, 0);
+  o.log(`the candidate's files: ${names.length} measured (${mb(bytes)}), each one's size and SHA-256 in the report`);
+  return files;
+}
+
+/**
  * The route's server given its own compile cache for the run (emptied before the first start), and a cap, where it has
  * those. Off the NPU nothing is compiled for a cap (routeOnDevice drops it), so there `cap` is only where the long read
  * goes: the same as an NPU run's, so the two compare.
@@ -555,6 +582,8 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   }
   const { entry, problems } = await setUpRoute(plan, tools, o.io?.setup ?? {}, log, now);
   if (!entry) return finish(1, { code: 'setup', say: problems.join('; ') || 'setup wrote no entry' });
+  // A candidate has no pinned files to report: its own are measured, now that setup has pulled them.
+  if (o.candidate) report.run.files = await candidateFiles(chatModel, { server: route.server, tools, env, log, hash: o.io?.setup?.hash });
 
   // 3. The conditions: how busy the processor is before the start.
   const busy: number[] = [];

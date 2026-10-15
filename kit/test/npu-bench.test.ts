@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -488,4 +489,32 @@ test("a text candidate on a Snapdragon is pulled as one and asked no pictures; w
       assert.deepEqual(s.fake.pictures, []);
     }
   }
+});
+
+test("a candidate's files are measured once it's pulled: each one in its folder, by size and SHA-256; FastFlowLM's aren't, and its log says so", async () => {
+  const C = 'ai-hub-models/Qwen3-4B-Instruct-2507';
+  const s = await scene({ vendor: 'qualcomm' });
+  // Where GenieX's pull puts it, in the scene's %USERPROFILE%: its folder drops no tag, as this id has none.
+  const dir = path.join(s.opts.env.USERPROFILE!, '.cache', 'geniex', 'models', 'ai-hub-models', 'Qwen3-4B-Instruct-2507');
+  const written: Record<string, Buffer> = { 'geniex.json': Buffer.from('{"model_type": "llm"}'), 'part1_of_1.bin': Buffer.alloc(70_000, 7), 'tokenizer/tokenizer.json': Buffer.from('{}') };
+  const pull = async () => {
+    for (const [name, bytes] of Object.entries(written)) {
+      mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      writeFileSync(path.join(dir, name), bytes);
+    }
+    return { code: 0, out: '' };
+  };
+  const { code, report } = await B.npuBench({ ...s.opts, profile: 'quick', candidate: C, io: { ...s.opts.io, setup: { run: pull } } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  const want = Object.fromEntries(Object.entries(written).map(([name, bytes]) => [name, { size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }]));
+  assert.deepEqual(report.run.files, want, 'every file, a folder inside it too, named as in the folder');
+  assert.ok(s.lines.some((l) => l === "the candidate's files: 3 measured (1 MB), each one's size and SHA-256 in the report"), s.lines.join('\n'));
+  const onDisk = JSON.parse(readFileSync(s.opts.out, 'utf8'));
+  assert.deepEqual(onDisk.run.files, want);
+  assert.deepEqual(B.checkSchema(onDisk, B.REPORT_SCHEMA), []);
+  // FastFlowLM keeps its models its own way: its route has no `present`, so nothing says where to look.
+  const lines: string[] = [];
+  const amd = B.candidateRoute(V.NPU_CATALOG.routes.amd, 'qwen3-it:1.7b').models[0];
+  assert.equal(await B.candidateFiles(amd, { server: 'FastFlowLM', tools: s.tools, log: (l: string) => lines.push(l) }), null);
+  assert.deepEqual(lines, ["the candidate's files: not measured, as FastFlowLM's route doesn't say where its models are"]);
 });
