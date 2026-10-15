@@ -3,7 +3,7 @@ import { APP } from '../app.ts';
 import { commitOf, fetchBranch, removeWorktree, showFile } from '../git.ts';
 import { STEWARD_BRANCH } from '../glance.ts';
 import { treeOf, wholePassOf } from '../whole.ts';
-import { runChecks } from './bump.ts';
+import { onlyFlaky, runChecks, type FailedChecks } from './bump.ts';
 import { freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { stewardEmployee } from './selfmerge.ts';
 
@@ -14,7 +14,7 @@ import { stewardEmployee } from './selfmerge.ts';
  * change reached everything, a train). A test the selection missed then holds the kit's release, as a failed release does
  * (self-failed.json, an alarm at once, tried again once a new commit lands on main), instead of reaching every agent. A
  * failure is run once more first, as a PR's checks are (prtest.ts); one Windows ended isn't held, the next round runs it
- * again.
+ * again; nor are two runs whose failing tests each passed in the other (onlyFlaky).
  *
  * The Steward's own release (v<version>), made after every merge, isn't held for it: that would be the whole suite once a
  * PR, more than the affected tests save. The Surveyor runs its whole suite on main once a day (or the Assayer's daily
@@ -55,12 +55,20 @@ export async function wholeSuiteBefore(ctx: Ctx, repo: string, o: { tag: string;
   try {
     say(`${o.tag}: the whole suite first, at ${at} in ${dir}, as its PRs ran only the tests each change reached`);
     const e = stewardEmployee(ctx.settings, repo);
-    const first = await runChecks(ctx, e, dir, { say });
+    const firstFailed: FailedChecks = {};
+    const againFailed: FailedChecks = {};
+    const first = await runChecks(ctx, e, dir, { say, failed: firstFailed });
     const ended = (failed: string) => ({ why: `Windows ended its whole suite at ${at} (${failed})`, retry: true });
     if (first && interrupted(first)) return ended(first);
     if (first) say(`its whole suite once more (${first})`);
-    const again = first ? await runChecks(ctx, e, dir, { say }) : null;
+    const again = first ? await runChecks(ctx, e, dir, { say, failed: againFailed }) : null;
     if (again && interrupted(again)) return ended(again);
+    // Each failing test passed in the other run: flaky, not a test the selection missed, so the kit isn't held for it (on
+    // 2026-10-15 kit 2.74.5 was, a test of the console the first time, a timeout's the second, each passing in the other).
+    if (again && onlyFlaky(firstFailed, againFailed)) {
+      say(`${o.tag}: its whole suite failed twice at ${at}, but no test failed both times, each passing in the other run: flaky, released all the same (the first time: ${first}; the second: ${again})`);
+      return null;
+    }
     if (again) return { why: `its whole suite failed at ${at}${again === first ? ', twice' : ` (the first time: ${first})`}: ${again}`, retry: false };
     say(`${o.tag}: the whole suite passed at ${at}${first ? ` on a second try (the first: ${first})` : ''}`);
     return null;

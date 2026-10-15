@@ -91,6 +91,44 @@ test('a kit whose whole suite fails, twice, is held as a failed release, and the
   assert.equal(wholePassOf(tree()), null);
 });
 
+test('a kit whose whole suite fails twice, but no test both times, is released all the same: flaky, not a test the selection missed', async () => {
+  // Its tests as node --test reports them: one test failing the first time, another the second, each passing in the other;
+  // and while failTests is there, one failing both times.
+  const flaky = path.join(home, 'flaky');
+  const runs = path.join(home, 'runs');
+  const tap = [
+    `if (fs.existsSync(${JSON.stringify(flaky)})) {`,
+    `  const n = fs.existsSync(${JSON.stringify(runs)}) ? Number(fs.readFileSync(${JSON.stringify(runs)}, 'utf8')) : 0;`,
+    `  fs.writeFileSync(${JSON.stringify(runs)}, String(n + 1));`,
+    `  console.log('not ok 1 - ' + (n === 0 ? 'a page started' : 'a slow server'));`,
+    `  if (fs.existsSync(${JSON.stringify(failTests)})) console.log('not ok 2 - the same test');`,
+    '  process.exit(1);',
+    '}',
+    '',
+  ].join('\n');
+  commit('tools/test.js', note('test') + tap);
+  writeFileSync(flaky, '');
+  if (existsSync(ran)) unlinkSync(ran);
+  const out = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  assert.deepEqual(out.map((x) => x.outcome), ['done', 'done'], out.map((x) => x.message).join('\n'));
+  assert.equal(lines().filter((l) => l === 'test').length, 2, 'run once more first');
+  assert.ok(lines().includes('kit-release --publish'), 'the kit released');
+  assert.equal(loadSelfFailures()['kit-v1.1.0'], undefined, "the last round's failure cleared");
+  assert.equal(wholePassOf(tree()), null, "not kept as a whole pass: it didn't pass");
+
+  // A test that failed both times holds it, as before.
+  commit('NOTES.md', 'flaky again\n');
+  unlinkSync(runs);
+  writeFileSync(failTests, '');
+  unlinkSync(ran);
+  const held = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  unlinkSync(failTests);
+  unlinkSync(flaky);
+  assert.deepEqual(held.map((x) => x.outcome), ['failed', 'skipped']);
+  assert.match(held[0].message, /"the same test"/);
+  assert.ok(!lines().some((l) => l.startsWith('kit-release')), 'nothing published');
+});
+
 test("a whole pass is kept only for the Steward's own checks, run whole, with its own kit, at a clean commit", async () => {
   commit('NOTES.md', 'another change\n');
   const steward = stewardEmployee(ctx.settings, checkout);

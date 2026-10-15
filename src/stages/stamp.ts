@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { changeFiles, CHANGES_DIR, CHANGES_README, entryBody, foldEntries, KIT_CHANGES_DIR, stampVersions, type Stamped } from '../entries.ts';
+import { addToEntry, changeFiles, CHANGES_DIR, CHANGES_README, entryBody, foldEntries, fragmentBody, fragmentFiles, isMinor, KIT_CHANGES_DIR, nextFree, stampVersions, type Stamped } from '../entries.ts';
 import { fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { CHANGELOG } from '../kit/notes.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -52,6 +52,36 @@ const listed = (dir: string, sub: string) => {
   return existsSync(at) ? changeFiles(readdirSync(at).map((f) => `${sub}/${f}`), sub) : [];
 };
 
+/** The fragments (changes/<branch>.md: entries.ts) in a folder of a worktree, as repository paths, by name. */
+const fragmentsIn = (dir: string, sub: string) => {
+  const at = path.join(dir, sub);
+  return existsSync(at) ? fragmentFiles(readdirSync(at).map((f) => `${sub}/${f}`), sub) : [];
+};
+
+/**
+ * The fragments stamped into `changelog`: every one under one version, the version the branch waits to release when it
+ * has one (`base`, not released), else the next free one above it, a minor step when one asks. A minor step asked for
+ * while the waiting version is a patch's renames that version's entry. Returns the version, or a note on the first
+ * fragment that says nothing.
+ */
+function stampFragments(dir: string, files: string[], changelog: string, name: string, o: { base: string; released: string[]; taken: string[] }): { version: string; composed: boolean } | { error: string } {
+  const read = files.map((f) => ({ f, frag: fragmentBody(readFileSync(path.join(dir, f), 'utf8')) }));
+  const empty = read.find((x) => !x.frag);
+  if (empty) return { error: `${empty.f} says nothing: that needs its author` };
+  const minor = read.some((x) => x.frag!.minor);
+  const taken = new Set([...o.released, ...o.taken]);
+  const waiting = !o.released.includes(o.base);
+  const version = waiting ? (minor && !isMinor(o.base) ? nextFree(o.base, taken, true) : o.base) : nextFree(o.base, taken, minor);
+  const at = path.join(dir, changelog);
+  let text = existsSync(at) ? readFileSync(at, 'utf8') : null;
+  read.forEach((x, i) => {
+    text = addToEntry(text, name, version, x.frag!.body, i === 0 && waiting && version !== o.base ? o.base : undefined);
+  });
+  writeFileSync(at, text ?? '');
+  for (const f of files) rmSync(path.join(dir, f));
+  return { version, composed: waiting };
+}
+
 /**
  * Stamps the entries in `files` (one folder's) into `changelog` and returns what it wrote: the stamped versions, or a
  * note on the first file that says nothing (or names another version in its heading).
@@ -91,6 +121,7 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     const kitRepo = existsSync(path.join(dir, KIT_VERSION_FILE));
     const own = listed(dir, CHANGES_DIR);
     const kitOwn = kitRepo ? listed(dir, KIT_CHANGES_DIR) : [];
+    const ownFragments = fragmentsIn(dir, CHANGES_DIR);
     // The branch's own, merged by an older Steward unstamped, come in with the merge below.
     const merged = await run('git', ['merge', '--no-ff', '--no-edit', '-m', `Merge ${e.branch} into ${pr.head}: stamped by the Steward`, `origin/${e.branch}`], { cwd: dir, timeoutMs: 5 * 60_000 });
     if (merged.code !== 0) {
@@ -99,7 +130,8 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
     }
     const files = listed(dir, CHANGES_DIR);
     const kitFiles = kitRepo ? listed(dir, KIT_CHANGES_DIR) : [];
-    if (!own.length && !kitOwn.length) return { done: false, nothing: true, note: 'it writes no entry in changes/, so it merges as it is' };
+    const fragments = fragmentsIn(dir, CHANGES_DIR);
+    if (!own.length && !kitOwn.length && !ownFragments.length) return { done: false, nothing: true, note: 'it writes no entry in changes/, so it merges as it is' };
     const read = () => agreedVersion(e.versionFiles.map((f) => [f, existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), 'utf8') : null] as [string, string | null]));
     const base = read();
     if (!('version' in base)) return { done: false, note: `its version can't be read once ${e.branch} is merged in: ${base.error}` };
@@ -115,6 +147,13 @@ export async function stamp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: st
       changed.push(...settleVersion(dir, settledFiles(dir, e.versionFiles), version), CHANGELOG, ...files);
       did.push(`v${version}${stamped.length > 1 ? ` (with ${stamped.slice(0, -1).map((s) => `v${s.version}`).join(', ')})` : ''}`);
       for (const s of stamped) if (s.why) did.push(`v${s.version} for ${s.file}, since ${s.why}`);
+    }
+    if (fragments.length) {
+      const r = stampFragments(dir, fragments, CHANGELOG, e.name, { base: version, released: o.released, taken: o.taken });
+      if ('error' in r) return { done: false, note: r.error };
+      changed.push(...settleVersion(dir, settledFiles(dir, e.versionFiles), r.version), CHANGELOG, ...fragments);
+      did.push(r.composed ? `v${r.version}, its entry joining the changes that release brings${r.version !== version ? ` (a minor step, from v${version})` : ''}` : `v${r.version}`);
+      version = r.version;
     }
     if (kitFiles.length) {
       const was = readFileSync(path.join(dir, KIT_VERSION_FILE), 'utf8');
