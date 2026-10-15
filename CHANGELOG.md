@@ -15,7 +15,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - Work that waits says which line it waits in: a turn of the checks pace, the work line, the first-round line, or an accelerator.
 - It says what holds each version queue: the pull request that isn't ready, since when, and the pull requests waiting behind it.
 - What each run of the checks came to is kept by the code it ran on, so a pass on the same code can be found later, whatever the commit.
-- Manor's next version has a **Work** page that gathers this from every agent on the PC, and from the licence's other PCs when Other PCs is on.
+- Manor 0.16.161 has a **Work** page that gathers this from every agent on the PC, and from the licence's other PCs when Other PCs is on.
 
 ### What changed
 
