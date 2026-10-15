@@ -13,7 +13,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The Steward's chosen tests now run as many test files at a time as their share of the processor has room for (12 at a third of 18 processors), not one per processor.
 - A command stopped at its time limit now says "stopped after N minutes, its time limit at the checks pace" instead of "Command failed" and its whole command line.
 - Two of the Steward's own tests, one for the NPU benchmark's energy reading and one for renaming a shared package set, failed now and then at the checks pace, with nothing wrong, and made a vouch or a kit release run again. They no longer depend on how fast the PC runs them.
-- This brings kit 2.74.2.
+- This brings kit 2.74.2. It also carries the NPU benchmark's fixes made on another PC: it runs at each NPU generation's own prompt length, counts an energy figure only when the battery's reading can tell it, and runs on a Snapdragon's GenieX.
 
 ### Before you update
 
