@@ -2,6 +2,28 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.74.0
+
+**A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
+
+### What's new
+
+- **spec/STAFF-PAGE.md**: the layout of an agent that serves MCP (Reeve, the Assayer): what needs you first, then at a glance, Connect your AI, Kept, then the agent's own sections. Plus the rules that keep such a page from becoming a data dump: a row is one line, long output opens beside the page rather than in it, what's fine is one line, counts go in headings.
+- **react/staff.tsx**, in the react part's index:
+  - `StaffLayout`: that order.
+  - `NeedsYou`: what the person must look at or do, a card each, its edge the colour of its badge.
+  - `Glance`: a row of tiles, each a number, a line and a colour, going to its section. Reeve's at a glance.
+  - `ConnectAI`: how to give an AI tool the agent's tools, as tabs per tool, the one-press connect where the agent has one, and the line for the AI's instructions. Open until an AI is connected, then one line naming it and when it last used the tools.
+  - `Kept`: what the agent read so the AI didn't have to, its three totals and what each part read.
+  - `Row`: one line of a list (its badge, name, what matters, its buttons), its details opening under it.
+  - `SidePanel` and `Output`: long output (a log, a failing test's output, a report) in a panel beside the page.
+  - `Paste` (text with Copy), `useFold` (a fold the browser remembers) and `showSection`.
+- Their styles are in `UI_CSS` (`ui-glance`, `ui-tile`, `ui-need`, `ui-line`, `ui-list-row`, `ui-connect`, `ui-kept`, `ui-paste`, `ui-output`, `ui-side-panel`), every colour a theme variable.
+
+### For an agent
+
+- Nothing changes until a page uses them. An agent that serves MCP lays its page out as spec/STAFF-PAGE.md says, with these parts in place of its own tiles, connect card and output blocks.
+
 ## 2.73.5
 
 **Every folder the kit compares, it compares by its real path: through a junction, a link or a Dev Drive mounted in a folder, one folder is one folder.**
