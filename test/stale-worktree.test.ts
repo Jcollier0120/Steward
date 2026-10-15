@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { realOf, removeWorktree, worktrees } from '../src/git.ts';
+import { realOf, removeWorktree, worktreeRecords, worktrees } from '../src/git.ts';
 import { projectsFrom } from '../src/kit/manor.ts';
 import { run } from '../src/run.ts';
 import { DEFAULT_SETTINGS, type Employee } from '../src/settings.ts';
@@ -67,6 +67,32 @@ test('the work folder behind a junction: its worktrees are still found and remov
   await freshWorktree(run, s, checkout, dir, 'HEAD', '--detach');
   await freshWorktree(run, s, checkout, dir, 'HEAD', '--detach');
   assert.ok(existsSync(path.join(dir, 'package.json')));
+});
+
+test("git's records of worktrees, read from its files, are what `git worktree list` gives, and git is asked only for what changes something", async () => {
+  const { checkout } = fakeEmployee(path.join(tmp, 'records'));
+  const workRoot = path.join(tmp, 'records', 'work');
+  mkdirSync(workRoot);
+  const [kept, gone, mine] = ['kept', 'gone', 'mine'].map((n) => path.join(workRoot, n));
+  for (const dir of [kept, gone, mine]) sh(checkout, 'worktree', 'add', '--quiet', '--detach', dir, 'HEAD');
+  const spelled = (p: string) => realOf(p).toLowerCase();
+  const listed = (await worktrees(run, checkout)).slice(1).map((w) => spelled(w.path)).sort();
+  assert.deepEqual(worktreeRecords(checkout)!.map((w) => spelled(w.path!)).sort(), listed);
+  rmSync(gone, { recursive: true, force: true });
+  assert.deepEqual(worktreeRecords(checkout)!.filter((w) => w.gone).map((w) => spelled(w.path!)), [spelled(gone)]);
+
+  const asked: string[] = [];
+  const counted: typeof run = (cmd, args, o) => (asked.push(args.slice(0, 2).join(' ')), run(cmd, args, o));
+  // One deleted by hand is still cleared from git's records when another is removed, as before.
+  assert.deepEqual(await removeWorktree(counted, checkout, mine), [`removed the worktree ${mine}`]);
+  assert.deepEqual(asked.splice(0), ['worktree remove', 'worktree prune']);
+  assert.equal(await registered(checkout, gone), false);
+  // Nothing left to clear: the removal alone, and for a folder that isn't there, nothing at all.
+  assert.deepEqual(await removeWorktree(counted, checkout, kept), [`removed the worktree ${kept}`]);
+  assert.deepEqual(asked.splice(0), ['worktree remove']);
+  assert.deepEqual(await removeWorktree(counted, checkout, path.join(workRoot, 'never')), []);
+  assert.deepEqual(asked, []);
+  assert.deepEqual(worktreeRecords(checkout), []);
 });
 
 test('the work folder behind a junction is worked in at its real path, where a script run from it finds itself', () => {

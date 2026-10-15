@@ -2,21 +2,29 @@ import { execFile, type ExecFileOptionsWithStringEncoding } from 'node:child_pro
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { signedIn } from './git-auth.ts';
-import { pacedCommand } from './kit/checks-pace.ts';
+import { pacedCommand, type Paced } from './kit/checks-pace.ts';
 import { sharesConsole } from './kit/console.ts';
 import { gitExe } from './kit/git-exe.ts';
+import { endProcesses } from './kit/native.ts';
 
 /** What a command did: its exit code, and what it printed. */
 export interface Ran {
   code: number;
   out: string;
   err: string;
+  /** Stopped at its time limit, with everything it started. */
+  timedOut?: boolean;
 }
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
+  /**
+   * A time limit as it is, not lengthened at the checks pace: a vouch's (stages/vouchtime.ts), measured on the clock as
+   * its runs were, paced. The command stops at the earlier of it and its usual limit.
+   */
+  limitMs?: number;
   /** Written to its standard input, which is then closed (git credential fill reads its question there). */
   input?: string;
   /**
@@ -117,8 +125,9 @@ export function useDotnet(dir: string): void {
   dotnetDir = undefined;
 }
 
+const WINDOWS = process.platform === 'win32';
 /** In the background: no terminal, so neither its input nor its output is one. */
-const BACKGROUND = process.platform === 'win32' && !process.stdin.isTTY && !process.stdout.isTTY;
+const BACKGROUND = WINDOWS && !process.stdin.isTTY && !process.stdout.isTTY;
 /** git and gh, the Steward's most frequent commands, whose own programs (git-remote-https) were seen to open no window. A build's (dotnet, npm) might. */
 const SHARING = new Set(['git', 'gh']);
 
@@ -138,8 +147,27 @@ export function startOptions(cmd: string, o: { shares: boolean; background: bool
  * The real runner. The Node running the Steward goes first on PATH, so npm's scripts find the same one; then a
  * .NET with an SDK, as DOTNET_ROOT too, so a .NET employee's commands find one.
  */
-/** How much longer a command run at the checks pace may take than its time limit says. */
+/** How much longer a command run at the checks pace may take than its time limit says, when its kit doesn't say (Paced.slower). */
 export const PACED_TIME = 4;
+
+/**
+ * How long a command may run: its own time limit (20 minutes unless it says), and at the checks pace that stretched by
+ * as much as the cap slows it, plus the wait for a turn behind other runs (the kit's pacedSlower and CHECKS_TURN_MS,
+ * kit 2.74.2). A fixed four times, for a quarter of the processor, stopped Reeve's tests at 80 minutes on 2026-10-14,
+ * held to two of the laptop's 18 processors and sharing them with another run: a third of the way through, nothing
+ * failed.
+ */
+export function timeLimit(timeoutMs: number | undefined, paced: Paced | null, resolved: string): number {
+  const own = timeoutMs ?? 20 * 60_000;
+  if (!paced || paced.file === resolved) return own;
+  return own * (paced.slower ?? PACED_TIME) + (paced.waitMs ?? 0);
+}
+
+/** What a run stopped at its time limit says, in place of Node's "Command failed: <the whole command line>". */
+export function stoppedForTime(ms: number, paced: boolean): string {
+  const span = ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} s`;
+  return `stopped after ${span}, its time limit${paced ? ' at the checks pace' : ''}: it was still running`;
+}
 
 const runPlain: Runner = async (cmd, args, opts = {}) => {
   const [resolved, resolvedArgs] = resolveCommand(cmd, args);
@@ -156,24 +184,42 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
     env.GH_TELEMETRY ??= '0';
     env.GH_NO_UPDATE_NOTIFIER ??= '1';
   }
-  // At the checks pace a command gets four times its time: held to the gentle cap below everything else, and waiting its
-  // turn behind other runs, it takes longer (the Assayer's suite on a busy PC: 73 s free, 219 s paced), and a run stopped
-  // for that would be taken for a failure.
-  const timeout = (opts.timeoutMs ?? 20 * 60_000) * (paced && paced.file !== resolved ? PACED_TIME : 1);
+  // At the checks pace a command gets as much more time as the cap slows it, and its wait for a turn (timeLimit): held to
+  // the cap below everything else, and waiting its turn behind other runs, it takes longer (the Assayer's suite on a busy
+  // PC: 73 s free, 219 s paced), and a run stopped for that would be taken for a failure. A limit as it is (limitMs, a
+  // vouch's) stops it sooner.
+  const usual = timeLimit(opts.timeoutMs, paced, resolved);
+  const timeout = Math.max(1, Math.min(usual, opts.limitMs ?? usual));
   return new Promise((resolve) => {
+    let timedOut = false;
+    let timer: NodeJS.Timeout | undefined;
     const child = execFile(
       file,
       argv,
-      // execFile hands its options to spawn, detached among them, though its type doesn't name it.
-      { cwd: opts.cwd, env, timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
+      // execFile hands its options to spawn, detached among them, though its type doesn't name it. On Windows the time
+      // limit is our own timer (below), so it ends the whole tree.
+      { cwd: opts.cwd, env, timeout: WINDOWS ? 0 : timeout, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...startOptions(cmd, { shares: sharesConsole(), background: BACKGROUND }) } as ExecFileOptionsWithStringEncoding,
       (e: any, stdout: string, stderr: string) => {
+        clearTimeout(timer);
         // gh not on PATH: one plain line on what to do, not a spawn error.
         if (e?.code === 'ENOENT' && cmd === 'gh') return resolve({ code: 127, out: '', err: NO_GH });
         const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
-        const err = [String(stderr ?? ''), e && typeof e.code !== 'number' ? String(e.message) : ''].filter(Boolean).join('\n');
-        resolve({ code, out: String(stdout ?? ''), err });
+        if (!WINDOWS && e?.killed && e.signal === 'SIGTERM') timedOut = true;
+        // Stopped at its time limit: said so, in place of Node's "Command failed: <the whole command line>".
+        const stopped = timedOut ? stoppedForTime(timeout, !!paced && paced.file !== resolved) : '';
+        const err = [String(stderr ?? ''), stopped || (e && typeof e.code !== 'number' ? String(e.message) : '')].filter(Boolean).join('\n');
+        resolve({ code, out: String(stdout ?? ''), err, ...(timedOut ? { timedOut } : {}) });
       },
     );
+    // At its time limit a command is ended with everything it started (taskkill /T), while it still holds them together:
+    // execFile's own limit ends only the program it started, and a test run under npm, or under the pace's launcher, ran on.
+    if (WINDOWS && child.pid) {
+      const pid = child.pid;
+      timer = setTimeout(() => {
+        timedOut = true;
+        endProcesses([pid]);
+      }, timeout);
+    }
     if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 };
@@ -182,7 +228,7 @@ const runPlain: Runner = async (cmd, args, opts = {}) => {
 export const run: Runner = signedIn(runPlain);
 
 /** A command line from an employee's settings, run in its folder. */
-export const runLine = (runner: Runner, line: string, opts: RunOptions = {}) => {
+export const runLine = (runner: Runner, line: string, opts: RunOptions = {}): Promise<Ran> => {
   const [cmd, ...args] = splitCommand(line);
   if (!cmd) return Promise.resolve({ code: 2, out: '', err: 'no command' });
   return runner(cmd, args, opts);

@@ -12,6 +12,7 @@ import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs,
 import { refreshNpu } from './npu-refresh.ts';
 import { npuIdleStopMinutes } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
+import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 import { kitVersion, testNpuEmbed, testNpuEntry } from './setup.ts';
 
@@ -389,20 +390,28 @@ export function manorPorts(servers: Pick<ReapedServer, 'base'>[]): Set<number> {
   return ports;
 }
 
-/** The same program, by its full path; a path Windows wouldn't give (an elevated process) is never a match. */
-export const sameProgram = (a: string, b: string) => !!a && !!b && path.win32.resolve(a).toLowerCase() === path.win32.resolve(b).toLowerCase();
+/**
+ * The same program, by its real path (spec/DEV-DRIVES.md): Windows names a process's program as it was started, through
+ * a junction or a mounted folder if it was, and a setting may name it the other way. A path Windows wouldn't give (an
+ * elevated process) is never a match.
+ */
+export const sameProgram = (a: string, b: string) => !!a && !!b && samePath(a, b);
 
 /**
  * The manor's own servers folders, where setup puts what it installs: the tools home's `servers` (toolsHome: the
  * accelerators' folder, or %USERPROFILE%\.reeve on a PC set up before kit 2.31.0), the accelerators' folder's, and
- * Reeve's, each once.
+ * Reeve's, each once, however each is spelled.
  */
 export function manorServerDirs(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string[] {
   const dirs = [path.join(toolsHome(env, home), 'servers'), path.join(acceleratorsHome(env), 'servers'), ...(env.REEVE_HOME ? [] : [path.join(home, '.reeve', 'servers')])];
-  return [...new Map(dirs.map((d) => [path.win32.resolve(d).toLowerCase(), d])).values()];
+  return [...new Map(dirs.map((d) => [pathKey(d), d])).values()];
 }
 
-const isUnder = (file: string, dir: string) => path.win32.resolve(file).toLowerCase().startsWith(path.win32.resolve(dir).toLowerCase() + '\\');
+/** `file` is inside `dir` (not `dir` itself), by their real paths. */
+const isUnder = (file: string, dir: string) => {
+  const [f, d] = [pathKey(file), pathKey(dir)];
+  return f !== d && keyInside(f, d);
+};
 
 /**
  * Whether a model server's process is the manor's own, and so may be stopped as an orphan: its program's path is

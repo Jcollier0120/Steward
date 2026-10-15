@@ -12,7 +12,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, pacedCommand } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -21,12 +21,8 @@ const manorWith = (name: string, settings: unknown) => {
   return dir;
 };
 
-test("the cap by default: the gentle pace's, a quarter of the processor and two processors' worth at most", () => {
-  assert.equal(checksCap(18), 1111, '18 processors: two of them');
-  assert.equal(checksCap(16), 1250);
-  assert.equal(checksCap(8), 2500, 'eight: a quarter (two)');
-  assert.equal(checksCap(4), 2500, 'four: a quarter (one)');
-  assert.equal(checksCap(1), 2500);
+test('the cap by default (kit 2.74.2): a third of the processor, however many processors it has', () => {
+  assert.equal(checksCap(), 3333);
 });
 
 test("the memory a run may take: each program an eighth of the PC's, 2 to 6 GB; the job a quarter, 4 to 12 GB", () => {
@@ -38,25 +34,46 @@ test("the memory a run may take: each program an eighth of the PC's, 2 to 6 GB; 
 });
 
 test("the launcher's first word: the cap, memory per program and for the job, runs at once", () => {
-  assert.equal(CHECKS_AT_ONCE, 2);
-  assert.equal(checksLimits(1111, { processMb: 6144, jobMb: 12288 }), '1111,6144,12288,2');
+  assert.equal(CHECKS_AT_ONCE, 3);
+  assert.equal(checksLimits(3333, { processMb: 6144, jobMb: 12288 }), '3333,6144,12288,3');
   assert.equal(checksLimits(5000, { processMb: 1, jobMb: 2 }, 0), '5000,1,2,0');
 });
 
 test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
   const none = path.join(home, 'no-manor');
-  assert.equal(checksPaceCap(none, {}, 18), 1111);
-  assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}, 18), 7000);
-  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}, 18), 0);
-  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}, 18), 0, '100%: no cap');
-  assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}, 18), 1000, 'never under a tenth');
-  assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}, 18), 1111, 'anything else: as if unsaid');
-  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}, 18), 0, "Settings' pace at full lifts it: the one switch");
-  assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}, 18), 4000);
-  assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }, 18), 6000, 'the variable says instead of Manor');
-  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }, 18), 0);
-  assert.equal(checksPaceCap(manorWith('m-t', { checksPace: 70 }), { NODE_TEST_CONTEXT: 'child' }, 18), 0, "a test's commands aren't paced");
-  assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: '50' }, 18), 5000);
+  assert.equal(checksPaceCap(none, {}), 3333);
+  assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}), 7000);
+  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}), 0);
+  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}), 0, '100%: no cap');
+  assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}), 1000, 'never under a tenth');
+  assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}), 3333, 'anything else: as if unsaid');
+  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}), 0, "Settings' pace at full lifts it: the one switch");
+  assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}), 4000);
+  assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }), 6000, 'the variable says instead of Manor');
+  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }), 0);
+  assert.equal(checksPaceCap(manorWith('m-t', { checksPace: 70 }), { NODE_TEST_CONTEXT: 'child' }), 0, "a test's commands aren't paced");
+  assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: '50' }), 5000);
+});
+
+test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap slows the work, and as many test files at once as it has room for', () => {
+  assert.equal(pacedSlower(1111), 9, 'two of 18 processors: nine times');
+  assert.equal(pacedSlower(2500), 4, 'a quarter: four, as it always was');
+  assert.equal(pacedSlower(3333), 4, 'a third, the default: four');
+  assert.equal(pacedSlower(5000), 4, 'never under four');
+  assert.equal(pacedSlower(0), 1, 'no cap: its own time');
+  assert.equal(pacedTestConcurrency(1111, 18), 4, "two of 18 processors' worth: four files at once, not 17");
+  assert.equal(pacedTestConcurrency(3333, 18), 12, 'a third of 18 processors, the default: twelve');
+  assert.equal(pacedTestConcurrency(2500, 4), 2, 'one processor: two at least');
+  assert.equal(pacedTestConcurrency(5000, 16), 16);
+  const node = process.execPath;
+  assert.deepEqual(withTestConcurrency(node, ['--import=./x.ts', '--test', 'a.test.ts'], 4), ['--import=./x.ts', '--test', '--test-concurrency=4', 'a.test.ts']);
+  assert.deepEqual(withTestConcurrency('node', ['--test'], 2), ['--test', '--test-concurrency=2']);
+  assert.deepEqual(withTestConcurrency(node, ['--test', '--test-concurrency=8', 'a'], 4), ['--test', '--test-concurrency=8', 'a'], 'its own says');
+  assert.deepEqual(withTestConcurrency(node, ['script.js', '--test'], 4), ['script.js', '--test'], "a script's own --test");
+  assert.deepEqual(withTestConcurrency(node, ['--import', 'x.ts', '--test'], 4), ['--import', 'x.ts', '--test'], "an option's value apart: left as it is");
+  assert.deepEqual(withTestConcurrency(node, ['-e', '0'], 4), ['-e', '0'], 'no --test');
+  assert.deepEqual(withTestConcurrency('npm', ['test'], 4), ['test'], "an npm script's node isn't seen");
+  assert.deepEqual(withTestConcurrency('C:\\x\\vitest.cmd', ['--test'], 4), ['--test'], 'not node');
 });
 
 test('the launcher: one for the PC, beside the gentle DLL, a new one for a new source; compiled to a name of its own', () => {
@@ -86,7 +103,10 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.deepEqual(logged, [], 'the launcher was built');
   assert.equal(p.file, checksPaceExe());
   assert.deepEqual(p.args, [checksLimits(5000), process.execPath, 'x']);
+  assert.deepEqual([p.slower, p.waitMs], [4, CHECKS_TURN_MS], 'half the processor: four times its time, and the wait for a turn');
   assert.equal(p.env.MSBUILDDISABLENODEREUSE, '1', ".NET's build servers don't stay behind in the job");
+  const tests = await pacedCommand(process.execPath, ['--test', 'a.test.ts'], { env: { KIT_CHECKS_PACE: '25' }, home: path.join(home, 'no-manor'), processors: 16 });
+  assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for');
   const script = 'console.log(JSON.stringify([process.argv.slice(1), require("os").getPriority()])); console.error("e"); process.exit(7)';
   const args = ['a b', '"q"', '', 'C:\\x\\y z\\'];
   const noTurn = checksLimits(5000, checksMemory(), 0);
