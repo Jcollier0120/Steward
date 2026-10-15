@@ -383,7 +383,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     report.played = { ...played, dataDir: dir };
     log(`Played: ${playedSay(played, dir, catalog)}. A rehearsal, so npu-vendors.json is left as it is.`);
   } else if (playing) log(`Running ${generation}'s starting values on this ${npu!.generation ?? 'NPU'}: a rehearsal, so npu-vendors.json is left as it is.`);
-  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
+  // This PC's cards, so its embeddings take the turn setup gives them (on the graphics, the graphics').
+  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } }, cards: d.cards })!;
   add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
   // 2. Its server and models, as setup does them, each step timed.

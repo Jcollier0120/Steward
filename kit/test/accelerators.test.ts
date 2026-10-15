@@ -803,6 +803,79 @@ test('embeddings go to an accelerator that serves them, and a server can be left
   }
 });
 
+test("an endpoint's turn: a graphics card's or the processor's is kept, the NPU's or anything else isn't; a vision model on the chat server takes chat's", () => {
+  const cfg = config({
+    accelerators: [
+      {
+        id: 'npu', kind: 'npu', name: 'NPU',
+        chat: { baseUrl: 'http://127.0.0.1:18183', model: 'c', turn: 'npu' },
+        embed: { baseUrl: 'http://127.0.0.1:18186', model: 'e', turn: 'gpu-intel-r-graphics' },
+      },
+      { id: 'gpu-a', kind: 'gpu', name: 'A', chat: { baseUrl: 'http://127.0.0.1:18191', model: 'c', turn: 'cpu' }, vision: { model: 'v' }, embed: { baseUrl: 'http://127.0.0.1:18192', model: 'e', turn: 'GPU 1' } },
+    ],
+  });
+  const [npu, card] = cfg.accelerators;
+  assert.equal(npu.chat!.turn, undefined, "the NPU's own turn is no other device's");
+  assert.equal(npu.embed!.turn, 'gpu-intel-r-graphics');
+  assert.equal(card.chat!.turn, 'cpu');
+  assert.equal(card.vision!.turn, 'cpu', "on chat's server, chat's turn");
+  assert.equal(card.embed!.turn, undefined, 'not an id');
+});
+
+test("the turn a kind takes: its endpoint's other device, with that one's slots and name when it has an entry; else its own", () => {
+  const npu = { id: 'npu', name: 'NPU', slots: 1, chat: { baseUrl: 'http://127.0.0.1:1', model: 'c' }, embed: { baseUrl: 'http://127.0.0.1:2', model: 'e', turn: 'gpu-intel-r-graphics' } };
+  assert.deepEqual(core.turnOf(npu, 'chat'), { id: 'npu', slots: 1 });
+  assert.deepEqual(core.turnOf(npu, 'embed'), { id: 'gpu-intel-r-graphics', slots: 1 }, 'no entry: one slot');
+  assert.deepEqual(core.turnOf(npu, 'embed', [{ id: 'gpu-intel-r-graphics', slots: 2 }]), { id: 'gpu-intel-r-graphics', slots: 2 });
+  assert.deepEqual(core.turnOf({ ...npu, embed: { ...npu.embed, turn: 'npu' } }, 'embed'), { id: 'npu', slots: 1 }, 'its own id is its own turn');
+  assert.deepEqual(A.turnFor(npu, 'chat'), { id: 'npu', name: 'NPU', slots: 1 });
+  assert.deepEqual(A.turnFor(npu, 'embed', [{ id: 'gpu-intel-r-graphics', name: 'Intel Graphics', slots: 2 }]), { id: 'gpu-intel-r-graphics', name: 'Intel Graphics', slots: 2 });
+  assert.equal(A.turnFor(npu, 'embed').id, 'gpu-intel-r-graphics');
+  assert.ok(A.turnFor(npu, 'embed').name, 'named from this PC without an entry');
+});
+
+test("the PC's lines include a device an entry's server takes the turn of, once, whether it has an entry of its own or not", () => {
+  const g = 'gpu-intel-r-graphics';
+  const npu = { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: 'http://127.0.0.1:18183', model: 'c' }, embed: { baseUrl: 'http://127.0.0.1:18186', model: 'e', turn: g } };
+  const ids = (raw: unknown) => acceleratorLines(config(raw)).map((l: any) => [l.id, l.slots]).sort();
+  assert.deepEqual(ids({ accelerators: [npu] }), [[g, 1], ['npu', 1]]);
+  assert.deepEqual(ids({ accelerators: [npu, gpu(g, { slots: 2, chat: { baseUrl: 'http://127.0.0.1:18191', model: 'q' } } as any)] }), [[g, 2], ['npu', 1]], 'its own entry, once');
+  assert.deepEqual(ids({ accelerators: [{ ...npu, enabled: false }, { id: 'cpu', kind: 'cpu', chat: { baseUrl: 'http://127.0.0.1:18199', model: 'q' } }] }), [['cpu', 1], ['npu', 1]], 'one turned off takes no turn');
+});
+
+test("an NPU's embedding server on the graphics answers in the graphics' turn while the NPU's is held (its chat writing); without a turn it waits for the NPU's", async () => {
+  fresh();
+  const server = await fakeServer();
+  const g = 'gpu-intel-r-graphics';
+  const npuEntry = (embed: object) => ({ id: 'npu', kind: 'npu', name: 'NPU', slots: 1, chat: { baseUrl: 'http://127.0.0.1:9', model: 'c' }, embed: { baseUrl: server.baseUrl, model: 'e', ...embed } });
+  const releaseNpu = hold(npuLockDir);
+  try {
+    const beside = new Npu(config({ accelerators: [npuEntry({ turn: g })] }));
+    const r = await beside.embed(['one', 'two'], { lane: 'interactive' });
+    assert.deepEqual(r.vectors, [[0, 1], [1, 1]]);
+    assert.equal(r.accelerator.id, 'npu', "still the NPU's embeddings");
+    assert.equal(A.readFailure('npu'), null);
+    // In the graphics' line: while the graphics are held (a card entry's vision on them), it waits there.
+    const releaseG = hold(lockDirFor(g));
+    let done = false;
+    const waiting = beside.embed(['three'], { lane: 'interactive' }).then((x) => ((done = true), x));
+    await sleep(paced(300));
+    assert.equal(done, false, "waits for the graphics' turn");
+    releaseG();
+    assert.deepEqual((await waiting).vectors, [[0, 1]]);
+    // Without a turn: the NPU's, held, so it waits for it.
+    const seen = server.seen.length;
+    const own = new Npu(config({ accelerators: [npuEntry({})] })).embed(['four'], { lane: 'interactive' });
+    await sleep(paced(300));
+    assert.equal(server.seen.length, seen, "waits for the NPU's turn");
+    releaseNpu();
+    assert.deepEqual((await own).vectors, [[0, 1]]);
+  } finally {
+    releaseNpu();
+    await server.close();
+  }
+});
+
 // ---------------------------------------------------------------- starting a server
 
 test("OpenVINO Model Server is ready once it lists its model: an empty /v1/models while it loads is busy; any other server's is ready", async () => {

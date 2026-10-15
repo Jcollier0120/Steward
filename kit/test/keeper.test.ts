@@ -519,6 +519,33 @@ test("Intel's embedding server (a second OpenVINO Model Server) is looked after 
   assert.equal(python.some((s) => s.base === 'http://127.0.0.1:18186'), false);
 });
 
+test("the NPU 3720's embedding server on the graphics (its turn) is looked after in the graphics' turn, with the NPU's idle time; its chat keeps the NPU's", async () => {
+  const { otherTurn, lockDirsOf } = await import('./fixture/src/kit/keeper.ts');
+  const G = 'gpu-intel-r-graphics';
+  const withTurn = (more: object[] = []) => {
+    const raw = npuRaw(OVMS, OVMS);
+    const [npu, ...rest] = raw.accelerators as any[];
+    return [{ ...npu, embed: { ...npu.embed, turn: G } }, ...rest, ...more];
+  };
+  const list = reapedServers(withTurn() as any, 'C:\\logs', { npuMs: 7 * MIN, otherMs: 5 * MIN }, 'C:\\locks\\npu');
+  const chat = list.find((s) => s.base === 'http://127.0.0.1:18183')!;
+  const embed = list.find((s) => s.base === 'http://127.0.0.1:18186')!;
+  assert.deepEqual([chat.acc.id, chat.lockDirs], ['npu', ['C:\\locks\\npu']]);
+  assert.deepEqual([embed.acc.id, embed.acc.kind, embed.lockDirs, embed.idleMs, embed.spec.logFile], [G, 'gpu', [`C:\\locks\\${G}`], 7 * MIN, 'C:\\logs\\npu.embed.log'], "the graphics' one slot, the NPU route's idle time, the NPU's log");
+  // A card entry on the same graphics: its slots and name, and the keeper's own lock folders.
+  const card = { id: G, kind: 'gpu', name: 'Intel Graphics', slots: 2, chat: { baseUrl: 'http://127.0.0.1:18195', model: 'q', startCommand: [LLAMA, '--port', '18195'] } };
+  const shared = reapedServers(withTurn([card]) as any, 'C:\\logs', { npuMs: 7 * MIN, otherMs: 5 * MIN }, lockDirsOf);
+  const e2 = shared.find((s) => s.base === 'http://127.0.0.1:18186')!;
+  assert.deepEqual([e2.acc.name, e2.lockDirs], ['Intel Graphics', lockDirsOf({ id: G, kind: 'gpu', slots: 2 })]);
+  assert.deepEqual(shared.find((s) => s.base === 'http://127.0.0.1:18195')!.lockDirs, e2.lockDirs, "the card's own server shares that turn");
+  // otherTurn: none for its own accelerator, the NPU, or nothing at all.
+  const npu = withTurn()[0];
+  assert.equal(otherTurn(npu, 'chat', []), null);
+  assert.equal(otherTurn({ ...npu, embed: { ...npu.embed, turn: 'npu' } }, 'embed', []), null);
+  assert.deepEqual(otherTurn(npu, 'embed', [card as any]), { id: G, kind: 'gpu', name: 'Intel Graphics', slots: 2 });
+  assert.equal(otherTurn(npu, 'embed', [])!.slots, 1);
+});
+
 // ---------------------------------------------------------------- an idle stop never races a request
 
 test('an idle stop never races a request: one in flight keeps its server; one that took the NPU after the look makes the stop give way; one arriving during the stop waits, then starts it again', async () => {

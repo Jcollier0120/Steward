@@ -454,13 +454,42 @@ export function candidates(
 /** An accelerator's lock folders, one per slot: `locks\npu` for the NPU, `locks\<id>`, `<id>.2` … for the others. */
 export const lockDirsOf = (acc: { id: string; slots?: number }) => slotDirs(lockDirFor(acc.id), core.lockFoldersOf(acc).length);
 
+/**
+ * The accelerator whose turn a request of this kind takes on `acc` (the core's turnOf), named for its messages: its
+ * own, or the device its endpoint's `turn` names, whose server runs there (the NPU 3720's embeddings, on the
+ * processor's graphics). `list` gives that device's slots and name when it has an entry; else one slot, and its name
+ * from this PC (hardware.json).
+ */
+export function turnFor(acc: Pick<Accelerator, 'id' | 'name' | 'slots'> & Partial<Pick<Accelerator, Work>>, work: Work, list: ReadonlyArray<Pick<Accelerator, 'id' | 'name' | 'slots'>> = []): { id: string; name: string; slots: number } {
+  const t = core.turnOf(acc, work, list);
+  if (t.id === acc.id) return { id: acc.id, name: acc.name, slots: acc.slots };
+  return { ...t, name: list.find((x) => x.id === t.id)?.name ?? core.acceleratorName(core.kindOfId(t.id) ?? 'gpu', t.id, readHardware()) };
+}
+
+/**
+ * The devices whose turns the entries' servers take (an endpoint's `turn`) that have no entry of their own: the NPU
+ * 3720's graphics, on a PC whose graphics serve nothing else. Their lines are the PC's too, for a status page.
+ */
+export function turnsWithoutEntry(list: Accelerator[]): { id: string; name: string; slots: number }[] {
+  const out = new Map<string, { id: string; name: string; slots: number }>();
+  for (const a of list) {
+    if (a.enabled === false) continue;
+    for (const w of ['chat', 'vision', 'embed'] as const) {
+      if (!a[w]) continue;
+      const t = turnFor(a, w, list);
+      if (t.id !== a.id && !list.some((x) => x.id === t.id)) out.set(t.id, t);
+    }
+  }
+  return [...out.values()];
+}
+
 export type Look = core.Look;
 
 /**
  * Its line on disk (Reeve's lineState), with this process's own tickets replaced by `localWaiting`:
  * its requests already headed there, whether they hold a ticket yet or not.
  */
-export function lineLook(acc: Accelerator, localWaiting = 0): Look {
+export function lineLook(acc: { id: string; slots?: number }, localWaiting = 0): Look {
   const dirs = lockDirsOf(acc);
   const s = lineState(dirs);
   const others = readLine(queueDirFor(dirs[0])).filter((t) => t.pid !== process.pid).length;

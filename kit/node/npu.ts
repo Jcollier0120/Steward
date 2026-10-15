@@ -28,6 +28,8 @@ import {
   servedRecently,
   serves,
   theAccelerator,
+  turnFor,
+  turnsWithoutEntry,
   visionBody,
   type Accelerator,
   type AcceleratorConfig,
@@ -189,10 +191,16 @@ export function resetNpuManners(): void {
 /** Who holds the NPU and who is waiting, in order: for a status line on the page. */
 export const npuLine = () => queueSnapshot(npuLockDir);
 
-/** Every accelerator's holders (per slot) and line, for a status line on the page. */
+/**
+ * Every accelerator's holders (per slot) and line, for a status line on the page; and the line of a device an entry's
+ * server takes the turn of without an entry of its own (the NPU 3720's graphics, its embeddings').
+ */
 export function acceleratorLines(cfg: AcceleratorConfig | { error: string } = loadAccelerators()) {
   if ('error' in cfg) return [];
-  return cfg.accelerators.map((a) => ({ ...refOf(a), slots: a.slots, ...lineSnapshot(lockDirsOf(a)) }));
+  return [
+    ...cfg.accelerators.map((a) => ({ ...refOf(a), slots: a.slots, ...lineSnapshot(lockDirsOf(a)) })),
+    ...turnsWithoutEntry(cfg.accelerators).map((t) => ({ id: t.id, name: t.name, slots: t.slots, ...lineSnapshot(lockDirsOf(t)) })),
+  ];
 }
 
 /**
@@ -417,6 +425,12 @@ export class Npu {
     const refused = core.tooBig(serving, promptTokens, maxTokens);
     if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
+    // Each candidate's turn for this work: its own, or another device's its server runs on (an endpoint's `turn`).
+    const turnOn = (a: Accelerator) => turnFor(a, work, cfg.accelerators);
+    const turnIdOf = (id: string) => {
+      const a = serving.find((x) => x.id === id);
+      return a ? turnOn(a).id : id;
+    };
     let first: { acc: Accelerator; reason: string } | null = null;
     const tried = new Set<string>();
     const notRunning: Accelerator[] = [];
@@ -425,7 +439,7 @@ export class Npu {
       const { list, skipped, npuFirst } = candidates(
         serving.filter((a) => !tried.has(a.id)),
         { work, tokens, lane },
-        { failure: readFailure, games, deferredMs: lane === 'background' ? deferredMs : undefined },
+        { failure: readFailure, games, deferredMs: lane === 'background' ? (id) => deferredMs(turnIdOf(id)) : undefined },
       );
       if (!list.length) {
         if (loadingOn && !first) {
@@ -438,19 +452,21 @@ export class Npu {
         }
         throw noCandidate(skipped, first);
       }
-      const choice = pick(list, lane);
+      const choice = pick(list, lane, turnOn);
       if ('deferred' in choice) {
-        for (const a of list) busyUntil.set(a.id, Date.now() + BACK_OFF_MS);
+        for (const a of list) busyUntil.set(turnOn(a).id, Date.now() + BACK_OFF_MS);
         throw new NpuBusy(core.say.modelWorkDeferred(choice.deferred, BACK_OFF_MS / 60_000));
       }
       const acc = choice.acc;
       tried.add(acc.id);
       const ep = acc[work]!;
+      const turn = turnOn(acc);
       try {
         // In its turn, the server is started if it isn't running; one that won't start fails the request,
         // which leaves its turn (the contract's fallback). One that is busy is waited on, not started again.
+        // The turn is the device's its server runs on: the NPU 3720's embeddings take the graphics', beside its chat.
         const value = await acceleratorTurn(
-          acc,
+          turn,
           async () => {
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
             const onWaking = opts.onWaking;
@@ -484,7 +500,7 @@ export class Npu {
         // Its model was still loading: slow, not failed. Nothing is marked; this agent leaves it alone a
         // while (a background request), and the request goes to the next candidate, if there is one.
         if (e instanceof ModelLoading) {
-          if (lane === 'background') busyUntil.set(acc.id, Date.now() + BACK_OFF_MS);
+          if (lane === 'background') busyUntil.set(turn.id, Date.now() + BACK_OFF_MS);
           loadingOn ??= { acc, reason: e.message };
           if (opts.accelerator) throw new NpuBusy(core.say.modelLoading(theAccelerator(acc), e.message, ''));
           // The NPU first (the core's candidates): loading is slow, not something it can't do, so the request
@@ -522,7 +538,13 @@ async function warmUp(acc: Accelerator, ep: Endpoint, timeoutMs?: number): Promi
 /** How long a model being loaded may take: the request's base and the cold load, the accelerator's own where longer. */
 const coldAllowanceMs = (acc: Accelerator) => RULES.accelerators.requestBaseMs + Math.max(RULES.accelerators.coldLoadMs, acc.timeouts?.coldLoadMs ?? 0);
 
-/** The pick (accelerators.ts), seeing this process's own requests already headed to each line. */
-function pick(list: Accelerator[], lane: Lane) {
-  return pickFrom(list, lane, (a) => lineLook(a, headed.get(a.id) ?? 0));
+/**
+ * The pick (accelerators.ts), seeing this process's own requests already headed to each line: the line of the turn
+ * each would take for `work` (turnFor), its own or another device's.
+ */
+function pick(list: Accelerator[], lane: Lane, turn: (a: Accelerator) => { id: string; slots: number }) {
+  return pickFrom(list, lane, (a) => {
+    const t = turn(a);
+    return lineLook(t, headed.get(t.id) ?? 0);
+  });
 }

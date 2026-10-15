@@ -74,6 +74,7 @@ llama.cpp's builds and the models go into the accelerators' folder (`servers\`, 
 - The kind comes from the id, and the name from the PC (Accelerators and their ids, above): an entry has no `name`, and one it has is ignored. The NPU always has one slot; the others at most 16.
 - `enabled: false` keeps an entry but sends it nothing. `%VAR%` in a `startCommand` is expanded.
 - Since kit 2.31.0, an endpoint may carry its own `maxContextTokens` (a cap for that kind, lower or higher than its accelerator's: the core's `capFor`) and `env` (what its server's environment needs, set over the starter's when its `startCommand` starts it, each `%VAR%` expanded: OpenVINO Model Server's `PYTHONHOME` and `PATH`); an accelerator may carry `timeouts` (`requestBaseMs`, `requestPerTokenMs`, `coldLoadMs`, each in place of the rules' for its requests). Setup writes them for an NPU from `npu-vendors.json`.
+- An endpoint whose server runs on another device than its accelerator's may carry `turn`: that device's id (a graphics card's, `gpu-…`, or `cpu`), whose lock and line its requests take (the core's `turnOf`; the lock and the line, below). The NPU 3720's embedding server runs on the processor's graphics (`--target_device GPU`), so setup writes its embeddings `turn` as the id of the Intel graphics that shares the PC's memory, and they answer beside the NPU's chat instead of waiting for it ([NPU-VENDORS.md](NPU-VENDORS.md#the-npu-3720s-embeddings-in-the-graphics-turn)). The NPU's own id, or anything that isn't an id, isn't a turn: the entry is read without it, and the check names it. A vision model on its chat endpoint's server takes chat's. Everything else stays the accelerator's: its failure marker, its cap, its name in an answer.
 
 ## Model servers
 
@@ -97,6 +98,7 @@ Reeve's `docs/NPU-QUEUE.md` protocol, unchanged in its rules, once per accelerat
 - Its lock folders are in `%USERPROFILE%\.npu-agent\locks\`: `<id>` for its first slot (the NPU's is `npu`, as now), `<id>.2` … `<id>.<slots>` for the others. `NPU_AGENT_NPU_LOCK` still moves the NPU's, and its folder holds the others.
 - Its line is `<id>.queue`, with the same tickets, lanes, heartbeats and ages. The ticket at the head of the line takes any free slot; once it holds one, its ticket goes and the next is the head.
 - A program that knows nothing of slots (Heiward, npu-embed) takes the first slot only, through the same line, and stays compatible.
+- A request takes the turn of the device its server runs on: its endpoint's `turn` when it has one, else its accelerator's. The NPU 3720's embeddings take the graphics' (`<id>`, and `<id>.2` … when the graphics have an entry with more slots, else one), so a search query answers while the NPU writes, and a card entry on the same graphics shares that turn with them. The pick reads that turn's line, and a background request's back-off is that turn's. The keeper looks after such a server in that turn too, with its accelerator's idle time, and the NPU's refresh holds both turns while it changes the NPU's servers.
 
 ## Choosing an accelerator for a request
 

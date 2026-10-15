@@ -23,9 +23,9 @@ const tools = path.join(home, 'tools');
 const MEASURED = { requestBaseMs: 90_000, requestPerTokenMs: 400, coldLoadMs: 600_000 };
 
 /** What setup writes on this PC with this kit, with this PC's measured timeouts. */
-function setUpEntry(o: { noEmbed?: boolean } = {}): Record<string, any> {
-  const plan = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, noEmbed: o.noEmbed })!;
-  const e = V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model } : undefined });
+function setUpEntry(o: { noEmbed?: boolean; cards?: { id: string; vendorId: number; memoryGb: number }[] } = {}): Record<string, any> {
+  const plan = V.planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true, noEmbed: o.noEmbed, cards: o.cards })!;
+  const e = V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, turn: plan.embed.turn } : undefined });
   return { ...e, timeouts: { ...MEASURED } };
 }
 
@@ -46,7 +46,7 @@ const capOf = (e: Record<string, any>) => {
 
 let n = 0;
 /** A PC with config.json holding `entry` beside a graphics card, the keeper's deps faked, and what each did. */
-function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void } = {}) {
+function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: boolean; answers?: string[]; embeds?: string[]; exists?: (p: string) => boolean; during?: (file: string) => void; cards?: object[] } = {}) {
   const dir = path.join(home, `pc-${++n}`);
   mkdirSync(dir, { recursive: true });
   const configFile = path.join(dir, 'config.json');
@@ -61,7 +61,7 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
     tools,
     home,
     now: () => Date.parse('2026-10-14T12:00:00Z'),
-    detect: async () => (did.push('detect'), { npu: support } as any),
+    detect: async () => (did.push('detect'), { npu: support, ...(o.cards ? { cards: o.cards } : {}) } as any),
     exists: o.exists ?? (() => true),
     validate: () => [],
     idle: () => o.idle ?? true,
@@ -120,6 +120,22 @@ test("an older kit's command: the servers stopped in the NPU's turn, the new one
   assert.match(pc.log.join('\n'), /the NPU's servers now start with this kit's command \(2\.75\.0\): --max_prompt_len \d+ added; --max_prompt_len 4096 removed/);
   assert.equal(readNpuRefresh(pc.configFile)?.did, 'refreshed');
   assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
+});
+
+test("an NPU 3720 set up before its embeddings took the graphics' turn: moved into it after the same test, its chat in the NPU's; a detection listing no cards keeps the entry's", async () => {
+  const IGPU = { id: 'gpu-intel-r-graphics', vendorId: 0x8086, memoryGb: 0.1 };
+  const old = setUpEntry();
+  assert.equal(old.embed.turn, undefined);
+  const pc = fakePc(old, { cards: [IGPU] });
+  const r = await refreshNpu(pc.deps);
+  assert.equal(r.did, 'refreshed');
+  assert.deepEqual(r.changes, ["embeddings: in gpu-intel-r-graphics's turn"]);
+  assert.ok(pc.did.includes(`test embed ${V.NPU_CATALOG.routes.intel.embedServer!.model.dims}`), pc.did.join(', '));
+  assert.equal(pc.npu().embed.turn, IGPU.id);
+  assert.equal(pc.npu().chat.turn, undefined);
+  assert.deepEqual(pc.npu().timeouts, MEASURED);
+  // Set up with it: current, whether this look's detection lists the cards or not.
+  for (const cards of [[IGPU], undefined]) assert.equal((await refreshNpu(fakePc(setUpEntry({ cards: [IGPU] }), { cards }).deps)).did, 'current', String(cards));
 });
 
 test('a PC whose embeddings were left off the NPU keeps them off', async () => {

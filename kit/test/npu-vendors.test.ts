@@ -895,6 +895,34 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   assert.equal(embed.baseUrl, `http://127.0.0.1:${intel.embedServer!.port}`);
 });
 
+test("the NPU 3720's embeddings, on the graphics, take the graphics' turn: OpenVINO's GPU, the Intel graphics sharing the PC's memory; every other generation's keep the NPU's", async () => {
+  const intel = V.NPU_CATALOG.routes.intel;
+  const meteor = V.routeFor(intel, 'meteor-lake');
+  const igpu = { id: 'gpu-intel-r-graphics', vendorId: 0x8086, memoryGb: 0.1 };
+  const arc = { id: 'gpu-intel-r-arc-tm-a770-graphics', vendorId: 0x8086, memoryGb: 16 };
+  const rtx = { id: 'gpu-nvidia-geforce-rtx-4090', vendorId: 0x10de, memoryGb: 24 };
+  assert.equal(V.embedTurn(meteor, [igpu]), igpu.id);
+  assert.equal(V.embedTurn(meteor, [rtx, arc, igpu]), igpu.id, 'the shared one, before a card of its own');
+  assert.equal(V.embedTurn(meteor, [rtx, arc]), arc.id, 'else the first Intel card');
+  assert.equal(V.embedTurn(meteor, [rtx]), undefined, 'no Intel graphics known: the NPU turn, as before');
+  assert.equal(V.embedTurn(meteor, []), undefined);
+  for (const id of ['lunar-lake', 'panther-lake', V.UNKNOWN_GENERATION]) assert.equal(V.embedTurn(V.routeFor(intel, id), [igpu]), undefined, `${id}: on its NPU`);
+  // Planned with this PC's cards, and written into its embedding endpoint.
+  const support = parseNpus(NPU.meteor, 'x64')[0];
+  const plan = V.planNpu({ support, tools: 'C:\\t', downloadsDir: 'C:\\t\\servers\\downloads', env: ENV, exists: disk(), cards: [igpu] })!;
+  assert.equal(plan.embed!.turn, igpu.id);
+  assert.equal(V.planNpu({ support, tools: 'C:\\t', downloadsDir: 'C:\\t\\servers\\downloads', env: ENV, exists: disk() })!.embed!.turn, undefined, 'no cards given');
+  const entry = V.npuEntry(plan.route, { tools: 'C:\\t', exe: plan.exe, port: plan.port, embed: { exe: plan.embed!.exe, model: plan.embed!.model, turn: plan.embed!.turn } });
+  assert.equal(entry.embed!.turn, igpu.id);
+  assert.equal(entry.chat!.turn, undefined, 'its chat keeps the NPU turn');
+  assert.deepEqual(validateKeeperConfig({ accelerators: [entry] }), []);
+  // Setup's plan, from this PC's detection: its Intel graphics' id.
+  const tools = path.join(home, 'turn-plan');
+  const meteorPc = `${NPU.meteor}\n${X64('Intel(R) Core(TM) Ultra 7 255U')}\nadapter|0|32902|134217728|17179869184|0x00000000_0x0000c3c3|0|Intel(R) Graphics\n`;
+  const p = await planSetup({ detection: parseDetection(meteorPc), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
+  assert.equal(p.npu?.embed?.turn, parseDetection(meteorPc).cards[0].id);
+});
+
 test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embeddings 1.74 GB; 16 GB keeps both, 12 GB chat alone, 8 GB neither', async () => {
   const intel = V.NPU_CATALOG.routes.intel;
   assert.equal(V.NPU_MEMORY_SHARE, 0.4);
