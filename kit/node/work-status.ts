@@ -7,7 +7,7 @@ import { agentsAtOnce, firstRoundLockDir, pace, workLockDir, type Pace } from '.
 import { dataFile, readJson, writeJson } from './store.ts';
 import { workTasks, type Task, type WorkFields } from './work-tasks.ts';
 
-export { currentWork, inWork, startWork, withWork, type WorkFields, type WorkHandle } from './work-tasks.ts';
+export { currentWork, inWork, outsideWork, startWork, withWork, type WorkFields, type WorkHandle } from './work-tasks.ts';
 
 /**
  * An agent's work status (kit 2.75.0, spec/WORK-STATUS.md): one shape every agent reports at GET /api/peer/work (the

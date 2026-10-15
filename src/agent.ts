@@ -7,6 +7,7 @@ import { hasTour, pageShell, reactPage } from './kit/react-page.ts';
 import { every } from './kit/schedule.ts';
 import { serve, type Handler } from './kit/server.ts';
 import { currentWork, inWork, startWork, workTasks } from './kit/work-tasks.ts';
+import { workBlocks } from './work-status.ts';
 import { afterWords } from './after.ts';
 import { gate, loadBudget } from './budget.ts';
 import { run as realRun, type Runner } from './run.ts';
@@ -25,8 +26,9 @@ import { claimClashes } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { trialsOnTheirOwn } from './stages/trial.ts';
+import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from './stages/wholesuite.ts';
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
-import { loadVersionQueues } from './version-queue.ts';
+import { heldQueues, loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
 import { buildWhen, loadPipeline, pipelineMode, pipelineView } from './pipeline.ts';
@@ -304,6 +306,17 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     if (rounding() || slotsFull()) roundAfter = true;
     else startRound();
   });
+  // So does the whole suite before a kit's release (stages/wholesuite.ts), never holding a round's merges: once it ends,
+  // a round releases the kit, or holds it, at once. A run a Steward that is gone left behind is ended first.
+  endWholeOrphans((line) => console.log(`whole suite: ${line}`));
+  wholeSuitesBeside({
+    log: (line) => console.log(`whole suite: ${line}`),
+    ended: () => {
+      if (!loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
+      if (rounding() || slotsFull()) roundAfter = true;
+      else startRound();
+    },
+  });
   // On duty, every few minutes while Settings say it merges and releases by itself, or keeps the staff's pages up; the
   // kit's every() pauses off duty. Saving Settings starts, stops or re-times it. The first comes within a minute of the
   // start, not the kit's 2 to 15 minutes at a gentle pace: the Steward starts again whenever Manor updates it, often
@@ -346,13 +359,15 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, queueHolds: heldQueues(loadVersionQueues()), wholeSuite: loadWholeJob() };
     return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 
   const served = await serve({
     port,
     icon: ICON,
+    // The whole suite beside the rounds ends with the Steward, with everything it started (stages/wholesuite.ts).
+    onStop: () => endWholeSuite(),
     ping: () => ({ busy: runs.length > 0, stage: runs.length ? runs.map((r) => r.stage).join(', ') : null, tour: hasTour() }),
     // Its work status (GET /api/peer/work, the kit's work-status.ts), for Manor's Work page: its stages' slots beside the
     // kit's, and what holds a repository's work up (workBlocks).

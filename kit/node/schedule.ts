@@ -1,4 +1,5 @@
 import { APP } from '../app.ts';
+import { stayAwake } from './awake.ts';
 import { duty } from './duty.ts';
 import { trialEnded } from './license-check.ts';
 import { isDemo } from './demo.ts';
@@ -294,10 +295,14 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  * time on this PC, fewer while it is busy. While it waits, its state's `waiting` says so. A schedule whose rounds are
  * `light` (a few requests, a look at a file: no heavy work) runs them at once, outside the line, as a round asked for
  * (Run now) always does: `true`, or a function asked before each round (light while it has nothing due, say).
+ *
+ * A round's work keeps the PC awake (awake.ts, kit 2.74.8): the job's `awake(what)` holds Windows from sleeping on its
+ * own while it runs checks, merges or a release, until the function it returns is called, or the round ends. Only for
+ * work: a round that only looks holds nothing, so the PC still sleeps between rounds.
  */
 export function every(
   everyMs: number | (() => number),
-  job: (round: { signal: AbortSignal }) => Promise<void>,
+  job: (round: { signal: AbortSignal; awake: (what: string) => () => void }) => Promise<void>,
   opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number } = {},
 ) {
   let running = false;
@@ -382,6 +387,13 @@ export function every(
     let used: { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null = null;
     // The round as a task in the agent's work status (work-tasks.ts): in a line while it waits, the work it tracks its part.
     const task = startWork({ kind: 'round', what: asked ? `${name}, asked for` : name });
+    // The PC held awake for the round's work (awake.ts): every hold it took let go when it ends, at the latest.
+    const holds: (() => void)[] = [];
+    const awake = (what: string) => {
+      const letGo = stayAwake(`${name}: ${what}`);
+      holds.push(letGo);
+      return letGo;
+    };
     try {
       const run = async () => {
         inLine = null;
@@ -393,7 +405,7 @@ export function every(
         const u = { cpu: process.cpuUsage(), memory: process.memoryUsage.rss(), sampler: undefined as NodeJS.Timeout | undefined };
         u.sampler = setInterval(() => (u.memory = Math.max(u.memory, process.memoryUsage.rss())), 5_000).unref();
         used = u;
-        const work = inWork(task, () => job({ signal: controller.signal }));
+        const work = inWork(task, () => job({ signal: controller.signal, awake }));
         const late = new Promise<never>((_, reject) => {
           limitTimer = setTimeout(() => reject(new RoundTimeout(limit)), limit);
         });
@@ -452,6 +464,7 @@ export function every(
       }
     } finally {
       task.done();
+      for (const letGo of holds) letGo();
       firstNow = null;
       if (waiting === WORK_WAITING) waiting = null;
       clearTimeout(limitTimer);

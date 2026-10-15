@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, routeFor, UNKNOWN_GENERATION } from './npu-vendors.ts';
-import { loadFailure, logLength, longFetch, processMemory, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
+import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, UNKNOWN_GENERATION } from './npu-vendors.ts';
+import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
@@ -25,6 +25,10 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
  *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]
+ *
+ * `--generation <id>` on an NPU of another generation plays it, and verifies nothing: a Snapdragon X2 plays a Snapdragon X
+ * whole (npu-vendors.ts' playGeneration: GenieX on a data folder of its own with AI Hub's X Elite build, the embeddings on
+ * Hexagon v73 code); an Intel or AMD NPU runs that generation's starting values. A newer generation on an older chip is refused.
  *
  * `--idle` runs the NPU's idle stop instead of the measurements (npu-idle.ts): the keeper stops the servers once the NPU
  * goes unused, a person's request after that is told the local AI is waking and answers, and a request in flight is
@@ -56,6 +60,8 @@ export interface NpuCheckReport {
   rehearsal: boolean;
   /** The generation it ran on (npu-vendors.json's id: `meteor-lake`, `lunar-lake`…), or a rehearsal's --generation. */
   generation: string | null;
+  /** The older Snapdragon this one played (playGeneration), its data folder filled in; null when it played none. */
+  played: Played | null;
   steps: CheckStep[];
   suggest: Suggestion | null;
   /**
@@ -288,6 +294,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     device: (o.device ?? 'NPU').toUpperCase(),
     rehearsal: false,
     generation: null,
+    played: null,
     steps,
     suggest: null,
     patch: null,
@@ -327,7 +334,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     return finish(2);
   }
   // The generation it runs on: the NPU's own, or the one a rehearsal is given (--generation), whose starting values it takes.
-  // Given on an NPU of another generation, that NPU plays it: its values run on real hardware, and the run verifies nothing.
+  // Given on an NPU of another generation, that NPU plays it, and the run verifies nothing: a Snapdragon plays an older
+  // Snapdragon whole (playGeneration: its AI Hub build and its Hexagon code); an Intel or AMD NPU runs its starting values.
   const generation = rehearsal ? (o.generation ?? null) : (o.generation ?? npu?.generation ?? null);
   const playing = !rehearsal && !!o.generation && o.generation !== npu?.generation;
   if (playing) report.rehearsal = true;
@@ -335,10 +343,17 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'route', ok: false, say: `${vendor} has no generation ${generation} (it has ${[...Object.keys(catalog.routes[vendor].generations), UNKNOWN_GENERATION].join(', ')})` });
     return finish(2);
   }
+  const play = playing ? playGeneration(npu!, generation!, catalog) : null;
+  if (play?.kind === 'refused') {
+    add({ step: 'play', ok: false, say: play.why });
+    return finish(2);
+  }
+  const played = play?.kind === 'played' ? play.played : null;
   report.generation = generation;
   let route: NpuRoute;
   try {
     route = routeOnDevice(routeFor(catalog.routes[vendor], generation), report.device);
+    if (played) route = playedRoute(route, played);
   } catch (e: any) {
     add({ step: 'route', ok: false, say: e.message });
     return finish(2);
@@ -360,7 +375,12 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   report.server = `${route.server} ${route.version}`;
   const tools = o.tools ?? toolsHome(env);
   const support: NpuSupport = rehearsal ? { vendor, generation, label: `${route.server} rehearsal`, supported: true, verified: false } : playing ? { ...npu!, generation, verified: false } : npu!;
-  if (playing) log(`Running ${generation}'s starting values on this ${npu!.generation ?? 'NPU'}: a rehearsal, so npu-vendors.json is left as it is.`);
+  if (played) {
+    // Its own GenieX data folder, naming the played chip to AI Hub, before the plan looks for its models there.
+    const dir = setUpPlayed(played, tools);
+    report.played = { ...played, dataDir: dir };
+    log(`Played: ${playedSay(played, dir, catalog)}. A rehearsal, so npu-vendors.json is left as it is.`);
+  } else if (playing) log(`Running ${generation}'s starting values on this ${npu!.generation ?? 'NPU'}: a rehearsal, so npu-vendors.json is left as it is.`);
   const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: route } } })!;
   add({ step: 'requirements', ok: true, say: plan.runtime ? `${route.server} needs ${plan.runtime.what}, which setup puts beside it (${mb(plan.runtime.size)}, no administrator)` : `${route.server} needs nothing more on this PC` });
 
@@ -546,8 +566,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
       try {
         await (await http(`${eb}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
         return true;
-      } catch {
-        return false;
+      } catch (e) {
+        return !refusedConnection(e);
       }
     };
     const e0 = now();
@@ -614,7 +634,8 @@ export const newGenerationId = (vendor: NpuVendor, pci: string) => `${vendor}-${
 
 /** An NPU of a generation setup doesn't know, as npu-vendors.json's `devices` would take it: its maker and PCI id (none on a Snapdragon, told by its name). */
 export function unknownDevice(npu: { vendor: NpuVendor | null; deviceId: string; name: string }): { vendor: NpuVendor | null; pciDevice: string | null; devices: Record<string, Record<string, string>> | null } {
-  // A Snapdragon's ACPI id (`ACPI\VEN_QCOM&DEV_0FF0`) has a DEV_ too, but npuGeneration tells it by its name.
+  // A Snapdragon's ACPI id (`ACPI\VEN_QCOM&DEV_0FF0`) has a DEV_ too, but npuGeneration tells it by its name first, and
+  // a new Snapdragon wants its Hexagon, AI Hub chip and pins as well: no patch makes one.
   const pci = npu.vendor === 'qualcomm' ? null : pciDevice(npu.deviceId);
   return { vendor: npu.vendor, pciDevice: pci, devices: npu.vendor && pci ? { [npu.vendor]: { [pci]: newGenerationId(npu.vendor, pci) } } : null };
 }
@@ -622,7 +643,10 @@ export function unknownDevice(npu: { vendor: NpuVendor | null; deviceId: string;
 /** The line the check prints for an NPU setup doesn't know: its PCI id, ready to add to `devices`; a Snapdragon's name, for npuGeneration. */
 export function unknownDeviceSay(npu: { vendor: NpuVendor | null; deviceId: string; name: string }): string {
   const u = unknownDevice(npu);
-  if (!u.devices) return `npu-vendors.json doesn't know this NPU's generation, and it has no PCI id: a Snapdragon's generation is told by its name ("${npu.name}"), in npu-vendors.ts' npuGeneration.`;
+  if (!u.devices) {
+    const acpi = pciDevice(npu.deviceId);
+    return `npu-vendors.json doesn't know this NPU's generation, and it has no PCI id: a Snapdragon's generation is told by its name ("${npu.name}"), in npu-vendors.ts' npuGeneration${acpi ? `, or where its name doesn't say, by its ACPI id (${acpi}) in devices.qualcomm` : ''}.`;
+  }
   return `npu-vendors.json doesn't know device ${u.pciDevice}: add it to devices, under the generation it is (one it has, or the new one this check's patch adds when every step passes): ${JSON.stringify({ devices: u.devices })}`;
 }
 
@@ -713,8 +737,8 @@ async function hardenSteps(c: {
     try {
       await (await http(`${base}/v1/models`, { signal: AbortSignal.timeout(timeoutMs) })).text();
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      return !refusedConnection(e);
     }
   };
   const chatBase = `http://127.0.0.1:${route.port}${route.baseUrlPath ?? ''}`;

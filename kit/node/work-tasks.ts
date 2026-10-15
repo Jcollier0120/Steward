@@ -106,6 +106,11 @@ export async function withWork<T>(f: WorkFields & { line?: string }, fn: (h: Wor
   }
 }
 
+/** Runs `fn` in no task: work it starts that outlives the task starting it (a job beside the rounds) is its own. */
+export function outsideWork<T>(fn: () => T): T {
+  return current.exit(fn);
+}
+
 /** The id of the task this runs in (withWork, inWork), or null. */
 export const currentWork = (): string | null => current.getStore() ?? null;
 

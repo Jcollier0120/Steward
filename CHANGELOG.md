@@ -2,6 +2,52 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.45
+
+**The whole test suite before a kit's release no longer holds up merging, the Steward says which pull request is holding a version queue, and the PC stays awake while the Steward is working.**
+
+### What's new
+
+- While the Steward runs checks, merges a pull request or makes a release, Windows doesn't put the PC to sleep on its own. Once that work ends, the PC may sleep again. On 15 October the PC slept for an hour in the middle of a round's checks, and again for 13 minutes, which is much of why that round ran out of time. This only stops sleep from idling: if you choose Sleep, press the power button or close the lid, the PC still sleeps, and the display still turns off as usual. Rounds that only look at GitHub don't keep the PC awake, so it still sleeps when nothing is being worked on. This comes with kit 2.74.8.
+
+- The Steward's page has a new card, **What holds the version queues**. It appears when the lowest version waiting in a repository is a draft, untested, or has failing or running checks, while ready pull requests above it wait their turn (the lowest version always merges first). It names the pull request holding the queue, why it isn't ready, which pull requests wait behind it, and since when. The round's log says the same.
+- When a queue has been held that way for more than an hour, it is an alarm (the same hour as a conflict that holds a queue, Settings' `blockingHours`). The alarm says what to do: mark the pull request ready, give it a version above the others, or close it. This covers the Steward's own repository too, where three drafts held every merge for hours on 14 and 15 October without anything saying so.
+- While the whole suite runs before a kit's release, the page shows it, with the commit and how long it has been running.
+
+### What changed
+
+- Before it releases a kit, the Steward runs its whole test suite (twice if the first run fails). That used to happen inside a round, and the round waited: a slow run held every merge for 45 minutes to 2 hours on 14 and 15 October, until the round was given up at its time limit with its tests still running. Now the suite runs on its own, beside the rounds. The round that starts it goes on merging at once, and the kit waits. The first round after the suite passes releases the kit. If it fails, the kit is held as a failed release, as before. Only one run goes at a time, never a second beside it.
+- A new commit on main stops a whole suite still running for the old commit and starts one for the new commit. When the Steward stops, its whole suite stops with it, along with every program it started. If a Steward ended without stopping it, the next Steward ends whatever was left running when it starts.
+- Code that has already passed the whole suite on this PC is still not run again, and a kit whose two runs failed only on different tests is still released.
+- With several PCs taking turns at the Steward's work, the whole suite runs only on the PC whose turn the Steward's own repository is. If the turn moves to another PC, this PC stops its run, and the other PC runs the suite there. The alarm for a held version queue is raised only by the PC whose turn that repository is, so two PCs never both raise it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.44
+
+**Kit 2.74.7: every first-generation Snapdragon X is recognised, the Snapdragons before it are turned down before anything downloads, and an X2 can stand in for an X.**
+
+### What's new
+
+- On a Snapdragon X2 laptop, the NPU check and the NPU benchmark can play a first-generation Snapdragon X (`--generation snapdragon-x`): they run the X's own model build and its NPU code on the X2, from a folder of their own, so the laptop's own local AI and its model are left alone. A played benchmark is shown, never ranked: it runs the X's code, not at an X's speed.
+
+### What changed
+
+- The kit the Steward hands out (2.74.7) recognises every first-generation Snapdragon X by the name Windows gives it, the plain X and X Plus included, and by its device id where the name doesn't say. On an X, setup now checks the model it downloads file by file against the X's own build, as it does on an X2.
+- On a Snapdragon from before the X (the 8cx, 8c, 7c, Microsoft's SQ1 to SQ3, the 850 and 835), setup now says plainly that its NPU can't run the manor's models, and why, before downloading anything. Before, it downloaded the NPU's server and a 4.4 GB model only for its test to fail. Its local AI runs on the graphics card or the processor instead, as it did once that test failed.
+- The NPU benchmark on a Snapdragon no longer fails its second start: it now waits until the stopped server has let go of its port before starting it again.
+- Steward 0.36.43's kit (2.74.6) also brought Intel's and AMD's NPU work, which its notes left out:
+  - Setup's first timeouts for an AMD NPU of a generation nobody has measured now allow for how fast its server actually reads: a 35 s base where it was 90 s.
+  - AMD's NPU has been measured on battery.
+  - On every Intel NPU, OpenVINO Model Server's prompt cache is now off.
+  - Intel's newer NPUs get prompt settings estimated from the ones measured.
+
+### Before you update
+
+- Nothing: it updates itself as usual, and agents get it as they pin the kit. On a PC with an Intel NPU (Lunar Lake, or the NPU 3720) that's already set up, the NPU compiles its model once more as an agent takes this kit, for a minute or so.
+
 ## 0.36.43
 
 **Kit 2.74.6: checks get the share of the processor Manor's Settings give them, and tests run at that pace take longer instead of failing.**

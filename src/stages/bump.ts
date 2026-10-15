@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import { claimVersion } from '../claims.ts';
 import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
+import { whileAwake } from '../kit/awake.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
 import { codeAt, recordResult, withWork } from '../kit/work-status.ts';
@@ -142,6 +143,9 @@ export const needsNpmCi = (dir: string) =>
  *
  * `failed`, when given, is filled with the step that failed and the tests it failed (node --test's TAP), for a caller
  * that weighs a second try against the first (wholesuite.ts).
+ *
+ * The PC is kept awake while they run (the kit's awake.ts, Steward 0.36.45): on 2026-10-15 it slept on its own for an
+ * hour in the middle of a round's checks.
  */
 export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   // A task in the Steward's work status (the kit's work-status.ts), with the commit and code tree it runs at; what it
@@ -150,22 +154,14 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
   const trial = !!o.env?.STEWARD_KIT;
   const what = `${e.name}: ${o.doing ?? 'its checks'}`;
   return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async () => {
-    const failed = await checksIn(ctx, e, dir, o);
+    const failed = await whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
     const after = trial || !commit ? null : await codeAt(dir);
     if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, ...(failed ? { note: failed.slice(0, 500) } : {}) });
     return failed;
   });
 }
 
-/** runChecks' options. */
-export interface ChecksOptions {
-  env?: Record<string, string>;
-  say: (line: string) => void;
-  affected?: AffectedScope;
-  doing?: string;
-  timeLimit?: (kind: CheckKind) => TimeLimit | null;
-  failed?: FailedChecks;
-}
+type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks };
 
 async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   const started = Date.now();
