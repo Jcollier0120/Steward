@@ -16,6 +16,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Agents get it as they pin the kit.
+
 ## 0.36.33
 
 **A pull request that conflicts with its branch is caught up within minutes, not when the round next reaches it.**

@@ -30,6 +30,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do: the Smith, else Reeve, runs the refresh in its look, and an agent that keeps the servers itself with `keeperLook` gets it the same way. A PC with an NPU 3720 set up by an earlier kit takes the new command once its NPU is idle; its first start with it compiles once, in about a minute. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
+
 ## 2.74.4
 **One process for every PowerShell, not two: powershell.exe shares the page's windowless console, as git and gh do since 2.73.2.**
 
