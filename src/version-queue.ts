@@ -4,6 +4,8 @@ import { compareVersions } from './kitfiles.ts';
 import { manorProjects, type ManorProject } from './kit/manor.ts';
 import { freshRemoteHeads } from './kit/remote-heads.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
+import type { Held } from './alarms.ts';
+import type { TurnsState } from './lease.ts';
 import type { Employee } from './settings.ts';
 import { checkoutOf, glanceOf, hostIs, type Ctx } from './stages/common.ts';
 import { holdReason, prVersions } from './stages/merge.ts';
@@ -63,6 +65,58 @@ export interface UpcomingDraft {
   head: string;
 }
 
+/**
+ * What holds a version queue (Steward 0.36.45): the lowest PR in it that isn't ready to merge (a draft, untested, its
+ * checks failing or running) while ready PRs above it wait their turn behind it, the lowest version merging first. On
+ * 2026-10-14 and 15 three drafts held the Steward's own queue for hours with nothing saying so. Said in the round's log
+ * and on the Steward's page, with since when; an alarm once it has held an hour (alarms.ts, Settings' blockingHours).
+ */
+export interface QueueHold {
+  number: number;
+  title: string;
+  url: string;
+  version: string;
+  /** Why it isn't ready: GitHub's say (a draft, its checks), or the merge stage's when it held it this round. */
+  why: string;
+  draft: boolean;
+  /** The ready PRs above it, waiting their turn behind it. */
+  behind: number[];
+  /** Since when it has held them: the first round that saw it hold the queue. */
+  since: string;
+}
+
+/** How a PR waits for its turn in the merge stage's words (merge.ts): ready, behind a lower version. */
+const TURN_WAIT = /^its turn comes after #\d+/;
+/** A PR that gives up its turn (merge.ts's GAVE_WAY, a kit its trial fails): the PRs above it don't wait for it. */
+const GIVES_WAY = /gives up its turn/;
+
+/**
+ * What holds `queue` (lowest version first), or null when nothing does: the lowest PR that isn't ready, with at least
+ * one ready PR above it. `held`: why the merge stage held each PR this round, by number, which says more than GitHub
+ * does (a team PR untested, or failing its checks here). `before`: the hold kept from the last round, whose `since`
+ * stands while the same PR holds it. Pure.
+ */
+export function queueHold(queue: QueuedPr[], at: string, o: { held?: Map<number, string>; before?: QueueHold | null } = {}): QueueHold | null {
+  const stage = (q: QueuedPr) => o.held?.get(q.number) ?? null;
+  const ready = (q: QueuedPr) => {
+    const why = stage(q);
+    return q.ready && (!why || TURN_WAIT.test(why));
+  };
+  for (const [i, q] of queue.entries()) {
+    if (ready(q)) continue;
+    const why = stage(q) ?? q.why ?? 'not ready';
+    if (GIVES_WAY.test(why)) continue;
+    const behind = queue.slice(i + 1).filter(ready).map((x) => x.number);
+    if (!behind.length) return null;
+    const since = o.before?.number === q.number ? o.before.since : at;
+    return { number: q.number, title: q.title, url: q.url, version: q.version, why, draft: !!q.draft, behind, since };
+  }
+  return null;
+}
+
+/** A queue's hold in words, for the round's log: "#233 (v0.36.41, a draft) holds #266, #268 since …". Pure. */
+export const holdWords = (h: QueueHold) => `#${h.number} (v${h.version}, ${h.why}) holds its version queue: ${h.behind.map((n) => `#${n}`).join(', ')} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it, since ${h.since}`;
+
 /** How near the front a draft is told it is coming up: within the first three. */
 export const UPCOMING_WITHIN = 3;
 
@@ -100,6 +154,8 @@ export interface VersionQueue {
   working: string | null;
   /** The highest version among its ready PRs, or null when none is ready. */
   latest: string | null;
+  /** What holds it (queueHold), in a repository the Steward merges in; null or left out when nothing does. */
+  held?: QueueHold | null;
   note: string | null;
   at: string;
 }
@@ -125,6 +181,8 @@ interface Target {
   versionFiles: string[];
   /** Its PRs can be listed (on GitHub). */
   prs: boolean;
+  /** The Steward merges its PRs, lowest version first: what holds its queue is said. */
+  merges: boolean;
 }
 
 /** The files a project with none named carries its version in: the first of these found on its branch. */
@@ -132,12 +190,14 @@ const GUESSES = ['package.json', 'VERSION'];
 
 export const projectId = (p: ManorProject) => `project:${p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
-function targetsOf(ctx: Ctx, projects: ManorProject[]): Target[] {
-  const agents: Target[] = ctx.settings.employees.map((e) => ({ id: e.id, name: e.name, kind: 'agent', repo: e.repo, branch: e.branch, checkout: checkoutOf(e), versionFiles: e.versionFiles, prs: hostIs(ctx, e) !== 'git' }));
+/** The employees', the Steward's own repository's (`self`, where it merges its own PRs), then Manor's other projects. */
+function targetsOf(ctx: Ctx, projects: ManorProject[], self: Employee | null = null): Target[] {
+  const employees = self && !ctx.settings.employees.some((e) => e.id === self.id) ? [...ctx.settings.employees, self] : ctx.settings.employees;
+  const agents: Target[] = employees.map((e) => ({ id: e.id, name: e.name, kind: 'agent', repo: e.repo, branch: e.branch, checkout: checkoutOf(e), versionFiles: e.versionFiles, prs: hostIs(ctx, e) !== 'git', merges: e.merges }));
   const own = new Set(agents.map((t) => t.checkout.toLowerCase()));
   const sideCars: Target[] = projects
     .filter((p) => !own.has(p.checkout.toLowerCase()))
-    .map((p) => ({ id: projectId(p), name: p.name, kind: 'project', repo: p.repo, branch: p.branch, checkout: p.checkout, versionFiles: p.versionFiles, prs: !!p.repo }));
+    .map((p) => ({ id: projectId(p), name: p.name, kind: 'project', repo: p.repo, branch: p.branch, checkout: p.checkout, versionFiles: p.versionFiles, prs: !!p.repo, merges: false }));
   return [...agents, ...sideCars];
 }
 
@@ -181,7 +241,7 @@ function knownHead(ctx: Ctx, t: Target, moved: Set<string>): string | null {
   return freshRemoteHeads(t.repo)?.[t.branch] ?? null;
 }
 
-async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at: string, moved: Set<string> = new Set()): Promise<VersionQueue> {
+async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at: string, moved: Set<string> = new Set(), held?: Map<number, string>): Promise<VersionQueue> {
   const base: Omit<VersionQueue, 'version' | 'head' | 'files' | 'queue' | 'working' | 'latest' | 'note'> = { id: t.id, name: t.name, kind: t.kind, repo: t.repo, branch: t.branch, at };
   const empty = (note: string, version: string | null = null, head: string | null = null, files: string[] = []): VersionQueue => ({ ...base, version, head, files, queue: [], working: null, latest: null, note });
   if (!existsSync(t.checkout)) return empty(`no checkout at ${t.checkout}`);
@@ -232,18 +292,28 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   }
   queue.sort((a, b) => compareVersions(a.version, b.version) || a.number - b.number);
   const ready = queue.filter((q) => q.ready);
-  return { ...base, version: v.version, head, files: v.files, queue, working: queue[0]?.version ?? null, latest: ready.length ? ready[ready.length - 1].version : null, note: null };
+  // What holds it, where the Steward merges lowest first; elsewhere the order is the person's.
+  const hold = t.merges ? queueHold(queue, at, { held, before: before?.held }) : null;
+  return { ...base, version: v.version, head, files: v.files, queue, working: queue[0]?.version ?? null, latest: ready.length ? ready[ready.length - 1].version : null, ...(hold ? { held: hold } : {}), note: null };
 }
 
 /**
  * Every repository's queue made again (only what changed is read again), kept, and returned. A repository that can't
  * be read keeps a note saying why; one that fails outright keeps what it had. `moved`: the employees the stage merged or
- * released to after its glance, whose clones are fetched whatever the glance said.
+ * released to after its glance, whose clones are fetched whatever the glance said. `held`: the PRs the merge stage held
+ * this round and why, by employee, for what holds each queue (queueHold), which the log says. `self`: the Steward's own
+ * repository, as the merge stage's employee, where it merges its own PRs.
  */
-export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]; now?: () => Date; moved?: Iterable<string> } = {}): Promise<VersionQueues> {
+export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]; now?: () => Date; moved?: Iterable<string>; held?: { employee: Pick<Employee, 'id'>; prs: Pick<Held, 'number' | 'why'>[] }[]; self?: Employee | null } = {}): Promise<VersionQueues> {
   const at = (o.now?.() ?? new Date()).toISOString();
   const moved = new Set(o.moved ?? []);
   const before = new Map(loadVersionQueues().repos.map((r) => [r.id, r]));
+  const held = new Map<string, Map<number, string>>();
+  for (const h of o.held ?? []) {
+    const m = held.get(h.employee.id) ?? new Map<number, string>();
+    for (const pr of h.prs) if (!m.has(pr.number)) m.set(pr.number, pr.why);
+    held.set(h.employee.id, m);
+  }
   let projects: ManorProject[];
   try {
     projects = o.projects ?? manorProjects();
@@ -251,9 +321,11 @@ export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]
     projects = [];
   }
   const repos: VersionQueue[] = [];
-  for (const t of targetsOf(ctx, projects)) {
+  for (const t of targetsOf(ctx, projects, o.self ?? null)) {
     try {
-      repos.push(await queueOf(ctx, t, before.get(t.id), at, moved));
+      const q = await queueOf(ctx, t, before.get(t.id), at, moved, held.get(t.id));
+      if (q.held) ctx.log(`[${t.id}] ${holdWords(q.held)}`);
+      repos.push(q);
     } catch (err) {
       const kept = before.get(t.id);
       ctx.log(`[${t.id}] couldn't read its version queue: ${(err as Error).message}`);
@@ -264,3 +336,19 @@ export async function keepVersionQueues(ctx: Ctx, o: { projects?: ManorProject[]
   writeJson(versionQueuesFile(), out);
   return out;
 }
+
+/** What holds each queue kept (queueHold), with the repository it holds, for the alarms and the page. */
+export interface HeldQueue {
+  id: string;
+  name: string;
+  repo: string;
+  branch: string;
+  hold: QueueHold;
+}
+
+/**
+ * What holds each queue kept. `turns` (lease.ts's turns.json): those whose repository another PC has its turn in left
+ * out, as that PC's Steward merges there and raises its alarm, so two PCs never raise one twice. Pure.
+ */
+export const heldQueues = (v: VersionQueues, turns?: Pick<TurnsState, 'repos'>): HeldQueue[] =>
+  v.repos.flatMap((r) => (r.held && r.repo && turns?.repos[r.repo.toLowerCase()]?.status !== 'elsewhere' ? [{ id: r.id, name: r.name, repo: r.repo, branch: r.branch, hold: r.held }] : []));

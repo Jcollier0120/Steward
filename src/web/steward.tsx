@@ -6,6 +6,8 @@ import type { TendState } from '../tend.ts';
 import type { TurnRow, TurnsView } from '../lease.ts';
 import type { Host } from '../scm.ts';
 import type { EmployeeResult, StageResult } from '../stages/common.ts';
+import type { WholeJob } from '../stages/wholesuite.ts';
+import type { HeldQueue } from '../version-queue.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
 
 /** The Steward's page: the kit, the staff's table, the stages, the last stage. (Settings is the kit's: shell.tsx.) */
@@ -953,6 +955,45 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
   );
 }
 
+/**
+ * What holds each version queue the Steward merges (version-queue.ts's queueHold): the lowest version that isn't ready,
+ * the ready PRs waiting their turn behind it, why, and since when. Its alarm comes once it has held an hour (alarms.ts).
+ */
+export function QueueHoldsCard({ holds, now }: { holds: HeldQueue[]; now: number }) {
+  if (!holds.length) return null;
+  return (
+    <Section title="What holds the version queues" count={holds.length}>
+      <Card>
+        <Notes
+          items={holds.map((q) => {
+            const behind = q.hold.behind.map((n) => `#${n}`).join(', ');
+            return (
+              <span key={`${q.repo}#${q.hold.number}`}>
+                <Badge tone={q.hold.draft ? 'caution' : 'danger'} label={q.hold.draft ? 'draft' : 'not ready'} /> <strong>{q.name}</strong> <Link url={q.hold.url}>#{q.hold.number}</Link> (v{q.hold.version}) holds {behind}, ready and waiting their turn behind it since {ago(q.hold.since, now)}: {q.hold.why}.
+                <br />
+                <Text variant="muted">{q.hold.title}</Text>
+              </span>
+            );
+          })}
+        />
+      </Card>
+    </Section>
+  );
+}
+
+/** The whole suite before a kit's release, while it runs beside the rounds (stages/wholesuite.ts): the kit waits for it, the merges don't. */
+export function WholeSuiteCard({ w, now }: { w: WholeJob | null | undefined; now: number }) {
+  if (!w || w.state !== 'running') return null;
+  return (
+    <Card className="row">
+      <Badge tone="info" label="Whole suite" />{' '}
+      <span>
+        Before {w.tag}'s release, the Steward's whole suite runs at {w.commit.slice(0, 7)}, beside the rounds, since {ago(w.startedAt, now)}. The rounds go on merging meanwhile; the first after it passes releases the kit.
+      </span>
+    </Card>
+  );
+}
+
 /** The page's body: everything above Settings. */
 export function StewardBody({ v }: { v: StewardView }) {
   const now = useNow();
@@ -976,7 +1017,9 @@ export function StewardBody({ v }: { v: StewardView }) {
           </span>
         </Card>
       ))}
+      <WholeSuiteCard w={v.wholeSuite} now={now} />
       <AlarmsCard a={v.alarms} now={now} />
+      <QueueHoldsCard holds={v.queueHolds ?? []} now={now} />
       {v.round.repos === false && (
         <Card>
           <Text variant="muted" as="p">
