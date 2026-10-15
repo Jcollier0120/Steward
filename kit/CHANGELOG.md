@@ -14,8 +14,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do: paced commands take the new cap as they start.
 
-## Unreleased (its version needs claiming on the main laptop)
-**Intel's NPU 3720 measured and verified: a short answer in 0.5 s, not 3.1, by reading prompts 128 tokens at a time; Arrow Lake-U named; the NPU check times a real compile.**
 ## 2.74.0
 
 **A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
