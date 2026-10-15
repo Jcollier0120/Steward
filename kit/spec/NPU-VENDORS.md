@@ -87,7 +87,27 @@ What stays as it was, and why:
 - **Recycling GenieX sooner on a small PC.** Each `--keepalive` unload and reload keeps 351 MB more on the NPU (4,238, 4,589 and 4,940 MB), but on a PC under 20 GB the keeper stops GenieX after 5 minutes unused, long before its keepalive (3,600 s) unloads anything, so the 9 GB recycle isn't reached there.
 - **No `memoryGb` for Qualcomm.** By working set, as Intel's is measured, chat holds 5.7 GB and embeddings 2.0; at the NPU's 40% share a 16 GB PC's budget is 6.2 GB, so `npuMemoryFit` would leave embeddings off the NPU on every 16 GB Snapdragon, the room this change makes for them, and on the processor they'd hold about as much of the same memory.
 
-Not run on a 16 GB Snapdragon: these were measured on the 48 GB X2 Elite (its NPU's memory is counted the same way), and the 16 GB figures are worked out from them.
+Not run on a real 16 GB Snapdragon. The figures above were measured on the 48 GB X2 Elite, whose NPU's memory is counted the same way. The X2 Elite was then run with a 16 GB PC's memory (below).
+
+**Under a 16 GB PC's memory** (2026-10-15, the X2 Elite, in a window the owner gave). A ballast process held memory, committed and written, and wrote every page again each 2 s, so that Windows had what a smaller PC has. Nine of the manor's agents were paused and its own GenieX stopped. GenieX and the embedding server then ran together on private ports in the NPU's turn: a chat (the cold load), a picture, the server's start and a query, 100 of Reeve's own chunks (from its index of the Steward), a 2,000-character input (731 tokens), and a chat, a picture and a query with both loaded. Each setting ran once at each level, with memory sampled every 2 s:
+
+| Held, setting (`-c` / `-ub`) | NPU, both | Working set, both | Lowest available | Cold load | Embeddings healthy | A chunk, median / p90 | 2,000 characters | A chat / a picture, both loaded |
+|---|---|---|---|---|---|---|---|---|
+| None (the 48 GB PC as it is, three runs), 4,096 / 512 | 5,646 MB | 7.8 GB | (the PC's other work) | 8.8–9.9 s; 18.2 s once, with the PC's commit charge near its limit | 2.0–3.0 s | 132–136 / 170–175 ms | 246–264 ms | 96–139 / 317–421 ms |
+| 16 GB, 9.7 GB left available: 4,096 / 512 | 5,646 MB | 7.8 GB (5.8 + 2.0) | 1.1 GB | 13.1 s | 2.0 s | 133 / 172 ms | 273 ms | 105 / 375 ms |
+| 16 GB, 9.7 GB left available: 8,192 / 2,048 | 7,114 MB | 9.4 GB (5.8 + 3.6) | 1.6 GB | 14.3 s | 3.2 s | 142 / 185 ms | 345 ms | 98 / 347 ms |
+| 32 GB, 15.6 GB left in all: 4,096 / 512 | 5,646 MB | 5.1 GB at most, 1.1 at the end | 0.2 GB | 17.5 s | 2.5 s | 131 / 183 ms | 244 ms | 238 / 383 ms |
+| 32 GB, 15.6 GB left in all: 8,192 / 2,048 | 7,114 MB | 6.4 GB at most, 1.3 at the end | 0.06 GB | 17.1 s | 3.7 s | 133 / 187 ms | 370 ms | 304 / 450 ms |
+
+The first level leaves about what a 16 GB Snapdragon has once Windows (about 4.5 GB) and the manor at rest (about 2 GB) are in. The second leaves 15.6 GB for everything, this PC's other programs included: about 24 GB of them were running, which Windows had to page out to make room.
+
+- **Nothing failed** at either level or setting. Every chat, picture and embedding answered, neither server stopped, and none was refused memory. Windows grew its page file as the commit charge reached its limit (the limit went from 53.6 to 72.7 GB, the charge peaking at 72.0), as a 16 GB PC's page file grows.
+- **The NPU's memory doesn't move under pressure.** GenieX held 4,238 MB and the embedding server 1,408 MB (2,876 at the old setting) at every level, as with no ballast. Windows trimmed the processes' own memory instead. At 32 GB, GenieX's working set fell from 5.8 GB to 11–350 MB between requests and the embedding server's from 2.0 GB to 0.7 GB, read back as they answered. So a chat took 240–300 ms, against 100 ms, and the cold load 17 s, against 13 s with 9.7 GB available and 9–10 s with no ballast (18 s once, with this PC's commit charge near its limit). The embeddings' times hardly moved (131–142 ms a chunk, median, at every level).
+- **The new setting leaves a 16 GB PC 1.6 GB more** with both loaded: 7.8 GB against 9.4 at 9.7 GB available. Its embedding server got healthy 0.7–1.2 s sooner and read the 2,000-character input 70–130 ms faster under pressure. The PC wrote out fewer pages a second at the new setting (2,600 against 6,000 on average at 9.7 GB available, 12,700 against 13,200 at 32 GB), but those counts are the whole PC's, other work included.
+
+What the ballast can't show:
+- **The device limit.** Windows sets how much one device may hold from the memory the PC starts with (half: 23.8 GB on this PC), and a ballast doesn't change that. The 7.8 GB a 16 GB PC's NPU may hold is still worked out: 5,646 MB at the new setting is 2.2 GB under it, and 7,114 MB at the old 0.7 GB under.
+- **All of the 32 GB.** A process can't hold its memory against the page file without the right to lock pages. At 32 GB Windows paged part of the ballast out as well (20.2 to 32.8 GB of it stayed resident while the servers ran), so they had somewhat more than a 16 GB PC would.
 
 ## Detection
 
@@ -330,7 +350,7 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 - GenieX 0.8.0 (2026-10-07, the Smith's scout's first try): its installer's SHA-256 as GitHub publishes it, the silent per-user install over 0.7.0, the test request (chat and vision) on the route's own arguments and on the PC's configured entry, and every pinned Qwen3-VL-4B file unchanged under it;
 - the test request, chat and vision, through the kit, in the NPU's turn: answered in 14 s;
 - the keeper's GenieX handling (measured since kit 2.6.0);
-- the embedding server's memory (2026-10-15, GenieX 0.8.0, b11125): 14 settings of `-c` and `-ub`, 26 starts, the same vectors at each; `-c 4096 -ub 512` beside a loaded GenieX three times, 5,646 MB on the NPU together, and `-c 8192 -ub 2048` twice, 7,114 MB (Memory on a 16 GB Snapdragon). InternVL3.5-2B screened against Qwen3-VL-4B with the benchmark's suite.
+- the embedding server's memory (2026-10-15, GenieX 0.8.0, b11125): 14 settings of `-c` and `-ub`, 26 starts, the same vectors at each; `-c 4096 -ub 512` beside a loaded GenieX three times, 5,646 MB on the NPU together, and `-c 8192 -ub 2048` twice, 7,114 MB (Memory on a 16 GB Snapdragon). Both, with GenieX, under a 16 GB PC's memory: a ballast leaving 9.7 GB available and then 15.6 GB in all, nothing failing at either. InternVL3.5-2B screened against Qwen3-VL-4B with the benchmark's suite.
 
 **Run on an Intel Lunar Lake** (Core Ultra 7 256V, PCI `643E`, NPU driver 32.0.100.4512, 2026-10-12), the NPU check passing every step:
 - setup from nothing: OpenVINO Model Server 2026.4.1's zip, the Visual C++ runtime beside it (the PC had it in System32 too, from Office; Windows loaded the copies beside `ovms.exe`), the model's pull;
@@ -381,7 +401,7 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones);
 - a real first-generation Snapdragon X, which the X2 only plays: GenieX's own V73 QAIRT runtime (played, the X's build ran on the X2's v81 runtime; GenieX's v73 runtime wasn't tried on the X2, for the risk of a bluescreen), the X's own speed (45 TOPS against the X2's 80), its memory, and the embedding server's `-c 4096 -ub 512` on its Hexagon (v73). On a 16 GB X Elite, GenieX (5.8 GB) and the embedding server (2.0 GB from kit 2.75.1, 4.4 GB before) beside it hold about 8 GB of the 16, and setup's memory check doesn't weigh them yet (Qualcomm's route has no `memoryGb`): whether a 16 GB X keeps both is the owner's to decide;
-- a 16 GB Snapdragon running chat, pictures and embeddings on the NPU beside the manor's agents (worked out from the X2 Elite's measurements: Memory on a 16 GB Snapdragon);
+- a real 16 GB Snapdragon running chat, pictures and embeddings on the NPU beside the manor's agents. The X2 Elite ran them under a 16 GB PC's memory (a ballast: Memory on a 16 GB Snapdragon), but the 7.8 GB its NPU may hold is still worked out, since Windows sets it from the memory the PC starts with;
 - the Snapdragons before the X refused on a real one, and the ACPI ids from Qualcomm's driver files (`0D0A`, `0D19`, `104F`, `1050`): only `0FF0`, this laptop's, has been seen;
 - Intel beyond Lunar Lake and Arrow Lake-U: Meteor Lake itself (verified through the Arrow Lake-U, which shares its NPU and PCI id, but not run on one), Arrow Lake-S and -H, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);
 - the prompt settings estimated from the NPU 3720 (Estimated, above): Lunar Lake's and Panther Lake's 512-token chunks and `BEST_PERF`, their prefix cache off, and Wildcat Lake's NPU 3720 settings. Only a benchmark on the Lunar Lake can check any of them;

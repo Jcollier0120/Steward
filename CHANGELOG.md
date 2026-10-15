@@ -8,7 +8,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### What changed
 
-- On a Snapdragon PC, the search model that runs on the NPU beside the chat model now holds 1.4 GB of memory instead of 2.9 GB. It answers just as fast and gives the same results, so existing search indexes carry over. Together the two models now hold 5.6 GB instead of 7.1 GB, comfortably inside what Windows lets the NPU hold on a 16 GB PC.
+- On a Snapdragon PC, the search model that runs on the NPU beside the chat model now holds 1.4 GB of memory instead of 2.9 GB. It answers just as fast and gives the same results, so existing search indexes carry over. Together the two models now hold 5.6 GB instead of 7.1 GB, comfortably inside what Windows lets the NPU hold on a 16 GB PC. Tried with only a 16 GB PC's worth of memory free, chat, pictures and search all kept working, and the two models left 1.6 GB more of it for everything else than before.
 - Waking the search model after a rest is now announced as taking about 3 seconds, as measured, instead of 10.
 - The kit the Steward hands out (2.75.1) brings this to every agent. Intel and AMD PCs are unchanged.
 
