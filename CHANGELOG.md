@@ -15,6 +15,10 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - If the halving can't single out one pull request, the ones at the bottom of the stack that passed ship, and the rest wait for the next build, with an alarm naming them.
 - A new setting, **To find the PR that breaks a build, at most** (Build pipeline, advanced; `bisectRuns`, 3 by default, 0 to 6): how many extra test runs the halving may take. At 0 it doesn't look: what passed at the bottom ships, the rest wait.
 
+### What changed
+
+- A kit is no longer held back from release by one of the Steward's own tests failing only because the PC was busy. The test of the NPU queue letting go of its lock while another program reads it now says it couldn't tell, rather than failing, when that program was held up longer than the queue waits. This kept kit 2.74.6 from being released on 15 October, while kit trials ran beside the check.
+
 ### Before you update
 
 - Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.40's build pipeline too, if that wasn't released on its own.
