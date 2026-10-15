@@ -2,6 +2,42 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+**The NPU benchmark runs, reports and reads near the generation's own cap, and counts an energy figure only when the battery's reading can tell it. On a Snapdragon its pictures reach GenieX as files and a text candidate is measured as one, a candidate's report carries its files' SHA-256s, and its spec says how to run it on a PC.**
+
+### What changed
+
+- **npu-bench.ts runs the route as setup does on this NPU's generation** (`routeFor`, as the NPU check already did). Before, it took the route's own values:
+  - on a Meteor Lake NPU 3720, the report said cap 4096, while the server ran at the generation's 2048;
+  - its read "near the cap" asked for about 3,700 tokens and got no answer.
+  - The generation's timeouts and server arguments now apply too.
+- **`--cap` is no longer undone by a generation with its own cap.** The bench's route went through `planNpu`, which put the generation's `--max_prompt_len` back. It is now planned as it is. Off the NPU, `--cap` sets where the long read goes instead of being refused. Without it, a graphics card's long read is at the NPU's cap, so the two runs compare.
+- **An energy figure counts only when working reads clearly more than rest**: by 1 W and by a tenth of the rest reading (`ENERGY_MIN_EXTRA`).
+  - On the Lunar Lake laptop the battery's rate gave 2.3 mJ a token, and on its graphics card a negative figure, both reported as if they counted.
+  - Such a run now keeps both readings, with `millijoulesPerToken: null`, and its log says why.
+- **npu-server.ts' `setUpRoute`** (the bench's and the NPU check's setup step) no longer passes on setup's "asking … a test question on the NPU" and "measuring … on this NPU" lines, since it asks and measures nothing itself. Setup's "answered on the NPU: chat, embed" becomes "is set up for: chat, embed". A graphics-card run no longer says it asked the NPU.
+- **The bench's pictures reach GenieX as files** (its `image-path` quirk).
+  - Each suite picture is written to a file of its own in the temporary folder, and its path is sent, as an agent's pictures go to GenieX. Before, they went as `data:` URLs, which the kit passes on as they are whatever the quirk says, and GenieX reads only a local path. The files are removed after the run.
+  - Other servers still get `data:` URLs. `picturePng` gives a picture's bytes; `picture` is its `data:` URL, as before.
+- **GenieX's `prefix-leak` nonce was already there.** The bench's requests are the kit's own (`chatBody`, `visionBody`), and its entry carries the route's quirks, so every request starts with a nonce. A test now holds it to that, and the run's log names the quirks it applied.
+- **One picture as a warm-up, not counted**, before the four graded, as every other measurement has. GenieX holds one model at a time and loads its vision part for a picture, so the first picture's time was that load's. Only routes with vision are affected (GenieX's; Intel's has none).
+- **A `--candidate` only chats, unless `--vision` says it sees.** `candidateRoute(route, id, { vision })` took the kinds of the model it stood in for. On GenieX's route, whose one model chats and sees, a text model was therefore:
+  - pulled with `--model-type vlm`, where GenieX's pull takes `llm` or `vlm`; it now gets `llm`, or `vlm` with `--vision`;
+  - asked the four pictures, and reported 0 of 4; it now has no vision column.
+  - Its `present` file kept the route's own model's folder, because GenieX's folder drops the id's `:W4A16` tag. So a candidate counted as downloaded whenever Qwen3-VL was, and was never pulled. The id is now renamed with and without its tag, in one pass.
+  - `--vision` on a route with no vision (Intel's) is refused, and so is `--vision` without `--candidate`.
+- **A `--candidate`'s files are measured.** The spec said its report carries their SHA-256s, but `run.files` came only from a model's `pinned` files, which a candidate has none of, so it was always null.
+  - Once setup has pulled it, `candidateFiles` reads every file in its model's folder (where its `present` file is: GenieX's `%USERPROFILE%\.cache\geniex\models\<org>\<name>`, OpenVINO's `{tools}\models\openvino\<org>\<name>`) and puts each one's `{ size, sha256 }` in `run.files`, by its name in that folder, as `pinned` lists a model's.
+  - FastFlowLM's route has no `present`, so nothing says where its models are: there `run.files` stays null and the log says so, as it does when the folder isn't there.
+- **spec/NPU-BENCHMARK.md**:
+  - says all of the above;
+  - drops the `streams` a route was said to declare in `npu-vendors.json`, which none does: the bench sees whether each answer was streamed and marks the run `not-streamed` (or `no-usage`) when not. Whether GenieX streams, with usage in its last chunk, is still to be checked on the X2 Elite;
+  - gains **Running it on a PC**, a runbook an agent can follow unaided, with a Snapdragon section: the Steward's own kit, an Arm64 Node, the conditions, pausing the keeper and stopping the NPU's servers, the quick then full run, `--energy` on battery, and what to send back. On a Snapdragon it covers GenieX's quirks, its one model at a time, the 2,400-token cap and the ~8K prompt that bluescreened the X2 Elite, why `--device GPU` and `--cap` are refused there, and the streaming and energy still to be seen.
+
+### For an agent
+
+- Nothing to do.
+
 ## 2.74.1
 
 **The checks pace allows four processors' worth, not two.**
