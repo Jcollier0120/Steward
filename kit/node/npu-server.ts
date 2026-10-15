@@ -314,7 +314,12 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
   let entry: AcceleratorEntry | undefined;
   const r = await setUpNpu(plan, tools, {
     ...io,
-    log: (l) => log(`  ${l}`),
+    // No test question is asked here, nor a measurement taken (the caller measures the server, on whichever device it
+    // runs on): setup's lines about them aren't this run's, and its "answered on the NPU" only says what was set up.
+    log: (l) => {
+      if (/^(asking .* (a test question|for a test embedding)|measuring .*) on (the|this) NPU\b/.test(l)) return;
+      log(`  ${l.replace(/ answered on the NPU: /, ' is set up for: ')}`);
+    },
     download: (dl, progress) => time('download', () => (io.download ?? download)(dl, progress)),
     unpack: (zip, into) => {
       const t0 = now();
