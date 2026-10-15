@@ -306,6 +306,17 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 **Played on the X2 Elite Extreme** (2026-10-15), the first X's code on the X2's NPU (Playing an older Snapdragon, above): what an X runs, not at an X's speed:
 - the embeddings with `GGML_HEXAGON_ARCH=v73` against the native v81, Qwen3-Embedding-0.6B at `-c 8192`, each request with a fresh nonce (llama-server's prompt cache otherwise fakes the timings): cosine 1.000 on every text; a start in 1.8 s either way; 20 tokens in 21 ms either way; 551 tokens in 184 ms native and 195 ms on v73; 2,112 tokens in 970 ms native and 1,014 ms on v73 (about 5% slower); the same memory, 4.36 GB working set and 1.55 GB private. It ran the v73 code: without `libggml-htp-v73.so` it fails (0x80000406);
 - GenieX 0.8.0 serving AI Hub's X Elite build (soc 60, v73 context binaries) on the X2's v81 QAIRT runtime: a picture's colour named right ("red", 8.0 s cold), "ready" in 115 ms warm, a count to ten in 1.19 s (40 tokens). Once, warm, it wrote "tenth" without its spaces; setup's check of a count still passes it, as it needs only three and seven and no repetition. The X2's own build beside it: 11.0 s cold, 105 ms, 1.20 s. Both held 5.8 GB working set, 1.6 GB private.
+- the kit's own runs (kit 2.74.7), with the X Elite build seeded in the played folder so nothing downloaded: `npu-check --generation snapdragon-x` passed as a rehearsal with no patch. Setup found the six pinned files whole in `{tools}\played\snapdragon-x\geniex` (its `config.json` naming `qualcomm-snapdragon-x-elite`). Its other measurements: a first answer in 12 s, warm answers in 0.16–0.22 s, 17.3 tokens a second over 256, 1,812 tokens read in 1.8 s, 2,656 tokens under the cap answered, two requests at once in 0.38 s, a start again in 12 s. The kit's own test request (vision and "ready") passed, and so did its embeddings with `GGML_HEXAGON_ARCH=v73`: a vector in 2.9 s, then 21 ms a query and 165 ms a chunk, 1,024 dimensions. GenieX held 5.68 GB (1.55 GB private). `npu-bench --profile quick --generation snapdragon-x`, marked played and never ranked, against the X2's own build's quick run the same day:
+
+  | | played X | X2's own |
+  |---|---|---|
+  | job time | 5.5 s | 6.16 s |
+  | writing | 38.8 tokens a second | 39.9 tokens a second |
+  | cold load | 9.4 s | 10.0 s |
+  | quality | 23 of 24 (wrong: time) | 23 of 24 |
+  | vision | 3 of 4 | 2 of 4 |
+
+  The played run's cached load was 9.5 s. A quick run tries each measurement only 3 times, and the reply and summary jobs varied by more than 15%, so the two are alike within its noise.
 
 **Checked from source or the release, not run**: OpenVINO Model Server 2026.4.1's zip (its SHA-256, its layout, its `/v1/models` and `/v1/chat/completions` routes in its source at that tag); FastFlowLM 1.0.7's `flm validate --json`, from its source and `flm.exe`: it looks for PCI `17F0` alone, so it can't vouch for an AMD NPU setup doesn't know (Detection, above).
 
