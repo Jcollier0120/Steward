@@ -49,6 +49,7 @@ import { whereGitea } from './hosts/gitea.ts';
 import { repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
+import { loadBuildLeft, noteReady } from './stages/build.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -582,6 +583,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
+      // When each PR went ready, as the rounds see it: a build stacks its PRs in that order (stages/build.ts).
+      if (name === 'round' && ctx.glance) {
+        try {
+          noteReady(ctx.glance, at());
+        } catch (e) {
+          log(`couldn't keep when PRs went ready: ${(e as Error).message}`);
+        }
+      }
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
       let held: { employee: Employee; prs: Held[] }[] = [];
@@ -637,6 +646,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // In a build, a ready PR merges at once: the build time was the time to push to it (merge.ts' ageHold). And
             // nothing is released merge by merge: the build releases each repository once, when it closes.
             ctx.settings = { ...ctx.settings, mergeMinAgeMinutes: 0, releaseAfterMerge: false };
+            // Each repository's ready PRs stacked as one batch, in the order they went ready (stages/build.ts).
+            ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
           }
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
@@ -679,7 +690,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           let employees = turns.acting;
           if (round) {
-            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            // A build's first round looks at every repository: the PRs that waited since the last build board now,
+            // whether or not GitHub says anything new of them.
+            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full || (mode.kind === 'build' && mode.fresh), look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             // Those another PC has its turn in are left to it, and not kept as seen (afterRound): looked at again next round.
             const looked = await takeTurnsFor(ctx, o, plan.look, null, true);
             plan = { ...plan, look: looked.acting };
@@ -922,7 +935,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, buildLeft: loadBuildLeft(), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
