@@ -231,10 +231,23 @@ export function matchDevice(card: Pick<GpuCard, 'name'>, devices: LlamaDevice[],
 // ------------------------------------------------------------------------------------------------
 // The entries
 
-/** Each server's context, in tokens, as its startCommand sets it (acceleratorEntry): chat's is cap × slots. */
+/**
+ * Each server's context, in tokens, as sizing counts it: chat's is cap × slots. Its startCommand (acceleratorEntry) sets
+ * the same, but the embedding server's, which starts at EMBED_CONTEXT: sizing still counts that one at 8192, with
+ * SERVER_GB's compute buffer at -ub 2048, so every card is sized as it was before it started smaller.
+ */
 export function serverContext(kind: EndpointKind, s: { slots: number; maxContextTokens: number }): number {
   return kind === 'chat' ? s.maxContextTokens * s.slots : kind === 'vision' ? Math.max(8192, s.maxContextTokens) : 8192;
 }
+
+/** The embedding server's context, in tokens. */
+const EMBED_CONTEXT = 4096;
+/**
+ * The cap on a request to the embedding server, in the kit's estimate (3 characters a token): an input under it is at
+ * most 4,095 characters, so it fits EMBED_CONTEXT even at a token a character (code and unusual text come close).
+ * The agents' longest is Reeve's cluster item, about 2,060 characters.
+ */
+export const EMBED_CAP = Math.floor(EMBED_CONTEXT / 3);
 
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
 function kindFlags(kind: EndpointKind, e: { slots: number; maxContextTokens: number }, mmproj: string | undefined, model: string): string[] {
@@ -244,12 +257,14 @@ function kindFlags(kind: EndpointKind, e: { slots: number; maxContextTokens: num
     case 'vision':
       return ['--mmproj', portablePath(mmproj ?? ''), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
     case 'embed':
-      // Each input must fit one micro-batch, and Reeve's are under ~650 tokens (a 1,500-char chunk
-      // and its path). At 8192 the compute buffer was one 4.7 GB allocation, which the Adreno X2-90's
-      // OpenCL refused ("failed to allocate compute pp buffers"); at 2048 it loads.
-      return ['--embeddings', '--pooling', 'last', '-c', String(serverContext('embed', e)), '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', model];
+      // The compute buffer grows with -c × -ub: at -c 8192 -ub 8192 it was one 4.7 GB allocation, which the Adreno
+      // X2-90's OpenCL refused ("failed to allocate compute pp buffers"). At -c 4096 -ub 512 (b11669, 2026-10-15) a
+      // Radeon 860M's server held 1,278 MB of the card's memory against 1,891 at -c 8192 -ub 2048, with the same
+      // vectors (cosine 1.000000) and times (28 ms a query, 288 ms Reeve's longest, 2.2 s for 2,694 tokens): an
+      // input longer than a micro-batch is split across several.
+      return ['--embeddings', '--pooling', 'last', '-c', String(EMBED_CONTEXT), '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', model];
     case 'rerank':
-      // A question and one document a pass, each well under a micro-batch (Reeve sends 1,600 chars of a file): as embed.
+      // A question and one document a pass, each well under a micro-batch (Reeve sends 1,600 chars of a file).
       return ['--reranking', '-c', String(serverContext('rerank', e)), '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', model];
   }
 }
@@ -343,6 +358,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
     const model = MODEL_SPECS[kind].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
     a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)] };
+    if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
   }
   return a;
 }
