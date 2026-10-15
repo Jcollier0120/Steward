@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.74.5
 
-**The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, AMD's runs on a 16 GB Ryzen AI (XDNA 2 verified), and a known maker's NPU of a generation setup doesn't know is tried instead of refused.**
+**The NPU: a PC set up by an older kit gets this kit's command, Intel's NPU 3720 writes about 13% faster and holds less, AMD's runs on a 16 GB Ryzen AI (XDNA 2 verified), a known maker's NPU of a generation setup doesn't know is tried instead of refused, and the benchmark times prompts the server hasn't seen.**
 
 ### What's new
 
@@ -32,12 +32,15 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **The NPU check's start** fails when FastFlowLM answers `/v1/models` but holds no model (its `/api/ps`: `reportsLoaded`), with the reason from its log (`loadFailure`). Before, it passed on `/v1/models`, and failed only at its first answer, with "no answer: null". An answer that is only an error now keeps its words in the report.
 - **Setup's test request** asks about the picture first and chat last: a server holding one model at a time is left holding chat, and setup's measuring after it times chat warm. On FastFlowLM it timed the switch back from the vision model (9.2 s against 1.3 s) and wrote timeouts five times too long.
 - **The amd route's models name their files** (`present`), so `npu-check --no-setup` finds them. FastFlowLM's folders aren't named by the model's id, so npu-bench's `candidateRoute` drops a `present` whose path doesn't name the model. Kept, an AMD `--candidate` would have counted as downloaded, never been pulled, and had the route's own model's files measured as its own.
+- **Every read and job is asked as a new prompt.** npu-bench.ts puts a line of its own first, `[bench <run>-<count>]`, in each warm-up and try of the reads and jobs, the read near the cap, holding speed and energy (`freshPrompt`). OpenVINO Model Server turns the NPU's prefix caching on, so suite 1, which asked one prompt over and over, timed mostly the cache: on an NPU 3720, 0.74 s to the first token at 512 tokens, against 2.26 s for a prompt it hadn't seen. The short answer, writing and quality prompts are as they were. GenieX's requests were already new, by their nonce.
+- **The suite is `castellan-npu-bench/2`.** The website compares runs of one major version, so suite 1's runs don't rank against these. The report's format (`castellan-npu-bench-report/1`) is unchanged.
 - spec/NPU-VENDORS.md: the NPU 3720 sweep's numbers, and how the prefix cache makes the benchmark's repeated reads faster than a new prompt's; Detection (the guessed values, the note, and why FastFlowLM 1.0.7's `flm validate` isn't AMD's check: it looks for PCI `17F0` alone), the NPU check, and what's unverified; the AMD Krackan's run, and what is still unverified on AMD.
 
 ### For an agent
 
 - Nothing to do: the Smith, else Reeve, runs the refresh in its look, and an agent that keeps the servers itself with `keeperLook` gets it the same way. A PC with an NPU 3720 set up by an earlier kit takes the new command once its NPU is idle; its first start with it compiles once, in about a minute. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
 - A Ryzen AI PC whose setup left the NPU out gets it the next time setup runs (Manor's "Set up local AI"), which writes the NPU's entry afresh with the new command.
+- A run made to compare with an earlier one needs both on suite 2.
 
 ## 2.74.4
 **One process for every PowerShell, not two: powershell.exe shares the page's windowless console, as git and gh do since 2.73.2.**
