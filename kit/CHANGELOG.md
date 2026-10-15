@@ -18,6 +18,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do: a page drawing `NeedsYou` gets the spacing as it pins this kit. Anything it draws just after Needs you that belongs under its heading can move into its children.
 
+## 2.74.1
+
+**The checks pace allows four processors' worth, not two.**
+
+### What changed
+
+- **`checksCap()`** is a quarter of the processor and four processors' worth at most (was the gentle pace's, `gentleCap()`: two at most). Up to eight processors nothing changes; on 18 the cap goes from 11% to 22%. A suite that starts a git for every step was too slow at two: the Steward's own took over an hour on an 18-processor laptop that was otherwise idle. The agents' own background pace (`gentleCap()`) is unchanged. spec/ROUND.md says so.
+
+### For an agent
+
+- Nothing to do: paced commands take the new cap as they start.
+
 ## 2.74.0
 
 **A page template for the staff an AI assistant calls: Reeve's page, in parts every MCP agent can share, so their pages read alike.**
@@ -39,6 +51,44 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing changes until a page uses them. An agent that serves MCP lays its page out as spec/STAFF-PAGE.md says, with these parts in place of its own tiles, connect card and output blocks.
+
+## 2.73.5
+
+**Every folder the kit compares, it compares by its real path: through a junction, a link or a Dev Drive mounted in a folder, one folder is one folder.**
+
+### What's new
+
+- **`real-path.ts`**: `realPath(p)`, a path with its junctions, links and mounted folders followed (`realpathSync.native` of the deepest part that exists, the rest kept as given; a share such as `\\wsl.localhost\...` taken as it is, so WSL and the network are never woken; answers kept a minute), and `pathKey`, `samePath`, `inside` and `keyInside` to compare by it. `forgetRealPaths()` is for a test that makes a junction. spec/DEV-DRIVES.md's rule 1 points to it.
+- native.ts: `spellingsOf(dir)`, a folder as given and its real path when that's another.
+
+### What changed
+
+- install.ts: `--purge`'s guard compares the data folder with the profile and Windows' folders by their real paths, and refuses a whole drive mounted in a folder (`C:\DevData`, where `E:` is mounted). Before, a data folder named for the agent that held the profile through a junction passed as the agent's own, and would have been emptied. `install` knows its installed copy however its release and data folder are spelled.
+- An update ends the programs running from the app folder under either spelling (`processesUnder`): Windows names a process's program as it was started, through a junction or a mounted folder if it was.
+- keeper.ts: a model server's program (`sameProgram`) and the manor's servers folders (`manorOwns`, `manorServerDirs`) are compared by their real paths. A configured server whose process was started under the other spelling wasn't known as itself, and could be stopped as an orphan.
+- accelerators.ts, accelerator-config.ts: Reeve's older config.json is the accelerators' own when one's folder is a junction to the other's, so it's neither moved nor mirrored onto itself.
+- folders.ts: `uniqueFolders` lists a folder once however it's spelled.
+- manor.ts compares a project's checkout through `real-path.ts`, as it has since 2.73.1, now with its answers kept a minute.
+
+### For an agent
+
+- Take the kit and release as usual.
+- Compare your own folders with `samePath`, `inside` or `pathKey` from `./kit/real-path.ts`, not `path.resolve(...).toLowerCase()` (spec/DEV-DRIVES.md, rules 1 and 5).
+
+## 2.73.4
+
+**An NPU's own timeouts are used: its requests run on them, and a model found still loading is given its cold load.**
+
+### What changed
+
+- **A request runs on its accelerator's own `timeouts`.** `core.requestTimeoutMs` has always taken an accelerator's `timeouts` in place of rules.json's, but npu.ts never passed them, so every request ran on the rules': 15 s plus 0.3 s a token, and 90 s more for a cold load. Now a route's own in npu-vendors.json (Intel's up to 60 s plus 0.4 s a token and a 360 s cold load on Meteor Lake and Arrow Lake, AMD's 120 s), and what setup measured on a generation nobody had measured and wrote into its entry (`calibrate`), are what its requests get. A Qualcomm NPU has none of its own, so its requests are unchanged.
+- **A server found still loading its model gets the cold-load allowance for its warm-up**, as one just started does (2.71.0): `requestBaseMs` plus the larger of rules.json's `coldLoadMs` and the accelerator's own. Before, when another agent had started the server, the warm-up got the caller's `timeoutMs` (a person's 20 s), or 105 s with none. That was too short for an NPU that compiles its model on first load, and the request was deferred while the model went on loading.
+- **A warm-up with no `timeoutMs` gets the same allowance**, for example the first request after the server's keepalive has unloaded the model. Before, it got rules.json's 105 s whatever the accelerator's own cold load.
+- **npu-bench's energy (`--energy`) is measured on a busy PC too.** Each window now takes at least one reading, and the working window lasts until a job has finished, with a reading taken after it. Before, a process held past a window's end before its first look took no reading, and the report said "the battery gave no discharge rate". This was also why its test failed now and then while other tests ran beside it.
+
+### For an agent
+
+- Nothing to do: requests on an Intel or AMD NPU, or on one setup measured, wait as long as its timeouts allow. A caller's own `timeoutMs` still decides a request, as before.
 
 ## 2.73.3
 **An install or a settings file written just before the PC crashes comes back whole, not as files full of nothing; and Intel's NPU 3720 is measured and verified, a short answer in 0.5 s, not 3.1.**

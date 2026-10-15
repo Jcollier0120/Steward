@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gentleCap } from './gentle.ts';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { powershell, psQuote } from './ps.ts';
@@ -16,8 +15,8 @@ import { powershell, psQuote } from './ps.ts';
  * A paced command runs through a small launcher (checks-pace.cs, compiled once to an exe every agent on the PC shares, as
  * gentle.cs is to a DLL) that starts it, and every program it starts, in a job with
  *
- * - **a hard cap on the processor**: the gentle pace's, a quarter of it and two processors' worth at most
- *   (checksCap()), however many threads they run;
+ * - **a hard cap on the processor**: a quarter of it, and four processors' worth at most (checksCap()), however many
+ *   threads they run;
  * - **a cap on memory**: per program and for the whole job (checksMemory()), so a runaway test fails rather than
  *   pages the PC;
  * - **below-normal priority**: they give way to whatever the person is doing;
@@ -34,13 +33,15 @@ import { powershell, psQuote } from './ps.ts';
  */
 
 /**
- * The cap by default, in hundredths of a percent: the gentle pace's (gentleCap()), a quarter of the processor and two
- * processors' worth at most. Measured on an 18-core laptop (kit 2.73.0), the Assayer's own suite on a quiet PC: the whole
- * PC peaked at 91% and the suite took 39 s with no cap, 43% and 65 s at this one. Half the processor, as this was first,
- * barely held it (the suite's own peak went from 57% to 49%).
+ * The cap by default, in hundredths of a percent: a quarter of the processor, and four processors' worth at most (kit
+ * 2.74.1). Measured on an 18-core laptop (kit 2.73.0), the Assayer's own suite on a quiet PC: the whole PC peaked at 91%
+ * and the suite took 39 s with no cap, 43% and 65 s at the gentle pace's cap (gentleCap(): two processors' worth at
+ * most). Half the processor, as this was first, barely held it (the suite's own peak went from 57% to 49%). Two
+ * processors' worth, the gentle pace's, was too tight for a suite that starts a git for every step: the Steward's own
+ * took over an hour on that laptop, the PC otherwise idle. Up to eight processors this is the gentle pace's cap still.
  */
 export function checksCap(processors = os.availableParallelism()): number {
-  return gentleCap(processors);
+  return Math.round(Math.min(25, 400 / Math.max(1, processors)) * 100);
 }
 
 /** How many paced runs the PC runs at once (the launcher's turns); the rest wait for one, 20 minutes at most. */
