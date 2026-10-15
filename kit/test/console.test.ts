@@ -13,7 +13,8 @@ const pkg = JSON.parse(readFileSync(new URL('./fixture/package.json', import.met
 const ENV = String(pkg.name).toUpperCase().replace(/-/g, '_');
 process.env[`${ENV}_HOME`] = path.join(tmp, 'own-home');
 process.env[`${ENV}_PORT`] = String(await freePort());
-after(() => rmSync(tmp, { recursive: true, force: true }));
+// The pages it starts work in tmp and end on their own, after the test: on a busy PC one still had it (EBUSY).
+after(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
 const { pageLaunch } = await import('./fixture/src/kit/service.ts');
 
 test('pageLaunch: on Windows through cmd start /b with a windowless console; elsewhere, or on a path cmd would read, detached as before', () => {
