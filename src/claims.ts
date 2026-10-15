@@ -3,7 +3,7 @@ import { compareVersions } from './kitfiles.ts';
 import { withLock } from './kit/lock.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { originRepo } from './kit/manor.ts';
-import { makersOnly, makersOwn, makersPc } from './maker.ts';
+import { claimRefused, makersPc, makersRepo } from './maker.ts';
 import { stewardCloneAt } from './migrate.ts';
 import type { Employee, Settings } from './settings.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
@@ -17,6 +17,7 @@ export { CLAIMS_FILE, CLAIMS_REF };
 import { readRef, writeRef, type RemoteRepo } from './remote-ref.ts';
 import type { Runner } from './run.ts';
 import { hostFor, must } from './hosts/index.ts';
+import { pushable } from './found.ts';
 
 /**
  * Versions claimed up front. Two pieces of work started side by side on one repository each used to take "the next
@@ -34,6 +35,10 @@ import { hostFor, must } from './hosts/index.ts';
  *
  * The kit is claimed the same way, as a part of the Steward's repository (`claim-version kit`): kit/VERSION, its
  * kit-v<version> releases, the kit versions open PRs' titles name, and claims under `<repo>#kit` (stages/kitpart.ts).
+ *
+ * The maker's other development PCs (Steward 0.36.27) claim versions of the manor's repositories too, though nothing
+ * else of them is theirs: GitHub says their account can push there (maker.ts' claimRefused). They run no rounds to
+ * share a claim later, so theirs go through the repository's claims ref or not at all (sharedOnly).
  */
 
 export interface Claim {
@@ -107,11 +112,12 @@ export const claimsOn = (repo: string, all = loadClaims()): Claim[] => all.filte
  * as always, and shared on the next round that reaches the remote (shareClaims). `now`, the facts it reads and `remote`
  * stand in for tests (under node --test there's no remote unless given).
  */
-export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null }): Promise<{ claim: Claim; again: boolean }> {
+export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string | null; by: string; for: string; minor?: boolean; now?: number; part?: 'kit'; remote?: RemoteRepo | null; canPush?: (repo: string) => Promise<boolean> }): Promise<{ claim: Claim; again: boolean }> {
   const now = o.now ?? Date.now();
   const kit = o.part === 'kit';
-  // Off the maker's laptop, no version of Castellan's own repositories or kit is claimed (maker.ts).
-  const theirs = kit && !makersPc() ? makersOnly("Claiming a version of Castellan's kit") : makersOwn({ name: e.name, repo: e.repo }, { byId: false });
+  // Off the maker's laptop, no version of Castellan's own repositories or kit is claimed, unless GitHub says this PC's
+  // account can push there: one of the maker's other development PCs (maker.ts).
+  const theirs = await claimRefused(e, { kit, canPush: o.canPush ?? pushesHere(ctx) });
   if (theirs) throw new Error(theirs);
   const key = kit ? kitClaimKey(e.repo) : e.repo;
   const files = kit ? [KIT_VERSION_FILE] : e.versionFiles;
@@ -132,6 +138,7 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
     const shared = await claimShared(ctx.run, remote, ask);
     if (shared) return shared;
   }
+  if (sharedOnly(e)) throw new Error(`${ask.what}'s claims on GitHub (${CLAIMS_REF}) couldn't be read or written from here, and a claim kept on this PC alone would be seen by no other: nothing was claimed. Try again once GitHub answers.`);
   return withLock(claimsLock(), async () => {
     const all = loadClaims();
     const live = all.filter((c) => !same(c.repo, key) || stillHeld(c, facts));
@@ -139,6 +146,25 @@ export async function claimVersion(ctx: Ctx, e: Employee, o: { branch?: string |
     writeJson(claimsFile(), r.again ? live : [...live, r.claim]);
     return { claim: r.claim, again: r.again };
   });
+}
+
+/**
+ * Whether a claim here must go through the repository's claims ref: one of the maker's repositories (or its kit) from
+ * a PC that isn't the maker's laptop. Kept here alone, it would be shared by no round and seen by no other PC.
+ */
+export const sharedOnly = (e: Pick<Employee, 'repo'>, makers = makersPc()): boolean => !makers && makersRepo(e.repo);
+
+/**
+ * Whether gh's account can push to a repository, asked of GitHub (found.ts' pushable) once per repository for the
+ * function this returns: false when GitHub can't be asked.
+ */
+export function pushesHere(ctx: Pick<Ctx, 'run' | 'neutralDir'>): (repo: string) => Promise<boolean> {
+  const asked = new Map<string, Promise<boolean>>();
+  return (repo) => {
+    const k = repo.toLowerCase();
+    if (!asked.has(k)) asked.set(k, pushable(ctx.run, ctx.neutralDir, [repo]).then((r) => r.push.get(k) === true));
+    return asked.get(k)!;
+  };
 }
 
 type Ask = { key: string; branch: string | null; by: string; for: string; minor: boolean; now: number; facts: Parameters<typeof stillHeld>[1]; what: string; files: string[]; from: string };

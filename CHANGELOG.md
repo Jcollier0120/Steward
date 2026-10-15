@@ -35,6 +35,84 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The time limit starts once three vouches of a repository have passed on this version.
+## 0.36.27
+
+**Your second development PC can claim versions of the manor's repositories.**
+
+### What's new
+
+- On a PC you develop on beside the one that merges and releases, `claim-version` and `release-version` now work for the manor's own repositories (and the kit, from a Steward clone) when GitHub says the account that PC is signed in with can push to them. Before, they were refused anywhere but the maker's laptop, so work started there couldn't take a version.
+- The claim goes straight to the repository's shared claims on GitHub, which the merging PC reads. If GitHub can't be reached, nothing is claimed, rather than a claim only that PC would know about.
+- Nothing else moves: merging, releasing, ports and recalls stay on the maker's laptop.
+
+### Before you update
+
+- Nothing: it updates itself as usual. To claim from another PC, see "Except a version claim from the maker's other development PCs" in the README.
+## 0.36.26
+
+**Kit 2.74.0: a page layout for the agents your AI assistant calls, taken from Reeve's page, so they all read alike.**
+
+### What's new
+
+- The kit the Steward hands out (2.74.0) has a shared page layout for agents that serve MCP, like Reeve and the Assayer: what needs you first, then a row of tiles at a glance, connecting your AI, what was kept out of its context, then the agent's own sections. Lists show one line per item; details and long output open beside the page instead of filling it. Agents take it up as they pin kit 2.74.0, the Assayer first.
+## 0.36.25
+
+**The other agents see a merge within seconds, however long the Steward's round takes.**
+
+### What changed
+
+- The Steward shares the branches of your repositories on GitHub with the other agents, so they needn't ask GitHub themselves. Reeve uses them to bring each clone's main up to a merge. Before, they were read only as a round began, and a long round (one trying a new kit can take hours) left them out of date: the agents asked GitHub again, and Reeve couldn't tell a clone was behind.
+- Now the Steward's page also reads them on its own every 5 minutes, unless a round just did, and 10 seconds after each pull request it merges.
+- It costs about one of GitHub's 5,000 points an hour per read, and only happens while the Steward merges and releases by itself and is on duty. It never touches the tenth of GitHub's limit the Steward keeps spare.
+## 0.36.24
+
+**The Steward starts fewer git commands when it takes its turn in a repository or shares a version claim, and when it clears its work folders, so its rounds put less load on your PC.**
+
+### What changed
+
+- Writing the turn record or the shared version claims to a repository's remote used to start four git commands to build the commit before the push. The Steward now writes that small commit itself, and only the push still goes through git. The push's compare-and-swap is the same as before, so two PCs still can't both take a turn. The commit is the same one git would have made.
+- Reading a turn record or the claims back no longer starts git to read the file. The Steward reads it from the objects it already has, and asks git only when they're packed.
+- Clearing a stage's worktree used to list every worktree with git, remove it, and then always tidy up git's records of worktrees. The Steward now reads those records from git's own files and tidies up only when a worktree folder has gone missing. A folder that isn't there anymore costs no git command at all. Worktrees under a junction or a Dev Drive, and ones deleted by hand, are still found and cleared as before.
+- The Steward's own tests of these parts run faster: on the owner's laptop, the turn and claims tests went from 29 to 23 seconds and the catch-up's from 37 to 35.
+## 0.36.23
+
+**Kit 2.73.5: the kit sees one folder as one folder, however it's named.**
+
+### What changed
+
+- The kit's install, update and model-server checks now compare folders by their real paths, through a junction, a link or a Dev Drive mounted in a folder (the Steward's work folder, `%USERPROFILE%\.steward\work`, is often one). An update ends the programs still running from the old copy whichever way they were started. Uninstalling with `--purge` refuses a folder that holds your profile, or a whole drive mounted in a folder, however it's named. A model server started under the other spelling is still known as the manor's own, and never stopped as an orphan.
+- Agents take kit 2.73.5 as usual.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+## 0.36.22
+
+**The Steward's kit 2.73.4: an NPU that loads its model slowly is given the time its own settings allow.**
+
+### What changed
+
+- On a PC with an Intel or AMD NPU, the agents' local AI requests now wait as long as that NPU's own settings allow. Before, they all waited the same short time, so a slower NPU's answers, or its first answer while it prepared its model, could be cut off and the work put off until later. The timings setup measured for an NPU nobody had measured before are used now too.
+- When one agent finds the NPU still loading its model because another agent just woke it, it now waits for the load to finish, as it already did when it woke the NPU itself.
+- On a PC with a Qualcomm NPU, nothing changes.
+- The NPU benchmark's battery measurement no longer comes out empty when the PC is busy.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The agents get it as each takes kit 2.73.4.
+## 0.36.21
+
+**An update cut short by a crash no longer leaves an agent that can't start: what an update or a save writes is on the disk before it takes its place.**
+
+### What changed
+
+- The Steward hands out kit 2.73.3 and runs on it. When the PC went down seconds after Manor updated an agent, Windows had kept the swap of the agent's folder but not its files: they came back full of nothing (NUL bytes), and the agent's page couldn't start until it was installed again. Now each update writes the new version's files to the disk before swapping them in, and the copy kept for a rollback too.
+- The same for every settings and state file the Steward and the agents write: after a crash each is as it was before the save or as it was after, never empty. Each save takes about a millisecond longer.
+- Kit 2.73.3 also brings Intel's NPU 3720 tuning: on a PC with that NPU (Core Ultra Series 1, or 200U), the agents' local model answers a short question in about half a second instead of three, and the NPU check measures a real first compile. A PC whose NPU is already set up keeps its settings until it is set up again.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each agent gets the same once the Steward moves it onto kit 2.73.3.
 
 ## 0.36.20
 

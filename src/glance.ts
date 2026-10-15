@@ -186,8 +186,11 @@ export function headsFromGraph(r: any, had: Record<string, string> = {}): { head
   return { heads, complete: !after && Number(r.refs.totalCount) === Object.keys(heads).length, ...(after ? { after } : {}) };
 }
 
-/** The query for the next page of these repositories' branch heads (aliased h0, h1, …, in order). Pure. */
-export function moreHeadsQuery(repos: { repo: string; after: string }[]): string {
+/**
+ * The query for these repositories' branch heads (aliased h0, h1, …, in order): the next page of each where `after`
+ * says, else the first (heads.ts's look between rounds). Pure.
+ */
+export function moreHeadsQuery(repos: { repo: string; after?: string }[]): string {
   const parts = repos.map((r, i) => `h${i}: repository(${ownerName(r.repo)}) { ${headsPage(r.after)} }`);
   return `query { rateLimit { cost limit remaining used resetAt } ${parts.join(' ')} }`.replace(/\s+/g, ' ');
 }

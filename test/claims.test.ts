@@ -13,6 +13,9 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { after: next, claimVersion, claimsFile, loadClaims, pruneClaims, releaseClaim, stillHeld, titleVersions } = await import('../src/claims.ts');
 const { teamHold } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { CLAIMS_FILE, CLAIMS_REF, parseClaims } = await import('../src/claims.ts');
+const { makersPcForTests } = await import('../src/maker.ts');
+const { readRef } = await import('../src/remote-ref.ts');
 
 const DAY = 86_400_000;
 
@@ -107,6 +110,43 @@ test("the kit is claimed as a part of the Steward's repository: its own key, its
   assert.deepEqual([own.claim.repo, own.claim.version], [e.repo, '0.21.2'], "the Steward's own, counted apart from the kit's");
   const minor = await claimVersion(ctx, e, { branch: 'claude/y', by: 'claude', for: 'a big kit change', part: 'kit', minor: true });
   assert.equal(minor.claim.version, '2.37.0');
+});
+
+test("a maker's other PC claims a version of the maker's repositories through its claims ref, or not at all", async () => {
+  rmSync(claimsFile(), { force: true });
+  const s = setup('dev-pc');
+  const remote = { key: 'jcollier0120/fake', url: path.join(home, 'dev-pc', 'origin.git'), scratch: path.join(home, 'dev-pc', 'turns.git') };
+  const shared = async () => {
+    const r = await readRef(s.ctx.run, remote, CLAIMS_REF, CLAIMS_FILE);
+    return parseClaims(r.kind === 'found' ? r.text : '').map((c) => [c.branch, c.version]);
+  };
+  makersPcForTests(() => false);
+  try {
+    // GitHub says this PC's account can't push there: refused, nothing claimed anywhere.
+    await assert.rejects(claimVersion(s.ctx, s.e, { branch: 'claude/a', by: 'claude', for: 'a fix', remote, canPush: async () => false }), /is one of Castellan's own repositories.*can push to Jcollier0120\/Fake/);
+    assert.deepEqual(await shared(), []);
+    // It can: claimed in the repository's claims ref, which every PC that looks after it reads.
+    const a = await claimVersion(s.ctx, s.e, { branch: 'claude/a', by: 'claude', for: 'a fix', remote, canPush: async () => true });
+    assert.deepEqual([a.claim.version, a.claim.source, a.again], ['0.4.11', 'shared', false]);
+    assert.deepEqual(await shared(), [['claude/a', '0.4.11']]);
+    // The ref out of reach: nothing claimed, not even here, where no round would ever share it.
+    const before = loadClaims();
+    await assert.rejects(claimVersion(s.ctx, s.e, { branch: 'claude/b', by: 'claude', for: 'another', remote: null, canPush: async () => true }), /claims on GitHub \(refs\/manor\/claims\) couldn't be read or written from here.*nothing was claimed/);
+    assert.deepEqual(loadClaims(), before);
+    // Given back there too.
+    assert.equal(await releaseClaim(s.e.repo, '0.4.11', { remote, run: s.ctx.run }), true);
+    assert.deepEqual(await shared(), []);
+  } finally {
+    makersPcForTests(null);
+  }
+  // The maker's laptop with the ref out of reach: kept here, as always, and shared by a later round.
+  makersPcForTests(() => true);
+  try {
+    const c = await claimVersion(s.ctx, s.e, { branch: 'claude/c', by: 'claude', for: 'offline', remote: null });
+    assert.deepEqual([c.claim.version, c.claim.source], ['0.4.11', undefined]);
+  } finally {
+    makersPcForTests(null);
+  }
 });
 
 test("a catch-up's new version moves its branch's claim: the old one is free, the new one held, its worker given it again", async () => {

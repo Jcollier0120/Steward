@@ -329,27 +329,18 @@ test('a model that answers nonsense never gets past its first answer; a busy pro
   assert.ok(r2.report.results.energy!.millijoulesPerToken! > 0);
 });
 
-test("a PC held back past the energy load's time before a job reaches the model still reads the battery once that job is done", async () => {
-  const held = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? 10000 : 4000) });
-  // Each battery reading takes ten minutes on the bench's clock: the load's time is up at its first reading, which comes
-  // before the first job's request reaches the fake.
-  let behind = 0;
-  const read = held.opts.io.dischargeRate;
-  const r = await B.npuBench({
-    ...held.opts,
-    profile: 'quick',
-    energy: true,
-    io: {
-      ...held.opts.io,
-      now: () => performance.now() + behind,
-      dischargeRate: async () => {
-        behind += 600_000;
-        return read();
-      },
-    },
-  });
+test('energy on a PC busy enough to hold the bench past its windows: a reading at rest, and readings working until a job is done', async () => {
+  const busy = await scene({ conditions: { ...PLUGGED, onBattery: true }, rate: (w) => (w ? 10000 : 4000) });
+  // From the first reading on, every look at the clock is ten minutes later: each window has passed at its first look.
+  let late = 0;
+  let reading = false;
+  const now = () => performance.now() + (reading ? (late += 600_000) : 0);
+  const io = { ...busy.opts.io, now, dischargeRate: async () => ((reading = true), busy.opts.io.dischargeRate()) };
+  const r = await B.npuBench({ ...busy.opts, io, profile: 'quick', energy: true });
   assert.equal(r.code, 0);
-  assert.equal(r.report.results.energy!.restMilliwatts, 4000);
-  assert.ok(r.report.results.energy!.loadMilliwatts > 4000, `${r.report.results.energy!.loadMilliwatts} mW working`);
-  assert.ok(r.report.results.energy!.jobs > 0);
+  const e = r.report.results.energy!;
+  assert.ok(e, 'measured, not "the battery gave no discharge rate"');
+  assert.equal(e.restMilliwatts, 4000);
+  assert.ok(e.loadMilliwatts > 4000, 'read while working');
+  assert.ok(e.jobs > 0);
 });
