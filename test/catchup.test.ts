@@ -43,6 +43,12 @@ test("the version: a PR's own stays while it's new; else the next free one above
   // One that leaves the version alone keeps the branch's, unless it asks for a release of a released one.
   assert.deepEqual(v({ head: '0.4.10', from: '0.4.10', asksRelease: false }), { version: '0.4.10', why: null });
   assert.deepEqual(v({ head: '0.4.10', from: '0.4.10' }), { version: '0.4.11', why: 'it asks for a release, and v0.4.10 is already released' });
+  // Moved past the others (move-past.ts): the version it was moved to, while that is still new.
+  assert.deepEqual(v({ own: '0.4.14' }), { version: '0.4.14', why: 'it was moved past the others to v0.4.14' });
+  assert.deepEqual(v({ own: '0.4.14', base: '0.4.12', released: ['0.4.10'] }), { version: '0.4.14', why: 'it was moved past the others to v0.4.14' }, 'overtaken meanwhile: still its own');
+  assert.deepEqual(v({ own: '0.4.12', base: '0.4.12', released: ['0.4.10'] }), { version: '0.4.13', why: 'the branch is at v0.4.12 already' }, 'the branch past it: the next free one');
+  assert.deepEqual(v({ own: '0.4.14', taken: ['0.4.14'] }), { version: '0.4.11', why: null }, 'taken after all: as before');
+  assert.deepEqual(v({ head: '0.4.15', own: '0.4.14' }), { version: '0.4.15', why: null }, 'its author set a higher one: kept');
 });
 
 /**
