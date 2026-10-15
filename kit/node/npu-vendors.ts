@@ -219,6 +219,11 @@ export interface NpuSupport {
   why?: string;
   /** Its server and the generation have run on real hardware (npu-vendors.json's `verified`). */
   verified: boolean;
+  /**
+   * Its generation isn't one setup knows (UNKNOWN_GENERATION): it is tried on the route's most cautious values
+   * (unknownGeneration), and kept only if setup's test request and calibration pass on it.
+   */
+  guessed?: boolean;
 }
 
 /** The maker an NPU's manufacturer and name point to, as Heiward's NpuHardware.Classify: Qualcomm (or Hexagon), Intel, AMD. */
@@ -234,18 +239,70 @@ export function npuVendorOf(manufacturer: string | null | undefined, name: strin
 export const pciDevice = (deviceId: string) => /DEV_([0-9A-F]{4})/i.exec(deviceId)?.[1]?.toUpperCase() ?? null;
 
 /**
- * Which generation: a Snapdragon by its part number or name (X1E/X1P or "X Elite"/"X Plus" are the first, X2E/X2P or
- * "X2 Elite"/"X2 Plus" the second), Intel and AMD by their PCI device id (npu-vendors.json's `devices`). Null when
- * it's none setup knows.
+ * The generation of a known maker's NPU that setup doesn't know (a PCI id not in npu-vendors.json's `devices`, a
+ * Snapdragon by another name): tried on the route's most cautious values (unknownGeneration) rather than refused,
+ * and decided on the PC by setup's test request and calibration, as any generation nobody has measured.
  */
-export function npuGeneration(vendor: NpuVendor, dev: Pick<NpuDevice, 'device' | 'deviceId'>, catalog: NpuCatalog = NPU_CATALOG): string | null {
+export const UNKNOWN_GENERATION = 'unknown';
+
+/**
+ * Which generation: a Snapdragon by its part number or name (X1E/X1P or "X Elite"/"X Plus" are the first, X2E/X2P or
+ * "X2 Elite"/"X2 Plus" the second), Intel and AMD by their PCI device id (npu-vendors.json's `devices`).
+ * UNKNOWN_GENERATION when it's none setup knows.
+ */
+export function npuGeneration(vendor: NpuVendor, dev: Pick<NpuDevice, 'device' | 'deviceId'>, catalog: NpuCatalog = NPU_CATALOG): string {
   if (vendor === 'qualcomm') {
     if (/\bX2[EP]\d|\bX2 (Elite|Plus)\b/i.test(dev.device)) return 'snapdragon-x2';
     if (/\bX1[EP]\d|\bX (Elite|Plus)\b/i.test(dev.device)) return 'snapdragon-x';
-    return null;
+    return UNKNOWN_GENERATION;
   }
   const id = pciDevice(dev.deviceId);
-  return (id && catalog.devices[vendor]?.[id]) || null;
+  return (id && catalog.devices[vendor]?.[id]) || UNKNOWN_GENERATION;
+}
+
+/**
+ * A generation of a maker setup doesn't know: the most cautious of the route's supported generations' values, each
+ * as it runs (routeFor). The smallest cap, never over the route's (Qualcomm's 2,400 stays: an ~8K prompt bluescreened
+ * the X2 Elite), with the server arguments of the generation it is from (OpenVINO compiles for its prompt length);
+ * the longest timeouts and cold load; the most memory; the latest driver minimum. Never verified, so setup's test
+ * request and calibration decide on the PC. Null when the route has no supported generation to start from.
+ */
+export function unknownGeneration(route: NpuRoute): NpuGeneration | null {
+  const known = Object.keys(route.generations).filter((id) => route.generations[id].supported);
+  if (!known.length) return null;
+  const runs = known.map((id) => ({ id, g: route.generations[id], r: routeFor(route, id) }));
+  const smallest = runs.reduce((a, b) => (b.r.maxContextTokens < a.r.maxContextTokens ? b : a));
+  const maxContextTokens = Math.min(route.maxContextTokens, smallest.r.maxContextTokens);
+  const most = <K extends string>(values: Partial<Record<K, number>>[], pick: (...n: number[]) => number) => {
+    const out: Partial<Record<K, number>> = {};
+    for (const v of values) for (const [k, n] of Object.entries(v) as [K, number | undefined][]) if (typeof n === 'number') out[k] = out[k] === undefined ? n : pick(out[k]!, n);
+    return out;
+  };
+  const caps = most(runs.map((x) => x.r.caps), Math.min);
+  for (const k of Object.keys(caps) as ServeKind[]) caps[k] = Math.min(caps[k]!, maxContextTokens);
+  const timeouts = most(runs.map((x) => x.r.timeouts), Math.max);
+  const memoryGb = most(runs.map((x) => x.r.memoryGb ?? {}), Math.max);
+  const driverMin = runs.map((x) => x.g.driverMin ?? route.driverMin).filter((d): d is string => !!d).sort(compareVersions).pop();
+  const args = smallest.r.maxContextTokens === maxContextTokens ? smallest.g.args : undefined;
+  return {
+    label: "a generation setup doesn't know yet",
+    supported: true,
+    verified: false,
+    ...(driverMin ? { driverMin } : {}),
+    timeouts,
+    maxContextTokens,
+    caps,
+    ...(args ? { args } : {}),
+    ...(Object.keys(memoryGb).length ? { memoryGb } : {}),
+    basis: `Guessed: the most cautious of ${known.join(', ')} (the smallest cap, the longest timeouts and cold load, the most memory, the latest driver), until setup's test request and calibration decide on the PC.`,
+  };
+}
+
+/** A route's generation by its id: npu-vendors.json's, or for UNKNOWN_GENERATION the route's most cautious (unknownGeneration). */
+export function generationOf(route: NpuRoute, id: string | null | undefined): NpuGeneration | undefined {
+  if (!id) return undefined;
+  if (Object.hasOwn(route.generations, id)) return route.generations[id];
+  return id === UNKNOWN_GENERATION ? (unknownGeneration(route) ?? undefined) : undefined;
 }
 
 /** Compares dotted version numbers (a driver's): negative, 0 or positive, as a before, the same as, or after b. */
@@ -259,27 +316,34 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-const MAKERS: Record<NpuVendor, string> = { qualcomm: 'Qualcomm', intel: 'Intel', amd: 'AMD' };
+export const MAKERS: Record<NpuVendor, string> = { qualcomm: 'Qualcomm', intel: 'Intel', amd: 'AMD' };
 
 /**
  * What the manor can do with this NPU on this PC (its processor's `arch`): its maker and generation, and whether its
- * server can be set up here. An NPU it doesn't know, a generation without a server (AMD's first XDNA), a driver older
- * than the server needs, or the wrong processor for the server's build (an Arm64-only server on x64) is unsupported,
- * and says why plainly; its work then goes to the graphics card or the processor.
+ * server can be set up here. A known maker's generation setup doesn't know is tried on the route's most cautious
+ * values (`guessed`: unknownGeneration). An NPU of a maker it doesn't know, a generation without a server (AMD's first
+ * XDNA), a driver older than the server needs, or the wrong processor for the server's build (an Arm64-only server on
+ * x64) is unsupported, and says why plainly; its work then goes to the graphics card or the processor.
  */
 export function npuSupport(dev: NpuDevice, arch: string, catalog: NpuCatalog = NPU_CATALOG): NpuSupport {
   const vendor = npuVendorOf(dev.manufacturer, dev.device);
   if (!vendor) return { vendor: null, generation: null, label: dev.device || 'NPU', supported: false, verified: false, why: `the NPU "${dev.device || dev.deviceId}" is from a maker setup doesn't know yet (Qualcomm, Intel and AMD are)` };
   const route = catalog.routes[vendor];
-  const generation = npuGeneration(vendor, dev, catalog);
-  const gen = generation ? route.generations[generation] : undefined;
-  const base = { vendor, generation, label: gen?.label ?? `${MAKERS[vendor]} NPU`, verified: !!gen?.verified };
-  if (!gen) return { ...base, supported: false, why: `this ${MAKERS[vendor]} NPU ("${dev.device}"${pciDevice(dev.deviceId) ? `, device ${pciDevice(dev.deviceId)}` : ''}) isn't one setup knows yet` };
+  const id = pciDevice(dev.deviceId);
+  const found = npuGeneration(vendor, dev, catalog);
+  const gen = generationOf(route, found);
+  const generation = gen ? found : null;
+  const guessed = generation === UNKNOWN_GENERATION && !Object.hasOwn(route.generations, UNKNOWN_GENERATION);
+  const label = guessed ? `${MAKERS[vendor]} NPU of a generation setup doesn't know yet${id ? `, device ${id}` : ''}` : (gen?.label ?? `${MAKERS[vendor]} NPU`);
+  const base = { vendor, generation, label, verified: !!gen?.verified, ...(guessed ? { guessed } : {}) };
+  if (!gen) return { ...base, supported: false, why: `this ${MAKERS[vendor]} NPU ("${dev.device}"${id ? `, device ${id}` : ''}) isn't one setup knows yet` };
   if (!gen.supported) return { ...base, supported: false, why: `the ${gen.label} NPU can't run the manor's models: ${gen.why ?? 'no model server supports it'}` };
   if (arch && route.arch !== arch) return { ...base, supported: false, why: `${route.server} runs on ${route.arch} Windows, and this PC is ${arch}` };
   const driverMin = gen.driverMin ?? route.driverMin;
-  if (driverMin && dev.driver && compareVersions(dev.driver, driverMin) < 0)
-    return { ...base, supported: false, why: `the NPU's driver needs an update: ${route.server} needs ${MAKERS[vendor]}'s NPU driver ${driverMin} or later${gen.driverMin ? ` on the ${gen.label}` : ''}, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
+  if (driverMin && dev.driver && compareVersions(dev.driver, driverMin) < 0) {
+    const on = !gen.driverMin ? '' : !guessed ? ` on the ${gen.label}` : gen.driverMin === route.driverMin ? '' : ` on an NPU setup doesn't know yet (as the newest ${MAKERS[vendor]} NPUs it knows do)`;
+    return { ...base, supported: false, why: `the NPU's driver needs an update: ${route.server} needs ${MAKERS[vendor]}'s NPU driver ${driverMin} or later${on}, and this PC has ${dev.driver}: update the driver from ${MAKERS[vendor]} or the PC's maker, then run setup again` };
+  }
   return { ...base, supported: true };
 }
 
@@ -384,11 +448,12 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
 
 /**
  * The route as it runs on one generation: the generation's own timeouts, caps and server arguments over the route's
- * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt). The
- * route itself when the generation has none, or isn't known.
+ * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt); on
+ * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The route itself when the generation has none,
+ * or isn't the route's.
  */
 export function routeFor(route: NpuRoute, generation: string | null | undefined): NpuRoute {
-  const g = generation ? route.generations[generation] : undefined;
+  const g = generationOf(route, generation);
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.memoryGb)) return route;
   const serve = [...route.serve];
   for (const [flag, value] of Object.entries(g.args ?? {})) {

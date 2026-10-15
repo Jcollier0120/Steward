@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+**A known maker's NPU of a generation setup doesn't know is tried on guessed values, the most cautious its route has, instead of refused.**
+
+### What changed
+
+- **npu-vendors.ts**: an NPU from Qualcomm, Intel or AMD whose PCI id (or Snapdragon name) isn't in `npu-vendors.json` is now generation `unknown` (`UNKNOWN_GENERATION`), not null. `unknownGeneration(route)` works its values out from the route's supported generations: the smallest cap (with that generation's `args`, so OpenVINO's `--max_prompt_len` matches), the longest timeouts and cold load, the most memory, the latest driver minimum; `verified: false`. `generationOf(route, id)` gives it, and `routeFor` takes it. `npuSupport` marks it `guessed: true` and labels it "AMD NPU of a generation setup doesn't know yet, device 17F1". On Intel that is 2,048 tokens, the NPU 3720's prompt chunks, 60 s + 0.4 s a token, a 360 s cold load and driver 32.0.100.5540; on AMD, XDNA 2's values. Qualcomm's 2,400-token cap is never raised. AMD's first XDNA (`1502`) and unknown makers are still refused. `MAKERS` is exported.
+- **setup.ts**: such an NPU goes through setup's test request and calibration like any unverified generation, and is kept only if it passes. Its note says it runs on guessed values (`npuGuessedNote`), kept in `npu-note.json` and shown by the report; the plan and the report say it is "tried on guessed values, the most cautious it has, and kept only if it passes its test".
+- **npu-check.ts**: on such an NPU, the detect step says it runs on guessed values and prints its PCI id ready for `devices` (`unknownDevice`, `unknownDeviceSay`; the report's `unknownDevice`). Every step passing gives a patch adding it as a new verified generation, `<maker>-<pci id>`, with its `devices` entry (`checkPatch`'s `device`). `--generation unknown` rehearses the guessed values.
+- spec/NPU-VENDORS.md: Detection (the guessed values, the note, and why FastFlowLM 1.0.7's `flm validate` isn't AMD's check: it looks for PCI `17F0` alone), the NPU check, and what's unverified.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. A PC whose NPU was refused as one setup doesn't know is tried at its next Set up.
+
 ## Unreleased
 **A PC set up by an older kit gets this kit's NPU command: the keeper tests it when nobody uses the NPU, and writes it only when it answers.**
 

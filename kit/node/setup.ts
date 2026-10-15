@@ -679,7 +679,7 @@ export function describePlan(p: SetupPlan): string[] {
   if (p.dropNpu) lines.push("NPU (npu): removed from config.json. It's the GenieX server install wrote by default, and this PC has no NPU it can run on, so requests tried it first and failed.");
   if (p.npu) {
     const n = p.npu;
-    lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${n.support.verified ? '' : ' (not yet tried on this kind of NPU)'}`);
+    lines.push(`${n.support.label} (npu): ${n.route.server} ${n.route.version}, ${n.kinds.join(' and ')} on ${n.port}; ${n.models.map((m) => m.id).join(', ')}${untried(n.support)}`);
     lines.push(`  ${n.installed ? 'have' : 'get '} ${n.route.server} ${n.route.version} (${mb(n.route.download.size)}, SHA-256 pinned)${n.installed ? ` at ${n.exe}` : ''}`);
     if (n.runtime) lines.push(`  get  ${n.runtime.what} (${mb(n.runtime.size)}, SHA-256 pinned), beside ${path.win32.basename(n.exe)}: no administrator`);
     for (const m of n.models) lines.push(`  ${m.have ? 'have' : 'get '} ${m.id} (${mb(m.size)})`);
@@ -981,6 +981,18 @@ export function npuNoteFor(label: string, what: 'chat' | 'embed', reason: string
     : `The NPU (${label}) makes no embeddings: ${reason}. The graphics card or the processor makes them instead.`;
 }
 
+/**
+ * The note for an NPU of a generation setup doesn't know, kept because it passed its test on guessed values (the
+ * route's most cautious: unknownGeneration): the cap it was given, and whether its timeouts are this PC's own.
+ */
+export function npuGuessedNote(label: string, cap: number, measured: boolean): string {
+  return `The NPU (${label}) runs on guessed values: setup gave it the most cautious cap it has (${cap.toLocaleString('en-US')} tokens) and ${measured ? "this PC's own timeouts, measured" : 'the longest timeouts it has'}. It passed its test, so it's used; a kit update that knows this NPU may change them.`;
+}
+
+/** How a plan or report says an NPU hasn't run on real hardware: its generation unverified, or one setup doesn't know (its label says so). */
+const untried = (s: { verified: boolean; guessed?: boolean }) =>
+  s.guessed ? ' (tried on guessed values, the most cautious it has, and kept only if it passes its test)' : s.verified ? '' : ' (not yet tried on this kind of NPU)';
+
 /** A failed test's problems as the reason a person reads. */
 export function plainReason(problems: string[], what: 'chat' | 'embed'): string {
   const s = problems.join('; ');
@@ -993,7 +1005,7 @@ export function plainReason(problems: string[], what: 'chat' | 'embed'): string 
 export interface NpuSetup {
   entry?: AcceleratorEntry;
   problems: string[];
-  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't. */
+  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't; or that it runs on guessed values (npuGuessedNote). */
   note?: string;
   /** What setup measured, on a generation nobody had (calibrate): its timeouts come from it. */
   measured?: NpuMeasured;
@@ -1102,6 +1114,8 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     }
   }
   io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
+  // A generation setup doesn't know passed on guessed values: it's used, and the person is told so (npu-note.json).
+  if (n.support.guessed) note = [npuGuessedNote(label, n.route.maxContextTokens, !!measured), note].filter(Boolean).join(' ');
   return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}) };
 }
 
@@ -1493,8 +1507,10 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
       entries = [...entries.filter((e) => !r2.entries.some((x) => x.id === e.id)), ...r2.entries];
     } else log(`Not downloading for the processor: the NPU's ${missing.join(' and ')} stay unserved until setup runs again.`);
   }
-  // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole.
-  const plain = plan.npu ? (r.npu?.note ?? plan.npuPlain ?? null) : plan.npuPlain;
+  // Why the NPU, or its embeddings, isn't used, kept for the accelerators' report: cleared once it's set up whole on
+  // values setup knows. An NPU kept on guessed values says so, beside the plan's own note (its embeddings left off).
+  const said = r.npu?.entry && r.npu.note && plan.npuPlain ? `${r.npu.note} ${plan.npuPlain}` : r.npu?.note;
+  const plain = plan.npu ? (said ?? plan.npuPlain ?? null) : plan.npuPlain;
   const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
   if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
   if (plain) log(`note: ${plain}`);
@@ -1562,7 +1578,7 @@ export function printReport(r: AcceleratorReport, out: (s: string) => void = con
   const npuServer = n?.vendor === 'qualcomm' ? `; GenieX ${d.geniex ? `at ${d.geniex}` : 'not installed'}` : '';
   out(
     n
-      ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${n.verified ? '' : ' (not yet tried on this kind of NPU)'}` : `not used: ${n.why}`}`
+      ? `  ${n.name}  (npu)\n    ${n.label}, driver ${n.driver || '?'}${n.driverDate ? ` (${n.driverDate})` : ''}${npuServer}; ${n.supported ? `the manor runs models on it${untried(n)}` : `not used: ${n.why}`}`
       : "  no NPU (Windows lists no Neural processor)",
   );
   if (r.npuNote) out(`    ${r.npuNote}`);
