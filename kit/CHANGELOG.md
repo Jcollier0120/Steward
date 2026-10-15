@@ -4,17 +4,19 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## Unreleased
 
-**Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF` and keeps 4,096 tokens of prompts cached.**
+**Intel's other NPUs get prompt settings estimated from the NPU 3720: Lunar Lake and Panther Lake read in 512-token chunks, Wildcat Lake as the NPU 3720, and every generation writes with `BEST_PERF`, its prefix cache off.**
 
 ### What changed
 
 - **npu-vendors.json's Intel generations** (spec/NPU-VENDORS.md, Estimated). No Intel NPU beyond the Lunar Lake and the NPU 3720 will be run, so the others are estimated from the NPU 3720's sweep, scaled by the Lunar Lake's numbers.
-  - **`lunar-lake` and `panther-lake`**: `--plugin_config` `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"512","GENERATE_HINT":"BEST_PERF","NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS":"16"}`. That should be a short answer in 0.3–0.4 s rather than 0.72 s, and the jobs' prompts read 18–27% faster. OpenVINO Model Server's own prefix cache could hold 32,768 tokens on them, about 4 GB more over a day; this keeps it to 4,096 tokens. The Lunar Lake's other values are as measured.
-  - **`wildcat-lake`**: the NPU 3720's settings: 2,048-token cap, 128-token chunks, `BEST_PERF`, 32 blocks, 4.3 GB. Its NPU 5 is 15–17 TOPS, about 1.4 times the NPU 3720, in laptops of 8 to 16 GB.
+  - **`lunar-lake` and `panther-lake`**: `--plugin_config` `{"NPUW_LLM_PREFILL_CHUNK_SIZE":"512","GENERATE_HINT":"BEST_PERF"}`. That should be a short answer in 0.3–0.4 s rather than 0.72 s, and the jobs' prompts read 18–27% faster; on the NPU 3720 at their 4,096-token cap, 512 read about 3,500 tokens fastest too. The Lunar Lake's other values are as measured.
+  - **`wildcat-lake`**: the NPU 3720's settings: 2,048-token cap, 128-token chunks, `BEST_PERF`, 3.8 GB. Its NPU 5 is 15–17 TOPS, about 1.4 times the NPU 3720, in laptops of 8 to 16 GB.
+- **The prefix cache is off on every Intel NPU** (`--enable_prefix_caching false` in the route's command), from 11 quick benchmarks on the NPU 3720 on `castellan-npu-bench/2`, whose prompts no cache has seen. The agents' prompts share only 25–90 tokens at their start, less than one 128-token block, so it is hardly ever hit, and when nothing hits it costs. With it off the NPU 3720 read 2–5% faster, did the jobs in 27.25–27.48 s against 27.67–28.01 with #261's 32 blocks, and held 3.72 GB against 4.30 (5.98 with OpenVINO Model Server's own 128). So `meteor-lake` and `arrow-lake` drop the block count from `--plugin_config`, and their `memoryGb.chat` is 3.8, down from 4.3. `--plugin_config` can't turn it off: OpenVINO Model Server refuses `NPUW_LLM_ENABLE_PREFIX_CACHING` there as doubled.
+- **npu-check.ts's `routeOnDevice`** drops `--enable_prefix_caching` off the NPU with the other NPU-only flags, so the graphics card and processor keep OpenVINO's own caching.
 
 ### For an agent
 
-- Nothing to do. On a Lunar Lake already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
+- Nothing to do. On a Lunar Lake or NPU 3720 already set up, the NPU refresh (2.74.5) tries the new command as the agent pins this kit. It compiles the model once more, for about a minute or a minute and a half. It keeps the old command if the new one doesn't answer properly.
 
 ## 2.74.5
 

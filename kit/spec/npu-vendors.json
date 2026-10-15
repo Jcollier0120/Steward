@@ -219,12 +219,12 @@
           },
           "args": {
             "--max_prompt_len": "2048",
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\"}"
           },
           "memoryGb": {
-            "chat": 4.3
+            "chat": 3.8
           },
-          "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4. Then 20 quick benchmarks on the same PC (npu-bench, 2026-10-14), each also reading prompts no cache had seen: in 64-token chunks a short answer took 0.35 s and 1,740 tokens 8.1 s; in 128, 0.5 s and 6.3 s; in 256, 0.78 s and 6.0 s; in 512, 1.43 s and 6.4 s; in 1,024, 3.1 s and 6.9 s: 128 stays. GENERATE_HINT BEST_PERF writes 10.7 to 11.6 tokens a second against 9.6 to 10.5, and the benchmark's jobs took 22.6 to 24.3 s against 26.0 to 27.8 (five runs against five, never overlapping), the same reads and answers; it doubles the first compile, 57 to 62 s against 27 to 39: the slowest start to a first answer took 62 s: 120 s allows half again. OpenVINO Model Server turns the NPU's prefix caching on, and its 128 blocks of 128 tokens left the server holding 5.2 GB after a dozen varied long prompts, against 3.2 GB without it; 32 blocks (4,096 tokens) kept every time and held 3.8 GB, 4.3 GB at the end of the benchmark. PREFILL_HINT STATIC read every prompt in 7.4 s; NPU_TURBO was no faster, and STATIC prefill attention read 15 to 20% slower. A 3,072-token prompt held 0.4 GB more and read 5 to 10% slower; a 4,096-token one 1.0 GB more, past a 16 GB PC's room for chat and embeddings together."
+          "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4. Then 20 quick benchmarks on the same PC (npu-bench, 2026-10-14), each also reading prompts no cache had seen: in 64-token chunks a short answer took 0.35 s and 1,740 tokens 8.1 s; in 128, 0.5 s and 6.3 s; in 256, 0.78 s and 6.0 s; in 512, 1.43 s and 6.4 s; in 1,024, 3.1 s and 6.9 s: 128 stays. GENERATE_HINT BEST_PERF writes 12.3 to 13.1 tokens a second against 9.3 to 11.2, and the benchmark's jobs took 27.3 to 28.0 s against 29.1 to 35.6 (castellan-npu-bench/2, whose prompts no cache has seen, 2026-10-15), the same reads and answers; it doubles the first compile, 56.5 to 68.7 s against 25.8 to 28.9: the slowest start to a first answer took 69 s: 120 s allows half again. OpenVINO Model Server turns the NPU's prefix caching on: at the benchmark's end the server held 5.98 GB with its 128 blocks of 128 tokens, 4.30 GB with 32, and 3.72 GB with the cache off, which also read 2 to 5% faster and did the jobs in 27.25 to 27.48 s against 27.67 to 28.01 with 32 blocks (two runs each). The agents' prompts share 25 to 90 tokens at their start, less than a block, so a cache is hardly ever hit: the route's command turns it off (--enable_prefix_caching false: --plugin_config can't, OpenVINO Model Server refusing its key there as doubled), and 3.8 GB. PREFILL_HINT STATIC read every prompt in 7.4 s; NPU_TURBO was no faster, and STATIC prefill attention read 15 to 20% slower. A 3,072-token prompt held 0.4 GB more and read 5 to 10% slower; a 4,096-token one 1.0 GB more, past a 16 GB PC's room for chat and embeddings together."
         },
         "arrow-lake": {
           "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
@@ -241,10 +241,10 @@
           },
           "args": {
             "--max_prompt_len": "2048",
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\"}"
           },
           "memoryGb": {
-            "chat": 4.3
+            "chat": 3.8
           },
           "basis": "Not measured: the NPU 3720 measured under meteor-lake, with its prompt settings and memory; the generous starting values stay until the NPU check runs on one."
         },
@@ -253,9 +253,9 @@
           "supported": true,
           "verified": true,
           "args": {
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"16\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\"}"
           },
-          "basis": "Measured by the NPU check on a Lunar Lake (Core Ultra 7 256V), 2026-10-12, with OpenVINO's own prompt settings: the route's values. Its prompt settings are estimated from the NPU 3720 (meteor-lake), the only other Intel NPU there is to run (NPU-VENDORS.md, Estimated): the NPU 4 read a 1,024-token chunk in 0.23 to 0.26 of the NPU 3720's time, and a chunk costs a fixed part and a part for each of its tokens. In 512-token chunks a short prompt should take 0.3 to 0.4 s, what the NPU 3720 takes in its 128, against 0.72 s in OpenVINO's 1,024, and the jobs' prompts 18 to 27% less, whether or not the fixed part is faster on the NPU 4. GENERATE_HINT BEST_PERF wrote 13% faster on the NPU 3720 for about twice the first compile: 31 to 41 s here, so about 60 to 90 s, inside the 180 s cold load. OpenVINO Model Server's own prefix cache, 128 blocks of 256 tokens, could hold 32,768 tokens of prompts, about 4 GB more over a day's varied ones: 16 blocks keep 4,096 tokens, as the NPU 3720's 32 of 128 do."
+          "basis": "Measured by the NPU check on a Lunar Lake (Core Ultra 7 256V), 2026-10-12, with OpenVINO's own prompt settings and prefix cache: the route's timeouts, cap and memory. Its prompt settings are estimated from the NPU 3720 (meteor-lake), the only other Intel NPU there is to run (NPU-VENDORS.md, Estimated): the NPU 4 read a 1,024-token chunk in 0.23 to 0.26 of the NPU 3720's time, and a chunk costs a fixed part and a part for each of its tokens. In 512-token chunks a short prompt should take 0.3 to 0.4 s, what the NPU 3720 takes in its 128, against 0.72 s in OpenVINO's 1,024, and the jobs' prompts 18 to 27% less, whether or not the fixed part is faster on the NPU 4. The NPU 3720 at this 4,096-token prompt bears it out: in 512-token chunks it read about 3,500 tokens in 12.9 to 13.3 s, against 15.0 to 15.8 in 128 and 16.2 to 16.6 in 1,024. GENERATE_HINT BEST_PERF wrote 30% faster there for about twice the first compile (80 to 90 s against 42): 31 to 41 s here, so about 60 to 90 s, inside the 180 s cold load. The prefix cache is off, as on every Intel NPU (the route's command, meteor-lake): the agents' prompts share too little to hit it, and at 4,096 tokens on the NPU 3720 it held 0.4 to 0.6 GB more, read no faster, and at OpenVINO's default 128 blocks grew to 6.17 GB."
         },
         "panther-lake": {
           "label": "Core Ultra Series 3, Panther Lake (NPU 5)",
@@ -268,7 +268,7 @@
             "coldLoadMs": 240000
           },
           "args": {
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"16\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"512\",\"GENERATE_HINT\":\"BEST_PERF\"}"
           },
           "basis": "Not measured: NPU 5 at 50 TOPS, about the Lunar Lake's NPU 4 (48), so its values and its estimated prompt settings (lunar-lake), with room for a newer compiler's first compile; setup measures each PC."
         },
@@ -288,10 +288,10 @@
           },
           "args": {
             "--max_prompt_len": "2048",
-            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\",\"NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS\":\"32\"}"
+            "--plugin_config": "{\"NPUW_LLM_PREFILL_CHUNK_SIZE\":\"128\",\"GENERATE_HINT\":\"BEST_PERF\"}"
           },
           "memoryGb": {
-            "chat": 4.3
+            "chat": 3.8
           },
           "basis": "Not measured: Panther Lake's NPU 5, but a third of it, 15 to 17 TOPS against 50, about 1.4 times the NPU 3720's 11.5, so the NPU 3720's prompt settings and memory (meteor-lake): a 512-token chunk would take it 0.9 s, a 128-token one 0.3 s (NPU-VENDORS.md, Estimated). It goes in low-cost laptops of 8 to 16 GB, where the NPU 3720's 2,048-token prompt leaves room for the embedding server and 4,096 doesn't. Panther Lake's starting timeouts, with room for a newer compiler's first compile; setup measures each PC."
         }
@@ -345,6 +345,8 @@
         "4096",
         "--plugin_config",
         "{}",
+        "--enable_prefix_caching",
+        "false",
         "--cache_dir",
         "{tools}\\models\\openvino\\.npu-cache"
       ],

@@ -655,7 +655,7 @@ const A = await import('./fixture/src/kit/accelerators.ts');
 const at16 = (ram: number) => `cpu|9|16|Intel(R) Core(TM) Ultra 7 155H\nram|${ram}\n`;
 const GiB = 1024 ** 3;
 
-test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, 32 blocks cached, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; Lunar Lake and Panther Lake in 512-token chunks, Wildcat Lake as the NPU 3720, estimated from it", () => {
+test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128-token chunks, written with BEST_PERF, its prefix cache off, measured on an Arrow Lake-U, the Arrow Lake-S's generous until it is; Lunar Lake and Panther Lake in 512-token chunks, Wildcat Lake as the NPU 3720, estimated from it", () => {
   const intel = V.NPU_CATALOG.routes.intel;
   const g = intel.generations;
   assert.equal(g['lunar-lake'].verified, true);
@@ -668,19 +668,26 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   assert.equal(meteor.serve[meteor.serve.indexOf('--max_prompt_len') + 1], '2048');
   assert.equal(meteor.maxContextTokens, 2048);
   assert.equal(meteor.caps.chat, 2048);
-  // BEST_PERF's first compile took up to 62 s: 120 s allows half again.
+  // BEST_PERF's first compile took up to 69 s: 120 s allows half again.
   assert.deepEqual(meteor.timeouts, { requestBaseMs: 15_000, requestPerTokenMs: 200, coldLoadMs: 120_000 });
-  assert.equal(meteor.memoryGb?.chat, 4.3, 'the working set at the end of the benchmark, its prefix cache at 32 blocks');
+  assert.equal(meteor.memoryGb?.chat, 3.8, 'the working set at the end of the benchmark, 3.72 GB with its prefix cache off');
   assert.equal(meteor.memoryGb?.embed, 1.74, "the route's embeddings, at their 2048-token max_length on every generation");
   // The NPU 3720 reads a prompt 128 tokens at a time: a short answer 0.5 s against 3.1 in OpenVINO's own 1,024-token
-  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). It writes with BEST_PERF, 10.7 to 11.6 tokens
-  // a second against 9.6 to 10.5, and keeps 32 blocks of prompts (4,096 tokens) cached, 3.8 GB against 5.2 with
-  // OpenVINO Model Server's 128.
+  // chunks, 1,550 tokens 4.0 s against 7.0 (an Arrow Lake-U, 2026-10-14). It writes with BEST_PERF, 12.3 to 13.1 tokens
+  // a second against 9.3 to 11.2, and OpenVINO Model Server's prefix cache is off: 3.72 GB at the benchmark's end
+  // against 4.30 with 32 blocks and 5.98 with its 128, reading 2 to 5% faster.
   const plugin = (r: typeof intel) => r.serve[r.serve.indexOf('--plugin_config') + 1];
-  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128', GENERATE_HINT: 'BEST_PERF', NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS: '32' });
-  assert.ok(meteor.timeouts.coldLoadMs! >= 62_000 * 1.5, "the cold load covers BEST_PERF's first compile with half again");
+  assert.deepEqual(JSON.parse(plugin(meteor)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '128', GENERATE_HINT: 'BEST_PERF' });
+  assert.ok(meteor.timeouts.coldLoadMs! >= 69_000 * 1.5, "the cold load covers BEST_PERF's first compile with half again");
   assert.equal(plugin(V.routeFor(intel, 'arrow-lake')), plugin(meteor), 'Arrow Lake-S: the same NPU 3720');
   assert.equal(plugin(intel), '{}');
+  // Its prefix cache is off on every Intel NPU, an unknown one too: the route's own command, as --plugin_config can't
+  // (OpenVINO Model Server refuses NPUW_LLM_ENABLE_PREFIX_CACHING there as doubled, writing it itself).
+  for (const id of [...Object.keys(g), V.UNKNOWN_GENERATION]) {
+    const r = V.routeFor(intel, id);
+    assert.equal(r.serve[r.serve.indexOf('--enable_prefix_caching') + 1], 'false', id);
+    assert.ok(!plugin(r).includes('PREFIX_CACHING'), `${id}: no prefix caching key in --plugin_config`);
+  }
   // As measured: 200 ms a token covers half the 10.1 tokens a second it wrote.
   assert.ok(1000 / meteor.timeouts.requestPerTokenMs! <= 10.1 / 2);
   // The Arrow Lake-S, the same NPU unmeasured: the generous starting values. A token every 400 ms covers 2.5 a second.
@@ -694,10 +701,9 @@ test("each Intel generation's values: the NPU 3720 at a 2048-token prompt in 128
   assert.equal(panther.serve[panther.serve.indexOf('--max_prompt_len') + 1], intel.serve[intel.serve.indexOf('--max_prompt_len') + 1], "NPU 5 keeps Lunar Lake's prompt length");
   // Estimated from the NPU 3720, the only other Intel NPU to run (NPU-VENDORS.md, Estimated): the NPU 4 and Panther
   // Lake's NPU 5, about four times as fast, read in 512-token chunks, a short prompt in about the NPU 3720's 0.4 s, and
-  // keep 4,096 tokens cached (16 blocks of 256), not OpenVINO Model Server's 32,768. Lunar Lake's other values are the
-  // route's, as measured.
+  // write with BEST_PERF. Lunar Lake's other values are the route's, as measured.
   const lunar = V.routeFor(intel, 'lunar-lake');
-  assert.deepEqual(JSON.parse(plugin(lunar)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '512', GENERATE_HINT: 'BEST_PERF', NPUW_LLM_PREFIX_CACHING_MAX_NUM_BLOCKS: '16' });
+  assert.deepEqual(JSON.parse(plugin(lunar)), { NPUW_LLM_PREFILL_CHUNK_SIZE: '512', GENERATE_HINT: 'BEST_PERF' });
   assert.deepEqual({ ...lunar, serve: intel.serve }, intel, 'Lunar Lake: otherwise the route as measured');
   assert.ok(lunar.timeouts.coldLoadMs! >= 41_000 * 2 * 1.5, "the cold load covers twice its first compile, BEST_PERF's, with half again");
   assert.equal(plugin(panther), plugin(lunar));
@@ -727,7 +733,7 @@ test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embe
   const eight = V.npuMemoryFit(intel, 7.6 * GiB);
   assert.deepEqual([eight.chat, eight.embed], [false, false]);
   assert.match(eight.why!, /this PC's 8 GB of memory hasn't room for the NPU's chat model \(4\.3 GB\)/);
-  // The NPU 3720's chat at 2048 (3.6 GB) doesn't fit 8 GB either.
+  // The NPU 3720's chat at 2048 (3.8 GB) doesn't fit 8 GB either.
   assert.equal(V.npuMemoryFit(V.routeFor(intel, 'meteor-lake'), 7.6 * GiB).chat, false);
   assert.deepEqual(V.npuMemoryFit(intel, null), { chat: true, embed: true, budgetGb: 0 }, "memory unknown: the NPU isn't kept out on a guess");
 
