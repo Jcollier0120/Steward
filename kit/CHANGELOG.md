@@ -15,6 +15,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing to do: take the kit and release as usual.
 - A PowerShell script that starts a console program with `System.Diagnostics.ProcessStartInfo` and `CreateNoWindow = $true` still gives that program a console host of its own. Leave `CreateNoWindow` off (`$false`) and it shares powershell.exe's console, which has no window.
 
+## 2.74.3
+
+**The staff page's Needs you: its heading sits like every other section's, and it takes what belongs under it without being a need.**
+
+### What's new
+
+- **`NeedsYou` takes children**, drawn inside its section under the cards, or under the empty line when nothing needs you. For quiet things that belong under the heading without counting as a need: Reeve's review queues with nothing waiting, its "No review queue yet".
+
+### What changed
+
+- **Needs you's heading is a `Section`'s.** Its h2 was straight in `.ui-section-head`, so page.ts's `h2` top margin (26px) stacked on `.ui-section`'s own (22px): about 48px of space above Needs you at the top of the page. It is now in `.ui-section-name`, as `Section` draws it, with no margin of its own, and it is the plain section heading rather than the larger `ui-heading`: the cards' edges and badges carry the urgency (spec/STAFF-PAGE.md says why).
+
+### For an agent
+
+- Nothing to do: a page drawing `NeedsYou` gets the spacing as it pins this kit. Anything it draws just after Needs you that belongs under its heading can move into its children.
+
 ## 2.74.2
 **Paced runs go faster: the checks pace's cap is a third of the processor and three runs go at once; and paced test runs get room to finish, a time limit stretched as much as the cap slows them, as many test files at once as the cap has room for.**
 
