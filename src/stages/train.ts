@@ -4,6 +4,7 @@ import { aheadOf, fetchBranch, git, gitMaybe, removeWorktree } from '../git.ts';
 import { compareVersions } from '../kitfiles.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Employee, Settings } from '../settings.ts';
+import { headsMoved } from '../heads.ts';
 import { noteMerged } from '../strangers.ts';
 import { recordTested } from '../tested.ts';
 import { runChecks } from './bump.ts';
@@ -292,6 +293,8 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     delete failed[e.id];
     writeJson(trainsFile(), failed);
     for (const c of rode) noteMerged(e, c.pr.number);
+    // Its new head shared with the other agents a moment from now (heads.ts).
+    headsMoved(e.repo);
     // Passed here before it merged: the Surveyor's GET /api/tested (tested.ts).
     recordTested(e.id, { commit: at, stage: 'merge', branch: top.pr.head, pr: top.pr.number, version: top.version });
     const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
