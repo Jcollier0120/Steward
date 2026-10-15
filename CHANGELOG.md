@@ -15,11 +15,15 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The kit the Steward hands out (2.74.7) recognises every first-generation Snapdragon X by the name Windows gives it, the plain X and X Plus included, and by its device id where the name doesn't say. On an X, setup now checks the model it downloads file by file against the X's own build, as it does on an X2.
 - On a Snapdragon from before the X (the 8cx, 8c, 7c, Microsoft's SQ1 to SQ3, the 850 and 835), setup now says plainly that its NPU can't run the manor's models, and why, before downloading anything. Before, it downloaded the NPU's server and a 4.4 GB model only for its test to fail. Its local AI runs on the graphics card or the processor instead, as it did once that test failed.
 - The NPU benchmark on a Snapdragon no longer fails its second start: it now waits until the stopped server has let go of its port before starting it again.
-- The kit also brings AMD's NPU work, which wasn't released on its own. Setup's first timeouts for an AMD NPU of a generation nobody has measured now allow for how fast its server actually reads: a 35 s base where it was 90 s. AMD's NPU has also been measured on battery.
+- The kit also brings Intel's and AMD's NPU work, which wasn't released on its own:
+  - Setup's first timeouts for an AMD NPU of a generation nobody has measured now allow for how fast its server actually reads: a 35 s base where it was 90 s.
+  - AMD's NPU has been measured on battery.
+  - On every Intel NPU, OpenVINO Model Server's prompt cache is now off.
+  - Intel's newer NPUs get prompt settings estimated from the ones measured.
 
 ### Before you update
 
-- Nothing: it updates itself as usual, and agents get it as they pin the kit.
+- Nothing: it updates itself as usual, and agents get it as they pin the kit. On a PC with an Intel NPU (Lunar Lake, or the NPU 3720) that's already set up, the NPU compiles its model once more as an agent takes this kit, for a minute or so.
 
 ## 0.36.42
 
