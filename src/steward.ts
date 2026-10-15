@@ -16,7 +16,7 @@ import { pendingMigration } from './migrate.ts';
 import { DEVELOPER_ONLY, makersPc, stewardActs } from './maker.ts';
 import { bump } from './stages/bump.ts';
 import { headsUp } from './heads-up.ts';
-import { keepVersionQueues } from './version-queue.ts';
+import { heldQueues, keepVersionQueues, loadVersionQueues } from './version-queue.ts';
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
@@ -32,6 +32,7 @@ import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
 import { clearRolloutHolds, loadRolloutFailures, rollout } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
+import { settleWholeSuite } from './stages/wholesuite.ts';
 import { staff, type Staff } from './stages/staff.ts';
 import { appendRotating, kitsDir, pruneKits, tellAfterRelease, type Poke } from './upkeep.ts';
 import { loadTastingHolds, type TastingDeps } from './tasting.ts';
@@ -48,6 +49,7 @@ import { whereGitea } from './hosts/gitea.ts';
 import { repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
+import { loadBuildLeft, noteReady } from './stages/build.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -581,6 +583,14 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       if (o.kitInfo) ctx.kit = o.kitInfo;
       if (o.tasting) ctx.tasting = o.tasting;
       if (o.online) ctx.online = o.online;
+      // When each PR went ready, as the rounds see it: a build stacks its PRs in that order (stages/build.ts).
+      if (name === 'round' && ctx.glance) {
+        try {
+          noteReady(ctx.glance, at());
+        } catch (e) {
+          log(`couldn't keep when PRs went ready: ${(e as Error).message}`);
+        }
+      }
       const started = new Date().toISOString();
       const out: StageResult = { stage: name, started, finished: started, kit: null, asked: { ...ask }, results: [], log: lines };
       let held: { employee: Employee; prs: Held[] }[] = [];
@@ -636,6 +646,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // In a build, a ready PR merges at once: the build time was the time to push to it (merge.ts' ageHold). And
             // nothing is released merge by merge: the build releases each repository once, when it closes.
             ctx.settings = { ...ctx.settings, mergeMinAgeMinutes: 0, releaseAfterMerge: false };
+            // Each repository's ready PRs stacked as one batch, in the order they went ready (stages/build.ts).
+            ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
           }
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
@@ -664,6 +676,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
           const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
+          // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
+          if (round && whole && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
             // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
             // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
@@ -676,7 +690,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           }
           let employees = turns.acting;
           if (round) {
-            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full, look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
+            // A build's first round looks at every repository: the PRs that waited since the last build board now,
+            // whether or not GitHub says anything new of them.
+            plan = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, force: !!ask.full || (mode.kind === 'build' && mode.fresh), look: ask.look ?? [], now: o.now?.(), kit: { newest: latestKit(ctx.kit), own } });
             // Those another PC has its turn in are left to it, and not kept as seen (afterRound): looked at again next round.
             const looked = await takeTurnsFor(ctx, o, plan.look, null, true);
             plan = { ...plan, look: looked.acting };
@@ -896,6 +912,20 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           log(`claims: ${(e as Error).message}`);
         }
       }
+      // Each repository's version queue, for Manor (version-queue.ts): after the merges, so it says where each one is now,
+      // and what holds each (the PRs the merge stage held, and why), before the alarms, which raise one held an hour.
+      // Not in a test, which has no Manor and no projects of its own.
+      // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
+      if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
+        try {
+          // Those the stage did something for (or failed partway) moved since its glance: their clones are fetched.
+          const queues = await keepVersionQueues(ctx, { moved: out.results.filter((r) => r.outcome === 'done' || r.outcome === 'failed').map((r) => r.id), held, self: selfEmployee(ctx, o) });
+          // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
+          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
+        } catch (e) {
+          log(`couldn't keep the version queues: ${(e as Error).message}`);
+        }
+      }
       // After every round, done or not: what needs the person (alarms.ts).
       if (name === 'round') {
         try {
@@ -905,7 +935,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, buildLeft: loadBuildLeft(), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
@@ -916,19 +946,6 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           saveSeen(afterRound(seen, { plan, results: out.results, held, error: out.error, now: o.now?.() }));
         } catch (e) {
           log(`couldn't keep what this round saw: ${(e as Error).message}`);
-        }
-      }
-      // Each repository's version queue, for Manor (version-queue.ts): after the merges, so it says where each one is now.
-      // Not in a test, which has no Manor and no projects of its own.
-      // Not in a round that asked GitHub nothing: without a glance, each repository's PRs would be asked of on its own.
-      if ((name === 'round' || name === 'merge') && !out.error && !quiet && !process.env.NODE_TEST_CONTEXT) {
-        try {
-          // Those the stage did something for (or failed partway) moved since its glance: their clones are fetched.
-          const queues = await keepVersionQueues(ctx, { moved: out.results.filter((r) => r.outcome === 'done' || r.outcome === 'failed').map((r) => r.id) });
-          // The drafts coming up in them, told early so they're ready before their turn (heads-up.ts).
-          for (const line of await headsUp(ctx, queues.upcoming ?? [], { bailiffUrl: agentPages().bailiff })) log(line);
-        } catch (e) {
-          log(`couldn't keep the version queues: ${(e as Error).message}`);
         }
       }
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).

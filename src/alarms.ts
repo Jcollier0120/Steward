@@ -11,6 +11,7 @@ import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Em
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
 import type { Migration } from './migrate.ts';
+import type { BuildLeft } from './stages/build.ts';
 import { bumpDirOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { refreshDirOf } from './stages/refresh.ts';
 import type { Runner } from './run.ts';
@@ -18,6 +19,7 @@ import { portClashConditions, type PortUse } from './ports.ts';
 import { manorKeeps, tendConditions, type TendState } from './tend.ts';
 import { unstickConditions, type UnstickState } from './unstick.ts';
 import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type WorkState } from './work.ts';
+import type { HeldQueue } from './version-queue.ts';
 
 /**
  * What needs the person: the few things no one in the manor can see to by themselves. Each round, code (never a
@@ -31,6 +33,9 @@ import { closeResolved, fileWork, holdForWork, workItems, type WorkItem, type Wo
  * - a PR that conflicts with its branch and holds up others waiting their turn behind it (the lowest version merges
  *   first), for an hour (Settings: blockingHours): the whole queue stands still. One whose conflict was handed on to
  *   its author gives up its turn instead (stages/merge.ts), so this is the one nobody could be told about;
+ * - the lowest version in a queue that isn't ready for another reason (a draft, untested, its checks failing or
+ *   running) while ready PRs wait behind it (version-queue.ts's queueHold), for an hour from when it began to hold them
+ *   (Settings: blockingHours);
  * - a release that failed, which the rounds won't try again at that commit (round-failed.json): at once;
  * - a kit's bump or push that failed, which the rounds won't try again until the branch moves (rollout-failed.json),
  *   and one of the Steward's own releases that failed (self-failed.json): at once; a new kit that waits for the
@@ -161,7 +166,7 @@ export interface Held {
 export interface FailedRollout {
   kit: string;
   head: string;
-  stage: 'bump' | 'push';
+  stage: 'bump' | 'push' | 'build';
   message: string;
 }
 
@@ -184,6 +189,8 @@ export function roundConditions(o: {
   failedRollouts?: Record<string, FailedRollout>;
   failedSelf?: Record<string, FailedSelf>;
   rolloutWaits?: { kit: string; own: string } | null;
+  /** What builds left of each repository's batch (stages/build.ts's build-left.json), by employee: PRs kept for the next build are an alarm. */
+  buildLeft?: Record<string, BuildLeft>;
   /** Releases the Aletaster's tasting holds (tasting.ts's tasting-held.json), by employee. */
   tastingHolds?: Record<string, TastingHold>;
   /** Releases that wait until this PC can sign (signing.ts's signing-waits.json), by employee. */
@@ -204,6 +211,8 @@ export function roundConditions(o: {
   ports?: PortUse[];
   /** Packages whose install scripts held an install (installscripts.ts's install-held.json), by id. */
   installHolds?: Record<string, InstallHold>;
+  /** What holds each version queue, and since when (version-queue.ts's queueHold, kept in version-queues.json). */
+  queueHolds?: HeldQueue[];
   employees: Employee[];
   settings: Settings;
 }): Condition[] {
@@ -245,6 +254,31 @@ export function roundConditions(o: {
       }
     }
   }
+  // The lowest version not ready (a draft, untested, its checks), with ready PRs waiting their turn behind it: the queue
+  // stands still, so it is raised within the hour (three drafts held the Steward's own for hours, 2026-10-14 and 15). A
+  // conflict holding it is the blocking alarm's, above, which names its files.
+  for (const q of o.queueHolds ?? []) {
+    const h = q.hold;
+    if (h.why.startsWith(CONFLICTS)) continue;
+    const block = o.settings.alarms.blockingHours;
+    const behind = h.behind.map((n) => `#${n}`).join(', ');
+    out.push({
+      id: `queue:${q.repo}#${h.number}`,
+      who: q.id,
+      title: `${q.name} #${h.number} (v${h.version}) has held its version queue for ${hours(block)} or more: ${behind} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it`,
+      detail: [
+        h.title,
+        `Why it isn't ready: ${h.why}.`,
+        `${behind} ${h.behind.length === 1 ? 'is' : 'are'} ready, and ${h.behind.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first. Held since ${h.since}.`,
+        h.draft
+          ? 'Mark it ready once it is done, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.'
+          : 'Get it ready to merge, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.',
+      ],
+      url: h.url,
+      since: h.since,
+      afterMs: block * HOUR,
+    });
+  }
   for (const [id, commit] of Object.entries(o.failedReleases)) {
     const e = o.employees.find((x) => x.id === id);
     const said = o.round.results.find((r) => r.id === id && r.outcome === 'failed' && r.message.startsWith('release: '))?.message.slice('release: '.length);
@@ -278,6 +312,17 @@ export function roundConditions(o: {
     for (const [id, f] of Object.entries(o.failedRollouts ?? {})) {
       const e = o.employees.find((x) => x.id === id);
       if (!e) continue;
+      // A kit PR a build left out (stages/build.ts): the agent stays on its old kit.
+      if (f.stage === 'build') {
+        out.push({
+          id: `rollout:${id}:${f.kit}`,
+          who: id,
+          title: `${e.name}'s kit PR to kit ${f.kit} broke its build, so ${e.name} left without it and stays on its old kit`,
+          detail: [f.message, `Its kit PR doesn't go into a build again until it moves: a newer kit folds into it, or press Bump on the Steward's page once the kit or ${e.name} is fixed.`],
+          afterMs: 0,
+        });
+        continue;
+      }
       out.push({
         id: `rollout:${id}:${f.kit}`,
         who: id,
@@ -302,6 +347,20 @@ export function roundConditions(o: {
         afterMs: o.settings.alarms.waitingHours * HOUR,
       });
     }
+  }
+  // A build that couldn't find the one PR that broke a repository's batch: the PRs it kept wait for the next build.
+  for (const [id, l] of Object.entries(o.buildLeft ?? {})) {
+    if (!l.kept.length) continue;
+    const e = o.employees.find((x) => x.id === id);
+    const prs = l.kept.map((k) => `#${k.number}`).join(', ');
+    out.push({
+      id: `build:${id}:${l.due}`,
+      who: id,
+      title: `${e?.name ?? id} ${prs} didn't leave in ${l.name}, and wait${l.kept.length === 1 ? 's' : ''} for the next build`,
+      detail: [l.why, ...l.kept.map((k) => `#${k.number}: ${k.title}`), "They go into the next build as they are. Look at what failed (the Steward's log has each test run), and fix or close the PR that broke them."],
+      url: l.kept[0].url,
+      afterMs: 0,
+    });
   }
   if (o.settings.releaseSelf) {
     for (const [tag, f] of Object.entries(o.failedSelf ?? {})) {

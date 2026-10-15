@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { afterWords } from '../after.ts';
+import { whileAwake } from '../kit/awake.ts';
 import { commitOf, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { NO_TEAM } from '../team.ts';
 import { compareVersions } from '../kitfiles.ts';
@@ -16,6 +17,8 @@ import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
+import { buildCars, forgetEarlierBuilds, leftIn, loadReadySince, runBatch, type BuildBatch } from './build.ts';
+import { loadRolloutFailures } from './rollout.ts';
 import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
 import { claimsOn, reclaim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
@@ -494,12 +497,62 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (only && !(o.yes && o.team && ctx.settings.catchUp && conflicting.length)) return { ...result(e, 'skipped', NO_CONFLICTS), merged: [], held: [] };
   const failedHere: { pr: PrInfo; t: Tested }[] = [];
   const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
+  // A kit PR a build left out for breaking its checks (stages/build.ts): never merged at that head, in a build or not.
+  const kitHeld = loadRolloutFailures()[e.id];
+  // In a build, the PRs it dropped or kept for the next build: not merged on their own meanwhile.
+  if (ctx.build) forgetEarlierBuilds(e.id, ctx.build.due);
+  const left = ctx.build ? leftIn(e.id, ctx.build.due) : [];
   for (const pr of mergeable) {
+    if (kitHeld?.stage === 'build' && isKitPr(pr) && kitHeld.head === pr.headOid) {
+      hold.push({ pr, why: `it broke a build's checks (${kitHeld.message}): it waits for a newer kit, or Bump` });
+      continue;
+    }
+    if (left.includes(pr.number)) {
+      hold.push({ pr, why: `left out of ${ctx.build!.name}: it waits for the next build` });
+      continue;
+    }
     const c = await check(pr);
     if (c.why) {
       hold.push({ pr, why: c.why });
       if (c.raise && pr.whose === 'team') catchable.set(pr.number, pr);
     } else ready.push({ pr, sets: c.sets, stamps: c.stamps });
+  }
+  // A build's batch (stages/build.ts): its kit PR and the PRs that write fragments, stacked in the order they went
+  // ready and tested once; one that breaks it is found and dropped, and the rest leave together.
+  if (ctx.build && o.yes && o.team && existsSync(checkoutOf(e))) {
+    const cars = buildCars(prs, { id: e.id, branch: e.branch, since: loadReadySince(), left, kitHeld });
+    if (cars.length > 1) {
+      const numbers = cars.map((c) => `#${c.pr.number}`).join(', ');
+      let b: BuildBatch;
+      try {
+        const { released } = await lookup();
+        // The batch's own cars don't take versions from it: one it leaves out is caught up when it comes back.
+        const aboard = new Set(cars.map((c) => c.pr.number));
+        const heads = new Set(cars.map((c) => c.pr.head));
+        const taken = [...ready.filter((r) => !aboard.has(r.pr.number)).flatMap((r) => (r.sets ? [r.sets] : [])), ...claimsOn(e.repo).filter((c) => !c.branch || !heads.has(c.branch)).map((c) => c.version)];
+        b = await runBatch(ctx, e, cars, { released, taken });
+      } catch (err) {
+        b = { merged: [], dropped: [], kept: [], note: `couldn't stack them: ${(err as Error).message}`, tested: false };
+      }
+      if (b.merged.length) {
+        const words = `merged ${b.merged.map((p) => `#${p.number}`).join(', ')} in ${ctx.build.name} (${b.note})`;
+        return { ...result(e, 'done', words, { url: b.merged.at(-1)!.url }), merged: b.merged, held: [], did: [words], waits: [], lookAgain: true };
+      }
+      // Pushed and waiting for GitHub's checks at the stack: the cars wait as one batch, none merged alone meanwhile.
+      if (b.waiting) {
+        const words = `${numbers} wait as one batch: ${b.note}`;
+        ctx.log(`[${e.id}] ${words}`);
+        return { ...result(e, 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: cars.map((c) => heldOf(c.pr, CHECKS_RUNNING)), did: [], waits: [words], lookAgain: false };
+      }
+      // Tested, and none of it left: what it dropped and kept wait, and the next look takes the rest of the repository's PRs.
+      if (b.tested) {
+        const words = `${ctx.build.name} merged none of ${numbers}: ${b.note}`;
+        const why = (pr: PrInfo) => b.dropped.find((d) => d.pr.number === pr.number)?.why;
+        const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for the next build`));
+        return { ...result(e, 'failed', words, { url: cars[0].pr.url }), merged: [], held, did: [words], waits: [], lookAgain: true };
+      }
+      ctx.log(`[${e.id}] no batch for ${numbers}: ${b.note}`);
+    }
   }
   // Two team PRs that set one version: neither goes first, or the second would conflict, or share its version. One
   // stamped as it merges (changes/<version>.md) is given a free version then, so it never clashes.
@@ -696,7 +749,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     // Only the Steward's own branch is deleted: a team member's may still be checked out somewhere.
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
-    const r = await hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine });
+    // The PC kept awake while it merges (the kit's awake.ts), as while it tests (runChecks).
+    const r = await whileAwake(`${e.name} #${pr.number}'s merge`, () => hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine }), ctx.log);
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);

@@ -23,6 +23,62 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - On an NPU 3720 already set up, the NPU refresh tries the new command as the agent pins this kit (`embeddings: --target_device GPU added`), testing a chat answer and an embedding. The graphics compile the embedding model once, in 4–12 s. It keeps the old command if either doesn't answer properly, and a PC whose graphics can't run OpenVINO fails setup's embedding test, its embeddings going to the card or the processor as before.
 - The embedding endpoint the kit writes for an NPU 3720 (`planNpu`, `npuEntry`), started with its own command and environment on the 225U, answered a query in 43–50 ms and a dense chunk in 0.85 s, its first vector 6.6 s after the start with the graphics' compile. Setup and the NPU check haven't run it on a PC yet, nor has anyone on a Meteor Lake's Arc graphics, or with a game on the graphics: the keeper defers a card's models for a game, not the NPU entry's embedding server.
 
+## 2.75.2
+
+**Automatic updates work on a busy PC: a page slow to start after an update is waited for instead of rolled back, a rollback never leaves the new page running over the old files, and an agent's rounds make room for Manor's update.**
+
+### What's new
+
+- **update-hold.ts**: while Manor has an automatic update due for the agent, a scheduled round waits (`every()`, and `runSoon()`'s rounds too), looking again every 30 s (`UPDATE_LOOK_MS`), its state's `waiting` saying "Manor to update it to <version>". Manor updates an agent only while it's idle, and looks every minute: an agent whose rounds ran back to back was never idle then, and its update waited for hours. It waits 5 minutes at most for a version (`UPDATE_HOLD_MS`), then the rounds go on, and wait again 30 minutes later (`UPDATE_HOLD_AGAIN_MS`). A round asked for (Run now) never waits.
+- `updateDue()` reads Manor's files: `updates.json` (a version newer than this one available, Manor's last look not cut short by a problem or the network, not one Manor has given up on after its three tries or waits to try again) and `settings.json` (the agent's automatic updates on). A version the agent's own install refuses (`unsafe-updates.json`) isn't due, nor is anything in a development checkout. `updateHold()` is the agent's one hold, shared by all its schedules; `updateHolder()` makes another; `compareVersions` compares dotted versions.
+- **native.ts**: `pagesFrom(app)` lists the Node processes running the page from an app folder (`<app>\src\cli.ts serve`, and the `open` that starts it) by their command lines, which `processesUnder` can't see, since Node runs from its own folder. `pagesIn(lines, app)` reads PowerShell's lines for it.
+
+### What changed
+
+- **install.ts**: after starting the page, an install waits 20 s for it as before (`PAGE_FIRST_MS`), then on while its process is still starting, up to 5 minutes (`PAGE_START_MS`). A page whose process has ended isn't waited for past the 20 s. Its line says `up, after <n> s: the PC is busy`, `didn't answer, and its process has ended`, or `still starting after 5 minutes`. `waitForPage(ok, app, d)` is exported, and `InstallDeps.pagesStarting` stands in for `pagesFrom` in a test. On 15 October the Steward's 0.36.46 and the Assayer's 0.4.2 took longer than 20 s to answer on a PC running a release's checks: each was rolled back and flagged as unsafe, and went on running over the older version's files.
+- **safeinstall.ts**: an install that gave up waiting for the page, whose page answers as the new version by the time it is judged, goes on to its probation, which judges it as any other. Before, it was rolled back and flagged.
+- **safeinstall.ts**: a rollback ends any page process still starting from app, and the `open` starting it (`endStartingPages`, in the real `endPage`), before it puts the version before back. Such a page has no `server.json` yet, so the rollback used to miss it, and it came up over the older files. The rollback then waits for the old page as an install does.
+- **safeinstall.ts**: once a version holds up for its probation, the flags of the versions before it are dropped (allowed again), and with them an agent's alarm for one. Their kept copies (`app.unsafe-<version>`) stay.
+
+### For an agent
+
+- Nothing to do for its schedule. An agent that starts rounds itself, beside its schedule (the Steward does, after a kit trial or on waking), asks `updateHold()` first and starts none while it answers: the schedule runs that round once the wait ends.
+- A PC already left with a newer page running over an older version's files, that version flagged, is set right by the agent's next release: its install ends the running page, puts the whole release in, and drops the old flag once the new version holds up. Until the agent runs this kit, its rounds don't wait for Manor, so its next update may still wait for an idle moment, or for Update in Manor.
+- A test that runs `every()` reads Manor's files from `MANOR_HOME` (else `%USERPROFILE%\.manor`): set it to a folder of the test's own when the test's agent id could have automatic updates on.
+
+## 2.75.1
+
+**On a Snapdragon, the embedding server beside GenieX holds 1.4 GB of the NPU's memory, not 2.9 GB, in the same time and to the same vectors, so chat, pictures and embeddings fit a 16 GB PC with room to spare.**
+
+### What changed
+
+- **npu-vendors.json's qualcomm route** (Qualcomm's alone; Intel's and AMD's routes, the graphics card's and the processor's llama-server, the keeper and `npuMemoryFit` are unchanged):
+  - **`embedServer.serve`**: `-c 4096 -ub 512`, not `-c 8192 -ub 2048`. Measured on the X2 Elite, 14 settings, each started fresh on a private port in the NPU's turn: 1,408 MB on the NPU against 2,876, a 2.0 GB working set against 4.4, 629 MB private against 1,567. A query took 30 ms, a 432-token chunk 131 ms and a 2,707-token text 1.0 s, as before, and the vectors matched (cosine 0.99999 or more). Beside a loaded GenieX the two hold 5,646 MB of the NPU's memory, against 7,114 MB. Windows lets one device hold about half a PC's memory, 7.8 GB on a 16 GB Snapdragon.
+  - **`caps.embed`: 1,365**, by the kit's estimate of 3 characters a token, so a request stays under the server's 4,096 real tokens even at one token a character. Embeddings had the route's 2,400 before. The longest input any agent sends is about 2,060 characters (Reeve's cluster items), an estimate of 687, so every request still goes to the NPU. A longer one goes to the next accelerator that makes embeddings.
+  - **`idleStop.coldStartMs.embed`: 3,000**, measured (1.3 to 3.0 s alone, 1.5 to 2.2 s beside a loaded GenieX), not the 10,000 assumed. A person waking it is told about 3 s; the minutes stay 5.
+- **spec/NPU-VENDORS.md** has the measurements (Memory on a 16 GB Snapdragon) and what stays as it was: GenieX's own 1.56 GB float32 embedding table, which GenieX 0.8.0 reads whole for vision-language models and won't take quantized; its 4,096-token context, AI Hub's only build; InternVL3.5-2B, smaller and faster but 19 of 24 on the quality items against 22, a must-pass one wrong; recycling GenieX sooner, which the 5-minute idle stop makes moot on a small PC; and no `memoryGb` for Qualcomm, which at the 40% share would leave embeddings off the NPU on every 16 GB Snapdragon. It also has the route run under a 16 GB PC's memory (a ballast on the X2 Elite, at 9.7 GB available and at 15.6 GB in all). Nothing failed at either level. The NPU held the same 5,646 MB as with no ballast (7,114 at the old setting), and the new setting left 1.6 GB more of the PC's memory.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+- On a Snapdragon already set up, the NPU refresh brings the embedding server's new command and cap in as the agent pins this kit, once it answers its test. Nothing is downloaded, and no index is rebuilt: the model and its vectors are the same.
+
+## 2.74.8
+
+**An agent's work can keep the PC awake: while it runs checks, merges or a release, Windows doesn't sleep on its own, and once the work ends it may again.**
+
+### What's new
+
+- **awake.ts**: `stayAwake(what)` holds the PC awake until the function it returns is called, and `whileAwake(what, fn)` holds it while `fn` runs. Holds from anywhere in the agent's process share one hold of Windows, which ends when the last is let go. `awakeFor()` lists what holds it now.
+- **schedule.ts**: a round's job gets `awake(what)` beside its `signal`. It holds the PC awake for the round's work, and anything it still holds is let go when the round ends.
+- On Windows a small helper holds it (`awake.cs`, compiled once to `awake-<hash>.exe` beside the checks pace's launcher, shared by every agent on the PC). It asks Windows to keep the system working (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) until the agent closes its input. It lets go if the agent ends first, so a hold never outlives the agent, and `powercfg /requests` lists it while it holds.
+- It prevents idle sleep only. A sleep the person chooses (Start's Sleep, the power button, closing the lid) still happens, the display still turns off, and other platforms do nothing. A helper that can't be built or started leaves the PC to its own power settings, said once in the log, and never fails the work.
+- On 15 October a PC slept on its own for an hour in the middle of the Steward's checks, and for 13 minutes later, which is much of why that round ran out of time.
+
+### For an agent
+
+- Nothing to do: nothing is held until the agent asks. Hold it only around real work: a hold resets Windows' idle timer, so a round every few minutes that held it while only looking would keep the PC up all day. Under `node --test` nothing is held unless the test sets `setAwakeDeps`.
+
 ## 2.74.7
 
 **Older Snapdragons: every first-generation X is recognised and checked against its own model build, the Snapdragons before the X are refused before anything downloads, an X2 can play an X to test the X's code, and a server stopped is waited for until its port is free.**

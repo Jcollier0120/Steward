@@ -64,6 +64,10 @@ export class GitHub implements SourceHost {
     return this.gh(['pr', 'ready', String(n), '--repo', repo], MINUTE);
   }
 
+  draftPr(repo: string, n: number) {
+    return this.gh(['pr', 'ready', String(n), '--repo', repo, '--undo'], MINUTE);
+  }
+
   closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}) {
     return this.gh(['pr', 'close', String(n), '--repo', repo, ...(p.deleteBranch ? ['--delete-branch'] : []), ...(p.comment !== undefined ? ['--comment', p.comment] : [])], 2 * MINUTE);
   }

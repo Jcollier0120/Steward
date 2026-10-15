@@ -102,6 +102,12 @@ export interface Ctx {
   pause?: (ms: number) => Promise<void>;
   /** The Exchequer to let an urgent release out at (release.ts urgentNote); tests stand in for it. Not given: Castellan's. */
   exchequer?: ExchequerOptions;
+  /**
+   * One of a build's rounds (pipeline.ts): its build time, and its name in words ("the 13:00 build"). A repository's
+   * ready PRs are then stacked as one batch, and a batch that fails is halved to find the PR that broke it
+   * (stages/build.ts). Absent between builds, and without the pipeline.
+   */
+  build?: { due: string; name: string } | null;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

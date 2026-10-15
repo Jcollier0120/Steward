@@ -17,7 +17,7 @@ process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, MANOR_STARTUP, TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, MANOR_STARTUP, PAGE_START_MS, TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -203,6 +203,63 @@ test('an update ends the running page, replaces app and keeps the duty it had', 
   assert.equal(JSON.parse(readFileSync(f.dutyFile, 'utf8')).onDuty, false);
   assert.deepEqual(verbs(f.calls), ['/Create', '/Run']);
   assert.match(f.lines.join('\n'), /updated from 1\.0\.0[\s\S]*off duty/);
+});
+
+/**
+ * An update whose new page, once /Run starts it, answers `upAfterMs` later (null: never), its process there until
+ * `goneAfterMs` (null: throughout). The clock moves only as the install sleeps.
+ */
+async function slowStart(upAfterMs: number | null, goneAfterMs: number | null = null) {
+  const p = place();
+  const app = appFolder(p.data);
+  mkdirSync(path.join(app, 'src'), { recursive: true });
+  writeFileSync(path.join(app, 'release.json'), JSON.stringify({ version: '1.0.0' }));
+  const f = fakes({ root: p.release, data: p.data, up: true });
+  let t = 0;
+  let ranAt: number | null = null;
+  const looked: string[] = [];
+  const schtasks = f.deps.schtasks;
+  f.deps.schtasks = async (args) => {
+    if (args[0] !== '/Run') return schtasks(args);
+    ranAt = t;
+    return { code: 0, out: 'SUCCESS' };
+  };
+  f.deps.sleep = async (ms) => {
+    t += ms;
+  };
+  f.deps.ping = async () => (ranAt === null ? f.state.up : upAfterMs !== null && t - ranAt >= upAfterMs);
+  f.deps.pagesStarting = async (dir) => {
+    looked.push(dir);
+    return ranAt !== null && (goneAfterMs === null || t - ranAt < goneAfterMs) ? [4242] : [];
+  };
+  const code = await install({}, f.deps);
+  return { code, lines: f.lines.join('\n'), app, looked, waited: ranAt === null ? 0 : t - ranAt };
+}
+
+test('a page slow to start on a busy PC is waited for while its process is there, not taken for a broken release (kit 2.75.2)', async () => {
+  const quick = await slowStart(3_000);
+  assert.equal(quick.code, 0, quick.lines);
+  assert.deepEqual(quick.looked, [], 'a page up within 20 s: no process looked for');
+  assert.match(quick.lines, /page: .*\(up\)/);
+
+  // The Steward's 0.36.46 answered later than the 20 s an install gave it, and was rolled back for it.
+  const slow = await slowStart(90_000);
+  assert.equal(slow.code, 0, slow.lines);
+  assert.ok(slow.looked.length > 0 && slow.looked.every((d) => d === slow.app), 'its process looked for under app');
+  assert.match(slow.lines, /page: .*\(up, after \d+ s: the PC is busy\)/);
+  assert.ok(slow.waited >= 90_000 && slow.waited < 100_000, `answered at ${slow.waited} ms`);
+});
+
+test("a page whose process has ended isn't waited for past the first 20 s, and one still starting after 5 minutes is given up on", async () => {
+  const gone = await slowStart(null, 5_000);
+  assert.equal(gone.code, 1);
+  assert.match(gone.lines, /didn't answer, and its process has ended; see .*serve\.log/);
+  assert.ok(gone.waited <= 21_000, `waited ${gone.waited} ms`);
+
+  const stuck = await slowStart(null);
+  assert.equal(stuck.code, 1);
+  assert.match(stuck.lines, /still starting after 5 minutes; see .*serve\.log/);
+  assert.ok(stuck.waited >= PAGE_START_MS && stuck.waited < PAGE_START_MS + 10_000, `waited ${stuck.waited} ms`);
 });
 
 test("an update that moves the port ends the old page on the old port, where this version's ping can't see it", async () => {

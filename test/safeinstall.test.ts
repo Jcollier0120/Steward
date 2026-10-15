@@ -86,6 +86,8 @@ function setup(o: { installCode?: number; page?: (t: number) => string | null; h
     now: () => t,
     record: (u) => writeFileSync(unsafeFile(), JSON.stringify({ ...loadUnsafe(), [u.version]: u })),
     flagged: loadUnsafe,
+    // No page process is looked for on this PC: a page that doesn't answer has ended, as far as a rollback's wait goes.
+    pagesStarting: async () => [],
   };
   return { d, app, said, tasks, ended, running: () => running };
 }
@@ -159,7 +161,8 @@ test('the other ways an update fails its probation: the wrong version answers, t
   for (const [o, why] of [
     [{ page: () => '0.8.13' }, /its page answers as 0\.8\.13, not 0\.8\.14/],
     [{ homeStatus: 500 }, /its home page answered 500/],
-    [{ installCode: 1 }, /its install failed \(exit 1\) once it was in place/],
+    // Its page never answering as it: one that answers late goes on to its probation (below).
+    [{ installCode: 1, page: () => null }, /its install failed \(exit 1\) once it was in place/],
   ] as const) {
     rmSync(unsafeFile(), { force: true });
     const s = setup(o);
@@ -167,6 +170,64 @@ test('the other ways an update fails its probation: the wrong version answers, t
     assert.equal(versionIn(s.app), '0.8.13');
     assert.match(loadUnsafe()['0.8.14'].why, why);
   }
+});
+
+test("an install that stopped waiting for a slow page, which then answers as the new version, goes on to its probation: not rolled back, not flagged (0.36.46's case)", async () => {
+  rmSync(unsafeFile(), { force: true });
+  // The kit's install gave up on the page (exit 1), but by now it answers as 0.8.14, and keeps answering.
+  const s = setup({ installCode: 1 });
+  assert.equal(await safeInstall({}, s.d), 0, s.said.join('\n'));
+  assert.equal(versionIn(s.app), '0.8.14');
+  assert.equal(s.running(), '0.8.14');
+  assert.deepEqual(s.ended, [], 'nothing ended');
+  assert.deepEqual(loadUnsafe(), {});
+  assert.ok(s.said.some((l) => /0\.8\.14's page answered late, after the install had stopped waiting for it/.test(l)), s.said.join('\n'));
+
+  // One that answers late and then stops is judged by its probation, as any other.
+  const t = setup({ installCode: 1, page: (at) => (at < 10_000 ? '0.8.14' : null) });
+  assert.equal(await safeInstall({}, t.d), 1);
+  assert.equal(versionIn(t.app), '0.8.13');
+  assert.match(loadUnsafe()['0.8.14'].why, /its page stopped answering/);
+});
+
+test('a version that holds up drops the flags of the versions before it (their alarms are the flags); a newer one flagged stays (kit 2.75.2)', async () => {
+  rmSync(unsafeFile(), { force: true });
+  const flag = (version: string) => ({ version, from: '0.8.11', why: 'its install failed (exit 1) once it was in place', at: '2026-10-15T18:00:00.000Z', kept: null });
+  writeFileSync(unsafeFile(), JSON.stringify({ '0.8.12': flag('0.8.12'), '0.8.20': flag('0.8.20') }));
+  const s = setup();
+  assert.equal(await safeInstall({}, s.d), 0, s.said.join('\n'));
+  assert.deepEqual(Object.keys(loadUnsafe()), ['0.8.20']);
+  assert.ok(s.said.some((l) => /0\.8\.12 was flagged as unsafe: no longer, since 0\.8\.14, newer, holds up/.test(l)), s.said.join('\n'));
+  rmSync(unsafeFile(), { force: true });
+});
+
+test('a rollback ends a page still starting from app, and the open starting it, before the version before goes back in (kit 2.75.2)', async () => {
+  const { endStartingPages } = await import('../src/kit/safeinstall.ts');
+  const app = path.join(home, 'starting', 'app');
+  let running = [4242, 4243, process.pid];
+  const asked: string[] = [];
+  const endedIds: number[][] = [];
+  const deps = {
+    pagesStarting: async (dir: string) => {
+      asked.push(dir);
+      return running;
+    },
+    endPrograms: async (ids: number[]) => {
+      endedIds.push(ids);
+      running = running.filter((id) => !ids.includes(id));
+    },
+    sleep: async () => {},
+  };
+  assert.equal(await endStartingPages(app, deps), true);
+  assert.deepEqual(endedIds, [[4242, 4243]], 'both, never the install itself');
+  assert.ok(asked.every((d) => d === app));
+
+  // None there: nothing ended. One that won't end: false, after a while.
+  endedIds.length = 0;
+  running = [];
+  assert.equal(await endStartingPages(app, deps), true);
+  assert.deepEqual(endedIds, []);
+  assert.equal(await endStartingPages(app, { ...deps, pagesStarting: async () => [7], endPrograms: async () => {} }), false);
 });
 
 test("a home page that doesn't answer at first is asked again, not rolled back: a network blip at the update (2026-10-13)", async () => {

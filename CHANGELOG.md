@@ -2,6 +2,82 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.49
+
+**Updates go in on a busy PC: an agent slow to start after an update is no longer rolled back as broken, and the Steward pauses its rounds for a few minutes so Manor can update it.**
+
+### What's new
+
+- Manor updates an agent only while it's idle. A Steward busy with one round after another could go hours without being idle when Manor looked, so its updates waited, or waited for you to press Update. Now, while Manor has an automatic update ready for the Steward, its rounds wait up to 5 minutes so the update can go in. If it hasn't gone in by then, the rounds go on, and wait again half an hour later. Run now never waits. Every agent gets the same with kit 2.75.2.
+
+### What changed
+
+- When an update starts an agent while the PC is busy (a release's checks running, say), its page can take more than 20 seconds to answer. The update used to take that for a broken release: it put the version before back, marked the new one unsafe and refused it from then on, and the new version kept running over the older version's files. On 15 October this happened to the Steward's 0.36.46 and the Assayer's 0.4.2. Now the update waits while the agent is still starting, up to 5 minutes, and one that answers late as the new version is kept, and checked as usual.
+- If an update does have to be rolled back, the new version is stopped completely first, even while it's still starting, so the version put back is the one that runs.
+- Once a newer version is installed and holds up, an older version marked unsafe no longer is, and its alarm goes away.
+
+### Before you update
+
+- If your Steward's update to 0.36.46 was rolled back (its page has an alarm saying so, and Manor shows 0.36.42 installed), this update sets it right: it stops the Steward that's running, installs 0.36.49 whole, and clears the 0.36.46 alarm once 0.36.49 holds up. Until 0.36.49 is running, the Steward doesn't pause its rounds for Manor yet, so if Manor keeps waiting for the Steward to be idle, press Update in Manor. Other agents rolled back the same way are set right by their next release.
+
+## 0.36.48
+
+**Kit 2.75.1: on a Snapdragon, the local AI's search model holds half the memory it did, so everything fits on a 16 GB PC.**
+
+### What changed
+
+- On a Snapdragon PC, the search model that runs on the NPU beside the chat model now holds 1.4 GB of memory instead of 2.9 GB. It answers just as fast and gives the same results, so existing search indexes carry over. Together the two models now hold 5.6 GB instead of 7.1 GB, comfortably inside what Windows lets the NPU hold on a 16 GB PC. Tried with only a 16 GB PC's worth of memory free, chat, pictures and search all kept working, and the two models left 1.6 GB more of it for everything else than before.
+- Waking the search model after a rest is now announced as taking about 3 seconds, as measured, instead of 10.
+- The kit the Steward hands out (2.75.1) brings this to every agent. Intel and AMD PCs are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On a Snapdragon already set up, the agents switch the search model to its new settings as they update, with nothing to download.
+
+## 0.36.46
+
+**A build whose checks fail no longer holds everything back: the Steward finds the pull request that broke it, takes it out, and ships the rest.**
+
+### What's new
+
+- At each build, the kit's pull request and the pull requests that write changelog fragments go together as one batch: stacked in the order they went ready (the kit first), stamped with one version and tested once.
+- When the batch's checks fail, the Steward tries once more (a flaky test doesn't break up a build), then tests the bottom half of the stack, and halves again, to find the one pull request that broke it.
+- That pull request is taken out and turned back into a draft, with a comment saying which tests failed and which pull request it clashed with, so the session that opened it can fix it for the next build. It also gets a red **steward/build** status. The rest of the batch ships without it.
+- If the kit's pull request is the one that broke it, the agent ships without the new kit, stays on its old one, and the kit rollout alarm goes off.
+- If the halving can't single out one pull request, the ones at the bottom of the stack that passed ship, and the rest wait for the next build, with an alarm naming them.
+- A new setting, **To find the PR that breaks a build, at most** (Build pipeline, advanced; `bisectRuns`, 3 by default, 0 to 6): how many extra test runs the halving may take. At 0 it doesn't look: what passed at the bottom ships, the rest wait.
+
+### What changed
+
+- A kit is no longer held back from release by one of the Steward's own tests failing only because the PC was busy. The test of the NPU queue letting go of its lock while another program reads it now says it couldn't tell, rather than failing, when that program was held up longer than the queue waits. This kept kit 2.74.6 from being released on 15 October, while kit trials ran beside the check.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The batch only runs with the build pipeline on. This release brings 0.36.40's build pipeline too, if that wasn't released on its own.
+
+## 0.36.45
+
+**The whole test suite before a kit's release no longer holds up merging, the Steward says which pull request is holding a version queue, and the PC stays awake while the Steward is working.**
+
+### What's new
+
+- While the Steward runs checks, merges a pull request or makes a release, Windows doesn't put the PC to sleep on its own. Once that work ends, the PC may sleep again. On 15 October the PC slept for an hour in the middle of a round's checks, and again for 13 minutes, which is much of why that round ran out of time. This only stops sleep from idling: if you choose Sleep, press the power button or close the lid, the PC still sleeps, and the display still turns off as usual. Rounds that only look at GitHub don't keep the PC awake, so it still sleeps when nothing is being worked on. This comes with kit 2.74.8.
+
+- The Steward's page has a new card, **What holds the version queues**. It appears when the lowest version waiting in a repository is a draft, untested, or has failing or running checks, while ready pull requests above it wait their turn (the lowest version always merges first). It names the pull request holding the queue, why it isn't ready, which pull requests wait behind it, and since when. The round's log says the same.
+- When a queue has been held that way for more than an hour, it is an alarm (the same hour as a conflict that holds a queue, Settings' `blockingHours`). The alarm says what to do: mark the pull request ready, give it a version above the others, or close it. This covers the Steward's own repository too, where three drafts held every merge for hours on 14 and 15 October without anything saying so.
+- While the whole suite runs before a kit's release, the page shows it, with the commit and how long it has been running.
+
+### What changed
+
+- Before it releases a kit, the Steward runs its whole test suite (twice if the first run fails). That used to happen inside a round, and the round waited: a slow run held every merge for 45 minutes to 2 hours on 14 and 15 October, until the round was given up at its time limit with its tests still running. Now the suite runs on its own, beside the rounds. The round that starts it goes on merging at once, and the kit waits. The first round after the suite passes releases the kit. If it fails, the kit is held as a failed release, as before. Only one run goes at a time, never a second beside it.
+- A new commit on main stops a whole suite still running for the old commit and starts one for the new commit. When the Steward stops, its whole suite stops with it, along with every program it started. If a Steward ended without stopping it, the next Steward ends whatever was left running when it starts.
+- Code that has already passed the whole suite on this PC is still not run again, and a kit whose two runs failed only on different tests is still released.
+- With several PCs taking turns at the Steward's work, the whole suite runs only on the PC whose turn the Steward's own repository is. If the turn moves to another PC, this PC stops its run, and the other PC runs the suite there. The alarm for a held version queue is raised only by the PC whose turn that repository is, so two PCs never both raise it.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.44
 
 **Kit 2.74.7: every first-generation Snapdragon X is recognised, the Snapdragons before it are turned down before anything downloads, and an X2 can stand in for an X.**
