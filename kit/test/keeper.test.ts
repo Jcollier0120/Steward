@@ -649,3 +649,202 @@ test('an idle stop never races a request: one in flight keeps its server; one th
   assert.equal(pc.started, 1);
   assert.equal(pc.overlap, false, 'the keeper and a request never held the NPU at once');
 });
+
+// ---------------------------------------------------------------- the NPU's embedding server gives way to its chat
+
+const HEX_BASE = 'http://127.0.0.1:18182';
+/** Qualcomm's route as config.json has it: GenieX for chat and vision, llama-server on the Hexagon for embeddings. */
+const qualcommRaw = (embed: Record<string, unknown> = { baseUrl: HEX_BASE, model: 'qwen3-embedding-0.6b-gguf', startCommand: [HEXAGON, '--port', '18182'] }) => ({
+  accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: BASE, model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16', startCommand: [GENIEX, 'serve'] }, vision: { model: 'qualcomm/Qwen3-VL-4B-Instruct:W4A16' }, embed }],
+});
+const parsedNpu = async (raw: unknown) => {
+  const { parseAccelerators } = await import('./fixture/src/kit/accelerators.ts');
+  const cfg = parseAccelerators(raw, null);
+  if ('error' in cfg) throw new Error(cfg.error);
+  return cfg.accelerators.find((a) => a.kind === 'npu')!;
+};
+
+/** A PC whose NPU embedding server runs (pid 777) until it's stopped, its port closing as it goes. */
+function yieldPc(o: { state?: 'ready' | 'busy' | 'down'; processes?: () => Promise<{ pid: number; startedMs: number }[]> } = {}) {
+  const pc = { procs: [{ pid: 777, startedMs: 0 }], stopped: [] as number[], probed: 0, log: [] as string[], clock: 0 };
+  const deps = {
+    probe: async () => {
+      pc.probed++;
+      return pc.procs.length ? (o.state ?? 'ready') : ('down' as const);
+    },
+    processes: o.processes ?? (async () => pc.procs),
+    stop: (pid: number) => {
+      pc.stopped.push(pid);
+      pc.procs = pc.procs.filter((p) => p.pid !== pid);
+    },
+    log: (l: string) => pc.log.push(l),
+    now: () => pc.clock,
+    sleep: async (ms: number) => {
+      pc.clock += ms;
+    },
+  };
+  return { pc, deps };
+}
+
+test("the NPU's own embedding server: Qualcomm's llama-server and Intel's second OpenVINO Model Server; none for FastFlowLM, npu-embed, a shared server or a card", async () => {
+  const { ownEmbedServer } = await import('./fixture/src/kit/keeper.ts');
+  assert.deepEqual(ownEmbedServer(await parsedNpu(qualcommRaw())), { base: HEX_BASE, program: HEXAGON });
+  assert.deepEqual(ownEmbedServer(await parsedNpu(npuRaw(OVMS, OVMS))), { base: 'http://127.0.0.1:18186', program: OVMS });
+  assert.equal(ownEmbedServer(await parsedNpu(npuRaw(FLM))), null, 'FastFlowLM: embeddings go to the card');
+  assert.equal(ownEmbedServer(await parsedNpu(qualcommRaw({ baseUrl: 'http://127.0.0.1:18282', model: 'nomic', startCommand: ['C:\\Python\\python.exe', 'npu-embed.py'] }))), null, 'npu-embed exits by itself');
+  assert.equal(ownEmbedServer(await parsedNpu(qualcommRaw({ baseUrl: BASE, model: 'e', startCommand: [HEXAGON] }))), null, 'one server for chat and embeddings: nothing to give way');
+  assert.equal(ownEmbedServer(await parsedNpu(qualcommRaw({ baseUrl: HEX_BASE, model: 'e' }))), null, 'one nobody can start again');
+  assert.equal(ownEmbedServer({ kind: 'gpu', chat: undefined, vision: undefined, embed: { baseUrl: CARD, model: 'e', startCommand: [LLAMA] } } as any), null, "a card's");
+  const npu = await parsedNpu(npuRaw(OVMS, OVMS));
+  assert.equal(ownEmbedServer({ ...npu, embed: { ...npu.embed!, turn: 'gpu-intel-arc' } } as any), null, "one in the graphics' turn may be answering beside the chat");
+});
+
+test("on a PC under 20 GB, a chat stops the NPU's own embedding server first, and it's gone before the chat goes on; said in the keeper's log", async () => {
+  const { yieldEmbedServer } = await import('./fixture/src/kit/keeper.ts');
+  for (const [raw, base, program] of [
+    [qualcommRaw(), HEX_BASE, 'llama-server.exe'],
+    [npuRaw(OVMS, OVMS), 'http://127.0.0.1:18186', 'ovms.exe'],
+  ] as const) {
+    const { pc, deps } = yieldPc();
+    const r = await yieldEmbedServer(await parsedNpu(raw), { ramBytes: 15.6 * GB, given: () => false }, deps);
+    assert.equal(r.did, 'stopped', JSON.stringify(r));
+    assert.deepEqual([r.did === 'stopped' && r.base, pc.stopped, pc.procs], [base, [777], []]);
+    assert.equal(await deps.probe(), 'down', 'its port closed before the chat goes on');
+    assert.equal(pc.log.length, 1);
+    assert.ok(pc.log[0].startsWith(`stopped ${program} (777) at ${base} in `), pc.log[0]);
+    assert.match(pc.log[0], / ms: it gives way to the NPU's chat on a PC under 20 GB, and starts again for the next embedding$/);
+  }
+});
+
+test("the embedding server stays on a bigger PC, when npuIdleStopMinutes is given, when it isn't running, while it loads, or when its processes can't be found in time; never a throw", async () => {
+  const { yieldEmbedServer } = await import('./fixture/src/kit/keeper.ts');
+  const acc = await parsedNpu(qualcommRaw());
+  const run = async (o: { ramBytes?: number | null; given?: () => boolean; state?: 'ready' | 'busy' | 'down'; processes?: () => Promise<any> }) => {
+    const { pc, deps } = yieldPc({ state: o.state, processes: o.processes });
+    const r = await yieldEmbedServer(acc, { ramBytes: o.ramBytes === undefined ? 15.6 * GB : o.ramBytes, given: o.given ?? (() => false), findMs: 30 }, deps);
+    return { r, pc };
+  };
+  for (const ramBytes of [32 * GB, 24 * GB, null]) {
+    const { r, pc } = await run({ ramBytes });
+    assert.deepEqual([r, pc.probed, pc.stopped], [{ did: 'kept', why: 'big-pc' }, 0, []], `${ramBytes}: not even asked`);
+  }
+  const given = await run({ given: () => true });
+  assert.deepEqual([given.r, given.pc.stopped], [{ did: 'kept', why: 'given' }, []], "the owner's npuIdleStopMinutes keeps the servers as long as it says");
+  const down = await run({ state: 'down' });
+  assert.deepEqual(down.r, { did: 'kept', why: 'not-running' });
+  const busy = await run({ state: 'busy' });
+  assert.deepEqual([busy.r, busy.pc.stopped], [{ did: 'kept', why: 'busy' }, []], 'loading its model: stopping it would waste that');
+  const slow = await run({ processes: () => new Promise(() => {}) });
+  assert.deepEqual([slow.r, slow.pc.stopped], [{ did: 'kept', why: 'slow' }, []], "Windows' process list too slow: the chat goes on beside it");
+  const none = await run({ processes: async () => [] });
+  assert.deepEqual(none.r, { did: 'kept', why: 'not-found' }, 'answering, but no process of its program at its address: never a stranger stopped');
+  const broken = await run({ processes: async () => Promise.reject(new Error('PowerShell timed out')) });
+  assert.deepEqual([broken.r, broken.pc.stopped], [{ did: 'kept', why: 'slow' }, []]);
+  assert.ok(broken.pc.log[0].startsWith("left http://127.0.0.1:18182 running for the NPU's chat: PowerShell timed out"), broken.pc.log[0]);
+});
+
+test('embeddings answered in the last 30 s keep their server: a search right after a summary, an index built between chats', async () => {
+  const { yieldEmbedServer, YIELD_GRACE_MS } = await import('./fixture/src/kit/keeper.ts');
+  const acc = await parsedNpu(qualcommRaw());
+  assert.equal(YIELD_GRACE_MS, 30_000);
+  const run = async (embeddedAt: () => number | null) => {
+    const { pc, deps } = yieldPc();
+    pc.clock = 1_000_000;
+    const r = await yieldEmbedServer(acc, { ramBytes: 15.6 * GB, given: () => false, embeddedAt }, deps);
+    return { r, pc };
+  };
+  const recent = await run(() => 1_000_000 - 29_999);
+  assert.deepEqual([recent.r, recent.pc.probed, recent.pc.stopped], [{ did: 'kept', why: 'in-use' }, 0, []], 'in use: not even asked');
+  assert.equal((await run(() => 1_000_000 - 30_000)).r.did, 'stopped', '30 s without an embedding: it gives way');
+  assert.equal((await run(() => null)).r.did, 'stopped', 'no record: taken as unused');
+});
+
+test("an embedding on the NPU notes when it answered, every few seconds at most; the chat's giving way reads it", async () => {
+  const http = await import('node:http');
+  const { Npu, embedGivesWay } = await import('./fixture/src/kit/npu.ts');
+  const { parseAccelerators, embeddedAt, embeddedFile, noteEmbedded } = await import('./fixture/src/kit/accelerators.ts');
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const c of req) raw += c;
+    if (req.method === 'GET') return void res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"e"}]}');
+    const body = JSON.parse(raw);
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_: string, index: number) => ({ index, embedding: [1, 0] })) }));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  try {
+    const cfg = parseAccelerators({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: at, model: 'm' }, embed: { baseUrl: `${at}/v1`, model: 'e' } }] }, null);
+    if ('error' in cfg) throw new Error(cfg.error);
+    rmSync(embeddedFile('npu'), { force: true });
+    const npu = new Npu(cfg, { gpuWithNpu: () => true, embedGivesWay: async () => null });
+    const before = Date.now();
+    await npu.embed(['a cat'], { accelerator: 'npu' });
+    const first = embeddedAt('npu');
+    assert.ok(first !== null && first >= before - 5_000 && first <= Date.now(), `noted: ${first}`);
+    await npu.embed(['a dog'], { accelerator: 'npu' });
+    assert.equal(embeddedAt('npu'), first, 'not after every request: a busy index writes it every few seconds');
+  } finally {
+    server.close();
+  }
+  // The chat's giving way, on a PC under 20 GB, reads the record: an embedding just answered keeps its server, unasked.
+  const acc = await parsedNpu(qualcommRaw({ baseUrl: 'http://127.0.0.1:1', model: 'e', startCommand: [HEXAGON, '--port', '1'] }));
+  noteEmbedded('npu');
+  const log = path.join(home, 'yield.log');
+  assert.deepEqual(await embedGivesWay(acc, { ramBytes: 15.6 * GB, given: () => false, logFile: log }), { did: 'kept', why: 'in-use' });
+  assert.deepEqual(await embedGivesWay(acc, { ramBytes: 15.6 * GB, given: () => false, embeddedAt: () => null, logFile: log }), { did: 'kept', why: 'not-running' }, 'no record: it looks, and nothing answers there');
+  assert.equal(await embedGivesWay(acc, { ramBytes: 32 * GB }), null, 'a bigger PC never loads the keeper for it');
+});
+
+test('through the kit: a chat or vision request on the NPU lets the embedding server give way in its own turn, before its server is asked; an embedding, or a card\u2019s chat, never does', async () => {
+  const http = await import('node:http');
+  const { Npu } = await import('./fixture/src/kit/npu.ts');
+  const { parseAccelerators, lockDirsOf } = await import('./fixture/src/kit/accelerators.ts');
+  const { lineState } = await import('./fixture/src/kit/npu-queue.ts');
+  const events: string[] = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = '';
+    for await (const c of req) raw += c;
+    if (req.method === 'GET') return void res.writeHead(200, { 'content-type': 'application/json' }).end('{"data":[{"id":"m"}]}');
+    const body = JSON.parse(raw);
+    events.push(`${req.url} max ${body.max_tokens ?? '-'}`);
+    const json = req.url === '/v1/embeddings' ? { data: body.input.map((_: string, index: number) => ({ index, embedding: [1, 0] })) } : { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } };
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(json));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+  try {
+    const cfg = parseAccelerators(
+      {
+        accelerators: [
+          { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: at, model: 'm' }, vision: { model: 'm' }, embed: { baseUrl: `${at}/v1`, model: 'e' } },
+          { id: 'gpu-rtx', kind: 'gpu', name: 'RTX', chat: { baseUrl: at, model: 'm' } },
+        ],
+      },
+      null,
+    );
+    if ('error' in cfg) throw new Error(cfg.error);
+    const npuDirs = lockDirsOf(cfg.accelerators.find((a) => a.id === 'npu')!);
+    const npu = new Npu(cfg, {
+      gpuWithNpu: () => true,
+      embedGivesWay: async (acc) => {
+        events.push(`gives way on ${acc.id}, the NPU ${lineState(npuDirs).held ? 'held' : 'free'}`);
+      },
+    });
+    await npu.chat([{ role: 'user', content: 'hi' }], { accelerator: 'npu', maxTokens: 8 });
+    assert.deepEqual(events, ['gives way on npu, the NPU held', '/v1/chat/completions max 1', '/v1/chat/completions max 8'], "in the chat's turn, before its warm-up");
+    events.length = 0;
+    const picture = path.join(home, 'two.png');
+    writeFileSync(picture, Buffer.from('89504e470d0a1a0a', 'hex'));
+    await npu.vision(picture, 'what?', { accelerator: 'npu', maxTokens: 8 });
+    assert.equal(events[0], 'gives way on npu, the NPU held', `vision too: ${events.join('; ')}`);
+    events.length = 0;
+    await npu.embed(['a cat'], { accelerator: 'npu' });
+    await npu.chat([{ role: 'user', content: 'hi' }], { accelerator: 'gpu-rtx', maxTokens: 8 });
+    assert.equal(events.filter((e) => e.startsWith('gives way')).length, 0, events.join('; '));
+    // A giving way that fails never fails the chat.
+    const failing = new Npu(cfg, { gpuWithNpu: () => true, embedGivesWay: async () => Promise.reject(new Error('no')) });
+    assert.equal((await failing.chat([{ role: 'user', content: 'hi' }], { accelerator: 'npu', maxTokens: 8 })).text, 'ok');
+  } finally {
+    server.close();
+  }
+});

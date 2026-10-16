@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { APP } from '../app.ts';
 import * as core from './core/index.js';
 import {
@@ -6,6 +7,7 @@ import {
   chatBody,
   clearFailure,
   currentGames,
+  embeddedAt,
   ensureServer,
   expandEnv,
   gamesStale,
@@ -13,6 +15,7 @@ import {
   loadAccelerators,
   lockDirsOf,
   markFailed,
+  noteEmbedded,
   MAX_AHEAD,
   ModelLoading,
   noteServed,
@@ -44,7 +47,7 @@ import { gpuWithNpu } from './manor.ts';
 import { tallyRequest } from './token-tally.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
-import { coldStartMsOf, routeOfServer } from './npu-vendors.ts';
+import { coldStartMsOf, routeOfServer, smallPc } from './npu-vendors.ts';
 
 export { npuLockDir };
 export { noteLabel, reeveHome, theAccelerator, type Accelerator, type AcceleratorConfig, type AcceleratorRef, type ChatMessage } from './accelerators.ts';
@@ -173,6 +176,9 @@ const BACK_OFF_MS = RULES.manners.backOffMs;
 const lines = new Map<string, Promise<unknown>>();
 const headed = new Map<string, number>();
 const busyUntil = new Map<string, number>();
+/** Per accelerator: when this process last wrote that the NPU answered an embedding (noteEmbedded), so a busy index writes it every few seconds, not after each request. */
+const embedNoted = new Map<string, number>();
+const EMBED_NOTE_MS = 5_000;
 const known = new Set<string>();
 
 const deferredMs = (id: string) => Math.max(0, (busyUntil.get(id) ?? 0) - Date.now());
@@ -295,11 +301,16 @@ function noCandidate(skipped: Skipped[], first: { acc: Accelerator; reason: stri
 export class Npu {
   private cfg: AcceleratorConfig | { error: string };
   private withNpu: () => boolean;
+  private embedGivesWay: (acc: Accelerator) => Promise<unknown>;
 
-  /** `o.gpuWithNpu`: Manor's switch as a check gives it, in place of Manor's settings read afresh each time. */
-  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean } = {}) {
+  /**
+   * `o.gpuWithNpu`: Manor's switch as a check gives it, in place of Manor's settings read afresh each time.
+   * `o.embedGivesWay`: what a chat or vision request on the NPU does first, in its turn (embedGivesWay below; tests give their own).
+   */
+  constructor(cfg: AcceleratorConfig | NpuConfig | { error: string } = loadAccelerators(), o: { gpuWithNpu?: () => boolean; embedGivesWay?: (acc: Accelerator) => Promise<unknown> } = {}) {
     this.cfg = 'error' in cfg || 'accelerators' in cfg ? cfg : fromNpuConfig(cfg);
     this.withNpu = o.gpuWithNpu ?? (() => gpuWithNpu().on);
+    this.embedGivesWay = o.embedGivesWay ?? ((acc) => embedGivesWay(acc));
     if (!('error' in this.cfg)) for (const a of this.cfg.accelerators) known.add(a.id);
   }
 
@@ -468,6 +479,8 @@ export class Npu {
         const value = await acceleratorTurn(
           turn,
           async () => {
+            // On a PC with little memory, the NPU's own embedding server stops first, so the chat has its memory.
+            if (acc.kind === 'npu' && (work === 'chat' || work === 'vision')) await this.embedGivesWay(acc).catch(() => undefined);
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
             const onWaking = opts.onWaking;
             const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, acc.timeouts?.coldLoadMs ?? 0), ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
@@ -484,6 +497,11 @@ export class Npu {
             const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading, timeouts: acc.timeouts });
             const answer = await send(acc, ep, timeoutMs, loading);
             if (warmsUp(acc, work)) noteServed(acc.id, ep);
+            // A chat's turn reads it: embeddings answered moments ago keep their server (embedGivesWay).
+            if (acc.kind === 'npu' && work === 'embed' && Date.now() - (embedNoted.get(acc.id) ?? 0) >= EMBED_NOTE_MS) {
+              embedNoted.set(acc.id, Date.now());
+              noteEmbedded(acc.id);
+            }
             return answer;
           },
           { maxWaitMs: opts.maxWaitMs, lane },
@@ -533,6 +551,21 @@ const warmsUp = (acc: Accelerator, work: Work) => acc.kind === 'npu' && work !==
  */
 async function warmUp(acc: Accelerator, ep: Endpoint, timeoutMs?: number): Promise<void> {
   await postJson(ep, '/v1/chat/completions', chatBody(acc, ep, [{ role: 'user', content: 'Hi' }], 1), timeoutMs ?? coldAllowanceMs(acc), { loading: true });
+}
+
+/**
+ * A chat or vision request's first step on the NPU: on a PC with little memory (npu-vendors.ts' smallPc), the NPU's own
+ * embedding server, when it has one apart from chat (Qualcomm's, Intel's), gives way to it (keeper.ts' yieldEmbedServer).
+ * A bigger PC, or an NPU without one, never loads the keeper for it. `o` stands in for this PC's memory, config.json's
+ * word, the NPU's last embedding (noteEmbedded) and the keeper's log, for a check that runs it as a small PC would.
+ */
+export async function embedGivesWay(acc: Accelerator, o: { ramBytes?: number; given?: () => boolean; embeddedAt?: () => number | null; logFile?: string } = {}): Promise<unknown> {
+  const ramBytes = o.ramBytes ?? os.totalmem();
+  if (!smallPc(ramBytes)) return null;
+  const keeper = await import('./keeper.ts');
+  if (!keeper.ownEmbedServer(acc)) return null;
+  const pc = keeper.pcYield({ logFile: o.logFile });
+  return keeper.yieldEmbedServer(acc, { ramBytes, given: o.given ?? pc.given, embeddedAt: o.embeddedAt ?? (() => embeddedAt(acc.id)) }, pc.deps);
 }
 
 /** How long a model being loaded may take: the request's base and the cold load, the accelerator's own where longer. */

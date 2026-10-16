@@ -2,6 +2,32 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.58
+
+**Kit 2.77.5: on a PC with under 20 GB of memory, the local AI's search model steps aside while you chat, so the chat model gets its memory.**
+
+### What changed
+
+- On a PC with under 20 GB of memory, the search model on the NPU now stops when a chat or a picture question starts, if nothing has searched in the last 30 seconds. The chat model gets the memory back: about 1.4 GB of the NPU's on a Snapdragon, and close to 2 GB of the PC's. The next search wakes the search model again in about 2 seconds.
+- The search model keeps running while it's in use, for example a search right after a summary, or an index being built between chats. Measured on two hours of the manor's own traffic, that means about one extra wake-up an hour.
+- PCs with 20 GB or more, and PCs where you've set how long the local AI stays loaded, are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.57
+
+**The Steward's notifications come under Castellan's name, with the castle, instead of Windows PowerShell.**
+
+### What changed
+
+- The Steward's Windows notifications (an alarm that needs you, a release that stopped) now say **Castellan**, as Manor's own do, with the castle on each one. In Windows' notification settings, Castellan's notifications are turned on or off together, without touching Windows PowerShell's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The castle shows once Manor 0.16.165 or later is installed; before that, the notifications already say Castellan.
+
 ## 0.36.56
 
 **Kit 2.77.3: on an AMD Ryzen AI PC, one smaller model answers chat and pictures on the NPU: faster, lighter, and a much smaller download.**
