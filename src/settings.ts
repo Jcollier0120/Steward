@@ -529,7 +529,7 @@ export const SETTINGS_SCHEMA: Field[] = [
           { value: 'first', label: "The day's first build" },
         ],
       },
-      { key: 'windowMinutes', kind: 'whole', min: 15, max: 360, unit: 'minutes', label: 'A build takes at most', advanced: true, help: 'Then it releases what it merged, and the rest waits for the next build.' },
+      { key: 'windowMinutes', kind: 'whole', min: 15, max: 60, unit: 'minutes', label: 'A build takes at most', advanced: true, help: 'Then it releases what it merged, and the rest waits for the next build. Its tests run between builds, ahead of it.' },
       {
         key: 'bisectRuns',
         kind: 'whole',

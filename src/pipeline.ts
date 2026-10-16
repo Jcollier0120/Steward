@@ -1,3 +1,4 @@
+import type { BuildPhase } from './buildtimes.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 
 /**
@@ -26,7 +27,11 @@ export interface BuildPipeline {
   days: Day[];
   /** The newest kit goes into every build, or only the day's first. */
   kit: 'every' | 'first';
-  /** A build's rounds go on at most this long; then the build releases what it merged, and ends. */
+  /**
+   * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise); then the build releases
+   * what it merged, and ends. Its tests run ahead of it, between builds (stages/prepare.ts), so a build mostly checks that
+   * nothing moved, merges and releases.
+   */
   windowMinutes: number;
   /**
    * A repository's stack that fails its checks (twice: once more for a flaky test) is halved at most this many times to
@@ -35,11 +40,23 @@ export interface BuildPipeline {
   bisectRuns: number;
 }
 
-export const DEFAULT_PIPELINE: BuildPipeline = { on: false, times: ['08:00', '13:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
+export const DEFAULT_PIPELINE: BuildPipeline = { on: false, times: ['08:00', '13:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 30, bisectRuns: 3 };
+
+/** The longest a build may take (Steward 0.36.67): an hour, which the owner already finds too long. */
+export const MAX_WINDOW_MINUTES = 60;
+
+/**
+ * The window's default before Steward 0.36.67. Settings save the whole group, so it was stored with the times when the
+ * pipeline was turned on: stored as it is, it was never chosen, and reads as today's default.
+ */
+const OLD_DEFAULT_WINDOW = 120;
 
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-/** settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. */
+/**
+ * settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. A window
+ * that is exactly the old default takes today's, and one longer than MAX_WINDOW_MINUTES is cut to it.
+ */
 export function normalizePipeline(raw: unknown): BuildPipeline {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_PIPELINE;
@@ -55,7 +72,7 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
     times: times.length ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
-    windowMinutes: Number.isInteger(w) ? Math.min(360, Math.max(15, w)) : d.windowMinutes,
+    windowMinutes: Number.isInteger(w) && w !== OLD_DEFAULT_WINDOW ? Math.min(MAX_WINDOW_MINUTES, Math.max(15, w)) : d.windowMinutes,
     bisectRuns: Number.isInteger(b) ? Math.min(6, Math.max(0, b)) : d.bisectRuns,
   };
 }
@@ -81,6 +98,8 @@ export interface BuildRun {
   failed: string[];
   /** It ran out of its window before everything settled. */
   cut?: boolean;
+  /** Where its time went (buildtimes.ts): each phase with its start and end, those done between builds for it marked `ahead`. */
+  phases?: BuildPhase[];
 }
 
 export interface PipelineState {

@@ -494,7 +494,9 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
       : r.build
         ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'} Between builds, a round every ${r.minutes} minutes only looks.${after}`
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
-  return { what, when };
+  // Where the last build's time went (buildtimes.ts), and that the next one's tests run ahead of it (stages/prepare.ts).
+  const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, the next build's tests run ahead of it, beside the rounds.` : '';
+  return { what, when: `${when}${took}` };
 }
 
 /**

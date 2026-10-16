@@ -28,6 +28,8 @@ import { claimClashes, employeeFor } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { rolloutsBeside } from './stages/rollout.ts';
+import { preparesBeside } from './stages/prepare.ts';
+import { buildTimeLine } from './buildtimes.ts';
 import { trialsOnTheirOwn } from './stages/trial.ts';
 import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from './stages/wholesuite.ts';
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
@@ -349,6 +351,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       else startRound();
     },
   });
+  // And the next build's tests between builds (stages/prepare.ts): run beside the rounds, so the build only merges. Not
+  // under node --test, where a page's round tests what it asks for alone.
+  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`build prep: ${line}`) });
   // And a kit's rollout (stages/rollout.ts): its bumps, checks and pushes run beside the rounds, which go on merging. Once
   // it ends, a round at once: it merges the kit PRs opened, reports what the rollout did, and looks again at the
   // employees whose bump or push failed.
@@ -399,7 +404,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const s = loadSettings();
     const busy = runs.length > 0 || refreshing !== null;
     const pv = s.buildPipeline.on ? pipelineView(s.buildPipeline, loadPipeline()) : null;
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: pv ? { times: pv.times, next: pv.next, building: pv.building } : null };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: pv ? { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null } : null };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];

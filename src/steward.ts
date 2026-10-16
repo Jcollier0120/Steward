@@ -50,6 +50,9 @@ import { heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
+import { keepPhases, phaseOf, timed } from './buildtimes.ts';
+import { kitComing } from './stages/buildkit.ts';
+import { prepareBeside } from './stages/prepare.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -635,6 +638,11 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.build = { between: true, next: mode.next?.toISOString() ?? null };
           log(mode.line);
           held.push(...heldBefore(seen!, picked.employees));
+          // The next build's tests, run now beside the rounds for what moved (stages/prepare.ts): the build then only merges.
+          if (name === 'round' && mode.next && !only?.length) {
+            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit) });
+            if (prepLine) log(prepLine);
+          }
         } else if (name === 'merge' || name === 'round') {
           if (mode.kind === 'build') {
             const when = mode.run.by === 'owner' ? "the owner's Build now" : `the ${buildWhen(new Date(mode.run.due), at())} build`;
@@ -677,7 +685,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
           }
           // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
-          const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
+          const selfReleases = round && whole && turns.selfActs ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, selfMovedMain), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
           // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
           if (round && whole && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
@@ -777,19 +785,27 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               // settles within minutes (checks running, a kit's trial, kit PRs just opened, a rollout beside the rounds),
               // every repository's new version released at once, the one release of this build. Or when the build's time
               // has run out.
-              const rolled = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run) ? await rollOut() : (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false });
+              // A newer kit coming in this build (stages/buildkit.ts): the rollout waits for it, and the build stays open
+              // meanwhile, rather than sending every agent the kit before it to be bumped again at the next build.
+              const coming = kitComing({ selfHeld: self ? (held.find((h) => h.employee.id === self.id)?.prs ?? []) : [], selfReleases });
+              const rolled: { opened: EmployeeResult[]; beside: boolean; waits?: string } = !kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
+                ? (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false })
+                : coming
+                  ? (log(`rollout: waits for ${coming}${mode.closing ? ', which the next build rolls out' : ''}`), { opened: [], beside: false, waits: coming })
+                  : await rollOut();
               const opened = rolled.opened;
-              buildCloses = mode.closing || (!brief.length && !opened.length && !rolled.beside);
+              buildCloses = mode.closing || (!brief.length && !opened.length && !rolled.beside && !rolled.waits);
               if (buildCloses) {
                 // The build's one release is every repository of the build's, looked at this round or not: their turns
                 // taken first, as this round took only those it looked at (above).
                 const all = await takeTurnsFor(ctx, o, picked.employees, null, true);
-                await releaseNow(all.acting);
+                await timed(phaseOf(ctx), 'releases', null, () => releaseNow(all.acting));
               }
               else {
                 // A rollout beside the rounds alone: no round sooner, as the one after it comes once it ends (agent.ts).
+                // Nor a kit whose whole suite runs beside them: a round comes once it ends (wholesuite.ts).
                 if (brief.length || opened.length) out.soon = true;
-                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : !opened.length && rolled.beside ? ": the kit's rollout goes on beside the rounds" : ''}`);
+                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : !opened.length && rolled.beside ? ": the kit's rollout goes on beside the rounds" : rolled.waits ? `: ${rolled.waits}` : ''}`);
               }
               out.results.push(...selfReleases);
             } else {
@@ -967,7 +983,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // Something released: the pages that want to know are told (Manor installs it within minutes; the Aletaster tastes it).
       // In a build, once: when it ends, for everything it released (the Steward's own, released in its first rounds, too).
       const tellNow = mode.kind === 'build' ? !!out.build?.closed && mode.run.released.length + buildReleased.length > 0 : out.results.some(releasedSomething);
-      if (tellNow) await tellAfterRelease(ctx.settings.afterRelease, log, o.tell);
+      if (tellNow) await timed(mode.kind === 'build' ? { due: mode.run.due } : null, 'manor', null, () => tellAfterRelease(ctx.settings.afterRelease, log, o.tell));
+      // Where the build's time went so far (buildtimes.ts), in its record: the page's line once it ends.
+      if (pipeline && mode.kind === 'build') keepPhases(mode.run.due);
       // A round with nothing done or failed leaves no trace: the last stage stays what last happened. The staff's table
       // is made again only when GitHub says something new of anyone, from this round's glance.
       if (name === 'round' && !roundDidSomething(out.results, out.error)) {

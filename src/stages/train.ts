@@ -10,6 +10,7 @@ import { recordTested } from '../tested.ts';
 import { runChecks } from './bump.ts';
 import { isChangelog, isKitPin, lockBeside, mergeChangelogs, mergeKitPins, resolveVersionConflicts, settledFiles, settleVersion } from './catchup.ts';
 import { checkoutOf, forgetGlance, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { checksOf, type PrInfo } from './staff.ts';
 import { raisesKit } from './trial.ts';
@@ -95,6 +96,11 @@ export interface TrainRun {
   tested: boolean;
   /** Pushed to the top PR's branch, and waiting there for GitHub's checks: the cars wait as one train. */
   waiting?: boolean;
+  /**
+   * Between builds (ctx.prepare): stacked and passed as the build will stack it, and nothing pushed. The build finds the
+   * pass by its code (standin.ts) and merges it. One that fails is kept as failed as ever, so the build doesn't stack it.
+   */
+  prepared?: true;
 }
 
 /** How long a pushed train waits for GitHub's checks at its top, asking every TRAIN_CHECK_EVERY_MS. */
@@ -317,11 +323,12 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
     if (passed[e.id] === at) say(`its checks passed here at ${at.slice(0, 7)} already`);
     else {
       // Once more on a failure, as a PR tested here is (prtest.ts): a flaky test doesn't break up a train.
-      checks = await runChecks(ctx, e, dir, { say });
-      if (checks) {
-        say(`its checks once more (${checks})`);
-        checks = await runChecks(ctx, e, dir, { say });
-      }
+      checks = await timed(phaseOf(ctx), 'tests', `${e.id} train`, async () => {
+        const first = await runChecks(ctx, e, dir, { say });
+        if (!first) return null;
+        say(`its checks once more (${first})`);
+        return runChecks(ctx, e, dir, { say });
+      });
       if (!checks) writeJson(trainsPassedFile(), { ...passed, [e.id]: at });
     }
     if (checks && interrupted(checks)) return { merged: [], note: `${numbers} stacked, but Windows ended its checks (${checks}): the next round tries the train again${stopped}`, tested: false };
@@ -331,11 +338,15 @@ export async function runTrain(ctx: Ctx, e: Employee, cars: Car[]): Promise<Trai
       return { merged: [], note: `${numbers} stacked, but ${checks}: they merge one at a time${stopped}`, tested: true };
     }
     const words = `stacked on ${e.branch} lowest version first and tested once, at ${at.slice(0, 7)}`;
-    const shipped = await shipStack(ctx, e, dir, rode, at, {
-      say,
-      top: (under) => `Merged by the Steward as one train with ${under}: ${words}. Each keeps its own version and changelog entry.`,
-      under: (top) => `Merged by the Steward in one train with ${top}: ${words}. Its commits are in \`${e.branch}\`.`,
-    });
+    // Between builds: passed, and left for the build, which merges it without testing it again if nothing moves first.
+    if (ctx.prepare && !ctx.build) return { merged: [], note: `stacked lowest version first and passed here: ${ctx.prepare.name} merges them as one train without testing them again, if nothing moves before it${stopped}`, tested: true, prepared: true };
+    const shipped = await timed(phaseOf(ctx), 'merges', `${e.id} train`, () =>
+      shipStack(ctx, e, dir, rode, at, {
+        say,
+        top: (under) => `Merged by the Steward as one train with ${under}: ${words}. Each keeps its own version and changelog entry.`,
+        under: (top) => `Merged by the Steward in one train with ${top}: ${words}. Its commits are in \`${e.branch}\`.`,
+      }),
+    );
     if ('note' in shipped) {
       if (shipped.ci === 'failing') {
         failed[e.id] = { key: trainKey(base, rode), note: `its checks on GitHub failed at ${at.slice(0, 7)}`, at: new Date().toISOString(), stack: at };

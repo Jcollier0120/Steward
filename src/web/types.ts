@@ -30,7 +30,7 @@ export interface RoundView {
   /** This PC releases Castellan itself: its rounds also approve Reeve's jobs, and as above roll the kit out and release the Steward. */
   castellan?: boolean;
   /** Settings' build pipeline, when on (pipeline.ts): its build times, the next, and whether one is under way. */
-  build?: { times: string[]; next: string | null; building: boolean } | null;
+  build?: { times: string[]; next: string | null; building: boolean; took?: string | null } | null;
 }
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */

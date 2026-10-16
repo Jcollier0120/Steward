@@ -113,6 +113,33 @@ test('a batch that passes: stacked behind the kit PR in the order they went read
   assert.deepEqual(statuses(gh.gh).map((s) => [s[0], s[1], s[2]]), b.prs.map((p) => [p.oid, 'state=success', 'description=left in the 13:00 build']));
 });
 
+test('a batch prepared between builds is tested then, merges nothing, and the build merges it without testing it again', async () => {
+  // Three PRs: a tree of its own, which no other test's pass stands in for.
+  const b = batch('prepared', 3, { kit: true });
+  const gh = github(b);
+  const { e, ctx } = ctxOf(b, gh.run);
+  const main = sh(b.origin, 'rev-parse', 'refs/heads/main');
+  ctx.build = null;
+  ctx.prepare = BUILD;
+  const prep = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(prep.outcome, 'skipped', prep.message);
+  assert.match(prep.message, /^#30, #31, #32, #33: stacked in the order they went ready and passed here: the 13:00 build merges them without testing them again/);
+  assert.equal(runs(ctx.lines), 1, 'tested once, ahead of the build');
+  assert.equal(gh.gh.filter((a) => a[1] === 'merge').length, 0, 'nothing merged');
+  assert.equal(sh(b.origin, 'rev-parse', 'refs/heads/main'), main, 'nothing pushed to main');
+  assert.deepEqual(statuses(gh.gh), [], 'no status on the PRs until the build');
+
+  ctx.lines.length = 0;
+  ctx.prepare = null;
+  ctx.build = BUILD;
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(r.outcome, 'done', r.message);
+  assert.deepEqual(r.merged.map((p) => p.number), [30, 31, 32, 33]);
+  assert.equal(runs(ctx.lines), 0, 'the same tree passed ahead of the build: not tested again');
+  assert.match(ctx.lines.join('\n'), /on exactly this code \(tree [0-9a-f]{7}\): not run again/);
+  assert.equal(JSON.parse(show(b, 'package.json')).version, '0.4.1');
+});
+
 test('the PR that clashes with one under it is found by halving, dropped back to a draft with a comment, and the rest leave', async () => {
   // #32 breaks with #31; #33 is fine with both.
   const b = batch('middle', 3, { bad: [['src/f1.ts', 'src/f2.ts']] });

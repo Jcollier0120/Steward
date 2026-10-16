@@ -12,6 +12,7 @@ import { agreedVersion } from '../versions.ts';
 import { runChecks } from './bump.ts';
 import { isKitPr } from './catchup.ts';
 import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 import { dropFromBuild } from './kickback.ts';
 import { kitReleaseHold } from './prtest.ts';
 import { loadRolloutFailures, rolloutFailedFile, type RolloutHold } from './rollout.ts';
@@ -180,6 +181,11 @@ export interface BuildBatch {
   tested: boolean;
   /** Pushed to the top PR's branch, and waiting there for GitHub's checks: the cars wait as one batch. */
   waiting?: boolean;
+  /**
+   * Between builds (ctx.prepare): the whole stack tested as the build will stack it, and nothing pushed, dropped or
+   * kept. Passed, the build finds the pass by its code (standin.ts) and ships it; failed, the build halves it.
+   */
+  prepared?: 'passed' | 'failed';
 }
 
 /** GitHub's status descriptions are at most 140 characters. */
@@ -199,7 +205,9 @@ export const buildDirOf = (s: Settings, e: Employee) => path.join(workRootOf(s),
  */
 export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { released: string[]; taken: string[] }): Promise<BuildBatch> {
   const { run } = ctx;
-  const build = ctx.build ?? { due: new Date().toISOString(), name: 'the build' };
+  // Between builds, the next build's batch: stacked and tested as it will be, then left for the build (prepared).
+  const dry = !!ctx.prepare && !ctx.build;
+  const build = ctx.build ?? ctx.prepare ?? { due: new Date().toISOString(), name: 'the build' };
   const none = (note: string): BuildBatch => ({ merged: [], dropped: [], kept: [], note, tested: false });
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return none(`there's no checkout at ${repo}`);
@@ -285,7 +293,7 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
         say(`its checks passed here at ${s.at.slice(0, 7)} already`);
         return null;
       }
-      const failed = await runChecks(ctx, e, dir, { say });
+      const failed = await timed(phaseOf(ctx), 'tests', `${e.id} batch`, () => runChecks(ctx, e, dir, { say }));
       if (!failed) writeJson(trainsPassedFile(), { ...readJson<Record<string, string>>(trainsPassedFile(), {}), [e.id]: s.at });
       return failed;
     };
@@ -306,6 +314,12 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
       why = await checksAt(all.at(-1)!.top);
     }
     if (why && interrupted(why)) return { ...none(`${numbers(all)} stacked, but Windows ended its checks (${why}): the next round tries again`), tested: false };
+    // Between builds: what the build will find. Nothing is halved, dropped, kept or shipped until it comes.
+    if (dry) {
+      return why
+        ? { ...none(`stacked in the order they went ready, and failed (${why}): ${build.name} halves the stack to find the PR that broke it${besides()}`), prepared: 'failed' }
+        : { ...none(`stacked in the order they went ready and passed here: ${build.name} merges them without testing them again, if nothing moves before it${besides()}`), prepared: 'passed' };
+    }
 
     /** What ships: a stack that passed here, `top` its commit before the stamp. */
     let ship: Stacked[] = all;
@@ -373,11 +387,13 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
     await git(run, dir, 'checkout', '--quiet', '--detach', s.at);
     const at = s.at;
     const words = `stacked on ${e.branch} in the order they went ready and tested once, at ${at.slice(0, 7)}`;
-    const shipped = await shipStack(ctx, e, dir, ship.map((x) => ({ pr: x.car.pr, version: x.version })), at, {
-      say,
-      top: (under) => `Merged by the Steward in ${build.name} with ${under}: ${words}.`,
-      under: (top) => `Merged by the Steward in ${build.name}, through ${top}: ${words}. Its commits are in \`${e.branch}\`.`,
-    });
+    const shipped = await timed(phaseOf(ctx), 'merges', `${e.id} batch`, () =>
+      shipStack(ctx, e, dir, ship.map((x) => ({ pr: x.car.pr, version: x.version })), at, {
+        say,
+        top: (under) => `Merged by the Steward in ${build.name} with ${under}: ${words}.`,
+        under: (top) => `Merged by the Steward in ${build.name}, through ${top}: ${words}. Its commits are in \`${e.branch}\`.`,
+      }),
+    );
     if ('note' in shipped) return result([], shipped.note, shipped.waiting ? { waiting: true } : {});
     for (const x of ship) await status(x.car.pr, 'success', `left in ${build.name}`);
     ctx.log(`[${e.id}] ${build.name}: merged ${numbers(ship)} through #${ship.at(-1)!.car.pr.number} (${words})`);
