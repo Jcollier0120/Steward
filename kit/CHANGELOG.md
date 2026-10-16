@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.2
+
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`).**
+
+A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). While the task that woke it runs, Task Scheduler keeps the PC out of sleep, with the screen off; an app's own hold didn't keep its process from being throttled there. So the task runs until the work is done. spec/ROUND.md has what was measured.
+
+### What's new
+
+- **wake.ts:**
+  - **`WakePlan`**: `{ times, days, beforeMinutes, holdMinutes, why }`, the times (`HH:MM`, local) and days work is due, how many minutes before each to wake, the longest the woken PC is held (the work's longest), and what for, in words.
+  - **`wakeTimes(plan)`**: each time `beforeMinutes` early, on the day that makes (a midnight time wakes the day before), grouped by time, the days in the week's order.
+  - **`wakeTaskXml(plan, { exe, user })`**: the task's definition. One calendar trigger for each wake time (daily on every day, else weekly on its days). It wakes the PC (`WakeToRun`), only on AC (`DisallowStartIfOnBatteries`, `StopIfGoingOnBatteries`), never late (`StartWhenAvailable` false), hidden, as the person signed in with least privilege, and stops 5 minutes past its hold. It runs the awake helper with `--for <holdMinutes × 60>`.
+  - **`keepWakeTask(plan | null, log)`**: keeps the task (`WAKE_TASK_NAME`) in step with the plan. It registers it when the plan changes (`schtasks /Create /XML /F`, the definition written UTF-16 to the data folder's `wake.task.xml`), removes it for a null plan, and asks Task Scheduler nothing while the plan is the one it set. The first look in a process checks the task is still there. A refusal is logged once and tried again an hour later (`WAKE_RETRY_MS`). Answers `set`, `same`, `removed`, `none` (nothing registers here: not Windows, a dev checkout, or under node --test) or `failed`.
+  - **`endWakeTask(log)`**: ends the task's run once the work is done (`schtasks /End`), so the PC may sleep again. The task stays registered for the next time, and Task Scheduler answers SUCCESS for one that isn't running. Answers `ended`, `none` (no task kept) or `failed`, logged.
+  - **`wakesPc()`**: whether the task is set, for the page.
+  - **`setWakeDeps(deps | null)`**: stands in for Task Scheduler in tests.
+- **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
+- **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. The agent ends the task sooner, once its work is done (`endWakeTask`).
+- **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Nothing is woken until an agent calls `keepWakeTask`.
+- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. Its `holdMinutes` is the longest the work may take. Once the work is done it calls `endWakeTask()`, but not when the agent merely stops (an update): the task then holds the PC until the agent is back. While it works it holds the PC with `stayAwake(what)`, as ever. Never wake a PC on battery, and never keep the screen on.
+- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
+
 ## 2.78.1
 
 **The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts.**
