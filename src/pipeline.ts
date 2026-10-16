@@ -8,7 +8,8 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * minutes, release each repository once and tell Manor once, so each agent is installed at most once a build.
  *
  * A build that the PC slept through begins at the first round after it wakes, once (a later build time it also missed
- * is the same build). The owner's override, Build now (POST /api/pipeline/build, or `steward build` at a console),
+ * is the same build), and the page says it was late, and why (lateLine). The Steward wakes the PC for its builds, and
+ * holds it until they close (build-hold.ts), so on AC power that happens only when the PC can't be woken. The owner's override, Build now (POST /api/pipeline/build, or `steward build` at a console),
  * begins one at once: for some repositories, or all, and, ticked, lets its releases out to customers at once too.
  *
  * pipeline.json keeps the build that is open, and the last builds, each with what it merged and released.
@@ -81,6 +82,8 @@ export interface BuildRun {
   failed: string[];
   /** It ran out of its window before everything settled. */
   cut?: boolean;
+  /** A build time the PC slept through (standby): when it woke (ISO), and the build began (pipelineMode's `wokeAt`). */
+  late?: string;
 }
 
 export interface PipelineState {
@@ -152,9 +155,10 @@ export type PipelineMode =
 
 /**
  * What a round does now: off (no pipeline), between builds, or a build's round, the one open going on, a new one for a
- * build time that has come (or the owner's Build now). Pure; the round saves the build it changes (endRound).
+ * build time that has come (or the owner's Build now). A build time's build that begins after the PC woke from standby
+ * past it (`wokeAt`, fresh-start.ts' lastWoke) is `late`. Pure; the round saves the build it changes (endRound).
  */
-export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null } = {}): PipelineMode {
+export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; wokeAt?: number | null } = {}): PipelineMode {
   if (!p.on && !o.buildNow) return { kind: 'off' };
   const open = state.open;
   if (open && !open.finished) {
@@ -166,9 +170,18 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   if (o.buildNow) return fresh(now.toISOString(), 'owner', { employees: o.employees?.length ? o.employees : null, ...(o.buildNow.toCustomers ? { toCustomers: true } : {}) });
   const due = lastBuildTime(p, now);
   const lastDue = state.builds.filter((b) => b.by === 'schedule').at(-1)?.due;
-  if (due && (!lastDue || Date.parse(lastDue) < due.getTime())) return fresh(due.toISOString(), 'schedule');
+  if (due && (!lastDue || Date.parse(lastDue) < due.getTime())) {
+    const woke = o.wokeAt ?? null;
+    return fresh(due.toISOString(), 'schedule', woke !== null && woke > due.getTime() && woke <= now.getTime() ? { late: new Date(woke).toISOString() } : {});
+  }
   const next = nextBuildTime(p, now);
   return { kind: 'between', next, line: `between builds: ready PRs wait for the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}` };
+}
+
+/** "the 08:00 build was late: the PC was in standby until 08:39", for a build the PC slept through; else null. */
+export function lateLine(run: BuildRun | null | undefined, now: Date): string | null {
+  if (!run?.late || run.by !== 'schedule') return null;
+  return `the ${buildWhen(new Date(run.due), now)} build was late: the PC was in standby until ${buildWhen(new Date(run.late), now)}`;
 }
 
 /** Whether the newest kit goes into this build: every build, or only the day's first scheduled one. */

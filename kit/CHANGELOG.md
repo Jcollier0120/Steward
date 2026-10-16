@@ -2,6 +2,31 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.2
+
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and the awake helper holds a woken PC for a set time with no agent beside it.**
+
+A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). spec/ROUND.md has what was measured.
+
+### What's new
+
+- **wake.ts:**
+  - **`WakePlan`**: `{ times, days, beforeMinutes, holdMinutes, why }`, the times (`HH:MM`, local) and days work is due, how many minutes before each to wake, how long to hold the woken PC, and what for, in words.
+  - **`wakeTimes(plan)`**: each time `beforeMinutes` early, on the day that makes (a midnight time wakes the day before), grouped by time, the days in the week's order.
+  - **`wakeTaskXml(plan, { exe, user })`**: the task's definition. One calendar trigger for each wake time (daily on every day, else weekly on its days). It wakes the PC (`WakeToRun`), only on AC (`DisallowStartIfOnBatteries`, `StopIfGoingOnBatteries`), never late (`StartWhenAvailable` false), hidden, as the person signed in with least privilege, and stops 5 minutes past its hold. It runs the awake helper with `--for <holdMinutes × 60>`.
+  - **`keepWakeTask(plan | null, log)`**: keeps the task (`WAKE_TASK_NAME`) in step with the plan. It registers it when the plan changes (`schtasks /Create /XML /F`, the definition written UTF-16 to the data folder's `wake.task.xml`), removes it for a null plan, and asks Task Scheduler nothing while the plan is the one it set. The first look in a process checks the task is still there. A refusal is logged once and tried again an hour later (`WAKE_RETRY_MS`). Answers `set`, `same`, `removed`, `none` (nothing registers here: not Windows, a dev checkout, or under node --test) or `failed`.
+  - **`wakesPc()`**: whether the task is set, for the page.
+  - **`setWakeDeps(deps | null)`**: stands in for Task Scheduler in tests.
+- **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
+- **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. By its end the agent's own hold has begun, if the agent wants the PC.
+- **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Nothing is woken until an agent calls `keepWakeTask`.
+- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. It holds the PC itself with `stayAwake(what)` from a few minutes before the work until it ends. Never wake a PC on battery, and never keep the screen on.
+- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
+
 ## 2.77.8
 
 **PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

@@ -2,6 +2,29 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.66
+
+**Builds run on time on a PC that sleeps: plugged in, it wakes a few minutes before each build and stays up until the build closes. A build the PC slept through says so, and a build shows as under way from its start.**
+
+### What's new
+
+- **The PC wakes for its builds.** When it's plugged in, Windows wakes the PC five minutes before each build time in Settings' Build pipeline, on its days. The Steward then keeps it up until that build has closed. Before, a PC that had gone to sleep missed its build until someone woke it.
+  - The wake is a hidden task in Task Scheduler (`\Steward\Wake`), kept in step with Settings' build times and days. It goes when the Steward has no builds to run (off duty, say, or not running rounds by itself).
+  - Lean by default: the screen stays off, nothing is held between builds, and a PC on battery is never woken.
+  - The Steward's page says so under the build times.
+- **A build the PC slept through says so.** It still begins as soon as the PC wakes, and the page and the round's log say, for example, "the 08:00 build was late: the PC was in standby until 08:39".
+
+### What changed
+
+- **A build is under way from its start.** Before, a build was recorded as under way only when its first round ended, and that round is often its longest. Until then Manor saw no build, so it could install updates in the middle of it, and the Steward's page showed none.
+- Uninstalling the Steward removes its wake task too.
+- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+- If the PC still isn't woken for its builds, check that wake timers are allowed when it's plugged in: Control Panel, Power Options, the plan's advanced settings, Sleep, "Allow wake timers", Plugged in: Enable.
+
 ## 0.36.61
 
 **Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors and has time for all the tests it runs.**

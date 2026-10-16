@@ -47,7 +47,8 @@ import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
 import { heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
-import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
+import { lastWoke } from './fresh-start.ts';
+import { buildWhen, endRound, kitRides, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
 
@@ -606,7 +607,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       let turnsOn = false;
       // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds merge, and its last releases.
       const pipeline = name === 'round' && !quiet ? loadPipeline() : null;
-      const mode: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees }) : { kind: 'off' };
+      const mode: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees, wokeAt: lastWoke() }) : { kind: 'off' };
       /** This round ends its build: it released what the build merged. */
       let buildCloses = false;
       /** "<id> #<n>" for each PR this round merged, for the build's record. */
@@ -640,7 +641,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const when = mode.run.by === 'owner' ? "the owner's Build now" : `the ${buildWhen(new Date(mode.run.due), at())} build`;
             log(
               mode.fresh
-                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled`
+                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled${mode.run.late ? ` (${lateLine(mode.run, at())})` : ''}`
                 : mode.closing
                   ? `${when} has run out of time (${ctx.settings.buildPipeline.windowMinutes} minutes): it releases what it merged, and the rest waits for the next build`
                   : `${when} goes on (its round ${mode.run.rounds + 1})`,
@@ -651,6 +652,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // Each repository's ready PRs stacked as one batch, in the order they went ready (stages/build.ts).
             ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
+            // Under way from its first round's start, not its end: GET /api/pipeline says building (Manor holds its installs)
+            // and the page shows the build through what is often its longest round. The round's end saves it again.
+            if (mode.fresh && pipeline) {
+              try {
+                savePipeline({ open: mode.run, builds: pipeline.builds });
+              } catch (e) {
+                log(`couldn't keep the build's record: ${(e as Error).message}`);
+              }
+            }
           }
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
