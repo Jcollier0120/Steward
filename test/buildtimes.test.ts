@@ -118,6 +118,20 @@ test('the next build is prepared for a repository only once its branch, its read
   assert.deepEqual(toPrepare([{ e: e('porter'), key: 'k9' }], kept, due).map((r) => r.id), ['porter'], 'it moved since');
 });
 
+test("a kit PR of the Steward's tested ahead of a build runs its whole suite, so the gate before the kit's release isn't run in the build", async () => {
+  const { wholeAhead } = await import('../src/stages/prtest.ts');
+  const { APP } = await import('../src/app.ts');
+  const pr = (files: string[]) => ({ number: 289, files }) as unknown as import('../src/stages/staff.ts').PrInfo;
+  const kit = pr(['kit/VERSION', 'kit/core/run.ts']);
+  const prepare = { due: at(0), name: 'the 08:00 build' };
+  const steward = { id: APP.id };
+  assert.equal(wholeAhead({ build: null, prepare }, steward, kit), true);
+  assert.equal(wholeAhead({ build: null, prepare }, steward, pr(['src/agent.ts'])), false, "one that doesn't raise the kit: what its change reaches");
+  assert.equal(wholeAhead({ build: prepare, prepare: null }, steward, kit), false, 'in the build: as before');
+  assert.equal(wholeAhead({ build: null, prepare: null }, steward, kit), false);
+  assert.equal(wholeAhead({ build: null, prepare }, { id: 'porter' }, kit), false, "an agent's: no kit is released from it");
+});
+
 test("a build's rollout waits for a newer kit coming in that build, not one held for anything else", () => {
   const held = (number: number, why: string, more: { kit?: boolean; draft?: boolean } = {}) => ({ number, url: '', title: '', why, draft: false, kit: true, ...more });
   const release = (more: object) => ({ id: 'steward', name: 'Steward', outcome: 'skipped' as const, message: '', ...more });

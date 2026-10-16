@@ -10,6 +10,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **The next build's tests run ahead of it.** Between builds, beside the rounds and at the checks' gentle pace, the Steward now tests what the next build will merge: each ready pull request at its head, a version queue as one train, a build's batch, and a new kit's trial on every agent, the Steward's own first. Nothing is merged, pushed or released until the build.
   - At the build, a pull request, train or batch whose code hasn't moved since merges without being tested again. Anything pushed to since is tested in the build, as before.
+  - A pull request that raises the kit runs its whole suite ahead of the build, not only the tests its change reaches. The whole suite the kit's release waits for then doesn't run again in the build, when nothing moved.
   - A repository is looked at again only once its branch, its ready pull requests or the kit move, so quiet hours cost nothing.
 - **Where a build's time goes.** Each build now keeps when each of its parts started and ended: the tests of each repository, the kit's trial, the whole suite before a kit's release, the merges, the rollout, the releases (signing included) and telling Manor. The Steward's page says in a line how long the last build took and where the time went, and how much of its testing ran ahead of it.
 
