@@ -38,7 +38,9 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing: it updates itself as usual. On the Steward's page, an agent's version that is a new kit alone, held, shows as skipped with the reason.## 0.36.69
+- Nothing: it updates itself as usual. On the Steward's page, an agent's version that is a new kit alone, held, shows as skipped with the reason.
+
+## 0.36.69
 
 **In a build, the agents' pull requests no longer wait while the Steward tests its own.**
 
