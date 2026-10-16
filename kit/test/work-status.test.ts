@@ -18,7 +18,8 @@ mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
 const { APP, port } = await import('./fixture/src/app.ts');
 const { currentWork, inWork, resetWorkTasks, startWork, withWork, workTasks } = await import('./fixture/src/kit/work-tasks.ts');
-const { RESULTS_SHOWN, codeAt, pcLines, pcLoad, recentResults, recordResult, resetResults, resultFor, resultKey, taskView, workStatus } = await import('./fixture/src/kit/work-status.ts');
+const { PASS_STANDS_MS, RESULTS_SHOWN, codeAt, passFor, pcLines, pcLoad, peerResult, recentResults, recordResult, resetResults, resultFor, resultKey, taskView, toolchainHere, whyNotPass, workStatus } = await import('./fixture/src/kit/work-status.ts');
+const { passOnOtherPcs } = await import('./fixture/src/kit/manor.ts');
 const { CHECKS_RUNS_ENV, CHECKS_WHO_ENV, checksLimits, checksMemory, checksPaceExe, checksRuns, checksRunsDir, checksWho, pacedCommand, parseChecksRun } = await import('./fixture/src/kit/checks-pace.ts');
 const { inWorkTurn, workLockDir } = await import('./fixture/src/kit/pace.ts');
 const { withAcceleratorTurn } = await import('./fixture/src/kit/npu-queue.ts');
@@ -191,6 +192,111 @@ test('results: one per kind, repository and tree, the latest replacing the one b
   assert.ok(existsSync(path.join(process.env.FIXTURE_HOME!, 'work-results.json')), 'kept in its data folder, which the test gave it');
 });
 
+// A pass that stands in for running the same checks again (kit 2.77.0).
+const TREE = 'a'.repeat(40);
+const NOW = Date.parse('2026-10-15T12:00:00Z');
+const tc = toolchainHere();
+const passed = (o: Record<string, unknown> = {}) => ({ kind: 'checks', repo: 'me/reeve', tree: TREE, commit: 'c'.repeat(40), ok: true, at: '2026-10-15T10:00:00.000Z', commands: ['npm run typecheck', 'npm test'], ...tc, ...o });
+const asked = { kind: 'checks', repo: 'Me/Reeve', tree: TREE, commands: ['npm test'] };
+
+test('a pass stands in only for the same whole work, repository and tree, under a day old, on the same Node.js major and OS, of every command asked', () => {
+  const why = (o: Record<string, unknown>, q = asked) => whyNotPass(passed(o) as any, q, { now: NOW });
+  assert.equal(why({}), null);
+  assert.equal(why({ node: `${tc.node.split('.')[0]}.0.0` }), null, 'another minor of the same major');
+  assert.equal(why({ ok: false }), 'it failed');
+  assert.equal(why({ kind: 'affected checks' }), 'only the tests its change reached ran');
+  assert.equal(why({ kind: 'whole-suite' }), 'it was whole-suite');
+  assert.equal(why({ repo: 'me/porter' }), 'another repository');
+  assert.equal(why({ tree: 'b'.repeat(40) }), 'other code');
+  assert.equal(why({ at: new Date(NOW - PASS_STANDS_MS - 1).toISOString() }), 'more than a day old');
+  assert.equal(why({ at: new Date(NOW + 3600_000).toISOString() }), 'no time it can be trusted', 'an hour ahead of this clock');
+  assert.equal(why({ at: new Date(NOW + 60_000).toISOString() }), null, "a minute ahead: two PCs' clocks");
+  assert.equal(why({ node: '1.0.0' }), `on Node.js 1, not ${tc.node.split('.')[0]}`);
+  assert.equal(why({ node: undefined }), "it doesn't say which Node.js", 'a result from before kit 2.77.0');
+  assert.equal(why({ platform: 'plan9' }), `on plan9, not ${tc.platform}`);
+  assert.equal(why({ commands: ['npm run typecheck'] }), "it didn't run npm test");
+  assert.equal(why({ commands: undefined }), "it doesn't say which checks it ran");
+  assert.equal(why({ commands: undefined }, { ...asked, commands: [] }), null, 'no commands asked: any');
+});
+
+test("a pass here first; else another PC's, kept here as that PC's; never a failure, nor one older than a failure here", async () => {
+  resetResults();
+  const laptop = { id: 'pc-2', name: 'LAPTOP' };
+  let asks = 0;
+  const elsewhere = (r: Record<string, unknown> | null) => async () => (asks++, r as any);
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: elsewhere(null) }), null, 'none anywhere');
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: null }), null, 'no one else to ask');
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: elsewhere(passed()) }), null, "a pass that doesn't say where it ran isn't another PC's");
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: elsewhere(passed({ from: laptop, node: '1.0.0' })) }), null, 'nor one on another Node.js');
+
+  const there = await passFor(asked, { now: NOW, elsewhere: elsewhere(passed({ from: laptop })) });
+  assert.deepEqual([there?.from, there?.at], [laptop, '2026-10-15T10:00:00.000Z']);
+  assert.deepEqual(resultFor(asked)?.from, laptop, 'kept here, at the time it ran there');
+  asks = 0;
+  assert.deepEqual((await passFor(asked, { now: NOW, elsewhere: elsewhere(null) }))?.from, laptop, 'found here next time');
+  assert.equal(asks, 0, 'without asking again');
+
+  resetResults();
+  recordResult(passed() as any);
+  assert.equal((await passFor(asked, { now: NOW, elsewhere: elsewhere(null) }))?.from, undefined, "this PC's own pass");
+  assert.equal(asks, 0);
+
+  resetResults();
+  recordResult(passed({ ok: false, at: '2026-10-15T11:00:00.000Z' }) as any);
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: elsewhere(passed({ from: laptop })) }), null, 'a failure here after the pass there: the code fails here');
+  assert.equal(resultFor(asked)?.ok, false);
+  assert.ok(await passFor(asked, { now: NOW, elsewhere: elsewhere(passed({ from: laptop, at: '2026-10-15T11:30:00.000Z' })) }), 'a pass there after the failure here');
+
+  resetResults();
+  recordResult(passed({ kind: 'affected checks' }) as any);
+  assert.equal(await passFor(asked, { now: NOW, elsewhere: elsewhere(null) }), null, 'an affected pass, kept as its own kind, is never found for the whole checks');
+  resetResults();
+});
+
+test("GET /api/peer/result answers this agent's own result for one tree, from all it keeps; Manor's lookup asks Manor here, with the agent's header", async () => {
+  resetResults();
+  const q = (o: Record<string, string>) => new URLSearchParams(o);
+  assert.equal(peerResult(q({ repo: 'me/reeve', tree: 'HEAD' })).status, 400);
+  assert.equal(peerResult(q({ repo: 'reeve', tree: TREE })).status, 400);
+  assert.deepEqual(peerResult(q({ repo: 'me/reeve', tree: TREE })).json, { v: 1, result: null });
+  recordResult(passed() as any);
+  for (let i = 0; i < 80; i++) recordResult({ kind: 'checks', repo: 'me/other', tree: i.toString(16).padStart(40, '0'), ok: true }, new Date(NOW));
+  assert.equal((peerResult(q({ repo: 'ME/REEVE', tree: TREE.toUpperCase() })).json as any).result.commit, 'c'.repeat(40), 'older than the results a status lists');
+  recordResult(passed({ from: { id: 'pc-3', name: 'DESK' } }) as any);
+  assert.deepEqual(peerResult(q({ repo: 'me/reeve', tree: TREE })).json, { v: 1, result: null }, "one taken from another PC isn't passed on");
+  resetResults();
+
+  const manor = path.join(home, 'manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  const manorPort = await freePort();
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port: manorPort }));
+  const seen: { url: string; peer: unknown }[] = [];
+  let answer: [number, unknown] = [200, { v: 1, result: { ...passed(), pc: { id: 'pc-2', name: 'LAPTOP' } }, asked: 1 }];
+  const fake = http.createServer((req, res) => {
+    seen.push({ url: req.url ?? '', peer: req.headers['x-castellan-peer'] });
+    res.writeHead(answer[0], { 'content-type': 'application/json' }).end(JSON.stringify(answer[1]));
+  });
+  await new Promise<void>((resolve) => fake.listen(manorPort, '127.0.0.1', resolve));
+  try {
+    const got = await passOnOtherPcs(asked, { agent: 'steward', home: manor });
+    assert.deepEqual([got?.from, got?.tree, got?.ok, (got as any)?.pc], [{ id: 'pc-2', name: 'LAPTOP' }, TREE, true, undefined]);
+    const url = new URL(seen[0].url, 'http://x');
+    assert.equal(url.pathname, '/api/peers/result');
+    assert.deepEqual(Object.fromEntries(url.searchParams), { agent: 'steward', kind: 'checks', repo: 'Me/Reeve', tree: TREE, node: tc.node.split('.')[0], platform: tc.platform });
+    assert.equal(seen[0].peer, 'steward');
+    answer = [404, { error: 'not found' }];
+    assert.equal(await passOnOtherPcs(asked, { agent: 'steward', home: manor }), null, "an older Manor's 404: none");
+    answer = [200, { v: 1, result: null, asked: 0, why: 'Other PCs is off here.' }];
+    assert.equal(await passOnOtherPcs(asked, { agent: 'steward', home: manor }), null);
+    answer = [200, { v: 1, result: { ...passed(), ok: false, pc: { id: 'pc-2', name: 'LAPTOP' } } }];
+    assert.equal(await passOnOtherPcs(asked, { agent: 'steward', home: manor }), null, 'never a failure');
+  } finally {
+    await new Promise((resolve) => fake.close(resolve));
+  }
+  assert.equal(await passOnOtherPcs(asked, { agent: 'steward', home: path.join(home, 'no-manor') }), null, 'no Manor here');
+  assert.equal(await passOnOtherPcs(asked, { agent: 'steward' }), null, "under node --test, Manor's own home is never asked");
+});
+
 test("a checkout's code: its commit and tree, and whether anything tracked changed; nothing known outside a checkout", async () => {
   const dir = path.join(home, 'checkout');
   mkdirSync(dir, { recursive: true });
@@ -265,6 +371,19 @@ test('every agent answers GET /api/peer/work with its status, with what it adds'
     assert.equal(s.agent.id, APP.id);
     assert.deepEqual(s.slots, [{ kind: 'stage', name: 'Stages', of: 2, used: 0 }]);
     assert.ok(s.lines.some((l: { id: string }) => l.id === 'checks'));
+    resetResults();
+    recordResult(passed() as any);
+    const result = await new Promise<{ status: number; body: any }>((resolve, reject) =>
+      http
+        .get({ host: '127.0.0.1', port, path: `/api/peer/result?kind=checks&repo=me/reeve&tree=${TREE}`, headers: { host: `127.0.0.1:${port}` } }, (res) => {
+          let text = '';
+          res.on('data', (c) => (text += c));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }));
+        })
+        .on('error', reject),
+    );
+    assert.deepEqual([result.status, result.body.v, result.body.result.tree, result.body.result.ok], [200, 1, TREE, true], 'and GET /api/peer/result with its result for one tree');
+    resetResults();
   } finally {
     await close();
   }
