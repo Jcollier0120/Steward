@@ -11,6 +11,16 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On a PC whose local AI runs on more than one accelerator (an NPU and a graphics card), each one's models now unload when that one has been idle. Before, work on any of them kept them all loaded, so Reeve indexing on the graphics card held the NPU's memory, and the NPU's chat held the card's.
 - How long each waits before it unloads is unchanged.
 
+## 0.36.58
+
+**Kit 2.77.5: on a PC with under 20 GB of memory, the local AI's search model steps aside while you chat, so the chat model gets its memory.**
+
+### What changed
+
+- On a PC with under 20 GB of memory, the search model on the NPU now stops when a chat or a picture question starts, if nothing has searched in the last 30 seconds. The chat model gets the memory back: about 1.4 GB of the NPU's on a Snapdragon, and close to 2 GB of the PC's. The next search wakes the search model again in about 2 seconds.
+- The search model keeps running while it's in use, for example a search right after a summary, or an index being built between chats. Measured on two hours of the manor's own traffic, that means about one extra wake-up an hour.
+- PCs with 20 GB or more, and PCs where you've set how long the local AI stays loaded, are unchanged.
+
 ### Before you update
 
 - Nothing: it updates itself as usual.

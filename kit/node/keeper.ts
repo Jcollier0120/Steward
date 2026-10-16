@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
 import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
@@ -10,7 +10,7 @@ import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 import { refreshNpu } from './npu-refresh.ts';
-import { npuIdleStopMinutes } from './npu-vendors.ts';
+import { NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
@@ -59,6 +59,10 @@ import { kitVersion, testNpuEmbed, testNpuEntry } from './setup.ts';
  * server's) that no configured server is (another program, or another port: a test's, a scratch home's, a server
  * an earlier config named) is stopped once seen for 5 minutes (`orphanGraceMs`), so nothing nobody tracks keeps a
  * card's memory. It is said in the log, with the program's path and command line.
+ *
+ * Not in the keeper's look but in a request's turn, and said in the same log: on a PC with little memory, a chat or
+ * vision request on the NPU first stops the NPU's own embedding server when it hasn't answered for 30 s
+ * (yieldEmbedServer, below; kit 2.77.5), so the chat has its memory.
  */
 
 // ------------------------------------------------------------------------------------------------
@@ -455,6 +459,9 @@ export function manorOwns(p: Pick<SeenProcess, 'pid' | 'path' | 'startedMs'>, o:
   return (o.started ?? []).some((r) => r.pid === p.pid && sameProgram(p.path, r.program) && Math.abs(p.startedMs - r.atMs) <= 60_000);
 }
 
+/** The programs an NPU's own embedding server is run with, which the keeper looks after: llama-server (Qualcomm's, on the Hexagon) and OpenVINO Model Server (Intel's). */
+const NPU_EMBED_SERVER = /^(llama-server|ovms)(\.exe)?$/i;
+
 /** An accelerator's lock folders, one per slot: the kit's (the NPU's lock for the NPU; `<locks>\<id>`, `<id>.2` … for the others). */
 export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): string[] => kitLockDirsOf({ id: a.id, slots: a.kind === 'npu' ? 1 : a.slots });
 
@@ -493,7 +500,7 @@ export function reapedServers(
     if (a.enabled === false) continue;
     // An NPU's embed endpoint is looked after when llama-server (Qualcomm's, on the Hexagon) or OpenVINO Model Server
     // (Intel's: 1.7 GB, kept until it was stopped, before kit 2.71.0) runs it; npu-embed exits by itself.
-    const npuEmbed = /^(llama-server|ovms)(\.exe)?$/i.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
+    const npuEmbed = NPU_EMBED_SERVER.test(path.win32.basename(expandEnv(a.embed?.startCommand?.[0] ?? '')));
     const kinds: EndpointKind[] = a.kind === 'npu' ? ['chat', 'vision', ...(npuEmbed ? (['embed'] as const) : [])] : ['chat', 'vision', 'embed', 'rerank'];
     for (const kind of kinds) {
       if (!a[kind]?.model) continue;
@@ -708,6 +715,117 @@ export function serversToReap(raw: Record<string, any>, o: { withNpu?: boolean; 
   const ramBytes = o.ramBytes === undefined ? os.totalmem() : o.ramBytes;
   const npuMsFor = given ? undefined : (program: string, kind: EndpointKind) => npuIdleStopMinutes({ program, kind: kind === 'rerank' ? 'chat' : kind, ramBytes, otherwise: k.npuIdleStopMinutes }) * 60_000;
   return reapedServers(accs, o.logDir, { npuMs: k.npuIdleStopMinutes * 60_000, otherMs: k.gpuIdleStopMinutes * 60_000, npuMsFor }, undefined, { keepGpuOut: gpuKeptOut(accs, o.withNpu ?? gpuWithNpu().on) });
+}
+
+// ------------------------------------------------------------------------------------------------
+// The NPU's embedding server gives way to its chat
+
+/** The NPU's own embedding server, when it has one apart from its chat's (Qualcomm's llama-server, Intel's second OpenVINO Model Server): where it answers and its program. */
+export function ownEmbedServer(acc: Pick<KitAccelerator, 'kind' | 'chat' | 'vision' | 'embed'>): { base: string; program: string } | null {
+  const ep = acc.embed;
+  if (acc.kind !== 'npu' || !ep?.model || !ep.baseUrl || !ep.startCommand?.length) return null;
+  const program = expandEnv(ep.startCommand[0]);
+  if (!NPU_EMBED_SERVER.test(path.win32.basename(program))) return null;
+  if (ep.baseUrl === acc.chat?.baseUrl || ep.baseUrl === acc.vision?.baseUrl) return null;
+  // One whose requests take another device's turn (an endpoint's `turn`) may be answering beside the chat: its own turn's.
+  if ((ep as { turn?: unknown }).turn) return null;
+  return { base: ep.baseUrl, program };
+}
+
+/** The PC, as the embedding server's giving way sees it: swapped in tests. */
+export interface YieldDeps {
+  probe: (base: string) => Promise<'ready' | 'busy' | 'loading' | 'down'>;
+  processes: (program: string, base: string) => Promise<ServerProcess[]>;
+  stop: (pid: number) => void;
+  log: (line: string) => void;
+  now: () => number;
+  sleep: (ms: number) => Promise<unknown>;
+}
+
+/** What giving way did: stopped the embedding server, or why it didn't. */
+export type YieldOutcome = { did: 'stopped'; base: string; pids: number[]; ms: number } | { did: 'kept'; why: 'none' | 'big-pc' | 'given' | 'in-use' | 'not-running' | 'busy' | 'not-found' | 'slow' };
+
+/** How long finding the embedding server's processes, then their going, may hold up a chat before it goes on beside them. */
+export const YIELD_FIND_MS = 5_000;
+export const YIELD_GONE_MS = 10_000;
+/**
+ * Embeddings answered this recently are in use, and keep their server: a person's search right after a summary, an index
+ * being built between chats. On the manor's traffic (2026-10-15, two hours) the embedding server giving way to every chat
+ * would have started it again 4 times an hour more; giving way only after 30 s without an embedding, once.
+ */
+export const YIELD_GRACE_MS = 30_000;
+
+/**
+ * The NPU's embedding server gives way to its chat on a PC with little memory (under npu-vendors.json's
+ * idleStop.smallPcGb): a chat or vision request that takes the NPU's turn while the NPU's own embedding server
+ * (ownEmbedServer) runs stops it first, so the chat has its memory: on a Snapdragon 1,408 MB of the NPU's and a 2.0 GB
+ * working set, Intel's 1.7 GB. Only the embedding side yields: it starts again for the next embedding in 2 to 3 s
+ * (idleStop.coldStartMs.embed), where GenieX loads its model in 9 to 17 s, so a chat is never stopped for embeddings.
+ * It runs in the chat's own turn, so no embedding is in flight, and only when the NPU hasn't answered an embedding for
+ * YIELD_GRACE_MS (`embeddedAt`: accelerators.ts' noteEmbedded). When config.json gives npuIdleStopMinutes (`given`),
+ * the servers stay as long as it says, and this keeps the embedding server too. Never throws, and gives up rather than
+ * hold the chat past YIELD_FIND_MS and YIELD_GONE_MS.
+ */
+export async function yieldEmbedServer(
+  acc: Pick<KitAccelerator, 'kind' | 'chat' | 'vision' | 'embed'>,
+  o: { ramBytes: number | null | undefined; given: () => boolean; embeddedAt?: () => number | null; graceMs?: number; findMs?: number; goneMs?: number },
+  d: YieldDeps,
+): Promise<YieldOutcome> {
+  const own = ownEmbedServer(acc);
+  if (!own) return { did: 'kept', why: 'none' };
+  if (!smallPc(o.ramBytes)) return { did: 'kept', why: 'big-pc' };
+  try {
+    if (o.given()) return { did: 'kept', why: 'given' };
+    const last = o.embeddedAt?.() ?? null;
+    if (last !== null && d.now() - last < (o.graceMs ?? YIELD_GRACE_MS)) return { did: 'kept', why: 'in-use' };
+    const t0 = d.now();
+    const state = await d.probe(own.base);
+    if (state === 'down') return { did: 'kept', why: 'not-running' };
+    // Loading (OpenVINO compiling its model, say): stopping it would only waste that.
+    if (state !== 'ready') return { did: 'kept', why: 'busy' };
+    const procs = await within(d.processes(own.program, own.base), o.findMs ?? YIELD_FIND_MS);
+    if (!procs) return { did: 'kept', why: 'slow' };
+    if (!procs.length) return { did: 'kept', why: 'not-found' };
+    for (const p of procs) d.stop(p.pid);
+    const deadline = d.now() + (o.goneMs ?? YIELD_GONE_MS);
+    while ((await d.probe(own.base)) !== 'down' && d.now() < deadline) await d.sleep(100);
+    const ms = Math.round(d.now() - t0);
+    const pids = procs.map((p) => p.pid);
+    d.log(`stopped ${path.win32.basename(own.program)} (${pids.join(', ')}) at ${own.base} in ${ms} ms: it gives way to the NPU's chat on a PC under ${NPU_CATALOG.idleStop.smallPcGb} GB, and starts again for the next embedding`);
+    return { did: 'stopped', base: own.base, pids, ms };
+  } catch (e: any) {
+    d.log(`left ${own.base} running for the NPU's chat: ${e?.message ?? e}`);
+    return { did: 'kept', why: 'slow' };
+  }
+}
+
+/** `p`'s value, or null when it takes longer than `ms`. */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([p, new Promise<null>((r) => (timer = setTimeout(() => r(null), ms)))]).finally(() => clearTimeout(timer));
+}
+
+/** This PC's: its processes, the agents' readable config.json for npuIdleStopMinutes, and the keeper's log. */
+export function pcYield(o: { logFile?: string; configFile?: string } = {}): { given: () => boolean; deps: YieldDeps } {
+  const logFile = o.logFile ?? reaperLog();
+  return {
+    given: () => {
+      const raw = readConfigFile(o.configFile ?? readableConfigFile()).raw;
+      return raw?.npuIdleStopMinutes === keeperSettings(raw).npuIdleStopMinutes;
+    },
+    deps: {
+      probe: (base) => kitProbe(base, 1_000),
+      processes: serverProcesses,
+      stop: (pid) => {
+        try {
+          process.kill(pid);
+        } catch {}
+      },
+      log: (line) => logLine(logFile, line),
+      now: Date.now,
+      sleep,
+    },
+  };
 }
 
 /** How old hardware.json may get before the keeper asks this PC again: a card or an NPU driver can come and go. */

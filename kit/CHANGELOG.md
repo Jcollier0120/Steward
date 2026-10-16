@@ -20,6 +20,29 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing: it updates itself as usual. The keeper of a PC that runs on more than one accelerator now stops each one's servers on its own idle time.
 
+## 2.77.5
+
+**On a PC under 20 GB, the NPU's embedding server gives way to its chat: a chat or vision request stops it first once no embedding has been answered for 30 s, so the chat has its 1.4 GB of the NPU's memory.**
+
+### What changed
+
+- **npu.ts**: a chat or vision request on the NPU, in its own turn and before its server is asked, lets the NPU's own embedding server give way (`embedGivesWay`). This applies on a PC under npu-vendors.json's `idleStop.smallPcGb` (20) with no `npuIdleStopMinutes` in config.json. A bigger PC never loads the code for it.
+  - It frees the chat 1,408 MB of the NPU's memory and a 1.7 to 2.0 GB working set on a Snapdragon, or 1.7 GB on Intel.
+  - Only the embedding side gives way. It starts again for the next embedding in 2 to 3 s (1.7 s beside a loaded GenieX, measured), where GenieX loads in 9 to 17 s.
+- **keeper.ts**: `ownEmbedServer(acc)` finds the NPU's own embedding server, and `yieldEmbedServer` stops it.
+  - **Which servers**: Qualcomm's llama-server and Intel's second OpenVINO Model Server. Not FastFlowLM's route, npu-embed, a server shared with chat, or one whose requests take another device's turn.
+  - **When it stops one**: only when the server answers ready (a loading one is left alone) and the NPU hasn't answered an embedding for `YIELD_GRACE_MS` (30 s).
+  - **How**: by its program and the address its command line serves. It waits up to 10 s for the port to close, and each stop is written in the keeper's log.
+  - **When it gives up**: if finding the processes takes more than 5 s, or on any error, the chat goes on beside the server. It never throws.
+- **accelerators.ts**: `noteEmbedded(id)` and `embeddedAt(id)` keep `<accelerators>/<id>.embedded.json` (`{at}`). Every agent writes it after its embeddings on the NPU, at most every 5 s per process.
+- **Why 30 s**: the manor's traffic, watched for two hours and merged onto one NPU as on a 16 GB Snapdragon. Giving way at every chat would start the embedding server 4 more times an hour, mostly for Reeve's search right after its map or summary. After 30 s without an embedding, it's 1 more an hour.
+- **Measured** on private ports through the kit's own requests: a warm chat that stops the server takes 0.47 to 0.63 s, against 0.10 s with nothing to stop. The NPU's memory falls by 1,409 MB.
+- **spec/NPU-VENDORS.md** (The embedding server gives way to chat) has the traffic, the measurements and what's left alone. spec/ACCELERATORS.md's keeper bullet points there.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. On a 20 GB PC or bigger, nothing changes.
+
 ## 2.77.3
 
 **On an AMD Ryzen AI 300, one smaller model, Qwen3.5-2B, answers chat and pictures on the NPU. It writes half again as fast, holds 0.4 GB less of the PC's memory for chat and 1.2 GB less for pictures, downloads 2.0 GB instead of 7.4, and never switches models between a chat and a picture. It starts about 1.7 s slower.**
