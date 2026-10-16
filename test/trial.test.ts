@@ -402,6 +402,49 @@ test('a build tries one kit: a head that moved after its trial began in the buil
   }
 });
 
+test('another PR carrying the very kit a trial tried (stacked on it, its kit version given anew) takes its verdict: the kit is tried once (Steward 0.36.73)', async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const due = '2026-10-16T22:00:00.000Z';
+  const inBuild = () => {
+    const x = ctx();
+    x.c.settings.employees = [good];
+    x.c.build = { due, name: 'the 18:00 build' };
+    return x;
+  };
+  const kept = () => JSON.parse(readFileSync(kitTrialsFile(), 'utf8'));
+  const first = inBuild();
+  assert.equal(await kitTrialHold(first.c, me, pr()), null, first.c.lines.join('\n'));
+  try {
+    // #8, stacked on #7: the same kit\ parts and tools/kit.ts, its own kit version and changelog, and code of its own.
+    writeFileSync(path.join(steward.checkout, 'kit', 'VERSION'), '1.0.4\n');
+    writeFileSync(path.join(steward.checkout, 'kit', 'CHANGELOG.md'), '# Kit\n\n## 1.0.4\n\nRenumbered.\n');
+    writeFileSync(path.join(steward.checkout, 'other.txt'), 'Its own.\n');
+    sh(steward.checkout, 'add', '-A');
+    sh(steward.checkout, 'commit', '--quiet', '-m', 'Stacked on #7');
+    sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/8/head');
+    const stacked = sh(steward.checkout, 'rev-parse', 'HEAD');
+    const eight = pr({ number: 8, headOid: stacked, head: 'claude/stacked', title: 'Steward 0.11.1' });
+    const next = inBuild();
+    assert.equal(await trialWaitsForNextBuild(next.c, me, eight), null, 'the kit this build tried: no second trial to wait for');
+    assert.equal(await kitTrialHold(next.c, me, eight), null, next.c.lines.join('\n'));
+    assert.ok(!next.c.lines.some((l) => l.includes('trial:')), next.c.lines.join('\n'));
+    assert.match(next.c.lines.join('\n'), /#8: its kit is the one #7 tried \(kit 1\.0\.1\), but for versions and changelogs, at [0-9a-f]{7}: not tried again/);
+    const t = kept()[`8@${stacked}`];
+    assert.equal(t.from, `7@${head}`);
+    assert.equal(t.kit, '1.0.4');
+    assert.equal(t.content, kept()[`7@${head}`].content);
+    assert.deepEqual(t.mains, kept()[`7@${head}`].mains);
+  } finally {
+    sh(steward.checkout, 'reset', '--quiet', '--hard', head);
+  }
+});
+
+test("in a build, a kit PR waits while the build's other PRs still merge, and the build stays open for it; ahead of a build, it waits for the build", async () => {
+  const { KIT_GATHERS, KIT_WAITS_FOR_BUILD, waitsBriefly } = await import('../src/stages/merge.ts');
+  assert.equal(waitsBriefly(`${KIT_GATHERS}; meanwhile it gives up its turn, so the PRs above it merge first`), true);
+  assert.equal(waitsBriefly(`${KIT_WAITS_FOR_BUILD}; meanwhile it gives up its turn, so the PRs above it merge first`), false);
+});
+
 test('a trial another live process is trying on its own is left to it; one whose process went quiet is tried here', async () => {
   const at = (ms: number) => new Date(Date.now() - ms).toISOString();
   const trial = (by: { pid: number; at: string }) => writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [], passed: 1, at: at(0), mains: {}, pending: ['good'], by } });
