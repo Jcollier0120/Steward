@@ -2,6 +2,27 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.7
+
+**The NPU check's and the NPU benchmark's server starts apart, in the servers' job at the manor's ceiling, as an agent's does, so they measure the server an agent gets. Before, it was a plain detached child, outside that job.**
+
+### What changed
+
+- **npu-server.ts: `startServer`** starts the route's server through `startApart()` (apart.ts), as the keeper does.
+  - It leaves the job of whatever ran the tool (a check run's, a terminal's) and joins `Local\kit-apart-pace`, hard-capped at `CEILING_CAP` (85%).
+  - Where it can't start apart (not Windows, no launcher, node --test without `KIT_APART=1`), it starts a plain detached child, as before.
+  - Its `pid` is the server's own, as before, so `stop()` still ends its whole tree, and `processMemory()` reads the server.
+  - Its output still goes to the tool's log.
+  - The timing of the cold start begins after `startServer` returns, so a first start that builds the launcher isn't counted.
+- **Found by the AMD Dev Manager.** On an AMD PC, kit 2.78.3's `startApart` with FastFlowLM 1.0.7 (qwen3.5:2b) showed no measurable cost from the cap: writing at 22.71 tokens/s capped against 22.72 uncapped. But npu-check and npu-bench weren't starting their server that way.
+- **Checked on an 18-thread Snapdragon X2 Elite.**
+  - Outside node --test, `startServer`'s server was in `Local\kit-apart-pace`, whose rate control read flags 5 (enabled, hard cap) and cap 8500.
+  - Under test, at a cap of 10% (`KIT_APART_CAP=1000`), a server keeping every processor busy took no more than that. Started the old way, the same server took 62.5%.
+
+### Before you update
+
+- Nothing to do: it updates itself as usual. An NPU benchmark run after it is measured at the manor's ceiling. A route whose server leans on the processor (a llama.cpp one, the processor's own) may score a little lower than before. One that runs on the NPU, like FastFlowLM's, scores the same.
+
 ## 2.78.3
 
 **A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**

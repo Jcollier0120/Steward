@@ -2,6 +2,19 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.72
+
+**The NPU check and the NPU benchmark now measure the local AI's server as the agents get it: inside the 85% limit every model server shares.**
+
+### What changed
+
+- The NPU check and the NPU benchmark start the NPU's AI server themselves, to measure it. They used to start it with no limit at all. Now they start it the way the agents' own servers start: with every other AI model server, held together to 85% of the processor. So a benchmark's numbers are the speeds the agents get. On an AMD PC, FastFlowLM ran just as fast within the limit as without it.
+- This Steward hands out kit 2.78.7, which brings this to every agent.
+
+### Before you update
+
+- Nothing: it updates itself as usual. A benchmark run after the update is measured within the limit, so on a PC whose AI server leans on the processor, it may score a little lower than the same PC did before.
+
 ## 0.36.68
 
 **A full pace never takes the whole PC any more: everything the manor runs, together, its AI model servers included, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**

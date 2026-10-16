@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { chatBody, expandEnv, failedWithOk, listsWhenLoaded, reportsLoaded, serverEnv, visionBody } from './accelerators.ts';
 import type { Accelerator, AcceleratorEntry } from './accelerator-config.ts';
+import { startApart } from './apart.ts';
 import { runPowerShell } from './detect.ts';
 import { type NpuPlan, runProgram } from './npu-vendors.ts';
 import { download, type NpuIo, setUpNpu, unpack } from './setup.ts';
@@ -34,17 +35,31 @@ const taskkill = (pid: number) =>
  * Starts a server from its entry, detached, its output appended to `logFile`; stopped with its whole tree. Its
  * command's %VARIABLES% are expanded as the keeper does (setup writes %USERPROFILE%\... paths): before kit 2.65.0
  * they weren't, so a tools home under the user's folder started nothing, and said nothing for 20 minutes.
+ *
+ * It starts apart, as the keeper starts an agent's server (apart.ts, kit 2.78.7): in the servers' job at the manor's
+ * ceiling, out of the job of whatever ran the tool (a check run's, a terminal's), so the check and the benchmark measure
+ * the server an agent gets. Before kit 2.78.7 it was a plain detached child, outside the servers' job. Where it can't
+ * start apart (not Windows, no launcher, under node --test without KIT_APART=1), a plain detached child, as before.
  */
 export async function startServer(entry: AcceleratorEntry, logFile: string): Promise<RunningServer> {
   const ep = entry.chat!;
   const [cmd, ...args] = ep.startCommand!.map((a) => expandEnv(a));
   mkdirSync(path.dirname(logFile), { recursive: true });
   const fd = openSync(logFile, 'a');
-  const child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd], windowsHide: true, cwd: os.homedir(), env: serverEnv({ env: ep.env }) });
-  closeSync(fd);
-  child.on('error', (e) => appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`));
-  child.unref();
-  return { pid: child.pid, stop: () => (child.pid ? taskkill(child.pid) : Promise.resolve()) };
+  const env = serverEnv({ env: ep.env });
+  let pid: number | undefined;
+  try {
+    pid = (await startApart(cmd, args, { cwd: os.homedir(), env, out: fd })) ?? undefined;
+    if (pid === undefined) {
+      const child = spawn(cmd, args, { detached: true, stdio: ['ignore', fd, fd], windowsHide: true, cwd: os.homedir(), env });
+      child.on('error', (e) => appendFileSync(logFile, `couldn't start ${cmd}: ${e.message}\n`));
+      child.unref();
+      pid = child.pid;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { pid, stop: () => (pid ? taskkill(pid) : Promise.resolve()) };
 }
 
 /** A log's length in bytes, or 0: where what a server prints next begins. */
