@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.62
+
+**SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**
+
+### What changed
+
+- SimplySign Desktop's session sometimes ends while a release is being built. When that happened, the release used to wait ten minutes for signtool, then fail for good and raise an alarm. Every other release that signs in the same round then built and waited its own ten minutes. Now the release waits until this PC can sign, as it does when the Steward finds the key gone before it builds. The other releases that sign don't build, and the rounds don't try signtool again for a quarter of an hour.
+- This Steward hands out kit 2.77.9. A release made with it gives up on signtool within a minute: it checks once before building and again before signing, since the session may end in between.
+- This also covers Manor's setup, and the staff still on an older kit. Their releases still wait their ten minutes the first time, but no longer fail for it, and the round's other signed releases don't wait too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The staff whose releases sign get the one-minute limit when they take kit 2.77.9.
+
 ## 0.36.60
 
 **A new kit's rollout no longer holds up merges: ready pull requests merge while the staff are being moved to it.**

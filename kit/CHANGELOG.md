@@ -2,6 +2,20 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.77.9
+
+**A release that signs gives up within a minute when SimplySign Desktop is waiting for its sign-in, before it builds or before it signs, instead of after ten minutes.**
+
+### What changed
+
+- **sign.ts**: `trialProblem(signtool, thumbprint)` signs a throwaway script without a timestamp, within `TRIAL_MS` (60 s). If signtool says "No certificates were found", the key can't be reached. If it doesn't answer in time, SimplySign Desktop is waiting for someone to sign in, and that now counts as "can't sign" too. Before, `readySigner`'s trial gave signtool two minutes and counted no answer as "can sign", so the release built and then waited ten minutes on its first batch.
+- `signFiles` tries a trial signature before it signs, because SimplySign's session can end while the release builds. When that trial fails, the release stops with `couldn't sign the native files: signtool didn't answer within 60 seconds …`. Nothing has been signed by then.
+- A batch that runs past its ten minutes now says SimplySign Desktop may be waiting for you to sign in. The Steward (0.36.62) reads all of these as "waits until this PC can sign", not as a failed release.
+
+### Before you update
+
+- Nothing: take the kit and release as usual. Only a release that publishes native files signs.
+
 ## Unreleased
 
 **`npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

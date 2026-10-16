@@ -13,7 +13,7 @@ const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-sign
 process.env.STEWARD_HOME = tmp;
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { forgetSigningLooks, HUNG_MS, loadSigningWaits, noteSigningWaits, signingDown, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
+const { forgetSigningLooks, HUNG_MS, loadSigningWaits, noteSigningWaits, signingDown, signingHung, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
 const { releaseUnreleased, roundFailuresFile } = await import('../src/stages/round.ts');
 const { releaseDirOf } = await import('../src/stages/common.ts');
@@ -43,6 +43,17 @@ test("signingDown: the line that says the key couldn't be reached, in signtool's
   assert.match(signingDown("release: SimplySign Desktop isn't running, and the signing key is in its cloud")!, /isn't running/);
   assert.equal(signingDown(`x\n${NO_KEY}\n`), NO_KEY);
   assert.equal(signingDown('npm ERR! code ELIFECYCLE\nError: tests failed'), null);
+  // A signtool that didn't answer (0.36.62): kit 2.77.9's trial, the kit's batches before it, and Manor's tools/sign.ts.
+  const hangs = [
+    `Error: couldn't sign the native files: signtool didn't answer within 60 seconds with the signing certificate's key (${PRINT}): SimplySign Desktop may be waiting for you to sign in`,
+    "Error: couldn't sign the native files: signtool didn't finish within 10 minutes: is the certificate's sign-in waiting?",
+    "Error: couldn't sign Castellan-Setup.exe: signtool didn't finish within 10 minutes. Is SimplySign Desktop connected? Its sign-in may be waiting.",
+  ];
+  for (const line of hangs) {
+    assert.equal(signingDown(`building…\n${line}\n`), line);
+    assert.equal(signingHung(line), true, line);
+  }
+  assert.equal(signingHung(NO_KEY), false, 'the key gone is not a hang');
 });
 
 /** A runner for the look: the certificate store says `store`, a trial signature exits `sign`. */
@@ -170,6 +181,33 @@ test("a release that loses the key while it builds waits too, rather than failin
   assert.equal(fixed.npm.length, 1, 'tried again');
   assert.equal(again[0].outcome, 'done', again[0].message);
   assert.deepEqual(loadSigningWaits(), {}, 'no longer waits');
+});
+
+// Steward 0.36.62: the sign-in started waiting while a release built. The kit's release gave up on signtool after ten
+// minutes, in words the Steward didn't know: a failed release, left to a person, and each signed release after it in the
+// round built and waited its ten minutes too.
+test("a release whose signtool hangs while it builds waits rather than failing, and the signed releases after it don't build: the hang stands a quarter of an hour", async () => {
+  const native = { kit: '2.77.9', parts: ['node'], native: { build: 'native/build.ps1', out: 'native/build', thumbprint: PRINT } };
+  const first: Employee = { ...signer('First', native), id: 'first', name: 'First' };
+  const second: Employee = { ...signer('Second', native), id: 'second', name: 'Second' };
+  const hang = `Error: couldn't sign the native files: signtool didn't answer within 60 seconds with the signing certificate's key (${PRINT}): SimplySign Desktop may be waiting for you to sign in`;
+  // The look before it says this PC can sign; the release itself then meets the hang.
+  const r = releasing({ npm: { code: 1, out: 'built\n', err: `${hang}\n` }, sign: ok('Successfully signed') });
+  const ctx = ctxFor({ employees: [first, second], workRoot: path.join(tmp, 'work-hang'), run: r.run, neutralDir: tmp });
+  const a = await releaseOne(ctx, first, { kit: null });
+  assert.equal(a.outcome, 'skipped', a.message);
+  assert.equal(a.message, `v0.2.3 waits until this PC can sign: ${hang}`);
+  assert.ok(a.signing && a.again, 'a wait, looked at again');
+  assert.equal(r.npm.length, 1, "the first's release ran, and met the hang");
+
+  const b = await releaseOne(ctx, second, { kit: null });
+  assert.equal(b.outcome, 'skipped', b.message);
+  assert.equal(b.message, `v0.2.3 waits until this PC can sign: ${hang}`);
+  assert.equal(r.npm.length, 1, "the second's release never ran");
+  const later = looking('ok', ok('Successfully signed'));
+  assert.equal(await signingProblem(later.run, PRINT, { signtool: 'signtool.exe', now: Date.now() + HUNG_MS - 60_000 }), hang, 'nearly a quarter of an hour on: the same answer');
+  assert.deepEqual(later.asked, [], 'signtool not asked meanwhile');
+  assert.equal(await signingProblem(later.run, PRINT, { signtool: 'signtool.exe', now: Date.now() + HUNG_MS + 1000 }), null, 'then looked at again: it can sign');
 });
 
 test('the alarm: one for every release that waits until this PC can sign, raised at once, gone once none waits', () => {
