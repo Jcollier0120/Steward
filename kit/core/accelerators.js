@@ -50,7 +50,7 @@ import { slotNames } from './queue.js';
  * @property {Endpoint} [chat]
  * @property {Endpoint} [vision] A vision endpoint without a server of its own is on the chat endpoint's.
  * @property {Endpoint} [embed]
- * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
+ * @property {string[]} quirks `prefix-leak`, `image-path`, `sides-of-32` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
  * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
@@ -115,8 +115,12 @@ import { slotNames } from './queue.js';
 /** @type {readonly Work[]} */
 export const WORKS = Object.freeze(['chat', 'vision', 'embed']);
 
-/** `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path. */
-export const QUIRKS = Object.freeze(['prefix-leak', 'image-path']);
+/**
+ * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
+ * `sides-of-32`: a picture's side of a whole number of 32 px, on a picture the server doesn't shrink, is made a pixel
+ * longer first (FastFlowLM 1.0.7 misreads it).
+ */
+export const QUIRKS = Object.freeze(['prefix-leak', 'image-path', 'sides-of-32']);
 
 /**
  * Whether it serves this kind of request.
