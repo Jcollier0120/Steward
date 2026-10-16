@@ -10,7 +10,8 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-vq-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { heldQueues, keepVersionQueues, loadVersionQueues, queueHold } = await import('../src/version-queue.ts');
+const vq = await import('../src/version-queue.ts');
+const { heldQueues, keepVersionQueues, loadVersionQueues, queueHold } = vq;
 const { workBlocks } = await import('../src/work-status.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 const { shareRemoteHeads } = await import('../src/kit/remote-heads.ts');
@@ -50,7 +51,7 @@ const listed = (repo: string, n: number, sha: string, o: Record<string, unknown>
   headRefOid: sha,
   baseRefName: 'main',
   isCrossRepository: false,
-  author: { login: 'someone' },
+  author: { login: 'Jcollier0120' },
   mergeable: 'MERGEABLE',
   mergeStateStatus: 'CLEAN',
   isDraft: false,
@@ -219,6 +220,124 @@ test('what holds a version queue: its lowest PR not ready, with ready PRs waitin
   assert.equal(queueHold([queued(266, '0.36.43'), draft], T), null, 'a draft above the ready ones holds nothing');
   assert.equal(queueHold([queued(250, '0.36.40', { ready: false, why: CONFLICTS }), ...queue.slice(1)], T, { held: new Map([[250, GAVE_WAY]]) }), null, 'one that gives up its turn holds nothing');
   assert.equal(queueHold([], T), null);
+});
+
+test('one moved past the others stands in line at its new version and holds nothing; the drafts that would hold the queue next are named', () => {
+  const { inLine, upcomingDrafts } = vq;
+  const queue = [
+    queued(233, '0.36.41', { ready: false, why: 'a draft', draft: true }),
+    queued(240, '0.36.42', { ready: false, why: 'a draft', draft: true }),
+    queued(241, '0.36.43', { ready: false, why: 'checks running' }),
+    queued(266, '0.36.44'),
+    queued(270, '0.36.45', { ready: false, why: 'a draft', draft: true }),
+  ];
+  const h = queueHold(queue, T);
+  assert.deepEqual([h?.number, h?.behind, h?.drafts], [233, [266], [240]], 'running checks end by themselves, and a draft above the last ready PR holds nothing');
+  const moved = inLine(queue.map((q) => (q.number === 233 ? { ...q, moved: '0.36.46' } : q.number === 240 ? { ...q, moved: '0.36.47' } : q)));
+  assert.deepEqual(moved.map((q) => q.number), [241, 266, 270, 233, 240]);
+  assert.equal(queueHold(moved, T)?.number, 241, 'the next one not ready holds it then');
+  assert.equal(queueHold(moved.filter((q) => q.number !== 241), T), null, 'moved, a draft holds nothing');
+  // Moved and since marked ready: it waits its turn at its new version, behind the PRs below it.
+  const ready = inLine([queued(233, '0.36.41', { moved: '0.36.46' }), queued(266, '0.36.44')]);
+  assert.deepEqual(ready.map((q) => q.number), [266, 233]);
+  assert.equal(queueHold(ready, T), null);
+  // Its author was told as it was moved: no heads-up for it.
+  const repo = { id: 'steward', name: 'Steward', kind: 'agent' as const, repo: 'Jcollier0120/Steward', branch: 'main', version: '0.36.40', head: 'b', files: [], working: null, latest: null, note: null, at: T };
+  assert.deepEqual(upcomingDrafts([{ ...repo, queue: moved }]).map((u) => u.number), [270]);
+});
+
+test("one the merges never take (outside the team) neither holds the queue nor waits behind a draft; the team's draft still holds it", () => {
+  const { upcomingDrafts } = vq;
+  const stranger = queued(230, '0.36.40', { ready: false, why: 'a draft', draft: true, outside: true });
+  const queue = [stranger, queued(266, '0.36.43'), queued(268, '0.36.44')];
+  assert.equal(queueHold(queue, T), null, "a stranger's draft below the team's ready PRs holds nothing: the merges never wait for it");
+  const team = queued(233, '0.36.41', { ready: false, why: 'a draft', draft: true });
+  assert.deepEqual([queueHold([stranger, team, ...queue.slice(1)], T)?.number, queueHold([stranger, team, ...queue.slice(1)], T)?.behind], [233, [266, 268]], "the team's draft still holds it");
+  assert.equal(queueHold([team, queued(266, '0.36.43', { outside: true })], T), null, "a stranger's ready PR above a draft isn't waiting on it");
+  assert.deepEqual(queueHold([team, queued(240, '0.36.42', { ready: false, why: 'a draft', draft: true, outside: true }), queued(241, '0.36.43', { ready: false, why: 'a draft', draft: true }), queued(266, '0.36.44')], T)?.drafts, [241], "a stranger's draft isn't moved with it");
+  // No heads-up for it, and its place in line is the merges' line.
+  const repo = { id: 'steward', name: 'Steward', kind: 'agent' as const, repo: 'Jcollier0120/Steward', branch: 'main', version: '0.36.39', head: 'b', files: [], working: null, latest: null, note: null, at: T };
+  assert.deepEqual(upcomingDrafts([{ ...repo, queue: [stranger, team, ...queue.slice(1)] }]).map((u) => [u.number, u.position, u.holds]), [[233, 0, [266, 268]]]);
+});
+
+test("the queue lists everyone's PRs, but only the team's and the Steward's hold it: a stranger's draft raises no hold or alarm", async () => {
+  const s = repoWithPrs('steward-outside');
+  const shas = { 41: s.make(41, '0.4.1'), 42: s.make(42, '0.4.2'), 43: s.make(43, '0.4.3'), 44: s.make(44, '0.4.4') };
+  const prs = [
+    listed('Jcollier0120/Steward', 41, shas[41], { isDraft: true, author: { login: 'a-stranger' } }),
+    listed('Jcollier0120/Steward', 42, shas[42], { isDraft: true, author: { login: 'a-stranger' }, headRefName: 'steward/kit-9.9.9', isCrossRepository: true }),
+    listed('Jcollier0120/Steward', 43, shas[43], { author: { login: 'jcollier0120' } }),
+    listed('Jcollier0120/Steward', 44, shas[44], { author: { login: 'a-stranger' }, headRefName: 'steward/kit-9.9.10' }),
+  ];
+  const r = runner((args) => (args[0] === 'pr' && args[1] === 'list' ? ok(prs) : undefined));
+  const self = employee(s.checkout, { id: 'steward', name: 'Steward', repo: 'Jcollier0120/Steward' });
+  const ctx = ctxFor({ employees: [], workRoot: path.join(tmp, 'work-outside'), run: r.run, neutralDir: tmp });
+
+  let q = await keepVersionQueues(ctx, { projects: [], self, now: () => later(0) });
+  let own = q.repos.find((x) => x.id === 'steward')!;
+  assert.deepEqual(own.queue.map((x) => [x.number, !!x.outside]), [[41, true], [42, true], [43, false], [44, false]], "all listed for Manor; a stranger's, and a fork's branch called steward/…, are outside the merges' line; the Steward's own branch and the team's (any case) are in it");
+  assert.equal(own.held, undefined, "a stranger's draft below the team's ready PRs holds nothing");
+  assert.deepEqual(heldQueues(loadVersionQueues()), [], 'so no alarm');
+  assert.deepEqual(q.upcoming?.filter((u) => u.id === 'steward'), [], 'and no heads-up for it');
+  const { movePast } = await import('../src/move-past.ts');
+  assert.deepEqual([(await movePast(ctx, self, 41)).status, r.gh.some((a) => a[0] === 'pr' && a[1] === 'comment')], [409, false], 'nothing to move');
+
+  // The team's own draft still holds it.
+  prs[2] = listed('Jcollier0120/Steward', 43, shas[43], { isDraft: true });
+  q = await keepVersionQueues(ctx, { projects: [], self, now: () => later(10) });
+  own = q.repos.find((x) => x.id === 'steward')!;
+  assert.deepEqual([own.held?.number, own.held?.behind], [43, [44]]);
+});
+
+test("a PR holding its queue moved past the others: claimed above the rest with the drafts behind it, its author told, the queue kept and its alarm cleared at once", async () => {
+  const { movePast } = await import('../src/move-past.ts');
+  const { loadClaims } = await import('../src/claims.ts');
+  const { alarmsFile, loadAlarms } = await import('../src/alarms.ts');
+  const s = repoWithPrs('steward-move');
+  const shas = { 31: s.make(31, '0.4.1'), 32: s.make(32, '0.4.2'), 33: s.make(33, '0.4.3'), 34: s.make(34, '0.4.4') };
+  const prs = [
+    listed('Jcollier0120/Steward', 31, shas[31], { isDraft: true }),
+    listed('Jcollier0120/Steward', 32, shas[32], { isDraft: true }),
+    listed('Jcollier0120/Steward', 33, shas[33]),
+    listed('Jcollier0120/Steward', 34, shas[34]),
+  ];
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok(prs);
+    if (args[0] === 'release' && args[1] === 'list') return ok([]);
+    if (args[0] === 'pr' && args[1] === 'comment') return ok('');
+  });
+  const self = employee(s.checkout, { id: 'steward', name: 'Steward', repo: 'Jcollier0120/Steward' });
+  const ctx = ctxFor({ employees: [self], workRoot: path.join(tmp, 'work-move'), run: r.run, neutralDir: tmp });
+  rmSync(path.join(process.env.STEWARD_HOME!, 'version-claims.json'), { force: true });
+  await keepVersionQueues(ctx, { projects: [], now: () => later(0) });
+  const id = 'queue:Jcollier0120/Steward#31';
+  writeFileSync(alarmsFile(), JSON.stringify({ at: T, watching: { [id]: T }, open: [{ id, who: 'steward', title: 'held', detail: [], since: T, raisedAt: T }], cleared: [] }));
+
+  const m = await movePast(ctx, self, 31, { now: () => later(70) });
+  assert.equal(m.status, 200, m.message);
+  assert.deepEqual(m.moved.map((x) => [x.number, x.from, x.to, x.told]), [[31, '0.4.1', '0.4.5', true], [32, '0.4.2', '0.4.6', true]], 'above every version in line, the draft that would hold it next with it');
+  assert.match(m.message, /^#31 is moved to v0\.4\.5 \(from v0\.4\.1\), #32 is moved to v0\.4\.6 \(from v0\.4\.2\): #33 and #34 merge at the next round\.$/);
+  const comments = r.gh.filter((a) => a[0] === 'pr' && a[1] === 'comment');
+  assert.equal(comments.length, 2);
+  assert.ok(comments[0].some((a) => /Moved past the others by the Steward.*v0\.4\.5 is claimed for this branch.*set its version to v0\.4\.5/s.test(a)), comments[0].join(' '));
+  assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.moved]), [['feat/31', '0.4.5', 31], ['feat/32', '0.4.6', 32]]);
+  // The queue kept says so at once, and the alarm is gone, not waiting for a round.
+  const kept = loadVersionQueues().repos.find((x) => x.id === 'steward')!;
+  assert.deepEqual([kept.held, kept.queue.map((q) => [q.number, q.moved ?? null])], [undefined, [[33, null], [34, null], [31, '0.4.5'], [32, '0.4.6']]]);
+  assert.deepEqual([loadAlarms().open, loadAlarms().cleared.map((a) => a.id), loadAlarms().watching], [[], [id], {}]);
+  // A round after it finds the same: nothing holds the queue.
+  const q = await keepVersionQueues(ctx, { projects: [], now: () => later(80) });
+  assert.equal(q.repos.find((x) => x.id === 'steward')?.held, undefined);
+  assert.deepEqual(q.upcoming?.map((u) => u.number), [], 'no heads-up for a draft moved past the others');
+  // A hold kept by a round that began before the move raises nothing.
+  assert.deepEqual(heldQueues({ at: T, repos: [{ ...kept, held: { number: 31, title: '', url: '', version: '0.4.1', why: 'a draft', draft: true, behind: [33, 34], since: T } }] }, undefined, loadClaims()), []);
+
+  // Asked again: moved already, nothing said again. A ready one, or one not in line: nothing to move.
+  const again = await movePast(ctx, self, 31, { now: () => later(90) });
+  assert.deepEqual([again.status, again.moved.map((x) => [x.number, x.to, x.again])], [200, [[31, '0.4.5', true]]]);
+  assert.equal(r.gh.filter((a) => a[0] === 'pr' && a[1] === 'comment').length, 2);
+  assert.deepEqual([(await movePast(ctx, self, 33)).status, (await movePast(ctx, self, 33)).message], [409, 'Nothing was moved: #33 is ready now: it merges in its turn, at v0.4.3']);
+  assert.equal((await movePast(ctx, self, 99)).status, 404);
 });
 
 test("the round says what holds the Steward's own queue and since when, and an alarm is raised once it has held more than an hour", async () => {

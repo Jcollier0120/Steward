@@ -87,6 +87,17 @@ export interface Condition {
   since?: string;
   /** How long it must last to be an alarm. */
   afterMs: number;
+  /** What the person can have the Steward do about it, in one click (POST /api/alarms/act). */
+  action?: AlarmAction;
+}
+
+/**
+ * What an alarm's button does, in its words, and the question asked before it (Steward 0.36.52): moving a PR that holds a
+ * version queue past the others (move-past.ts). Its page and Manor's Needs you show it beside Dismiss.
+ */
+export interface AlarmAction {
+  label: string;
+  confirm: string;
 }
 
 export interface Alarm {
@@ -99,6 +110,7 @@ export interface Alarm {
   raisedAt: string;
   /** When the person dismissed it; it stays dismissed until it clears. */
   dismissedAt?: string;
+  action?: AlarmAction;
 }
 
 export interface AlarmState {
@@ -130,6 +142,7 @@ export function reconcile(state: AlarmState, conditions: Condition[], now: Date)
     const was = state.open.find((a) => a.id === c.id);
     const alarm: Alarm = { id: c.id, who: c.who, title: c.title, detail: c.detail, since, raisedAt: was?.raisedAt ?? at };
     if (c.url) alarm.url = c.url;
+    if (c.action) alarm.action = c.action;
     if (was?.dismissedAt) alarm.dismissedAt = was.dismissedAt;
     open.push(alarm);
     if (!was) raised.push(alarm);
@@ -148,7 +161,30 @@ export function dismiss(id: string, now = new Date()): boolean {
   return true;
 }
 
+/**
+ * An open alarm cleared now, its condition gone by the person's hand (a PR moved past the others): not waiting for the
+ * next round to see so. Its condition is forgotten too, so should it come back, its hour starts again. False when there's
+ * no such alarm open.
+ */
+export function clearAlarm(id: string, now = new Date()): boolean {
+  const s = loadAlarms();
+  const a = s.open.find((x) => x.id === id);
+  if (!a) return false;
+  const { [id]: _gone, ...watching } = s.watching;
+  writeJson(alarmsFile(), { ...s, watching, open: s.open.filter((x) => x !== a), cleared: [{ ...a, clearedAt: now.toISOString() }, ...s.cleared].slice(0, KEEP_CLEARED) });
+  return true;
+}
+
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;
+
+/** The id of the alarm a PR holding its version queue raises: "queue:Jcollier0120/Steward#233". */
+export const queueAlarmId = (repo: string, number: number) => `queue:${repo}#${number}`;
+
+/** The repository and PR a queue alarm's id names, or null for any other alarm's. Pure. */
+export function queueAlarmOf(id: string): { repo: string; number: number } | null {
+  const m = /^queue:([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(id);
+  return m ? { repo: m[1], number: Number(m[2]) } : null;
+}
 
 /** A PR the merge stage held, as it said why. */
 export interface Held {
@@ -264,21 +300,26 @@ export function roundConditions(o: {
     if (h.why.startsWith(CONFLICTS)) continue;
     const block = o.settings.alarms.blockingHours;
     const behind = h.behind.map((n) => `#${n}`).join(', ');
+    const moving = [h.number, ...(h.drafts ?? [])].map((n) => `#${n}`);
+    const them = moving.length === 1 ? moving[0] : `${moving.slice(0, -1).join(', ')} and ${moving.at(-1)}`;
     out.push({
-      id: `queue:${q.repo}#${h.number}`,
+      id: queueAlarmId(q.repo, h.number),
       who: q.id,
       title: `${q.name} #${h.number} (v${h.version}) has held its version queue for ${hours(block)} or more: ${behind} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it`,
       detail: [
         h.title,
         `Why it isn't ready: ${h.why}.`,
         `${behind} ${h.behind.length === 1 ? 'is' : 'are'} ready, and ${h.behind.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first. Held since ${h.since}.`,
-        h.draft
-          ? 'Mark it ready once it is done, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.'
-          : 'Get it ready to merge, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.',
+        ...(h.drafts?.length ? [`${h.drafts.map((n) => `#${n}`).join(', ')}, a draft${h.drafts.length === 1 ? '' : ' each'}, would hold it next: they are moved with it.`] : []),
+        `${h.draft ? 'Mark it ready once it is done' : 'Get it ready to merge'}, or close it; or move it past the others: the Steward gives ${them} a version above the rest, tells ${moving.length === 1 ? 'its author' : 'their authors'} on GitHub, and the PRs behind merge at the next round.`,
       ],
       url: h.url,
       since: h.since,
       afterMs: block * HOUR,
+      action: {
+        label: 'Move it past the others',
+        confirm: `Give ${them} ${moving.length === 1 ? 'a version' : 'versions'} above the rest of ${q.name}'s queue, so ${behind} can merge? ${moving.length === 1 ? 'Its author is' : 'Their authors are'} told on GitHub; nothing is pushed to ${moving.length === 1 ? 'its branch' : 'their branches'}.`,
+      },
     });
   }
   for (const [id, commit] of Object.entries(o.failedReleases)) {

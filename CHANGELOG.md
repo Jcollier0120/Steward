@@ -14,6 +14,29 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The castle shows once Manor 0.16.165 or later is installed; before that, the notifications already say Castellan.
 
+## 0.36.52
+
+**A draft holding a repository's version queue can be moved out of the way in one click.**
+
+### What's new
+
+- The alarm for a pull request that has held a version queue for an hour (a draft, usually) now has a **Move it past the others** button, here and in Manor's **Needs you**. It asks first. Then the Steward gives that pull request a version above every other one in line, tells its author in a comment on the pull request, and clears the alarm. The pull requests that waited behind it merge at the round that follows, which comes at once.
+- Nothing is pushed to the moved pull request's branch, so it works for anyone's pull request, a fork's too. Once it is ready, the Steward catches it up to its new version itself where it can (a pull request from the repository itself, with Catch up on); otherwise the comment asks its author to set that version.
+- Drafts just above it that would hold the queue next are moved with it, so one click frees the queue. The alarm names them.
+- **What holds the version queues** on the Steward's page has the same button, so you needn't wait for the hour.
+- `move-past <repository> <pull request number>` does the same from a terminal.
+
+### What changed
+
+- A moved pull request that isn't ready gives up its turn. One marked ready afterwards waits its turn at its new version, behind the pull requests it was moved past, rather than merging first at its old one.
+- The move is recorded with the version claims every PC shares, so another PC whose turn it is to merge in that repository honours it too.
+- A pull request by someone outside Settings' team, which the Steward never merges, no longer counts as holding a version queue. Its draft no longer raises an alarm or a heads-up, and the pull requests above it no longer count as waiting for it. It is still listed in the queue.
+- Settings' **A PR holding others up for** (it was "A conflicting PR holding others up for") now says it covers drafts and other pull requests that aren't ready, as the alarm already did.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor shows the button in Needs you from Manor 0.16.164; an older Manor shows these alarms with Dismiss only.
+
 ## 0.36.51
 
 **Code that already passed its checks isn't tested again: not on this PC, and, with Manor's Other PCs on, not on another of your PCs either.**
