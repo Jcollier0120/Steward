@@ -5,7 +5,7 @@ import { changelogBetween, compareVersions, lf, pinText } from '../kitfiles.ts';
 import { whileAwake } from '../kit/awake.ts';
 import { CHANGELOG, HEADINGS, headingVersion, headlineOf, NOTHING_TO_DO, sectionOf, withEntry } from '../kit/notes.ts';
 import { unsignedGitVars } from '../kit/unsigned-git.ts';
-import { codeAt, recordResult, withWork } from '../kit/work-status.ts';
+import { codeAt, recordResult, toolchainHere, withWork } from '../kit/work-status.ts';
 import { commitOf, fetchBranch, git, gitMaybe, onOrigin, removeWorktree, showFile } from '../git.ts';
 import { affectedTests, kitFromOf, nodeTestScript, scriptsIn, type Changed } from '../affected.ts';
 import type { KitReach } from './kitreach.ts';
@@ -21,6 +21,7 @@ import { recordTested } from '../tested.ts';
 import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
+import { standIn, type StoodIn } from './standin.ts';
 
 /**
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
@@ -150,18 +151,37 @@ export const needsNpmCi = (dir: string) =>
 export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   // A task in the Steward's work status (the kit's work-status.ts), with the commit and code tree it runs at; what it
   // came to is kept by that tree, unless a kit under trial filled it (not the tree's own result) or it wasn't clean.
-  const { commit, tree } = await codeAt(dir);
+  const { commit, tree, clean } = await codeAt(dir);
   const trial = !!o.env?.STEWARD_KIT;
   const what = `${e.name}: ${o.doing ?? 'its checks'}`;
   return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async () => {
+    // Code that already passed these checks, in the Assayer, here or on another PC on the licence, isn't run again
+    // (standin.ts): never a trial's, one with settings of its own, nor one whose point is this PC.
+    const stood = trial || o.here || Object.keys(o.env ?? {}).length || !clean || !commit || !tree ? null : await standIn(ctx, e, dir, { tree, scope: o.affected });
+    if (stood) {
+      o.say(stood.line ?? 'a pass of exactly this code: not run again');
+      if (o.stoodIn) Object.assign(o.stoodIn, stood);
+      return null;
+    }
     const failed = await whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
     const after = trial || !commit ? null : await codeAt(dir);
-    if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, ...(failed ? { note: failed.slice(0, 500) } : {}) });
+    if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, commands: e.test, ...toolchainHere(), ...(failed ? { note: failed.slice(0, 500) } : {}) });
     return failed;
   });
 }
 
-type ChecksOptions = { env?: Record<string, string>; say: (line: string) => void; affected?: AffectedScope; doing?: string; timeLimit?: (kind: CheckKind) => TimeLimit | null; failed?: FailedChecks };
+type ChecksOptions = {
+  env?: Record<string, string>;
+  say: (line: string) => void;
+  affected?: AffectedScope;
+  doing?: string;
+  timeLimit?: (kind: CheckKind) => TimeLimit | null;
+  failed?: FailedChecks;
+  /** Run on this PC whatever passed elsewhere: no pass stands in (standin.ts). */
+  here?: boolean;
+  /** Filled with the pass that stood in, when one did (runChecks then ran nothing, and answers null). */
+  stoodIn?: StoodIn;
+};
 
 async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   const started = Date.now();
@@ -396,7 +416,8 @@ async function withoutTheKit(ctx: Ctx, e: Employee, dir: string, o: { say: (line
     return null;
   }
   o.say('its checks without the kit, as its main has it, to see whether the kit is why they fail');
-  return runChecks(ctx, e, dir, { ...o, doing: 'its checks without the kit' });
+  // Run here, whatever passed elsewhere: the question is whether this PC fails its main.
+  return runChecks(ctx, e, dir, { ...o, here: true, doing: 'its checks without the kit' });
 }
 
 export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<EmployeeResult> {
