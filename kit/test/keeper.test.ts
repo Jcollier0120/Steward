@@ -641,7 +641,7 @@ test("the NPU's idle stop by this PC's memory: under 20 GB, each server's route'
   // A 16 GB laptop, as Windows shows it: OpenVINO Model Server's chat and its embedding server after 5 minutes each.
   assert.deepEqual(idle(intel, 15.6 * GB), [['http://127.0.0.1:18183', 5], ['http://127.0.0.1:18186', 5], [CARD, 10]], 'the card keeps gpuIdleStopMinutes');
   assert.deepEqual(idle(intel, 12 * GB).map(([, m]) => m), [5, 5, 10]);
-  assert.deepEqual(idle(npuRaw(FLM), 15.6 * GB).map(([, m]) => m), [5, 10], "FastFlowLM's measured start (6.6 s on an XDNA 2): the floor, 5");
+  assert.deepEqual(idle(npuRaw(FLM), 15.6 * GB).map(([, m]) => m), [6, 10], "FastFlowLM's measured start (Qwen3.5-2B, 15.1 s on an XDNA 2): 20 times it, 6");
   assert.deepEqual(idle(npuRaw(GENIEX, HEXAGON), 15.6 * GB).map(([, m]) => m), [5, 5, 10], 'GenieX, and its llama-server on the Hexagon');
   assert.deepEqual(idle(npuRaw('C:\\mine\\my-server.exe'), 15.6 * GB).map(([, m]) => m), [10, 10], 'a server no route runs keeps the default');
   // Bigger, or memory unknown: as before.
