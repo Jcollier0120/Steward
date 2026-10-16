@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { APP } from '../app.ts';
 import { commitOf, fetchBranch, fetchFor, git, removeWorktree, showFile } from '../git.ts';
 import { latestKit } from '../kitsource.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
@@ -202,6 +203,14 @@ async function vouchedHere(ctx: Ctx, e: Employee, pr: PrInfo, scope: AffectedSco
   return tested;
 }
 
+/**
+ * A PR of the Steward's own that raises its kit, tested between builds for the next one (stages/prepare.ts): its whole
+ * suite, not only what its change reaches. A kit PR's change reaches most of the suite anyway, and a whole pass is kept
+ * by its tree (whole.ts), so the gate before the kit's release (stages/wholesuite.ts), on the same tree once merged up to
+ * date, isn't run again inside the build: on 2026-10-16 that gate took 14 to 35 minutes of the 08:00 build.
+ */
+export const wholeAhead = (ctx: Pick<Ctx, 'build' | 'prepare'>, e: Pick<Employee, 'id'>, pr: PrInfo): boolean => !!ctx.prepare && !ctx.build && e.id === APP.id && raisesKit(pr);
+
 async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const now = () => new Date().toISOString();
   if (!e.test.length) return { ok: false, note: `Settings give ${e.name} no checks to test it with`, at: now() };
@@ -217,8 +226,8 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   ctx.log(`[${e.id}] #${pr.number} has no checks on GitHub: testing it here at ${sha}, in ${dir}`);
   try {
     const say = (line: string) => ctx.log(`[${e.id}] ${line}`);
-    // Only the tests its change reaches (affected.ts), unless Settings say the whole suite.
-    const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
+    // Only the tests its change reaches (affected.ts), unless Settings say the whole suite, or it is wholeAhead.
+    const scope: AffectedScope | undefined = ctx.settings.affectedTests === false || wholeAhead(ctx, e, pr) ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
     const stoodIn: StoodIn = {};
     const task = { pr: pr.number, branch: pr.head };

@@ -33,6 +33,29 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - At a full pace the manor now always leaves 15% of the processor and memory to you and Windows, so big jobs such as a whole suite or a kit trial may take a little longer than before. Nothing to set: it updates itself as usual. Each agent's own work gets the ceiling when it takes kit 2.78.3.
 
+## 0.36.67
+
+**Builds are short: the next build's tests run between builds, a build only merges what passed and releases it, and it takes 30 minutes at most.**
+
+### What's new
+
+- **The next build's tests run ahead of it.** Between builds, beside the rounds and at the checks' gentle pace, the Steward now tests what the next build will merge: each ready pull request at its head, a version queue as one train, a build's batch, and a new kit's trial on every agent, the Steward's own first. Nothing is merged, pushed or released until the build.
+  - At the build, a pull request, train or batch whose code hasn't moved since merges without being tested again. Anything pushed to since is tested in the build, as before.
+  - A pull request that raises the kit runs its whole suite ahead of the build, not only the tests its change reaches. The whole suite the kit's release waits for then doesn't run again in the build, when nothing moved.
+  - A repository is looked at again only once its branch, its ready pull requests or the kit move, so quiet hours cost nothing.
+- **Where a build's time goes.** Each build now keeps when each of its parts started and ended: the tests of each repository, the kit's trial, the whole suite before a kit's release, the merges, the rollout, the releases (signing included) and telling Manor. The Steward's page says in a line how long the last build took and where the time went, and how much of its testing ran ahead of it.
+
+### What changed
+
+- **A build rolls out the newest kit, once.** When a newer kit is merging in the same build (its trial on the agents still going, or its release waiting for its whole suite), the rollout now waits for it. Before, the build sent the kit before it to every agent, with each one's checks run, and the next build bumped them all again. In a build, the newest kit now goes at once, without the hours a new kit waits to settle between builds.
+- **A build's releases run side by side.** Up to a third of the PC's cores at once (six at most), or Settings' parallel releases if that's more. Releases that sign start first, one after another in a lane of their own, since signing takes longest and the signing key answers one signtool at a time. The rest release beside them.
+- **A test that failed on a busy PC no longer holds up a release.** On a fully loaded PC, one of the Steward's own tests could have its request dropped after a minute's wait, which failed the whole suite before a kit's release. It now waits for the answer, up to three minutes.
+- **A build takes 30 minutes at most** unless you set it otherwise, and "A build takes at most … minutes" can no longer be set above 60. A build that runs out of time releases what it merged; the rest waits for the next build.
+
+### Before you update
+
+- Nothing: it updates itself as usual. If you left the build window at its old two hours, it becomes 30 minutes; if you set it to more than an hour yourself, it becomes an hour.
+
 ## 0.36.66
 
 **Builds run on time on a PC that sleeps: plugged in, it wakes a few minutes before each build and stays up until the build closes. A build the PC slept through says so, and a build shows as under way from its start.**

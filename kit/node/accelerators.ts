@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { alive, startApart } from './apart.ts';
 import * as core from './core/index.js';
 import { acceleratorsDir, lockDirFor } from './lock.ts';
 import { lineState, queueDirFor, readLine, slotDirs, type Lane } from './npu-queue.ts';
-import { powershell } from './ps.ts';
+import { powershell, psQuote } from './ps.ts';
 import { samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
@@ -27,14 +27,18 @@ import { RULES } from './rules.ts';
  *   accelerator failed (a file every agent reads), and the request goes once to the next candidate;
  *   a busy server (loading a model, or answering) is waited on, and a timeout while a model loads
  *   (ModelLoading) marks nothing;
- * - the servers' quirks: GenieX's prefix leak (a nonce first), and whether images go as a local path.
+ * - the servers' quirks: GenieX's prefix leak (a nonce first), whether images go as a local path, and FastFlowLM's
+ *   pictures with a side of a whole number of 32 px (made a pixel longer).
  * The turns themselves (locks, lines, this agent's manners) are the kit's npu.ts's.
  */
 
 export type AcceleratorKind = core.AcceleratorKind;
 export type Work = core.Work;
 
-/** `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path. */
+/**
+ * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
+ * `sides-of-32`: a picture's side of a whole number of 32 px is made a pixel longer first (FastFlowLM 1.0.7: fitPicture).
+ */
 export const QUIRKS: string[] = [...core.QUIRKS];
 
 export interface ChatMessage {
@@ -870,7 +874,108 @@ export function imageUrl(image: string, asPath: boolean): string {
   return `data:${mime};base64,${readFileSync(image).toString('base64')}`;
 }
 
-/** One question about one image: a local path the server reads itself (`image-path`), else a `data:` URL. */
+/**
+ * A picture's width and height from its header (PNG, JPEG, GIF, BMP), or null for another format (WebP) or one it can't
+ * read. Pure.
+ */
+export function pictureSize(b: Buffer): { width: number; height: number } | null {
+  if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47 && b.toString('latin1', 12, 16) === 'IHDR') return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  if (b.length >= 10 && /^GIF8[79]a$/.test(b.toString('latin1', 0, 6))) return { width: b.readUInt16LE(6), height: b.readUInt16LE(8) };
+  if (b.length >= 26 && b.toString('latin1', 0, 2) === 'BM') {
+    // BITMAPCOREHEADER (12 bytes) has 16-bit sides; every later header 32-bit ones, the height negative when top-down.
+    return b.readUInt32LE(14) === 12 ? { width: b.readUInt16LE(18), height: b.readUInt16LE(20) } : { width: Math.abs(b.readInt32LE(18)), height: Math.abs(b.readInt32LE(22)) };
+  }
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    // JPEG: its segments up to the first frame header (SOF0 to SOF15, which aren't DHT, JPG or DAC), which holds the sides.
+    let i = 2;
+    while (i + 9 <= b.length) {
+      if (b[i] !== 0xff) return null;
+      const m = b[i + 1];
+      if (m === 0xff) i += 1;
+      else if (m === 0x01 || (m >= 0xd0 && m <= 0xd8)) i += 2;
+      else if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { width: b.readUInt16BE(i + 7), height: b.readUInt16BE(i + 5) };
+      else if (m === 0xd9 || m === 0xda) return null;
+      else i += 2 + b.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+/**
+ * The size a server with `sides-of-32` should get a picture at, or null when it reads it right as it is. FastFlowLM 1.0.7
+ * misreads a picture with a side of a whole number of 32 px (its models' patches, 16 px merged in twos) when it doesn't
+ * shrink the picture itself, which its --img-pre-resize 2 (the default, the AMD route's) does only above 720 px tall.
+ * Made a pixel longer, such a side is resampled by the model's own resize, and read right: spec/NPU-VENDORS.md has the
+ * measurements. Pure.
+ */
+export function sidesOff32(size: { width: number; height: number }): { width: number; height: number } | null {
+  if (size.width < 1 || size.height < 1 || size.height > 720) return null;
+  const off = (n: number) => (n % 32 ? n : n + 1);
+  const to = { width: off(size.width), height: off(size.height) };
+  return to.width === size.width && to.height === size.height ? null : to;
+}
+
+/** Redraws the picture `from` at `size` as a PNG at `to`: System.Drawing's high-quality bicubic, its edges not faded. */
+export async function redrawPicture(from: string, to: string, size: { width: number; height: number }): Promise<void> {
+  const w = Math.round(size.width);
+  const h = Math.round(size.height);
+  await powershell(
+    `Add-Type -AssemblyName System.Drawing
+$src = [System.Drawing.Image]::FromFile(${psQuote(from)})
+try {
+  $bmp = New-Object System.Drawing.Bitmap ${w}, ${h}
+  try {
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+      $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $edges = New-Object System.Drawing.Imaging.ImageAttributes
+      $edges.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
+      $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, ${w}, ${h}), 0, 0, $src.Width, $src.Height, [System.Drawing.GraphicsUnit]::Pixel, $edges)
+    } finally { $g.Dispose() }
+    $bmp.Save(${psQuote(to)}, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally { $bmp.Dispose() }
+} finally { $src.Dispose() }`,
+    { timeoutMs: 30_000 },
+  );
+}
+
+/**
+ * The picture as `acc`'s server should get it (a local path, a `data:` URL or a URL): as it is, except where the server
+ * has `sides-of-32` and sidesOff32 gives the picture another size. Then it's redrawn at that size and goes as a PNG
+ * `data:` URL. A URL, a format whose size it can't read (WebP), and a picture it couldn't redraw go as they are.
+ */
+export async function fitPicture(acc: Pick<Accelerator, 'quirks'>, image: string, redraw: typeof redrawPicture = redrawPicture): Promise<string> {
+  if (!acc.quirks.includes('sides-of-32') || /^https?:/i.test(image)) return image;
+  const data = /^data:[^,]*;base64,/i.exec(image);
+  if (!data && /^data:/i.test(image)) return image;
+  let bytes: Buffer;
+  try {
+    bytes = data ? Buffer.from(image.slice(data[0].length), 'base64') : readFileSync(image);
+  } catch {
+    return image; // the request says what's wrong with it, as before
+  }
+  const size = pictureSize(bytes);
+  const to = size && sidesOff32(size);
+  if (!to) return image;
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'kit-picture-'));
+  try {
+    const from = data ? path.join(dir, 'from') : image;
+    if (data) writeFileSync(from, bytes);
+    const out = path.join(dir, 'to.png');
+    await redraw(from, out, to);
+    return `data:image/png;base64,${readFileSync(out).toString('base64')}`;
+  } catch {
+    return image;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * One question about one image: a local path the server reads itself (`image-path`), else a `data:` URL. The image is
+ * the one fitPicture gives for `acc`, which the caller awaits first.
+ */
 export function visionBody(acc: Accelerator, ep: Endpoint, image: string, question: string, maxTokens: number): Record<string, unknown> {
   const system = `${acc.quirks.includes('prefix-leak') ? `${nonce()} ` : ''}You answer questions about images briefly and literally.`;
   return {

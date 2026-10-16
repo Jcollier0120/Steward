@@ -192,6 +192,30 @@ The NPU 3720's PC (a Core Ultra 5 225U with 16 GB) shows Windows 15.43 GB, and i
 - **Chat's working set peaks at 5.1 GB as it loads**, from its compile cache, and settles at 3.1 GB once loaded. A 16 GB PC has the room, and the budget counts what a server holds once loaded.
 - **The Lunar Lake** (chat 4.3 GB at 4,096 tokens, measured with its prefix cache on, and embeddings 1.74) comes to 6.04 GB against a 16 GB PC's budget of 6.1 to 6.4: it fits, with little to spare. With the cache off it should hold less, as the NPU 3720 held 0.4 to 0.6 GB less at 4,096, but it won't be measured again.
 
+### FastFlowLM's pictures with sides of 32 px (AMD)
+
+FastFlowLM 1.0.7 misreads a picture it doesn't shrink when one of its sides is a whole number of 32 px. Its `--img-pre-resize` 2 (the default, the route's) shrinks only a picture taller than 720 px. The model's own resize then brings each side to a whole number of 32 px (16 px patches, merged in twos), and a side that already is one comes out misread. It was found from Smith's audit, whose vision check (TALLY 4827 in black on a white 512×512 PNG) failed on the Krackan.
+
+Measured there on 2026-10-16, asking each picture "What text is written in this image?" at temperature 0. With Qwen3.5-2B (the route's model), on a server of its own:
+
+| Picture | Tokens | Answer |
+|---|---|---|
+| 512×512 | 284 | wrong ("tuya") |
+| the same, redrawn at 513×513 | 284 | right |
+| 500×500, 520×520 (the 512 redrawn), 600×600 | 284–389 | right |
+| 640×640, 704×704, 960×540, 1024×576 | 428–604 | wrong |
+| 1280×720 | 948 | wrong ("TALLY 482") |
+| 1281×721 (the same, redrawn), 1290×720 | 948 | right |
+| 1280×360, 1440×720, 2560×720 | 468–1,868 | wrong |
+| 720×360, 1272×360, 2550×720 | 281–1,868 | right |
+| 1920×1080, which FastFlowLM shrinks to 1280×720 | 948 | right |
+
+One picture broke the pattern: 700×700 read "TALLY 487", a digit short. Through the kit's own `Npu.vision`, with this PC's Qwen3-4B vision model (qwen3vl-it:4b), the 512, 640, 1280×720, 1280×360 and 1024×576 pictures read "1482" or "TALY4827" as sent today, and all five read right with the quirk. Neither the format (32-bit or 24-bit PNG, JPEG) nor the alpha channel changed it.
+
+So the route has the quirk `sides-of-32`. Before a picture goes to FastFlowLM, the kit's `fitPicture` makes a side of a whole number of 32 px a pixel longer, on a picture 720 px tall or less. It redraws the picture with System.Drawing (high-quality bicubic) and sends it as a PNG `data:` URL. The redraw took 59 to 74 ms in the agent's PowerShell worker. The model's resize brings the picture back to the same number of patches, so it costs no tokens.
+
+Enlarging such a picture to 720 px tall fixes a square too, at twice the tokens, but not a wide one: 1280×360 enlarged to 2560×720 still misread ("ITALY 487"). A picture whose size the kit can't read from its header (WebP) goes as it is. FastFlowLM 1.0.8's and 1.0.9's notes mention no fix. When a later version reads these right, the route drops the quirk.
+
 ## Detection
 
 Detection asks Windows for the devices it lists as **Neural processors** (the `ComputeAccelerator` device class, as Heiward's `NpuHardware.cs` reads it), with their maker, PnP device id and driver (`DETECT_PS`, its `npu2|…` line). A PC whose Windows lists none is asked for a Hexagon driver as before.

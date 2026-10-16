@@ -109,6 +109,29 @@ test('three ready PRs in the queue merge as one train: stacked lowest first, tes
   assert.ok(!existsSync(path.join(q.dir, 'work', 'fake-train')), 'its worktree is gone');
 });
 
+test('a train prepared between builds is tested then and merges nothing; the build merges it without testing it again', async () => {
+  const q = queue('prepared', 2);
+  const gh = github(q);
+  const { e, ctx } = ctxOf(q, gh.run);
+  const build = { due: '2026-10-13T11:00:00.000Z', name: 'the 13:00 build' };
+  const main = sh(q.origin, 'rev-parse', 'refs/heads/main');
+  ctx.prepare = build;
+  const prep = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(prep.outcome, 'skipped', prep.message);
+  assert.equal(gh.gh.filter((a) => a[1] === 'merge').length, 0, 'nothing merged');
+  assert.equal(sh(q.origin, 'rev-parse', 'refs/heads/main'), main, 'nothing pushed to main');
+  assert.match(ctx.lines.join('\n'), /a train of #31, #32 \(v0\.4\.1 to v0\.4\.2\) stacked at [0-9a-f]{7}: its checks, once/);
+
+  ctx.lines.length = 0;
+  ctx.prepare = null;
+  ctx.build = build;
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(r.outcome, 'done', r.message);
+  assert.deepEqual(r.merged.map((p) => p.number), [31, 32]);
+  assert.equal(JSON.parse(sh(q.origin, 'show', 'refs/heads/main:package.json')).version, '0.4.2');
+  assert.match(ctx.lines.join('\n'), /its checks passed here at .*, on exactly this code \(tree [0-9a-f]{7}\): not run again/, 'the same tree passed ahead of the build: not tested again');
+});
+
 test("a train whose checks fail merges nothing as a train, isn't built again for the same heads, and the PRs go one at a time", async () => {
   const q = queue('fails', 2);
   const gh = github(q);

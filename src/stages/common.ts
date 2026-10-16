@@ -41,6 +41,8 @@ export interface EmployeeResult {
   errors?: string[];
   /** Its release waits until this PC can sign (signing.ts): why it can't, in a line. Nothing failed. */
   signing?: string;
+  /** The Steward's kit merged, whose release waits (its whole suite, stages/self.ts): its version. A build's rollout waits for it (stages/buildkit.ts). */
+  kitWaits?: string;
 }
 
 export type StageName = 'bump' | 'push' | 'merge' | 'release' | 'round' | 'staff';
@@ -112,6 +114,12 @@ export interface Ctx {
    * (stages/build.ts). Absent between builds, and without the pipeline.
    */
   build?: { due: string; name: string } | null;
+  /**
+   * Between builds, the next build prepared for (stages/prepare.ts): its build time, and its name in words. A repository's
+   * ready PRs are then tested as that build would test them (each at its head, stacked as its train or batch, a kit's
+   * trial), and nothing is merged, pushed, caught up or released: the build finds those passes and only merges.
+   */
+  prepare?: { due: string; name: string } | null;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */
