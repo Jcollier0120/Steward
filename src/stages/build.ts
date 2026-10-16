@@ -219,7 +219,7 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
   const { run } = ctx;
   // Between builds, the next build's batch: stacked and tested as it will be, then left for the build (prepared).
   const dry = !!ctx.prepare && !ctx.build;
-  const build = ctx.build ?? ctx.prepare ?? { due: new Date().toISOString(), name: 'the build' };
+  const build: { due: string; name: string; ahead?: boolean } = ctx.build ?? ctx.prepare ?? { due: new Date().toISOString(), name: 'the build' };
   const none = (note: string): BuildBatch => ({ merged: [], dropped: [], kept: [], note, tested: false });
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return none(`there's no checkout at ${repo}`);

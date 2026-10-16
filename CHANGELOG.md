@@ -4,15 +4,22 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.70
 
-**Builds do less work: one kit tried and rolled out per build, an agent released for a new kit alone only when the kit changes what it runs, and the whole suite never tested beside a kit's trial.**
+**Builds do less work: ready pull requests merge between builds and wait on main to be released at the build, one kit is tried and rolled out per build, an agent is released for a new kit alone only when the kit changes what it runs, and the whole suite is never tested beside a kit's trial.**
 
 ### What's new
 
+- **Ready pull requests merge ahead of the build.** Between builds, beside the rounds and at the checks' gentle pace, the Steward now does the build's merge pass ahead of time:
+  - Each ready pull request merges into main in version order, as in a build: stamped, tested once with the others, the one that broke a stack found and left out, a kit pull request after its trial on the agents, and the rest caught up.
+  - Nothing is released and no kit is rolled out. What merged waits on main until the build.
+  - At the build, the Steward merges whatever is left and releases each repository once. A repository with several pull requests merged since the last build gets one release, and its notes bring every version merged ahead. A new kit merged ahead is released, and rolled out to the agents, at the build alone.
+  - Nothing merges ahead once a build has begun, so main never moves under a build. A pull request left out ahead of a build is tried again by the build itself.
+  - Build now and urgent fixes work as before.
+  - For customers, updates still come at the build times, and builds end sooner.
 - **A new kit alone no longer releases every agent.** When the only change in an agent's version since its last release is the Steward's kit bump, the Steward releases it only:
   - if a file the new kit changes is one the agent runs: its own code, what that code imports, the kit scripts and lists it names, and the folders it reads. At most one such release a day per agent; or
   - if the kit's changelog entry says it's urgent, or names a fix for that agent (a line starting "**Fix for Reeve, Crier: …**").
 
-  Otherwise the bump is merged and waits. It goes out with the agent's next release of its own, and that release's notes carry the bump's entry too. In the 08:00 build of 16 October, 33 agents were released, most of them for a kit whose changes they never run.
+  Otherwise the bump is merged and waits. It goes out with the agent's next release of its own, and that release's notes carry the bump's entry too. Since Monday 12 October, 447 of the 601 agent releases were a new kit alone. Most kits change files every agent runs, so the one-a-day limit does most of the saving: about 140 of those 447 would have gone out.
   - For customers, this means fewer updates of agents in which nothing they'd notice changed. A kit fix for an agent, or an urgent one, still reaches them at once.
   - Release on the Steward's page still releases such a version at once.
 
