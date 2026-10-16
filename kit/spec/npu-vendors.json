@@ -633,6 +633,12 @@
       "readPerWrite": 30,
       "quirks": [],
       "recycle": false,
+      "powerTool": {
+        "exe": "%SystemRoot%\\System32\\AMD\\xrt-smi.exe",
+        "args": ["examine"],
+        "brokenExit": 3221225785,
+        "broken": "an older AMD NPU driver left its files in Windows\\System32\\AMD, where AMD's xrt-smi.exe loads them and can't start, and FastFlowLM sets the power mode with xrt-smi. Removing that older driver package fixes it (an administrator's job, with pnputil /delete-driver)"
+      },
       "idleStop": {
         "coldStartMs": {
           "chat": 15100,

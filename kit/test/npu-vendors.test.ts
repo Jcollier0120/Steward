@@ -592,11 +592,11 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   const noRuntime = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...fakeNpuIo().io, download: async (d: { what: string }) => { if (d.what.endsWith('.vsix')) throw new Error('404 Not Found'); } });
   assert.equal(noRuntime.entry, undefined);
   assert.match(noRuntime.problems[0], /^npu: the Microsoft Visual C\+\+ runtime 14\.44's download failed: 404 Not Found\. config\.json gets no NPU entry/);
-  // AMD: FastFlowLM's zip, then its one model, for chat and pictures.
+  // AMD: FastFlowLM's zip, then its one model, for chat and pictures, then, once it answered, AMD's xrt-smi (FastFlowLM's power tool), read only.
   const a = planFor(NPU.strix, 'x64', tools);
   const ar = fakeNpuIo();
   assert.deepEqual((await setUpNpu(a, tools, ar.io)).problems, []);
-  assert.deepEqual(ar.did.slice(2), ['run flm.exe pull qwen3.5:2b']);
+  assert.deepEqual(ar.did.slice(2), ['run flm.exe pull qwen3.5:2b', 'run xrt-smi.exe examine']);
 
   // Each failure leaves no entry, and says which step failed.
   const fails: [string, Parameters<typeof fakeNpuIo>[0], RegExp][] = [
@@ -611,6 +611,35 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
     assert.match(r.problems[0], re, what);
     assert.match(r.problems[0], /config\.json gets no NPU entry; its work goes to the graphics card or the processor$/, what);
   }
+});
+
+test("AMD's xrt-smi that can't start (an older driver's DLLs beside it): the NPU used all the same, at its default power mode, and the note says why", async () => {
+  const tools = path.join(home, 'npu-power');
+  const plan = planFor(NPU.strix, 'x64', tools);
+  assert.deepEqual(plan.powerTool && [plan.powerTool.exe, plan.powerTool.args], ['C:\\Windows\\System32\\AMD\\xrt-smi.exe', ['examine']]);
+  assert.equal(planFor(NPU.lunar, 'x64', tools).powerTool, undefined, "Intel's route runs no power tool");
+  // xrt-smi's run as the loader ends it: 0xC0000139, an entry point not found, as Node reports it.
+  const withExit = (code: number | null, xrtSmi = true) => {
+    const w = fakeNpuIo();
+    return { ...w.io, run: async (exe: string, args: string[]) => (/xrt-smi\.exe$/i.test(exe) ? { code, out: '' } : w.io.run(exe, args)), exists: (p: string) => (/xrt-smi\.exe$/i.test(p) ? xrtSmi : w.io.exists(p)) };
+  };
+  const broken = await setUpNpu(plan, tools, withExit(0xc0000139));
+  assert.equal(broken.entry?.chat?.model, 'qwen3.5:2b', 'used all the same');
+  assert.deepEqual(broken.problems, []);
+  assert.deepEqual(broken.power, { exe: 'C:\\Windows\\System32\\AMD\\xrt-smi.exe', missing: false, code: 3221225785, broken: true });
+  assert.match(broken.note!, /^The NPU \(.+\) is used, at its default power mode: an older AMD NPU driver left its files in Windows\\System32\\AMD, .* \(an administrator's job, with pnputil \/delete-driver\)\.$/);
+  // One that runs, one that isn't there (nothing run), and another failure: no note.
+  const fine = await setUpNpu(plan, tools, withExit(0));
+  assert.deepEqual([fine.note, fine.power?.broken], [undefined, false]);
+  const missing = await setUpNpu(plan, tools, withExit(0, false));
+  assert.deepEqual([missing.note, missing.power], [undefined, { exe: 'C:\\Windows\\System32\\AMD\\xrt-smi.exe', missing: true, code: null, broken: false }]);
+  const other = await setUpNpu(plan, tools, withExit(1));
+  assert.deepEqual([other.note, other.power?.broken], [undefined, false]);
+  // Its server failing its test leaves xrt-smi unrun: the NPU isn't used, and its note says that instead.
+  const fails = fakeNpuIo({ answers: false });
+  const failed = await setUpNpu(plan, tools, fails.io);
+  assert.equal(failed.power, undefined);
+  assert.ok(!fails.did.some((d) => /xrt-smi/.test(d)));
 });
 
 test("GenieX's libraries are copied over llama.cpp's where they differ, and only then; a missing one says which", () => {

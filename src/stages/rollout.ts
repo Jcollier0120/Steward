@@ -9,7 +9,8 @@ import { checkoutOf, freshBranch, workRootOf, glanceOf, networkFailure, NOT_ON_K
 import { push } from './push.ts';
 import { openPrs, parsePrs, readPin } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
-import { withRepo } from './slots.ts';
+import { LockTimeout, withLock } from '../kit/lock.ts';
+import { apart, STAGE_STALE_MS, withRepo } from './slots.ts';
 import { kitReach, type KitReach } from './kitreach.ts';
 import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
 
@@ -45,9 +46,62 @@ import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
  * rolloutQuietHours without a newer one, and never later than rolloutMaxWaitHours after the oldest kit released since
  * the last one rolled out (rollout-settle.json). A kit whose changelog entry's bold line starts with "Urgent" goes at
  * once. While the newest settles, the kit rolled out last still reaches those behind it, and its folds, as before.
+ *
+ * On the Steward's page (agent.ts: rolloutsBeside) the bumps and pushes run beside the rounds, never inside one (0.36.60).
+ * Inside the round, a rollout to some thirty agents, each bump running its checks at the checks pace, held every merge
+ * until it ended: the rounds that rolled a kit out took 20 to 56 minutes from 2026-10-12 to 15, against 15 to 20 for
+ * those that didn't, and a ready PR waited all that time. Now the round decides (the kit, and which employees are behind
+ * it: a fetch and a read for each) and starts the bumps as a job of its own, then goes on at once. Later rounds merge, and
+ * merge each kit PR as it opens, beside it; one that reaches an employee the rollout is bumping right now waits for that
+ * one bump, as two stages do for a repository (stages/slots.ts). While it runs no round starts another (`going`); one
+ * another process runs (a round in a terminal) holds locks\rollout, and leaves this PC's rounds nothing to roll out. When
+ * it ends, `ended` is told (a round comes at once, to merge what it opened), and that round reports what it did
+ * (takeRolloutResults), so stages.log, the round's look at what failed and the alarms see it as before. In a terminal
+ * round, and under node --test unless a test says otherwise, it runs inside the round as before.
  */
 
 export const rolloutFailedFile = () => dataFile('rollout-failed.json');
+
+/** Held while a rollout bumps and pushes, here or in another process: one at a time on this PC. */
+export const rolloutLock = () => dataFile('locks', 'rollout');
+
+/** What a round says when another process's rollout holds rolloutLock. */
+const ELSEWHERE = 'another rollout is bumping and pushing on this PC (a round in a terminal, say): the kit is left to it, and the next round looks again';
+
+/** What a rollout beside the rounds did, as `ended` is told it. */
+export interface RolloutRun {
+  kit: string;
+  results: EmployeeResult[];
+}
+
+/**
+ * Set by the Steward's page (agent.ts): the rollout's bumps and pushes then run beside the rounds, `ended` told when
+ * one ends and its lines going to `log`. Unset (a round in a terminal, the tests), they run inside the round.
+ */
+let beside: { ended?: (r: RolloutRun) => void; log?: (line: string) => void } | null = null;
+export const rolloutsBeside = (o: typeof beside): void => void (beside = o);
+
+/** The rollout running beside the rounds in this process: one at a time. */
+let going: { kit: string; names: string[]; started: number; done: Promise<void> } | null = null;
+
+/** What the rollouts beside the rounds did since a round last reported it. */
+let unreported: EmployeeResult[] = [];
+
+/** Settles once the rollout running beside the rounds has ended (at once when none runs). */
+export const rolloutDone = (): Promise<void> => going?.done ?? Promise.resolve();
+
+/** What the rollouts beside the rounds did since a round last took it: that round's results now. */
+export function takeRolloutResults(): EmployeeResult[] {
+  const out = unreported;
+  unreported = [];
+  return out;
+}
+
+/** How long ago, in words: "4 minutes". Pure. */
+const ago = (ms: number) => {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  return m < 1 ? 'less than a minute' : m === 1 ? 'a minute' : `${m} minutes`;
+};
 
 /** The kit rolled out last, and when the round chose it: what the next kit's settling counts from. */
 export const rolloutSettleFile = () => dataFile('rollout-settle.json');
@@ -289,9 +343,17 @@ export function clearRolloutHolds(ids: string[]): void {
 /**
  * The round's rollout, for the employees it looks at: each one's facts, the decision, then bump and push for those
  * behind the newest kit. One result for each employee it did something for (prefixed "rollout: "); a held one says so,
- * skipped. What failed is kept, and what no longer holds is let go.
+ * skipped. What failed is kept, and what no longer holds is let go. Beside the rounds (rolloutsBeside), the bumps and
+ * pushes are started as a job of their own and `beside` is true: their results come in a later round (takeRolloutResults).
  */
-export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string | null; ownKit: string | null; changelog: (kit: string) => Promise<string | null> }): Promise<{ results: EmployeeResult[]; plan: RolloutPlan }> {
+export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string | null; ownKit: string | null; changelog: (kit: string) => Promise<string | null> }): Promise<{ results: EmployeeResult[]; plan: RolloutPlan; beside?: boolean }> {
+  // Still bumping beside the rounds: this round leaves the kit to it, and decides nothing.
+  if (going) {
+    const who = going.names.length === 1 ? going.names[0] : `${going.names.length} employees`;
+    const why = `kit ${going.kit}'s rollout to ${who} goes on beside the rounds (started ${ago(Date.now() - going.started)} ago): the rounds go on merging meanwhile`;
+    ctx.log(`rollout: ${why}`);
+    return { results: [], plan: { kit: going.kit, why, waitsForSteward: false, bump: [], skip: [] }, beside: true };
+  }
   const failed = loadRolloutFailures();
   const before = JSON.stringify(failed);
   // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx), or for a program
@@ -342,50 +404,105 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // Those it looked at that no longer hold (on the kit now, a newer kit, a new commit): let go.
   for (const s of plan.skip) if (!s.held && s.employee.id in failed) delete failed[s.employee.id];
   for (const s of plan.skip.filter((x) => x.held)) results.push(result(s.employee, 'skipped', `rollout: ${s.why}`));
-  if (plan.bump.length) {
-    ctx.log(`rollout: kit ${kit} for ${plan.bump.map((b) => b.employee.name).join(', ')}`);
-    const heads = new Map(plan.bump.map((b) => [b.employee.id, b.head]));
-    const at = new Date().toISOString();
-    // The kit's changelog: each bump's entry in the employee's own, and its PR's body.
-    let changelog: string | null = null;
-    try {
-      changelog = await o.changelog(kit);
-    } catch {
-      // The entry names the kit alone, and the PR's body points at the kit's changelog.
-    }
-    const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
-    // Each bump runs the tests the kit reaches from the kit its branch pins, as the kit's trial did (kitreach.ts), not the
-    // whole suite: read from the kit's tag in the Steward's clone. Without the clone, or the tag, each runs them all.
-    const clone = stewardClone(ctx);
-    const reach = clone
-      ? async (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean): Promise<KitReach> =>
-          (await releasedTree(ctx, kit)) ? kitReach(ctx, { repo: clone, head: `refs/tags/kit-v${kit}`, pin, toolChanged }) : { all: `kit ${kit}'s release couldn't be read` }
-      : undefined;
-    const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
-    const ready = bumped.filter((r) => r.outcome === 'done');
-    for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
-      // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves.
-      if (!(await networkFailure(ctx, r.message))) failed[r.id] = { kit, head: heads.get(r.id)!, stage: 'bump', message: r.message, at };
-      results.push({ ...r, outcome: 'failed', message: `rollout: bump to kit ${kit}: ${r.message}` });
-    }
-    for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
-    if (ready.length) {
-      const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog, folds });
-      for (const p of pushed) {
-        const b = ready.find((r) => r.id === p.id)!;
-        if (p.outcome === 'done') {
-          delete failed[p.id];
-          results.push({ ...p, message: `rollout: kit ${kit}: ${b.message}; ${p.message}`, version: b.version ?? p.version });
-        } else if (p.outcome === 'skipped') {
-          // A fold whose PR merged or closed meanwhile: nothing failed, and the next round bumps it afresh.
-          results.push({ ...p, message: `rollout: ${p.message}` });
-        } else {
-          if (!(await networkFailure(ctx, p.message))) failed[p.id] = { kit, head: heads.get(p.id)!, stage: 'push', message: p.message, at };
-          results.push({ ...p, outcome: 'failed', message: `rollout: push of kit ${kit}: ${p.message} (the bump is ready: ${b.message})` });
-        }
+  if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
+  if (!plan.bump.length) return { results, plan };
+  const names = plan.bump.map((b) => b.employee.name).join(', ');
+  // One at a time on this PC: a rollout another process runs (a round in a terminal) has the kit.
+  const bumps = (c: Ctx) => withLock(rolloutLock(), () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) }), { waitMs: 0, staleMs: STAGE_STALE_MS });
+  if (beside) {
+    ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on merging meanwhile`);
+    startBeside(ctx, kit, plan.bump.map((b) => b.employee.name), bumps);
+    return { results, plan, beside: true };
+  }
+  ctx.log(`rollout: kit ${kit} for ${names}`);
+  try {
+    results.push(...(await bumps(ctx)));
+  } catch (err) {
+    if (!(err instanceof LockTimeout)) throw err;
+    ctx.log(`rollout: ${ELSEWHERE}`);
+  }
+  return { results, plan };
+}
+
+/**
+ * The rollout's bumps and pushes, for the employees its plan bumps: one result for each (prefixed "rollout: "). What
+ * failed is kept in rollout-failed.json, and what went is let go, written over the file as it is when they end.
+ */
+async function bumpAndPush(ctx: Ctx, plan: RolloutPlan, o: { kit: string; changelog: (kit: string) => Promise<string | null>; tool?: string }): Promise<EmployeeResult[]> {
+  const { kit, tool } = o;
+  const failed = loadRolloutFailures();
+  const before = JSON.stringify(failed);
+  const results: EmployeeResult[] = [];
+  const heads = new Map(plan.bump.map((b) => [b.employee.id, b.head]));
+  const at = new Date().toISOString();
+  // The kit's changelog: each bump's entry in the employee's own, and its PR's body.
+  let changelog: string | null = null;
+  try {
+    changelog = await o.changelog(kit);
+  } catch {
+    // The entry names the kit alone, and the PR's body points at the kit's changelog.
+  }
+  const folds = Object.fromEntries(plan.bump.filter((b) => b.fold).map((b) => [b.employee.id, b.fold!]));
+  // Each bump runs the tests the kit reaches from the kit its branch pins, as the kit's trial did (kitreach.ts), not the
+  // whole suite: read from the kit's tag in the Steward's clone. Without the clone, or the tag, each runs them all.
+  const clone = stewardClone(ctx);
+  const reach = clone
+    ? async (_e: Employee, pin: { kit: string; parts: string[] | null }, toolChanged: boolean): Promise<KitReach> =>
+        (await releasedTree(ctx, kit)) ? kitReach(ctx, { repo: clone, head: `refs/tags/kit-v${kit}`, pin, toolChanged }) : { all: `kit ${kit}'s release couldn't be read` }
+    : undefined;
+  const bumped = await bump(ctx, plan.bump.map((b) => b.employee), { kit, changelog, folds, ...(tool ? { tool } : {}), ...(reach ? { reach } : {}) });
+  const ready = bumped.filter((r) => r.outcome === 'done');
+  for (const r of bumped.filter((x) => x.outcome !== 'done' && x.outcome !== 'skipped')) {
+    // One the network cut short (the kit's net.ts) is tried again next round, not held until the branch moves. Held at
+    // the commit it was bumped from: a round beside it may have merged into its branch since the plan read its head.
+    if (!(await networkFailure(ctx, r.message))) failed[r.id] = { kit, head: (!folds[r.id] && r.base) || heads.get(r.id)!, stage: 'bump', message: r.message, at };
+    results.push({ ...r, outcome: 'failed', message: `rollout: bump to kit ${kit}: ${r.message}` });
+  }
+  for (const r of bumped.filter((x) => x.outcome === 'skipped')) results.push({ ...r, message: `rollout: ${r.message}` });
+  if (ready.length) {
+    const pushed = await push(ctx, plan.bump.map((b) => b.employee).filter((e) => ready.some((r) => r.id === e.id)), { kit, changelog, folds });
+    for (const p of pushed) {
+      const b = ready.find((r) => r.id === p.id)!;
+      if (p.outcome === 'done') {
+        delete failed[p.id];
+        results.push({ ...p, message: `rollout: kit ${kit}: ${b.message}; ${p.message}`, version: b.version ?? p.version });
+      } else if (p.outcome === 'skipped') {
+        // A fold whose PR merged or closed meanwhile: nothing failed, and the next round bumps it afresh.
+        results.push({ ...p, message: `rollout: ${p.message}` });
+      } else {
+        if (!(await networkFailure(ctx, p.message))) failed[p.id] = { kit, head: heads.get(p.id)!, stage: 'push', message: p.message, at };
+        results.push({ ...p, outcome: 'failed', message: `rollout: push of kit ${kit}: ${p.message} (the bump is ready: ${b.message})` });
       }
     }
   }
   if (JSON.stringify(failed) !== before) saveRolloutChanges(JSON.parse(before), failed);
-  return { results, plan };
+  return results;
+}
+
+/**
+ * The bumps and pushes started beside the rounds (rolloutsBeside) as a job of their own, `going` while they run: their
+ * lines to `beside.log`, their results kept for the next round to report, and `beside.ended` told when they end.
+ */
+function startBeside(ctx: Ctx, kit: string, names: string[], bumps: (c: Ctx) => Promise<EmployeeResult[]>): void {
+  const log = beside?.log ?? ctx.log;
+  const ended = beside?.ended;
+  const g: NonNullable<typeof going> = { kit, names, started: Date.now(), done: Promise.resolve() };
+  going = g;
+  g.done = apart('rollout', () => bumps({ ...ctx, log }))
+    .catch((err: Error): EmployeeResult[] => {
+      log(`rollout: ${err instanceof LockTimeout ? ELSEWHERE : `kit ${kit}: ${err.message}`}`);
+      return [];
+    })
+    .then((results) => {
+      if (going === g) going = null;
+      unreported.push(...results);
+      const opened = results.filter((r) => r.outcome === 'done').length;
+      const failedNow = results.filter((r) => r.outcome === 'failed').length;
+      log(`rollout: kit ${kit}'s rollout ended beside the rounds after ${ago(Date.now() - g.started)}: ${opened} PR${opened === 1 ? '' : 's'} opened or updated${failedNow ? `, ${failedNow} failed` : ''}`);
+      try {
+        ended?.({ kit, results });
+      } catch (err) {
+        log(`rollout: ${(err as Error).message}`);
+      }
+    });
 }

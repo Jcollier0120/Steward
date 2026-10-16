@@ -13,7 +13,7 @@ const tmp = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'steward-sign
 process.env.STEWARD_HOME = tmp;
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { forgetSigningLooks, loadSigningWaits, noteSigningWaits, signingDown, signingProblem, signsWith } = await import('../src/signing.ts');
+const { forgetSigningLooks, HUNG_MS, loadSigningWaits, noteSigningWaits, signingDown, signingProblem, signsWith, TRIAL_MS } = await import('../src/signing.ts');
 const { releaseOne } = await import('../src/stages/release.ts');
 const { releaseUnreleased, roundFailuresFile } = await import('../src/stages/round.ts');
 const { releaseDirOf } = await import('../src/stages/common.ts');
@@ -116,6 +116,36 @@ test('a release that signs waits while this PC cannot sign: nothing built, nothi
   assert.ok(waits.signing && waits.again, 'a wait, looked at again');
   assert.deepEqual(r.npm, [], 'its release command never ran');
   assert.equal(existsSync(releaseDirOf(ctx.settings, e)), false, 'no worktree made');
+});
+
+// Steward 0.36.60: a trial signature that didn't answer (SimplySign Desktop waiting for its sign-in) counted as "can
+// sign", so the release built and then sat in its own signtool up to its half-hour limit, with the round waiting on it.
+test("a trial signature that doesn't answer is can't sign, and stands a quarter of an hour: no round waits on signtool again meanwhile, and nothing is built", async () => {
+  const signtool = 'C:\\Kits\\x64\\signtool.exe';
+  const limits: (number | undefined)[] = [];
+  const hung = looking('ok', { code: 1, out: '', err: '', timedOut: true });
+  const run: Runner = (cmd, args, opts) => {
+    if (/signtool\.exe$/i.test(cmd)) limits.push(opts?.timeoutMs);
+    return hung.run(cmd, args, opts);
+  };
+  const why = await signingProblem(run, PRINT, { signtool, now: 0 });
+  assert.match(why!, /^signtool didn't answer within 60 seconds with the code-signing key \(6B654D9C.*\): SimplySign Desktop may be waiting for you to sign in/);
+  assert.deepEqual(limits, [TRIAL_MS], 'the trial has a minute');
+  assert.equal(await signingProblem(run, PRINT, { signtool, now: 5 * 60_000 }), why, 'five minutes on: the same answer');
+  assert.equal(await signingProblem(run, PRINT, { signtool, now: HUNG_MS - 1 }), why, 'and just before the quarter of an hour');
+  assert.deepEqual(hung.asked, ['powershell.exe', 'signtool.exe'], 'signtool asked once in all that time');
+  assert.equal(await signingProblem(looking('ok', ok('Successfully signed')).run, PRINT, { signtool, now: HUNG_MS }), null, 'then looked at again: it can sign');
+
+  // A release that signs, while its look stands: it waits, and its release command never runs.
+  forgetSigningLooks();
+  await signingProblem(run, PRINT, { signtool, now: Date.now() });
+  const e = signer('Hung', { kit: '2.73.2', parts: ['node'], native: { build: 'native/build.ps1', out: 'native/build', thumbprint: PRINT } });
+  const r = releasing({ npm: ok(''), sign: ok('Successfully signed') });
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-hung'), run: r.run, neutralDir: tmp });
+  const waits = await releaseOne(ctx, e, { kit: null });
+  assert.equal(waits.outcome, 'skipped', waits.message);
+  assert.equal(waits.message, `v0.2.3 waits until this PC can sign: ${why}`);
+  assert.deepEqual(r.npm, [], 'its release command never ran');
 });
 
 test("a release that loses the key while it builds waits too, rather than failing; a round's failure for it before isn't held", async () => {
