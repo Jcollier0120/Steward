@@ -25,6 +25,19 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 Nothing to do. On an AMD NPU, the next setup checks xrt-smi by itself. On a PC with the old DLLs, the NPU's note says so.
 
+## Unreleased
+
+**`npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**
+
+### What changed
+
+- **npu-check.ts's `--harden`** waits, up to a minute, for the server the timeout case's setup started to answer before stopping it. Given 1 s, that server hadn't opened its port when the check stopped servers, and only a server that answers is stopped, so it was left loading the route's model, and the nonsense case's test asked it instead of starting its own: a 404 for the nonsense model, and the step failed (the NPU 3720, 2026-10-15). With it, every `--harden` step passes on the NPU 3720, the nonsense case too: OpenVINO's group-wise Qwen3-4B compiles there (its first load 125 s) and answers nonsense, as on the Lunar Lake, and setup leaves the NPU out.
+- **spec/NPU-VENDORS.md** gains Memory on a 16 GB Intel PC: on the NPU 3720, with the route's commands, chat held 3.20 GB and embeddings 1.16 GB on the NPU (1.14–1.27 on the graphics), 4.2–4.4 GB of the PC's available memory together, under the route's `memoryGb` (5.54) and the 6.2 GB budget; Windows lets the NPU hold 8.80 GB. Nothing changes: the Snapdragon's smaller embedding context (kit 2.75.1) saves nothing on OpenVINO's NPU.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
+
 ## 2.77.6
 
 **Each accelerator's servers stop when that accelerator has been idle, whatever the others do. Before, a let-go of any accelerator's lock counted as use of all of them, so Reeve indexing on a graphics card kept the NPU's servers loaded, and the NPU kept a card's.**
