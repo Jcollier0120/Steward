@@ -17,6 +17,7 @@ const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
 const { merge, mergeOne, standingOf } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { resetResults } = await import('../src/kit/work-status.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
 const conflict = (ours: string[], base: string[], theirs: string[]) => ['{', '<<<<<<< HEAD', ...ours, '||||||| abc1234', ...base, '=======', ...theirs, '>>>>>>> origin/main', '}'].join('\n');
@@ -418,6 +419,8 @@ function kitRunner() {
 }
 
 test("a kit PR of the Steward's whose version lines conflict is caught up, its checks run before the push", async () => {
+  // An earlier test's catch-up came to the same code and passed the same checks, which would stand in (standin.ts).
+  resetResults();
   const { dir, checkout, pr } = kitPr('kit-versions');
   const { run, gh, ran } = kitRunner();
   const e = employee(checkout, { fill: '', test: ['node -e process.exit(0)'] });

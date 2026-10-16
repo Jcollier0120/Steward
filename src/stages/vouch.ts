@@ -5,8 +5,8 @@ import { originUrl, repoFromUrl } from '../scm.ts';
 import { dataFile, readJson } from '../kit/store.ts';
 import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
-import { assayedHead } from './assayed.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
+import type { StoodIn } from './standin.ts';
 import type { Ctx } from './common.ts';
 import { VOUCH_CONTEXT, type PrInfo } from './staff.ts';
 import { noteVouchTime, vouchLimit } from './vouchtime.ts';
@@ -20,7 +20,8 @@ import { hostFor } from '../hosts/index.ts';
  * HEAD, which must be the PR's head, with nothing uncommitted. Once they pass, it sets a commit status on that commit:
  * context VOUCH_CONTEXT, state success. Nothing is set when they fail. When the Assayer already passed the whole of the
  * checks on exactly HEAD's tree, with the same dependencies and kit (assayed.ts), nothing is run again: its pass is taken;
- * and so is its affected pass, when the test files it ran take in every one the vouch would run itself. Checks that run
+ * and so is its affected pass, when the test files it ran take in every one the vouch would run itself; and so is a pass
+ * of the whole checks on exactly that tree, on this PC or another on the licence (standin.ts). Checks that run
  * five minutes past the vouch's average time are stopped, and nothing is set (vouchtime.ts).
  *
  * The merge stage (merge.ts) trusts it only when a team member's account set it (Settings' team, read from GitHub's
@@ -137,23 +138,24 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
 async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void; overMs?: number }): Promise<string | null> {
   // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
-  // The Assayer already passed exactly this tree (assayed.ts), whole or the tests this change reaches: nothing run
-  // again, so the PC isn't loaded twice.
-  const assayed = await assayedHead(ctx.run, o.dir, e, { scope });
-  if (assayed) {
-    const when = new Date(assayed.check.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    o.say(`the Assayer passed this exact tree at ${when}${assayed.chose ? ` (npm test: ${assayed.chose})` : ''}: nothing run again`);
-    const description = assayed.check.full
-      ? `${(assayed.check.commands ?? []).join(', ')} passed in the Assayer at ${o.head.slice(0, 7)}`.slice(0, 140)
-      : vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: assayed.chose }, o.head);
-    return setVouch(ctx, e, o.repo, o.head, description);
-  }
-  // Stopped five minutes past its usual time for as many test files (vouchtime.ts); a pass is kept toward that average.
+  // Stopped five minutes past its usual time for as many test files (vouchtime.ts); a pass is kept toward that average. A pass of exactly
+  // this tree stands in (runChecks, standin.ts): the Assayer's (whole, or the tests this change reaches), this PC's or
+  // another PC's on the licence. Then nothing is run again, so the PC isn't loaded twice.
   const started = Date.now();
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }) });
+  const stoodIn: StoodIn = {};
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn });
   if (failed) return failed;
+  if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, stoodInDescription(e, stoodIn, o.head));
   noteVouchTime(e.id, checkKind(scope), Date.now() - started, scope?.files);
   return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
+}
+
+/** The vouch's description when a pass stood in for running the checks: whose, and at which commit. */
+export function stoodInDescription(e: Employee, s: StoodIn, head: string): string {
+  const a = s.assayed;
+  if (a?.check.full) return `${(a.check.commands ?? []).join(', ')} passed in the Assayer at ${head.slice(0, 7)}`.slice(0, 140);
+  if (a) return vouchDescription({ ...e, fill: '' }, { base: `origin/${e.branch}`, chose: a.chose }, head);
+  return vouchDescription(e, undefined, head, s.by === 'pc' && s.where ? ` ${s.where}` : '');
 }
 
 /** The vouch's description: the checks that ran and passed, and at which commit (GitHub keeps 140 characters). */

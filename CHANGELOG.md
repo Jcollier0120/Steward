@@ -21,6 +21,36 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.51
+
+**Code that already passed its checks isn't tested again: not on this PC, and, with Manor's Other PCs on, not on another of your PCs either.**
+
+### What's new
+
+- Before the Steward runs a repository's checks, it looks for a pass of exactly the same code. It doesn't matter which commit the code came from, only that the code is the same. It looks in three places:
+  - the Assayer's check of that folder, as before for a vouch;
+  - this PC's own results;
+  - with Other PCs on, the other PCs on your licence, asked through Manor (Manor 0.16.163 and later).
+
+  If it finds one, it takes it and runs nothing. The round's log says so ("its checks passed on LAPTOP at 14:02, on exactly this code: not run again"), and so does Manor's Work page ("passed on LAPTOP, not run again here").
+- This counts wherever the Steward runs checks: testing a pull request, a vouch, a merge train, a build, a catch-up, and the whole suite before a kit's release. A vouch whose pass came from another PC says so on GitHub ("… passed on LAPTOP at abc1234").
+- A pass stands in only when:
+  - it covers all of the checks, not only the tests a change reached;
+  - it is for the same repository;
+  - it is less than a day old;
+  - it ran on the same Node.js major version and the same OS;
+  - it ran every check your Settings give that repository.
+- A failure never stands in. If the code failed here after it passed on another PC, the checks run here again.
+
+### What changed
+
+- Every run of the checks now records which commands it ran and on which Node.js and OS.
+- This release brings the Steward's kit 2.77.0, which gives every agent the same: a pass by code tree, from this PC or another PC on the licence.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Results kept before this version don't say which Node.js or checks they ran, so they are run again once. With Other PCs off, or with an older Manor, only this PC's own passes count.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**
