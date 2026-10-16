@@ -126,7 +126,7 @@ export async function bisect(n: number, cap: number, why: string, test: (k: numb
 
 /** What a build left of a repository's batch: the PRs it dropped or kept for the next build, and why (an alarm while kept). */
 export interface BuildLeft {
-  /** The build's time (pipeline.json's due), and its name in words. */
+  /** The build's time (pipeline.json's due; leftKey's for the merge pass ahead of it), and its name in words. */
   due: string;
   name: string;
   /** The PRs dropped from it (now drafts) and those kept for the next build: neither boards again in this build. */
@@ -134,6 +134,8 @@ export interface BuildLeft {
   kept: { number: number; url: string; title: string }[];
   why: string;
   at: string;
+  /** Left by the merge pass ahead of a build (Ctx's build `ahead`): they board that build. */
+  ahead?: boolean;
 }
 
 export const buildLeftFile = () => dataFile('build-left.json');
@@ -154,15 +156,25 @@ export const leftIn = (id: string, due: string): number[] => {
   return l && l.due === due ? [...l.dropped, ...l.kept.map((k) => k.number)] : [];
 };
 
-function noteLeft(id: string, build: { due: string; name: string }, o: { dropped: number[]; kept: PrInfo[]; why: string }): void {
+/**
+ * What a build's left-out PRs are kept under (leftIn, forgetEarlierBuilds): its time, or for the merge pass ahead of it
+ * (Ctx's build `ahead`) a key of that pass's own, so the build itself takes them again. Pure.
+ */
+export const leftKey = (b: { due: string; ahead?: boolean }): string => (b.ahead ? `${b.due} ahead` : b.due);
+
+/** The build a PR left out of this one boards next, in words: the next build, or, ahead of a build, that build. Pure. */
+export const leftFor = (b: { ahead?: boolean }): string => (b.ahead ? 'the build' : 'the next build');
+
+function noteLeft(id: string, build: { due: string; name: string; ahead?: boolean }, o: { dropped: number[]; kept: PrInfo[]; why: string }): void {
   const all = loadBuildLeft();
-  const was = all[id]?.due === build.due ? all[id] : null;
+  const was = all[id]?.due === leftKey(build) ? all[id] : null;
   all[id] = {
-    due: build.due,
+    due: leftKey(build),
     name: build.name,
     dropped: [...new Set([...(was?.dropped ?? []), ...o.dropped])],
     kept: [...(was?.kept ?? []), ...o.kept.map((p) => ({ number: p.number, url: p.url, title: p.title }))],
     why: o.why,
+    ...(build.ahead ? { ahead: true } : {}),
     at: new Date().toISOString(),
   };
   writeJson(buildLeftFile(), all);
@@ -207,7 +219,7 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
   const { run } = ctx;
   // Between builds, the next build's batch: stacked and tested as it will be, then left for the build (prepared).
   const dry = !!ctx.prepare && !ctx.build;
-  const build = ctx.build ?? ctx.prepare ?? { due: new Date().toISOString(), name: 'the build' };
+  const build: { due: string; name: string; ahead?: boolean } = ctx.build ?? ctx.prepare ?? { due: new Date().toISOString(), name: 'the build' };
   const none = (note: string): BuildBatch => ({ merged: [], dropped: [], kept: [], note, tested: false });
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return none(`there's no checkout at ${repo}`);
@@ -376,9 +388,9 @@ export async function runBatch(ctx: Ctx, e: Employee, cars: BuildCar[], o: { rel
           : `they failed together (${found.why}), and Settings look for no PR that broke them (bisectRuns 0)`;
       }
     }
-    for (const k of kept) await status(k.car.pr, 'success', `waits for the next build: ${keptWhy}`);
+    for (const k of kept) await status(k.car.pr, 'success', `waits for ${leftFor(build)}: ${keptWhy}`);
     if (kept.length || dropped.length) noteLeft(e.id, build, { dropped: dropped.map((d) => d.pr.number), kept: kept.map((k) => k.car.pr), why: keptWhy || dropped.map((d) => `#${d.pr.number}: ${d.why}`).join('; ') });
-    const left = [...dropped.map((d) => `dropped #${d.pr.number} (${d.why})`), ...(kept.length ? [`kept ${numbers(kept)} for the next build: ${keptWhy}`] : [])].join('; ');
+    const left = [...dropped.map((d) => `dropped #${d.pr.number} (${d.why})`), ...(kept.length ? [`kept ${numbers(kept)} for ${leftFor(build)}: ${keptWhy}`] : [])].join('; ');
     const result = (merged: PrInfo[], note: string, more: Partial<BuildBatch> = {}): BuildBatch => ({ merged, dropped, kept: kept.map((k) => k.car.pr), note: `${note}${left ? `; ${left}` : ''}${besides()}`, tested: true, ...more });
     if (!ship.length) return result([], `${numbers(all)} failed together, and no PRs at the bottom of the stack passed: none of them leaves in ${build.name}`);
 

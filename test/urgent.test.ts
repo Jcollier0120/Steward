@@ -128,7 +128,7 @@ test('a round between builds: an urgent fix begins a build of its own, for its r
   const quiet = await round();
   assert.equal(quiet.error, undefined);
   assert.deepEqual(quiet.build, { between: true, next: new Date(2026, 9, 13, 12, 0).toISOString() });
-  assert.match(quiet.log.join('\n'), /between builds: ready PRs wait for the next build, at 12:00/);
+  assert.match(quiet.log.join('\n'), /between builds: ready PRs merge ahead of the next build, at 12:00, and are released at it/);
   assert.equal(loadPipeline().open, null);
 
   prs = [urgentLog.node, plain.node];

@@ -18,6 +18,7 @@ const { rolloutFailedFile } = await import('../src/stages/rollout.ts');
 const { checksOf } = await import('../src/stages/staff.ts');
 const { roundConditions } = await import('../src/alarms.ts');
 const { DEFAULT_PIPELINE } = await import('../src/pipeline.ts');
+const { aheadGuard } = await import('../src/stages/prepare.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 type Glance = import('../src/glance.ts').Glance;
@@ -213,6 +214,55 @@ test("halving that can't find one PR within bisectRuns: the prefix that passed l
   const r2 = await mergeOne(next.ctx, next.e, { yes: true, team: true });
   assert.ok(next.ctx.lines.some((l) => l.includes('the 18:00 build: #33, #34 stacked on main')), [r2.message, ...next.ctx.lines].join('\n'));
   assert.equal(loadBuildLeft().fake?.due, '2026-10-13T16:00:00.000Z', "the 13:00 build's record is gone");
+});
+
+test('merged ahead of a build: the batch merges between builds as in the build, nothing is released, and a guard that says no merges nothing', async () => {
+  const b = batch('ahead', 2, { kit: true });
+  const gh = github(b);
+  const { e, ctx } = ctxOf(b, gh.run);
+  const main = sh(b.origin, 'rev-parse', 'refs/heads/main');
+  ctx.build = { ...BUILD, name: 'the merge pass ahead of the 13:00 build', ahead: true };
+  // The build has begun: the pass ahead of it stops before pushing anything.
+  ctx.lease = aheadGuard(null, () => true);
+  const stopped = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.deepEqual(stopped.merged, [], stopped.message);
+  assert.equal(gh.gh.filter((a) => a[1] === 'merge').length, 0, 'nothing merged');
+  assert.equal(sh(b.origin, 'rev-parse', 'refs/heads/main'), main, 'main never moves under the build');
+
+  ctx.lines.length = 0;
+  ctx.lease = aheadGuard(null, () => false);
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.equal(r.outcome, 'done', r.message);
+  assert.deepEqual(r.merged.map((p) => p.number), [30, 31, 32]);
+  assert.match(r.message, /^merged #30, #31, #32 in the merge pass ahead of the 13:00 build \(/);
+  assert.equal(runs(ctx.lines), 0, 'the stack that passed before the guard said no is not tested again');
+  assert.equal(JSON.parse(show(b, 'package.json')).version, '0.4.1');
+  assert.ok(!gh.gh.some((a) => a[0] === 'release' && a[1] === 'create'), 'nothing released: the build releases it');
+});
+
+test('kept by the merge pass ahead of a build: they board that build itself, and the alarm says so', async () => {
+  const b = batch('ahead-cap', 4, { bad: [['src/f3.ts', 'src/f4.ts']] });
+  const gh = github(b);
+  const { e, ctx } = ctxOf(b, gh.run, 1);
+  ctx.build = { ...BUILD, name: 'the merge pass ahead of the 13:00 build', ahead: true };
+  const r = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.deepEqual(r.merged.map((p) => p.number), [31, 32]);
+  assert.match(r.message, /kept #33, #34 for the build: they failed together/);
+  assert.equal(loadBuildLeft().fake?.due, `${BUILD.due} ahead`);
+  const conditions = roundConditions({ round: { stage: 'round', started: '', finished: '', kit: null, asked: {}, results: [], log: [] }, held: [], failedReleases: {}, buildLeft: loadBuildLeft(), employees: [e], settings: ctx.settings });
+  assert.equal(conditions.find((c) => c.id === `build:fake:${BUILD.due} ahead`)?.title, "Fake #33, #34 didn't leave in the merge pass ahead of the 13:00 build, and wait for the build");
+  // Again ahead of it: still left out.
+  ctx.lines.length = 0;
+  b.prs.splice(0, 2);
+  const again = await mergeOne(ctx, e, { yes: true, team: true });
+  assert.deepEqual(again.merged, [], again.message);
+  assert.match(again.held.map((h) => h.why).join('\n'), /left out of the merge pass ahead of the 13:00 build: it waits for the build/);
+
+  // The build itself: they board again.
+  const build = ctxOf(b, github(b).run, 1);
+  const r2 = await mergeOne(build.ctx, build.e, { yes: true, team: true });
+  assert.ok(build.ctx.lines.some((l) => l.includes('the 13:00 build: #33, #34 stacked on main')), [r2.message, ...build.ctx.lines].join('\n'));
+  assert.equal(loadBuildLeft().fake?.due, BUILD.due, "the pass ahead's record is gone");
 });
 
 test('when nothing at the bottom of the stack passes, nothing leaves', async () => {

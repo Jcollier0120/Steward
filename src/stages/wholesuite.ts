@@ -11,7 +11,7 @@ import { treeOf, wholePassOf } from '../whole.ts';
 import { onlyFlaky, runChecks, type FailedChecks } from './bump.ts';
 import { freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { stewardEmployee } from './selfmerge.ts';
-import { apart } from './slots.ts';
+import { apart, apartNow } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 import type { StoodIn } from './standin.ts';
 
@@ -340,6 +340,10 @@ async function besideHold(ctx: Ctx, repo: string, o: { tag: string; commit: stri
   }
   // Another Steward process runs it still (the page restarting as it updates): left to it.
   if (kept && keyOf(kept) === key && kept.state === 'running' && kept.by !== process.pid) return { ...runningHold(kept), why: `its whole suite runs beside the rounds of another Steward process (${kept.by}) at ${at}, started ${agoWords(kept.startedAt)} ago` };
+  // Never beside a kit trial or a rollout's checks running apart now: it waits for them to end, and the round that comes
+  // when they do starts it. On 2026-10-16 one beside a trial ran into its 20-minute limit, then ran 14.5 minutes again.
+  const busy = apartNow('kit trial', 'rollout');
+  if (busy) return { why: `its whole suite waits for the ${busy} running beside the rounds to end, so the two never test at once: the rounds go on merging meanwhile`, retry: true, beside: true };
   const dir = wholeDirOf(ctx);
   await removeWorktree(ctx.run, repo, dir);
   await freshWorktree(ctx.run, ctx.settings, repo, dir, o.commit, '--detach');
