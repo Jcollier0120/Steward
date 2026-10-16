@@ -143,7 +143,8 @@ async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: str
   // another PC's on the licence. Then nothing is run again, so the PC isn't loaded twice.
   const started = Date.now();
   const stoodIn: StoodIn = {};
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn });
+  // A person waits on a vouch: the Seneschal's first lane (stages/seneschal.ts).
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn, task: { lane: 'person' } });
   if (failed) return failed;
   if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, stoodInDescription(e, stoodIn, o.head));
   noteVouchTime(e.id, checkKind(scope), Date.now() - started, scope?.files);

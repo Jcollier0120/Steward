@@ -237,13 +237,14 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
     const scope: AffectedScope | undefined = ctx.settings.affectedTests === false || wholeAhead(ctx, e, pr) ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
     const stoodIn: StoodIn = {};
-    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, stoodIn });
+    const task = { pr: pr.number, branch: pr.head };
+    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, stoodIn, task });
     // A pass of exactly this code stood in (standin.ts): said as whose, and vouched for as such.
     if (!failed && stoodIn.by) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed ${stoodIn.where} at ${sha}, not run again`, at: now(), branch }, stoodInDescription(e, stoodIn, pr.headOid));
     const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
     if (!failed) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch });
     say(`#${pr.number}: its checks once more (${failed})`);
-    const again = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
+    const again = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, task });
     return again
       ? { ok: false, note: `its checks failed here at ${sha}, twice: ${again}`, at: now(), branch }
       : await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha} on a second try (the first: ${failed})`, at: now(), branch });

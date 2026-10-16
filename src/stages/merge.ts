@@ -32,6 +32,7 @@ import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conf
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
+import { withLane } from './seneschal.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -728,7 +729,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       const before = testedBefore(e, pr);
       let t: Tested;
       try {
-        t = await timed(phaseOf(ctx), 'tests', `${e.id} #${pr.number}`, () => testAtHead(ctx, e, pr));
+        // What the merge waits on: the Seneschal's blocking lane (stages/seneschal.ts).
+        t = await timed(phaseOf(ctx), 'tests', `${e.id} #${pr.number}`, () => withLane('blocking', () => testAtHead(ctx, e, pr)));
       } catch (err) {
         t = { ok: false, note: `couldn't test it here: ${(err as Error).message}`, at: new Date().toISOString() };
       }

@@ -26,6 +26,10 @@ export function takeFreshStart(part: FreshPart): boolean {
 /** The ticks of a wake watch further apart than this: the PC slept between them (timers don't run while it sleeps). */
 export const WOKE_AFTER_MS = 3 * 60_000;
 
+/** When the wake watch last saw the PC wake (ms), or null since the page started: a build it slept through was late. */
+let woke: number | null = null;
+export const lastWoke = (): number | null => woke;
+
 /**
  * Watches for the PC waking from sleep: a tick every `everyMs`, and one that comes over WOKE_AFTER_MS after the last
  * means the PC slept between. Then a fresh start, and `onWake` (a round now). Returns the function that stops it.
@@ -38,6 +42,7 @@ export function watchWake(onWake: () => void, everyMs = 30_000, now: () => numbe
     last = t;
     if (gap > WOKE_AFTER_MS) {
       console.log(`${new Date(t).toISOString()} the PC woke after ${Math.round(gap / 60_000)} min: what failed before is tried again`);
+      woke = t;
       noteFreshStart();
       onWake();
     }

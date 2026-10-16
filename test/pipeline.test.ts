@@ -10,7 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-pipeline-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, lastBuildTime, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, urgentKey } = await import('../src/pipeline.ts');
+const { boardedUrgent, DEFAULT_PIPELINE, endRound, kitRides, lastBuildTime, lateLine, nextBuildTime, normalizePipeline, pipelineMode, pipelineView, urgentKey } = await import('../src/pipeline.ts');
 const { addToEntry, composeEntry, CHANGES_README, changesReadme, fragmentBody, fragmentFiles, fragmentFor } = await import('../src/entries.ts');
 const { stamp } = await import('../src/stages/stamp.ts');
 const { prVersions } = await import('../src/stages/merge.ts');
@@ -126,6 +126,25 @@ test('a build begins at its time, once, even when the PC slept through it; it go
   // Asleep from 12:00 to 19:30: the 13:00 and 18:00 builds are one build, begun at once.
   const woke = pipelineMode(THREE, state, at(19, 30));
   assert.equal(woke.kind === 'build' && woke.fresh && woke.run.due === at(18).toISOString(), true);
+});
+
+test('a build the PC slept through in standby is late, and the page says until when', () => {
+  // In standby from 00:35, woken at 08:39 (fresh-start.ts' lastWoke): the 08:00 build begins then, late.
+  const woke = pipelineMode(THREE, none, at(8, 40), { wokeAt: at(8, 39).getTime() });
+  assert.equal(woke.kind, 'build');
+  if (woke.kind !== 'build') return;
+  assert.equal(woke.run.late, at(8, 39).toISOString());
+  assert.equal(lateLine(woke.run, at(8, 40)), 'the 08:00 build was late: the PC was in standby until 08:39');
+  assert.equal(lateLine(woke.run, at(9, 0, 14)), 'the Tue 08:00 build was late: the PC was in standby until Tue 08:39', 'another day names it');
+  // Woken before the build time, or by an earlier wake: on time, and nothing said.
+  for (const wokeAt of [at(7, 50).getTime(), null]) {
+    const m = pipelineMode(THREE, none, at(8, 2), { wokeAt });
+    assert.equal(m.kind === 'build' && m.run.late, undefined);
+    assert.equal(lateLine(m.kind === 'build' ? m.run : null, at(8, 2)), null);
+  }
+  // The owner's Build now is never late.
+  const now = pipelineMode(THREE, none, at(10), { buildNow: {}, wokeAt: at(9, 59).getTime() });
+  assert.equal(now.kind === 'build' && now.run.late, undefined);
 });
 
 test("the owner's Build now begins a build at once, for some repositories, its releases let out to customers when asked", () => {
