@@ -125,7 +125,9 @@ export function pillOf(o: { look: Look; busy?: boolean; duty: Duty; nextAt?: num
 /**
  * The agent's page: its title bar, `body`, and a small script for buttons. A button with data-post="/api/x"
  * POSTs (with the page token) and reloads; data-body='{"json":1}' sends that, data-form="#id" sends the
- * form's fields (ticked boxes of one name become a list), data-confirm="text" asks first. While `busy`,
+ * form's fields (ticked boxes of one name become a list), data-confirm="text" asks first, in the page's own
+ * dialog (never the browser's). While it waits the button spins, and it and what it acts on (its form, else the card
+ * it's in) take no presses; an error or the server's message is said in the same dialog. While `busy`,
  * the page refreshes itself every few seconds, unless something on it is ticked or being typed in, or
  * the Settings panel has changes not yet saved, or Settings or the Theme menu is open.
  *
@@ -216,12 +218,104 @@ function fields(form) {
   }
   return out;
 }
-async function act(path, data, ask) {
-  if (ask && !confirm(ask)) return;
-  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': TOKEN }, body: JSON.stringify(data || {}) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(j.error || r.statusText); return; }
-  if (j.message) alert(j.message);
+// The page's own dialog, never the browser's: a question (OK and Cancel; true for OK) or a message (OK). Focus moves
+// into it and stays there (Tab goes round its buttons), Escape answers Cancel (a message: OK), and focus goes back to
+// where it was. The react part's confirmDialog and alertDialog (modal.tsx) draw the same.
+let asked = 0;
+function ask(text, question) {
+  return new Promise((done) => {
+    const before = document.activeElement;
+    const wrap = document.createElement('div');
+    wrap.className = 'ui-modal ui-dialog';
+    const card = document.createElement('div');
+    card.className = 'ui-modal-card ui-dialog-card';
+    card.tabIndex = -1;
+    card.setAttribute('role', 'alertdialog');
+    card.setAttribute('aria-modal', 'true');
+    card.setAttribute('aria-label', question ? 'Question' : 'Message');
+    const p = document.createElement('p');
+    p.className = 'ui-dialog-text';
+    p.id = 'kit-dialog-' + ++asked;
+    p.textContent = text;
+    card.setAttribute('aria-describedby', p.id);
+    const row = document.createElement('div');
+    row.className = 'ui-dialog-actions';
+    const button = (words, cls, yes) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (cls) b.className = cls;
+      b.textContent = words;
+      b.addEventListener('click', () => close(yes));
+      row.append(b);
+      return b;
+    };
+    const ok = button('OK', '', true);
+    if (question) button('Cancel', 'quiet', false);
+    card.append(p, row);
+    wrap.append(card);
+    const keys = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        close(!question);
+      } else if (e.key === 'Tab') {
+        const stops = [...row.querySelectorAll('button')];
+        const at = stops.indexOf(document.activeElement);
+        if (e.shiftKey ? at <= 0 : at < 0 || at === stops.length - 1) {
+          e.preventDefault();
+          stops[e.shiftKey ? stops.length - 1 : 0].focus();
+        }
+      }
+    };
+    function close(yes) {
+      document.removeEventListener('keydown', keys, true);
+      wrap.remove();
+      if (before && before.isConnected && before.focus) before.focus();
+      done(yes);
+    }
+    document.addEventListener('keydown', keys, true);
+    document.body.append(wrap);
+    ok.focus();
+  });
+}
+// While a button's POST runs: a spinner in it, aria-busy, and no presses on it nor on what it acts on (its data-form's
+// form, else the form or card it is in). Undone when it fails; when it works, the page reloads.
+function busy(b) {
+  const scope = (b.dataset.form && document.querySelector(b.dataset.form)) || b.closest('form, .card');
+  const off = [b, ...(scope ? scope.querySelectorAll('button, input, select, textarea') : [])].filter((el) => !el.disabled);
+  for (const el of off) el.disabled = true;
+  const spin = document.createElement('span');
+  spin.className = 'ui-spinner';
+  spin.setAttribute('aria-hidden', 'true');
+  b.prepend(spin);
+  b.setAttribute('aria-busy', 'true');
+  if (scope) scope.setAttribute('aria-busy', 'true');
+  return () => {
+    for (const el of off) el.disabled = false;
+    spin.remove();
+    b.removeAttribute('aria-busy');
+    if (scope) scope.removeAttribute('aria-busy');
+    if ((!document.activeElement || document.activeElement === document.body) && b.isConnected) b.focus();
+  };
+}
+async function act(path, data, question, b) {
+  if (question && !(await ask(question, true))) return;
+  const done = b ? busy(b) : () => {};
+  let r, j;
+  try {
+    r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': TOKEN }, body: JSON.stringify(data || {}) });
+    j = await r.json().catch(() => ({}));
+  } catch (e) {
+    done();
+    await ask(e && e.message ? e.message : String(e));
+    return;
+  }
+  if (!r.ok) {
+    done();
+    await ask(j.error || r.statusText);
+    return;
+  }
+  if (j.message) await ask(j.message);
   location.reload();
 }
 // A form whose fields a button sends (data-form) must not also submit itself on Enter: that would be a
@@ -236,8 +330,7 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   const form = b.dataset.form ? document.querySelector(b.dataset.form) : null;
   const data = b.dataset.body ? JSON.parse(b.dataset.body) : form ? fields(form) : {};
-  b.disabled = true;
-  act(b.dataset.post, data, b.dataset.confirm).finally(() => { b.disabled = false; });
+  act(b.dataset.post, data, b.dataset.confirm, b);
 });
 // The title bar stays at the top (sticky): --titlebar-h follows its height, so a jump to #a-section and the Theme
 // menu's height allow for it, and .stuck draws the line under it once the page has scrolled.
@@ -346,8 +439,9 @@ document.addEventListener('click', (e) => {
   route();
   link.hidden = false;
 })();
-// Someone at the page: typing, ticking, in Settings or the theme menu. A reload then waits for them.
-const engaged = () => !!document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden])');
+// Someone at the page: typing, ticking, in Settings or the theme menu, answering its dialog, or waiting on a button. A
+// reload then waits for them.
+const engaged = () => !!document.querySelector('input:checked:not([data-keep]), :focus:is(input, textarea, select), [data-dirty], body.on-settings, #theme-menu:not([hidden]), .ui-dialog, button[aria-busy]');
 if (REFRESH) setInterval(() => {
   if (!engaged()) location.reload();
 }, REFRESH * 1000);
@@ -605,6 +699,20 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent-text)
 button.link:disabled { color: var(--muted); text-decoration: none; opacity: 1; cursor: default; }
 button.small { padding: 2px 10px; font-size: 12px; }
 :is(button, a, summary, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Busy: a turning ring in the text's colour, in a button whose work runs (the script's, and the react part's Spinner). */
+.ui-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ui-spin .8s linear infinite; vertical-align: -2px; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-spinner { animation-duration: 2.4s; } }
+button:has(> .ui-icon, > .ui-spinner) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+[aria-busy="true"]:is(form, fieldset, .card) { cursor: progress; }
+/* The page's own modal card, and its confirm and alert (the script's ask(), the react part's modal.tsx): over the tour too. */
+.ui-modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .45); }
+.ui-modal-card { width: min(560px, 100%); overflow: auto; padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); outline: none; }
+.ui-modal.ui-dialog { z-index: 90; }
+.ui-dialog-card { width: min(460px, 100%); max-height: 80vh; }
+.ui-dialog-title { margin: 0 0 8px; font-size: 16px; }
+.ui-dialog-text { margin: 0; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.ui-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 :where(input:not([type=checkbox], [type=radio], [type=range]), select, textarea) { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 :where(input[type=checkbox], input[type=radio]) { accent-color: var(--accent); }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
