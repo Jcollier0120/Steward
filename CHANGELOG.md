@@ -2,6 +2,37 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.69
+
+**In a build, the agents' pull requests no longer wait while the Steward tests its own.**
+
+### What changed
+
+- **In a build, the agents' merges go beside the Steward's own.** A pull request to the Steward that was pushed to after the build was prepared is still tested in the build, about ten minutes a run. Until now, each round of a build tested those first and only then merged the agents' ready pull requests: in one build, 34 kit pull requests waited an hour behind two such runs. Now the agents' pull requests merge while the Steward's are being tested. What depends on the Steward's own still waits for it: the kit's rollout (a newer kit merging in the same build goes first) and the build's releases.
+- **A kit released during those merges still reaches every agent in that round.** When the Steward releases a new kit while the agents' merges run, the agents' pull requests that waited for that kit are looked at again at once and merge in the same round, and the agents the round hadn't looked at are looked at too, so the rollout takes the kit to all of them together.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.68
+
+**A full pace never takes the whole PC any more: everything the manor runs, together, its AI model servers included, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
+
+### What changed
+
+- At a full pace (Manor's Settings), the Steward's checks used to run with no cap at all. These are test runs, type checks, installs and builds, an agent's whole suite before it merges, and a kit's trial on every agent. Now they are held to 85% of the processor, all of them together. Up to six run at once, as many agents as run at once at full, and they share the 85% rather than each adding to it. Each check run also keeps the memory limits it has at a gentle pace.
+- An agent at a full pace keeps normal priority, but its own work, and everything it starts, stays within 85% of the processor too. So does Manor's own page.
+- The AI model servers the agents share (the graphics card's, the NPU's) used to run with no cap at any pace. Now they stay within 85% of the processor too, all of them together, whatever the pace. A server that's already running gets the cap the next time it starts.
+- While more than 85% of this PC's memory is in use, no agent starts a scheduled round, whatever the pace. It waits for room, and says why it waits. A round already running finishes, and a round you ask for (Run now) still runs.
+- A kit trial starts no new try while more than 85% of the memory is in use. It goes on at the next round. It also tries fewer agents at once when memory is tight: only as many as the free memory holds above the 15% left to you.
+- A checks pace you set (checksPace), or KIT_CHECKS_PACE, still sets a lower cap. 100% or "full" now means 85%.
+- This Steward hands out kit 2.78.3, which brings the same ceiling to every agent that takes it.
+
+### Before you update
+
+- At a full pace the manor now always leaves 15% of the processor and memory to you and Windows, so big jobs such as a whole suite or a kit trial may take a little longer than before. Nothing to set: it updates itself as usual. Each agent's own work gets the ceiling when it takes kit 2.78.3.
+
 ## 0.36.67
 
 **Builds are short: the next build's tests run between builds, a build only merges what passed and releases it, and it takes 30 minutes at most.**

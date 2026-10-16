@@ -4,7 +4,7 @@ import path from 'node:path';
 import { lockDirFor } from './lock.ts';
 import { readJsonFile } from './file-cache.ts';
 import { manorHome } from './manor.ts';
-import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
+import { LockTimeout, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
 
 /**
  * The manor's pace (kit 2.43.3, spec/ROUND.md's "Pace"): how the agents' scheduled rounds share this PC, so they never
@@ -19,11 +19,14 @@ import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
  *     come, first served, and a holder whose process has gone gives up its place at once.
  *   - **Below-normal priority.** A scheduled round runs at below-normal priority, and so does every program it starts
  *     (Windows gives a below-normal process's children its class), so it gives way to whatever the person is doing.
- * - **full**: as before kit 2.43.3: normal priority, and no first-round line.
+ * - **full**: normal priority, and no first-round line, but never past the manor's ceiling (PACE_CEILING, kit 2.78.3):
+ *   the agent's own work and its check runs are each held to 85% of the processor (gentle.ts, checks-pace.ts), so
+ *   Windows and the person always keep the rest. Before kit 2.78.3 full had no ceiling at all.
  *
  * Either way, the agents' scheduled rounds share **the work line** (kit 2.56.0): as many run side by side as Manor's
  * `"agentsAtOnce"` says (2 at a gentle pace, 4 at a full one, unless it says), and only one at a time while the PC is
- * busy or short of memory; the rest wait their turn, first come, first served.
+ * busy or short of memory; the rest wait their turn, first come, first served. Short of memory is more than
+ * PACE_CEILING of it in use, and then no round starts at all until there is room again (kit 2.78.3), line or no line.
  *
  * A round the person asked for (Run now) never waits in the line, but runs at the pace like any other (kit 2.73.0): the
  * setting is the only thing that changes the pace.
@@ -32,6 +35,20 @@ import { slotDirs, withAcceleratorTurn } from './npu-queue.ts';
  */
 
 export type Pace = 'gentle' | 'full';
+
+/**
+ * The most of this PC the manor's background work may take, whatever the pace (kit 2.78.3): 85% of the processor, and
+ * no new work while more than 85% of the memory is in use. The owner's words: "cap it at 85% system resources to leave
+ * room for OS and other operations that the user might be doing." A full pace runs up to it; a gentle one stays well
+ * under it. Every ceiling in the kit is this one.
+ */
+export const PACE_CEILING = 0.85;
+
+/** PACE_CEILING as a job's processor cap, in hundredths of a percent (8500), as gentle.cs and checks-pace.cs take it. */
+export const CEILING_CAP = Math.round(PACE_CEILING * 10_000);
+
+/** PACE_CEILING in words: "85%". */
+export const CEILING_WORDS = `${Math.round(PACE_CEILING * 100)}%`;
 
 /** How long an agent waits in the first-round line before it lets its place go (and joins again at its next round). */
 export const FIRST_ROUND_WAIT_MS = 6 * 3_600_000;
@@ -147,14 +164,52 @@ export interface Load {
 
 /**
  * When the work line offers fewer slots than it has: one at a time once the processor is `busy` or memory is short
- * (`lowMemory` free), and half of them (rounded up) once it is `someBusy`.
+ * (shortOfMemory()), and half of them (rounded up) once it is `someBusy`.
  */
-export const LOAD = { busy: 0.6, someBusy: 0.35, lowMemory: 0.15 };
+export const LOAD = { busy: 0.6, someBusy: 0.35 };
+
+/**
+ * Whether `load` is short of memory: more than PACE_CEILING of it in use (kit 2.78.3; before, less than 15% free, the
+ * same line), what Windows doesn't have available, as measureLoad() and memoryInUse() read it.
+ */
+export const shortOfMemory = (load: Pick<Load, 'freeMemory'>): boolean => 1 - load.freeMemory > PACE_CEILING;
+
+/** The share of this PC's memory in use now, 0 to 1: what Windows doesn't have available (os.freemem() is that). */
+export const memoryInUse = (): number => 1 - os.freemem() / Math.max(1, os.totalmem());
 
 /** The slots of `slots` a round may take at `load`: all of them on a quiet PC, fewer on a busy one, and one at least. */
 export function slotsFor(slots: number, load: Load): number {
-  if (slots <= 1 || load.busy >= LOAD.busy || load.freeMemory < LOAD.lowMemory) return 1;
+  if (slots <= 1 || load.busy >= LOAD.busy || shortOfMemory(load)) return 1;
   return load.busy >= LOAD.someBusy ? Math.ceil(slots / 2) : slots;
+}
+
+/** What a round waiting for memory says it waits for (round.json's waiting): nothing new starts above the ceiling. */
+export const MEMORY_WAITING = `room: more than ${CEILING_WORDS} of this PC's memory is in use, and the manor starts nothing new above that`;
+
+/** How often a round waiting for memory looks again. */
+export const ROOM_LOOK_MS = 10_000;
+
+/** A round's wait for memory outlasted its wait in line: the line's LockTimeout, which every() takes as a round that waited. */
+export class NoRoom extends LockTimeout {}
+
+/**
+ * Waits until no more than PACE_CEILING of this PC's memory is in use (`inUse`, read now and every `lookMs`), at once
+ * when there is room; `onWait` is told once, when it has to wait. Throws NoRoom once `deadline` (epoch ms) comes first.
+ */
+export async function roomToStart(o: { deadline: number; inUse?: () => number | Promise<number>; lookMs?: number; onWait?: () => void }): Promise<void> {
+  const inUse = o.inUse ?? memoryInUse;
+  let told = false;
+  for (;;) {
+    const used = await inUse();
+    if (used <= PACE_CEILING) return;
+    if (!told) {
+      told = true;
+      o.onWait?.();
+    }
+    const left = o.deadline - Date.now();
+    if (left <= 0) throw new NoRoom(`no room: ${Math.round(used * 100)}% of this PC's memory was in use, more than ${CEILING_WORDS}`);
+    await new Promise((r) => setTimeout(r, Math.min(o.lookMs ?? ROOM_LOOK_MS, left)));
+  }
 }
 
 interface CpuTimes {
@@ -190,15 +245,31 @@ export async function measureLoad(sampleMs = 1000): Promise<Load> {
  * else when one is, first come, first served with the other agents' rounds. It may take every slot (agentsAtOnce())
  * on a quiet PC, and fewer on a busy one (slotsFor()), so a busy PC runs one round at a time. The holder keeps its slot
  * for its round's time limit (`limitMs`), and one whose process has gone gives it up at once (the kit's lock rules).
- * After `waitMs` in line it throws the line's LockTimeout, which every() takes as a round that waited. `slots` and
- * `load` are for tests.
+ * After `waitMs` in line it throws the line's LockTimeout, which every() takes as a round that waited.
+ *
+ * Nothing new starts above the ceiling (kit 2.78.3): in its turn, or at once with no line, a round waits while more
+ * than PACE_CEILING of the PC's memory is in use (roomToStart()), `onRoom` told when it does, and throws NoRoom if
+ * there is still none `waitMs` after it joined. `slots`, `load`, `inUse` (the memory in use, 0 to 1; else what
+ * `load` says) and `lookMs` (how often it looks again) are for tests: under node --test a round looks at the memory
+ * only when `load` or `inUse` says it.
  */
-export async function inWorkTurn<T>(p: Pace, fn: () => Promise<T>, o: { who: string; limitMs: number; waitMs: number; doing?: string; dir?: string; slots?: number | null; load?: () => Promise<Load> }): Promise<T> {
+export async function inWorkTurn<T>(
+  p: Pace,
+  fn: () => Promise<T>,
+  o: { who: string; limitMs: number; waitMs: number; doing?: string; dir?: string; slots?: number | null; load?: () => Promise<Load>; inUse?: () => number | Promise<number>; lookMs?: number; onRoom?: () => void },
+): Promise<T> {
+  const deadline = Date.now() + o.waitMs;
+  const own = o.load;
+  const inUse = o.inUse ?? (own ? async () => 1 - (await own()).freeMemory : process.env.NODE_TEST_CONTEXT ? null : memoryInUse);
+  const room = async () => {
+    if (inUse) await roomToStart({ deadline, inUse, lookMs: o.lookMs, onWait: o.onRoom });
+    return fn();
+  };
   const slots = o.slots !== undefined ? o.slots : agentsAtOnce(p);
-  if (slots === null) return fn();
-  const load = slots > 1 ? await (o.load ?? measureLoad)().catch(() => null) : null;
+  if (slots === null) return room();
+  const load = slots > 1 ? await (own ?? measureLoad)().catch(() => null) : null;
   const offered = load ? slotsFor(slots, load) : slots;
-  return withAcceleratorTurn(slotDirs(o.dir ?? workLockDir(), offered), () => fn(), {
+  return withAcceleratorTurn(slotDirs(o.dir ?? workLockDir(), offered), room, {
     lane: 'background',
     who: o.who,
     ...(o.doing ? { doing: o.doing.slice(0, 80) } : {}),
