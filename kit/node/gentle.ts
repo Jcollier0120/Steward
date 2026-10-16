@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { locksDir } from './lock.ts';
-import { pace, setPriorityFor, type Pace } from './pace.ts';
+import { CEILING_CAP, pace, setPriorityFor, type Pace } from './pace.ts';
 import { powershell, psQuote } from './ps.ts';
 
 /**
@@ -16,6 +16,11 @@ import { powershell, psQuote } from './ps.ts';
  *   worker too) are in one job that may use at most a quarter of the processor, and two processors' worth at the most
  *   (gentleCap()), however many threads they run. A program that starts its own threads per processor (x265, a
  *   model's runtime) is held to the cap with the rest.
+ *
+ * At a full pace (kit 2.78.3) the process keeps normal priority, no efficiency mode and its usual disk priority, but
+ * stays in its job, the worker too, with the manor's ceiling as its cap: 85% of the processor (pace.ts's CEILING_CAP),
+ * so even at full speed the agent and what it starts leave Windows and the person the rest. Before kit 2.78.3 full
+ * lifted the cap altogether.
  *
  * The pace is the owner's setting alone (kit 2.73.0): Manor's Settings, gentle or full. Nothing else lifts it, not a
  * round someone asked for (Run now) nor a page being looked at, so what a page shows is what the agent costs in the
@@ -38,9 +43,10 @@ export function gentleDll(source = gentleSource()): string {
 const gentleSource = () => readFileSync(new URL('./gentle.cs', import.meta.url), 'utf8');
 
 /**
- * The script that sets process `pid` gentle or not. It compiles the helper first when no agent has yet: to a name of
- * its own, then moved into place, so two agents compiling at once never load a half-written DLL. Gentle, the worker
- * running it then joins the agent's job (it was started before the job was made, so isn't in it yet).
+ * The script that sets process `pid` gentle or not, its job capped at `cap` hundredths of a percent (0: no cap, no job
+ * made). It compiles the helper first when no agent has yet: to a name of its own, then moved into place, so two agents
+ * compiling at once never load a half-written DLL. With a cap, the worker running it then joins the agent's job (it was
+ * started before the job was made, so isn't in it yet).
  */
 export function gentleScript(pid: number, gentle: boolean, cap: number, dll: string, source: string | null): string {
   const compile = source === null
@@ -53,7 +59,7 @@ export function gentleScript(pid: number, gentle: boolean, cap: number, dll: str
 `;
   const set = `[KitGentle]::Set(${pid}, $${gentle}, ${cap})`;
   return `${compile}Add-Type -LiteralPath ${psQuote(dll)}
-${gentle ? `${set} + ' ' + [KitGentle]::Join(${pid})` : set}`;
+${cap > 0 ? `${set} + ' ' + [KitGentle]::Join(${pid})` : set}`;
 }
 
 /** What this process was last set to: it starts as Windows starts every process, not gentle. */
@@ -63,9 +69,10 @@ let responsive = false;
 
 /**
  * For a process people wait on (Manor, whose page every Open and every agent's card goes through; kit 2.57.1): its
- * rounds never set it gentle, so it keeps normal priority, no efficiency mode and no processor cap, whatever the pace.
- * At a gentle pace its page sat ready to run for up to half a minute at a time while Windows gave it no processor, and
- * the programs it starts were held to its cap with it. Undoes a gentle pace already set; the agents' own processes keep theirs.
+ * rounds never set it gentle, so it keeps normal priority, no efficiency mode and only the manor's ceiling on the
+ * processor (a full pace's, kit 2.78.3: 85% of it, which a page never comes near), whatever the pace. At a gentle pace
+ * its page sat ready to run for up to half a minute at a time while Windows gave it no processor, and the programs it
+ * starts were held to its cap with it. Undoes a gentle pace already set; the agents' own processes keep theirs.
  */
 export function keepResponsive(): Promise<void> {
   const back = paceProcess('full');
@@ -83,18 +90,25 @@ export function pageInUse(_now = Date.now()): void {}
 
 /** The pace its rounds last asked for (none yet: as Windows started it). */
 let wanted: Pace | null = null;
-/** What the process is set to: 'normal', or 'gentle <cap>' (also where Windows' calls are off: KIT_GENTLE=0, not Windows). */
+/**
+ * What the process is set to: 'normal' as Windows started it, else 'gentle <cap>' or 'full <cap>' (also where Windows'
+ * calls are off: KIT_GENTLE=0, not Windows).
+ */
 let setTo = 'normal';
 
-/** What the process is set to now: 'normal', or 'gentle <cap>' with its job's cap in hundredths of a percent. */
+/**
+ * What the process is set to now: 'normal' (as Windows started it, before any pace, and full under node --test),
+ * 'gentle <cap>', or 'full <cap>' (kit 2.78.3: normal priority, its job at the manor's ceiling), with its job's cap in
+ * hundredths of a percent (paceCap()).
+ */
 export const paceSet = () => setTo;
 
 /**
- * Sets this process for the pace, the owner's setting (Manor's Settings, pace.ts pace()), and nothing else. Windows only
- * beyond priority; KIT_GENTLE=0 leaves it to priority alone. Priority is set at once (pace.ts); the rest through the
- * worker, in order, and only when it changes, so a round at the same pace as the one before starts no PowerShell.
- * Never throws: a PC that refuses keeps its priority, and the log says once what didn't take. Nothing, once
- * keepResponsive() was called.
+ * Sets this process for the pace, the owner's setting (Manor's Settings, pace.ts pace()), and nothing else: gentle, or
+ * full with the manor's ceiling on its job (CEILING_CAP). Windows only beyond priority; KIT_GENTLE=0 leaves it to
+ * priority alone. Priority is set at once (pace.ts); the rest through the worker, in order, and only when it changes,
+ * so a round at the same pace as the one before starts no PowerShell. Never throws: a PC that refuses keeps its
+ * priority, and the log says once what didn't take. Nothing, once keepResponsive() was called.
  */
 export function paceProcess(p: Pace): Promise<void> {
   if (responsive) return pending;
@@ -102,12 +116,19 @@ export function paceProcess(p: Pace): Promise<void> {
   return applyPace();
 }
 
+/**
+ * The processor cap on the process's job at pace `p`, in hundredths of a percent: gentle, gentleCap(); full, the
+ * manor's ceiling (CEILING_CAP, kit 2.78.3), never the whole processor. Under node --test, none at full, as before: a
+ * round's pace never puts a test's own process in a job, as checks-pace.ts' commands aren't paced there.
+ */
+export const paceCap = (p: Pace, env: NodeJS.ProcessEnv = process.env): number => (p === 'gentle' ? gentleCap() : env.NODE_TEST_CONTEXT ? 0 : CEILING_CAP);
+
 function applyPace(): Promise<void> {
   const p = wanted ?? 'full';
   setPriorityFor(p);
   const gentle = p === 'gentle';
-  const cap = gentleCap();
-  const want = gentle ? `gentle ${cap}` : 'normal';
+  const cap = paceCap(p);
+  const want = cap ? `${p} ${cap}` : 'normal';
   setTo = want;
   if (process.platform !== 'win32' || process.env.KIT_GENTLE === '0') return pending;
   pending = pending.then(async () => {
@@ -122,9 +143,9 @@ function applyPace(): Promise<void> {
         first = source;
       }
       const took = (await powershell(gentleScript(process.pid, gentle, cap, dll, first), { timeoutMs: 120_000 })).trim();
-      if (took !== (gentle ? 'eco io cap worker' : 'eco io cap')) console.log(`${new Date().toISOString()} the ${gentle ? 'gentle' : 'normal'} pace took only in part (${took}): what didn't take stays as it was`);
+      if (took !== (cap ? 'eco io cap worker' : 'eco io cap')) console.log(`${new Date().toISOString()} the ${p} pace took only in part (${took}): what didn't take stays as it was`);
     } catch (e) {
-      console.log(`${new Date().toISOString()} the ${gentle ? 'gentle' : 'normal'} pace couldn't be set beyond priority: ${(e as Error).message.slice(0, 300)}`);
+      console.log(`${new Date().toISOString()} the ${p} pace couldn't be set beyond priority: ${(e as Error).message.slice(0, 300)}`);
     }
   });
   return pending;
@@ -139,7 +160,8 @@ let containTimer: NodeJS.Timeout | null = null;
  * kit 2.73.0): sets it at the owner's pace now (Manor's Settings; `own` when Manor doesn't say), gentle in a job with
  * the gentle cap that every program it starts afterwards is in too, and reads the setting again every
  * CONTAIN_CHECK_MS so a change applies without a restart. Call it first, before the process starts anything. Model
- * servers it starts leave its job (accelerators.ts, apart.ts): they serve every agent, and an asker's cap isn't theirs.
+ * servers it starts leave its job (accelerators.ts, apart.ts): they serve every agent, and an asker's cap isn't theirs;
+ * the servers' own job holds them to the manor's ceiling (kit 2.78.3).
  */
 export function containSelf(own: Pace = 'gentle', read: () => Pace = () => pace(own)): Promise<void> {
   const done = paceProcess(read());

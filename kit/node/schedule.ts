@@ -7,7 +7,7 @@ import { needsSettings } from './required.ts';
 import { offlineFailure } from './net.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
 import { paceProcess } from './gentle.ts';
-import { FIRST_ROUND_WAITING, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
+import { FIRST_ROUND_WAITING, MEMORY_WAITING, NoRoom, WORK_WAITING, inFirstRoundTurn, inWorkTurn, pace } from './pace.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 import { inWork, startWork } from './work-tasks.ts';
 import { updateHold } from './update-hold.ts';
@@ -296,7 +296,8 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
  *   the signal (`job({ signal })`); one that can't is simply no longer waited for.
  *
  * A scheduled round takes its turn in the work line (pace.ts's inWorkTurn(), kit 2.56.0): a few agents' rounds at a
- * time on this PC, fewer while it is busy. While it waits, its state's `waiting` says so. A schedule whose rounds are
+ * time on this PC, fewer while it is busy, and none while more than the manor's ceiling of its memory is in use (kit
+ * 2.78.3: MEMORY_WAITING; `room` stands in for the memory in use in tests). While it waits, its state's `waiting` says so. A schedule whose rounds are
  * `light` (a few requests, a look at a file: no heavy work) runs them at once, outside the line, as a round asked for
  * (Run now) always does: `true`, or a function asked before each round (light while it has nothing due, say).
  *
@@ -310,7 +311,7 @@ export function roundTimes(): Pick<RoundState, 'lastRunAt' | 'lastRunOk' | 'last
 export function every(
   everyMs: number | (() => number),
   job: (round: { signal: AbortSignal; awake: (what: string) => () => void }) => Promise<void>,
-  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number } = {},
+  opts: { firstDelayMs?: number; lastEndedAt?: number; name?: string; timeoutMs?: number | (() => number); light?: boolean | (() => boolean); phaseMs?: number; room?: { inUse: () => number | Promise<number>; lookMs?: number } } = {},
 ) {
   let running = false;
   let timer: NodeJS.Timeout | undefined;
@@ -413,7 +414,7 @@ export function every(
       const run = async () => {
         inLine = null;
         task.running();
-        if (waiting === WORK_WAITING) waiting = null;
+        if (waiting === WORK_WAITING || waiting === MEMORY_WAITING) waiting = null;
         started = Date.now();
         startedAt = started;
         firstNow = isFirst ? 'running' : null;
@@ -444,7 +445,7 @@ export function every(
         task.waitIn('work');
         // Said while it waits, so a reader of its state (the Surveyor) never takes it for a schedule with nothing coming.
         waiting = WORK_WAITING;
-        return inWorkTurn(p, run, { who: APP.id, doing: name, limitMs: limit, waitMs: Math.max(interval(), 60_000) });
+        return inWorkTurn(p, run, { who: APP.id, doing: name, limitMs: limit, waitMs: Math.max(interval(), 60_000), ...opts.room, onRoom: () => (waiting = MEMORY_WAITING) });
       };
       await inFirstRoundTurn(p, !asked && isFirst, inTurn, {
         who: APP.id,
@@ -464,10 +465,11 @@ export function every(
         // Its turn didn't come before its next round was due: it joins the line again then.
         // Set by run() and inTurn() above, which TypeScript can't follow.
         const line = inLine as 'first' | 'work' | null;
-        waitedTurn = line === 'work' ? WORK_WAITING : FIRST_ROUND_WAITING;
+        const noRoom = e instanceof NoRoom;
+        waitedTurn = noRoom ? MEMORY_WAITING : line === 'work' ? WORK_WAITING : FIRST_ROUND_WAITING;
         lastOk = null;
         console.log(
-          `${new Date().toISOString()} ${line === 'work' ? 'its round waited its turn behind the other agents at work' : "its first round waited its turn behind the other agents' first rounds"}; it waits again at its next round`,
+          `${new Date().toISOString()} ${noRoom ? `its round waited for room (${e.message})` : line === 'work' ? 'its round waited its turn behind the other agents at work' : "its first round waited its turn behind the other agents' first rounds"}; it waits again at its next round`,
         );
       } else {
         lastError = (e as Error).message;
@@ -481,7 +483,7 @@ export function every(
       task.done();
       for (const letGo of holds) letGo();
       firstNow = null;
-      if (waiting === WORK_WAITING) waiting = null;
+      if (waiting === WORK_WAITING || waiting === MEMORY_WAITING) waiting = null;
       clearTimeout(limitTimer);
       const u = used as { cpu: NodeJS.CpuUsage; memory: number; sampler?: NodeJS.Timeout } | null;
       if (u) clearInterval(u.sampler);
@@ -500,7 +502,7 @@ export function every(
         finished: new Date(ended).toISOString(),
         ok: offline || waitedTurn ? null : error === null,
         ...(offline ? { offline: true } : {}),
-        ...(waitedTurn ? { waiting: waitedTurn, turn: waitedTurn === WORK_WAITING ? ('work' as const) : ('first' as const) } : {}),
+        ...(waitedTurn ? { waiting: waitedTurn, turn: waitedTurn === FIRST_ROUND_WAITING ? ('first' as const) : ('work' as const) } : {}),
         ...(timedOut ? { timedOut: true } : {}),
         error,
         everyMs: interval(),
