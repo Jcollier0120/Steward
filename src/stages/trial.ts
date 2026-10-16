@@ -377,10 +377,12 @@ async function tryPair(ctx: Ctx, e: Employee, p: PrInfo, kitDir: string): Promis
   const sha = p.headOid.slice(0, 7);
   try {
     const env = { STEWARD_KIT: path.resolve(kitDir) };
-    const first = await runChecks(ctx, e, dir, { env, say });
+    // The Seneschal's kit-trial task, for this PR's head and the kit's commit (stages/seneschal.ts).
+    const task = { kind: 'kit-trial', pr: p.number, branch: p.head } as const;
+    const first = await runChecks(ctx, e, dir, { env, say, task });
     if (!first) return { ok: true, message: `checks passed here at ${sha}` };
     say(`#${p.number}: its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say });
+    const again = await runChecks(ctx, e, dir, { env, say, task });
     return again ? { ok: false, message: `its checks failed at ${sha}, twice: ${again}` } : { ok: true, message: `checks passed here at ${sha} on a second try (the first: ${first})` };
   } finally {
     try {

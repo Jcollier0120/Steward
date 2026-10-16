@@ -302,6 +302,30 @@ test("watching: Reeve's alerts are read only where he is installed, raised at on
   assert.deepEqual([st.open.length, st.cleared.slice(0, 2).map((a) => a.id).sort()], [0, ['reeve:fast-forward:0123456789ab', 'reeve:npu-health:3f9a1c0b7d2e']], 'cleared once Reeve no longer lists them');
 });
 
+const SENESCHAL_JAMS = {
+  alerts: [
+    { id: 'jam:t12', job: 'jam', title: "The Seneschal: Reeve#212's checks has waited 42 min", detail: ['PR check in Jcollier0120/Reeve, asked for by steward.', 'Nothing has leased it.'], since: '2026-10-01T12:00:00.000Z', url: 'http://seneschal.localhost:18393/#jams' },
+    { title: 'no id: left out' },
+  ],
+};
+
+test("the Seneschal's jams: one alarm each, at once, read only where it is installed; its page down, or none, is quiet", async () => {
+  const { seneschalConditions } = alarmsModule;
+  assert.deepEqual(seneschalConditions(SENESCHAL_JAMS), [{ id: 'seneschal:jam:t12', who: 'seneschal', title: "The Seneschal: Reeve#212's checks has waited 42 min", detail: ['PR check in Jcollier0120/Reeve, asked for by steward.', 'Nothing has leased it.'], url: 'http://seneschal.localhost:18393/#jams', since: '2026-10-01T12:00:00.000Z', afterMs: 0 }]);
+  assert.deepEqual(seneschalConditions({ error: 'ECONNREFUSED' }), []);
+  assert.deepEqual(seneschalConditions({ alerts: 'x' }), []);
+  writeFileSync(alarmsFile(), JSON.stringify(empty()));
+  const asked: string[] = [];
+  const s = structuredClone(settings);
+  const deps = (installed: boolean) => ({ pages: { manor: '', surveyor: '', wright: '', reeve: '', seneschal: 'http://127.0.0.1:18393' }, getJson: async (u: string) => (asked.push(u), u === 'http://127.0.0.1:18393/api/alerts' ? SENESCHAL_JAMS : { error: 'none' }), toast: async () => {}, now: at(12), seneschalInstalled: () => installed });
+  const watch = (d: ReturnType<typeof deps>) => watchAlarms({ settings: s, round: roundResult(), held: [], failedReleases: {}, employees: DEFAULT_EMPLOYEES, log: () => {} }, d);
+  let st = await watch(deps(false));
+  assert.deepEqual([asked, st.open], [[], []], 'not installed (or no Developer Pro): not read');
+  st = await watch(deps(true));
+  assert.deepEqual(st.open.map((a) => [a.id, a.who, a.url]), [['seneschal:jam:t12', 'seneschal', 'http://seneschal.localhost:18393/#jams']]);
+  assert.equal(agentPages().seneschal, '', 'not installed here: no page to read');
+});
+
 test("while this PC is offline, what is only the network's is no alarm; everything else is as ever, and the toast too", async () => {
   const { withoutOffline } = await import('../src/alarms.ts');
   const cs = [
