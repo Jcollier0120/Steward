@@ -11,7 +11,7 @@ import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf,
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
-import { calibrate, checkPinned, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -1005,6 +1005,11 @@ export function npuGuessedNote(label: string, cap: number, measured: boolean): s
   return `The NPU (${label}) runs on guessed values: setup gave it the most cautious cap it has (${cap.toLocaleString('en-US')} tokens) and ${measured ? "this PC's own timeouts, measured" : 'the longest timeouts it has'}. It passed its test, so it's used; a kit update that knows this NPU may change them.`;
 }
 
+/** The note for an NPU whose server can't set its power mode (its route's power tool broken): used all the same. */
+export function npuPowerNote(label: string, why: string): string {
+  return `The NPU (${label}) is used, at its default power mode: ${why}.`;
+}
+
 /** How a plan or report says an NPU hasn't run on real hardware: its generation unverified, or one setup doesn't know (its label says so). */
 const untried = (s: { verified: boolean; guessed?: boolean }) =>
   s.guessed ? ' (tried on guessed values, the most cautious it has, and kept only if it passes its test)' : s.verified ? '' : ' (not yet tried on this kind of NPU)';
@@ -1021,10 +1026,15 @@ export function plainReason(problems: string[], what: 'chat' | 'embed'): string 
 export interface NpuSetup {
   entry?: AcceleratorEntry;
   problems: string[];
-  /** Why the NPU, or its embeddings, isn't used (npuNote), when it isn't; or that it runs on guessed values (npuGuessedNote). */
+  /**
+   * Why the NPU, or its embeddings, isn't used (npuNote), when it isn't; or that it runs on guessed values
+   * (npuGuessedNote), or at its default power mode (npuPowerNote).
+   */
   note?: string;
   /** What setup measured, on a generation nobody had (calibrate): its timeouts come from it. */
   measured?: NpuMeasured;
+  /** Its route's power tool, run once its server answered (checkPowerTool), when the route has one. */
+  power?: PowerToolCheck;
 }
 
 /**
@@ -1132,7 +1142,14 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
   io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
   // A generation setup doesn't know passed on guessed values: it's used, and the person is told so (npu-note.json).
   if (n.support.guessed) note = [npuGuessedNote(label, n.route.maxContextTokens, !!measured), note].filter(Boolean).join(' ');
-  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}) };
+  // The tool its server sets the NPU's power mode with (AMD's xrt-smi, for FastFlowLM), which the server runs without
+  // checking: one that can't start leaves the NPU at its default mode. It's used all the same, and the person is told why.
+  const power = await checkPowerTool(n, { run, exists });
+  if (power?.broken) {
+    io.log(`${path.win32.basename(power.exe)} couldn't start (exit ${power.code}): ${n.route.server} can't set the NPU's power mode`);
+    note = [note, npuPowerNote(label, n.powerTool!.broken)].filter(Boolean).join(' ');
+  }
+  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}), ...(power ? { power } : {}) };
 }
 
 /** Three sentences, two about the same thing: an embedding model that runs properly puts those two closer. */
