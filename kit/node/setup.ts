@@ -12,7 +12,7 @@ import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
 import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
-import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, smallPc, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -600,14 +600,16 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
     // Only what fits in this PC's memory beside everything else (npuMemoryFit, at this generation's sizes): the rest
     // goes to the card or the processor.
-    const route = det.vendor ? routeFor(NPU_CATALOG.routes[det.vendor], det.generation) : null;
+    // A PC with little memory runs its generation's smallPc models, where it has any (a 16 GB Snapdragon X2: Qwen3-VL-2B).
+    const small = smallPc(o.detection.ramBytes);
+    const route = det.vendor ? routeFor(NPU_CATALOG.routes[det.vendor], det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };
     if (!fit.chat) {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
       npuLeftOut = 'memory';
     } else {
-      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards });
+      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards, small });
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);

@@ -26,6 +26,12 @@ export interface NpuModel {
   kinds: ServeKind[];
   /** The server program's arguments that download it (placeholders expanded). */
   pull: string[];
+  /**
+   * Server arguments it needs beside the route's `serve`, added to the server's command when it is the chat model (the
+   * one the server starts with): GenieX's llama.cpp models' `--compute npu --vit-compute GPUOpenCL`, which its QAIRT
+   * models mustn't get.
+   */
+  serve?: string[];
   /** A file that is there once it's downloaded, when the server keeps it in a known place. */
   present?: string;
   /** About how much it downloads, in bytes. */
@@ -122,6 +128,12 @@ export interface NpuGeneration {
   memoryGb?: NpuRoute['memoryGb'];
   /** Why its values are what they are, in a sentence. */
   basis?: string;
+  /**
+   * The models it runs instead of the route's on a PC with little memory (smallPc: under idleStop.smallPcGb), and why:
+   * a 16 GB Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, where a bigger one keeps the route's 4B.
+   * routeFor puts them in the route's place when it's told the PC is small.
+   */
+  smallPc?: { models: NpuModel[]; basis: string };
   /**
    * Its speed as its owners' reports measured it (npu-reports.ts, spec/NPU-REPORTS.md), for the website: the medians
    * of the PCs that passed, on the server and model named. Only while those are the route's does the site show it.
@@ -462,8 +474,9 @@ export function embedPaths(route: NpuRoute, tools: string, env?: Record<string, 
 /**
  * The config.json entry for the NPU on this route: one server on its port, chat and every other kind it serves, the
  * route's caps (per kind where they differ), its own timeouts, quirks. A kind on the chat model's server shares it
- * (no baseUrl of its own); its startCommand starts it with the chat model. `exe` is written as setup found it. The
- * route's embedding server, when it has one and `embed` says where setup put it, is the embed endpoint, on its own port.
+ * (no baseUrl of its own); its startCommand starts it with the chat model, and that model's own arguments after the
+ * route's. `exe` is written as setup found it. The route's embedding server, when it has one and `embed` says where
+ * setup put it, is the embed endpoint, on its own port.
  */
 export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string } }): AcceleratorEntry {
   const port = o.port ?? route.port;
@@ -471,7 +484,7 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
   const chat = firstModel(route, 'chat');
   if (!chat) throw new Error(`${route.server}: no chat model`);
   const baseUrl = `http://127.0.0.1:${port}${route.baseUrlPath ?? ''}`;
-  const startCommand = [keep(o.exe), ...route.serve.map((a) => {
+  const startCommand = [keep(o.exe), ...[...route.serve, ...(chat.serve ?? [])].map((a) => {
     const x = expandRoute(a, { tools: o.tools, port, model: chat.id });
     return a.includes('{tools}') ? keep(x) : x;
   })];
@@ -535,11 +548,13 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
 /**
  * The route as it runs on one generation: the generation's own timeouts, caps and server arguments over the route's
  * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt); on
- * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The route itself when the generation has none,
- * or isn't the route's.
+ * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). On a PC with little memory (`small`: smallPc of
+ * its memory), the generation's smallPc models in the route's place. The route itself when the generation has none of
+ * these, or isn't the route's.
  */
-export function routeFor(route: NpuRoute, generation: string | null | undefined): NpuRoute {
+export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false): NpuRoute {
   const g = generationOf(route, generation);
+  if (small && g?.smallPc) route = { ...route, models: g.smallPc.models };
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
     const serve = [...args];
@@ -819,11 +834,13 @@ export function planNpu(o: {
   noEmbed?: boolean;
   /** This PC's graphics cards (detection's), for the turn of an embedding server that runs on its graphics (embedTurn). */
   cards?: readonly GraphicsCard[];
+  /** This PC has little memory (smallPc): its generation's smallPc models, where it has any. */
+  small?: boolean;
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
-  // The generation's own starting values (routeFor); its embedding server left out when asked.
-  const generic = routeFor((o.catalog ?? NPU_CATALOG).routes[o.support.vendor], o.support.generation);
+  // The generation's own starting values and models (routeFor); its embedding server left out when asked.
+  const generic = routeFor((o.catalog ?? NPU_CATALOG).routes[o.support.vendor], o.support.generation, o.small);
   const route: NpuRoute = o.noEmbed ? { ...generic, embedServer: undefined, models: generic.models.filter((m) => !(m.kinds.length === 1 && m.kinds[0] === 'embed')) } : generic;
   const exe = serverExe(route, o.tools, o.env);
   const installed = exists(exe);

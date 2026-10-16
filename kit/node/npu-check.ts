@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Accelerator, type AcceleratorEntry, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect } from './detect.ts';
-import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, UNKNOWN_GENERATION } from './npu-vendors.ts';
+import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
 import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
 import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
@@ -25,7 +25,10 @@ export { processMemory, type RunningServer, startServer } from './npu-server.ts'
  * x64 programs on): its download, layout, environment, pull, serve and routes, all but the NPU. A rehearsal runs only in
  * a scratch REEVE_HOME, so it never touches this PC's servers, models or locks.
  *
- *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]
+ *   node <agent>\src\kit\npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--small-pc] [--harden] [--idle] [--out <file>]
+ *
+ * It runs the models setup would on this PC: on one with little memory (under idleStop.smallPcGb), its generation's
+ * smallPc models, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` runs those on a bigger PC too.
  *
  * `--generation <id>` on an NPU of another generation plays it, and verifies nothing: a Snapdragon X2 plays a Snapdragon X
  * whole (npu-vendors.ts' playGeneration: GenieX on a data folder of its own with AI Hub's X Elite build, the embeddings on
@@ -83,6 +86,8 @@ export interface NpuCheckOptions {
    * maker's played by this one (the Lunar Lake standing in for an NPU 3720), which verifies nothing. Unset, the NPU's own.
    */
   generation?: string;
+  /** The models a PC with little memory runs (its generation's smallPc), whatever this PC's memory. */
+  smallPc?: boolean;
   /**
    * Setup's hardening, on this PC's NPU (hardenCheck): the failures setup must fall back from quietly, forced (a model
    * that answers nonsense, an impossible timeout, a driver below the minimum), and setup's calibration checked
@@ -364,8 +369,11 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const played = play?.kind === 'played' ? play.played : null;
   report.generation = generation;
   let route: NpuRoute;
+  // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked.
+  const small = !!o.smallPc || smallPc(d.ramBytes);
   try {
-    route = routeOnDevice(routeFor(catalog.routes[vendor], generation), report.device);
+    route =routeOnDevice(routeFor(catalog.routes[vendor], generation, small), report.device);
+    if (small && generationOf(catalog.routes[vendor], generation)?.smallPc) log(`A small PC's models (${o.smallPc ? '--small-pc' : `this PC's ${report.pc.ramGb} GB`}): ${route.models.map((m) => m.id).join(', ')}.`);
     if (played) route = playedRoute(route, played);
   } catch (e: any) {
     add({ step: 'route', ok: false, say: e.message });
@@ -470,7 +478,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     return finish(1);
   }
   // From here on it measures this PC's own NPU (never a rehearsal's device): what it finds is the NPU's report.
-  if (!report.rehearsal) measuring = { route: routeFor(catalog.routes[vendor], generation), verified: !!support.verified };
+  // A small PC's models are what it ran, so the report names them (npu-reports.ts counts them apart from the route's).
+  if (!report.rehearsal) measuring = { route: routeFor(catalog.routes[vendor], generation, small), verified: !!support.verified };
   const cacheArg = route.serve.indexOf('--cache_dir');
   if (cacheArg >= 0) (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(route.serve[cacheArg + 1].replace('{tools}', tools));
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;
@@ -887,7 +896,8 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
       const v = argv[++i];
       if (!v) return { error: '--generation takes a generation of the route (meteor-lake, lunar-lake…)' };
       o.generation = v;
-    } else if (a === '--harden') o.harden = true;
+    } else if (a === '--small-pc') o.smallPc = true;
+    else if (a === '--harden') o.harden = true;
     else if (a === '--idle') o.idle = true;
     else if (a === '--out') o.out = argv[++i];
     else return { error: `unknown argument ${a}` };
@@ -898,7 +908,7 @@ export function parseCheckArgs(argv: string[]): NpuCheckOptions | { error: strin
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseCheckArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--harden] [--idle] [--out <file>]`);
+    console.error(`${o.error}\nUsage: node npu-check.ts [--yes] [--no-setup] [--route intel|amd|qualcomm] [--device NPU|CPU|GPU] [--generation <id>] [--small-pc] [--harden] [--idle] [--out <file>]`);
     process.exit(2);
   }
   const { code } = await npuCheck(o);

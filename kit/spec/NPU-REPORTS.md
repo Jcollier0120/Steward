@@ -136,7 +136,10 @@ node <agent>\src\kit\npu-reports.ts --fetch [--exchequer <url>]    (the publishe
 
 It reads the summary against this kit's `npu-vendors.json` and prints, per generation, what the reports say and the JSON
 merge patch they support, as the NPU check prints its `patch`. It changes nothing: a person reads it, merges it into
-`npu-vendors.json` and releases the kit. Only groups on the route's current server version and model count.
+`npu-vendors.json` and releases the kit. Only groups on the route's current server version and model count. A PC with
+little memory that runs its generation's `smallPc` models in the route's place (a 16 GB Snapdragon X2's Qwen3-VL-2B)
+reports those models: their groups are listed on their own (`smallPc`), for a person to read, and never count toward
+the route's model.
 
 - **verified**: a generation still `verified: false` becomes `true` once at least **3** PCs passed (`passedPcs`) and
   under **1 in 5** of its PCs failed. Short of that it says what is missing; with more failing, it lists the failures.

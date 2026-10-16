@@ -77,6 +77,19 @@ test('short of 3 PCs it says what is missing; a verified generation failing ofte
   assert.equal((edge.patch as any)?.routes.intel.generations['panther-lake']?.verified, undefined);
 });
 
+test("a small PC's own models (smallPc) are listed on their own: never counted toward the route's model, and not stale", () => {
+  const qualcomm = V.NPU_CATALOG.routes.qualcomm;
+  const [gen] = Object.entries(qualcomm.generations).find(([, g]) => (g as any).smallPc) ?? [];
+  assert.ok(gen, 'a generation with smallPc models (the Snapdragon X2)');
+  const run = V.routeFor(qualcomm, gen, true);
+  const small = (run.models.find((m: any) => m.kinds.includes('chat')) ?? run.models[0]).id;
+  const r = P.reportsPatch({ ...summary, groups: [group({ vendor: 'qualcomm', generation: gen, server: qualcomm.server, version: qualcomm.version, model: small, reports: 4, pcs: 4, passedPcs: 3, failedPcs: 1, failures: { 'test-timeout': 1 } })] } as any);
+  assert.deepEqual(r.smallPc, [{ vendor: 'qualcomm', generation: gen, model: small, pcs: 4, passedPcs: 3, failedPcs: 1 }]);
+  assert.equal(r.stale, 0);
+  assert.equal(r.patch, null, "nothing proposed for the route's model from a small PC's");
+  assert.ok(r.lines.some((l) => l.includes(`${gen} on small PCs, ${small} (its smallPc models): 3 of 4 PCs passed. Not counted toward the route's model`)), r.lines.join('\n'));
+});
+
 test("the reports' sentence in a basis replaces the one they put there before, and leaves the rest", () => {
   const g = summary.groups[0] as any;
   const once = P.withReportsBasis('Not measured: a guess.', P.reportsBasis(g));

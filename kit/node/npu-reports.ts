@@ -76,6 +76,11 @@ export interface ReportsPatch {
   unknown: { vendor: NpuVendor; pciDevice: string; pcs: number; passedPcs: number; cpus: string[] }[];
   /** Reports on a server, version or model the route no longer runs, which count for nothing here. */
   stale: number;
+  /**
+   * Reports of a generation's smallPc models (a PC with little memory runs them in the route's place): listed on their
+   * own, for the owner to read, and never counted toward the route's model.
+   */
+  smallPc: { vendor: NpuVendor; generation: string; model: string; pcs: number; passedPcs: number; failedPcs: number }[];
   /** The JSON merge patch for npu-vendors.json, or null when the reports support no change. */
   patch: Record<string, unknown> | null;
   lines: string[];
@@ -135,6 +140,7 @@ export function reportsTimeouts(g: NpuSummaryGroup, route: NpuRoute): { timeouts
 export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATALOG): ReportsPatch {
   const findings: GenerationFinding[] = [];
   let stale = 0;
+  const smallPcs: ReportsPatch['smallPc'] = [];
   const day = summary.at.slice(0, 10);
   for (const g of summary.groups) {
     if (!g.vendor || !NPU_VENDORS.includes(g.vendor) || !g.generation || g.generation === UNKNOWN_GENERATION) continue;
@@ -144,7 +150,11 @@ export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATA
     // out) says nothing of how the route runs.
     if (!g.server) continue;
     if (g.server !== route.server || g.version !== route.version || g.model !== chatModel(route)) {
-      stale += g.reports;
+      // A small PC's own models (smallPc), run in the route's place: listed apart, never counted toward the route's.
+      const small = route.generations[g.generation].smallPc ? chatModel(routeFor(route, g.generation, true)) : null;
+      if (small && g.server === route.server && g.version === route.version && g.model === small) {
+        smallPcs.push({ vendor: g.vendor, generation: g.generation, model: small, pcs: g.pcs, passedPcs: g.passedPcs, failedPcs: g.failedPcs });
+      } else stale += g.reports;
       continue;
     }
     const gen = route.generations[g.generation];
@@ -202,9 +212,10 @@ export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATA
   for (const f of findings) lines.push(`${MAKERS[f.vendor]} ${f.generation}:`, ...f.lines.map((l) => `  ${l}`));
   if (!findings.length) lines.push('  none on a generation and route this kit runs now.');
   if (stale) lines.push(`${stale} report${stale === 1 ? '' : 's'} on a server, version or model the route no longer runs: not counted.`);
+  for (const s of smallPcs) lines.push(`${MAKERS[s.vendor]} ${s.generation} on small PCs, ${s.model} (its smallPc models): ${s.passedPcs} of ${s.pcs} PCs passed. Not counted toward the route's model: read them before changing its smallPc.`);
   for (const u of unknown) lines.push(`An NPU nobody has listed: ${MAKERS[u.vendor]} device ${u.pciDevice}, on ${u.pcs} PCs (${u.passedPcs} passed on guessed values; ${u.cpus.slice(0, 3).join('; ') || 'processors unknown'}): add "${u.pciDevice}": "<its generation>" to devices.${u.vendor} once its generation is known.`);
   lines.push(patch ? 'The patch for npu-vendors.json (a JSON merge patch: read it, merge it, release the kit):' : 'No change to npu-vendors.json.');
-  return { findings, unknown, stale, patch, lines };
+  return { findings, unknown, stale, smallPc: smallPcs, patch, lines };
 }
 
 /** The summary from the Exchequer, with the publisher's key. */
