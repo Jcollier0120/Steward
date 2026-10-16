@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## Unreleased
+
+**The NPU check's hardening run passes every step on Intel's NPU 3720.**
+
+### What changed
+
+- The NPU check's hardening run now passes every step on Intel's NPU 3720 (Meteor Lake and Arrow Lake-U). Before, one of its steps could ask a server that an earlier step had left starting, and fail.
+- How much memory the local AI holds on a 16 GB PC with the NPU 3720 is now measured and written down: chat and search together hold about 4.3 GB, inside what setup allows. Nothing changes for it.
+- The kit the Steward hands out brings this to every agent.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.59
 
 **Kit 2.77.6: the local AI's NPU unloads its models about five minutes after its last request, even while Reeve indexes on the graphics card.**
