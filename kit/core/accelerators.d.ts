@@ -223,7 +223,11 @@ export type Look = {
  */
 /** @type {readonly Work[]} */
 export declare const WORKS: readonly Work[];
-/** `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path. */
+/**
+ * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
+ * `sides-of-32`: a picture's side of a whole number of 32 px, on a picture the server doesn't shrink, is made a pixel
+ * longer first (FastFlowLM 1.0.7 misreads it).
+ */
 export declare const QUIRKS: readonly string[];
 /**
  * Whether it serves this kind of request.
