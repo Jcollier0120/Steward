@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.0
 
-**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board.**
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: a button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
 
 ### What's new
 
@@ -13,6 +13,14 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **`routeFor(route, generation, small)`**: with `small`, the generation's `smallPc` models in the route's place; without it, as before. **`planNpu({ small })`** passes it on.
   - **`NpuModel.serve`**: server arguments a model needs beside the route's `serve`. `npuEntry` adds the chat model's after the route's, so they go with that model alone.
 - **npu-check.ts and npu-bench.ts: `--small-pc`** runs a small PC's models on any PC. On a PC under 20 GB they run anyway, as setup would run them. `npu-bench --model` one of a small PC's models runs them too, and `--model` one of the route's own measures it on a small PC. The report's model says which ran.
+- **busy.tsx:**
+  - **`BusyButton`:** a button in the page's own classes (`className`, any button attribute) that spins while its work runs: a spinner in place of its `icon` (before its words without one), `aria-busy`, and no presses. Its work is `busy`, the page's own word for it (a store's "updating"), and any promise its `onClick` returns.
+  - **`BusyArea`:** a part of the page that is disabled while its work runs: a `<fieldset>` drawn as a plain block, every control in it disabled, `aria-busy`, the progress cursor. Busy while `busy` says so, and while a BusyButton, PostButton or Button in it runs.
+  - **Focus stays:** a control the browser lets go of as it's disabled has the focus back when the work is done.
+- **modal.tsx:**
+  - **`confirmDialog(text, { ok, cancel, danger, title })`** and **`alertDialog(text, { ok, danger, title })`:** the page's own `confirm()` and `alert()`. The same words, and the same choices: OK and Cancel (OK alone for a message). `confirmDialog` is true for OK, false for Cancel or Escape. They draw themselves (no host for a page to mount), one at a time, oldest first, over the tour too. Inside an open modal `<dialog>`, they're drawn in it, so they can be pressed.
+  - **Each dialog:** an `alertdialog` that names its text (`aria-describedby`). OK has the focus, as the browser's had. Tab stays in it, Escape is Cancel (OK for a message), and focus goes back to where it was. Line breaks in the text stay.
+  - **`DialogHost`** (a page may draw its own; a test does), **`dialogsOpen()`** and **`nextStop`** (where Tab goes) are exported too.
 
 ### What changed
 
@@ -44,12 +52,24 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - The job's median, the job time and every other measurement are as before, so runs still compare within `castellan-npu-bench/2`, and a report from before keeps its verdict. A server that doesn't stream or count tokens is judged on whole times, as before (it is marked anyway).
   - The `noisy` mark names such a job "at one answer length". **spec/npu-bench.schema.json**: the three new fields, optional so earlier reports still match.
 - **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row, `--small-pc`, and a job's steadiness.
+- **`ModalCard`** (moved to modal.tsx, still exported from feedback.tsx and index.ts) keeps focus in it: Tab and Shift+Tab go round it. Only the top modal hears Escape. Focus moves to an element marked `data-autofocus`, else the card. A page that draws `onClose` anew each render no longer moves focus about while it's open. New props: `role` (`alertdialog`), `describedBy` and `modalClassName`.
+- **`Button`:** an `onPress` that returns a promise spins the button until it settles, as `loading` does. `onPress` is `() => unknown` now; a `() => void` still fits.
+- **`PostButton`:** its `confirm` asks in the page's own dialog. The server's error or `message` is said there once the POST is done and the page has looked for news, and a server that doesn't answer is said too (before, nothing was). Its BusyArea waits with it.
+- **The Settings form** (settings-form.tsx) disables its fields, Cancel and "Set every field to its default" while it saves. **OnPageList**'s Removes wait for each other.
+- **The tour:** "Save your changes first, or Cancel them." and "… can't start without …" are the page's own dialog.
+- **page.ts's script:** `data-confirm` asks in the page's own dialog, and the server's error or message is said there. While its POST runs, the button spins and takes no presses, and so do its `data-form` form or the form or card it's in. A failure gives them back, and on success the page reloads as before. A network failure is said, and the page doesn't reload itself under a dialog or a button that waits.
+- **settings-panel.js:** Save spins while it saves, and the fields, Cancel and "Set every field to its default" wait with it. "Try again" spins while the settings load.
+- **The CSS:** the spinner, the modal card and the dialogs are page.ts's CSS now (both kinds of page draw them), with `button:has(> .ui-spinner)`. The react part's UI_CSS adds `.ui-busy-area`.
 
 ### For an agent
 
-- Nothing to do.
+- Nothing to do for the NPU's changes.
 - A 16 GB Snapdragon X2 already set up keeps the 4B until it is set up again (Manor's Set up local AI), which pulls the 2B (1.9 GB) and writes it. The 4B stays in `%USERPROFILE%\.cache\geniex\models` (4.4 GB) until removed (`geniex remove qualcomm/Qwen3-VL-4B-Instruct`).
 - Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB, the kit's own command through `npu-bench --small-pc`), its pull through setup, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
+- Nothing to do for PostButton, `data-confirm`, OnPageList, the Settings form or the tour: they use the page's own dialog by themselves.
+- A page of its own that calls `window.confirm()` or `window.alert()` calls `await confirmDialog(text)` or `await alertDialog(text)` instead, with the same words.
+- A button whose handler awaits is a `BusyButton` (or the kit's `Button`, whose `onPress` returns the promise). Wrap what the work changes in a `BusyArea`.
+- A page that copies the kit's CSS (Manor's app.css, under a policy with no inline style) adds `.ui-busy-area`, `.ui-modal.ui-dialog` and the `.ui-dialog-*` rules from page.ts's CSS.
 
 ## 2.77.8
 

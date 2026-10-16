@@ -16,6 +16,10 @@
  *     );
  *   }
  *   mount(<App />);
+ *
+ * Busy and asking: a Button whose onPress returns a promise spins until it settles, BusyButton does the same for a
+ * button of the page's own classes, and BusyArea disables the part of the page the work changes. confirmDialog and
+ * alertDialog are the page's own confirm() and alert(): never the browser's.
  */
 export { BUSY_LOOK_MS, initialData, pageToken, PING_LOOK_MS, post, roundState, usePageData, type PageData, type PageShell, type ShellTheme } from './page-data.ts';
 export { mount, Page, ThemeMenu, useRoute, type Route } from './shell.tsx';
@@ -24,7 +28,9 @@ export { ago, useNow } from './time.ts';
 export { Icon, Spinner, type IconName } from './icons.tsx';
 export { Badge, Button, Card, CardFooter, DetailRow, IconButton, LinkButton, Notes, PostButton, ReloadProvider, Section, Text, type BadgeTone, type ButtonProps, type ButtonSize, type ButtonVariant, type TextVariant } from './ui.tsx';
 export { ChoiceGroup, Input, SaveStatus, Segmented, Select, Switch, type ChoiceLayout, type ChoiceOption, type ChoiceValue, type SegmentedOption, type SelectOption } from './forms.tsx';
-export { EmptyNote, ErrorNote, Loading, ModalCard, QueryView, Toast, type QueryLike } from './feedback.tsx';
+export { EmptyNote, ErrorNote, Loading, QueryView, Toast, type QueryLike } from './feedback.tsx';
+export { alertDialog, confirmDialog, DialogHost, dialogsOpen, ModalCard, nextStop, type DialogOptions } from './modal.tsx';
+export { BusyArea, BusyButton, useTracked, type BusyButtonProps } from './busy.tsx';
 export { UI_CSS } from './styles.ts';
 export { SettingsForm } from './settings-form.tsx';
 export { pageTabInHash, PageTabs, settingsTabInHash, SHOW_TAB, Tabs, usePageTab, useSettingsTab, type PageTab, type SettingsTab } from './tabs.tsx';
