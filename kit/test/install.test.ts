@@ -17,7 +17,7 @@ process.env[`${ENV}_PORT`] = String(await freePort());
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { APP, appRoot, devCheckout, isDevCheckout, placeFor } = await import('./fixture/src/app.ts');
-const { DEV_CHECKOUT, MANOR_STARTUP, PAGE_START_MS, TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
+const { DEV_CHECKOUT, MANOR_STARTUP, PAGE_START_MS, TASK_NAME, WAKE_TASK_NAME, appFolder, homePageTaskXml, install, purgeRefusal, signInDelaySeconds, installCli, taskArguments, taskXmlFile, uninstall, utf16 } = await import('./fixture/src/kit/install.ts');
 const { ANNOUNCEMENT, announcementOf, checkAnnouncement, kitOf, pickReleaseFiles, releaseVersion, repoFiles, repoFromUrl, sumsText, zipName } = await import('./fixture/src/kit/release.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 
@@ -435,9 +435,13 @@ test('uninstall ends the page, deletes the task and removes app, and keeps the d
   assert.equal(await install({}, f.deps), 0);
   writeFileSync(path.join(p.data, 'state.json'), '{}');
   f.calls.length = 0;
+  // The agent woke the PC for its work (wake.ts): that task goes too.
+  f.state.tasks.add(WAKE_TASK_NAME);
   assert.equal(await uninstall({}, f.deps), 0, f.lines.join('\n'));
-  assert.deepEqual(verbs(f.calls), ['/Query', '/End', '/Delete']);
+  assert.deepEqual(verbs(f.calls), ['/Query', '/End', '/Delete', '/Query', '/End', '/Delete']);
   assert.deepEqual(f.calls[2], ['/Delete', '/TN', TASK_NAME, '/F']);
+  assert.deepEqual(f.calls[5], ['/Delete', '/TN', WAKE_TASK_NAME, '/F']);
+  assert.deepEqual([...f.state.tasks], []);
   assert.equal(f.state.shutdowns, 1);
   assert.ok(!existsSync(appFolder(p.data)));
   assert.ok(!existsSync(taskXmlFile(p.data)));
@@ -445,7 +449,7 @@ test('uninstall ends the page, deletes the task and removes app, and keeps the d
 
   f.calls.length = 0;
   assert.equal(await uninstall({ purge: true }, f.deps), 0, 'a task that is already gone is fine');
-  assert.deepEqual(verbs(f.calls), ['/Query']);
+  assert.deepEqual(verbs(f.calls), ['/Query', '/Query']);
   assert.ok(!existsSync(p.data));
 });
 

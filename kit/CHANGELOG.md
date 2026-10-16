@@ -2,14 +2,43 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 2.78.2
 
-**Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`). It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values. Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
+
+A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). While the task that woke it runs, Task Scheduler keeps the PC out of sleep, with the screen off; an app's own hold didn't keep its process from being throttled there. So the task runs until the work is done. spec/ROUND.md has what was measured.
+
+### What's new
+
+- **wake.ts:**
+  - **`WakePlan`**: `{ times, days, beforeMinutes, holdMinutes, why }`, the times (`HH:MM`, local) and days work is due, how many minutes before each to wake, the longest the woken PC is held (the work's longest), and what for, in words.
+  - **`wakeTimes(plan)`**: each time `beforeMinutes` early, on the day that makes (a midnight time wakes the day before), grouped by time, the days in the week's order.
+  - **`wakeTaskXml(plan, { exe, user })`**: the task's definition. One calendar trigger for each wake time (daily on every day, else weekly on its days). It wakes the PC (`WakeToRun`), only on AC (`DisallowStartIfOnBatteries`, `StopIfGoingOnBatteries`), never late (`StartWhenAvailable` false), hidden, as the person signed in with least privilege, and stops 5 minutes past its hold. It runs the awake helper with `--for <holdMinutes × 60>`.
+  - **`keepWakeTask(plan | null, log)`**: keeps the task (`WAKE_TASK_NAME`) in step with the plan. It registers it when the plan changes (`schtasks /Create /XML /F`, the definition written UTF-16 to the data folder's `wake.task.xml`), removes it for a null plan, and asks Task Scheduler nothing while the plan is the one it set. The first look in a process checks the task is still there. A refusal is logged once and tried again an hour later (`WAKE_RETRY_MS`). Answers `set`, `same`, `removed`, `none` (nothing registers here: not Windows, a dev checkout, or under node --test) or `failed`.
+  - **`endWakeTask(log)`**: ends the task's run once the work is done (`schtasks /End`), so the PC may sleep again. The task stays registered for the next time, and Task Scheduler answers SUCCESS for one that isn't running. Answers `ended`, `none` (no task kept) or `failed`, logged.
+  - **`wakesPc()`**: whether the task is set, for the page.
+  - **`setWakeDeps(deps | null)`**: stands in for Task Scheduler in tests.
+- **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
+- **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. The agent ends the task sooner, once its work is done (`endWakeTask`).
+- **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
 
 ### What changed
 
+- **named.cs and named.ts:**
+  - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
+  - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
+  - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
+- **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
+- **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before. `pageLaunch`'s `args` are the page's arguments after its entry, `serve` unless given, for an agent whose page has a command of its own (Reeve's `dashboard --port <n>`).
+
 - **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
 - **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Nothing is woken until an agent calls `keepWakeTask`.
+- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. Its `holdMinutes` is the longest the work may take. Once the work is done it calls `endWakeTask()`, but not when the agent merely stops (an update): the task then holds the PC until the agent is back. While it works it holds the PC with `stayAwake(what)`, as ever. Never wake a PC on battery, and never keep the screen on.
+- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
 
 ## 2.77.9
 

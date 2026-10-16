@@ -9,6 +9,7 @@ import { duty, setDuty } from './duty.ts';
 import { licenseNow, licensePing, startLicenseCheck } from './license-check.ts';
 import { dutyStatus } from './service.ts';
 import { manorIcon } from './manor.ts';
+import { namedLauncher, namedWanted } from './named.ts';
 import { hasTour, pageScript } from './react-page.ts';
 import { needsSettings, watchRequired } from './required.ts';
 import { rounds, roundTimes } from './schedule.ts';
@@ -308,6 +309,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
   });
   alsoOnV6Loopback(server, opts.port);
   writeJson(dataFile('server.json'), { pid: process.pid, port: opts.port, token, since: new Date().toISOString() });
+  // Its name in Task Manager (named.ts): its launcher built once the page has settled, at a moment of its own (agents
+  // start together at sign-in), for open to start its next page through.
+  if (namedWanted(APP)) setTimeout(() => void namedLauncher(APP), 30_000 + Math.floor(Math.random() * 90_000)).unref();
   return { server, token, close: () => new Promise((r) => server.close(() => r())) };
 }
 
