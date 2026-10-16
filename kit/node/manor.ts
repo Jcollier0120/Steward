@@ -6,6 +6,7 @@ import path from 'node:path';
 import { readJsonFile, readText } from './file-cache.ts';
 import { keyInside, pathKey } from './real-path.ts';
 import { themeNamed } from './themes.ts';
+import type { PassQuery, WorkResult } from './work-status.ts';
 
 /**
  * The manor this agent works at, for the title bar's "Back to <manor>", for its theme (page.ts), and for its
@@ -480,9 +481,9 @@ export const HOUSE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1
 /** An SVG fit to serve from this agent's address: an SVG, and nothing in it that runs. */
 export const safeSvg = (s: string) => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(s) && !/<script|\son[a-z]+\s*=|javascript:|<foreignObject/i.test(s);
 
-function getText(url: string, ms: number): Promise<{ status: number; type: string; body: string } | null> {
+function getText(url: string, ms: number, headers: Record<string, string> = {}): Promise<{ status: number; type: string; body: string } | null> {
   return new Promise((resolve) => {
-    const req = http.get(url, { timeout: ms }, (res) => {
+    const req = http.get(url, { timeout: ms, headers }, (res) => {
       const chunks: Buffer[] = [];
       let size = 0;
       res.on('data', (c: Buffer) => {
@@ -525,3 +526,33 @@ export async function manorIcon(home = manorHome(), now = Date.now()): Promise<s
 export const forgetManorIcon = () => {
   kept = null;
 };
+
+/** How long an agent waits for Manor to ask the other PCs (Manor gives each a few seconds, all at once). */
+export const PASS_ASK_MS = 6_000;
+
+/**
+ * A pass of `q` on another PC on the licence (kit 2.77.0), asked of Manor on this PC: its GET /api/peers/result
+ * (Manor 0.16.163 and later) asks this agent on each PC it hears from over its link, at once, and answers the first
+ * pass of the same work, repository and tree, on the same Node.js major and OS, with which PC ran it (`from` here).
+ * Null when there is none, Manor isn't here, Other PCs is off, or Manor is older (its 404): then the checks run.
+ * Never under node --test unless the test gave Manor a home of its own (MANOR_HOME). Never throws.
+ */
+export async function passOnOtherPcs(q: PassQuery, o: { agent: string; home?: string; ms?: number }): Promise<WorkResult | null> {
+  if (process.env.NODE_TEST_CONTEXT && !process.env.MANOR_HOME && !o.home) return null;
+  const link = manorLink(o.home ?? manorHome());
+  if (!link) return null;
+  const node = process.versions.node.split('.')[0];
+  const ask = new URLSearchParams({ agent: o.agent, kind: q.kind, repo: q.repo, tree: q.tree, node, platform: process.platform });
+  const r = await getText(`http://127.0.0.1:${link.port}/api/peers/result?${ask}`, o.ms ?? PASS_ASK_MS, { 'x-castellan-peer': o.agent });
+  if (!r || r.status !== 200) return null;
+  try {
+    const body = JSON.parse(r.body);
+    const found = body?.v === 1 ? body.result : null;
+    if (!found || typeof found !== 'object' || found.ok !== true) return null;
+    const { pc, ...result } = found as WorkResult & { pc?: { id?: unknown; name?: unknown } };
+    if (typeof pc?.id !== 'string' || typeof pc?.name !== 'string' || typeof result.at !== 'string') return null;
+    return { ...result, from: { id: pc.id.slice(0, 80), name: pc.name.slice(0, 120) } };
+  } catch {
+    return null;
+  }
+}

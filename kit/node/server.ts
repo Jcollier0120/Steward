@@ -16,7 +16,7 @@ import { saveSettingsReply, SETTINGS_BODY_LIMIT, settingsReply, type SettingsSpe
 import { demoAnswer, demoDir, DEMO_NO } from './demo.ts';
 import { dataFile, writeJson } from './store.ts';
 import { repair, repairKinds } from './repair.ts';
-import { workStatus, type WorkExtra } from './work-status.ts';
+import { peerResult, workStatus, type WorkExtra } from './work-status.ts';
 
 /**
  * The agent's page and API, on 127.0.0.1 only. On top of that, the same rules as Manor's server:
@@ -230,6 +230,9 @@ export async function serve(opts: ServeOptions): Promise<{ server: http.Server; 
     // Its work status (work-status.ts, kit 2.76.0), for Manor's Work page: here, and from the PCs on the licence over
     // Manor's link (GET /agents/<id>/work). Read only.
     '/api/peer/work': async () => ({ json: await workStatus(await opts.work?.()) }),
+    // Its result for one code tree (work-status.ts, kit 2.77.0), for an agent on another PC about to run the same checks
+    // (over Manor's link: GET /agents/<id>/result). Read only.
+    '/api/peer/result': ({ query }) => peerResult(query),
     ...opts.get,
   };
   const post: Record<string, Handler> = {
