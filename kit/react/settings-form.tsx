@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { BusyArea } from './busy.tsx';
 import { ErrorNote } from './feedback.tsx';
 import { Switch } from './forms.tsx';
 import { Tabs } from './tabs.tsx';
@@ -781,19 +782,21 @@ export function SettingsForm({ keys, onSaved, onDirty, initial }: { keys?: strin
             </nav>
           )}
           <FormHead data={data} later={laterNotes(fields)} general={msgs['']} />
-          <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
-            {tabbed ? (
-              <FormTabs panels={panelsOf(ordinary, advanced, data.schema)} tab={tab} onChoose={setTab} block={block} />
-            ) : (
-              <>
-                {ordinary.map(block)}
-                <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
-                  {advanced.map(block)}
-                </Advanced>
-              </>
-            )}
-            <FormActions dirty={dirty} busy={s.busy} status={s.status} onCancel={cancel} onDefaults={defaults} />
-          </form>
+          <BusyArea busy={s.busy} className="sf-busy">
+            <form className="sf-form" noValidate onSubmit={(e) => (e.preventDefault(), void s.save(fields))}>
+              {tabbed ? (
+                <FormTabs panels={panelsOf(ordinary, advanced, data.schema)} tab={tab} onChoose={setTab} block={block} />
+              ) : (
+                <>
+                  {ordinary.map(block)}
+                  <Advanced count={advanced.length} open={advanced.some((f) => under(msgs, f.key))}>
+                    {advanced.map(block)}
+                  </Advanced>
+                </>
+              )}
+              <FormActions dirty={dirty} busy={s.busy} status={s.status} onCancel={cancel} onDefaults={defaults} />
+            </form>
+          </BusyArea>
         </MsgContext.Provider>
       </TopContext.Provider>
     </div>
