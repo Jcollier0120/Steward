@@ -2,6 +2,18 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.10
+
+**On a PC set up before, a card's embedding server is brought down to setup's smaller context: about 0.6 GB less of the graphics' memory, with the same vectors, from its next start.**
+
+### What changed
+
+- **setup.ts:**
+  - **`withSmallerEmbedServer(raw)`:** a graphics card's (`kind: 'gpu'`) llama-server embedding command still at the context and micro-batch setup wrote from 2.11.0 (`-c 8192 … -ub 2048`) gets setup's own: `-c` `EMBED_CONTEXT` (4096) and `-ub 512`. Its `embed.maxContextTokens` becomes `EMBED_CAP` (1,365), or stays lower if it already was. A command with any other context or micro-batch, changed by hand, is left as it is.
+  - **`refreshCardVision`** now runs it after `withEncoderOnProcessor`, so the keeper's look at the cards' commands, once for each kit version (keeper.ts), changes both. Its log line names the cards whose embedding server changed and what it saves.
+  - Measured on an AMD Radeon 860M with Qwen3-Embedding-0.6B: 1,874 MB of the graphics' memory before, 1,274 MB after.
+- **What an agent must do:** nothing. The change reaches config.json once the keeper runs this kit, and the server takes it at its next start.
+
 ## 2.78.3
 
 **A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
