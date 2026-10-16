@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { paced as testsPaced } from './until.ts';
+import { paced as testsPaced, until } from './until.ts';
 
 // The checks pace (checks-pace.ts, kit 2.70.0): test runs, type checks, installs and builds held to a share of the processor.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-checks-pace-'));
@@ -13,8 +13,9 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 const { psPaced } = await import('./fixture/src/kit/ps.ts');
+const { AGENTS_AT_ONCE, CEILING_CAP, PACE_CEILING } = await import('./fixture/src/kit/pace.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -41,20 +42,35 @@ test("the launcher's first word: the cap, memory per program and for the job, ru
   assert.equal(checksLimits(5000, { processMb: 1, jobMb: 2 }, 0), '5000,1,2,0');
 });
 
-test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
+test("the cap now: the manor's ceiling when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for the ceiling, never past it; none under node --test unless said (kit 2.78.3)", () => {
   const none = path.join(home, 'no-manor');
   assert.equal(checksPaceCap(none, {}), 3333);
   assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}), 7000);
-  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}), 0);
-  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}), 0, '100%: no cap');
+  assert.equal(CEILING_CAP, 8500, '85% of the processor: the most the manor takes');
+  assert.equal(CEILING_CAP, Math.round(PACE_CEILING * 10_000));
+  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}), 8500, 'full: the ceiling, not the whole PC');
+  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}), 8500, '100%: the ceiling');
+  assert.equal(checksPaceCap(manorWith('m-90', { checksPace: 90 }), {}), 8500, 'never past the ceiling');
+  assert.equal(checksPaceCap(manorWith('m-85', { checksPace: '85%' }), {}), 8500);
   assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}), 1000, 'never under a tenth');
   assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}), 3333, 'anything else: as if unsaid');
-  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}), 0, "Settings' pace at full lifts it: the one switch");
+  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}), 8500, "Settings' pace at full raises it to the ceiling: the one switch");
   assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}), 4000);
   assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }), 6000, 'the variable says instead of Manor');
-  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }), 0);
+  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }), 8500);
+  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: '95%' }), 8500, 'the variable goes no higher either');
+  assert.equal(checksPaceCap(manorWith('m-bg-full-env', { backgroundPace: 'full' }), { KIT_CHECKS_PACE: '50' }), 5000, 'the variable sets a lower cap at full');
   assert.equal(checksPaceCap(manorWith('m-t', { checksPace: 70 }), { NODE_TEST_CONTEXT: 'child' }), 0, "a test's commands aren't paced");
   assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: '50' }), 5000);
+  assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: 'full' }), 0, "a test's commands at full: unpaced, as before");
+});
+
+test('turns at full (kit 2.78.3): as many check runs at once as agents at full, the cap held for all of them together', () => {
+  assert.equal(CHECKS_AT_ONCE_FULL, AGENTS_AT_ONCE.most);
+  assert.ok(CHECKS_AT_ONCE_FULL > CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(path.join(home, 'no-manor')), CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(manorWith('t-gentle', { backgroundPace: 'gentle' })), CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(manorWith('t-full', { backgroundPace: 'full' })), CHECKS_AT_ONCE_FULL);
 });
 
 test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap slows the work, and as many test files at once as it has room for', () => {
@@ -67,6 +83,7 @@ test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap
   assert.equal(pacedTestConcurrency(3333, 18), 12, 'a third of 18 processors, the default: twelve');
   assert.equal(pacedTestConcurrency(2500, 4), 2, 'one processor: two at least');
   assert.equal(pacedTestConcurrency(5000, 16), 16);
+  assert.equal(pacedTestConcurrency(8500, 18), 18, 'the ceiling, at full: one file per processor, no more');
   const node = process.execPath;
   assert.deepEqual(withTestConcurrency(node, ['--import=./x.ts', '--test', 'a.test.ts'], 4), ['--import=./x.ts', '--test', '--test-concurrency=4', 'a.test.ts']);
   assert.deepEqual(withTestConcurrency('node', ['--test'], 2), ['--test', '--test-concurrency=2']);
@@ -108,9 +125,9 @@ test('the launcher: one for the PC, beside the gentle DLL, a new one for a new s
   assert.ok(script.includes("'C:/o''k/checks-pace-1' + '.'"), 'built beside it, then moved into place');
 });
 
-test("a command with the cap off (Manor's checksPace full: the only way out) runs as it is", async () => {
+test('a command with the cap off (only under node --test, unless KIT_CHECKS_PACE says a percentage under 100) runs as it is', async () => {
   const plain = { file: 'node', args: ['a'], env: {} };
-  assert.deepEqual(await pacedCommand('node', ['a'], { env: { KIT_CHECKS_PACE: 'full' } }), plain);
+  assert.deepEqual(await pacedCommand('node', ['a'], { env: { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: 'full' } }), plain);
   assert.deepEqual(await pacedCommand('node', ['a'], { env: { NODE_TEST_CONTEXT: 'child' } }), plain);
 });
 
@@ -160,9 +177,45 @@ test('on Windows, a program started apart (a model server): detached, its output
   }
   assert.ok(pid && pid > 0, 'its process id');
   assert.ok(alive(pid), 'running after the launcher has gone');
-  for (let i = 0; i < 100 && !readFileSync(log, 'utf8').includes('up'); i++) await new Promise((r) => setTimeout(r, 100));
+  await until(() => readFileSync(log, 'utf8').includes('up'), 10_000, 'its output in the file');
   assert.equal(readFileSync(log, 'utf8').trim(), 'up a b', 'its arguments as they were, its output in the file');
   process.kill(pid);
+});
+
+test("the servers' cap (kit 2.78.3): the manor's ceiling, whatever the pace; none under node --test unless KIT_APART_CAP says", async () => {
+  const { apartCap } = await import('./fixture/src/kit/apart.ts');
+  assert.equal(apartCap({}), CEILING_CAP);
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child' }), 0, "a test's servers: no job, as before");
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child', KIT_APART_CAP: '1000' }), 1000);
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child', KIT_APART_CAP: '9900' }), CEILING_CAP, 'never past the ceiling');
+});
+
+test("on Windows, programs started apart share one capped job: together, they stay within its cap, after the launcher has gone", { skip: process.platform !== 'win32' }, async () => {
+  const { startApart } = await import('./fixture/src/kit/apart.ts');
+  // Each keeps every processor busy for 3 s, then writes the processor time it had against the PC's in that time.
+  const burn = [
+    'const { Worker } = require("worker_threads"); const os = require("os"); const t0 = Date.now(); const n = os.availableParallelism();',
+    'const spin = "const end = Date.now() + 3000; let x = 0; while (Date.now() < end) x = (x * 31 + 7) % 1000003;";',
+    'let left = n; for (let i = 0; i < n; i++) new Worker(spin, { eval: true }).on("exit", () => { if (--left) return;',
+    '  const u = process.cpuUsage(); require("fs").writeFileSync(process.argv[1], String((u.user + u.system) / ((Date.now() - t0) * 1000 * n))); });',
+  ].join(' ');
+  const said = { KIT_APART: process.env.KIT_APART, KIT_APART_CAP: process.env.KIT_APART_CAP, KIT_APART_JOB_NAME: process.env.KIT_APART_JOB_NAME };
+  Object.assign(process.env, { KIT_APART: '1', KIT_APART_CAP: '1000', KIT_APART_JOB_NAME: `kit-test-apart-${process.pid}` });
+  const files = [path.join(home, 'burn-a.txt'), path.join(home, 'burn-b.txt')];
+  try {
+    const pids = await Promise.all(files.map((f) => startApart(process.execPath, ['-e', burn, f])));
+    assert.ok(pids.every((p) => p && p > 0), 'both started');
+  } finally {
+    for (const [k, v] of Object.entries(said)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  await until(() => files.every((f) => existsSync(f) && readFileSync(f, 'utf8')), 60_000, 'both to have burned their 3 s');
+  const shares = files.map((f) => Number(readFileSync(f, 'utf8')));
+  // A tenth of the PC for the two together (each a job of its own would let them take a tenth each); a busy PC can only
+  // give them less.
+  assert.ok(shares[0] + shares[1] <= 0.14, `together ${(100 * (shares[0] + shares[1])).toFixed(1)}% of the processor, not past the job's 10%`);
 });
 
 test('on Windows, a paced run takes a turn, and the runs it starts take none (they would wait on their own)', { skip: process.platform !== 'win32' }, async () => {

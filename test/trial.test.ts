@@ -10,7 +10,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-trial-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, NEXT_BUILD_TRIAL, raisesKit, TRIAL_GOING, trialGivesWay, trialParallel, trialsOnTheirOwn, trialWaitsForNextBuild } = await import('../src/stages/trial.ts');
+const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, NEXT_BUILD_TRIAL, raisesKit, TRIAL_GOING, TRIAL_NO_ROOM, trialGivesWay, trialParallel, trialsOnTheirOwn, trialWaitsForNextBuild } = await import('../src/stages/trial.ts');
 const { apart, apartNow } = await import('../src/stages/slots.ts');
 const { APP } = await import('../src/app.ts');
 const { writeJson } = await import('../src/kit/store.ts');
@@ -416,12 +416,28 @@ test('a trial another live process is trying on its own is left to it; one whose
   assert.ok(quiet.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')), quiet.c.lines.join('\n'));
 });
 
-test("how many agents a trial tries at once: Settings' parallel or a quarter of the processors up to 4, within free memory", () => {
+test("how many agents a trial tries at once: Settings' parallel or a quarter of the processors up to 4, within free memory above the manor's 15%", () => {
   const GB = 1024 ** 3;
-  assert.equal(trialParallel(2, 18, 40 * GB), 4);
-  assert.equal(trialParallel(2, 4, 40 * GB), 2, 'never fewer than Settings say, memory allowing');
-  assert.equal(trialParallel(6, 18, 40 * GB), 6);
-  assert.equal(trialParallel(2, 64, 40 * GB), 4, 'at most 4 by processors');
-  assert.equal(trialParallel(4, 18, 7 * GB), 2, 'what free memory holds');
-  assert.equal(trialParallel(2, 18, 0), 1, 'at least one');
+  assert.equal(trialParallel(2, 18, 40 * GB, 48 * GB), 4);
+  assert.equal(trialParallel(2, 4, 40 * GB, 48 * GB), 2, 'never fewer than Settings say, memory allowing');
+  assert.equal(trialParallel(6, 18, 40 * GB, 48 * GB), 6);
+  assert.equal(trialParallel(2, 64, 40 * GB, 48 * GB), 4, 'at most 4 by processors');
+  assert.equal(trialParallel(4, 18, 7 * GB, 8 * GB), 1, 'what free memory holds, above the 15% left for the person (1.2 GB of 8)');
+  assert.equal(trialParallel(4, 18, 14 * GB, 48 * GB), 2, '14 GB free of 48: 6.8 GB of it the manor may use, two tries');
+  assert.equal(trialParallel(4, 18, 7 * GB, 48 * GB), 1, 'free memory under the ceiling: one at least');
+  assert.equal(trialParallel(2, 18, 0, 48 * GB), 1, 'at least one');
+});
+
+test("no try starts while more than 85% of the PC's memory is in use (Steward 0.36.68): the trial goes on from the next round", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  writeJson(kitTrialsFile(), { [`7@${head}`]: { kit: '1.0.1', failed: [], passed: 0, at: new Date().toISOString(), mains: {}, pending: ['good'] } });
+  const full = ctx();
+  full.c.memoryInUse = () => 0.9;
+  assert.equal(await kitTrialHold(full.c, me, pr()), TRIAL_NO_ROOM, full.c.lines.join('\n'));
+  assert.deepEqual(JSON.parse(readFileSync(kitTrialsFile(), 'utf8'))[`7@${head}`].pending, ['good'], 'still to try');
+  assert.ok(!full.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial')), full.c.lines.join('\n'));
+  const room = ctx();
+  room.c.memoryInUse = () => 0.5;
+  assert.equal(await kitTrialHold(room.c, me, pr()), null, room.c.lines.join('\n'));
+  assert.ok(room.c.lines.some((l) => l.startsWith('[good] kit 1.0.1 trial: done')), room.c.lines.join('\n'));
 });

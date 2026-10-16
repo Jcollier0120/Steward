@@ -5,6 +5,7 @@ import { APP } from '../app.ts';
 import { commitOf, fetchBranch, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions, KIT_VERSION } from '../kitfiles.ts';
 import { TOOL } from '../kitsource.ts';
+import { CEILING_WORDS, PACE_CEILING, memoryInUse } from '../kit/pace.ts';
 import { readJson, writeJson } from '../kit/store.ts';
 import type { Employee } from '../settings.ts';
 import { bumpOne, checksLogOf, runChecks, trialBranch, trialDirOf, WITHOUT_THE_KIT } from './bump.ts';
@@ -504,14 +505,21 @@ const TRY_BYTES = 3 * 1024 ** 3;
 
 /**
  * How many agents a trial tries at once: Settings' parallel, or a quarter of this PC's processors up to 4, whichever is
- * more; never more than the memory free now holds at TRY_BYTES each (at least one). A try is an agent's install, its kit
- * filled and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
+ * more; never more than the memory free now holds at TRY_BYTES each, above the room the manor always leaves (the kit's
+ * PACE_CEILING: 15% of the PC's memory, Steward 0.36.68), and at least one. A try is an agent's install, its kit filled
+ * and the tests the kit reaches, most of it waiting on its own processes: kit 2.62.0's 34 tries took 21 s each on
  * average, and two at a time left the trial waiting on itself. Their commands run at the kit's checks pace (Steward
  * 0.36.8), in one job for the PC with one processor cap: more tries at once share that cap rather than adding to it, so
  * the processor is held to it whatever this says, and memory stays the limit. Pure.
  */
-export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem()): number =>
-  Math.max(1, Math.min(Math.max(parallel, Math.min(4, Math.floor(cpus / 4))), Math.floor(free / TRY_BYTES)));
+export const trialParallel = (parallel: number, cpus = os.availableParallelism(), free = os.freemem(), total = os.totalmem()): number =>
+  Math.max(1, Math.min(Math.max(parallel, Math.min(4, Math.floor(cpus / 4))), Math.floor((free - (1 - PACE_CEILING) * total) / TRY_BYTES)));
+
+/**
+ * Why a trial starts no try now, while more than the manor's ceiling of this PC's memory is in use (Steward 0.36.68):
+ * the trial goes on (TRIAL_GOING), from the next round.
+ */
+export const TRIAL_NO_ROOM = `${TRIAL_GOING}, and waits for room: more than ${CEILING_WORDS} of this PC's memory is in use, and no agent's try starts above that`;
 
 /** What a trial tries: its key in kit-trials.json, the PR whose hold it is, and the commit whose kit\ and tools\kit.ts fill the agents. */
 interface TrialAt {
@@ -525,7 +533,8 @@ interface TrialAt {
  * changes it, the next one started as soon as one ends, until none are left or `sliceMs` has passed (those in flight
  * finish); `save` after each. A try the network cut short leaves its agent to try again, and says so (no more are
  * started). One that fails as under load (underLoad) goes to `retry`; once none are pending, those are tried once more,
- * one at a time with nothing of the trial beside them, and what they give then stands.
+ * one at a time with nothing of the trial beside them, and what they give then stands. No try starts while more than
+ * the manor's ceiling of the PC's memory is in use (TRIAL_NO_ROOM, said as a cut short is: the next round goes on).
  */
 async function trySlice(ctx: Ctx, steward: Employee, at: TrialAt, t: KitTrial, sliceMs: number, save: () => void): Promise<string | null> {
   const repo = checkoutOf(steward);
@@ -535,9 +544,15 @@ async function trySlice(ctx: Ctx, steward: Employee, at: TrialAt, t: KitTrial, s
   return timed(phaseOf(ctx), 'trial', `kit ${t.kit}`, () => withKitTree(ctx, steward, at.commit, async (dir) => {
     let cut: string | null = null;
     const queue = [...(t.pending ?? [])];
-    // The first of each slice always starts, so every round gets on with it.
+    // The first of each slice always starts, so every round gets on with it, unless the PC has no room for it.
     let started = 0;
-    const goes = () => !cut && (!started || Date.now() - t0 < sliceMs);
+    const inUse = ctx.memoryInUse ?? (process.env.NODE_TEST_CONTEXT ? () => 0 : memoryInUse);
+    const room = () => {
+      if (inUse() <= PACE_CEILING) return true;
+      cut ??= TRIAL_NO_ROOM;
+      return false;
+    };
+    const goes = () => !cut && (!started || Date.now() - t0 < sliceMs) && room();
     const tryOne = async (id: string, again: boolean): Promise<void> => {
       started++;
       const e = ctx.settings.employees.find((x) => x.id === id);

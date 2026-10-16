@@ -2,6 +2,67 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.3
+
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%. It also brings what wasn't released before: each agent shows under its own name in Task Manager, and Intel's NPU labels name the Core Ultra 200H and 200HX.**
+
+### What changed
+
+- **pace.ts:**
+  - **`PACE_CEILING`** (0.85), **`CEILING_CAP`** (8500, in the hundredths of a percent a Windows job takes) and **`CEILING_WORDS`** ("85%") hold the manor's ceiling. It is written once, and everything below reads it.
+  - **The work line:**
+    - Short of memory now means more than `PACE_CEILING` of it in use (`shortOfMemory()`). This is the same measure as before, when it was less than 15% free. `LOAD.lowMemory` is gone.
+    - When short of memory, the line gives one slot, and no scheduled round starts until there is room (`roomToStart()`, looking every 10 s). That holds both in its turn and at once with no line (agentsAtOnce 0).
+    - While it waits, the round's state says `MEMORY_WAITING`. If there is still no room when its next round is due, it throws `NoRoom` (a `LockTimeout`), and round.json records a round that waited.
+    - A round asked for (Run now) and a light round don't wait.
+    - Under node --test, it looks at memory only when `load` or `inUse` stands in for it.
+  - **`memoryInUse()`:** the share of the PC's memory in use now.
+- **gentle.ts, gentle.cs:**
+  - At full, the agent keeps normal priority, no efficiency mode and its usual disk priority. It now stays in its job, the worker too, capped at `CEILING_CAP`; before, the cap was lifted. Manor's `keepResponsive()` gets the ceiling too.
+  - `paceCap(p)` gives the cap, and `paceSet()` says `full 8500`. A cap of 0 makes no job.
+  - Under node --test, full has no cap, as before.
+- **checks-pace.ts:**
+  - At a full pace (Manor's `backgroundPace`), check runs are held to `CEILING_CAP` in the PC's one job, instead of running with no cap. `checksPaceCap()` never returns more than that.
+  - A cap set as `checksPace` or `KIT_CHECKS_PACE` of "full", or of 100 and up, means the ceiling. A lower percentage still sets a lower cap: `KIT_CHECKS_PACE` at either pace, `checksPace` at gentle.
+  - At full, up to `CHECKS_AT_ONCE_FULL` runs go at once (`checksAtOnce()`): six, `AGENTS_AT_ONCE.most`. They share the cap rather than each adding to it. At gentle it stays three.
+  - A run's memory limits now apply at full too: an eighth of the PC's memory for each program, a quarter for the job.
+  - `pacedTestConcurrency()` never gives more test files at once than there are processors.
+  - Under node --test, commands are unpaced unless `KIT_CHECKS_PACE` says a percentage under 100, as before.
+- **apart.ts, checks-pace.cs (the model servers):**
+  - A server started apart (llama.cpp's, FastFlowLM's, the NPU routes') still leaves the asker's job. It now also joins the servers' job, one for the PC (`Local\kit-apart-pace`, `checks-pace.exe apart:<cap>`). That job is hard-capped at `CEILING_CAP` whatever the asker's pace, so all the servers together stay within 85% of the processor. Before, they ran with no cap at all.
+  - The job limits nothing else and ends nothing. Each server holds a handle to it, so it lasts while any server runs, and the next server joins the same job.
+  - A server that can't join it gets a job of its own with the same cap. If neither works, it runs as before.
+  - `apartCap()` gives the cap. Under node --test there is none unless `KIT_APART_CAP` sets one, and a test's servers use `KIT_APART_JOB_NAME`'s job.
+  - The launcher's source changed, so each PC builds it once more, at its next check run or server start.
+  - Measured on an 18-thread laptop with two programs each keeping every processor busy, started apart together:
+
+    | How they were started | Their share of the processor, together |
+    |---|---|
+    | `apart`, no cap | 88.4% (other work on the PC took the rest) |
+    | `apart:8500` | 83.5% |
+    | `apart:1000` | 10.5% |
+
+    At 10% they shared one job's cap: two jobs would have allowed 20%.
+- **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
+- **work-status.ts:** the checks' turns come from `checksAtOnce()`.
+- **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
+- **Each agent under its own name in Task Manager** (brought from before): its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page's console, its log and its pace are as they were.
+- **named.cs and named.ts:**
+  - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
+  - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
+  - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
+- **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
+- **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before. `pageLaunch`'s `args` are the page's arguments after its entry, `serve` unless given, for an agent whose page has a command of its own (Reeve's `dashboard --port <n>`).
+- **Intel's NPU labels name the Core Ultra 200H and 200HX** (brought from before): the NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.
+- **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
+- **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
+
+### Before you update
+
+- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts.
+- An agent builds its named launcher a minute or two after its page starts, so it shows under its own name from its next start: after the update, a sign-in or a restart.
+- Nothing to do: it updates itself as usual.
+
 ## 2.78.2
 
 **An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`). It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values. Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
