@@ -401,8 +401,8 @@ export function roundConditions(o: {
     out.push({
       id: `build:${id}:${l.due}`,
       who: id,
-      title: `${e?.name ?? id} ${prs} didn't leave in ${l.name}, and wait${l.kept.length === 1 ? 's' : ''} for the next build`,
-      detail: [l.why, ...l.kept.map((k) => `#${k.number}: ${k.title}`), "They go into the next build as they are. Look at what failed (the Steward's log has each test run), and fix or close the PR that broke them."],
+      title: `${e?.name ?? id} ${prs} didn't leave in ${l.name}, and wait${l.kept.length === 1 ? 's' : ''} for ${l.ahead ? 'the build' : 'the next build'}`,
+      detail: [l.why, ...l.kept.map((k) => `#${k.number}: ${k.title}`), `They go into ${l.ahead ? 'the build' : 'the next build'} as they are. Look at what failed (the Steward's log has each test run), and fix or close the PR that broke them.`],
       url: l.kept[0].url,
       afterMs: 0,
     });

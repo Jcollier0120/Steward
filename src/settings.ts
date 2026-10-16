@@ -493,7 +493,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs wait, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
+    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs merge ahead of the next build, and wait on their branch to be released at it, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
     fields: [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).

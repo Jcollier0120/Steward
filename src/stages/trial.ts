@@ -294,7 +294,7 @@ export const nextBuildWords = (sha: string, [key, t]: [string, KitTrial]): strin
  * head was tried, or is covered by kit PRs tried together, or carries a trial from an earlier head (kitTrialHold).
  */
 export async function trialWaitsForNextBuild(ctx: Ctx, steward: Employee, pr: PrInfo, line: PrInfo[] = []): Promise<string | null> {
-  if (!ctx.build || steward.id !== APP.id || !raisesKit(pr) || !pr.headOid) return null;
+  if (!ctx.build || ctx.build.ahead || steward.id !== APP.id || !raisesKit(pr) || !pr.headOid) return null;
   const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
   const begun = begunIn(kept, ctx.build.due);
   if (!begun || kept[keyOf(pr)]) return null;
@@ -887,7 +887,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       t = { ...before[1], kit, ...tried, from: before[0] };
     } else {
       // A build tries one kit (begunIn): this head waits for the trial between builds.
-      const begun = ctx.build ? begunIn(kept, ctx.build.due) : undefined;
+      const begun = ctx.build && !ctx.build.ahead ? begunIn(kept, ctx.build.due) : undefined;
       if (begun) return nextBuildWords(sha, begun);
       const whole = wholeGoing();
       if (whole) {
@@ -912,7 +912,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
         ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, ${how}`);
         t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version };
       }
-      if (ctx.build) t.build = ctx.build.due;
+      if (ctx.build && !ctx.build.ahead) t.build = ctx.build.due;
     }
   }
   const at: TrialAt = { key, pr, commit: t.commit ?? pr.headOid };

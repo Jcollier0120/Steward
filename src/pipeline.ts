@@ -217,7 +217,7 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   // An urgent fix between builds: a build of its own, for its repository, at once.
   if (o.urgent?.length) return fresh(now.toISOString(), 'urgent', { employees: [...new Set(o.urgent.map((u) => u.id))], urgent: o.urgent.map(urgentKey) });
   const next = nextBuildTime(p, now);
-  return { kind: 'between', next, line: `between builds: ready PRs wait for the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}` };
+  return { kind: 'between', next, line: `between builds: ready PRs merge ahead of the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}, and are released at it` };
 }
 
 /**

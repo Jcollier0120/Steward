@@ -53,7 +53,7 @@ import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
 import { keepPhases, phaseOf, timed } from './buildtimes.ts';
 import { kitComing } from './stages/buildkit.ts';
-import { prepareBeside } from './stages/prepare.ts';
+import { buildBegins, prepareBeside } from './stages/prepare.ts';
 
 /**
  * The stages, as the command line and the page both run them: Settings' stagesAtOnce at a time on this PC, each
@@ -669,18 +669,26 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.budget = budget;
           log(waitLine(budget));
         } else if (mode.kind === 'between') {
-          // Between builds: nothing merged, caught up, rolled out or released. The PRs that waited at the last look
-          // still wait, so the alarms go on counting their hours.
+          // Between builds: nothing released or rolled out. The PRs that waited at the last look still wait, so the alarms
+          // go on counting their hours.
           out.build = { between: true, next: mode.next?.toISOString() ?? null };
           log(mode.line);
           held.push(...heldBefore(seen!, picked.employees));
-          // The next build's tests, run now beside the rounds for what moved (stages/prepare.ts): the build then only merges.
+          // The merge pass ahead of the next build, beside the rounds (stages/prepare.ts): ready PRs merged as the build
+          // would merge them, and released by the build. Only where this PC has the turn (lease.ts).
           if (name === 'round' && mode.next && !only?.length) {
-            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit) });
+            const turns = async (c: Ctx, list: Employee[]) => {
+              const own = list.find((e) => e.id === APP.id) ?? null;
+              const t = await takeTurnsFor(c, o, list.filter((e) => e !== own), own ? selfForTurns(c, o, true, false) : null, true);
+              return list.filter((e) => (e === own ? t.selfActs : t.acting.includes(e)));
+            };
+            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit), turns });
             if (prepLine) log(prepLine);
           }
         } else if (name === 'merge' || name === 'round') {
           if (mode.kind === 'build') {
+            // The merge pass ahead of this build, if one goes on, merges nothing more (stages/prepare.ts).
+            buildBegins();
             const when =
               mode.run.by === 'owner'
                 ? "the owner's Build now"
