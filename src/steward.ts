@@ -23,7 +23,7 @@ import { afterMerge } from './stages/aftermerge.ts';
 import { conflictsWaiting, merge, mergeOne, NO_CONFLICTS, waitsBriefly } from './stages/merge.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
-import { pruneClaims, shareClaims } from './claims.ts';
+import { loadClaims, pruneClaims, shareClaims } from './claims.ts';
 import { push } from './stages/push.ts';
 import { loadRefreshFailures, loadRefreshPending, refreshAfterReleases, refreshPendingFile, refreshStep, releasedWords } from './stages/refresh.ts';
 import { loadInstallHolds } from './installscripts.ts';
@@ -935,7 +935,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Every agent's port (ports.ts): two agents on one is an alarm before either is installed. Not in a test,
           // which has no Manor of its own to read, and only on the PC Castellan is made on: its agents' ports are its makers'.
           const ports = process.env.NODE_TEST_CONTEXT || !makersPc() ? undefined : await portUses(ctx.run, ctx.settings.employees).catch(() => undefined);
-          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, buildLeft: loadBuildLeft(), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
+          await watchAlarms({ settings: ctx.settings, round: out, held, failedReleases, strangers, ports, failedRollouts: loadRolloutFailures(), failedSelf: loadSelfFailures(), rolloutWaits, buildLeft: loadBuildLeft(), tastingHolds: loadTastingHolds(), signingWaits: loadSigningWaits(), tending: ctx.settings.tend ? loadTending() : null, unstick: ctx.settings.tend ? loadUnstick() : null, unsafe: loadUnsafe(), migrated: pendingMigration(settingsFile()), failedRefreshes: loadRefreshFailures(), installHolds: loadInstallHolds(), queueHolds: heldQueues(loadVersionQueues(), loadTurns(), loadClaims()), employees: ctx.settings.employees, log, run: ctx.run, neutralDir: ctx.neutralDir }, { online: o.online ?? onlineNow, ...o.alarms });
         } catch (e) {
           log(`alarms: ${(e as Error).message}`);
         }
