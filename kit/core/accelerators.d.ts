@@ -66,7 +66,7 @@ export type Accelerator = {
     vision?: Endpoint;
     embed?: Endpoint;
     /**
-     * `prefix-leak`, `image-path` (QUIRKS).
+     * `prefix-leak`, `image-path`, `sides-of-32` (QUIRKS).
      */
     quirks: string[];
     /**
@@ -168,7 +168,7 @@ export type Look = {
  * @property {Endpoint} [chat]
  * @property {Endpoint} [vision] A vision endpoint without a server of its own is on the chat endpoint's.
  * @property {Endpoint} [embed]
- * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
+ * @property {string[]} quirks `prefix-leak`, `image-path`, `sides-of-32` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
  * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */
@@ -223,7 +223,11 @@ export type Look = {
  */
 /** @type {readonly Work[]} */
 export declare const WORKS: readonly Work[];
-/** `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path. */
+/**
+ * `prefix-leak`: each request starts with a nonce (GenieX v0.7.0). `image-path`: the server reads a local image path.
+ * `sides-of-32`: a picture's side of a whole number of 32 px, on a picture the server doesn't shrink, is made a pixel
+ * longer first (FastFlowLM 1.0.7 misreads it).
+ */
 export declare const QUIRKS: readonly string[];
 /**
  * Whether it serves this kind of request.
