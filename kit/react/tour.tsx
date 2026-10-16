@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { alertDialog } from './modal.tsx';
 import type { Onboarding, PageShell } from './page-data.ts';
 import { SettingsForm } from './settings-form.tsx';
 import { SHOW_TAB } from './tabs.tsx';
@@ -149,7 +150,7 @@ export function Tour({ onboarding, app, needs = null, onSettingsSaved, start = t
   if (step === 'settings')
     return (
       <div className="tour-backdrop">
-        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? window.alert('Save your changes first, or Cancel them.') : needs ? window.alert(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from} manorName={manorName}>
+        <TourCard wide place={place} title="Your settings" back={() => go(-1)} next={() => (dirty ? void alertDialog('Save your changes first, or Cancel them.') : needs ? void alertDialog(`${app.name} can't start without ${needs.text}: fill it in and Save first.`) : go(1))} last={steps.length === 2} appId={app.id} from={from} manorName={manorName}>
           <Text variant="muted" as="p">
             {onboarding.settings.length ? `Only what ${app.name} can't choose for you. Everything else has a default that works, and is in Settings.` : `${app.name} needs nothing from you to start.`}
           </Text>

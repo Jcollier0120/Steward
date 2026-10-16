@@ -134,9 +134,11 @@ test('the title bar stays at the top as the page scrolls, and a jump to a #secti
   assert.match(html, /max-height: calc\(100vh - var\(--titlebar-h\) - 16px\)/, 'the Theme menu fits below it');
   assert.ok(html.includes(`root.style.setProperty('--titlebar-h'`), 'the script keeps it to the bar');
   assert.ok(html.includes(`bar.classList.toggle('stuck', window.scrollY > 0)`));
-  // Nothing else of the kit's sticks to the top, where it would meet the bar.
+  // Nothing else of the kit's sticks to the top, where it would meet the bar. The one fixed layer is the modal's (the
+  // page's own dialogs, ModalCard): it covers the whole window, the bar too, while it's open.
   assert.equal((html.match(/position: sticky/g) ?? []).length, 1);
-  assert.equal((html.match(/position: fixed/g) ?? []).length, 0);
+  assert.deepEqual([...html.matchAll(/(?:^|\n)([^\n{}]+) \{[^}]*position: fixed/g)].map((m) => m[1]), ['.ui-modal']);
+  assert.match(rule('.ui-modal'), /position: fixed; inset: 0;/);
 });
 
 test('the page uses the width of the window: no column for text, panels or Settings, and the role whole when it fits', () => {

@@ -18,6 +18,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The kit the Steward hands out lists the Seneschal, the new agent that hands out your agents' work on this PC in order, among the developer agents. With Developer options off, its Settings page no longer shows a "Where its work runs" section for work that doesn't run then.
 - Its page gets its own colour and title-bar scene: a ledger whose lines are ticked one by one as their work goes out to free slots.
 - Its Settings page says it comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.
+- On the Steward's page (and every agent's on kit 2.78.1), a button whose work takes time spins while it runs and takes no second press, and Settings' fields wait while it saves. Its questions and messages are the page's own dialogs, not the browser's.
 
 ### Before you update
 

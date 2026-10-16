@@ -4,11 +4,19 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.1
 
-**The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts.**
+**The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts. It also brings what wasn't released before: A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
 
 ### What's new
 
 - **node/seneschal.ts:** the Seneschal's work client. `seneschalTurn(task, { worker, commands })` submits a task (a repository and a commit, never a command), asks for it by name every 5 seconds until its turn comes, and answers `{ turn }` (run it inside `turn.hold()`, which sends the lease's heartbeats and reports the result), `{ reused }` (a pass of exactly these commands on the same code: nothing to run), or null: run it as before. Null whenever the Seneschal isn't on the PC, doesn't answer, is off duty, the PC has no Developer Pro, the turn doesn't come in 20 minutes, or the run is already inside a checks pace turn (`KIT_CHECKS_TURN`). A failure it holds is never taken for this run's: the task is asked for again, and run. A run under its lease sets `TURN_HELD_ENV` for its commands, so the checks pace's launcher takes no turn of its own. Under node --test it asks only a Seneschal the test gave a home of its own.
+- **busy.tsx:**
+  - **`BusyButton`:** a button in the page's own classes (`className`, any button attribute) that spins while its work runs: a spinner in place of its `icon` (before its words without one), `aria-busy`, and no presses. Its work is `busy`, the page's own word for it (a store's "updating"), and any promise its `onClick` returns.
+  - **`BusyArea`:** a part of the page that is disabled while its work runs: a `<fieldset>` drawn as a plain block, every control in it disabled, `aria-busy`, the progress cursor. Busy while `busy` says so, and while a BusyButton, PostButton or Button in it runs.
+  - **Focus stays:** a control the browser lets go of as it's disabled has the focus back when the work is done.
+- **modal.tsx:**
+  - **`confirmDialog(text, { ok, cancel, danger, title })`** and **`alertDialog(text, { ok, danger, title })`:** the page's own `confirm()` and `alert()`. The same words, and the same choices: OK and Cancel (OK alone for a message). `confirmDialog` is true for OK, false for Cancel or Escape. They draw themselves (no host for a page to mount), one at a time, oldest first, over the tour too. Inside an open modal `<dialog>`, they're drawn in it, so they can be pressed.
+  - **Each dialog:** an `alertdialog` that names its text (`aria-describedby`). OK has the focus, as the browser's had. Tab stays in it, Escape is Cancel (OK for a message), and focus goes back to where it was. Line breaks in the text stay.
+  - **`DialogHost`** (a page may draw its own; a test does), **`dialogsOpen()`** and **`nextStop`** (where Tab goes) are exported too.
 
 ### What changed
 
@@ -16,10 +24,25 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **node/look.ts:** the Seneschal's look: deep blue, "Handing out work" on its pill, and a scene where each line of a ledger is ticked in turn and its task goes out to a free slot beside the steward's staff.
 - **node/developer-pro.ts:** Developer Pro covers the Seneschal too. Without it, the Seneschal hands out no work, and each agent runs its own as before.
 - **spec/DEVELOPER-OPTIONS.md** lists the Seneschal among the developer roles.
+- **`ModalCard`** (moved to modal.tsx, still exported from feedback.tsx and index.ts) keeps focus in it: Tab and Shift+Tab go round it. Only the top modal hears Escape. Focus moves to an element marked `data-autofocus`, else the card. A page that draws `onClose` anew each render no longer moves focus about while it's open. New props: `role` (`alertdialog`), `describedBy` and `modalClassName`.
+- **`Button`:** an `onPress` that returns a promise spins the button until it settles, as `loading` does. `onPress` is `() => unknown` now; a `() => void` still fits.
+- **`PostButton`:** its `confirm` asks in the page's own dialog. The server's error or `message` is said there once the POST is done and the page has looked for news, and a server that doesn't answer is said too (before, nothing was). Its BusyArea waits with it.
+- **The Settings form** (settings-form.tsx) disables its fields, Cancel and "Set every field to its default" while it saves. **OnPageList**'s Removes wait for each other.
+- **The tour:** "Save your changes first, or Cancel them." and "… can't start without …" are the page's own dialog.
+- **page.ts's script:** `data-confirm` asks in the page's own dialog, and the server's error or message is said there. While its POST runs, the button spins and takes no presses, and so do its `data-form` form or the form or card it's in. A failure gives them back, and on success the page reloads as before. A network failure is said, and the page doesn't reload itself under a dialog or a button that waits.
+- **settings-panel.js:** Save spins while it saves, and the fields, Cancel and "Set every field to its default" wait with it. "Try again" spins while the settings load.
+- **The CSS:** the spinner, the modal card and the dialogs are page.ts's CSS now (both kinds of page draw them), with `button:has(> .ui-spinner)`. The react part's UI_CSS adds `.ui-busy-area`.
 
 ### Before you update
 
 - Nothing: it updates itself as usual. The Seneschal's own page asks `developerPro()` itself.
+
+### For an agent
+
+- Nothing to do for PostButton, `data-confirm`, OnPageList, the Settings form or the tour: they use the page's own dialog by themselves.
+- A page of its own that calls `window.confirm()` or `window.alert()` calls `await confirmDialog(text)` or `await alertDialog(text)` instead, with the same words.
+- A button whose handler awaits is a `BusyButton` (or the kit's `Button`, whose `onPress` returns the promise). Wrap what the work changes in a `BusyArea`.
+- A page that copies the kit's CSS (Manor's app.css, under a policy with no inline style) adds `.ui-busy-area`, `.ui-modal.ui-dialog` and the `.ui-dialog-*` rules from page.ts's CSS.
 
 ## 2.77.8
 

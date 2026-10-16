@@ -1,10 +1,10 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Spinner } from './icons.tsx';
 import { Button, Card, Text } from './ui.tsx';
 
 /**
  * The page's states and notices, on GamerNexus's API (apps/mobile/components/ui): loading, an error with Try again,
- * an empty note, the async boundary that picks between them (QueryView), a toast, and a modal card.
+ * an empty note, the async boundary that picks between them (QueryView), and a toast. The modal card is modal.tsx's.
  */
 
 /** A centred spinner, while something loads. */
@@ -81,31 +81,5 @@ export function Toast({ message, onHide, duration = 2600 }: { message: string | 
   );
 }
 
-/**
- * A card over a dimmed page: Escape or a click outside closes it (unless `dismissOnBackdrop` is false, for an editor an
- * accidental click mustn't discard), and focus moves into it, then back to where it was.
- */
-export function ModalCard({ visible, onClose, children, maxHeightRatio = 0.8, className, dismissOnBackdrop = true, label }: { visible: boolean; onClose: () => void; children: ReactNode; maxHeightRatio?: number; className?: string; dismissOnBackdrop?: boolean; label?: string }) {
-  const card = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!visible) return;
-    const before = document.activeElement as HTMLElement | null;
-    card.current?.focus();
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', keys);
-    return () => {
-      document.removeEventListener('keydown', keys);
-      before?.focus?.();
-    };
-  }, [visible, onClose]);
-  if (!visible) return null;
-  return (
-    <div className="ui-modal" onClick={dismissOnBackdrop ? onClose : undefined}>
-      <div ref={card} className={className ? `ui-modal-card ${className}` : 'ui-modal-card'} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} style={{ maxHeight: `${Math.round(maxHeightRatio * 100)}vh` }} onClick={(e) => e.stopPropagation()}>
-        {children}
-      </div>
-    </div>
-  );
-}
+/** The modal card is modal.tsx's, beside the page's own confirm and alert dialogs; it is said here too, as it was. */
+export { ModalCard } from './modal.tsx';
