@@ -5,6 +5,7 @@ import path from 'node:path';
 import { locksDir } from './lock.ts';
 import { manorHome } from './manor.ts';
 import { pidAlive } from './npu-queue.ts';
+import { AGENTS_AT_ONCE, CEILING_CAP } from './pace.ts';
 import { powershell, psQuote } from './ps.ts';
 import { currentWork } from './work-tasks.ts';
 
@@ -17,11 +18,13 @@ import { currentWork } from './work-tasks.ts';
  * A paced command runs through a small launcher (checks-pace.cs, compiled once to an exe every agent on the PC shares, as
  * gentle.cs is to a DLL) that starts it, and every program it starts, in a job with
  *
- * - **a hard cap on the processor**: a third of it by default (checksCap()), however many threads they run;
+ * - **a hard cap on the processor**: a third of it by default (checksCap()), the manor's ceiling (85%) at a full pace,
+ *   however many threads they run;
  * - **a cap on memory**: per program and for the whole job (checksMemory()), so a runaway test fails rather than
  *   pages the PC;
  * - **below-normal priority**: they give way to whatever the person is doing;
- * - **a turn**: at most CHECKS_AT_ONCE runs on the PC at once, from whichever agent or Claude session, the rest wait.
+ * - **a turn**: at most CHECKS_AT_ONCE runs on the PC at once (CHECKS_AT_ONCE_FULL at a full pace), from whichever
+ *   agent or Claude session, the rest wait.
  *
  * and, since it is slower so (kit 2.74.2), **room to finish**: a runner stretches its time limit by as much as the cap
  * slows the work (pacedSlower) plus the wait for a turn, and node's test runner runs as many files at once as the cap
@@ -37,11 +40,14 @@ import { currentWork } from './work-tasks.ts';
  * taking it twice, so together they never peg the processor either. The command leaves the agent's own gentle job first
  * (kit 2.74.6), which lets it: the checks pace is the cap that holds it, not the agent's own tighter one as well.
  *
- * Manor's Settings pace at full lifts it, as it lifts the agents' own (pace.ts): one switch for the whole manor. While
- * that is gentle, settings.json `"checksPace"` (or KIT_CHECKS_PACE) may set the cap: a percentage of the processor from
- * 10 to 100, or "full" for none. Nothing else lifts it: a run asked for by hand is paced like any other. Windows
- * only: elsewhere a paced command runs under `nice`. Never fails a command: a launcher that can't be built or started
- * leaves the command to run as it is.
+ * Manor's Settings pace at full raises the cap to the manor's ceiling, 85% of the processor (pace.ts's CEILING_CAP, kit
+ * 2.78.3; before, full lifted it altogether), as it raises the agents' own (gentle.ts): one switch for the whole manor,
+ * and Windows and the person keep the rest. At full the runs take more turns at once (CHECKS_AT_ONCE_FULL), sharing the
+ * one cap. While the pace is gentle, settings.json `"checksPace"` (or KIT_CHECKS_PACE, at either pace) may set the cap:
+ * a percentage of the processor from 10 to 85, or "full" (or 100) for the ceiling. Nothing goes past the ceiling, and
+ * nothing else changes the cap: a run asked for by hand is paced like any other. Windows only: elsewhere a paced
+ * command runs under `nice`. Never fails a command: a launcher that can't be built or started leaves the command to run
+ * as it is.
  */
 
 /**
@@ -62,6 +68,18 @@ export function checksCap(): number {
  * waiting behind two long ones.
  */
 export const CHECKS_AT_ONCE = 3;
+/**
+ * How many paced runs the PC runs at once at a full pace (kit 2.78.3): as many as the work line's most agents at once,
+ * six. Before 2.78.3 a full pace's runs took no turns at all. They share the one job and its ceiling, so more turns
+ * add no processor, and three would hold back a build's releases side by side.
+ */
+export const CHECKS_AT_ONCE_FULL = AGENTS_AT_ONCE.most;
+
+/** The turns now: CHECKS_AT_ONCE, or CHECKS_AT_ONCE_FULL when Manor's Settings pace is full. Read afresh each time. */
+export function checksAtOnce(home = manorHome()): number {
+  return manorSetting(home, 'backgroundPace') === 'full' ? CHECKS_AT_ONCE_FULL : CHECKS_AT_ONCE;
+}
+
 /** How long a paced run may wait for a turn before it runs without one (checks-pace.cs' TURN_WAIT_MS). */
 export const CHECKS_TURN_MS = 20 * 60_000;
 /** The least a paced run's time limit is stretched by (pacedSlower): what it always was, for a quarter of the processor. */
@@ -101,12 +119,13 @@ export function paced(ms: number, env: NodeJS.ProcessEnv = process.env): number 
 
 /**
  * How many test files node's runner runs at once at the checks pace (kit 2.74.2): twice the processors the cap leaves,
- * two at least (12 at a third of 18 processors). Left to itself it starts one per processor but one, 17 on an
- * 18-thread laptop, every one held to the cap's share and the job's memory: at two processors' worth each crawled, and
- * their own timeouts fired for want of a processor. Twice keeps the cap busy while some wait on git or a timer.
+ * two at least (12 at a third of 18 processors), and never more than the processors (kit 2.78.3: 18 at the ceiling,
+ * where twice would be 32). Left to itself it starts one per processor but one, 17 on an 18-thread laptop, every one
+ * held to the cap's share and the job's memory: at two processors' worth each crawled, and their own timeouts fired for
+ * want of a processor. Twice keeps the cap busy while some wait on git or a timer.
  */
 export function pacedTestConcurrency(cap: number, processors = os.availableParallelism()): number {
-  return Math.max(2, 2 * Math.ceil((processors * cap) / 10_000));
+  return Math.max(2, Math.min(processors, 2 * Math.ceil((processors * cap) / 10_000)));
 }
 
 /**
@@ -138,20 +157,22 @@ export function checksLimits(cap: number, memory = checksMemory(), atOnce = CHEC
 }
 
 /**
- * The cap now, in hundredths of a percent, or 0 for none: none when Manor's Settings pace (`"backgroundPace"`) is full,
- * the one switch for everything the manor runs; else KIT_CHECKS_PACE, else Manor's settings.json `"checksPace"`, else
- * checksCap(). Either says a percentage (10 to 100; 100 is none) or "full" (none). Read afresh each time, so a change
- * applies from the next command. Under node --test, none unless KIT_CHECKS_PACE says: a test's commands never build the
- * launcher in this PC's kit folder.
+ * The cap now, in hundredths of a percent: KIT_CHECKS_PACE when it says; else the manor's ceiling (CEILING_CAP, 85%)
+ * when Manor's Settings pace (`"backgroundPace"`) is full, the one switch for everything the manor runs; else Manor's
+ * settings.json `"checksPace"`, else checksCap(). Either says a percentage (10 to 100) or "full". Nothing goes past the
+ * ceiling (kit 2.78.3): "full", "off", 0 and 100 or more are the ceiling, where before they were no cap at all, and a
+ * percentage above it is the ceiling too. Read afresh each time, so a change applies from the next command. Under
+ * node --test, 0 (no cap: the command runs as it is) unless KIT_CHECKS_PACE says a percentage under 100, as ever: a
+ * test's commands never build the launcher in this PC's kit folder.
  */
 export function checksPaceCap(home = manorHome(), env: NodeJS.ProcessEnv = process.env): number {
-  if (env.NODE_TEST_CONTEXT && !env.KIT_CHECKS_PACE) return 0;
+  const tested = !!env.NODE_TEST_CONTEXT;
+  if (tested && !env.KIT_CHECKS_PACE) return 0;
   const said = env.KIT_CHECKS_PACE?.trim() || (manorSetting(home, 'backgroundPace') === 'full' ? 'full' : manorSetting(home, 'checksPace'));
-  if (said === 'full' || said === 'off' || said === '0' || said === 0) return 0;
   const n = typeof said === 'number' ? said : typeof said === 'string' ? Number(said.replace(/%$/, '')) : NaN;
+  if (said === 'full' || said === 'off' || said === '0' || said === 0 || n >= 100) return tested ? 0 : CEILING_CAP;
   if (!Number.isFinite(n)) return checksCap();
-  if (n >= 100) return 0;
-  return Math.round(Math.max(10, n) * 100);
+  return Math.min(CEILING_CAP, Math.round(Math.max(10, n) * 100));
 }
 
 /** One key of Manor's settings.json, when Manor is installed and the file can be read; undefined otherwise. */
@@ -222,7 +243,7 @@ export interface Paced {
 
 /**
  * The command `file args` at the checks pace: through the launcher with its limits (checksPaceCap(), checksMemory(), a
- * turn), or as it is when the cap is off (Manor's "checksPace": "full") or the launcher can't be had. The environment
+ * turn of checksAtOnce()), or as it is under node --test (no cap) or when the launcher can't be had. The environment
  * keeps .NET's build servers from staying behind in the job (the job ends what is left in it once its runs are done).
  * A `node --test` runs as many test files at once as the cap has room for (pacedTestConcurrency), and every command is
  * told how much slower it runs (CHECKS_SLOWER_ENV). Never throws.
@@ -243,7 +264,7 @@ export async function pacedCommand(file: string, args: string[], o: { home?: str
   const { APP } = await import('../app.ts');
   return {
     file: exe,
-    args: [checksLimits(cap), file, ...testArgs],
+    args: [checksLimits(cap, checksMemory(), checksAtOnce(o.home)), file, ...testArgs],
     env: { MSBUILDDISABLENODEREUSE: '1', [CHECKS_SLOWER_ENV]: String(slower), [CHECKS_RUNS_ENV]: checksRunsDir(), [CHECKS_WHO_ENV]: checksWho(file, args, o.what, APP.id) },
     slower,
     waitMs: CHECKS_TURN_MS,

@@ -2,6 +2,23 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.68
+
+**A full pace never takes the whole PC any more: everything the manor runs, together, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
+
+### What changed
+
+- At a full pace (Manor's Settings), the Steward's checks used to run with no cap at all. These are test runs, type checks, installs and builds, an agent's whole suite before it merges, and a kit's trial on every agent. Now they are held to 85% of the processor, all of them together. Up to six run at once, as many agents as run at once at full, and they share the 85% rather than each adding to it. Each check run also keeps the memory limits it has at a gentle pace.
+- An agent at a full pace keeps normal priority, but its own work, and everything it starts, stays within 85% of the processor too. So does Manor's own page.
+- While more than 85% of this PC's memory is in use, no agent starts a scheduled round, whatever the pace. It waits for room, and says why it waits. A round already running finishes, and a round you ask for (Run now) still runs.
+- A kit trial starts no new try while more than 85% of the memory is in use. It goes on at the next round. It also tries fewer agents at once when memory is tight: only as many as the free memory holds above the 15% left to you.
+- A checks pace you set (checksPace), or KIT_CHECKS_PACE, still sets a lower cap. 100% or "full" now means 85%.
+- This Steward hands out kit 2.78.3, which brings the same ceiling to every agent that takes it.
+
+### Before you update
+
+- At a full pace the manor now always leaves 15% of the processor and memory to you and Windows, so big jobs such as a whole suite or a kit trial may take a little longer than before. Nothing to set: it updates itself as usual. Each agent's own work gets the ceiling when it takes kit 2.78.3.
+
 ## 0.36.62
 
 **SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**

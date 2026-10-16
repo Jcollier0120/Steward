@@ -13,8 +13,9 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { CHECKS_AT_ONCE, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
+const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 const { psPaced } = await import('./fixture/src/kit/ps.ts');
+const { AGENTS_AT_ONCE, CEILING_CAP, PACE_CEILING } = await import('./fixture/src/kit/pace.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -41,20 +42,35 @@ test("the launcher's first word: the cap, memory per program and for the job, ru
   assert.equal(checksLimits(5000, { processMb: 1, jobMb: 2 }, 0), '5000,1,2,0');
 });
 
-test("the cap now: none when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for none; none under node --test unless said", () => {
+test("the cap now: the manor's ceiling when Settings say full, else KIT_CHECKS_PACE, else Manor's checksPace, else the default; full or 100 for the ceiling, never past it; none under node --test unless said (kit 2.78.3)", () => {
   const none = path.join(home, 'no-manor');
   assert.equal(checksPaceCap(none, {}), 3333);
   assert.equal(checksPaceCap(manorWith('m-70', { checksPace: 70 }), {}), 7000);
-  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}), 0);
-  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}), 0, '100%: no cap');
+  assert.equal(CEILING_CAP, 8500, '85% of the processor: the most the manor takes');
+  assert.equal(CEILING_CAP, Math.round(PACE_CEILING * 10_000));
+  assert.equal(checksPaceCap(manorWith('m-full', { checksPace: 'full' }), {}), 8500, 'full: the ceiling, not the whole PC');
+  assert.equal(checksPaceCap(manorWith('m-100', { checksPace: 100 }), {}), 8500, '100%: the ceiling');
+  assert.equal(checksPaceCap(manorWith('m-90', { checksPace: 90 }), {}), 8500, 'never past the ceiling');
+  assert.equal(checksPaceCap(manorWith('m-85', { checksPace: '85%' }), {}), 8500);
   assert.equal(checksPaceCap(manorWith('m-low', { checksPace: 2 }), {}), 1000, 'never under a tenth');
   assert.equal(checksPaceCap(manorWith('m-odd', { checksPace: 'lots' }), {}), 3333, 'anything else: as if unsaid');
-  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}), 0, "Settings' pace at full lifts it: the one switch");
+  assert.equal(checksPaceCap(manorWith('m-bg-full', { backgroundPace: 'full', checksPace: 40 }), {}), 8500, "Settings' pace at full raises it to the ceiling: the one switch");
   assert.equal(checksPaceCap(manorWith('m-bg-gentle', { backgroundPace: 'gentle', checksPace: 40 }), {}), 4000);
   assert.equal(checksPaceCap(manorWith('m-40', { checksPace: 40 }), { KIT_CHECKS_PACE: '60%' }), 6000, 'the variable says instead of Manor');
-  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }), 0);
+  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: 'full' }), 8500);
+  assert.equal(checksPaceCap(none, { KIT_CHECKS_PACE: '95%' }), 8500, 'the variable goes no higher either');
+  assert.equal(checksPaceCap(manorWith('m-bg-full-env', { backgroundPace: 'full' }), { KIT_CHECKS_PACE: '50' }), 5000, 'the variable sets a lower cap at full');
   assert.equal(checksPaceCap(manorWith('m-t', { checksPace: 70 }), { NODE_TEST_CONTEXT: 'child' }), 0, "a test's commands aren't paced");
   assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: '50' }), 5000);
+  assert.equal(checksPaceCap(none, { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: 'full' }), 0, "a test's commands at full: unpaced, as before");
+});
+
+test('turns at full (kit 2.78.3): as many check runs at once as agents at full, the cap held for all of them together', () => {
+  assert.equal(CHECKS_AT_ONCE_FULL, AGENTS_AT_ONCE.most);
+  assert.ok(CHECKS_AT_ONCE_FULL > CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(path.join(home, 'no-manor')), CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(manorWith('t-gentle', { backgroundPace: 'gentle' })), CHECKS_AT_ONCE);
+  assert.equal(checksAtOnce(manorWith('t-full', { backgroundPace: 'full' })), CHECKS_AT_ONCE_FULL);
 });
 
 test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap slows the work, and as many test files at once as it has room for', () => {
@@ -67,6 +83,7 @@ test('room to finish at the pace (kit 2.74.2): a time limit stretched as the cap
   assert.equal(pacedTestConcurrency(3333, 18), 12, 'a third of 18 processors, the default: twelve');
   assert.equal(pacedTestConcurrency(2500, 4), 2, 'one processor: two at least');
   assert.equal(pacedTestConcurrency(5000, 16), 16);
+  assert.equal(pacedTestConcurrency(8500, 18), 18, 'the ceiling, at full: one file per processor, no more');
   const node = process.execPath;
   assert.deepEqual(withTestConcurrency(node, ['--import=./x.ts', '--test', 'a.test.ts'], 4), ['--import=./x.ts', '--test', '--test-concurrency=4', 'a.test.ts']);
   assert.deepEqual(withTestConcurrency('node', ['--test'], 2), ['--test', '--test-concurrency=2']);
@@ -108,9 +125,9 @@ test('the launcher: one for the PC, beside the gentle DLL, a new one for a new s
   assert.ok(script.includes("'C:/o''k/checks-pace-1' + '.'"), 'built beside it, then moved into place');
 });
 
-test("a command with the cap off (Manor's checksPace full: the only way out) runs as it is", async () => {
+test('a command with the cap off (only under node --test, unless KIT_CHECKS_PACE says a percentage under 100) runs as it is', async () => {
   const plain = { file: 'node', args: ['a'], env: {} };
-  assert.deepEqual(await pacedCommand('node', ['a'], { env: { KIT_CHECKS_PACE: 'full' } }), plain);
+  assert.deepEqual(await pacedCommand('node', ['a'], { env: { NODE_TEST_CONTEXT: 'child', KIT_CHECKS_PACE: 'full' } }), plain);
   assert.deepEqual(await pacedCommand('node', ['a'], { env: { NODE_TEST_CONTEXT: 'child' } }), plain);
 });
 
