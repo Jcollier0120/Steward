@@ -880,12 +880,21 @@ export async function mergeLooks(ctx: Ctx, e: Employee, o: { yes: boolean; team?
   }
   const cut = looks.length >= MAX_LOOKS && !!looks.at(-1)!.lookAgain;
   if (cut) ctx.log(`[${e.id}] looked at its PRs ${MAX_LOOKS} times this round: the next round goes on`);
+  const out = joinLooks(looks);
+  return cut ? { ...out, again: true } : out;
+}
+
+/**
+ * Several looks at one employee's PRs as one result: everything merged and done in them, then what waits after the
+ * last. A round's looks (mergeLooks), or a build's second look once a kit released beside them (steward.ts). Pure.
+ */
+export function joinLooks(looks: MergeLook[]): MergeLook {
   if (looks.length === 1) return looks[0];
   const last = looks.at(-1)!;
   const merged = looks.flatMap((l) => l.merged);
   const parts = [...looks.flatMap((l) => l.did ?? []), ...(last.waits ?? [])];
   const outcome = looks.some((l) => l.outcome === 'failed') ? 'failed' : merged.length ? 'done' : last.outcome;
-  return { ...last, outcome, message: parts.join('; ') || last.message, url: merged[0]?.url ?? last.url, merged, did: looks.flatMap((l) => l.did ?? []), ...(cut ? { again: true } : {}) };
+  return { ...last, outcome, message: parts.join('; ') || last.message, url: merged[0]?.url ?? last.url, merged, did: looks.flatMap((l) => l.did ?? []) };
 }
 
 /**
