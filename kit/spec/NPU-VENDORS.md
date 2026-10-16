@@ -291,6 +291,53 @@ A route's minutes are 20 times its cold start (stopped to its first answer), nev
 
 An idle stop never races a request: the keeper stops a server only holding the NPU's turn, joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
+### The embedding server gives way to chat (kit 2.77.5)
+
+On a PC under 20 GB, with no `npuIdleStopMinutes` in config.json, a chat or vision request on the NPU first stops the NPU's own embedding server when the NPU hasn't answered an embedding for 30 s. That is Qualcomm's llama-server (18182) or Intel's second OpenVINO Model Server (18186). The chat gets its memory: on a Snapdragon, 1,408 MB of the NPU's and a 1.7 to 2.0 GB working set; on Intel, 1.7 GB. Only the embedding side gives way. It starts again for the next embedding in 2 to 3 s, where GenieX takes 9 to 17 s to load a model.
+
+- **In the chat's own turn**, so no embedding is in flight (the kit's `embedGivesWay`, with keeper.ts' `yieldEmbedServer`):
+  - It looks at the server's `/v1/models`, and stops it only when it answers ready. A server still loading is left alone.
+  - It finds the server by its program and the address its command line serves, never by the port alone, then waits up to 10 s for the port to close.
+  - Finding the processes may take 5 s. Past that, or on any error, the chat goes on beside the server.
+  - Each stop is written in the keeper's log.
+- **When the NPU last answered an embedding**: every agent writes `<accelerators>/<id>.embedded.json` (`{at}`) after its embeddings there, at most every 5 s. With no record, the server counts as unused.
+- **Never stopped**:
+  - FastFlowLM's route, which has no NPU embeddings.
+  - npu-embed, which exits by itself.
+  - A server shared with chat.
+  - A server whose requests take another device's turn.
+  - Anything on a bigger PC, which never loads this code.
+
+**Why 30 s.** The manor's NPU and graphics-card turns were watched for two hours on the 48 GB X2 Elite (2026-10-15, 20:48 to 22:48 UTC). They were merged onto one NPU, as on a 16 GB Snapdragon where chat and embeddings both run on it. Tests and other sessions' benchmark runs were left out. That left 3,525 embeddings and 17 chats:
+
+- **Embeddings**: Reeve indexing four repositories, plus 35 searches and maps for Claude.
+- **Chats**: Reeve's map, triage and summarize for Claude, Heiward, Porter, and two unnamed.
+
+The embedding server's own 5-minute idle stop started it again 4 times (2 an hour). Giving way to chat adds:
+
+| Gives way | Extra starts in 2 h | An hour |
+|---|---|---|
+| At every chat | 8 | 4 |
+| After 10 s without an embedding | 5 | 2.5 |
+| After 30 s | 2 | 1 |
+| After 60 s | 2 | 1 |
+| After 120 s | 1 | 0.5 |
+
+At every chat, 5 of the 8 extra starts fell on Reeve's requests for Claude a second or so after its map or summary, and the other 3 on an index being built between chats. With 30 s, 2 remain: chats more than half a minute after the last embedding. Counting the benchmark sessions, it's 8 an hour at every chat and 2 an hour with 30 s.
+
+**Measured** on the X2 Elite on private ports (28181 GenieX, 28182 llama-server, `-c 4096 -ub 512`). Every request went through the kit's `Npu` in the NPU's turn, as a 15.6 GB PC would run it:
+
+| | |
+|---|---|
+| The embedding server's cold start, alone / beside a loaded GenieX | 3.6 s / 1.7 s (twice) |
+| An embedding, warm | 16 ms |
+| A warm chat that stops the embedding server / with nothing to stop | 0.47 to 0.63 s (the stop 0.35 to 0.53 s, mostly finding the process) / 0.10 s |
+| A cold chat that stops it | 12.3 s (the stop 0.7 s) |
+| The NPU's memory when it stops | 1,409 MB less (10,152 to 8,743 MB) |
+| The PC's memory when it stops | the server's 1,680 MB working set freed, 1.4 GB more available |
+
+So a chat that finds the embedding server idle pays about half a second once, and the next embedding about 1.7 s. On an NPU 3720, whose embedding server runs on the processor's graphics (`embedArgs`), the server gives way too while its requests take the NPU's turn. That frees the PC's memory rather than the NPU's.
+
 ## Models and sizes
 
 | Maker | Model | Kinds | Download |
