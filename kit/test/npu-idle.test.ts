@@ -210,10 +210,10 @@ function fakeIdlePc(o: { keeperStops?: boolean; tellsWaking?: boolean } = {}) {
   return { pc, deps };
 }
 
-const runIdle = async (deps: IdleDeps) => {
+const runIdle = async (deps: IdleDeps, entry: Parameters<typeof idleSteps>[0]['entry'] = ENTRY) => {
   const steps: IdleStep[] = [];
   const logged: string[] = [];
-  await idleSteps({ entry: ENTRY, route: V.NPU_CATALOG.routes.intel, vendor: 'intel', deps, add: (s) => steps.push(s), log: (l) => logged.push(l), idleMs: 60_000 });
+  await idleSteps({ entry, route: V.NPU_CATALOG.routes.intel, vendor: 'intel', deps, add: (s) => steps.push(s), log: (l) => logged.push(l), idleMs: 60_000 });
   return { steps, logged, by: Object.fromEntries(steps.map((s) => [s.step, s])) };
 };
 
@@ -239,6 +239,12 @@ test("npu-check --idle fails where the keeper never stops the servers, or a pers
   const silent = await runIdle(fakeIdlePc({ tellsWaking: false }).deps);
   assert.equal(silent.by['idle-cold-answer'].ok, false);
   assert.match(silent.by['idle-cold-answer'].say, /^never told it was waking, it answered "ready"/);
+});
+
+test("the NPU 3720's embeddings in the graphics' turn: a request holding the NPU's is looked at on its chat server alone, the embedding server free meanwhile", async () => {
+  const { by } = await runIdle(fakeIdlePc().deps, { ...ENTRY, embed: { ...ENTRY.embed, turn: 'gpu-intel-r-graphics' } });
+  assert.equal(by['idle-in-flight'].ok, true);
+  assert.match(by['idle-in-flight'].say, /while a request held the NPU: in-use; the request answered/);
 });
 
 test('npu-check takes --idle', () => {

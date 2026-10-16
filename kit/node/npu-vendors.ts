@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AcceleratorEntry, Quirk, ServeKind } from './accelerator-config.ts';
+import { type AcceleratorEntry, OWN_MEMORY_GB, type Quirk, type ServeKind } from './accelerator-config.ts';
 
 /**
  * The NPU on every Copilot+ PC (spec/NPU-VENDORS.md): which maker's NPU this is and which generation, whether the
@@ -136,7 +136,8 @@ export interface NpuRuntime {
 
 /**
  * An NPU's embedding server of its own, on its own port, serving /v1/embeddings in the NPU's turn like every NPU
- * request. Qualcomm's is llama.cpp's llama-server of the very build GenieX carries, over GenieX's own libraries, its
+ * request; one a generation runs on the processor's graphics (the NPU 3720's), in the graphics' turn (embedTurn), beside
+ * the NPU's chat. Qualcomm's is llama.cpp's llama-server of the very build GenieX carries, over GenieX's own libraries, its
  * Hexagon backend and Qualcomm's signed HTP libraries among them, so nothing unsigned runs on the NPU: its zip is
  * unpacked into `into`, the route's server's `overlay` files are copied over it, and its model is downloaded as a file.
  * Intel's is a second OpenVINO Model Server, the route's own program (no `download`), whose model it pulls as it pulls
@@ -448,7 +449,7 @@ export function embedPaths(route: NpuRoute, tools: string, env?: Record<string, 
  * (no baseUrl of its own); its startCommand starts it with the chat model. `exe` is written as setup found it. The
  * route's embedding server, when it has one and `embed` says where setup put it, is the embed endpoint, on its own port.
  */
-export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string } }): AcceleratorEntry {
+export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?: number; portable?: (p: string) => string; embed?: { exe: string; model: string; turn?: string } }): AcceleratorEntry {
   const port = o.port ?? route.port;
   const keep = o.portable ?? ((p: string) => p);
   const chat = firstModel(route, 'chat');
@@ -477,10 +478,32 @@ export function npuEntry(route: NpuRoute, o: { tools: string; exe: string; port?
     const own = es.env ? Object.fromEntries(Object.entries(es.env).map(([k, v]) => [k, v.includes('{tools}') ? keep(v.replace(/\{tools\}/g, o.tools)) : v])) : {};
     const all = { ...(es.download ? {} : env ?? {}), ...own };
     const embedEnv = Object.keys(all).length ? all : undefined;
-    e.embed = { baseUrl: `http://127.0.0.1:${es.port}`, model: es.model.id, startCommand: [keep(o.embed.exe), ...args], ...(embedEnv ? { env: embedEnv } : {}), ...cap('embed') };
+    // On the processor's graphics (embedTurn), it answers in the graphics' turn, beside the NPU's chat.
+    e.embed = { baseUrl: `http://127.0.0.1:${es.port}`, model: es.model.id, startCommand: [keep(o.embed.exe), ...args], ...(embedEnv ? { env: embedEnv } : {}), ...cap('embed'), ...(o.embed.turn ? { turn: o.embed.turn } : {}) };
   }
   if (Object.keys(route.timeouts).length) e.timeouts = { ...route.timeouts };
   return e;
+}
+
+/** A graphics card as detection lists it, as far as embedTurn needs it. */
+export type GraphicsCard = { id: string; vendorId: number; memoryGb: number };
+
+/** Intel's PCI vendor id: OpenVINO runs on Intel's graphics alone. */
+const INTEL_VENDOR = 0x8086;
+
+/**
+ * The turn of a route's embedding server that runs on the processor's graphics (`--target_device GPU`: the NPU 3720's,
+ * by its generation's `embedArgs`): the id of that graphics among this PC's cards, so its requests take the graphics'
+ * turn, beside the NPU's chat, which they don't slow (NPU-VENDORS.md). OpenVINO's GPU is its first Intel graphics: the
+ * one sharing the PC's memory (under 2 GB of its own), else the first Intel card. Undefined when it runs on the NPU, or
+ * no Intel graphics is known: then it takes the NPU's turn, as before.
+ */
+export function embedTurn(route: NpuRoute, cards: readonly GraphicsCard[]): string | undefined {
+  const serve = route.embedServer?.serve ?? [];
+  const i = serve.indexOf('--target_device');
+  if (i < 0 || !/^GPU\b/i.test(serve[i + 1] ?? '')) return undefined;
+  const intel = cards.filter((c) => c.vendorId === INTEL_VENDOR);
+  return (intel.find((c) => c.memoryGb < OWN_MEMORY_GB) ?? intel[0])?.id;
 }
 
 /** Whether a configured NPU entry runs this route's server (its chat endpoint's program). */
@@ -756,7 +779,7 @@ export interface NpuPlan {
    * The route's embedding server, when it has one: where it goes, and its zip and model unless they're here (its
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
    */
-  embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null; modelPull: string[] | null }) | null;
+  embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null; modelPull: string[] | null; turn?: string }) | null;
   /** The route's power tool, its path expanded, when it has one. */
   powerTool?: NpuPowerTool;
   /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
@@ -778,6 +801,8 @@ export function planNpu(o: {
   port?: number;
   /** Leave its embeddings off the NPU (too little memory for them beside its chat: npuMemoryFit). */
   noEmbed?: boolean;
+  /** This PC's graphics cards (detection's), for the turn of an embedding server that runs on its graphics (embedTurn). */
+  cards?: readonly GraphicsCard[];
 }): NpuPlan | null {
   if (!o.support.supported || !o.support.vendor) return null;
   const exists = o.exists ?? existsSync;
@@ -804,7 +829,8 @@ export function planNpu(o: {
     const here = !!p.model && exists(p.model);
     const model = isPulled(m) || here ? null : { what: m.file, url: m.url, size: m.size, sha256: m.sha256, dest: p.model, have: false };
     const pull = isPulled(m) && !here ? m.pull.map((a) => expandRoute(a, { tools: o.tools, model: m.id, env: o.env })) : null;
-    embed = { ...p, server: es, download: zip, modelDownload: model, modelPull: pull };
+    const turn = embedTurn(route, o.cards ?? []);
+    embed = { ...p, server: es, download: zip, modelDownload: model, modelPull: pull, ...(turn ? { turn } : {}) };
   }
   const downloadBytes =
     (download ? download.size : 0) +

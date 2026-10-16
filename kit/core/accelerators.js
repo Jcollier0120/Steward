@@ -23,6 +23,9 @@ import { slotNames } from './queue.js';
  * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
  * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
  * vision model may take less than its chat model): capFor.
+ * @property {string} [turn] The accelerator whose lock and line its requests take, when its server runs on another
+ * device than its accelerator's: the NPU 3720's embedding server, on the processor's graphics, takes the graphics'
+ * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
  */
 
 /**
@@ -133,6 +136,21 @@ export function lockFoldersOf(acc) {
   return slotNames(acc.id, acc.id === 'npu' ? 1 : (acc.slots ?? 1));
 }
 
+/**
+ * The accelerator whose turn a kind of request takes: its endpoint's `turn` when its server runs on another device
+ * (the NPU 3720's embeddings, on the processor's graphics), else its own. Its slots are that accelerator's in `list`
+ * when it's there, else one.
+ * @param {Pick<Accelerator, 'id' | 'slots'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @param {ReadonlyArray<Pick<Accelerator, 'id' | 'slots'>>} [list]
+ * @returns {{ id: string, slots: number }}
+ */
+export function turnOf(a, work, list = []) {
+  const id = a[work]?.turn;
+  if (!id || id === a.id) return { id: a.id, slots: a.slots };
+  return { id, slots: list.find((x) => x.id === id)?.slots ?? 1 };
+}
+
 // ---------------------------------------------------------------- Reeve's config
 
 /** @param {unknown} u */
@@ -140,7 +158,7 @@ const baseUrlOf = (u) => String(u).replace(/\/(v1\/?)?$/, '');
 /** @param {unknown} v */
 const positiveInt = (v) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
 
-/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number }} Written */
+/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number, turn?: string }} Written */
 
 /**
  * A server's own environment as written: names to strings, anything else left out.
@@ -168,6 +186,8 @@ function readEndpoint(v) {
     ...(Array.isArray(v.startCommand) ? { startCommand: v.startCommand.map(String) } : {}),
     ...(readEnv(v.env) ? { env: readEnv(v.env) } : {}),
     ...(positiveInt(v.maxContextTokens) ? { maxContextTokens: v.maxContextTokens } : {}),
+    // Another device's turn: a graphics card's or the processor's, never the NPU's (an NPU's own servers are in its turn).
+    ...(kindOfId(v.turn) && v.turn !== 'npu' ? { turn: v.turn } : {}),
   };
 }
 
@@ -211,9 +231,10 @@ function withServers(a, eps) {
     const ep = eps[w];
     if (!ep) continue;
     const cap = ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {};
-    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...cap };
+    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...cap, ...(ep.turn ? { turn: ep.turn } : {}) };
+    // On the chat endpoint's server, it takes that server's turn.
     else if (w === 'vision' && eps.chat?.baseUrl)
-      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...cap };
+      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...cap, ...(eps.chat.turn ? { turn: eps.chat.turn } : {}) };
   }
   return out;
 }

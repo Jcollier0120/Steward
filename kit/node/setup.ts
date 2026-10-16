@@ -562,7 +562,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
     } else {
-      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed });
+      npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards });
       if (!fit.embed && route?.embedServer) {
         npuNote = `${det.label} (npu): its embeddings not set up: ${fit.why}. The graphics card or the processor makes them.`;
         npuPlain = npuNoteFor(det.label, 'embed', fit.why!);
@@ -1102,11 +1102,11 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
     note = npuNoteFor(label, 'embed', reason);
   };
-  let embedAt: { exe: string; model: string } | undefined;
+  let embedAt: { exe: string; model: string; turn?: string } | undefined;
   if (n.embed) {
     const why = await setUpNpuEmbed(n, tools, io, env);
     if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`, "its embedding server couldn't be set up");
-    else embedAt = { exe: n.embed.exe, model: n.embed.model };
+    else embedAt = { exe: n.embed.exe, model: n.embed.model, ...(n.embed.turn ? { turn: n.embed.turn } : {}) };
   }
   const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt });
   io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);

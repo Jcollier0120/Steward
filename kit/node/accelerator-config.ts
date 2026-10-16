@@ -61,6 +61,11 @@ export interface Endpoint {
   maxContextTokens?: number;
   /** What its server's environment needs besides the starter's (OpenVINO Model Server's PYTHONHOME and PATH); `%NAME%` is expanded. */
   env?: Record<string, string>;
+  /**
+   * The accelerator whose lock and line its requests take, when its server runs on another device (the core's turnOf):
+   * the NPU 3720's embedding server, on the processor's graphics, takes the graphics' (`gpu-…`). A `gpu-…` id or `cpu`.
+   */
+  turn?: string;
 }
 
 /** An accelerator's own request timings, over rules.json's (the core's requestTimeoutMs): a slower NPU's. */
@@ -236,6 +241,7 @@ function readEndpoint(v: any): Endpoint | undefined {
   }
   const cap = positiveInt(v.maxContextTokens);
   if (cap) ep.maxContextTokens = cap;
+  if (typeof v.turn === 'string' && kindOfId(v.turn) && v.turn !== 'npu') ep.turn = v.turn;
   return ep;
 }
 
@@ -432,6 +438,8 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
           problems.push(`${where}: env must be an object of names to text (its server's environment)`);
         if (ep.maxContextTokens !== undefined && !(Number.isInteger(ep.maxContextTokens) && ep.maxContextTokens >= 512 && ep.maxContextTokens <= 1_048_576))
           problems.push(`${where}: maxContextTokens must be a whole number from 512 to 1048576`);
+        if (ep.turn !== undefined && !(typeof ep.turn === 'string' && kindOfId(ep.turn) && ep.turn !== 'npu'))
+          problems.push(`${where}: turn must be a graphics card's id (gpu-…) or cpu, the device its server runs on`);
         if (typeof ep.baseUrl === 'string' && isHttpUrl(ep.baseUrl)) {
           const base = serverBase(ep.baseUrl);
           const other = servers.get(base);

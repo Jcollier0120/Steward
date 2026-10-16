@@ -2,6 +2,25 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s.**
+
+### What's new
+
+- **An endpoint's `turn`** (the core's Endpoint, and the keeper's config): the id of the device its server runs on, `gpu-…` or `cpu`, when that isn't its accelerator. Its requests take that device's lock and line (the core's `turnOf`; the kit's `turnFor`). The NPU's id, or anything that isn't an id, isn't a turn: the entry is read without it, and the check names it. A vision model on its chat endpoint's server takes chat's. spec/ACCELERATORS.md has it.
+- **npu-vendors.ts**: `embedTurn(route, cards)` gives a route's embedding server that runs on the graphics (`--target_device GPU`: the NPU 3720's) the id of the Intel graphics that shares the PC's memory, else the first Intel card. `planNpu` takes the PC's `cards` for it, and `npuEntry` writes the embeddings' `turn`.
+- **accelerators.ts**: `turnsWithoutEntry(list)`, the devices whose turns an entry's servers take without an entry of their own. `acceleratorLines()` and the work status's `pcLines()` list their lines too.
+
+### What changed
+
+- **npu.ts**: a request takes the turn of the device its server runs on. The pick reads that turn's line, and a background request's back-off is that turn's. An NPU 3720's search query no longer waits for the NPU's chat, nor its chat for an indexing batch. Its failure marker, cap and name stay the NPU's.
+- **Setup** (`planSetup`, `setUpNpu`) and the check (`npu-check`) plan the NPU with this PC's cards, so an NPU 3720's embeddings get their `turn`.
+- **The NPU's refresh** (npu-refresh.ts) writes the turn into a PC set up before it, after its usual test, and stops and tests holding both turns. A detection that lists no cards keeps the entry's turn.
+- **The keeper** (keeper.ts) looks after such a server in its turn's lock folders, with its accelerator's idle time and log (`otherTurn`). Its idle-in-flight check (`npu-check --idle`) looks only at the servers in the NPU's turn.
+- **The embedding server's giving way to chat** (2.77.5) leaves it alone: with its `turn` it answers beside the chat, and the keeper's `ownEmbedServer` already skips an endpoint with one. spec/NPU-VENDORS.md says so for the NPU 3720.
+- **spec/NPU-VENDORS.md** has The NPU 3720's embeddings in the graphics' turn, with the measurements before and after.
+
 ## Unreleased (its version needs claiming on the main laptop)
 
 **Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why.** FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a PC where an older AMD NPU driver left its DLLs in `Windows\System32\AMD`, xrt-smi can't start, and the NPU runs at its default mode. This was found on the Krackan test PC, from a Dell factory image.
