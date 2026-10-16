@@ -77,6 +77,7 @@ export async function releaseUnreleased(ctx: Ctx, employees: Employee[]): Promis
       return await withRepo(ctx.log, e.id, () =>
         releaseOne(ctx, e, {
           kit: null,
+          kitOnly: true,
           unless: (commit, version) => (failed[e.id] === commit.slice(0, 7) && !retry.has(e.id) ? `v${version} at ${commit.slice(0, 7)} failed to release in an earlier round, so the rounds leave it to you: Release on the page, or a new commit` : null),
         }),
       );

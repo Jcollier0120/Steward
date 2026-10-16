@@ -85,13 +85,25 @@ export async function withRepo<T>(log: (line: string) => void, id: string, fn: (
   );
 }
 
+/** How many of each work apart (by name) run in this process now. */
+const aparts = new Map<string, number>();
+
 /**
  * Runs `fn` as work of its own named `name`, apart from the stage that started it: it holds none of that stage's
  * repositories, so it waits for each like any other stage once that stage has gone on (a kit trial beside the rounds).
  * It is a task of its own in the work status (the kit's work-status.ts), not the stage's: the checks it runs its parts.
  */
-export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
-  held.exit(() => inStage.run(name, () => outsideWork(() => withWork({ kind: name.replace(/\s+/g, '-'), what: name }, fn))));
+export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+  aparts.set(name, (aparts.get(name) ?? 0) + 1);
+  return held.exit(() => inStage.run(name, () => outsideWork(() => withWork({ kind: name.replace(/\s+/g, '-'), what: name }, fn)))).finally(() => {
+    const left = (aparts.get(name) ?? 1) - 1;
+    if (left > 0) aparts.set(name, left);
+    else aparts.delete(name);
+  });
+};
+
+/** Which of `names`, work apart, runs in this process now ("kit trial", say), or null: so two that test never run at once. */
+export const apartNow = (...names: string[]): string | null => names.find((n) => (aparts.get(n) ?? 0) > 0) ?? null;
 
 /** The stage, or the work apart, of this process that holds employee `id`'s repository now ("rollout", say), or null. */
 export const heldBy = (id: string): string | null => holders.get(id) ?? null;

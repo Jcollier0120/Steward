@@ -10,7 +10,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-slots-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { repoBusy, withRepo, withStageSlot } = await import('../src/stages/slots.ts');
+const { apart, apartNow, repoBusy, withRepo, withStageSlot } = await import('../src/stages/slots.ts');
 const { LockTimeout } = await import('../src/kit/lock.ts');
 const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts');
 
@@ -80,6 +80,20 @@ test('two stages never work on one repository at once: the second waits, saying 
   await Promise.all([release, round]);
   assert.deepEqual(order, ['release in', 'round porter', 'release out', 'round manor']);
   assert.ok(!repoBusy('manor'), 'free again');
+});
+
+test('work apart is known by name while it runs, however many of it, and not once each has ended or failed', async () => {
+  const [a, b] = [gate(), gate()];
+  const one = apart('kit trial', () => a.opened);
+  const two = apart('kit trial', () => b.opened.then(() => Promise.reject(new Error('cut short'))));
+  assert.equal(apartNow('whole suite', 'kit trial'), 'kit trial');
+  assert.equal(apartNow('whole suite'), null);
+  a.open();
+  await one;
+  assert.equal(apartNow('kit trial'), 'kit trial', 'the other still runs');
+  b.open();
+  await assert.rejects(two, /cut short/);
+  assert.equal(apartNow('kit trial'), null);
 });
 
 test('a repository asked for again inside its own hold is just used', async () => {

@@ -36,9 +36,9 @@ export interface PhaseOf {
   ahead?: boolean;
 }
 
-/** The build a stage's work counts for: the build under way, else the one it prepares for, else none. */
-export const phaseOf = (ctx: { build?: { due: string } | null; prepare?: { due: string } | null }): PhaseOf | null =>
-  ctx.build ? { due: ctx.build.due } : ctx.prepare ? { due: ctx.prepare.due, ahead: true } : null;
+/** The build a stage's work counts for: the build under way, else the one it merges ahead of (ctx.build `ahead`) or prepares for, else none. */
+export const phaseOf = (ctx: { build?: { due: string; ahead?: boolean } | null; prepare?: { due: string } | null }): PhaseOf | null =>
+  ctx.build ? { due: ctx.build.due, ...(ctx.build.ahead ? { ahead: true } : {}) } : ctx.prepare ? { due: ctx.prepare.due, ahead: true } : null;
 
 export const buildPhasesFile = () => dataFile('build-phases.json');
 
