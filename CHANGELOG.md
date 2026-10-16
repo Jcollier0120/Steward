@@ -21,6 +21,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - From this version, the Steward merges and releases only at its build times, four a day: 00:00, 06:00, 12:00 and 18:00. A pull request marked ready waits for the next build, unless its changelog entry marks it an urgent fix.
 - If a build time has passed when it updates, the first build begins at once.
+- If you switched the build pipeline on and kept its build times as they were (08:00, 13:00 and 18:00), they become the new four. Build times you chose yourself stay as you set them.
 - Manor's Settings may still show a **Build at set times** switch for the Steward. It no longer does anything: the Steward builds at its times whatever it says.
 
 ## 0.36.61

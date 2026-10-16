@@ -42,11 +42,17 @@ export interface BuildPipeline {
 
 export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
 
+/**
+ * The default build times before Steward 0.36.63. Settings saves the whole group, so turning the switch on stored them
+ * with it: stored as they are, they were never chosen, and read as today's default.
+ */
+const OLD_DEFAULT_TIMES = ['08:00', '13:00', '18:00'];
+
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /**
  * settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. An `on` kept
- * from when there was a switch is left out, whatever it says.
+ * from when there was a switch is left out, whatever it says, and times that are exactly the old default take today's.
  */
 export function normalizePipeline(raw: unknown): BuildPipeline {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -58,8 +64,9 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
   const whole = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x) : Number.NaN);
   const w = whole(r.windowMinutes);
   const b = whole(r.bisectRuns);
+  const oldDefault = times.length === OLD_DEFAULT_TIMES.length && times.every((t, i) => t === OLD_DEFAULT_TIMES[i]);
   return {
-    times: times.length ? times : d.times,
+    times: times.length && !oldDefault ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
     windowMinutes: Number.isInteger(w) ? Math.min(360, Math.max(15, w)) : d.windowMinutes,
