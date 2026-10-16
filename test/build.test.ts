@@ -82,7 +82,7 @@ const BUILD = { due: '2026-10-13T11:00:00.000Z', name: 'the 13:00 build' };
 function ctxOf(b: ReturnType<typeof batch>, run: ReturnType<typeof runner>['run'], bisectRuns = 3) {
   const e = employee(b.checkout, { fill: '', test: ['node check.cjs'] });
   const ctx = ctxFor({ employees: [e], workRoot: path.join(b.dir, 'work'), run, neutralDir: b.dir });
-  ctx.settings.buildPipeline = { ...DEFAULT_PIPELINE, on: true, bisectRuns };
+  ctx.settings.buildPipeline = { ...DEFAULT_PIPELINE, bisectRuns };
   ctx.settings.mergeMinAgeMinutes = 0;
   ctx.build = BUILD;
   return { e, ctx };

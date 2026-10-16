@@ -492,7 +492,7 @@ export function roundWords(r: RoundView, now = Date.now()): { what: string; when
         ? `It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. A round every ${r.minutes} minutes while on duty only ${tend}.${after} Run now does a whole round.`
         : 'It merges and releases only when asked, until you say yes: "Merges and releases by itself" is off in Settings. Run now does one round.'
       : r.build
-        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'} Between builds, a round every ${r.minutes} minutes only looks.${after}`
+        ? `It builds at set times (${r.build.times.join(', ')}; Settings: Build pipeline): a build ${what}, each repository released once. ${r.build.building ? 'A build is under way now.' : r.build.next ? `The next build is at ${buildAt(r.build.next, now)}.` : 'No build time is set to come.'} Between builds, a round every ${r.minutes} minutes only looks, except for an urgent fix (a ready PR whose changelog entry starts "**Urgent fix:"): that builds at once, for its repository alone.${after}`
         : `By itself, a round every ${r.minutes} minutes while on duty: it ${what}.${after}`;
   // Where the last build's time went (buildtimes.ts), and that the next one's tests run ahead of it (stages/prepare.ts).
   const took = r.on && !noRepos && r.build?.took ? ` ${r.build.took} Between builds, the next build's tests run ahead of it, beside the rounds.` : '';
