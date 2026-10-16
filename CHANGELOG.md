@@ -2,19 +2,59 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.53
+## Unreleased
 
-**Kit 2.77.1: the NPU check's hardening run passes every step on Intel's NPU 3720.**
+**The NPU check's hardening run passes every step on Intel's NPU 3720.**
 
 ### What changed
 
 - The NPU check's hardening run now passes every step on Intel's NPU 3720 (Meteor Lake and Arrow Lake-U). Before, one of its steps could ask a server that an earlier step had left starting, and fail.
 - How much memory the local AI holds on a 16 GB PC with the NPU 3720 is now measured and written down: chat and search together hold about 4.3 GB, inside what setup allows. Nothing changes for it.
-- The kit the Steward hands out (2.77.1) brings this to every agent.
+- The kit the Steward hands out brings this to every agent.
 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.57
+
+**The Steward's notifications come under Castellan's name, with the castle, instead of Windows PowerShell.**
+
+### What changed
+
+- The Steward's Windows notifications (an alarm that needs you, a release that stopped) now say **Castellan**, as Manor's own do, with the castle on each one. In Windows' notification settings, Castellan's notifications are turned on or off together, without touching Windows PowerShell's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The castle shows once Manor 0.16.165 or later is installed; before that, the notifications already say Castellan.
+
+## 0.36.56
+
+**Kit 2.77.3: on an AMD Ryzen AI PC, one smaller model answers chat and pictures on the NPU: faster, lighter, and a much smaller download.**
+
+### What changed
+
+- On an AMD Ryzen AI 300 PC, the local AI on the NPU now uses one model, Qwen3.5-2B, for both chat and pictures, instead of two 4B models. It writes about half again as fast, holds 0.4 GB less memory for chat and 1.2 GB less for pictures, and downloads 2.0 GB instead of 7.4 GB. It no longer pauses 8 to 9 seconds to switch models between a chat and a picture. On the quality checks it scored 22 of 24 against the 4B's 23, with every must-pass item right.
+- It takes about 1.7 seconds longer to start. Waking it after a rest is now announced as about 15 seconds, where the 4B's chat took about 7.
+- The kit the Steward hands out (2.77.3) brings this to every agent. Intel and Snapdragon PCs are unchanged.
+
+### Before you update
+
+- A PC already set up keeps using the two 4B models until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3.5-2B (2.0 GB). The 4B models stay on disk (7.4 GB) until you remove them: `flm remove qwen3-it:4b` and `flm remove qwen3vl-it:4b`.
+
+## 0.36.55
+
+**Kit 2.77.2: the local AI's search model on a graphics card or the processor holds about 600 MB less memory, as fast and with the same results.**
+
+### What changed
+
+- The search model that runs on a graphics card, or on the processor, now starts with a smaller working space and holds about 600 MB less memory: 1.3 GB instead of 1.9 GB on an AMD Radeon 860M, and 1.4 GB instead of 2.0 GB on a Core Ultra 5's Intel graphics. It answers just as fast and gives the same results, so existing search indexes carry over. Where the graphics share the PC's memory, as on most laptops, that is 600 MB more for everything else.
+- One piece of text sent to it at once is now limited to about 4,000 characters. The manor's agents send at most about 2,000, so nothing changes for them; a longer text is refused with a note to split it.
+- The kit the Steward hands out (2.77.2) brings this to every agent. Snapdragon PCs had the same change in kit 2.75.1.
+
+### Before you update
+
+- A PC whose local AI is already set up keeps the search model's old settings until its local AI is set up again (in Manor, Set up local AI). Otherwise nothing: it updates itself as usual.
 
 ## 0.36.52
 
