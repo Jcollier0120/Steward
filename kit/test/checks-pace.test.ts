@@ -14,6 +14,7 @@ process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
 const { CHECKS_AT_ONCE, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
+const { psPaced } = await import('./fixture/src/kit/ps.ts');
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -91,6 +92,9 @@ test("a test's own waits at the pace (kit 2.74.6): stretched as much as its run'
   for (const said of [undefined, '4', '9', '0.5', 'x', '1000']) {
     const env = said === undefined ? {} : { KIT_CHECKS_SLOWER: said };
     assert.equal(testsPaced(400, env), paced(400, env), `KIT_CHECKS_SLOWER=${said}`);
+    // And PowerShell's time limits (ps.ts, which checks-pace.ts runs, so it can't load it): the keeper's 30 s query and
+    // psQuote's 60 s scripts timed out at the pace on 2026-10-15, as powershell.exe started inside its job.
+    assert.equal(psPaced(30_000, env), paced(30_000, env), `ps.ts, KIT_CHECKS_SLOWER=${said}`);
   }
 });
 

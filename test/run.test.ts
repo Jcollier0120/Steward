@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { dotnetWithSdk, PACED_TIME, run, startOptions, stoppedForTime, timeLimit } from '../src/run.ts';
+import { dotnetWithSdk, errorLines, PACED_TIME, run, startOptions, stoppedForTime, timeLimit } from '../src/run.ts';
 
 // A .NET employee's commands need a dotnet with an SDK: Task Scheduler's PATH finds Program Files' runtime first.
 test('dotnetWithSdk: the first folder with dotnet.exe and an SDK, never a runtime alone', () => {
@@ -48,4 +48,37 @@ test('a command stopped at its time limit says so, not "Command failed" and its 
   assert.equal(r.code, 1);
   assert.equal(r.err.trim(), 'stopped after 1 s, its time limit: it was still running');
   assert.equal(stoppedForTime(200 * 60_000, true), 'stopped after 200 minutes, its time limit at the checks pace: it was still running');
+});
+
+test("a failed step's error lines: the first few that say what went wrong, each once however many files said it, never TAP's 'test failed'", () => {
+  // Kit 2.76.0's trial on Reeve: forty-one test files that couldn't load, each saying so from its own path.
+  const files = ['alerts', 'branches', 'cluster'].map((f) => [
+    `# Subtest: test\\${f}.test.ts`,
+    `# file:///E:/steward-work/reeve-trial/src/app.ts:14`,
+    `# ReferenceError: Cannot access 'appRoot' before initialization`,
+    `#     at file:///E:/steward-work/reeve-trial/test/${f}.test.ts:3:9`,
+    `not ok 1 - test\\${f}.test.ts`,
+    '  ---',
+    "  error: 'test failed'",
+    "  code: 'ERR_TEST_FAILURE'",
+    '  ...',
+  ]);
+  const tap = [
+    ...files.flat(),
+    'not ok 4 - the sum',
+    '  ---',
+    '  error: |-',
+    '    Expected values to be strictly equal:',
+    '',
+    '    1 !== 2',
+    "  error: '1 subtest failed'",
+    '  ...',
+    "src/x.ts(3,1): error TS2304: Cannot find name 'y'.",
+  ].join('\r\n');
+  assert.deepEqual(errorLines(tap), ["ReferenceError: Cannot access 'appRoot' before initialization", 'Expected values to be strictly equal:', "src/x.ts(3,1): error TS2304: Cannot find name 'y'."]);
+  assert.deepEqual(errorLines(tap, 1), ["ReferenceError: Cannot access 'appRoot' before initialization"]);
+  // The same error at another file and line is one; another error is another.
+  assert.deepEqual(errorLines('Error [ERR_MODULE_NOT_FOUND]: Cannot find module C:\\a\\b.ts\nError [ERR_MODULE_NOT_FOUND]: Cannot find module C:\\a\\c.ts\nTypeError: x is not a function'), ['Error [ERR_MODULE_NOT_FOUND]: Cannot find module C:\\a\\b.ts', 'TypeError: x is not a function']);
+  assert.deepEqual(errorLines('npm ERR! code 1\n> node --test\nall is well'), []);
+  assert.equal(errorLines(`Error: ${'x'.repeat(400)}`)[0].length, 200);
 });

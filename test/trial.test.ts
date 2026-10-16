@@ -13,14 +13,21 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit, TRIAL_GOING, trialGivesWay, trialParallel, trialsOnTheirOwn } = await import('../src/stages/trial.ts');
 const { APP } = await import('../src/app.ts');
 const { writeJson } = await import('../src/kit/store.ts');
-const { bumpOne, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
+const { bumpOne, kitTrialLogOf, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
 const kitTool = readFileSync(new URL('../tools/kit.ts', import.meta.url), 'utf8');
 // An agent's test that relies on what the kit says, as nine agents' tests relied on kit 2.19.0's "note from the NPU".
 // It passes on its main as it is (kit 1.0.0), so the failure is the kit's: the trial runs it without the kit too.
-const CHECK = "import { readFileSync } from 'node:fs';\nprocess.exit(JSON.parse(readFileSync('kit.json', 'utf8')).kit === '1.0.0' ? 0 : 1);\n";
+// Failing, it says why as a test file that can't load does, from two places: the comment says it once.
+const CHECK = [
+  "import { readFileSync } from 'node:fs';",
+  "const kit = JSON.parse(readFileSync('kit.json', 'utf8')).kit;",
+  "if (kit !== '1.0.0') for (const at of ['a', 'b']) console.error(`file:///C:/x/${at}.ts:2\\nReferenceError: Cannot access 'APP' before initialization\\n    at file:///C:/x/${at}.ts:2:7`);",
+  "process.exit(kit === '1.0.0' ? 0 : 1);",
+  '',
+].join('\n');
 
 // The Steward: its main, with kit 1.0.1 in kit\ (the PR's head), pushed as refs/pull/7/head.
 const steward = fakeEmployee(path.join(tmp, 'steward'), { kit: null, files: { 'kit/VERSION': '1.0.1\n', 'kit/node/npu.ts': 'export const npu = 2;\n', 'tools/kit.ts': kitTool } });
@@ -49,6 +56,11 @@ test('a PR that raises the kit waits while the new kit fails an agent, with a co
   const body = said[0][said[0].indexOf('--body') + 1];
   assert.match(body, /1 of 2 fail their checks with it/);
   assert.match(body, /- \*\*Bad\*\*: node check\.mjs failed \(exit 1\)/);
+  // What it printed, once however often it said it; and its whole output, kept apart from its trial's worktree.
+  assert.match(body, /- \*\*Bad\*\*: [^\n]*\n\n  It printed:\n\n  ```text\n  ReferenceError: Cannot access 'APP' before initialization\n  ```\n/);
+  const kept = kitTrialLogOf(c.settings, bad, '1.0.1');
+  assert.match(readFileSync(kept, 'utf8'), /ReferenceError/);
+  assert.ok(body.includes(`the failed step's whole output in ${kept}`), body);
   assert.match(body, /add the label `kit:breaks-agents`/);
   assert.ok(!/\*\*Good\*\*/.test(body), 'one that passes is not named');
 

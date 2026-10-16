@@ -37,6 +37,8 @@ export interface EmployeeResult {
   partial?: boolean;
   /** A kit's trial that failed: how its checks failed without the kit too, otherwise (bump.ts's withoutTheKit). */
   without?: string;
+  /** A kit's trial that failed: the first distinct lines of the failed step's output that say what went wrong (run.ts's errorLines). */
+  errors?: string[];
   /** Its release waits until this PC can sign (signing.ts): why it can't, in a line. Nothing failed. */
   signing?: string;
 }

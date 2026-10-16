@@ -138,15 +138,15 @@ export async function vouch(ctx: Ctx, o: { dir: string; pr?: number; say: (line:
 async function checkAndRecord(ctx: Ctx, e: Employee, o: { dir: string; repo: string; head: string; say: (line: string) => void; overMs?: number }): Promise<string | null> {
   // Only the tests this change reaches (affected.ts), unless Settings say the whole suite.
   const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
-  // Stopped five minutes past its usual time (vouchtime.ts); a pass is kept toward that average. A pass of exactly
+  // Stopped five minutes past its usual time for as many test files (vouchtime.ts); a pass is kept toward that average. A pass of exactly
   // this tree stands in (runChecks, standin.ts): the Assayer's (whole, or the tests this change reaches), this PC's or
   // another PC's on the licence. Then nothing is run again, so the PC isn't loaded twice.
   const started = Date.now();
   const stoodIn: StoodIn = {};
-  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind) => vouchLimit(e.id, kind, { overMs: o.overMs }), stoodIn });
+  const failed = await runChecks(ctx, e, o.dir, { say: o.say, ...(scope ? { affected: scope } : {}), timeLimit: (kind, files) => vouchLimit(e.id, kind, { overMs: o.overMs, files }), stoodIn });
   if (failed) return failed;
   if (stoodIn.by) return setVouch(ctx, e, o.repo, o.head, stoodInDescription(e, stoodIn, o.head));
-  noteVouchTime(e.id, checkKind(scope), Date.now() - started);
+  noteVouchTime(e.id, checkKind(scope), Date.now() - started, scope?.files);
   return setVouch(ctx, e, o.repo, o.head, vouchDescription(e, scope, o.head));
 }
 
@@ -167,13 +167,37 @@ export function vouchDescription(e: Employee, scope: AffectedScope | undefined, 
 /**
  * The vouch set on `head` (VOUCH_CONTEXT, success): by `steward vouch` once a clone's checks pass, and by the Steward's
  * own PR test once they pass here (prtest.ts), so the Assayer, which vouches for any team PR head without one, doesn't
- * install and test it a second time. Null once it is set, else why not. Never throws.
+ * install and test it a second time. A refusal that reads as the host's passing trouble (passingTrouble) is tried again
+ * after each of STATUS_WAITS_MS: setting the same status twice leaves one. Null once it is set, else why not. Never throws.
  */
 export async function setVouch(ctx: Ctx, e: Employee, repo: string, head: string, description: string): Promise<string | null> {
   const host = hostFor(ctx, e);
-  const s = await host.setStatus(repo, head, { state: 'success', context: VOUCH_CONTEXT, description }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
-  if (s.code !== 0) return `its checks passed, but ${host.name} wouldn't take the status: ${(s.err || s.out).trim().split('\n').pop()}`;
-  return null;
+  const pause = ctx.pause ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let why = '';
+  for (const ms of [0, ...STATUS_WAITS_MS]) {
+    if (ms) {
+      ctx.log(`[${e.id}] ${host.name} wouldn't take the status (${why}): trying again in ${ms / 1000} s`);
+      await pause(ms);
+    }
+    const s = await host.setStatus(repo, head, { state: 'success', context: VOUCH_CONTEXT, description }).catch((err: Error) => ({ code: 1, out: '', err: err.message }));
+    if (s.code === 0) return null;
+    why = (s.err || s.out).trim().split('\n').pop() ?? '';
+    if (!passingTrouble(`${s.err}\n${s.out}`)) break;
+  }
+  return `its checks passed, but ${host.name} wouldn't take the status: ${why}`;
+}
+
+/** How long setVouch waits before each time it sets the status again, after the host's passing trouble: 17 s in all. */
+export const STATUS_WAITS_MS = [2_000, 5_000, 10_000];
+
+/**
+ * Whether a host's refusal reads as passing trouble, worth trying again: an answer cut short or not JSON, a 5xx, a
+ * gateway or the network failing, a time-out. A refusal of the request itself (401, 403, 404, 422: no account, no
+ * such commit, a bad status) isn't, and nor is anything else. Pure.
+ */
+export function passingTrouble(text: string): boolean {
+  if (/\bHTTP 4\d\d\b|\(HTTP 4\d\d\)/i.test(text)) return false;
+  return /unexpected end of JSON|invalid character .* looking for|\bHTTP 5\d\d\b|\(HTTP 5\d\d\)|\b50[0234]\b|bad gateway|service unavailable|gateway time-?out|internal server error|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|connection reset|timed? ?out|\bEOF\b|TLS handshake|i\/o timeout|was killed/i.test(text);
 }
 
 /**

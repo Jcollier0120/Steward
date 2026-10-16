@@ -17,7 +17,7 @@ after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { mergeOne } = await import('../src/stages/merge.ts');
 const { checksOf, VOUCH_CONTEXT } = await import('../src/stages/staff.ts');
-const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
+const { askRoundSoon, passingTrouble, setVouch, STATUS_WAITS_MS, vouch } = await import('../src/stages/vouch.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
@@ -119,6 +119,45 @@ test('steward vouch: the checks run at the PR\'s head, and only once they pass i
   assert.ok(!dirty.r.gh.some((a) => a[0] === 'pr' || a[0] === 'api'));
 });
 
+test("the vouch's status is set again after GitHub's passing trouble (an answer cut short, a 5xx, the network), and waits between; a refusal of it, or trouble that lasts, gives up", async () => {
+  const e = employee(tmp);
+  const post = async (answers: { code: number; out?: string; err?: string }[]) => {
+    let i = 0;
+    const waited: number[] = [];
+    const r = runner((a) => (a[0] === 'api' ? { out: '', err: '', ...answers[Math.min(i++, answers.length - 1)] } : undefined));
+    const ctx = { ...ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp }), pause: async (ms: number) => void waited.push(ms) };
+    const why = await setVouch(ctx, e, e.repo, 'a'.repeat(40), 'npm test passed at aaaaaaa');
+    return { why, tries: r.gh.filter((a) => a[0] === 'api').length, waited, lines: ctx.lines.join('\n') };
+  };
+
+  // The vouch of 15 October 2026: GitHub's answer cut short, then set fine the second time.
+  const cut = await post([{ code: 1, err: 'unexpected end of JSON input' }, { code: 0, out: '{}' }]);
+  assert.equal(cut.why, null);
+  assert.equal(cut.tries, 2);
+  assert.deepEqual(cut.waited, [STATUS_WAITS_MS[0]]);
+  assert.match(cut.lines, /GitHub wouldn't take the status \(unexpected end of JSON input\): trying again in 2 s/);
+
+  const gateway = await post([{ code: 1, err: 'gh: Bad Gateway (HTTP 502)' }, { code: 1, err: 'Post "https://api.github.com/…": read: connection reset by peer' }, { code: 0, out: '{}' }]);
+  assert.equal(gateway.why, null);
+  assert.equal(gateway.tries, 3);
+
+  // Trouble that lasts: tried once and after each wait, then the last refusal says why.
+  const down = await post([{ code: 1, err: 'gh: Service Unavailable (HTTP 503)' }]);
+  assert.equal(down.why, "its checks passed, but GitHub wouldn't take the status: gh: Service Unavailable (HTTP 503)");
+  assert.equal(down.tries, 1 + STATUS_WAITS_MS.length);
+  assert.deepEqual(down.waited, STATUS_WAITS_MS);
+
+  // GitHub refusing the status itself: asked once.
+  for (const err of ['gh: Validation Failed (HTTP 422)', 'gh: Not Found (HTTP 404)', 'gh: Bad credentials (HTTP 401)', 'no such thing']) {
+    const refused = await post([{ code: 1, err }, { code: 0, out: '{}' }]);
+    assert.equal(refused.why, `its checks passed, but GitHub wouldn't take the status: ${err}`, err);
+    assert.equal(refused.tries, 1, err);
+  }
+  assert.equal(passingTrouble('Post "https://api.github.com/repos/x/y/statuses/z": dial tcp: lookup api.github.com: i/o timeout'), true);
+  assert.equal(passingTrouble('HTTP 500: Internal Server Error'), true);
+  assert.equal(passingTrouble('HTTP 403: Resource not accessible by integration'), false);
+});
+
 test("steward vouch is stopped past its average time, with everything its checks started, and sets nothing; a pass is kept toward the average", async () => {
   const f = fakeEmployee(path.join(tmp, 'slow'), { version: '0.4.0' });
   sh(f.checkout, 'switch', '--quiet', '-c', 'claude/slow');
@@ -176,6 +215,27 @@ test("a vouch's time limit: the average of the kind's last ten passes and five m
   assert.deepEqual(vouchLimit('c', 'affected'), { ms: 7500 + 5 * 60_000, why: "5 min, its last 10 affected vouches' average of 8 s and 5 min more" });
   noteVouchTime('c', 'whole', 0);
   assert.deepEqual(vouchTimes().c.whole, [1], 'no time, no record');
+});
+
+test("an affected vouch reaching more test files than its usual ones gets that much more time, up to the whole suite's limit", () => {
+  const min = 60_000;
+  // Ten affected runs of 3 min, 20 test files each, kept with their files.
+  const times = { s: { affected: Array.from({ length: 10 }, () => ({ ms: 3 * min, files: 20 })) } };
+  assert.deepEqual(vouchLimit('s', 'affected', { times, files: 89 }), { ms: Math.round(3 * min * 89 / 20) + 5 * min, why: '18 min: its last 10 affected vouches took 3 min on average for 20 test files, this one runs 89, and 5 min more' });
+  assert.equal(vouchLimit('s', 'affected', { times, files: 12 })?.ms, 8 * min, 'fewer files than usual: their average as before');
+  assert.equal(vouchLimit('s', 'affected', { times })?.ms, 8 * min, 'files not known: as before');
+  // The whole suite's limit known: never past it, nor below its own.
+  const withWhole = { s: { ...times.s, whole: [12 * min, 12 * min, 12 * min] } };
+  assert.deepEqual(vouchLimit('s', 'affected', { times: withWhole, files: 140 }), { ms: 17 * min, why: "17 min, its last 3 whole-suite vouches' average of 12 min and 5 min more, as it runs 140 test files, more than the 20 its affected vouches usually run" });
+  assert.equal(vouchLimit('s', 'affected', { times: { s: { ...times.s, whole: [min, min, min] } }, files: 89 })?.ms, 8 * min, 'a whole suite quicker than its affected runs: their own limit stands');
+  // Runs kept before their files were (bare times) count in the average, but stretch nothing until three know theirs.
+  const older = { s: { affected: [3 * min, 3 * min, 3 * min, { ms: 3 * min, files: 20 }, { ms: 3 * min, files: 20 }] } };
+  assert.equal(vouchLimit('s', 'affected', { times: older, files: 89 })?.ms, 8 * min);
+  // Kept with its files when it ran only the affected tests; a whole-suite run as a bare time.
+  writeFileSync(vouchTimesFile(), JSON.stringify({ t: { affected: [60_000, { ms: 1, files: 0 }, { ms: 'x', files: 3 }] } }));
+  noteVouchTime('t', 'affected', 2 * min, 30);
+  noteVouchTime('t', 'whole', 4 * min, 152);
+  assert.deepEqual(vouchTimes().t, { affected: [60_000, { ms: 2 * min, files: 30 }], whole: [4 * min] }, 'what it can read, and the new runs');
 });
 
 test("after a vouch, the Steward running here is asked for a round now, with its server.json's token; nothing it says fails the vouch", async () => {

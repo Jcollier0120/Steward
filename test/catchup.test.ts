@@ -10,7 +10,8 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'steward-catchup-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { catchUp, catchUpVersion, keepsStanding, lockBeside, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts, settledFiles } = await import('../src/stages/catchup.ts');
+const { catchUp, catchUpVersion, foldUnreleased, keepsStanding, lockBeside, mergeChangelogs, mergeKitPins, renumberChangelog, resolveVersionConflicts, settledFiles } = await import('../src/stages/catchup.ts');
+const { NOTHING_TO_DO } = await import('../src/kit/notes.ts');
 const { testedBefore } = await import('../src/stages/prtest.ts');
 const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
@@ -145,12 +146,66 @@ test("the changelog: the PR's new entry goes above the branch's, under the versi
   assert.equal(mergeChangelogs(log(['0.4.0', 'The first.'], ['0.3.0', 'Older.']), log(['0.4.1', 'a'], ['0.4.0', 'The first.']), two, '0.4.2'), null, 'an entry gone');
   assert.equal(mergeChangelogs(base, log(['0.4.1', 'a'], ['0.4.0 (renamed)', 'The first.']), theirs, '0.4.2'), null, 'a heading changed');
   assert.equal(mergeChangelogs(base, log(['0.4.2', 'b'], ['0.4.1', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.3'), null);
-  assert.equal(mergeChangelogs(base, log(['Unreleased', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.2'), null);
+  assert.equal(mergeChangelogs(base, log(['Next', 'a'], ['0.4.0', 'The first.']), theirs, '0.4.2'), null);
   // The text above the entries changed on one side only: that side's is kept.
   assert.match(mergeChangelogs(base, ours, theirs.replace('Newest first.', 'Newest first, always.'), '0.4.2')!, /^# Changelog\n\nNewest first, always\.\n\n## 0\.4\.2/);
   // Renamed alone (no conflict): only when the top entry is the one that names the PR's old version.
   assert.equal(renumberChangelog(ours, '0.4.1', '0.4.2'), ours.replace('## 0.4.1', '## 0.4.2'));
   assert.equal(renumberChangelog(theirs, '0.4.3', '0.4.4'), null);
+});
+
+test("the changelog's Unreleased entries: the PR's goes above the branch's new ones as it is; the branch's are folded into the PR's version, section by section", () => {
+  const base = log(['0.4.0', 'The first.']);
+  const entry = (headline: string, ...subs: [string, string][]) => [`**${headline}**`, ...subs.flatMap(([h, t]) => ['', `### ${h}`, '', t])].join('\n');
+
+  // The PR's entry is Unreleased (its version not claimed yet), and the branch released 0.4.1: theirs kept, its own on top.
+  const waits = entry('A thing.', ['What changed', '- a thing']);
+  const released = log(['0.4.1', entry('A fix.', ['What changed', '- a fix'])], ['0.4.0', 'The first.']);
+  assert.equal(mergeChangelogs(base, log(['Unreleased', waits], ['0.4.0', 'The first.']), released, '0.4.2'), log(['Unreleased', waits], ['0.4.1', entry('A fix.', ['What changed', '- a fix'])], ['0.4.0', 'The first.']));
+
+  // The branch has two Unreleased entries (as kit 2.74.5's three were) above a version, and the PR adds 0.4.1: they are
+  // released with the PR's version, so they go into its entry; the branch's versioned entry stays as it is below.
+  const ours = log(['0.4.1', entry('Work status.', ["What's new", '- **work-status.ts**: a status.'], ['For an agent', '- Nothing to do.'])], ['0.4.0', 'The first.']);
+  const theirs = log(
+    ['Unreleased', entry('The NPU writes faster.', ['What changed', '- **npu-vendors.json**: BEST_PERF.\n- the cold load is 120 s.'], ['For an agent', '- Nothing to do.'])],
+    ['Unreleased (its version needs claiming on the main laptop)', entry('An unknown NPU is tried.', ["What's new", '- **npu-vendors.ts**: `unknown`.'], ['For an agent', '- A refused PC is tried at its next Set up.'])],
+    ['0.4.1', 'A fix.'],
+    ['0.4.0', 'The first.'],
+  );
+  const folded = entry(
+    "Work status. It also brings what wasn't released before: The NPU writes faster. An unknown NPU is tried.",
+    ["What's new", '- **work-status.ts**: a status.\n- **npu-vendors.ts**: `unknown`.'],
+    ['What changed', '- **npu-vendors.json**: BEST_PERF.\n- the cold load is 120 s.'],
+    // "Nothing to do" from two of them gives way to the one that says more.
+    ['For an agent', '- A refused PC is tried at its next Set up.'],
+  );
+  assert.equal(mergeChangelogs(base, ours, theirs, '0.4.2'), log(['0.4.2', folded], ['0.4.1', 'A fix.'], ['0.4.0', 'The first.']));
+  // One below a version the branch released since (as Steward 0.36.60 merged after #278's Unreleased entry) went out
+  // with that version: it stays where it is, and the PR's entry takes nothing of it.
+  const npu = entry('The NPU writes faster.', ['What changed', '- BEST_PERF.']);
+  const mine = entry('Work status.', ["What's new", '- **work-status.ts**: a status.'], ['For an agent', '- Nothing to do.']);
+  assert.equal(mergeChangelogs(base, ours, log(['0.4.1', 'A fix.'], ['Unreleased', npu], ['0.4.0', 'The first.']), '0.4.2'), log(['0.4.2', mine], ['0.4.1', 'A fix.'], ['Unreleased', npu], ['0.4.0', 'The first.']));
+  // Above it still waits: the PR's entry takes that one, and the one below stays.
+  assert.equal(
+    mergeChangelogs(base, ours, log(['Unreleased', npu], ['0.4.1', 'A fix.'], ['Unreleased', 'Older.'], ['0.4.0', 'The first.']), '0.4.2'),
+    log(['0.4.2', entry("Work status. It also brings what wasn't released before: The NPU writes faster.", ["What's new", '- **work-status.ts**: a status.'], ['What changed', '- BEST_PERF.'], ['For an agent', '- Nothing to do.'])], ['0.4.1', 'A fix.'], ['Unreleased', 'Older.'], ['0.4.0', 'The first.']),
+  );
+  // "Nothing to do" gives way to what says more: here, the only what-to-do line is the Unreleased entry's.
+  assert.match(foldUnreleased(`## 0.4.2\n\n${entry('A.', ['Before you update', NOTHING_TO_DO])}`, [`## Unreleased\n\n${entry('B.', ['Before you update', '- Restart it.'])}`]), /### Before you update\n\n- Restart it\.\n$/);
+  assert.match(foldUnreleased(`## 0.4.2\n\n${entry('A.', ['Before you update', '- Restart it.'])}`, [`## Unreleased\n\n${entry('B.', ['Before you update', NOTHING_TO_DO])}`]), /### Before you update\n\n- Restart it\.\n$/);
+
+  // Kept as before: the PR's two entries, or a heading that names no version and isn't Unreleased, are a person's.
+  assert.equal(mergeChangelogs(base, log(['Unreleased', 'a'], ['0.4.1', 'b'], ['0.4.0', 'The first.']), theirs, '0.4.2'), null);
+});
+
+test("the kit's changelog folds the branch's Unreleased kit entry into the PR's kit version the same way, and a catch-up that did keeps its standing", () => {
+  // Both changelogs a catch-up resolves (catchUp's loop) are merged by mergeChangelogs: the kit's under the kit's version.
+  const kitBase = log(['2.75.0', 'Kit.']);
+  const kitOurs = log(['2.76.0', '**Work status.**\n\n### What changed\n\n- a'], ['2.75.0', 'Kit.']);
+  const kitTheirs = log(['Unreleased', '**Embeddings on the graphics.**\n\n### What changed\n\n- b'], ['2.75.0', 'Kit.']);
+  assert.equal(mergeChangelogs(kitBase, kitOurs, kitTheirs, '2.76.1'), log(['2.76.1', "**Work status. It also brings what wasn't released before: Embeddings on the graphics.**\n\n### What changed\n\n- a\n- b"], ['2.75.0', 'Kit.']));
+  // Only version files and changelogs were resolved: the PR's tested standing is carried as before.
+  assert.equal(keepsStanding(['CHANGELOG.md', 'kit/CHANGELOG.md', 'kit/VERSION', 'package.json'], ['package.json'], true), true);
 });
 
 test('a PR whose changelog conflicts only in a new top entry is caught up: both entries kept, its own under its new version', async () => {
@@ -167,6 +222,22 @@ test('a PR whose changelog conflicts only in a new top entry is caught up: both 
   assert.match(c.note, /its version lines and changelog resolved; v0\.4\.2/);
   sh(checkout, 'fetch', '--quiet', 'origin');
   assert.equal(sh(checkout, 'show', 'origin/claude/feature:CHANGELOG.md'), log(['0.4.2', 'A feature.'], ['0.4.1', 'All rights reserved.'], ['0.4.0', 'The first.']).trimEnd());
+});
+
+test("a PR caught up past an Unreleased entry on its branch is caught up, not handed back: that entry goes into the PR's own", async () => {
+  // #273's kit entry, merged as Unreleased while #274 waited with a versioned one: before, "beyond a new entry at its top".
+  const { dir, checkout, pr } = moved(
+    'unreleased',
+    { 'src/feature.ts': 'export const feature = 1;\n', 'CHANGELOG.md': log(['0.4.1', '**A feature.**\n\n### What changed\n\n- a feature'], ['0.4.0', 'The first.']) },
+    { base: { 'CHANGELOG.md': log(['0.4.0', 'The first.']) }, main: { 'CHANGELOG.md': log(['Unreleased', '**A fix.**\n\n### What changed\n\n- a fix'], ['0.4.0', 'The first.']) } },
+  );
+  const { run } = runner(() => ok(''));
+  const e = employee(checkout);
+  const c = await catchUp(ctxFor({ employees: [e], workRoot: path.join(dir, 'work'), run, neutralDir: dir }), e, pr, { released: ['0.4.0', '0.4.1'], taken: [] });
+  assert.equal(c.done, true, c.note);
+  assert.match(c.note, /changelog resolved; v0\.4\.2/);
+  sh(checkout, 'fetch', '--quiet', 'origin');
+  assert.equal(sh(checkout, 'show', 'origin/claude/feature:CHANGELOG.md'), log(['0.4.2', "**A feature. It also brings what wasn't released before: A fix.**\n\n### What changed\n\n- a feature\n- a fix"], ['0.4.0', 'The first.']).trimEnd());
 });
 
 test("package-lock.json beside package.json is caught up as a version file, though the employee's settings name package.json alone", async () => {

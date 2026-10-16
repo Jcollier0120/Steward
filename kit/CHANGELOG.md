@@ -2,31 +2,17 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.77.8
 
-**The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s.**
+**PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**
+
+FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a PC where an older AMD NPU driver left its DLLs in `Windows\System32\AMD`, xrt-smi can't start, and the NPU runs at its default mode. This was found on the Krackan test PC, from a Dell factory image.
 
 ### What's new
 
 - **An endpoint's `turn`** (the core's Endpoint, and the keeper's config): the id of the device its server runs on, `gpu-…` or `cpu`, when that isn't its accelerator. Its requests take that device's lock and line (the core's `turnOf`; the kit's `turnFor`). The NPU's id, or anything that isn't an id, isn't a turn: the entry is read without it, and the check names it. A vision model on its chat endpoint's server takes chat's. spec/ACCELERATORS.md has it.
 - **npu-vendors.ts**: `embedTurn(route, cards)` gives a route's embedding server that runs on the graphics (`--target_device GPU`: the NPU 3720's) the id of the Intel graphics that shares the PC's memory, else the first Intel card. `planNpu` takes the PC's `cards` for it, and `npuEntry` writes the embeddings' `turn`.
 - **accelerators.ts**: `turnsWithoutEntry(list)`, the devices whose turns an entry's servers take without an entry of their own. `acceleratorLines()` and the work status's `pcLines()` list their lines too.
-
-### What changed
-
-- **npu.ts**: a request takes the turn of the device its server runs on. The pick reads that turn's line, and a background request's back-off is that turn's. An NPU 3720's search query no longer waits for the NPU's chat, nor its chat for an indexing batch. Its failure marker, cap and name stay the NPU's.
-- **Setup** (`planSetup`, `setUpNpu`) and the check (`npu-check`) plan the NPU with this PC's cards, so an NPU 3720's embeddings get their `turn`.
-- **The NPU's refresh** (npu-refresh.ts) writes the turn into a PC set up before it, after its usual test, and stops and tests holding both turns. A detection that lists no cards keeps the entry's turn.
-- **The keeper** (keeper.ts) looks after such a server in its turn's lock folders, with its accelerator's idle time and log (`otherTurn`). Its idle-in-flight check (`npu-check --idle`) looks only at the servers in the NPU's turn.
-- **The embedding server's giving way to chat** (2.77.5) leaves it alone: with its `turn` it answers beside the chat, and the keeper's `ownEmbedServer` already skips an endpoint with one. spec/NPU-VENDORS.md says so for the NPU 3720.
-- **spec/NPU-VENDORS.md** has The NPU 3720's embeddings in the graphics' turn, with the measurements before and after.
-
-## Unreleased (its version needs claiming on the main laptop)
-
-**Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why.** FastFlowLM sets the mode with AMD's `xrt-smi.exe` and ignores the result. On a PC where an older AMD NPU driver left its DLLs in `Windows\System32\AMD`, xrt-smi can't start, and the NPU runs at its default mode. This was found on the Krackan test PC, from a Dell factory image.
-
-### What's new
-
 - **npu-vendors.ts:**
   - **A route's `powerTool`:** `exe`, `args` (read only), `brokenExit` and `broken`, the reason in plain words.
   - **AMD's:** `%SystemRoot%\System32\AMD\xrt-smi.exe examine`, broken on exit 0xC0000139 (3221225785, as Node reports it).
@@ -40,22 +26,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **npu-check.ts:** a `power-tool` step, right after `setup`, on every route that has a power tool. Its `ok` is null, never a failure. It says whether the tool ran, couldn't start, or isn't on the PC, and its data is the check, so the reports count the PCs where this happens.
 - **spec/NPU-VENDORS.md:** the check, and how the Krackan was fixed.
 
-### For an agent
-
-Nothing to do. On an AMD NPU, the next setup checks xrt-smi by itself. On a PC with the old DLLs, the NPU's note says so.
-
-## Unreleased
-
-**`npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**
-
 ### What changed
 
+- **ps.ts**: `powershell(script, { timeoutMs })` stretches its time limit (60 s unless given) by as much as the checks pace slows the process (`psPaced`, which reads `KIT_CHECKS_SLOWER` as checks-pace.ts's `paced` does). A test run at the pace starts its own powershell.exe inside the pace's job, beside every other test file's, and .NET's start alone could pass the keeper's 30 s process query, or a script's 60 s, there. The keeper's and psQuote's tests timed out so on a busy PC. Unpaced, as an agent's own work runs, nothing changes.
+- **npu.ts**: a request takes the turn of the device its server runs on. The pick reads that turn's line, and a background request's back-off is that turn's. An NPU 3720's search query no longer waits for the NPU's chat, nor its chat for an indexing batch. Its failure marker, cap and name stay the NPU's.
+- **Setup** (`planSetup`, `setUpNpu`) and the check (`npu-check`) plan the NPU with this PC's cards, so an NPU 3720's embeddings get their `turn`.
+- **The NPU's refresh** (npu-refresh.ts) writes the turn into a PC set up before it, after its usual test, and stops and tests holding both turns. A detection that lists no cards keeps the entry's turn.
+- **The keeper** (keeper.ts) looks after such a server in its turn's lock folders, with its accelerator's idle time and log (`otherTurn`). Its idle-in-flight check (`npu-check --idle`) looks only at the servers in the NPU's turn.
+- **The embedding server's giving way to chat** (2.77.5) leaves it alone: with its `turn` it answers beside the chat, and the keeper's `ownEmbedServer` already skips an endpoint with one. spec/NPU-VENDORS.md says so for the NPU 3720.
+- **spec/NPU-VENDORS.md** has The NPU 3720's embeddings in the graphics' turn, with the measurements before and after.
 - **npu-check.ts's `--harden`** waits, up to a minute, for the server the timeout case's setup started to answer before stopping it. Given 1 s, that server hadn't opened its port when the check stopped servers, and only a server that answers is stopped, so it was left loading the route's model, and the nonsense case's test asked it instead of starting its own: a 404 for the nonsense model, and the step failed (the NPU 3720, 2026-10-15). With it, every `--harden` step passes on the NPU 3720, the nonsense case too: OpenVINO's group-wise Qwen3-4B compiles there (its first load 125 s) and answers nonsense, as on the Lunar Lake, and setup leaves the NPU out.
 - **spec/NPU-VENDORS.md** gains Memory on a 16 GB Intel PC: on the NPU 3720, with the route's commands, chat held 3.20 GB and embeddings 1.16 GB on the NPU (1.14–1.27 on the graphics), 4.2–4.4 GB of the PC's available memory together, under the route's `memoryGb` (5.54) and the 6.2 GB budget; Windows lets the NPU hold 8.80 GB. Nothing changes: the Snapdragon's smaller embedding context (kit 2.75.1) saves nothing on OpenVINO's NPU.
 
 ### For an agent
 
 - Nothing to do: take the kit and release as usual.
+- On an AMD NPU, the next setup checks xrt-smi by itself. On a PC with the old DLLs, the NPU's note says so.
 
 ## 2.77.6
 

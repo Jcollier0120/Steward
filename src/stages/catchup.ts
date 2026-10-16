@@ -136,9 +136,12 @@ const spaced = (s: string) => `${s.trimEnd()}\n`;
 /**
  * The changelog both sides added a new top entry to, as two PRs written side by side do: the branch's new entries
  * kept, the PR's entry put above them under `to` (its version once caught up), and each older entry as the side that
- * changed it left it (a spelling swept through the old notes, say). Null when it needs judgement: the text above the
- * entries, or an older entry, changed differently on both sides; an older entry gone or its heading changed; or the PR
- * added more than one entry, or one whose heading names no version.
+ * changed it left it (a spelling swept through the old notes, say). An entry under `## Unreleased` (written before its
+ * version was claimed) is released with the next version above it: the PR's own goes above the branch's new entries as
+ * it is, and the branch's new ones are folded into the PR's versioned entry (foldUnreleased), as kit 2.74.5 and 2.76.0
+ * folded theirs by hand. Null when it needs judgement: the text above the entries, or an older entry, changed
+ * differently on both sides; an older entry gone or its heading changed; or the PR added more than one entry, or one
+ * whose heading names no version and isn't Unreleased.
  */
 export function mergeChangelogs(base: string, ours: string, theirs: string, to: string): string | null {
   const eol = theirs.includes('\r\n') ? '\r\n' : '\n';
@@ -162,10 +165,15 @@ export function mergeChangelogs(base: string, ours: string, theirs: string, to: 
   if (mine.length > 1) return null;
   const renamed = mine.map((p) => {
     const [heading, ...rest] = p.split('\n');
+    if (isUnreleased(p)) return p;
     return VERSION_IN.test(heading) ? [heading.replace(VERSION_IN, to), ...rest].join('\n') : null;
   });
   if (renamed.includes(null)) return null;
-  const moved = [...(renamed as string[]), ...theirsNew];
+  // The branch's new Unreleased entries above its newest version, below the PR's once it is above them: released with
+  // it, so in its entry. One below a version the branch has since released went out with that one, and stays.
+  const released = theirsNew.findIndex((p) => !isUnreleased(p));
+  const waiting = renamed.length && !isUnreleased(renamed[0]!) ? theirsNew.slice(0, released < 0 ? theirsNew.length : released) : [];
+  const moved = waiting.length ? [foldUnreleased(renamed[0]!, waiting), ...theirsNew.slice(waiting.length)] : [...(renamed as string[]), ...theirsNew];
   // Each section is its lines, joined again with the line breaks between them; one moved above another ends with a blank line.
   const parts = [...moved.map((p, i) => (i < moved.length - 1 || n ? spaced(p) : p)), ...older];
   const text = (head === '' && parts.length ? parts : [head, ...parts]).join('\n');
@@ -173,6 +181,62 @@ export function mergeChangelogs(base: string, ours: string, theirs: string, to: 
 }
 
 const VERSION_IN = /\d+\.\d+\.\d+/;
+
+/** Whether a changelog's section is an entry under `## Unreleased` (`## Unreleased (its version needs claiming …)` too). */
+export const isUnreleased = (section: string) => /^## +Unreleased\b/i.test(section);
+
+/** An entry cut up: its `## ` heading, its bold headline, the words before its first `### `, and each `### ` section. */
+function entryParts(section: string): { heading: string; headline: string | null; intro: string; subs: { heading: string; body: string }[] } {
+  const lines = section.replace(/\r\n/g, '\n').split('\n');
+  const at = lines.map((l, i) => (i && l.startsWith('### ') ? i : -1)).filter((i) => i >= 0);
+  const before = lines.slice(1, at[0] ?? lines.length).join('\n').trim();
+  const bold = /^\*\*(.+?)\*\*/s.exec(before);
+  return {
+    heading: lines[0],
+    headline: bold ? bold[1].replace(/\s+/g, ' ').trim() : null,
+    intro: (bold ? before.slice(bold[0].length) : before).trim(),
+    subs: at.map((a, k) => ({ heading: lines[a].slice(4).trim(), body: lines.slice(a + 1, at[k + 1] ?? lines.length).join('\n').trim() })),
+  };
+}
+
+/** Where a `### ` section stands in an entry: What's new, What changed, any other, then what to do (Before you update, For an agent). */
+const subRank = (h: string) => (/^what'?s new$/i.test(h) ? 0 : /^what changed$/i.test(h) ? 1 : /^(before you update|for an agent)$/i.test(h) ? 3 : 2);
+
+/** What-to-do lines that say only that there is nothing to do: given way to any that say more. */
+const NOTHING_ONLY = /^(?:- )?Nothing(?: to do)?(?:: it updates itself as usual)?\.?$/i;
+
+/**
+ * A versioned entry with Unreleased ones folded in (newest first, as the changelog has them), for a release that brings
+ * them: its headline goes on to say "It also brings what wasn't released before: …" with theirs; each `### ` section's
+ * lines go under the entry's section of the same name (a new one in its place: What's new, What changed, then what to
+ * do), a line already there once, and "Nothing to do" given way to what says more. Pure.
+ */
+export function foldUnreleased(entry: string, unreleased: string[]): string {
+  const into = entryParts(entry);
+  const folded = unreleased.map(entryParts);
+  const theirs = folded.map((f) => f.headline).filter((h): h is string => !!h);
+  const brings = theirs.length ? `It also brings what wasn't released before: ${theirs.join(' ')}` : '';
+  const headline = into.headline ? `**${into.headline}${brings ? `${/[.!?]$/.test(into.headline) ? '' : '.'} ${brings}` : ''}**` : '';
+  const intro = [headline, into.intro, ...(into.headline || !brings ? [] : [brings]), ...folded.map((f) => f.intro)].filter(Boolean);
+  const subs = into.subs.map((s) => ({ ...s, lines: s.body.split('\n') }));
+  for (const s of folded.flatMap((f) => f.subs)) {
+    const same = subs.find((x) => x.heading.toLowerCase() === s.heading.toLowerCase());
+    const add = s.body.split('\n');
+    if (!same) {
+      const at = subs.findIndex((x) => subRank(x.heading) > subRank(s.heading));
+      subs.splice(at < 0 ? subs.length : at, 0, { ...s, lines: add });
+      continue;
+    }
+    const said = (ls: string[]) => ls.filter((l) => l.trim() && !NOTHING_ONLY.test(l.trim()));
+    if (subRank(same.heading) === 3 && !said(add).length) continue;
+    if (subRank(same.heading) === 3 && !said(same.lines).length) same.lines = [];
+    const fresh = add.filter((l) => !l.trim() || !same.lines.some((m) => m.trim() === l.trim()));
+    // Lists run on as one list; anything else stands apart.
+    const list = (l: string | undefined) => !!l && /^\s*[-*] /.test(l);
+    same.lines = same.lines.length ? [...same.lines, ...(list(same.lines.at(-1)) && list(fresh.find((l) => l.trim())) ? [] : ['']), ...fresh] : fresh;
+  }
+  return [into.heading, '', ...intro.flatMap((p) => [p, '']), ...subs.flatMap((s) => [`### ${s.heading}`, '', ...s.lines.join('\n').trim().split('\n'), ''])].join('\n');
+}
 
 /** The changelog's top section renamed from `from` to `to`, when it is the one that names `from`; null when it isn't. */
 export function renumberChangelog(text: string, from: string, to: string): string | null {
