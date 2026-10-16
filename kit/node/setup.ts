@@ -11,7 +11,7 @@ import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf,
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
-import { calibrate, checkPinned, checkPowerTool, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
+import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
 
 /**
  * Accelerator setup (Manor's Set up local AI, `smith accelerators setup`, Reeve's where there is no Smith, and their
@@ -249,13 +249,32 @@ const EMBED_CONTEXT = 4096;
  */
 export const EMBED_CAP = Math.floor(EMBED_CONTEXT / 3);
 
+/** llama-server's flag that keeps the vision encoder (the projector, `--mmproj`) on the processor. */
+export const ENCODER_ON_PROCESSOR = '--no-mmproj-offload';
+
+/**
+ * Whether a card's vision server encodes pictures on the processor (ENCODER_ON_PROCESSOR) while its language model
+ * stays on the card: Intel's integrated graphics on llama.cpp's Vulkan build. On a Core Ultra 5 225U's Intel Graphics
+ * (driver 32.0.101.8831, builds b11624 and b11669, 2026-10-15) the encoder lost the device (`ggml_vulkan: device lost`)
+ * at llama.cpp's warm-up, so the server exited as it started. With `--no-warmup` it started, read the Smith's check
+ * picture (290 tokens), then lost the device on a 1,920 × 1,200 screenshot (2,309 tokens); so did flash attention off,
+ * cooperative matrices off (GGML_VK_DISABLE_COOPMAT) and pictures capped at 1,024 tokens. On the processor it was ready
+ * in 5 s and read the check picture in 6 s, the screenshot in 93 s and one twice its size in 228 s, at below-normal
+ * priority on a busy PC. A card is Intel's by its id (every Intel adapter's name starts with Intel), and integrated
+ * when it has under OWN_MEMORY_GB of its own, as sizing counts it; Intel's cards with memory of their own (Arc A and B)
+ * weren't measured, and keep the encoder on the card.
+ */
+export function encodesOnProcessor(card: { id: string; memoryGb?: number; device: string | null }): boolean {
+  return card.id.startsWith('gpu-intel-') && (card.memoryGb ?? 0) < OWN_MEMORY_GB && /^Vulkan\d*$/.test(card.device ?? '');
+}
+
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
-function kindFlags(kind: EndpointKind, e: { slots: number; maxContextTokens: number }, mmproj: string | undefined, model: string): string[] {
+function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
   switch (kind) {
     case 'chat':
       return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
     case 'vision':
-      return ['--mmproj', portablePath(mmproj ?? ''), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
+      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
     case 'embed':
       // The compute buffer grows with -c × -ub: at -c 8192 -ub 8192 it was one 4.7 GB allocation, which the Adreno
       // X2-90's OpenCL refused ("failed to allocate compute pp buffers"). At -c 4096 -ub 512 (b11669, 2026-10-15) a
@@ -1228,6 +1247,71 @@ export function rememberNpuRefresh(configFile: string, r: NpuRefreshRecord): voi
     mkdirSync(path.dirname(configFile), { recursive: true });
     writeFileSync(npuRefreshFile(configFile), JSON.stringify(r, null, 2) + '\n');
   } catch {}
+}
+
+/** Which kit last looked at the cards' vision commands (refreshCardVision): `card-refresh.json`, beside config.json. */
+export interface CardRefreshRecord {
+  kit: string;
+  at: string;
+  /** The cards whose command it changed. */
+  changed?: string[];
+  problems?: string[];
+}
+
+export const cardRefreshFile = (configFile: string) => path.join(path.dirname(configFile), 'card-refresh.json');
+
+export function readCardRefresh(configFile: string): CardRefreshRecord | null {
+  try {
+    const r = JSON.parse(readFileSync(cardRefreshFile(configFile), 'utf8').replace(/^﻿/, ''));
+    return r && typeof r.kit === 'string' ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * config.json with ENCODER_ON_PROCESSOR added to each card's vision command that an older kit's setup wrote without it
+ * (encodesOnProcessor), after its `--mmproj` file, and the cards changed. A command that isn't llama-server's, or that
+ * already says where the encoder runs (either way), is left as it is.
+ */
+export function withEncoderOnProcessor(raw: Record<string, any>): { raw: Record<string, any>; changed: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
+  const changed: string[] = [];
+  const accelerators = raw.accelerators.map((a: any) => {
+    const cmd: unknown = a?.vision?.startCommand;
+    if (a?.kind !== 'gpu' || typeof a.id !== 'string' || !Array.isArray(cmd) || !cmd.every((s) => typeof s === 'string')) return a;
+    const at = cmd.indexOf('--mmproj');
+    const dev = cmd.indexOf('--device');
+    if (at < 0 || at + 1 >= cmd.length || !/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? ''))) return a;
+    if (cmd.includes(ENCODER_ON_PROCESSOR) || cmd.includes('--mmproj-offload')) return a;
+    if (!encodesOnProcessor({ id: a.id, memoryGb: typeof a.memoryGb === 'number' ? a.memoryGb : undefined, device: dev >= 0 ? (cmd[dev + 1] ?? null) : null })) return a;
+    changed.push(a.id);
+    return { ...a, vision: { ...a.vision, startCommand: [...cmd.slice(0, at + 2), ENCODER_ON_PROCESSOR, ...cmd.slice(at + 2)] } };
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
+}
+
+/**
+ * The cards' vision commands brought up to this kit's (withEncoderOnProcessor) on a PC an older kit set up: setup writes
+ * them once, so the keeper's look does it, once for each kit version, as the NPU's refresh does (npu-refresh.ts), and a
+ * kit never redoes what a newer one looked at. Nothing is started or stopped: on the cards it's for, the old command
+ * never stays up, and a server running elsewhere takes the new one at its next start. A person who takes the flag out
+ * again keeps it out until the next kit. The cards changed; none when config.json couldn't be read (the next look tries).
+ */
+export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
+  const had = readCardRefresh(o.configFile);
+  if (had?.kit === o.kit || (had?.kit && compareVersions(had.kit, o.kit) > 0)) return [];
+  const file = readConfigFile(o.configFile);
+  if (file.error) return [];
+  const { raw, changed } = withEncoderOnProcessor(file.raw);
+  const saved = changed.length ? writeConfigFile(o.configFile, raw, o.validate ?? validateKeeperConfig) : { problems: [] };
+  if (saved.problems.length) o.log(`the vision command of ${changed.join(', ')} keeps the encoder on the card: config.json wasn't written: ${saved.problems.join('; ')}`);
+  else if (changed.length) o.log(`${changed.join(', ')}: vision now encodes pictures on the processor (${ENCODER_ON_PROCESSOR} added by kit ${o.kit}): these graphics lose the device encoding them`);
+  const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
+  try {
+    writeFileSync(cardRefreshFile(o.configFile), JSON.stringify(record, null, 2) + '\n');
+  } catch {}
+  return saved.problems.length ? [] : changed;
 }
 
 /**

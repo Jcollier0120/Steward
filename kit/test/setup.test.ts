@@ -321,6 +321,7 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
   });
   assert.ok(e.vision!.startCommand!.includes('--mmproj'));
   assert.ok(e.vision!.startCommand!.some((s) => s.endsWith('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf')));
+  assert.ok(!e.vision!.startCommand!.includes('--no-mmproj-offload'), "the Adreno's encoder stays on the card");
   assert.deepEqual(e.embed!.startCommand!.slice(-13), ['--embeddings', '--pooling', 'last', '-c', '4096', '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf']);
   assert.equal(e.embed!.maxContextTokens, 1365, 'its own cap: 4,095 characters fit -c 4096 at a token each');
   assert.ok(!('maxContextTokens' in e.chat!), "chat's is the card's");
@@ -452,6 +453,121 @@ test('a processor entry: the CPU build, no device, no offload', () => {
   const e = acceleratorEntry({ id: 'cpu', kind: 'cpu', device: null, server: 'C:\\s\\llama-server.exe', models: { chat: { path: 'C:\\m\\q.gguf' } }, ports: { chat: 18199 }, slots: 1, maxContextTokens: 4096 });
   assert.deepEqual(e.chat!.startCommand, ['C:\\s\\llama-server.exe', '--host', '127.0.0.1', '--port', '18199', '-ngl', '0', '-m', 'C:\\m\\q.gguf', '-c', '4096', '--parallel', '1', '--jinja', '--alias', 'qwen3-4b-instruct-2507']);
   assert.equal(e.vision, undefined);
+});
+
+// This PC's Intel Graphics, as the kit set it up before (WEASELDEV02, 2026-10-15): vision alone beside the NPU.
+const INTEL_ID = 'gpu-intel-r-graphics';
+const VK = '%USERPROFILE%\\.manor\\accelerators\\servers\\llama.cpp\\b11669-vulkan-x64\\llama-server.exe';
+const MODELS = '%USERPROFILE%\\.manor\\accelerators\\models';
+const oldVision = (port = 18192, device = 'Vulkan0') => ({
+  baseUrl: `http://127.0.0.1:${port}`,
+  model: 'qwen3-vl-4b-instruct',
+  startCommand: [VK, '--host', '127.0.0.1', '--port', String(port), '--device', device, '-ngl', '99', '-m', `${MODELS}\\Qwen3VL-4B-Instruct-Q4_K_M.gguf`, '--mmproj', `${MODELS}\\mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf`, '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-vl-4b-instruct'],
+});
+const intelChat = { baseUrl: 'http://127.0.0.1:18191', model: 'qwen3-4b-instruct-2507', startCommand: [VK, '--port', '18191', '--device', 'Vulkan0', '-ngl', '99', '-m', `${MODELS}\\Qwen3-4B-Instruct-2507-Q4_K_M.gguf`, '-c', '4096'] };
+const npuEntry = { id: 'npu', kind: 'npu', slots: 1, maxContextTokens: 2048, quirks: [], chat: { baseUrl: 'http://127.0.0.1:18183', model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', startCommand: ['C:\\o\\ovms.exe', '--rest_port', '18183'] } };
+const intelConfig = () => ({ accelerators: [npuEntry, { id: INTEL_ID, kind: 'gpu', slots: 1, maxContextTokens: 4096, quirks: [], memoryGb: 0.1, chat: intelChat, vision: oldVision() }], acceleratorOrder: 'auto' });
+
+test("Intel's integrated graphics encode pictures on the processor: their Vulkan encoder loses the device; every other card keeps its own", async () => {
+  const { encodesOnProcessor } = await import('./fixture/src/kit/setup.ts');
+  assert.equal(encodesOnProcessor({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }), true);
+  assert.equal(encodesOnProcessor({ id: 'gpu-intel-r-uhd-graphics-770', memoryGb: 0.1, device: 'Vulkan1' }), true, 'any Intel integrated graphics, beside another card too');
+  assert.equal(encodesOnProcessor({ id: INTEL_ID, device: 'Vulkan0' }), true, 'no memory recorded: shared, as sizing counts it');
+  assert.equal(encodesOnProcessor({ id: 'gpu-intel-r-arc-tm-a770-graphics', memoryGb: 15.9, device: 'Vulkan0' }), false, 'an Arc with memory of its own: not measured');
+  assert.equal(encodesOnProcessor({ id: 'gpu-amd-radeon-tm-860m-graphics', memoryGb: 0.5, device: 'Vulkan0' }), false, "AMD's integrated graphics: not measured");
+  assert.equal(encodesOnProcessor({ id: 'gpu-nvidia-geforce-rtx-4090', memoryGb: 24, device: 'CUDA0' }), false);
+  assert.equal(encodesOnProcessor({ id: INTEL_ID, memoryGb: 0.1, device: null }), false, 'not on the card at all');
+
+  // Setup's entry: the flag right after the projector, on vision alone; chat and embeddings have no encoder.
+  const e = acceleratorEntry({
+    id: INTEL_ID,
+    kind: 'gpu',
+    memoryGb: 0.1,
+    device: 'Vulkan0',
+    server: 'C:\\s\\llama-server.exe',
+    models: { chat: { path: 'C:\\m\\c.gguf' }, vision: { path: 'C:\\m\\v.gguf', mmproj: 'C:\\m\\p.gguf' }, embed: { path: 'C:\\m\\e.gguf' } },
+    ports: { chat: 18191, vision: 18192, embed: 18193 },
+    slots: 1,
+    maxContextTokens: 4096,
+  });
+  assert.deepEqual(e.vision!.startCommand!.slice(9), ['-m', 'C:\\m\\v.gguf', '--mmproj', 'C:\\m\\p.gguf', '--no-mmproj-offload', '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-vl-4b-instruct']);
+  assert.ok(!e.chat!.startCommand!.includes('--no-mmproj-offload') && !e.embed!.startCommand!.includes('--no-mmproj-offload'));
+  const arc = acceleratorEntry({ id: 'gpu-intel-r-arc-tm-a770-graphics', kind: 'gpu', memoryGb: 15.9, device: 'Vulkan0', server: 'C:\\s\\llama-server.exe', models: { vision: { path: 'C:\\m\\v.gguf', mmproj: 'C:\\m\\p.gguf' } }, ports: { vision: 18192 }, slots: 2, maxContextTokens: 16384 });
+  assert.ok(!arc.vision!.startCommand!.includes('--no-mmproj-offload'));
+});
+
+test("a PC set up before: its Intel graphics' vision command gets the flag, only that, after its projector; anything else stays as it is", async () => {
+  const { withEncoderOnProcessor } = await import('./fixture/src/kit/setup.ts');
+  const raw = intelConfig();
+  const r = withEncoderOnProcessor(raw);
+  assert.deepEqual(r.changed, [INTEL_ID]);
+  const card = r.raw.accelerators[1];
+  const want = oldVision().startCommand;
+  want.splice(want.indexOf('--mmproj') + 2, 0, '--no-mmproj-offload');
+  assert.deepEqual(card.vision.startCommand, want);
+  assert.deepEqual({ ...card, vision: undefined }, { ...raw.accelerators[1], vision: undefined }, 'its chat, cap and the rest unchanged');
+  assert.deepEqual(r.raw.accelerators[0], npuEntry);
+  assert.equal((raw.accelerators[1] as any).vision.startCommand.includes('--no-mmproj-offload'), false, 'the config read is not changed in place');
+  // Again: nothing to do.
+  assert.deepEqual(withEncoderOnProcessor(r.raw).changed, []);
+
+  // Left alone: a person's choice either way, another server, a card with memory of its own, another maker's, no list.
+  const one = (vision: any, more: Record<string, unknown> = {}) => withEncoderOnProcessor({ accelerators: [{ id: INTEL_ID, kind: 'gpu', memoryGb: 0.1, slots: 1, maxContextTokens: 4096, quirks: [], vision, ...more }] }).changed;
+  const v = oldVision();
+  assert.deepEqual(one({ ...v, startCommand: [...v.startCommand, '--mmproj-offload'] }), []);
+  assert.deepEqual(one({ ...v, startCommand: [...v.startCommand, '--no-mmproj-offload'] }), []);
+  assert.deepEqual(one({ ...v, startCommand: ['C:\\o\\ollama.exe', 'serve', '--mmproj', 'x'] }), []);
+  assert.deepEqual(one({ ...v, startCommand: v.startCommand.filter((s) => !/mmproj/i.test(s)) }), [], 'no projector');
+  assert.deepEqual(one({ baseUrl: v.baseUrl, model: v.model }), [], 'no command: started by someone else');
+  assert.deepEqual(one(v, { memoryGb: 15.9 }), []);
+  assert.deepEqual(one(v, { id: 'gpu-amd-radeon-tm-860m-graphics' }), []);
+  assert.deepEqual(one(v, { kind: 'cpu', id: 'cpu' }), []);
+  assert.deepEqual(one(oldVision(18192, 'GPUOpenCL')), []);
+  assert.deepEqual(one(v), [INTEL_ID]);
+  assert.deepEqual(withEncoderOnProcessor({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181' } }).changed, [], 'an old config with no list');
+});
+
+test("the keeper's look adds it once for each kit version: config.json written, a person's later change kept, never undone by an older kit", async () => {
+  const { cardRefreshFile, readCardRefresh, refreshCardVision } = await import('./fixture/src/kit/setup.ts');
+  const dir = mkdtempSync(path.join(process.env.REEVE_HOME!, 'card-refresh-'));
+  const file = path.join(dir, 'config.json');
+  writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
+  const log: string[] = [];
+  const look = (kit: string) => refreshCardVision({ configFile: file, kit, now: () => Date.parse('2026-10-16T03:00:00Z'), log: (l) => log.push(l) });
+  const vision = () => JSON.parse(readFileSync(file, 'utf8')).accelerators[1].vision.startCommand as string[];
+
+  assert.deepEqual(look('2.80.0'), [INTEL_ID]);
+  assert.ok(vision().includes('--no-mmproj-offload'));
+  assert.match(log[0], /^gpu-intel-r-graphics: vision now encodes pictures on the processor \(--no-mmproj-offload added by kit 2\.80\.0\)/);
+  assert.deepEqual(readCardRefresh(file), { kit: '2.80.0', at: '2026-10-16T03:00:00.000Z', changed: [INTEL_ID] });
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).accelerators[0].chat.startCommand[0], 'C:\\o\\ovms.exe', "the NPU's entry as it was");
+
+  // A person takes it out: this kit doesn't look again, nor does an older one; the next kit puts it back.
+  writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
+  assert.deepEqual(look('2.80.0'), []);
+  assert.deepEqual(look('2.79.9'), []);
+  assert.ok(!vision().includes('--no-mmproj-offload'));
+  assert.deepEqual(look('2.81.0'), [INTEL_ID]);
+  assert.ok(vision().includes('--no-mmproj-offload'));
+  assert.equal(log.length, 2);
+
+  // Nothing to change: recorded, config.json untouched.
+  const before = readFileSync(file, 'utf8');
+  assert.deepEqual(look('2.82.0'), []);
+  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.deepEqual(readCardRefresh(file), { kit: '2.82.0', at: '2026-10-16T03:00:00.000Z' });
+
+  // config.json unreadable: nothing written or recorded, so the next look tries again.
+  writeFileSync(file, '{ not json');
+  assert.deepEqual(look('2.83.0'), []);
+  assert.equal(readCardRefresh(file)!.kit, '2.82.0');
+  // Written only when it validates: the record says why.
+  writeFileSync(file, JSON.stringify(intelConfig(), null, 2));
+  assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.84.0', validate: () => ['nope'], log: (l) => log.push(l) }), []);
+  assert.ok(!vision().includes('--no-mmproj-offload'));
+  assert.deepEqual(readCardRefresh(file)!.problems, ['nope']);
+  assert.match(log.at(-1)!, /keeps the encoder on the card: config\.json wasn't written: nope/);
+  assert.ok(existsSync(cardRefreshFile(file)));
 });
 
 test('a reranker: set up only when asked for, as an add-on that keeps what its accelerator serves, on its own port; the keeper keeps it', async () => {

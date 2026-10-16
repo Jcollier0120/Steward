@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased
+
+**Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again.**
+
+### What's new
+
+- **setup.ts:**
+  - `encodesOnProcessor(card)`: whether a card's vision server encodes on the processor. That is Intel's graphics (its id is `gpu-intel-…`) with under `OWN_MEMORY_GB` of its own, on a Vulkan device. `ENCODER_ON_PROCESSOR` is the flag.
+  - `withEncoderOnProcessor(raw)`: config.json with the flag added after the `--mmproj` file of each such card's llama-server vision command that lacks it, and the cards changed. A command that already says where the encoder runs (either flag), or that isn't llama-server's, is left alone.
+  - `refreshCardVision({ configFile, kit, log })` writes that into config.json once for each kit version, recorded in `card-refresh.json` beside it (`readCardRefresh`). A kit never redoes what a newer one looked at, so a person who takes the flag out keeps it out until the next kit.
+- **keeper.ts:** `refreshCards()`, called by the keeper's look (`keeperLook`) before the NPU's refresh. What it changed goes in the keeper's log.
+
+### What changed
+
+- **Setup** (`acceleratorEntry`) writes the flag into such a card's vision command, right after its projector. The card's chat and embeddings, and every other card, are unchanged.
+- **spec/ACCELERATORS.md** says where a card's vision encoder runs, and why, with the measurements: `--no-warmup` started the server, but lost the device on the screenshot. So did flash attention off, cooperative matrices off, and pictures capped at 1,024 tokens.
+
 ## 2.77.8
 
 **PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

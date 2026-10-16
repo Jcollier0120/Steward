@@ -14,7 +14,7 @@ import { NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
-import { kitVersion, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { kitVersion, refreshCardVision, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 /**
  * Keeping the model servers (spec/ACCELERATORS.md, "Keeping the servers"): whoever keeps them (the Smith; Reeve
@@ -944,10 +944,21 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
     .finally(() => (npuRefresh = null));
 }
 
+/** The cards' vision commands brought up to this kit's (setup.ts' refreshCardVision), once for each kit version: what it changed goes in the keeper's log. */
+export function refreshCards(o: { logFile?: string } = {}): void {
+  const logFile = o.logFile ?? reaperLog();
+  try {
+    refreshCardVision({ configFile: acceleratorConfigFile(), kit: kitVersion(), log: (line) => logLine(logFile, line) });
+  } catch (e: any) {
+    logLine(logFile, `the cards' vision commands couldn't be looked at: ${e?.message ?? e}`);
+  }
+}
+
 /** One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the next look. */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
   if (!o.config) {
     await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
+    refreshCards();
     startNpuRefresh();
   }
   const servers = serversToReap((o.config ?? (() => readConfigFile().raw))(), { withNpu: (o.withNpu ?? (() => gpuWithNpu().on))() });
