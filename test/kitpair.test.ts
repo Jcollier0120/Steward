@@ -120,8 +120,10 @@ test("the kit merges when the agent it fails moves with it in a PR that passes; 
 });
 
 test("the kit waits as before when the agent's PR that pins it fails too, or is a draft; and an agent PR with no Steward PR bringing its kit says so", async () => {
-  // A second kit PR head, so this trial is its own.
-  sh(steward.checkout, 'commit', '--quiet', '--allow-empty', '-m', 'Kit 1.0.1 again');
+  // A second kit PR, with a kit of its own (the same kit would take #7's verdict: trial.ts's sameKitTrial), so this trial is its own.
+  writeFileSync(path.join(steward.checkout, 'kit', 'node', 'more.ts'), 'export const more = 1;\n');
+  sh(steward.checkout, 'add', '-A');
+  sh(steward.checkout, 'commit', '--quiet', '-m', 'Kit 1.0.1 again, with a file more');
   sh(steward.checkout, 'push', '--quiet', 'origin', 'HEAD:refs/pull/8/head');
   const head8 = sh(steward.checkout, 'rev-parse', 'HEAD');
   const pr8 = kitPr({ number: 8, headOid: head8, url: 'https://github.com/Jcollier0120/Steward/pull/8' });
