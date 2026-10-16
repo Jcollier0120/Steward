@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.3
 
-**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%. It also brings what wasn't released before: each agent shows under its own name in Task Manager, and Intel's NPU labels name the Core Ultra 200H and 200HX.**
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
 
 ### What changed
 
@@ -46,22 +46,68 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
 - **work-status.ts:** the checks' turns come from `checksAtOnce()`.
 - **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
-- **Each agent under its own name in Task Manager** (brought from before): its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page's console, its log and its pace are as they were.
+
+### Before you update
+
+- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts. Nothing to do: it updates itself as usual.
+
+## 2.78.0
+
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values. Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
+
+### What's new
+
+- **npu-vendors.ts:**
+  - **`NpuGeneration.smallPc`** (`{ models, basis }`): the models a generation runs in the route's place on a PC with little memory (`smallPc`: under `idleStop.smallPcGb`, 20).
+  - **`routeFor(route, generation, small)`**: with `small`, the generation's `smallPc` models in the route's place; without it, as before. **`planNpu({ small })`** passes it on.
+  - **`NpuModel.serve`**: server arguments a model needs beside the route's `serve`. `npuEntry` adds the chat model's after the route's, so they go with that model alone.
+- **npu-check.ts and npu-bench.ts: `--small-pc`** runs a small PC's models on any PC. On a PC under 20 GB they run anyway, as setup would run them. `npu-bench --model` one of a small PC's models runs them too, and `--model` one of the route's own measures it on a small PC. The report's model says which ran.
+
+### What changed
+
+- **npu-vendors.json's qualcomm route**, the `snapdragon-x2` generation's `smallPc`: `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, chat and vision.
+  - Pulled from Hugging Face (`--model-hub hf --model-type vlm`): AI Hub has no QAIRT build of the 2B, only this GGUF.
+  - Served by GenieX's llama.cpp plugin with `--compute npu --vit-compute GPUOpenCL`: the language model on the Hexagon, the pictures' encoder on the Adreno. GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon, and on the processor each picture takes about 5.5 s of its time, against 0.8 s on the Adreno.
+  - 1,876,179,296 bytes, its Q4_0 GGUF and F16 projector pinned for the X2 (unsloth's repository at 8dcb98e5). Apache-2.0, the base model's.
+  - The route's cap (2,400), timeouts and idle stop are unchanged. Its cold start, 5.1 to 9.1 s, is inside the route's 15 s.
+  - **Measured** with the full benchmark (`castellan-npu-bench/2`) on the 48 GB X2 Elite, 2026-10-15, against the 4B:
+
+    | | Qwen3-VL-2B (Q4_0, llama.cpp) | Qwen3-VL-4B (W4A16, QAIRT) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 22 of 24 |
+    | Pictures | 4 of 4 | 3 of 4 |
+    | Tokens written a second | 75.0 | 41.1 |
+    | Jobs: triage, reply, summary | 0.56, 0.43 and 1.95 s | 0.73, 0.98 and 3.88 s |
+    | Cold / cached load | 5.1 / 5.4 s | 10.0 / 9.9 s |
+    | Speed held over 10 minutes | 95% (100% run again quiet) | 100% |
+    | Working set / private | 4.31 / 2.34 GB | 6.12 / 1.68 GB |
+    | On the NPU | 2.1 GB | 4.2 GB |
+    | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
+
+    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs and a 4.3 s cold load, and its speed held 100%. Only the reply job's spread kept it off the board (508 to 666 ms), judged then on whole times: see npu-bench.ts below.
+- **setup.ts**: on a PC under 20 GB, the NPU is planned with its generation's `smallPc` models (`smallPc(detection.ramBytes)`).
+- **npu-refresh.ts**: the keeper's look plans with the PC's memory too. On a 16 GB X2 set up with the 4B, it leaves the NPU for setup (`needs-setup`) while the 2B isn't there, since it never downloads. Once it is there, the look tests it in the NPU's turn, as any new command, and switches. Its log and `changes` name a model change: `model … in …'s place`.
+- **npu-bench.ts: a job's tries are judged at one answer length.**
+  - Each try of a job is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer one takes longer to write without the server being slower. That most likely kept every GenieX full run off the board, even on a quiet X2 Elite: the 4B's summary took 3.3 to 4.3 s and the 2B's reply 508 to 666 ms, while the short answer, writing and reading held within 5%. Those runs recorded no token counts, so the next run will show it.
+  - Each job's tries now record their answer tokens (`answerTokens`, the server's count) and first-token times (`firstTokenMs`). Whether they are steady is the spread with each try's writing scaled to the tries' median answer length (`spreadAtLength`; `atAnswerLength`, `jobMeasure`).
+  - The job's median, the job time and every other measurement are as before, so runs still compare within `castellan-npu-bench/2`, and a report from before keeps its verdict. A server that doesn't stream or count tokens is judged on whole times, as before (it is marked anyway).
+  - The `noisy` mark names such a job "at one answer length". **spec/npu-bench.schema.json**: the three new fields, optional so earlier reports still match.
+- **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row, `--small-pc`, and a job's steadiness.
 - **named.cs and named.ts:**
   - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
   - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
   - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
 - **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
 - **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before. `pageLaunch`'s `args` are the page's arguments after its entry, `serve` unless given, for an agent whose page has a command of its own (Reeve's `dashboard --port <n>`).
-- **Intel's NPU labels name the Core Ultra 200H and 200HX** (brought from before): the NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.
+
 - **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
 - **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
 
-### Before you update
+### For an agent
 
-- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts.
-- An agent builds its named launcher a minute or two after its page starts, so it shows under its own name from its next start: after the update, a sign-in or a restart.
-- Nothing to do: it updates itself as usual.
+- Nothing to do.
+- A 16 GB Snapdragon X2 already set up keeps the 4B until it is set up again (Manor's Set up local AI), which pulls the 2B (1.9 GB) and writes it. The 4B stays in `%USERPROFILE%\.cache\geniex\models` (4.4 GB) until removed (`geniex remove qualcomm/Qwen3-VL-4B-Instruct`).
+- Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB, the kit's own command through `npu-bench --small-pc`), its pull through setup, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
 
 ## 2.77.9
 
