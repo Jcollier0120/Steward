@@ -478,7 +478,8 @@ test("Intel's integrated graphics encode pictures on the processor: their Vulkan
   assert.equal(encodesOnProcessor({ id: 'gpu-nvidia-geforce-rtx-4090', memoryGb: 24, device: 'CUDA0' }), false);
   assert.equal(encodesOnProcessor({ id: INTEL_ID, memoryGb: 0.1, device: null }), false, 'not on the card at all');
 
-  // Setup's entry: the flag right after the projector, on vision alone; chat and embeddings have no encoder.
+  // Setup's entry: the flag right after the projector, then the cap on a picture's tokens, on vision alone (chat and
+  // embeddings have no encoder); vision has its own time, chat the rules'.
   const e = acceleratorEntry({
     id: INTEL_ID,
     kind: 'gpu',
@@ -490,40 +491,82 @@ test("Intel's integrated graphics encode pictures on the processor: their Vulkan
     slots: 1,
     maxContextTokens: 4096,
   });
-  assert.deepEqual(e.vision!.startCommand!.slice(9), ['-m', 'C:\\m\\v.gguf', '--mmproj', 'C:\\m\\p.gguf', '--no-mmproj-offload', '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-vl-4b-instruct']);
-  assert.ok(!e.chat!.startCommand!.includes('--no-mmproj-offload') && !e.embed!.startCommand!.includes('--no-mmproj-offload'));
+  assert.deepEqual(e.vision!.startCommand!.slice(9), ['-m', 'C:\\m\\v.gguf', '--mmproj', 'C:\\m\\p.gguf', '--no-mmproj-offload', '--image-max-tokens', '1024', '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-vl-4b-instruct']);
+  assert.deepEqual(e.vision!.timeouts, { requestBaseMs: 90_000 });
+  for (const k of ['chat', 'embed'] as const) {
+    assert.ok(!e[k]!.startCommand!.includes('--no-mmproj-offload') && !e[k]!.startCommand!.includes('--image-max-tokens'));
+    assert.equal(e[k]!.timeouts, undefined);
+  }
+  assert.equal(e.timeouts, undefined, "the card's own: the rules'");
+  // As config.json: valid, and read back with vision's own time.
+  const written = { accelerators: [e] };
+  assert.deepEqual(validateAccelerators(written), []);
+  assert.deepEqual(readAccelerators(written, null).accelerators[0].vision!.timeouts, { requestBaseMs: 90_000 });
   const arc = acceleratorEntry({ id: 'gpu-intel-r-arc-tm-a770-graphics', kind: 'gpu', memoryGb: 15.9, device: 'Vulkan0', server: 'C:\\s\\llama-server.exe', models: { vision: { path: 'C:\\m\\v.gguf', mmproj: 'C:\\m\\p.gguf' } }, ports: { vision: 18192 }, slots: 2, maxContextTokens: 16384 });
-  assert.ok(!arc.vision!.startCommand!.includes('--no-mmproj-offload'));
+  assert.ok(!arc.vision!.startCommand!.includes('--no-mmproj-offload') && !arc.vision!.startCommand!.includes('--image-max-tokens'));
+  assert.equal(arc.vision!.timeouts, undefined);
 });
 
-test("a PC set up before: its Intel graphics' vision command gets the flag, only that, after its projector; anything else stays as it is", async () => {
+test("a kind's own timeouts in config.json: validated as an accelerator's are", () => {
+  const card = (vision: Record<string, unknown>) => ({ accelerators: [{ id: INTEL_ID, kind: 'gpu', chat: intelChat, vision: { ...oldVision(), ...vision } }] });
+  assert.deepEqual(validateAccelerators(card({ timeouts: { requestBaseMs: 90_000, coldLoadMs: 0 } })), []);
+  const at = `accelerators[0] (${INTEL_ID}).vision`;
+  assert.deepEqual(validateAccelerators(card({ timeouts: 'long' })), [`${at}: timeouts must be an object (requestBaseMs, requestPerTokenMs, coldLoadMs)`]);
+  assert.deepEqual(validateAccelerators(card({ timeouts: { requestBaseMs: -1, slowMs: 5 } })), [
+    `${at}: timeouts.requestBaseMs must be one of requestBaseMs, requestPerTokenMs, coldLoadMs, a whole number of ms up to an hour`,
+    `${at}: timeouts.slowMs must be one of requestBaseMs, requestPerTokenMs, coldLoadMs, a whole number of ms up to an hour`,
+  ]);
+  // Read leaving out what isn't a timing, as an accelerator's are.
+  assert.deepEqual(readAccelerators(card({ timeouts: { requestBaseMs: 90_000, slowMs: 5, coldLoadMs: 1.5 } }), null).accelerators[0].vision!.timeouts, { requestBaseMs: 90_000 });
+  assert.equal(readAccelerators(card({ timeouts: {} }), null).accelerators[0].vision!.timeouts, undefined);
+});
+
+test("a PC set up before: its Intel graphics' vision gets what setup now writes, after its projector, only what's missing; anything else stays as it is", async () => {
   const { withEncoderOnProcessor } = await import('./fixture/src/kit/setup.ts');
   const raw = intelConfig();
   const r = withEncoderOnProcessor(raw);
   assert.deepEqual(r.changed, [INTEL_ID]);
   const card = r.raw.accelerators[1];
   const want = oldVision().startCommand;
-  want.splice(want.indexOf('--mmproj') + 2, 0, '--no-mmproj-offload');
+  want.splice(want.indexOf('--mmproj') + 2, 0, '--no-mmproj-offload', '--image-max-tokens', '1024');
   assert.deepEqual(card.vision.startCommand, want);
+  assert.deepEqual(card.vision.timeouts, { requestBaseMs: 90_000 });
   assert.deepEqual({ ...card, vision: undefined }, { ...raw.accelerators[1], vision: undefined }, 'its chat, cap and the rest unchanged');
   assert.deepEqual(r.raw.accelerators[0], npuEntry);
   assert.equal((raw.accelerators[1] as any).vision.startCommand.includes('--no-mmproj-offload'), false, 'the config read is not changed in place');
+  assert.equal((raw.accelerators[1] as any).vision.timeouts, undefined);
   // Again: nothing to do.
   assert.deepEqual(withEncoderOnProcessor(r.raw).changed, []);
 
-  // Left alone: a person's choice either way, another server, a card with memory of its own, another maker's, no list.
-  const one = (vision: any, more: Record<string, unknown> = {}) => withEncoderOnProcessor({ accelerators: [{ id: INTEL_ID, kind: 'gpu', memoryGb: 0.1, slots: 1, maxContextTokens: 4096, quirks: [], vision, ...more }] }).changed;
+  const one = (vision: any, more: Record<string, unknown> = {}) => withEncoderOnProcessor({ accelerators: [{ id: INTEL_ID, kind: 'gpu', memoryGb: 0.1, slots: 1, maxContextTokens: 4096, quirks: [], vision, ...more }] });
   const v = oldVision();
-  assert.deepEqual(one({ ...v, startCommand: [...v.startCommand, '--mmproj-offload'] }), []);
-  assert.deepEqual(one({ ...v, startCommand: [...v.startCommand, '--no-mmproj-offload'] }), []);
-  assert.deepEqual(one({ ...v, startCommand: ['C:\\o\\ollama.exe', 'serve', '--mmproj', 'x'] }), []);
-  assert.deepEqual(one({ ...v, startCommand: v.startCommand.filter((s) => !/mmproj/i.test(s)) }), [], 'no projector');
-  assert.deepEqual(one({ baseUrl: v.baseUrl, model: v.model }), [], 'no command: started by someone else');
-  assert.deepEqual(one(v, { memoryGb: 15.9 }), []);
-  assert.deepEqual(one(v, { id: 'gpu-amd-radeon-tm-860m-graphics' }), []);
-  assert.deepEqual(one(v, { kind: 'cpu', id: 'cpu' }), []);
-  assert.deepEqual(one(oldVision(18192, 'GPUOpenCL')), []);
-  assert.deepEqual(one(v), [INTEL_ID]);
+  // An earlier kit's look that only added the flag: the cap after it, and the time.
+  const flagOnly = [...v.startCommand];
+  flagOnly.splice(flagOnly.indexOf('--mmproj') + 2, 0, '--no-mmproj-offload');
+  const later = one({ ...v, startCommand: flagOnly });
+  assert.deepEqual(later.changed, [INTEL_ID]);
+  assert.deepEqual(later.raw.accelerators[0].vision.startCommand, want);
+  assert.deepEqual(later.raw.accelerators[0].vision.timeouts, { requestBaseMs: 90_000 });
+  // A person's own cap, or time, is theirs: only what's missing is added.
+  const theirCap = one({ ...v, startCommand: [...flagOnly, '--image-max-tokens', '2048'] });
+  assert.deepEqual(theirCap.raw.accelerators[0].vision.startCommand, [...flagOnly, '--image-max-tokens', '2048']);
+  assert.deepEqual(theirCap.raw.accelerators[0].vision.timeouts, { requestBaseMs: 90_000 });
+  const theirTime = one({ ...v, timeouts: { requestBaseMs: 120_000 } });
+  assert.deepEqual(theirTime.raw.accelerators[0].vision.startCommand, want);
+  assert.deepEqual(theirTime.raw.accelerators[0].vision.timeouts, { requestBaseMs: 120_000 });
+  assert.deepEqual(one({ ...v, startCommand: want, timeouts: { requestPerTokenMs: 500 } }).changed, [], 'all there: their time kept');
+
+  // Left alone: the encoder kept on the card by a person, another server, a card with memory of its own, another maker's, no list.
+  const changed = (vision: any, more: Record<string, unknown> = {}) => one(vision, more).changed;
+  assert.deepEqual(changed({ ...v, startCommand: [...v.startCommand, '--mmproj-offload'] }), []);
+  assert.deepEqual(changed({ ...v, startCommand: ['C:\\o\\ollama.exe', 'serve', '--mmproj', 'x'] }), []);
+  assert.deepEqual(changed({ ...v, startCommand: v.startCommand.filter((s) => !/mmproj/i.test(s)) }), [], 'no projector');
+  assert.deepEqual(changed({ baseUrl: v.baseUrl, model: v.model }), [], 'no command: started by someone else');
+  assert.deepEqual(changed(v, { memoryGb: 15.9 }), []);
+  assert.deepEqual(changed(v, { id: 'gpu-amd-radeon-tm-860m-graphics' }), []);
+  assert.deepEqual(changed(v, { kind: 'cpu', id: 'cpu' }), []);
+  assert.deepEqual(changed(oldVision(18192, 'GPUOpenCL')), []);
+  assert.deepEqual(changed(v), [INTEL_ID]);
   assert.deepEqual(withEncoderOnProcessor({ chatEndpoint: { baseUrl: 'http://127.0.0.1:18181' } }).changed, [], 'an old config with no list');
 });
 
@@ -537,8 +580,9 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   const vision = () => JSON.parse(readFileSync(file, 'utf8')).accelerators[1].vision.startCommand as string[];
 
   assert.deepEqual(look('2.80.0'), [INTEL_ID]);
-  assert.ok(vision().includes('--no-mmproj-offload'));
-  assert.match(log[0], /^gpu-intel-r-graphics: vision now encodes pictures on the processor \(--no-mmproj-offload added by kit 2\.80\.0\)/);
+  assert.ok(vision().includes('--no-mmproj-offload') && vision().includes('--image-max-tokens'));
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).accelerators[1].vision.timeouts, { requestBaseMs: 90_000 });
+  assert.match(log[0], /^gpu-intel-r-graphics: vision now encodes pictures on the processor, at most 1024 tokens each, with 90 s a request \(kit 2\.80\.0\)/);
   assert.deepEqual(readCardRefresh(file), { kit: '2.80.0', at: '2026-10-16T03:00:00.000Z', changed: [INTEL_ID] });
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).accelerators[0].chat.startCommand[0], 'C:\\o\\ovms.exe', "the NPU's entry as it was");
 
@@ -566,7 +610,7 @@ test("the keeper's look adds it once for each kit version: config.json written, 
   assert.deepEqual(refreshCardVision({ configFile: file, kit: '2.84.0', validate: () => ['nope'], log: (l) => log.push(l) }), []);
   assert.ok(!vision().includes('--no-mmproj-offload'));
   assert.deepEqual(readCardRefresh(file)!.problems, ['nope']);
-  assert.match(log.at(-1)!, /keeps the encoder on the card: config\.json wasn't written: nope/);
+  assert.match(log.at(-1)!, /keeps its command and time: config\.json wasn't written: nope/);
   assert.ok(existsSync(cardRefreshFile(file)));
 });
 
