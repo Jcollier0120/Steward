@@ -583,7 +583,8 @@ test('fitPicture redraws with System.Drawing: a 64 px square comes back 65 px a 
   const { picturePng } = await import('./fixture/src/kit/npu-bench.ts');
   const file = path.join(home, 'red-64.png');
   writeFileSync(file, picturePng({ solid: [220, 20, 20], width: 64, height: 64 }));
-  const url = await A.fitPicture({ quirks: ['sides-of-32'] }, file);
+  // Real PowerShell: three minutes, not the agents' 30 s, for a PC busy with a kit trial.
+  const url = await A.fitPicture({ quirks: ['sides-of-32'] }, file, (f, t, s) => A.redrawPicture(f, t, s, { timeoutMs: 180_000 }));
   assert.match(url, /^data:image\/png;base64,/);
   assert.deepEqual(A.pictureSize(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')), { width: 65, height: 65 });
 });
