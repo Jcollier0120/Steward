@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.2
 
-**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`).**
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`). It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
 
 A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). While the task that woke it runs, Task Scheduler keeps the PC out of sleep, with the screen off; an app's own hold didn't keep its process from being throttled there. So the task runs until the work is done. spec/ROUND.md has what was measured.
 
@@ -21,6 +21,11 @@ A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the p
 - **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
 - **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. The agent ends the task sooner, once its work is done (`endWakeTask`).
 - **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
+
+### What changed
+
+- **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
+- **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
 
 ### For an agent
 
