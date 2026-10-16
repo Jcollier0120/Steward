@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.2
 
-**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and the awake helper holds a woken PC for a set time with no agent beside it. It also brings what wasn't released before: A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm. Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again. On those graphics a picture's first question takes about 30 s, whatever its size, and has the time it needs. Their vision server caps each picture at 1,024 tokens (`--image-max-tokens 1024`), and their vision endpoint has its own `timeouts`: a background request may take 90 s and 0.3 s a token. Uncapped, a 1,920 × 1,200 screenshot took 89 s and a phone's 27 s, past the 16.2 s a 4-token question gets (Reeve's screens asks those), and a timeout marks the card failed, its chat too, for 10 minutes. Capped, every answer measured was the same. A PC set up before gets both at the keeper's next look, with or without the flag already.**
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`).**
 
 A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). While the task that woke it runs, Task Scheduler keeps the PC out of sleep, with the screen off; an app's own hold didn't keep its process from being throttled there. So the task runs until the work is done. spec/ROUND.md has what was measured.
 
@@ -21,6 +21,23 @@ A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the p
 - **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
 - **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. The agent ends the task sooner, once its work is done (`endWakeTask`).
 - **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Nothing is woken until an agent calls `keepWakeTask`.
+- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. Its `holdMinutes` is the longest the work may take. Once the work is done it calls `endWakeTask()`, but not when the agent merely stops (an update): the task then holds the PC until the agent is back. While it works it holds the PC with `stayAwake(what)`, as ever. Never wake a PC on battery, and never keep the screen on.
+- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
+
+## 2.77.9
+
+**A release that signs gives up within a minute when SimplySign Desktop is waiting for its sign-in, before it builds or before it signs, instead of after ten minutes. It also brings what wasn't released before: A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
+
+**Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again.**
+
+**On those graphics a picture's first question takes about 30 s, whatever its size, and has the time it needs. Their vision server caps each picture at 1,024 tokens (`--image-max-tokens 1024`), and their vision endpoint has its own `timeouts`: a background request may take 90 s and 0.3 s a token. Uncapped, a 1,920 × 1,200 screenshot took 89 s and a phone's 27 s, past the 16.2 s a 4-token question gets (Reeve's screens asks those), and a timeout marks the card failed, its chat too, for 10 minutes. Capped, every answer measured was the same. A PC set up before gets both at the keeper's next look, with or without the flag already.**
+
+### What's new
+
 - **busy.tsx:**
   - **`BusyButton`:** a button in the page's own classes (`className`, any button attribute) that spins while its work runs: a spinner in place of its `icon` (before its words without one), `aria-busy`, and no presses. Its work is `busy`, the page's own word for it (a store's "updating"), and any promise its `onClick` returns.
   - **`BusyArea`:** a part of the page that is disabled while its work runs: a `<fieldset>` drawn as a plain block, every control in it disabled, `aria-busy`, the progress cursor. Busy while `busy` says so, and while a BusyButton, PostButton or Button in it runs.
@@ -40,6 +57,9 @@ A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the p
 
 ### What changed
 
+- **sign.ts**: `trialProblem(signtool, thumbprint)` signs a throwaway script without a timestamp, within `TRIAL_MS` (60 s). If signtool says "No certificates were found", the key can't be reached. If it doesn't answer in time, SimplySign Desktop is waiting for someone to sign in, and that now counts as "can't sign" too. Before, `readySigner`'s trial gave signtool two minutes and counted no answer as "can sign", so the release built and then waited ten minutes on its first batch.
+- `signFiles` tries a trial signature before it signs, because SimplySign's session can end while the release builds. When that trial fails, the release stops with `couldn't sign the native files: signtool didn't answer within 60 seconds …`. Nothing has been signed by then.
+- A batch that runs past its ten minutes now says SimplySign Desktop may be waiting for you to sign in. The Steward (0.36.62) reads all of these as "waits until this PC can sign", not as a failed release.
 - **`ModalCard`** (moved to modal.tsx, still exported from feedback.tsx and index.ts) keeps focus in it: Tab and Shift+Tab go round it. Only the top modal hears Escape. Focus moves to an element marked `data-autofocus`, else the card. A page that draws `onClose` anew each render no longer moves focus about while it's open. New props: `role` (`alertdialog`), `describedBy` and `modalClassName`.
 - **`Button`:** an `onPress` that returns a promise spins the button until it settles, as `loading` does. `onPress` is `() => unknown` now; a `() => void` still fits.
 - **`PostButton`:** its `confirm` asks in the page's own dialog. The server's error or `message` is said there once the POST is done and the page has looked for news, and a server that doesn't answer is said too (before, nothing was). Its BusyArea waits with it.
@@ -54,9 +74,6 @@ A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the p
 
 ### For an agent
 
-- Nothing to do for the wake task: nothing is woken until an agent calls `keepWakeTask`.
-- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. Its `holdMinutes` is the longest the work may take. Once the work is done it calls `endWakeTask()`, but not when the agent merely stops (an update): the task then holds the PC until the agent is back. While it works it holds the PC with `stayAwake(what)`, as ever. Never wake a PC on battery, and never keep the screen on.
-- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
 - Nothing to do for PostButton, `data-confirm`, OnPageList, the Settings form or the tour: they use the page's own dialog by themselves.
 - A page of its own that calls `window.confirm()` or `window.alert()` calls `await confirmDialog(text)` or `await alertDialog(text)` instead, with the same words.
 - A button whose handler awaits is a `BusyButton` (or the kit's `Button`, whose `onPress` returns the promise). Wrap what the work changes in a `BusyArea`.

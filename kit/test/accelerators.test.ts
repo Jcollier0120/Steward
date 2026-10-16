@@ -702,6 +702,32 @@ test('a busy server is waited on, never started twice, and looked at afresh each
   }
 });
 
+test("a kind's own timeouts: over its accelerator's, for its own requests alone (vision encoding pictures on the processor)", async () => {
+  fresh();
+  noGames();
+  // The request takes 600 ms, the warm-up none: longer than 200 ms, however late a busy PC fires that timer (paced).
+  const server = await fakeServer((b) => ({ text: 'seen', delayMs: b.max_tokens === 1 ? 0 : paced(600) }));
+  const picture = 'data:image/png;base64,iVBORw0KGgo=';
+  const short = { requestBaseMs: 200, requestPerTokenMs: 0 };
+  try {
+    const cfg = (more: object) => config({ accelerators: [{ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: server.baseUrl, model: 'm' }, ...more }] });
+    // Vision's own short ones fail its request; chat, on the same server, keeps the rules'.
+    const visionShort = cfg({ vision: { model: 'v', timeouts: short } });
+    assert.deepEqual(visionShort.accelerators[0].vision!.timeouts, short, "read, on the chat endpoint's server too");
+    assert.equal((await new Npu(visionShort).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 })).text, 'seen');
+    fresh();
+    await assert.rejects(new Npu(visionShort).vision(picture, 'What is it?', { maxTokens: 4 }), /timed out/);
+    // The accelerator's short, vision's own long: vision answers on its own, each it gives over the accelerator's.
+    fresh();
+    const accShort = cfg({ timeouts: short, vision: { model: 'v', timeouts: { requestBaseMs: 15_000 } } });
+    assert.equal((await new Npu(accShort).vision(picture, 'What is it?', { maxTokens: 4 })).text, 'seen');
+    fresh();
+    await assert.rejects(new Npu(accShort).chat([{ role: 'user', content: 'Hi' }], { maxTokens: 10 }), /timed out/);
+  } finally {
+    await server.close();
+  }
+});
+
 test("an accelerator's own timeouts: its requests run on them, and a server found still loading gets the cold-load allowance", async () => {
   fresh();
   noGames();
