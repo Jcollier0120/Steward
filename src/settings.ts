@@ -627,7 +627,7 @@ export const SETTINGS_SCHEMA: Field[] = [
       { key: 'on', kind: 'switch', label: 'Raise alarms' },
       { key: 'toast', kind: 'switch', label: 'A Windows notification for each', help: 'Clicking it opens this page.' },
       { key: 'waitingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR waiting for', help: 'A draft no one marked ready, conflicts, failing checks, a version that clashes.' },
-      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A conflicting PR holding others up for', help: 'The lowest version merges first, so the PRs behind it wait. A conflict its author was told about and left this long goes to the Wright.' },
+      { key: 'blockingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: 'A PR holding others up for', help: 'The lowest version merges first, so the ready PRs behind one not ready yet (a draft, a conflict) wait. Its alarm comes after this long, with a button that moves it past the others. A conflict its author was told about and left this long goes to the Wright.' },
       { key: 'problemHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A Surveyor's problem lasting", help: 'Its warnings and notes never raise one.' },
       { key: 'tastingHours', kind: 'whole', min: 1, max: 168, unit: 'hours', label: "A release the Aletaster's tasting holds for" },
     ],
