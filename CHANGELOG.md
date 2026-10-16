@@ -14,13 +14,29 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - Snapdragon X2 PCs with more memory, first-generation Snapdragon X PCs, and Intel and AMD PCs are unchanged.
 - The NPU benchmark no longer counts a test job as unsteady just because the model wrote answers of different lengths from one try to the next: it now compares the tries as if their answers were the same length. Until now this most likely kept every full run on a Snapdragon off the leaderboard, even on a quiet PC.
 - The kit the Steward hands out (2.78.0) brings this to every agent.
-- That kit also brings work not released before: on an agent's page, a button whose work takes time spins while it runs, the part of the page it changes waits with it, and questions and messages appear in the page's own dialogs instead of the browser's.
-- It also brings: on a PC with Intel's integrated graphics, reading pictures works again. Each picture is encoded on the processor, and the rest stays on the graphics. A PC set up before gets this at the keeper's next look, with nothing to download or set up again.
 
 ### Before you update
 
 - A 16 GB Snapdragon X2 already set up keeps the 4B until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3-VL-2B (1.9 GB). The 4B stays on disk (4.4 GB) until you remove it: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
 - It was measured on a Snapdragon X2 Elite with 48 GB, not yet on a 16 GB PC.
+
+## 0.36.62
+
+**SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**
+
+### What's new
+
+- With kit 2.77.9, a button on the Steward's page whose work takes a while spins until it's done, and the part of the page it changes waits with it. Questions and messages appear in the page's own dialogs instead of the browser's.
+
+### What changed
+
+- SimplySign Desktop's session sometimes ends while a release is being built. When that happened, the release used to wait ten minutes for signtool, then fail for good and raise an alarm. Every other release that signs in the same round then built and waited its own ten minutes. Now the release waits until this PC can sign, as it does when the Steward finds the key gone before it builds. The other releases that sign don't build, and the rounds don't try signtool again for a quarter of an hour.
+- This Steward hands out kit 2.77.9. A release made with it gives up on signtool within a minute: it checks once before building and again before signing, since the session may end in between.
+- This also covers Manor's setup, and the staff still on an older kit. Their releases still wait their ten minutes the first time, but no longer fail for it, and the round's other signed releases don't wait too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The staff whose releases sign get the one-minute limit when they take kit 2.77.9.
 
 ## 0.36.61
 

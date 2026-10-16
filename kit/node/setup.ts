@@ -262,11 +262,30 @@ export const ENCODER_ON_PROCESSOR = '--no-mmproj-offload';
  * in 5 s and read the check picture in 6 s, the screenshot in 93 s and one twice its size in 228 s, at below-normal
  * priority on a busy PC. A card is Intel's by its id (every Intel adapter's name starts with Intel), and integrated
  * when it has under OWN_MEMORY_GB of its own, as sizing counts it; Intel's cards with memory of their own (Arc A and B)
- * weren't measured, and keep the encoder on the card.
+ * weren't measured, and keep the encoder on the card. Such a card's vision also caps a picture (PICTURE_CAP) and has
+ * its own time (VISION_ON_PROCESSOR_TIMEOUTS).
  */
 export function encodesOnProcessor(card: { id: string; memoryGb?: number; device: string | null }): boolean {
   return card.id.startsWith('gpu-intel-') && (card.memoryGb ?? 0) < OWN_MEMORY_GB && /^Vulkan\d*$/.test(card.device ?? '');
 }
+
+/**
+ * llama-server's flag capping the tokens a picture is encoded into, and the cap when the processor encodes them
+ * (encodesOnProcessor). Measured there through the kit's own requests (b11669, 2026-10-15, below-normal priority on a
+ * busy PC), a picture's first question took: a 720 × 1,600 phone screenshot 27 s uncapped (1,188 tokens), 29 s capped
+ * (1,025); a 1,920 × 1,200 desktop one 89 s uncapped (2,318), 31 s capped (1,038); one twice its size 29 s capped.
+ * Every answer was the same either way (a heading quoted, a count, a window title, a percentage, a clock), and a
+ * question again on the same picture took 1 to 2 s (llama-server keeps it).
+ */
+export const PICTURE_CAP = '--image-max-tokens';
+export const PICTURE_TOKENS = 1024;
+
+/**
+ * Vision's own time on those cards: a background request may take 90 s and 0.3 s a token it answers, three times the
+ * slowest first question measured (PICTURE_TOKENS), where the rules' 15 s would fail Reeve's screens' 4-token questions
+ * and mark the card failed, its chat too, for ten minutes. Their chat keeps the rules'.
+ */
+export const VISION_ON_PROCESSOR_TIMEOUTS = { requestBaseMs: 90_000 } as const;
 
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
 function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
@@ -274,7 +293,7 @@ function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | '
     case 'chat':
       return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
     case 'vision':
-      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
+      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR, PICTURE_CAP, String(PICTURE_TOKENS)] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
     case 'embed':
       // The compute buffer grows with -c × -ub: at -c 8192 -ub 8192 it was one 4.7 GB allocation, which the Adreno
       // X2-90's OpenCL refused ("failed to allocate compute pp buffers"). At -c 4096 -ub 512 (b11669, 2026-10-15) a
@@ -378,6 +397,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
     a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(kind, e, m.mmproj, model)] };
     if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
+    if (kind === 'vision' && encodesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
   }
   return a;
 }
@@ -1272,9 +1292,10 @@ export function readCardRefresh(configFile: string): CardRefreshRecord | null {
 }
 
 /**
- * config.json with ENCODER_ON_PROCESSOR added to each card's vision command that an older kit's setup wrote without it
- * (encodesOnProcessor), after its `--mmproj` file, and the cards changed. A command that isn't llama-server's, or that
- * already says where the encoder runs (either way), is left as it is.
+ * config.json with each card's vision brought up to what setup now writes for it (encodesOnProcessor) where an older
+ * kit's setup wrote less, and the cards changed: ENCODER_ON_PROCESSOR after its `--mmproj` file, PICTURE_CAP after
+ * that, and VISION_ON_PROCESSOR_TIMEOUTS. Each is added only when missing, so a cap or timeouts a person set stay
+ * theirs. A command that isn't llama-server's, or that keeps the encoder on the card (`--mmproj-offload`), is left as it is.
  */
 export function withEncoderOnProcessor(raw: Record<string, any>): { raw: Record<string, any>; changed: string[] } {
   if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
@@ -1285,10 +1306,22 @@ export function withEncoderOnProcessor(raw: Record<string, any>): { raw: Record<
     const at = cmd.indexOf('--mmproj');
     const dev = cmd.indexOf('--device');
     if (at < 0 || at + 1 >= cmd.length || !/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? ''))) return a;
-    if (cmd.includes(ENCODER_ON_PROCESSOR) || cmd.includes('--mmproj-offload')) return a;
+    if (cmd.includes('--mmproj-offload')) return a;
     if (!encodesOnProcessor({ id: a.id, memoryGb: typeof a.memoryGb === 'number' ? a.memoryGb : undefined, device: dev >= 0 ? (cmd[dev + 1] ?? null) : null })) return a;
+    const on = cmd.indexOf(ENCODER_ON_PROCESSOR);
+    const add = [...(on < 0 ? [ENCODER_ON_PROCESSOR] : []), ...(cmd.includes(PICTURE_CAP) ? [] : [PICTURE_CAP, String(PICTURE_TOKENS)])];
+    const timeouts = a.vision.timeouts === undefined;
+    if (!add.length && !timeouts) return a;
     changed.push(a.id);
-    return { ...a, vision: { ...a.vision, startCommand: [...cmd.slice(0, at + 2), ENCODER_ON_PROCESSOR, ...cmd.slice(at + 2)] } };
+    const after = on < 0 ? at + 2 : on + 1;
+    return {
+      ...a,
+      vision: {
+        ...a.vision,
+        ...(add.length ? { startCommand: [...cmd.slice(0, after), ...add, ...cmd.slice(after)] } : {}),
+        ...(timeouts ? { timeouts: { ...VISION_ON_PROCESSOR_TIMEOUTS } } : {}),
+      },
+    };
   });
   return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
 }
@@ -1296,9 +1329,10 @@ export function withEncoderOnProcessor(raw: Record<string, any>): { raw: Record<
 /**
  * The cards' vision commands brought up to this kit's (withEncoderOnProcessor) on a PC an older kit set up: setup writes
  * them once, so the keeper's look does it, once for each kit version, as the NPU's refresh does (npu-refresh.ts), and a
- * kit never redoes what a newer one looked at. Nothing is started or stopped: on the cards it's for, the old command
- * never stays up, and a server running elsewhere takes the new one at its next start. A person who takes the flag out
- * again keeps it out until the next kit. The cards changed; none when config.json couldn't be read (the next look tries).
+ * kit never redoes what a newer one looked at. Nothing is started or stopped: on the cards it's for, a command without
+ * the flag never stays up, a server running with the flag takes the cap at its next start, and an agent takes the time
+ * when it next reads config.json. A person who takes the flag, the cap or the time out again keeps it out until the next kit. The cards
+ * changed; none when config.json couldn't be read (the next look tries).
  */
 export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
   const had = readCardRefresh(o.configFile);
@@ -1307,8 +1341,11 @@ export function refreshCardVision(o: { configFile: string; kit: string; now?: ()
   if (file.error) return [];
   const { raw, changed } = withEncoderOnProcessor(file.raw);
   const saved = changed.length ? writeConfigFile(o.configFile, raw, o.validate ?? validateKeeperConfig) : { problems: [] };
-  if (saved.problems.length) o.log(`the vision command of ${changed.join(', ')} keeps the encoder on the card: config.json wasn't written: ${saved.problems.join('; ')}`);
-  else if (changed.length) o.log(`${changed.join(', ')}: vision now encodes pictures on the processor (${ENCODER_ON_PROCESSOR} added by kit ${o.kit}): these graphics lose the device encoding them`);
+  if (saved.problems.length) o.log(`the vision of ${changed.join(', ')} keeps its command and time: config.json wasn't written: ${saved.problems.join('; ')}`);
+  else if (changed.length)
+    o.log(
+      `${changed.join(', ')}: vision now encodes pictures on the processor, at most ${PICTURE_TOKENS} tokens each, with ${VISION_ON_PROCESSOR_TIMEOUTS.requestBaseMs / 1000} s a request (kit ${o.kit}): these graphics lose the device encoding them, and the processor takes about 30 s a picture`,
+    );
   const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
   try {
     writeFileSync(cardRefreshFile(o.configFile), JSON.stringify(record, null, 2) + '\n');

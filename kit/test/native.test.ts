@@ -19,7 +19,7 @@ const { APP, appRoot } = await import('./fixture/src/app.ts');
 const { ARCHES, archOf, buildNative, keepOwnArch, nativeFolder, nativeOf, nativeRelease, signable, stageNative } = await import('./fixture/src/kit/native.ts');
 const { appFolder, install, readRelease } = await import('./fixture/src/kit/install.ts');
 const { nativeFor } = await import('./fixture/src/kit/release.ts');
-const { findSignTool, signArgs, signProblem } = await import('./fixture/src/kit/sign.ts');
+const { findSignTool, signArgs, signFiles, signProblem, trialProblem, TRIAL_MS } = await import('./fixture/src/kit/sign.ts');
 type Deps = import('./fixture/src/kit/install.ts').InstallDeps;
 type Native = import('./fixture/src/kit/native.ts').Native;
 
@@ -242,6 +242,28 @@ test('signing: the x64 signtool of the newest SDK, timestamped, and a cloud key 
   assert.deepEqual(signArgs(['a.exe', 'b.dll'], THUMB, 'http://time.certum.pl'), ['sign', '/sha1', THUMB, '/fd', 'SHA256', '/tr', 'http://time.certum.pl', '/td', 'SHA256', 'a.exe', 'b.dll']);
   assert.match(signProblem('SignTool Error: No certificates were found that met all the given criteria.', THUMB)!, /connect SimplySign Desktop/);
   assert.equal(signProblem('SignTool Error: The specified timestamp server could not be reached.', THUMB), null);
+});
+
+// Kit 2.77.9: SimplySign Desktop asks for its sign-in once its session has ended, and holds signtool until someone
+// answers. A trial that timed out counted as "can sign", and signFiles then waited ten minutes a batch.
+test("signing: a trial signature that doesn't answer in a minute is can't sign, and signFiles tries one before it signs", () => {
+  const calls: { args: string[]; timeout: number }[] = [];
+  const answering = (trial: { ok: boolean; timedOut: boolean; text: string }) => (tool: string, args: string[], timeout: number) => {
+    calls.push({ args, timeout });
+    return args.includes('/tr') ? { ok: true, timedOut: false, text: 'Successfully signed' } : trial;
+  };
+  const hung = answering({ ok: false, timedOut: true, text: '' });
+  assert.match(trialProblem('signtool.exe', THUMB, { run: hung })!, /^signtool didn't answer within 60 seconds with the signing certificate's key \(6B654D9C.*\): SimplySign Desktop may be waiting for you to sign in/);
+  assert.deepEqual(calls.map((c) => [c.args.slice(0, 5), c.timeout]), [[['sign', '/sha1', THUMB, '/fd', 'SHA256'], TRIAL_MS]], 'a trial signature, no timestamp, a minute');
+  assert.match(trialProblem('signtool.exe', THUMB, { run: answering({ ok: false, timedOut: false, text: 'SignTool Error: No certificates were found that met all the given criteria.' }) })!, /connect SimplySign Desktop/);
+  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering({ ok: false, timedOut: false, text: 'SignTool Error: something else' }) }), null, 'anything else is left to the real signing');
+  assert.equal(trialProblem('signtool.exe', THUMB, { run: answering({ ok: true, timedOut: false, text: '' }) }), null);
+
+  // The key's sign-in started waiting while the release built: signFiles gives up after the trial's minute, signing nothing.
+  calls.length = 0;
+  const signer = { signtool: 'signtool.exe', thumbprint: THUMB, timestamp: 'http://time.certum.pl' };
+  assert.throws(() => signFiles(signer, ['a.exe', 'b.dll'], () => {}, { run: hung }), /^Error: couldn't sign the native files: signtool didn't answer within 60 seconds .*SimplySign Desktop may be waiting for you to sign in/);
+  assert.deepEqual(calls.map((c) => c.timeout), [TRIAL_MS], 'only the trial ran');
 });
 
 test('npm run release carries both processors\' native files and their notices; publishing them unsigned is refused', { skip: process.platform !== 'win32' && 'needs Windows tar.exe and PowerShell' }, () => {
