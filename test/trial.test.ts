@@ -10,7 +10,8 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-trial-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, raisesKit, TRIAL_GOING, TRIAL_NO_ROOM, trialGivesWay, trialParallel, trialsOnTheirOwn } = await import('../src/stages/trial.ts');
+const { KIT_BREAKS_LABEL, kitTrialHold, kitTrialDirOf, kitTrialsFile, NEXT_BUILD_TRIAL, raisesKit, TRIAL_GOING, TRIAL_NO_ROOM, trialGivesWay, trialParallel, trialsOnTheirOwn, trialWaitsForNextBuild } = await import('../src/stages/trial.ts');
+const { apart, apartNow } = await import('../src/stages/slots.ts');
 const { APP } = await import('../src/app.ts');
 const { writeJson } = await import('../src/kit/store.ts');
 const { bumpOne, kitTrialLogOf, trialBranch, trialDirOf } = await import('../src/stages/bump.ts');
@@ -325,6 +326,79 @@ test("beside the rounds (the Steward's page): the PR waits at once while its age
     assert.match(settled.c.lines.join('\n'), /kit 1\.0\.1 tried on every agent: 2 passed, 0 failed/);
   } finally {
     trialsOnTheirOwn(null);
+  }
+});
+
+test("beside the rounds, a kit's trial never runs beside the Steward's whole suite: it waits for it to end, trying nothing", async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  trialsOnTheirOwn(() => {});
+  let end!: () => void;
+  const ended = new Promise<void>((r) => (end = r));
+  const whole = apart('whole suite', () => ended);
+  try {
+    const c = ctx();
+    let going = 0;
+    assert.equal(await kitTrialHold(c.c, me, pr(), { going: () => going++ }), `${TRIAL_GOING}: it waits for the Steward's whole suite running beside the rounds to end first, so the two never test at once; the rounds go on meanwhile`);
+    assert.equal(going, 1, 'a brief wait: the next round comes sooner');
+    assert.ok(!c.c.lines.some((l) => l.includes('trial:') || l.includes('beside the rounds')), c.c.lines.join('\n'));
+  } finally {
+    end();
+    await whole;
+    trialsOnTheirOwn(null);
+  }
+  assert.equal(apartNow('whole suite'), null);
+});
+
+test('a build tries one kit: a head that moved after its trial began in the build waits for the next build; a catch-up of it does not', async () => {
+  rmSync(kitTrialsFile(), { force: true });
+  const due = '2026-10-16T17:00:00.000Z';
+  const inBuild = () => {
+    const x = ctx();
+    x.c.settings.employees = [good];
+    x.c.build = { due, name: 'the 13:00 build' };
+    return x;
+  };
+  const kept = () => JSON.parse(readFileSync(kitTrialsFile(), 'utf8'));
+  /** `files` committed in `dir` and pushed as the PR's head: its commit. */
+  const commitAt = (dir: string, message: string, files: Record<string, string>) => {
+    for (const [f, t] of Object.entries(files)) writeFileSync(path.join(dir, f), t);
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '--quiet', '-m', message);
+    sh(dir, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+    return sh(dir, 'rev-parse', 'HEAD');
+  };
+  const first = inBuild();
+  assert.equal(await kitTrialHold(first.c, me, pr()), null, first.c.lines.join('\n'));
+  assert.equal(kept()[`7@${head}`].build, due, 'the build it began in');
+
+  // Its author pushes a change to the kit while the build goes on.
+  const moved = commitAt(steward.checkout, 'Kit 1.0.2', { 'kit/VERSION': '1.0.2\n', 'kit/node/npu.ts': 'export const npu = 3;\n' });
+  try {
+    const next = inBuild();
+    const words = `${NEXT_BUILD_TRIAL}: this build tried kit 1.0.1 already (#7), before it moved to ${moved.slice(0, 7)}, and a build tries one kit`;
+    assert.equal(await kitTrialHold(next.c, me, pr({ headOid: moved })), words);
+    assert.ok(!next.c.lines.some((l) => l.includes('trial:')), next.c.lines.join('\n'));
+    assert.equal(await trialWaitsForNextBuild(next.c, me, pr({ headOid: moved })), words, 'merge.ts asks before its test at head');
+    assert.equal(await trialWaitsForNextBuild(next.c, me, pr()), null, 'the head the build tried');
+    // A catch-up of the head it tried, changing no kit but its version: the trial's verdict stands, in this build.
+    sh(steward.checkout, 'reset', '--quiet', '--hard', head);
+    const caught = commitAt(steward.checkout, 'Caught up', { 'README.md': 'Steward, caught up in the build\n' });
+    const carried = inBuild();
+    assert.equal(await trialWaitsForNextBuild(carried.c, me, pr({ headOid: caught })), null);
+    assert.equal(await kitTrialHold(carried.c, me, pr({ headOid: caught })), null, carried.c.lines.join('\n'));
+    sh(steward.checkout, 'reset', '--quiet', '--hard', moved);
+    sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
+
+    // Between builds, it is tried, for the next build.
+    const between = ctx();
+    between.c.settings.employees = [good];
+    assert.equal(await trialWaitsForNextBuild(between.c, me, pr({ headOid: moved })), null);
+    assert.equal(await kitTrialHold(between.c, me, pr({ headOid: moved })), null, between.c.lines.join('\n'));
+    assert.ok(between.c.lines.some((l) => l.startsWith('[good] kit 1.0.2 trial: done')), between.c.lines.join('\n'));
+    assert.equal(kept()[`7@${moved}`].build, undefined);
+  } finally {
+    sh(steward.checkout, 'reset', '--quiet', '--hard', head);
+    sh(steward.checkout, 'push', '--quiet', '--force', 'origin', 'HEAD:refs/pull/7/head');
   }
 });
 

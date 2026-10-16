@@ -358,7 +358,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   });
   // And the next build's tests between builds (stages/prepare.ts): run beside the rounds, so the build only merges. Not
   // under node --test, where a page's round tests what it asks for alone.
-  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`build prep: ${line}`) });
+  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`merge ahead: ${line}`) });
   // And a kit's rollout (stages/rollout.ts): its bumps, checks and pushes run beside the rounds, which go on merging. Once
   // it ends, a round at once: it merges the kit PRs opened, reports what the rollout did, and looks again at the
   // employees whose bump or push failed.

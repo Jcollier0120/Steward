@@ -216,7 +216,7 @@ async function vouchedHere(ctx: Ctx, e: Employee, pr: PrInfo, scope: AffectedSco
  * by its tree (whole.ts), so the gate before the kit's release (stages/wholesuite.ts), on the same tree once merged up to
  * date, isn't run again inside the build: on 2026-10-16 that gate took 14 to 35 minutes of the 08:00 build.
  */
-export const wholeAhead = (ctx: Pick<Ctx, 'build' | 'prepare'>, e: Pick<Employee, 'id'>, pr: PrInfo): boolean => !!ctx.prepare && !ctx.build && e.id === APP.id && raisesKit(pr);
+export const wholeAhead = (ctx: Pick<Ctx, 'build' | 'prepare'>, e: Pick<Employee, 'id'>, pr: PrInfo): boolean => ((!!ctx.prepare && !ctx.build) || !!ctx.build?.ahead) && e.id === APP.id && raisesKit(pr);
 
 async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
   const now = () => new Date().toISOString();

@@ -98,7 +98,7 @@ export function readsInPlace(text: string, name: string): boolean {
 }
 
 /** A code file's folders of its own (`new URL('../core/', import.meta.url)`): each file in them is one it reads. */
-const FOLDER = /new URL\(\s*(['"])(\.{1,2}\/(?:[^'"]*\/)?|\.{1,2})\1\s*,\s*import\.meta\.url\s*\)/g;
+export const FOLDER = /new URL\(\s*(['"])(\.{1,2}\/(?:[^'"]*\/)?|\.{1,2})\1\s*,\s*import\.meta\.url\s*\)/g;
 
 /** A changed file, as git names it: its status (A, M, D, R…) and path. */
 export interface Changed {
