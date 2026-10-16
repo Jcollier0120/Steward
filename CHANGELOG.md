@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.60
+
+**A new kit's rollout no longer holds up merges: ready pull requests merge while the staff are being moved to it.**
+
+### What changed
+
+- When a new kit comes out, the Steward moves each of the staff to it: it raises their version, runs their checks, and opens a pull request. That used to happen inside a round, so every ready pull request waited until all of it was done. Rounds that rolled a kit out took 20 to 56 minutes this week, against 15 to 20 for the others. Now the rollout runs beside the rounds, and the next round starts at once and merges what's ready.
+- While the rollout is working on one of the staff, the rounds leave that one alone and look at it again once the rollout is done with it. The round after the rollout ends lists what it did, merges its pull requests and releases them.
+- If another rollout is already running on this PC (a round started from a terminal, say), the round leaves the kit to that one, and looks again next round.
+- The Steward checks that this PC can sign before it starts a release that signs. If SimplySign Desktop is waiting for you to sign in, that check used to wait as well, and so did the round behind it, for up to half an hour. Now a check that gets no answer within a minute counts as "can't sign yet". The release waits, without holding the round, and the Steward doesn't ask signtool again for a quarter of an hour. The alarm says SimplySign Desktop may be waiting for you to sign in.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.59
 
 **Kit 2.77.6: the local AI's NPU unloads its models about five minutes after its last request, even while Reeve indexes on the graphics card.**
