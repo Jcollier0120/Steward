@@ -4,6 +4,7 @@ import { APP } from '../app.ts';
 import { CHECKS_AT_ONCE, checksPaceCap, checksRuns, type ChecksRun } from './checks-pace.ts';
 import { lineSnapshot, slotDirs, type Lane } from './npu-queue.ts';
 import { agentsAtOnce, firstRoundLockDir, pace, workLockDir, type Pace } from './pace.ts';
+import { passOnOtherPcs } from './manor.ts';
 import { dataFile, readJson, writeJson } from './store.ts';
 import { workTasks, type Task, type WorkFields } from './work-tasks.ts';
 
@@ -119,6 +120,13 @@ export interface WorkResult {
   what?: string;
   /** What failed, or anything else worth a line. */
   note?: string;
+  /** The commands it ran (a repository's checks: kit 2.77.0), so a pass stands in only for the checks it ran. */
+  commands?: string[];
+  /** The Node.js it ran on (process.versions.node) and the OS (process.platform), kit 2.77.0: toolchainHere(). */
+  node?: string;
+  platform?: string;
+  /** The PC that ran it, for a pass taken from another PC on the licence (passFor, kit 2.77.0): this PC didn't. */
+  from?: { id: string; name: string };
 }
 
 /** Something that holds the agent's work up: what is held, by what, and since when. */
@@ -200,6 +208,105 @@ export const resultFor = (q: Pick<WorkResult, 'kind' | 'repo' | 'tree' | 'commit
 export function resetResults(): void {
   unkept = {};
   if (kept()) writeJson(workResultsFile(), {});
+}
+
+// ---------------------------------------------------------------- a pass that stands in (kit 2.77.0)
+
+/**
+ * How long a pass of a tree stands in for running the same checks again: a day. The tree fixes the code, its lockfile
+ * and the kit it pins, but not what the checks reach outside it (the date, the network, a tool on the PC updated since).
+ * A day covers the same code tested for its pull request, its vouch, its train and on main once merged, on each PC, and
+ * is the window in which the Steward takes the Assayer's check of a folder (the Steward's assayed.ts).
+ */
+export const PASS_STANDS_MS = 24 * 3600_000;
+/** How far ahead of this PC's clock another PC's pass may say it ran: two PCs' clocks differ a little. */
+const CLOCK_SKEW_MS = 10 * 60_000;
+
+/** What a result is matched on besides its code: Node.js's version (its major must be the same) and the OS. */
+export const toolchainHere = (): { node: string; platform: string } => ({ node: process.versions.node, platform: process.platform });
+
+/** What a pass must be of to stand in for running work again: a kind of work on a repository's tree, of these commands (none asked: any). */
+export interface PassQuery {
+  kind: string;
+  repo: string;
+  tree: string;
+  commands?: string[];
+}
+
+/** Who else is asked for a pass (passFor): another PC's result, with `from` saying which; null for no one. */
+export type PassElsewhere = ((q: PassQuery) => Promise<WorkResult | null>) | null;
+
+const major = (v: string | undefined) => (v ?? '').replace(/^v/, '').split('.')[0];
+
+/**
+ * Why `r` doesn't stand in for running `q` again, or null when it does. It must have passed, and be of the whole of
+ * that kind (only the tests a change reached, picked against some base, never stand in for the whole checks), of the
+ * same repository and tree, under PASS_STANDS_MS old, on the same Node.js major and OS as here, and of every command
+ * asked. A result recorded before kit 2.77.0 says none of these, and so never stands in.
+ */
+export function whyNotPass(r: WorkResult, q: PassQuery, o: { now?: number; toolchain?: { node: string; platform: string } } = {}): string | null {
+  const now = o.now ?? Date.now();
+  const here = o.toolchain ?? toolchainHere();
+  if (!r.ok) return 'it failed';
+  if (r.kind !== q.kind) return r.kind === `affected ${q.kind}` ? 'only the tests its change reached ran' : `it was ${r.kind}`;
+  if ((r.repo ?? '').toLowerCase() !== q.repo.toLowerCase()) return 'another repository';
+  if ((r.tree ?? '').toLowerCase() !== q.tree.toLowerCase()) return 'other code';
+  const at = Date.parse(r.at);
+  if (!Number.isFinite(at) || at > now + CLOCK_SKEW_MS) return 'no time it can be trusted';
+  if (now - at > PASS_STANDS_MS) return 'more than a day old';
+  if (!r.node) return "it doesn't say which Node.js";
+  if (major(r.node) !== major(here.node)) return `on Node.js ${major(r.node)}, not ${major(here.node)}`;
+  if (!r.platform) return "it doesn't say which OS";
+  if (r.platform !== here.platform) return `on ${r.platform}, not ${here.platform}`;
+  if (q.commands?.length) {
+    if (!r.commands) return "it doesn't say which checks it ran";
+    const missing = q.commands.filter((c) => !r.commands!.includes(c));
+    if (missing.length) return `it didn't run ${missing.join(', ')}`;
+  }
+  return null;
+}
+
+/**
+ * The pass that stands in for running `q` again, or null: then run it. This PC's own result for the tree first
+ * (work-results.json); else another PC's on the licence, asked through Manor (manor.ts passOnOtherPcs: Manor 0.16.163
+ * and later, with Other PCs on; nothing when it's off, or older). Either must pass whyNotPass. A failure here newer than
+ * the other PC's pass, and that pass isn't taken: this PC's latest says how the code stands here. A failure elsewhere
+ * never spares a run. A pass taken from another PC is kept here as that PC's (`from`, at the time it ran there), so the
+ * next look here finds it at once and the Work page says where it ran. `elsewhere`: who else to ask (null: no one).
+ * Never throws.
+ */
+export async function passFor(q: PassQuery, o: { now?: number; elsewhere?: PassElsewhere } = {}): Promise<WorkResult | null> {
+  const now = o.now ?? Date.now();
+  try {
+    const here = resultFor(q);
+    if (here && !whyNotPass(here, q, { now })) return here;
+    const ask = o.elsewhere === undefined ? (x: PassQuery) => passOnOtherPcs(x, { agent: APP.id }) : o.elsewhere;
+    const there = ask ? await ask(q) : null;
+    if (!there?.from || whyNotPass(there, q, { now })) return null;
+    if (here && !here.ok && Date.parse(here.at) >= Date.parse(there.at)) return null;
+    recordResult(there);
+    return there;
+  } catch {
+    return null;
+  }
+}
+
+const KIND = /^[a-z][a-z -]{0,39}$/;
+const REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+
+/**
+ * GET /api/peer/result?kind=checks&repo=<owner/name>&tree=<git tree id> (server.ts): this agent's result for that tree,
+ * from all it keeps (work-results.json, not only the recent ones a status lists), for Manor to pass to another PC on the
+ * licence whose agent is about to run the same checks. Its own result only: one it took from another PC isn't passed
+ * on. Read only; null when it has none.
+ */
+export function peerResult(query: URLSearchParams): { json: unknown; status?: number } {
+  const kind = query.get('kind') || 'checks';
+  const repo = query.get('repo') ?? '';
+  const tree = (query.get('tree') ?? '').toLowerCase();
+  if (!KIND.test(kind) || !REPO.test(repo) || !SHA.test(tree)) return { status: 400, json: { error: 'Ask for kind=<the work>, repo=<owner/name> and tree=<its git tree id>.' } };
+  const r = resultFor({ kind, repo, tree });
+  return { json: { v: 1, result: r && !r.from ? r : null } };
 }
 
 /** A checkout's code as work starts on it, or ends: its HEAD's commit and tree, and whether nothing tracked is changed. */

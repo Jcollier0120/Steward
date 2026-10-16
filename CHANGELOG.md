@@ -2,6 +2,59 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.52
+
+**A draft holding a repository's version queue can be moved out of the way in one click.**
+
+### What's new
+
+- The alarm for a pull request that has held a version queue for an hour (a draft, usually) now has a **Move it past the others** button, here and in Manor's **Needs you**. It asks first. Then the Steward gives that pull request a version above every other one in line, tells its author in a comment on the pull request, and clears the alarm. The pull requests that waited behind it merge at the round that follows, which comes at once.
+- Nothing is pushed to the moved pull request's branch, so it works for anyone's pull request, a fork's too. Once it is ready, the Steward catches it up to its new version itself where it can (a pull request from the repository itself, with Catch up on); otherwise the comment asks its author to set that version.
+- Drafts just above it that would hold the queue next are moved with it, so one click frees the queue. The alarm names them.
+- **What holds the version queues** on the Steward's page has the same button, so you needn't wait for the hour.
+- `move-past <repository> <pull request number>` does the same from a terminal.
+
+### What changed
+
+- A moved pull request that isn't ready gives up its turn. One marked ready afterwards waits its turn at its new version, behind the pull requests it was moved past, rather than merging first at its old one.
+- The move is recorded with the version claims every PC shares, so another PC whose turn it is to merge in that repository honours it too.
+- A pull request by someone outside Settings' team, which the Steward never merges, no longer counts as holding a version queue. Its draft no longer raises an alarm or a heads-up, and the pull requests above it no longer count as waiting for it. It is still listed in the queue.
+- Settings' **A PR holding others up for** (it was "A conflicting PR holding others up for") now says it covers drafts and other pull requests that aren't ready, as the alarm already did.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor shows the button in Needs you from Manor 0.16.164; an older Manor shows these alarms with Dismiss only.
+
+## 0.36.51
+
+**Code that already passed its checks isn't tested again: not on this PC, and, with Manor's Other PCs on, not on another of your PCs either.**
+
+### What's new
+
+- Before the Steward runs a repository's checks, it looks for a pass of exactly the same code. It doesn't matter which commit the code came from, only that the code is the same. It looks in three places:
+  - the Assayer's check of that folder, as before for a vouch;
+  - this PC's own results;
+  - with Other PCs on, the other PCs on your licence, asked through Manor (Manor 0.16.163 and later).
+
+  If it finds one, it takes it and runs nothing. The round's log says so ("its checks passed on LAPTOP at 14:02, on exactly this code: not run again"), and so does Manor's Work page ("passed on LAPTOP, not run again here").
+- This counts wherever the Steward runs checks: testing a pull request, a vouch, a merge train, a build, a catch-up, and the whole suite before a kit's release. A vouch whose pass came from another PC says so on GitHub ("… passed on LAPTOP at abc1234").
+- A pass stands in only when:
+  - it covers all of the checks, not only the tests a change reached;
+  - it is for the same repository;
+  - it is less than a day old;
+  - it ran on the same Node.js major version and the same OS;
+  - it ran every check your Settings give that repository.
+- A failure never stands in. If the code failed here after it passed on another PC, the checks run here again.
+
+### What changed
+
+- Every run of the checks now records which commands it ran and on which Node.js and OS.
+- This release brings the Steward's kit 2.77.0, which gives every agent the same: a pass by code tree, from this PC or another PC on the licence.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Results kept before this version don't say which Node.js or checks they ran, so they are run again once. With Other PCs off, or with an older Manor, only this PC's own passes count.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**

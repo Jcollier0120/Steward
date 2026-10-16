@@ -12,6 +12,7 @@ import { onlyFlaky, runChecks, type FailedChecks } from './bump.ts';
 import { freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { stewardEmployee } from './selfmerge.ts';
 import { apart } from './slots.ts';
+import type { StoodIn } from './standin.ts';
 
 /**
  * The whole suite before a kit's release. A vouch and a PR tested here run only the tests each change reaches
@@ -145,7 +146,14 @@ async function runWhole(ctx: Ctx, repo: string, dir: string, o: { tag: string; c
     const why = stopped();
     return why ? { verdict: 'ended', why: `its whole suite at ${at} was stopped: ${why}` } : null;
   };
-  const first = await runChecks(ctx, e, dir, { say, failed: firstFailed });
+  const stoodIn: StoodIn = {};
+  const first = await runChecks(ctx, e, dir, { say, failed: firstFailed, stoodIn });
+  // The whole checks already passed on exactly this code (standin.ts): here, in the Assayer, or on another PC.
+  if (!first && stoodIn.by) {
+    const why = `the whole suite passed ${stoodIn.where} at ${at}, not run again`;
+    say(`${o.tag}: ${why}`);
+    return { verdict: 'passed', why };
+  }
   const ended = (failed: string): Verdict => ({ verdict: 'ended', why: `Windows ended its whole suite at ${at} (${failed})` });
   if (first) {
     const c = cut();

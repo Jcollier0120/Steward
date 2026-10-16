@@ -16,6 +16,7 @@ const { kickbacksFile } = await import('../src/stages/kickback.ts');
 const { conflictsFile, loadConflicts } = await import('../src/conflicts.ts');
 const { merge, mergeOne, standingOf } = await import('../src/stages/merge.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { resetResults } = await import('../src/kit/work-status.ts');
 type PrInfo = import('../src/stages/staff.ts').PrInfo;
 
 const conflict = (ours: string[], base: string[], theirs: string[]) => ['{', '<<<<<<< HEAD', ...ours, '||||||| abc1234', ...base, '=======', ...theirs, '>>>>>>> origin/main', '}'].join('\n');
@@ -43,6 +44,12 @@ test("the version: a PR's own stays while it's new; else the next free one above
   // One that leaves the version alone keeps the branch's, unless it asks for a release of a released one.
   assert.deepEqual(v({ head: '0.4.10', from: '0.4.10', asksRelease: false }), { version: '0.4.10', why: null });
   assert.deepEqual(v({ head: '0.4.10', from: '0.4.10' }), { version: '0.4.11', why: 'it asks for a release, and v0.4.10 is already released' });
+  // Moved past the others (move-past.ts): the version it was moved to, while that is still new.
+  assert.deepEqual(v({ own: '0.4.14' }), { version: '0.4.14', why: 'it was moved past the others to v0.4.14' });
+  assert.deepEqual(v({ own: '0.4.14', base: '0.4.12', released: ['0.4.10'] }), { version: '0.4.14', why: 'it was moved past the others to v0.4.14' }, 'overtaken meanwhile: still its own');
+  assert.deepEqual(v({ own: '0.4.12', base: '0.4.12', released: ['0.4.10'] }), { version: '0.4.13', why: 'the branch is at v0.4.12 already' }, 'the branch past it: the next free one');
+  assert.deepEqual(v({ own: '0.4.14', taken: ['0.4.14'] }), { version: '0.4.11', why: null }, 'taken after all: as before');
+  assert.deepEqual(v({ head: '0.4.15', own: '0.4.14' }), { version: '0.4.15', why: null }, 'its author set a higher one: kept');
 });
 
 /**
@@ -357,6 +364,8 @@ function kitRunner() {
 }
 
 test("a kit PR of the Steward's whose version lines conflict is caught up, its checks run before the push", async () => {
+  // An earlier test's catch-up came to the same code and passed the same checks, which would stand in (standin.ts).
+  resetResults();
   const { dir, checkout, pr } = kitPr('kit-versions');
   const { run, gh, ran } = kitRunner();
   const e = employee(checkout, { fill: '', test: ['node -e process.exit(0)'] });
