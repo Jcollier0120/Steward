@@ -18,6 +18,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **A build rolls out the newest kit, once.** When a newer kit is merging in the same build (its trial on the agents still going, or its release waiting for its whole suite), the rollout now waits for it. Before, the build sent the kit before it to every agent, with each one's checks run, and the next build bumped them all again. In a build, the newest kit now goes at once, without the hours a new kit waits to settle between builds.
 - **A build's releases run side by side.** Up to a third of the PC's cores at once (six at most), or Settings' parallel releases if that's more. Releases that sign start first, one after another in a lane of their own, since signing takes longest and the signing key answers one signtool at a time. The rest release beside them.
+- **A test that failed on a busy PC no longer holds up a release.** On a fully loaded PC, one of the Steward's own tests could have its request dropped after a minute's wait, which failed the whole suite before a kit's release. It now waits for the answer, up to three minutes.
 - **A build takes 30 minutes at most** unless you set it otherwise, and "A build takes at most … minutes" can no longer be set above 60. A build that runs out of time releases what it merged; the rest waits for the next build.
 
 ### Before you update
