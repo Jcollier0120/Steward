@@ -109,8 +109,10 @@ test('the page shows the kit, the stages, its rounds and Run now', async () => {
   const withTeam = (await renderStewardBody())({ ...body, staff: { ...body.staff, rows }, round: { ...body.round, repos: true }, team: ['someone'], teamNote: null });
   assert.match(withTeam, /data-post="\/api\/stage\/merge-team"[^>]*>/);
   assert.match(withTeam, />Merge the team(&#x27;|')s PRs</);
-  // By itself (Settings' default): its rounds; and Run now, in the title bar.
-  assert.match(withOne, /By itself, a round every 10 minutes while on duty: it merges every PR of its own and the team(&#x27;|')s that is ready/);
+  // By itself (Settings' default): it builds at set times, its rounds only looking between builds but for an urgent fix;
+  // and Run now, in the title bar.
+  assert.match(withOne, /It builds at set times \(00:00, 06:00, 12:00, 18:00; Settings: Build pipeline\): a build merges every PR of its own and the team(&#x27;|')s that is ready/);
+  assert.match(withOne, /Between builds, a round every 10 minutes only looks, except for an urgent fix/);
   assert.match((await renderStewardBody('RunNow'))(body), /data-post="\/api\/run"[^>]*>Run now</);
   // No turn taken yet: nothing said of release PCs.
   assert.equal(body.turns, null);

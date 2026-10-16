@@ -137,7 +137,7 @@ const run = async (cmd: string, args: string[], opts?: any) => {
   }
   return { code: 1, out: '', err: `no stand-in for gh ${args.join(' ')}` };
 };
-const buildNow = () => runStage('round', { buildNow: {} }, { run, ownKit: '9.9.9', self: { checkout: steward.checkout } });
+const buildNow = () => runStage('round', { buildNow: {} }, { run, ownKit: '9.9.9', self: { checkout: steward.checkout }, pipeline: true });
 const done = (out: { results: { outcome: string; message: string }[] }) => out.results.filter((r) => r.outcome !== 'skipped').map((r) => r.message.replace(/\b[0-9a-f]{7}\b/g, '…'));
 
 test("in a build, an agent's ready PR merges while the Steward's own PR is still being tested", async (t) => {
