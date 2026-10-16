@@ -17,6 +17,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - On a busy hour, with agents, checks and AI servers all working at once, the manor's work may take a little longer than before: it now gets 85% of the processor together, where it could take all of it. Each agent joins the shared limit when it next starts.
 - Nothing: it updates itself as usual. A benchmark run after the update is measured within the limit, so on a PC whose AI server leans on the processor, it may score a little lower than the same PC did before.
 
+## 0.36.69
+
+**In a build, the agents' pull requests no longer wait while the Steward tests its own.**
+
+### What changed
+
+- **In a build, the agents' merges go beside the Steward's own.** A pull request to the Steward that was pushed to after the build was prepared is still tested in the build, about ten minutes a run. Until now, each round of a build tested those first and only then merged the agents' ready pull requests: in one build, 34 kit pull requests waited an hour behind two such runs. Now the agents' pull requests merge while the Steward's are being tested. What depends on the Steward's own still waits for it: the kit's rollout (a newer kit merging in the same build goes first) and the build's releases.
+- **A kit released during those merges still reaches every agent in that round.** When the Steward releases a new kit while the agents' merges run, the agents' pull requests that waited for that kit are looked at again at once and merge in the same round, and the agents the round hadn't looked at are looked at too, so the rollout takes the kit to all of them together.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.68
 
 **A full pace never takes the whole PC any more: everything the manor runs, together, its AI model servers included, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
