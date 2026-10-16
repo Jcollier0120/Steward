@@ -4,7 +4,14 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.65
 
-**Kit 2.78.1: the Seneschal is one of the developer agents, and comes with Developer Pro.**
+**Where the Seneschal is on this PC, the Steward's checks wait their turn in its one order, and its jams are alarms. Kit 2.78.1.**
+
+### What's new
+
+- With the Seneschal on this PC (it comes with Developer Pro), each run of a repository's checks asks it for a turn first: a PR's test, a vouch, the whole suite before a kit's release, and each kit trial (one per agent and kit). What a person waits on goes first (`steward vouch`, a round started by Run now or Build now), then what a merge or a release waits on, then the rest, and kit trials last. The checks then run without a turn of the checks pace: the Seneschal's turn is theirs, so the PC isn't held back twice.
+- A pass of exactly the same checks on the same code that the Seneschal already has (another agent ran them) stands in for running them again. A failure it has never does: the checks run here.
+- A task the Seneschal has left waiting far past its usual time is raised as an alarm, with a link to the Seneschal's page.
+- Without the Seneschal, with it off duty, or on a PC without Developer Pro, the checks run exactly as before.
 
 ### What changed
 
@@ -14,7 +21,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ### Before you update
 
-- Nothing: it updates itself as usual.
+- Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
 
 ## 0.36.61
 

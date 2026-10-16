@@ -36,6 +36,7 @@ import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
 import { buildWhen, loadPipeline, pipelineMode, pipelineView } from './pipeline.ts';
 import { keepHeads } from './heads.ts';
+import { withLane } from './stages/seneschal.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -267,7 +268,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       const look = lookNext;
       lookNext = [];
       const ask: StageAsk = full ? { full, ...extra } : loadSettings().byItself ? (look.length ? { look } : {}) : { tendOnly: true };
-      const out = await inStage(end, () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) }));
+      // A person started it (Run now, Build now): its checks go in the Seneschal's first lane (stages/seneschal.ts).
+      const stage = () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      const out = await inStage(end, () => (full ? withLane('person', stage) : stage()));
       ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;

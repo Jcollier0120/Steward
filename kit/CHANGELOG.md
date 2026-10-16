@@ -4,7 +4,11 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.1
 
-**The Seneschal is one of the manor's developer roles, and comes with Developer Pro.**
+**The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts.**
+
+### What's new
+
+- **node/seneschal.ts:** the Seneschal's work client. `seneschalTurn(task, { worker, commands })` submits a task (a repository and a commit, never a command), asks for it by name every 5 seconds until its turn comes, and answers `{ turn }` (run it inside `turn.hold()`, which sends the lease's heartbeats and reports the result), `{ reused }` (a pass of exactly these commands on the same code: nothing to run), or null: run it as before. Null whenever the Seneschal isn't on the PC, doesn't answer, is off duty, the PC has no Developer Pro, the turn doesn't come in 20 minutes, or the run is already inside a checks pace turn (`KIT_CHECKS_TURN`). A failure it holds is never taken for this run's: the task is asked for again, and run. A run under its lease sets `TURN_HELD_ENV` for its commands, so the checks pace's launcher takes no turn of its own. Under node --test it asks only a Seneschal the test gave a home of its own.
 
 ### What changed
 
