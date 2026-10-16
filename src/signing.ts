@@ -25,6 +25,12 @@ import { checksLogOf } from './stages/bump.ts';
  * sat in its own signtool until its half-hour limit, the round and every merge after it waiting. Now the trial has
  * TRIAL_MS, one that doesn't answer in it is "can't sign", and that answer stands for HUNG_MS: the rounds meanwhile don't
  * wait on signtool again, and the release waits as above.
+ *
+ * Nor does a sign-in that starts waiting while a release builds (0.36.62). The kit's release gave up on signtool only
+ * after ten minutes, in words signingDown didn't know, so the release failed for good, and each release after it in the
+ * round built and waited its ten minutes too. Now those words are a signing wait (signingHung), the release that met
+ * them stands as the look at its certificate for HUNG_MS (noteSigningDown), and kit 2.77.9 tries a trial signature with
+ * TRIAL_MS before it signs, so it gives up in a minute.
  */
 
 /** A release waiting for the code-signing key, as signing-waits.json keeps it for the alarm. */
@@ -80,9 +86,16 @@ export function signsWith(o: { kitJson: string | null; signTs: string | null; re
   return m ? m[1].toUpperCase() : null;
 }
 
+/** signtool that gave up waiting, in the kit's words and Manor's tools/sign.ts's (the kit's before 2.77.9 too): its sign-in waiting. */
+const HUNG = /signtool didn't (?:finish|answer) within/i;
+
+/** Whether a line signingDown found says signtool hung (SimplySign Desktop's sign-in waiting), not just that the key is gone. */
+export const signingHung = (line: string): boolean => HUNG.test(line);
+
 /**
  * The line in a release's output that says it couldn't reach the code-signing key, or null when none does: signtool's
- * own words for it, and the kit's and Manor's for a key they found missing before building.
+ * own words for it, and the kit's and Manor's for a key they found missing before building, or for a signtool that
+ * didn't answer.
  */
 export function signingDown(output: string): string | null {
   const lines = output.replace(/\r/g, '').split('\n').map((l) => l.trim());
@@ -91,6 +104,7 @@ export function signingDown(output: string): string | null {
     /SimplySign Desktop isn't running/i,
     /the signing certificate \([0-9a-f]{40}\) isn't in Cert:/i,
     /No certificates were found that met all the given criteria/i,
+    HUNG,
   ];
   for (const re of said) {
     const line = lines.findLast((l) => re.test(l));
@@ -118,6 +132,15 @@ const looks = new Map<string, { at: number; answer: Promise<string | null>; forM
 
 /** Forgets the looks taken (for a test). */
 export const forgetSigningLooks = () => looks.clear();
+
+/**
+ * Takes what a release that failed for the key said as the look at its certificate: the releases after it in the round
+ * don't build only to find the same, and when signtool hung there (its sign-in waiting), none waits on it again for
+ * HUNG_MS, as after a trial signature that didn't answer.
+ */
+export function noteSigningDown(thumbprint: string, why: string, o: { now?: number } = {}): void {
+  looks.set(thumbprint, { at: o.now ?? Date.now(), answer: Promise.resolve(why), forMs: Promise.resolve(signingHung(why) ? HUNG_MS : LOOK_MS) });
+}
 
 const quotedPs = (s: string) => `'${s.replace(/'/g, "''")}'`;
 

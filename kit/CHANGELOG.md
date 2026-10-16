@@ -2,9 +2,9 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.77.9
 
-**A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
+**A release that signs gives up within a minute when SimplySign Desktop is waiting for its sign-in, before it builds or before it signs, instead of after ten minutes. It also brings what wasn't released before: A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
 
 **Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again.**
 
@@ -31,6 +31,9 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### What changed
 
+- **sign.ts**: `trialProblem(signtool, thumbprint)` signs a throwaway script without a timestamp, within `TRIAL_MS` (60 s). If signtool says "No certificates were found", the key can't be reached. If it doesn't answer in time, SimplySign Desktop is waiting for someone to sign in, and that now counts as "can't sign" too. Before, `readySigner`'s trial gave signtool two minutes and counted no answer as "can sign", so the release built and then waited ten minutes on its first batch.
+- `signFiles` tries a trial signature before it signs, because SimplySign's session can end while the release builds. When that trial fails, the release stops with `couldn't sign the native files: signtool didn't answer within 60 seconds …`. Nothing has been signed by then.
+- A batch that runs past its ten minutes now says SimplySign Desktop may be waiting for you to sign in. The Steward (0.36.62) reads all of these as "waits until this PC can sign", not as a failed release.
 - **`ModalCard`** (moved to modal.tsx, still exported from feedback.tsx and index.ts) keeps focus in it: Tab and Shift+Tab go round it. Only the top modal hears Escape. Focus moves to an element marked `data-autofocus`, else the card. A page that draws `onClose` anew each render no longer moves focus about while it's open. New props: `role` (`alertdialog`), `describedBy` and `modalClassName`.
 - **`Button`:** an `onPress` that returns a promise spins the button until it settles, as `loading` does. `onPress` is `() => unknown` now; a `() => void` still fits.
 - **`PostButton`:** its `confirm` asks in the page's own dialog. The server's error or `message` is said there once the POST is done and the page has looked for news, and a server that doesn't answer is said too (before, nothing was). Its BusyArea waits with it.
