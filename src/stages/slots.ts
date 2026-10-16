@@ -93,5 +93,8 @@ export async function withRepo<T>(log: (line: string) => void, id: string, fn: (
 export const apart = <T>(name: string, fn: () => Promise<T>): Promise<T> =>
   held.exit(() => inStage.run(name, () => outsideWork(() => withWork({ kind: name.replace(/\s+/g, '-'), what: name }, fn))));
 
+/** The stage, or the work apart, of this process that holds employee `id`'s repository now ("rollout", say), or null. */
+export const heldBy = (id: string): string | null => holders.get(id) ?? null;
+
 /** Whether another stage is working on employee `id`'s repository now: then a look at it leaves its clone alone. */
 export const repoBusy = (id: string): boolean => !held.getStore()?.has(id) && existsSync(repoLock(id));
