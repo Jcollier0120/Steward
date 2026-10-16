@@ -1065,3 +1065,23 @@ test("gpuWithNpu on, an older Manor without the key, no Manor, or no NPU: the ca
     fresh();
   }
 });
+
+test("a card's embedding cap below the card's own (setup's 1,365): the chunking budget; over it, refused saying that cap, or sent to one that takes it", async () => {
+  fresh();
+  noGames();
+  const ids = (l: { id: string }[]) => l.map((a) => a.id);
+  try {
+    const card = gpu('gpu-radeon', { memoryGb: null, maxContextTokens: 4096, embed: { baseUrl: 'http://127.0.0.1:1', model: 'e', maxContextTokens: 1365 } } as any);
+    const alone = new Npu(config({ accelerators: [card] }));
+    assert.equal(alone.budget(0, 'embed'), 1365, "the embedding server's cap, not the card's 4096");
+    // 4,200 characters are ~1,400 tokens by the kit's estimate: refused before anything is sent, with the cap it's over.
+    await assert.rejects(alone.embed(['x'.repeat(4200)]), (e: Error) => e instanceof NpuError && !(e instanceof NpuBusy) && /refusing a request of ~1400\+0 tokens \(cap 1365\)/.test(e.message));
+    // Beside a processor that takes more, the longer input goes there, as any request over one accelerator's cap does.
+    const both = new Npu(config({ accelerators: [card, { id: 'cpu', kind: 'cpu', maxContextTokens: 4000, embed: { baseUrl: 'http://127.0.0.1:1', model: 'e' } }] }));
+    const need = { work: 'embed' as const, tokens: 1400, lane: 'background' as const };
+    assert.deepEqual(ids(A.candidates(both.accelerators, need, { failure: A.readFailure }).list), ['cpu']);
+    assert.ok(ids(A.candidates(both.accelerators, { ...need, tokens: 1300 }, { failure: A.readFailure }).list).includes('gpu-radeon'));
+  } finally {
+    fresh();
+  }
+});
