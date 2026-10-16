@@ -31,8 +31,61 @@ test("the accelerators' own folder (kit 2.31.0): Manor's, not Reeve's; a PC set 
   assert.equal(C.acceleratorConfigFile({ ACCELERATORS_HOME: 'D:\\a' }), path.join('D:\\a', 'config.json'));
   assert.equal(C.acceleratorConfigFile({ ACCELERATORS_CONFIG: 'D:\\x.json', REEVE_HOME: 'D:\\r' }), 'D:\\x.json');
   assert.equal(C.toolsHome({}, profile), path.join(homedir(), '.manor', 'accelerators'), "a new PC: the accelerators' folder");
-  mkdirSync(path.join(profile, '.reeve', 'models'), { recursive: true });
+  mkdirSync(path.join(profile, '.reeve', 'servers', 'logs'), { recursive: true });
+  mkdirSync(path.join(profile, '.reeve', 'servers', 'downloads'), { recursive: true });
+  assert.equal(C.toolsHome({}, profile), path.join(homedir(), '.manor', 'accelerators'), "the keeper's logs and setup's test image in .reeve aren't a set-up");
+  mkdirSync(path.join(profile, '.reeve', 'models', 'q'), { recursive: true });
   assert.equal(C.toolsHome({}, profile), path.join(profile, '.reeve'), 'a PC set up before: its builds and models stay where they are');
+});
+
+test("the tools home is the folder config.json's startCommands are in: the accelerators' folder or .reeve", () => {
+  const profile = mkdtempSync(path.join(home, 'commands-'));
+  const reeve = path.join(profile, '.reeve');
+  const file = path.join(profile, '.manor', 'accelerators', 'config.json');
+  const env = { ACCELERATORS_CONFIG: file, USERPROFILE: profile };
+  const own = C.acceleratorsHome(env);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const write = (accelerators: unknown[]) => writeFileSync(file, JSON.stringify({ accelerators }));
+  const at = (...p: string[]) => path.join('%USERPROFILE%', ...p);
+  const ep = (port: number, ...startCommand: string[]) => ({ baseUrl: `http://127.0.0.1:${port}`, model: 'q', startCommand });
+
+  // The Intel test PC: set up in the accelerators' folder; a test image, the keeper's log and a second OVMS later went
+  // into .reeve\servers. Its servers run from the accelerators' folder, so that stays the tools home.
+  mkdirSync(path.join(reeve, 'servers', 'ovms-2026.4.1'), { recursive: true });
+  mkdirSync(path.join(reeve, 'servers', 'downloads'), { recursive: true });
+  write([
+    { id: 'npu', kind: 'npu', chat: ep(18183, at('.manor', 'accelerators', 'servers', 'ovms', 'ovms.exe'), '--rest_port', '18183') },
+    { id: 'gpu-intel-arc', kind: 'gpu', chat: ep(18191, at('.manor', 'accelerators', 'servers', 'llama.cpp-b1', 'llama-server.exe'), '-m', at('.manor', 'accelerators', 'models', 'q.gguf')) },
+  ]);
+  assert.equal(C.toolsHome(env, profile), own, "its commands are in the accelerators' folder: what .reeve holds doesn't move it");
+
+  // The Snapdragon laptop: its config is the accelerators' own, but its llama.cpp is in .reeve; GenieX's is in neither.
+  write([
+    { id: 'npu', kind: 'npu', chat: ep(18181, at('AppData', 'Local', 'GenieX CLI', 'geniex.exe'), 'serve') },
+    { id: 'cpu', kind: 'cpu', embed: ep(18193, at('.reeve', 'servers', 'llama.cpp-b1', 'llama-server.exe'), '--embedding') },
+  ]);
+  assert.equal(C.toolsHome(env, profile), reeve, 'its llama.cpp runs from .reeve');
+
+  // An AMD PC: flm on the PATH, no command in either folder, and .reeve with only logs and downloads.
+  rmSync(path.join(reeve, 'servers', 'ovms-2026.4.1'), { recursive: true });
+  mkdirSync(path.join(reeve, 'servers', 'logs'), { recursive: true });
+  write([{ id: 'npu', kind: 'npu', chat: ep(18181, 'flm', 'serve') }]);
+  assert.equal(C.toolsHome(env, profile), own, "no command in either: .reeve's logs and downloads aren't a set-up");
+
+  // As many in each: as before, .reeve when it holds a build or a model.
+  write([
+    { id: 'npu', kind: 'npu', chat: ep(18183, at('.manor', 'accelerators', 'servers', 'ovms', 'ovms.exe')) },
+    { id: 'cpu', kind: 'cpu', embed: ep(18193, at('.reeve', 'servers', 'llama.cpp-b1', 'llama-server.exe')) },
+  ]);
+  assert.equal(C.toolsHome(env, profile), own);
+  mkdirSync(path.join(reeve, 'models', 'q'), { recursive: true });
+  assert.equal(C.toolsHome(env, profile), reeve);
+
+  // A path given as --x=path counts; a command whose %NAME% isn't known isn't a path; no file is none.
+  write([{ id: 'npu', kind: 'npu', chat: ep(18181, 'geniex', `--models=${at('.reeve', 'models')}`) }]);
+  assert.equal(C.commandsHome(file, [path.join(profile, '.manor', 'accelerators'), reeve], env), reeve);
+  assert.equal(C.commandsHome(file, [reeve], {}), null);
+  assert.equal(C.commandsHome(path.join(profile, 'none.json'), [reeve], env), null);
 });
 
 test("moving the accelerators out of Reeve's config.json: a copy of their keys, Reeve's file untouched, later saves mirrored back", () => {
