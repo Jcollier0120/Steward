@@ -65,6 +65,7 @@ test("a phase is kept under its build's time, whatever its work gave, and copied
   const clock = () => T0 + tick++ * 60_000;
   assert.equal(await timed(null, 'tests', 'porter', async () => 7), 7, 'no build: it only runs');
   assert.equal(phaseOf({ build: null, prepare: null }), null);
+  assert.deepEqual(phaseOf({ build: { due, ahead: true } }), { due, ahead: true }, 'merged ahead of the build: counted ahead of it');
   assert.equal(await timed(phaseOf({ build: { due } }), 'tests', 'porter', async () => 'passed', undefined, clock), 'passed');
   await assert.rejects(timed(phaseOf({ build: { due } }), 'merges', 'clerk', async () => Promise.reject(new Error('no')), undefined, clock), /no/);
   await timed(phaseOf({ build: null, prepare: { due } }), 'tests', 'miller', async () => 1, undefined, clock);
