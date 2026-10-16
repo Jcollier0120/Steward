@@ -36,8 +36,8 @@ export interface BuildPipeline {
   kit: 'every' | 'first';
   /**
    * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise); then the build releases
-   * what it merged, and ends. Its tests run ahead of it, between builds (stages/prepare.ts), so a build mostly checks that
-   * nothing moved, merges and releases.
+   * what it merged, and ends. Its ready PRs merge ahead of it, between builds (stages/prepare.ts), so a build mostly merges
+   * what went ready since, and releases.
    */
   windowMinutes: number;
   /**
