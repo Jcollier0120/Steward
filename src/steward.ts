@@ -48,13 +48,14 @@ import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
 import { apart, heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
-import { boardedUrgent, buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
+import { lastWoke } from './fresh-start.ts';
+import { boardedUrgent, buildWhen, endRound, kitRides, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
 import { urgentReady } from './stages/urgent.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
 import { keepPhases, phaseOf, timed } from './buildtimes.ts';
 import { kitComing } from './stages/buildkit.ts';
-import { prepareBeside } from './stages/prepare.ts';
+import { buildBegins, prepareBeside } from './stages/prepare.ts';
 import { selfTestBeside } from './stages/selftests.ts';
 
 /**
@@ -639,7 +640,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       let turnsOn = false;
       // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds merge, and its last releases.
       const pipeline = name === 'round' && !quiet && pipelineRounds(o) ? loadPipeline() : null;
-      const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees }) : { kind: 'outside' };
+      const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees, wokeAt: lastWoke() }) : { kind: 'outside' };
       // An urgent fix between builds (stages/urgent.ts): a build of its own for its repository, at once.
       const urgent = pipeline && planned.kind === 'between' ? await urgentBetween(ctx, o, ask, pipeline, log) : [];
       const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : planned;
@@ -671,18 +672,26 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           out.budget = budget;
           log(waitLine(budget));
         } else if (mode.kind === 'between') {
-          // Between builds: nothing merged, caught up, rolled out or released. The PRs that waited at the last look
-          // still wait, so the alarms go on counting their hours.
+          // Between builds: nothing released or rolled out. The PRs that waited at the last look still wait, so the alarms
+          // go on counting their hours.
           out.build = { between: true, next: mode.next?.toISOString() ?? null };
           log(mode.line);
           held.push(...heldBefore(seen!, picked.employees));
-          // The next build's tests, run now beside the rounds for what moved (stages/prepare.ts): the build then only merges.
+          // The merge pass ahead of the next build, beside the rounds (stages/prepare.ts): ready PRs merged as the build
+          // would merge them, and released by the build. Only where this PC has the turn (lease.ts).
           if (name === 'round' && mode.next && !only?.length) {
-            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit) });
+            const turns = async (c: Ctx, list: Employee[]) => {
+              const own = list.find((e) => e.id === APP.id) ?? null;
+              const t = await takeTurnsFor(c, o, list.filter((e) => e !== own), own ? selfForTurns(c, o, true, false) : null, true);
+              return list.filter((e) => (e === own ? t.selfActs : t.acting.includes(e)));
+            };
+            const prepLine = prepareBeside(ctx, { next: mode.next, employees: picked.employees, self: selfEmployee(ctx, o), kit: latestKit(ctx.kit), turns });
             if (prepLine) log(prepLine);
           }
         } else if (name === 'merge' || name === 'round') {
           if (mode.kind === 'build') {
+            // The merge pass ahead of this build, if one goes on, merges nothing more (stages/prepare.ts).
+            buildBegins();
             const when =
               mode.run.by === 'owner'
                 ? "the owner's Build now"
@@ -691,7 +700,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                   : `the ${buildWhen(new Date(mode.run.due), at())} build`;
             log(
               mode.fresh
-                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled`
+                ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled${mode.run.late ? ` (${lateLine(mode.run, at())})` : ''}`
                 : mode.closing
                   ? `${when} has run out of time (${ctx.settings.buildPipeline.windowMinutes} minutes): it releases what it merged, and the rest waits for the next build`
                   : `${when} goes on (its round ${mode.run.rounds + 1})`,
@@ -702,6 +711,15 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             // Each repository's ready PRs stacked as one batch, in the order they went ready (stages/build.ts).
             ctx.build = { due: mode.run.due, name: when };
             out.build = { due: mode.run.due, by: mode.run.by, round: mode.run.rounds + 1 };
+            // Under way from its first round's start, not its end: GET /api/pipeline says building (Manor holds its installs)
+            // and the page shows the build through what is often its longest round. The round's end saves it again.
+            if (mode.fresh && pipeline) {
+              try {
+                savePipeline({ open: mode.run, builds: pipeline.builds });
+              } catch (e) {
+                log(`couldn't keep the build's record: ${(e as Error).message}`);
+              }
+            }
           }
           // A round is merge --yes --team, then a release for every version not yet released (stages/round.ts).
           const round = name === 'round';
@@ -752,7 +770,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // build's release. Out of a build, the Steward's own first, as before.
           const selfBeside = mode.kind === 'build' && !!self;
           // On the Steward's page, its PRs moved since they were tested for this build are tested beside the rounds
-          // instead (stages/selftests.ts, Steward 0.36.71), and the round doesn't wait for them: it, and those after it
+          // instead (stages/selftests.ts, Steward 0.36.77), and the round doesn't wait for them: it, and those after it
           // until they end, leave the Steward's own repository alone, its merges and releases, and its ready PRs wait.
           // Once they end, a round merges what passed (agent.ts).
           const testing = selfBeside && round && self ? await selfTestBeside(ctx, self, { kit: latestKit(ctx.kit) }) : null;

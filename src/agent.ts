@@ -37,8 +37,11 @@ import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
 import { heldQueues, loadVersionQueues } from './version-queue.ts';
 import { DEVELOPER_ONLY, PLAIN_ROLE, stewardActs } from './maker.ts';
 import { noteFreshStart, watchWake } from './fresh-start.ts';
-import { buildWhen, loadPipeline, pipelineMode, pipelineView } from './pipeline.ts';
+import { buildWhen, lateLine, loadPipeline, pipelineMode, pipelineView } from './pipeline.ts';
+import { holdForBuilds } from './build-hold.ts';
+import { wakesPc } from './kit/wake.ts';
 import { keepHeads } from './heads.ts';
+import { withLane } from './stages/seneschal.ts';
 
 /** Whether the GitHub CLI is signed in here, as the last look said (scm.ts); undefined before any look. */
 const githubReadyHere = (): boolean | undefined => {
@@ -270,7 +273,9 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       const look = lookNext;
       lookNext = [];
       const ask: StageAsk = full ? { full, ...extra } : loadSettings().byItself ? (look.length ? { look } : {}) : { tendOnly: true };
-      const out = await inStage(end, () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) }));
+      // A person started it (Run now, Build now): its checks go in the Seneschal's first lane (stages/seneschal.ts).
+      const stage = () => runStage('round', ask, { run: o.run, owner: o.owner, log: (line) => console.log(`round: ${line}`) });
+      const out = await inStage(end, () => (full ? withLane('person', stage) : stage()));
       ({ sooner, run: soonRun } = soonAfter(!!out.soon, soonRun, loadSettings().roundMinutes * 60_000));
     } catch (e) {
       if (!(e instanceof LockTimeout)) throw e;
@@ -354,7 +359,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   });
   // And the next build's tests between builds (stages/prepare.ts): run beside the rounds, so the build only merges. Not
   // under node --test, where a page's round tests what it asks for alone.
-  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`build prep: ${line}`) });
+  if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`merge ahead: ${line}`) });
   // And in a build, the Steward's own PRs that moved since they were tested for it (stages/selftests.ts): tested beside the
   // rounds, which go on merging the agents'. Once their tests end, a round at once: it merges what passed. Not under
   // node --test either.
@@ -394,12 +399,29 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       rounds.stop();
       rounds = null;
     } else rounds?.reschedule();
+    builds.look();
   };
+  // The builds (build-hold.ts): the PC held up from a few minutes before each build time until its build closes, a round
+  // at the build time, and the task that wakes the PC, plugged in, for each, kept in step with Settings and duty.
+  const builds = holdForBuilds({
+    pipeline: () => {
+      if (!stewardActs() || !duty().onDuty) return null;
+      const s = loadSettings();
+      return s.byItself ? s.buildPipeline : null;
+    },
+    state: loadPipeline,
+    onDue: () => {
+      if (!rounds) return;
+      if (rounding() || slotsFull()) roundAfter = true;
+      else startRound();
+    },
+  });
   arrange();
   // Just started: the page may have been down with the PC (shut down, asleep, offline), so what failed before is tried
   // once more at the first round. The PC woke from sleep: the same before is tried again (fresh-start.ts), in a round now rather than at the next.
   noteFreshStart();
   watchWake(() => {
+    builds.look();
     if (rounds) startRound();
   });
   // The manor's branch heads, shared with the other agents, kept fresh beside the rounds, however long one takes, and
@@ -417,7 +439,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const s = loadSettings();
     const busy = runs.length > 0 || refreshing !== null;
     const pv = pipelineView(s.buildPipeline, loadPipeline());
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null } };
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building, took: pv.last ? buildTimeLine(pv.last) : null, late: lateLine(pv.open ?? pv.last, new Date()), wakes: wakesPc() } };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];

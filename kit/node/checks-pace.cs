@@ -25,7 +25,12 @@
 // `apart <command line>` (apart.ts) instead starts a program out of the jobs it would inherit, as far as they let it
 // (an agent's gentle job does, kit 2.73.0; one that doesn't keeps it), detached, its output to the launcher's standard
 // error, and answers its process id as the exit code (0: it couldn't start). For the model servers every agent shares:
-// an asker's cap isn't theirs, and they outlive it.
+// an asker's cap isn't theirs, and they outlive it. `apart:<cap>` (kit 2.78.3) also puts it in the servers' job, one
+// for the PC (Local\kit-apart-pace), with a hard cap on the processor (the manor's ceiling, 85%): every server started
+// apart shares it, so together they stay within it. The job ends nothing: each server holds a handle to it, so it and
+// its name last while any server runs, and a server outlives the launcher. A server that can't join it (one that
+// couldn't leave a job of another family) gets a job of its own with the same cap; and if neither takes, it runs as
+// before.
 using System;
 using System.Runtime.InteropServices;
 
@@ -85,6 +90,8 @@ public static class KitChecksPace
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateMutex(IntPtr attributes, bool owned, string name);
     [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool all, uint ms);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReleaseMutex(IntPtr h);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr fromProcess, IntPtr h, IntPtr toProcess, out IntPtr copy, uint access, bool inherit, uint options);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
 
     const int JobObjectExtendedLimitInformation = 9, JobObjectCpuRateControlInformation = 15;
     const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000, JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100, JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200;
@@ -98,9 +105,28 @@ public static class KitChecksPace
     const uint DETACHED_PROCESS = 0x8, CREATE_NEW_PROCESS_GROUP = 0x200, CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
     const int STARTF_USESTDHANDLES = 0x100;
     const uint INFINITE = 0xFFFFFFFF;
+    const uint DUPLICATE_SAME_ACCESS = 0x2;
 
     /// <summary>The job every launcher on the PC shares (per sign-in session).</summary>
     public const string JobName = @"Local\kit-checks-pace";
+
+    /// <summary>The job every model server started apart shares (per sign-in session), kit 2.78.3.</summary>
+    public const string ApartJobName = "kit-apart-pace";
+
+    // The servers' job's name: KIT_APART_JOB_NAME, so a test's servers are in a job of their own, never the PC's real one.
+    static string ApartJob()
+    {
+        string n = Environment.GetEnvironmentVariable("KIT_APART_JOB_NAME");
+        return @"Local\" + (string.IsNullOrEmpty(n) || n.IndexOf('\\') >= 0 ? ApartJobName : n);
+    }
+
+    /// <summary>`apart` (no cap: no job) or `apart:<cap>`; -1 when the word is neither.</summary>
+    public static int ApartCap(string word)
+    {
+        if (word == "apart") return 0;
+        int cap;
+        return word.StartsWith("apart:") && int.TryParse(word.Substring(6), out cap) && cap >= 0 ? cap : -1;
+    }
 
     /// <summary>The launcher's limits: the processor cap, memory per process and for the job (MB, 0 none), runs at once (0 any).</summary>
     public struct Limits { public int Cap; public long ProcessMb, JobMb; public int AtOnce; }
@@ -121,7 +147,8 @@ public static class KitChecksPace
     {
         Limits limits;
         string line = Rest(Marshal.PtrToStringUni(GetCommandLineW()));
-        if (args.Length >= 2 && args[0] == "apart" && line.Length > 0) return Apart(line);
+        int apartCap = args.Length >= 2 ? ApartCap(args[0]) : -1;
+        if (apartCap >= 0 && line.Length > 0) return Apart(line, apartCap);
         if (args.Length < 2 || !ParseLimits(args[0], out limits) || line.Length == 0)
         {
             Console.Error.WriteLine("usage: checks-pace <cap in hundredths of a percent>[,<MB per process>,<MB for the job>,<runs at once>] <command line>");
@@ -238,14 +265,15 @@ public static class KitChecksPace
     }
 
     // Starts `line` detached and out of the jobs that let it leave (CREATE_BREAKAWAY_FROM_JOB: it leaves each job up to
-    // the first that doesn't allow it, and stays in that one); if Windows refuses, as the launcher's own child. Its
-    // standard output and error are the launcher's standard error. The exit code is its process id, 0 when it couldn't start.
-    static int Apart(string line)
+    // the first that doesn't allow it, and stays in that one); if Windows refuses, as the launcher's own child. With a
+    // cap, it starts suspended and runs once it is in the servers' job (Contained). Its standard output and error are the
+    // launcher's standard error. The exit code is its process id, 0 when it couldn't start.
+    static int Apart(string line, int cap)
     {
         IntPtr err = GetStdHandle(-12);
         var si = new StartupInfo { cb = Marshal.SizeOf(typeof(StartupInfo)), dwFlags = STARTF_USESTDHANDLES, hStdInput = IntPtr.Zero, hStdOutput = err, hStdError = err };
         ProcessInformation pi;
-        uint flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        uint flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | (cap > 0 ? CREATE_SUSPENDED : 0);
         bool ok = CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, null, ref si, out pi)
             || CreateProcess(null, new System.Text.StringBuilder(line), IntPtr.Zero, IntPtr.Zero, true, flags, IntPtr.Zero, null, ref si, out pi);
         if (!ok)
@@ -253,9 +281,29 @@ public static class KitChecksPace
             Console.Error.WriteLine("checks-pace: couldn't start " + line + " (Windows error " + Marshal.GetLastWin32Error() + ")");
             return 0;
         }
+        if (cap > 0)
+        {
+            // The PC's servers' job, else one of its own; if neither takes, it runs as it is: the cap never stops a server.
+            if (!Contained(CreateJobObject(IntPtr.Zero, ApartJob()), pi.hProcess, cap)) Contained(CreateJobObject(IntPtr.Zero, null), pi.hProcess, cap);
+            ResumeThread(pi.hThread);
+        }
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         return pi.dwProcessId;
+    }
+
+    // The servers' job with its cap set (again, if another launcher made it), the process in it, and a handle to it
+    // copied into the process, so the job and its name outlive this launcher for as long as any server in it runs. No
+    // limit ends anything: a server lives until it is stopped. False, and the handle closed, when it couldn't be.
+    static bool Contained(IntPtr job, IntPtr p, int cap)
+    {
+        if (job == IntPtr.Zero) return false;
+        var rate = new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, Math.Min(10000, cap)) };
+        SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));
+        IntPtr kept;
+        bool ok = AssignProcessToJobObject(job, p) && DuplicateHandle(GetCurrentProcess(), job, p, out kept, 0, false, DUPLICATE_SAME_ACCESS);
+        CloseHandle(job);
+        return ok;
     }
 
     // The job with its limits set (the cap; memory per process and for the whole job, so a runaway fails with "out of

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { until } from '../kit/test/until.ts';
 
-// Steward 0.36.71: in a build, the Steward's own PRs are tested beside the rounds (stages/selftests.ts), which go on
+// Steward 0.36.77: in a build, the Steward's own PRs are tested beside the rounds (stages/selftests.ts), which go on
 // without them: a round ends, and the next merges an agent's PR, while a Steward PR's tests still run; once they end, a
 // round merges it without testing it again. Whole rounds here, on a data folder of their own, git and gh standing in, and
 // npm for the Steward's checks: its `npm test` waits until the test lets it go.
@@ -22,6 +22,7 @@ const { loadPipeline } = await import('../src/pipeline.ts');
 const { SELF_TESTS, selfTestsBeside, selfTestsDone } = await import('../src/stages/selftests.ts');
 const { TESTED_BESIDE, waitsBriefly } = await import('../src/stages/merge.ts');
 const { kitComing } = await import('../src/stages/buildkit.ts');
+const { buildUnderWay } = await import('../src/stages/common.ts');
 const { fakeEmployee, ok, sh } = await import('./helpers.ts');
 const { run: realRun } = await import('../src/run.ts');
 
@@ -129,6 +130,15 @@ test('a Steward PR tested beside the rounds waits briefly, and a kit PR among th
   const why = `${TESTED_BESIDE} for the 12:00 build: a round merges it once its tests end`;
   assert.equal(waitsBriefly(why), true);
   assert.match(kitComing({ selfHeld: [{ number: 3, url: '', title: '', why, draft: false, kit: true }], selfReleases: [] }) ?? '', /the Steward's #3, whose newer kit merges in this build/);
+});
+
+test('tests beside the rounds are part of the build, so it still tries one kit; a merge pass ahead of it, and preparing between builds, are not', () => {
+  const due = '2026-10-16T12:00:00.000Z';
+  assert.equal(buildUnderWay({ build: { due, name: 'the 12:00 build' } }), due);
+  assert.equal(buildUnderWay({ build: null, prepare: { due, name: 'the 12:00 build', inBuild: true } }), due);
+  assert.equal(buildUnderWay({ build: { due, name: 'the merge pass ahead of the 12:00 build', ahead: true } }), null);
+  assert.equal(buildUnderWay({ build: null, prepare: { due, name: 'the 12:00 build' } }), null);
+  assert.equal(buildUnderWay({}), null);
 });
 
 test("in a build, a round ends and the next merges an agent's PR while a Steward PR's tests still run beside them; then a round merges it, not testing it again", async (t) => {

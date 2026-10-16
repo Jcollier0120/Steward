@@ -12,14 +12,14 @@ import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
 import { catchUp, isKitPr, type CaughtUp } from './catchup.ts';
-import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpDirOf, buildUnderWay, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
-import { buildCars, forgetEarlierBuilds, leftIn, loadReadySince, runBatch, type BuildBatch } from './build.ts';
+import { buildCars, forgetEarlierBuilds, leftFor, leftIn, leftKey, loadReadySince, runBatch, type BuildBatch } from './build.ts';
 import { loadRolloutFailures } from './rollout.ts';
-import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, trialWaitsForNextBuild, TRIAL_GOING } from './trial.ts';
 import { claimsOn, movedTo, reclaim, type Claim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -32,6 +32,7 @@ import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conf
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
+import { withLane } from './seneschal.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -525,16 +526,17 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   const ready: { pr: PrInfo; sets: string | null; stamps?: boolean }[] = [];
   // A kit PR a build left out for breaking its checks (stages/build.ts): never merged at that head, in a build or not.
   const kitHeld = loadRolloutFailures()[e.id];
-  // In a build, the PRs it dropped or kept for the next build: not merged on their own meanwhile.
-  if (ctx.build) forgetEarlierBuilds(e.id, ctx.build.due);
-  const left = ctx.build ? leftIn(e.id, ctx.build.due) : [];
+  // In a build, the PRs it dropped or kept for the next build: not merged on their own meanwhile. Those the merge pass
+  // ahead of a build left out board the build itself (leftKey).
+  if (ctx.build) forgetEarlierBuilds(e.id, leftKey(ctx.build));
+  const left = ctx.build ? leftIn(e.id, leftKey(ctx.build)) : [];
   for (const pr of mergeable) {
     if (kitHeld?.stage === 'build' && isKitPr(pr) && kitHeld.head === pr.headOid) {
       hold.push({ pr, why: `it broke a build's checks (${kitHeld.message}): it waits for a newer kit, or Bump` });
       continue;
     }
     if (left.includes(pr.number)) {
-      hold.push({ pr, why: `left out of ${ctx.build!.name}: it waits for the next build` });
+      hold.push({ pr, why: `left out of ${ctx.build!.name}: it waits for ${leftFor(ctx.build!)}` });
       continue;
     }
     const c = await check(pr);
@@ -580,7 +582,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (b.tested && ctx.build) {
         const words = `${ctx.build.name} merged none of ${numbers}: ${b.note}`;
         const why = (pr: PrInfo) => b.dropped.find((d) => d.pr.number === pr.number)?.why;
-        const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for the next build`));
+        const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for ${leftFor(ctx.build!)}`));
         return { ...result(e, 'failed', words, { url: cars[0].pr.url }), merged: [], held, did: [words], waits: [], lookAgain: true };
       }
       ctx.log(`[${e.id}] no batch for ${numbers}: ${b.note}`);
@@ -619,8 +621,20 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // A conflict handed on to its author gives up its turn (givesWay): the queue goes on without it.
   const gaveWay = givesWay(e, hold);
   for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
-  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes.
+  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes. And,
+  // in a build that tried a kit already, one at a head that trial didn't try (trialWaitsForNextBuild, a catch-up's head
+  // carrying its verdict being one it did): it waits for the next build's.
   const trialWay = trialGivesWay(e, prs);
+  const nextBuild = new Map<number, string>();
+  if (buildUnderWay(ctx)) {
+    const kits = prs.filter((p) => raisesKit(p) && !p.draft).sort((a, b) => compareVersions(pending.get(a.number) ?? '0.0.0', pending.get(b.number) ?? '0.0.0') || a.number - b.number);
+    for (const pr of kits) {
+      const why = await trialWaitsForNextBuild(ctx, e, pr, kits).catch(() => null);
+      if (!why) continue;
+      nextBuild.set(pr.number, why);
+      trialWay.add(pr.number);
+    }
+  }
   // And one moved past the others (movedPast): not ready, it gives up its turn; ready, it waits its turn at the version
   // it was moved to.
   const moves = movedPast(claimsOn(e.repo), prs, pending);
@@ -729,10 +743,19 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         held.push(heldOf(pr, kitWaits));
         continue;
       }
+      // A kit PR at a head this build's one trial didn't try isn't tested in it either: it waits for the next build.
+      const later = nextBuild.get(pr.number);
+      if (later) {
+        const why = `${later}; meanwhile it gives up its turn, so the PRs above it merge first`;
+        waits.push(`${describe(pr)} waits: ${why}`);
+        held.push(heldOf(pr, why));
+        continue;
+      }
       const before = testedBefore(e, pr);
       let t: Tested;
       try {
-        t = await timed(phaseOf(ctx), 'tests', `${e.id} #${pr.number}`, () => testAtHead(ctx, e, pr));
+        // What the merge waits on: the Seneschal's blocking lane (stages/seneschal.ts).
+        t = await timed(phaseOf(ctx), 'tests', `${e.id} #${pr.number}`, () => withLane('blocking', () => testAtHead(ctx, e, pr)));
       } catch (err) {
         t = { ok: false, note: `couldn't test it here: ${(err as Error).message}`, at: new Date().toISOString() };
       }

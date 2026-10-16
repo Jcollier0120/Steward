@@ -122,6 +122,17 @@ test("an older kit's command: the servers stopped in the NPU's turn, the new one
   assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
 });
 
+test("an entry whose quirks aren't its route's gets the route's, after the same test, its log naming them", async () => {
+  const old = { ...setUpEntry(), quirks: ['sides-of-32'] };
+  const pc = fakePc(old);
+  const r = await refreshNpu(pc.deps);
+  assert.equal(r.did, 'refreshed');
+  assert.deepEqual(r.changes, ['quirks: none']);
+  assert.ok(pc.did.includes(`test chat ${capOf(old)}`), pc.did.join(', '));
+  assert.deepEqual(pc.npu().quirks, []);
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): quirks: none/);
+});
+
 test("an NPU 3720 set up before its embeddings took the graphics' turn: moved into it after the same test, its chat in the NPU's; a detection listing no cards keeps the entry's", async () => {
   const IGPU = { id: 'gpu-intel-r-graphics', vendorId: 0x8086, memoryGb: 0.1 };
   const old = setUpEntry();
@@ -214,6 +225,42 @@ test('a command that needs a download, another server, or no NPU at all: left fo
   const none = fakePc(null);
   assert.deepEqual(await refreshNpu(none.deps), { did: 'no-npu' });
   assert.deepEqual(none.did, [], 'no NPU in config.json: this PC not asked');
+});
+
+test("a 16 GB Snapdragon X2 set up with the 4B: Qwen3-VL-2B once setup has pulled it, never pulled here; a bigger X2 keeps the 4B", async () => {
+  const X2 = 'npu2|30.0.228.10000|2026-07-20|Qualcomm Technologies, Inc.|ACPI\\VEN_QCOM&DEV_0FF0&SUBSYS_CRD08480&REV_0056\\2&DABA3FF&0|Snapdragon(R) X2 Elite Extreme - X2E94100 - Qualcomm(R) Hexagon(TM) NPU';
+  const x2 = parseNpus(X2, 'arm64')[0];
+  // What an older kit wrote on any X2: the 4B, on GenieX's QAIRT plugin, its embeddings on llama-server.
+  const plan = V.planNpu({ support: x2, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), exists: () => true })!;
+  const fourB = { ...V.npuEntry(plan.route, { tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, home), embed: { exe: plan.embed!.exe, model: plan.embed!.model } }), timeouts: { ...MEASURED } };
+  const on = (ramGb: number, exists: (p: string) => boolean) => {
+    const pc = fakePc(fourB, { exists });
+    pc.deps.detect = async () => (pc.did.push('detect'), { npu: x2, ramBytes: ramGb * 1024 ** 3 } as any);
+    return pc;
+  };
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+
+  // Not pulled yet: left for setup (Set up local AI), which downloads it; the 4B goes on serving.
+  const notYet = on(15.6, (p) => !/Qwen3-VL-2B-Instruct-GGUF/.test(p));
+  assert.deepEqual(await refreshNpu(notYet.deps), { did: 'needs-setup' });
+  assert.ok(!notYet.did.includes('turn'));
+  assert.equal(notYet.npu().chat.model, 'qualcomm/Qwen3-VL-4B-Instruct:W4A16');
+
+  // Pulled: its command tested in the NPU's turn, then written, the PC's own timeouts kept.
+  const pulled = on(15.6, () => true);
+  const r = await refreshNpu(pulled.deps);
+  assert.deepEqual(r, { did: 'refreshed', changes: [`model ${TWO_B} in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`, '--compute npu added', '--vit-compute GPUOpenCL added'] });
+  assert.ok(pulled.did.includes('stop geniex.exe http://127.0.0.1:18181') && pulled.did.includes('stop llama-server.exe http://127.0.0.1:18182'), pulled.did.join(', '));
+  assert.equal(pulled.npu().chat.model, TWO_B);
+  assert.deepEqual(pulled.npu().vision, { model: TWO_B });
+  assert.deepEqual(pulled.npu().chat.startCommand.slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL']);
+  assert.deepEqual(pulled.npu().embed, fourB.embed, 'its embeddings as they were');
+  assert.deepEqual(pulled.npu().timeouts, MEASURED);
+  assert.match(pulled.log.join('\n'), /now start with this kit's command \(2\.75\.0\): model unsloth\/Qwen3-VL-2B-Instruct-GGUF:Q4_0 in qualcomm\/Qwen3-VL-4B-Instruct:W4A16's place/);
+
+  // 47.6 GB: the 4B stays, whatever is on disk.
+  const big = on(47.6, () => true);
+  assert.deepEqual(await refreshNpu(big.deps), { did: 'current' });
 });
 
 test("the changed arguments, as the keeper's log says them", () => {

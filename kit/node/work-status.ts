@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import { APP } from '../app.ts';
-import { CHECKS_AT_ONCE, checksPaceCap, checksRuns, type ChecksRun } from './checks-pace.ts';
+import { checksAtOnce, checksPaceCap, checksRuns, type ChecksRun } from './checks-pace.ts';
 import { lineSnapshot, slotDirs, type Lane } from './npu-queue.ts';
 import { agentsAtOnce, firstRoundLockDir, pace, workLockDir, type Pace } from './pace.ts';
 import { passOnOtherPcs } from './manor.ts';
@@ -102,7 +102,7 @@ export interface WorkQueue {
   id: string;
   kind: 'checks' | 'work' | 'first-round' | 'accelerator' | 'agent';
   name: string;
-  /** How many hold a place at once; null for no limit now (the pace at full lifts the checks' turns and the first-round line). */
+  /** How many hold a place at once; null for no limit now (the pace at full lifts the first-round line; under node --test the checks take no turns). */
   slots: number | null;
   holders: WorkPlace[];
   waiting: WorkPlace[];
@@ -355,7 +355,7 @@ export async function pcLines(o: { runs?: ChecksRun[] } = {}): Promise<WorkQueue
     id: 'checks',
     kind: 'checks',
     name: "The checks pace's turns",
-    slots: checksPaceCap() ? CHECKS_AT_ONCE : null,
+    slots: checksPaceCap() ? checksAtOnce() : null,
     holders: runs.filter((r) => r.state !== 'waiting').map(placeOfRun),
     waiting: runs.filter((r) => r.state === 'waiting').map(placeOfRun),
   });

@@ -161,8 +161,9 @@ test('a filler prompt is about the tokens asked for, each line its own', () => {
   assert.match(p, /Line 1:.*\nLine 2:/);
 });
 
-test('the arguments: --route, --device, --yes, --no-setup, --out; anything else is refused', () => {
+test('the arguments: --route, --device, --small-pc, --yes, --no-setup, --out; anything else is refused', () => {
   assert.deepEqual(C.parseCheckArgs(['--route', 'intel', '--device', 'cpu', '--yes', '--no-setup', '--out', 'r.json']), { vendor: 'intel', device: 'CPU', yes: true, setup: false, out: 'r.json' });
+  assert.deepEqual(C.parseCheckArgs(['--small-pc']), { smallPc: true });
   assert.match((C.parseCheckArgs(['--route', 'nvidia']) as any).error, /--route takes/);
   assert.match((C.parseCheckArgs(['--device', 'tpu']) as any).error, /NPU, CPU or GPU/);
   assert.match((C.parseCheckArgs(['--fast']) as any).error, /unknown argument/);

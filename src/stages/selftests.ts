@@ -8,15 +8,15 @@ import { apart, withRepo } from './slots.ts';
 import { openPrs, parsePrs } from './staff.ts';
 
 /**
- * The Steward's own PRs tested beside a build's rounds (Steward 0.36.71). Since 0.36.69 a build's round merges the
+ * The Steward's own PRs tested beside a build's rounds (Steward 0.36.77). Since 0.36.69 a build's round merges the
  * employees' PRs beside the Steward's own, but the round still lasted as long as the Steward's PR tests, ten minutes a
  * run: a rollout's PRs opened meanwhile, an agent's PR gone ready, waited for that round to end, and the build couldn't
  * close until it had.
  *
- * Now a build's round that finds the Steward's ready PRs moved since they were tested for this build (prepare.ts's key,
- * in build-prepared.json) starts their tests apart from it, as prepare.ts runs them between builds (merge.ts's mergeOne
- * with ctx.prepare: each tested at its head, stacked as its train or batch, a kit PR's trial started; nothing merged,
- * pushed or released), and goes on without them. While they run, the rounds leave the Steward's own repository alone,
+ * Now a build's round that finds the Steward's ready PRs moved since they were last looked at for this build (prepare.ts's
+ * key, in build-prepared.json) starts their tests apart from it (merge.ts's mergeOne with ctx.prepare `inBuild`: each
+ * tested at its head, stacked as its train or batch, a kit PR's trial started unless this build tried a kit already;
+ * nothing merged, pushed or released), and goes on without them. While they run, the rounds leave the Steward's own repository alone,
  * its merges and its releases, and its ready PRs wait as TESTED_BESIDE, which merge.ts's waitsBriefly counts: the build
  * stays open for them, and a kit PR among them is a kit coming in this build (buildkit.ts), which the rollout waits for.
  * Once they end, a round comes at once (agent.ts: selfTestsBeside's `ended`), and merges what passed without testing it

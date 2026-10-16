@@ -2,19 +2,58 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.71
+## 0.36.77
 
 **In a build, the Steward's own pull requests are tested beside its rounds, which no longer wait for them.**
 
 ### What changed
 
-- In a build, the Steward's own pull requests pushed since they were tested for it are tested beside the build's rounds, as the next build's are tested between builds. The rounds go on merging the agents' pull requests and the kit's rollout pull requests meanwhile, rather than each one lasting as long as the Steward's tests.
+- In a build, the Steward's own pull requests that moved since the Steward last looked at them for it are tested beside the build's rounds. The rounds go on merging the agents' pull requests and the kit's rollout pull requests meanwhile, rather than each one lasting as long as the Steward's tests.
 - While those tests run, the build stays open for them, and a kit pull request among them holds the rollout for its newer kit, as before. Once they end, a round comes at once and merges what passed, without testing it again.
+- A build still tries one kit: a kit pull request pushed to during the build, after its kit was tried, waits for the next build's trial, whether it is tested beside the rounds or in them.
 - The build's timings count those tests as the build's own time.
 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.70
+
+**Builds do less work: ready pull requests merge between builds and wait on main to be released at the build, one kit is tried and rolled out per build, an agent is released for a new kit alone only when the kit changes what it runs, and the whole suite is never tested beside a kit's trial.**
+
+### What's new
+
+- **Ready pull requests merge ahead of the build.** Between builds, beside the rounds and at the checks' gentle pace, the Steward now does the build's merge pass ahead of time:
+  - Each ready pull request merges into main in version order, as in a build: stamped, tested once with the others, the one that broke a stack found and left out, a kit pull request after its trial on the agents, and the rest caught up.
+  - Nothing is released and no kit is rolled out. What merged waits on main until the build.
+  - At the build, the Steward merges whatever is left and releases each repository once. A repository with several pull requests merged since the last build gets one release, and its notes bring every version merged ahead. A new kit merged ahead is released, and rolled out to the agents, at the build alone.
+  - Nothing merges ahead once a build has begun, so main never moves under a build. A pull request left out ahead of a build is tried again by the build itself.
+  - Build now and urgent fixes work as before.
+  - For customers, updates still come at the build times, and builds end sooner.
+- **A new kit alone no longer releases every agent.** When the only change in an agent's version since its last release is the Steward's kit bump, the Steward releases it only:
+  - if a file the new kit changes is one the agent runs: its own code, what that code imports, the kit scripts and lists it names, and the folders it reads. At most one such release a day per agent; or
+  - if the kit's changelog entry says it's urgent, or names a fix for that agent (a line starting "**Fix for Reeve, Crier: …**").
+
+  Otherwise the bump is merged and waits. It goes out with the agent's next release of its own, and that release's notes carry the bump's entry too. Since Monday 12 October, 447 of the 601 agent releases were a new kit alone. Most kits change files every agent runs, so the one-a-day limit does most of the saving: about 140 of those 447 would have gone out.
+  - For customers, this means fewer updates of agents in which nothing they'd notice changed. A kit fix for an agent, or an urgent one, still reaches them at once.
+  - Release on the Steward's page still releases such a version at once.
+
+### What changed
+
+- **A build tries one kit.** A build stacks every kit pull request that's ready when it begins, tries that stack on the agents once, and rolls that one kit out.
+  - A kit pull request pushed to during the build no longer starts a second trial in it. It gives up its turn, so the pull requests above it merge, and its kit is tried between builds, for the next one.
+  - A catch-up that only changes versions keeps its trial, as before.
+  - The 08:00 build of 16 October tried two kits on 34 agents each, 30 minutes apart, because one pull request was pushed to after the first trial began.
+- **The whole suite never runs beside a kit's trial.**
+  - The whole suite that a kit's release waits for now waits while a kit's trial, or a rollout's checks, run beside the rounds.
+  - A kit's trial waits while the whole suite runs.
+  - The round after one ends starts the other.
+  - Before, a whole suite run beside a trial could hit its 20-minute limit and then run again: 35 minutes in all on 16 October.
+- How many agents a trial tries at once is unchanged. On an 18-core laptop, four at once checked 25 agents in 43 seconds, against 61 for two at once.
+
+### Before you update
+
+- Nothing: it updates itself as usual. On the Steward's page, an agent's version that is a new kit alone, held, shows as skipped with the reason.
 
 ## 0.36.69
 
@@ -28,6 +67,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.68
+
+**A full pace never takes the whole PC any more: everything the manor runs, together, its AI model servers included, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
+
+### What changed
+
+- At a full pace (Manor's Settings), the Steward's checks used to run with no cap at all. These are test runs, type checks, installs and builds, an agent's whole suite before it merges, and a kit's trial on every agent. Now they are held to 85% of the processor, all of them together. Up to six run at once, as many agents as run at once at full, and they share the 85% rather than each adding to it. Each check run also keeps the memory limits it has at a gentle pace.
+- An agent at a full pace keeps normal priority, but its own work, and everything it starts, stays within 85% of the processor too. So does Manor's own page.
+- The AI model servers the agents share (the graphics card's, the NPU's) used to run with no cap at any pace. Now they stay within 85% of the processor too, all of them together, whatever the pace. A server that's already running gets the cap the next time it starts.
+- While more than 85% of this PC's memory is in use, no agent starts a scheduled round, whatever the pace. It waits for room, and says why it waits. A round already running finishes, and a round you ask for (Run now) still runs.
+- A kit trial starts no new try while more than 85% of the memory is in use. It goes on at the next round. It also tries fewer agents at once when memory is tight: only as many as the free memory holds above the 15% left to you.
+- A checks pace you set (checksPace), or KIT_CHECKS_PACE, still sets a lower cap. 100% or "full" now means 85%.
+- This Steward hands out kit 2.78.3, which brings the same ceiling to every agent that takes it.
+
+### Before you update
+
+- At a full pace the manor now always leaves 15% of the processor and memory to you and Windows, so big jobs such as a whole suite or a kit trial may take a little longer than before. Nothing to set: it updates itself as usual. Each agent's own work gets the ceiling when it takes kit 2.78.3.
 
 ## 0.36.67
 
@@ -51,6 +108,69 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. If you left the build window at its old two hours, it becomes 30 minutes; if you set it to more than an hour yourself, it becomes an hour.
+
+## 0.36.66
+
+**Builds run on time on a PC that sleeps: plugged in, it wakes a few minutes before each build and stays up until the build closes. A build the PC slept through says so, and a build shows as under way from its start.**
+
+### What's new
+
+- **The PC wakes for its builds.** When it's plugged in, Windows wakes the PC five minutes before each build time in Settings' Build pipeline, on its days. The Steward then keeps it up until that build has closed. Before, a PC that had gone to sleep missed its build until someone woke it.
+  - The wake is a hidden task in Task Scheduler (`\Steward\Wake`), kept in step with Settings' build times and days. It goes when the Steward has no builds to run (off duty, say, or not running rounds by itself).
+  - Lean by default: the screen stays off, nothing is held between builds, and a PC on battery is never woken. With the screen off, Windows runs the build a little slower than while someone uses the PC.
+  - The Steward's page says so under the build times.
+- **A build the PC slept through says so.** It still begins as soon as the PC wakes, and the page and the round's log say, for example, "the 08:00 build was late: the PC was in standby until 08:39".
+
+### What changed
+
+- **A build is under way from its start.** Before, a build was recorded as under way only when its first round ended, and that round is often its longest. Until then Manor saw no build, so it could install updates in the middle of it, and the Steward's page showed none.
+- Uninstalling the Steward removes its wake task too.
+- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+- If the PC still isn't woken for its builds, check that wake timers are allowed when it's plugged in: Control Panel, Power Options, the plan's advanced settings, Sleep, "Allow wake timers", Plugged in: Enable.
+
+## 0.36.65
+
+**Where the Seneschal is on this PC, the Steward's checks wait their turn in its one order, and its jams are alarms. Kit 2.78.1.**
+
+### What's new
+
+- With the Seneschal on this PC (it comes with Developer Pro), each run of a repository's checks asks it for a turn first: a PR's test, a vouch, the whole suite before a kit's release, and each kit trial (one per agent and kit). What a person waits on goes first (`steward vouch`, a round started by Run now or Build now), then what a merge or a release waits on, then the rest, and kit trials last. The checks then run without a turn of the checks pace: the Seneschal's turn is theirs, so the PC isn't held back twice.
+- A pass of exactly the same checks on the same code that the Seneschal already has (another agent ran them) stands in for running them again. A failure it has never does: the checks run here.
+- A task the Seneschal has left waiting far past its usual time is raised as an alarm, with a link to the Seneschal's page.
+- Without the Seneschal, with it off duty, or on a PC without Developer Pro, the checks run exactly as before.
+
+### What changed
+
+- The kit the Steward hands out lists the Seneschal, the new agent that hands out your agents' work on this PC in order, among the developer agents. With Developer options off, its Settings page no longer shows a "Where its work runs" section for work that doesn't run then.
+- Its page gets its own colour and title-bar scene: a ledger whose lines are ticked one by one as their work goes out to free slots.
+- Its Settings page says it comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
+
+## 0.36.64
+
+**Kit 2.78.0: on a 16 GB Snapdragon X2, the local AI on the NPU uses a smaller model, Qwen3-VL-2B. It is faster, better with pictures, and leaves the PC about 2 GB more memory.**
+
+### What changed
+
+- On a Snapdragon X2 PC with 16 GB of memory, the local AI on the NPU now uses Qwen3-VL-2B for chat and pictures instead of Qwen3-VL-4B. On the same tests it wrote nearly twice as fast (75 tokens a second against 41), did the test jobs in half the time, started in about 5 seconds instead of 10, and read all four test pictures right (the 4B read three). On the quality checks it scored 22 of 24, as the 4B did, with every must-pass item right.
+- It leaves the PC about 2 GB more memory once loaded, room a 16 GB PC needs beside Windows and the other agents.
+- The pictures are read by the PC's graphics (the Adreno) rather than the NPU: the current GenieX can't read them properly on the NPU with this model.
+- Snapdragon X2 PCs with more memory, first-generation Snapdragon X PCs, and Intel and AMD PCs are unchanged.
+- The NPU benchmark no longer counts a test job as unsteady just because the model wrote answers of different lengths from one try to the next: it now compares the tries as if their answers were the same length. Until now this most likely kept every full run on a Snapdragon off the leaderboard, even on a quiet PC.
+- The kit the Steward hands out (2.78.0) brings this to every agent.
+- That kit also brings work not released before: each agent shows under its own name in Task Manager, and on a PC with a Core Ultra 200H or 200HX, the NPU is named for that processor.
+
+### Before you update
+
+- A 16 GB Snapdragon X2 already set up keeps the 4B until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3-VL-2B (1.9 GB). The 4B stays on disk (4.4 GB) until you remove it: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- It was measured on a Snapdragon X2 Elite with 48 GB, not yet on a 16 GB PC.
 
 ## 0.36.63
 

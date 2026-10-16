@@ -2,14 +2,174 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 2.78.3
 
-**Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%. It also brings what wasn't released before: Pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, including Smith's audit's 512×512 vision check and a 1280×720 picture. The kit now makes such a side a pixel longer before sending the picture.**
+
+### What's new
+
+- **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
+- **accelerators.ts:**
+  - `fitPicture(acc, image)`: the picture as `acc`'s server should get it.
+  - `sidesOff32(size)`: the size it should have, or null.
+  - `pictureSize(bytes)`: a PNG's, JPEG's, GIF's or BMP's size, from its header.
+  - `redrawPicture(from, to, size)`: System.Drawing's high-quality bicubic.
+- **npu-refresh.ts:** a refresh that changes an entry's quirks names them in its `changes` and its log line.
 
 ### What changed
 
+- **pace.ts:**
+  - **`PACE_CEILING`** (0.85), **`CEILING_CAP`** (8500, in the hundredths of a percent a Windows job takes) and **`CEILING_WORDS`** ("85%") hold the manor's ceiling. It is written once, and everything below reads it.
+  - **The work line:**
+    - Short of memory now means more than `PACE_CEILING` of it in use (`shortOfMemory()`). This is the same measure as before, when it was less than 15% free. `LOAD.lowMemory` is gone.
+    - When short of memory, the line gives one slot, and no scheduled round starts until there is room (`roomToStart()`, looking every 10 s). That holds both in its turn and at once with no line (agentsAtOnce 0).
+    - While it waits, the round's state says `MEMORY_WAITING`. If there is still no room when its next round is due, it throws `NoRoom` (a `LockTimeout`), and round.json records a round that waited.
+    - A round asked for (Run now) and a light round don't wait.
+    - Under node --test, it looks at memory only when `load` or `inUse` stands in for it.
+  - **`memoryInUse()`:** the share of the PC's memory in use now.
+- **gentle.ts, gentle.cs:**
+  - At full, the agent keeps normal priority, no efficiency mode and its usual disk priority. It now stays in its job, the worker too, capped at `CEILING_CAP`; before, the cap was lifted. Manor's `keepResponsive()` gets the ceiling too.
+  - `paceCap(p)` gives the cap, and `paceSet()` says `full 8500`. A cap of 0 makes no job.
+  - Under node --test, full has no cap, as before.
+- **checks-pace.ts:**
+  - At a full pace (Manor's `backgroundPace`), check runs are held to `CEILING_CAP` in the PC's one job, instead of running with no cap. `checksPaceCap()` never returns more than that.
+  - A cap set as `checksPace` or `KIT_CHECKS_PACE` of "full", or of 100 and up, means the ceiling. A lower percentage still sets a lower cap: `KIT_CHECKS_PACE` at either pace, `checksPace` at gentle.
+  - At full, up to `CHECKS_AT_ONCE_FULL` runs go at once (`checksAtOnce()`): six, `AGENTS_AT_ONCE.most`. They share the cap rather than each adding to it. At gentle it stays three.
+  - A run's memory limits now apply at full too: an eighth of the PC's memory for each program, a quarter for the job.
+  - `pacedTestConcurrency()` never gives more test files at once than there are processors.
+  - Under node --test, commands are unpaced unless `KIT_CHECKS_PACE` says a percentage under 100, as before.
+- **apart.ts, checks-pace.cs (the model servers):**
+  - A server started apart (llama.cpp's, FastFlowLM's, the NPU routes') still leaves the asker's job. It now also joins the servers' job, one for the PC (`Local\kit-apart-pace`, `checks-pace.exe apart:<cap>`). That job is hard-capped at `CEILING_CAP` whatever the asker's pace, so all the servers together stay within 85% of the processor. Before, they ran with no cap at all.
+  - The job limits nothing else and ends nothing. Each server holds a handle to it, so it lasts while any server runs, and the next server joins the same job.
+  - A server that can't join it gets a job of its own with the same cap. If neither works, it runs as before.
+  - `apartCap()` gives the cap. Under node --test there is none unless `KIT_APART_CAP` sets one, and a test's servers use `KIT_APART_JOB_NAME`'s job.
+  - The launcher's source changed, so each PC builds it once more, at its next check run or server start.
+  - Measured on an 18-thread laptop with two programs each keeping every processor busy, started apart together:
+
+    | How they were started | Their share of the processor, together |
+    |---|---|
+    | `apart`, no cap | 88.4% (other work on the PC took the rest) |
+    | `apart:8500` | 83.5% |
+    | `apart:1000` | 10.5% |
+
+    At 10% they shared one job's cap: two jobs would have allowed 20%.
+- **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
+- **work-status.ts:** the checks' turns come from `checksAtOnce()`.
+- **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
+- **`Npu.vision`, setup's vision test, and the NPU check's and benchmark's requests** (npu-server.ts' `serverClient`) fit each picture first. On the AMD route, three of the benchmark's four pictures go a pixel larger. The benchmark's log names the quirk, and its times leave out the redraw.
+- **spec/NPU-VENDORS.md:** the measurements, in "FastFlowLM's pictures with sides of 32 px".
+- `visionBody` is unchanged and stays synchronous.
+
+### What an agent must do
+
+Nothing, if it asks through `Npu.vision`. An agent that builds its own vision requests with `visionBody` awaits `fitPicture(acc, image)` first.
+
+### Before you update
+
+- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts. Nothing to do: it updates itself as usual.
+
+## 2.78.2
+
+**An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`).**
+
+A Modern Standby PC that goes to sleep is out of an agent's reach: a sleep the person chooses (Start's Sleep, the power button, the lid) enters standby at once, whatever an app holds, and the desktop apps are suspended there. Only a wake timer brings the PC back, and Windows allows those plugged in (Power Options' "Allow wake timers", on AC). While the task that woke it runs, Task Scheduler keeps the PC out of sleep, with the screen off; an app's own hold didn't keep its process from being throttled there. So the task runs until the work is done. spec/ROUND.md has what was measured.
+
+### What's new
+
+- **wake.ts:**
+  - **`WakePlan`**: `{ times, days, beforeMinutes, holdMinutes, why }`, the times (`HH:MM`, local) and days work is due, how many minutes before each to wake, the longest the woken PC is held (the work's longest), and what for, in words.
+  - **`wakeTimes(plan)`**: each time `beforeMinutes` early, on the day that makes (a midnight time wakes the day before), grouped by time, the days in the week's order.
+  - **`wakeTaskXml(plan, { exe, user })`**: the task's definition. One calendar trigger for each wake time (daily on every day, else weekly on its days). It wakes the PC (`WakeToRun`), only on AC (`DisallowStartIfOnBatteries`, `StopIfGoingOnBatteries`), never late (`StartWhenAvailable` false), hidden, as the person signed in with least privilege, and stops 5 minutes past its hold. It runs the awake helper with `--for <holdMinutes × 60>`.
+  - **`keepWakeTask(plan | null, log)`**: keeps the task (`WAKE_TASK_NAME`) in step with the plan. It registers it when the plan changes (`schtasks /Create /XML /F`, the definition written UTF-16 to the data folder's `wake.task.xml`), removes it for a null plan, and asks Task Scheduler nothing while the plan is the one it set. The first look in a process checks the task is still there. A refusal is logged once and tried again an hour later (`WAKE_RETRY_MS`). Answers `set`, `same`, `removed`, `none` (nothing registers here: not Windows, a dev checkout, or under node --test) or `failed`.
+  - **`endWakeTask(log)`**: ends the task's run once the work is done (`schtasks /End`), so the PC may sleep again. The task stays registered for the next time, and Task Scheduler answers SUCCESS for one that isn't running. Answers `ended`, `none` (no task kept) or `failed`, logged.
+  - **`wakesPc()`**: whether the task is set, for the page.
+  - **`setWakeDeps(deps | null)`**: stands in for Task Scheduler in tests.
+- **install.ts**: `WAKE_TASK_NAME`, `\<App>\Wake`. Uninstalling ends and deletes it as well, beside the agent's own task.
+- **awake.cs**: `--for <seconds>`: holds the PC (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`) that long, then lets go and exits. It is what the wake task runs: no agent, no input. The agent ends the task sooner, once its work is done (`endWakeTask`).
+- **awake.ts**: `awakeHelperExe(log)`, the compiled helper's path (compiled first if needed), for the wake task.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. Nothing is woken until an agent calls `keepWakeTask`.
+- An agent with work due at set times calls `keepWakeTask(plan)` whenever the times may have changed (a cheap call: it asks Task Scheduler nothing while the plan is the same), and `keepWakeTask(null)` when it has nothing to wake for. Its `holdMinutes` is the longest the work may take. Once the work is done it calls `endWakeTask()`, but not when the agent merely stops (an update): the task then holds the PC until the agent is back. While it works it holds the PC with `stayAwake(what)`, as ever. Never wake a PC on battery, and never keep the screen on.
+- An agent that has a wake task removes it at uninstall through the kit's `uninstall`.
+
+## 2.78.1
+
+**The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts.**
+
+### What's new
+
+- **node/seneschal.ts:** the Seneschal's work client. `seneschalTurn(task, { worker, commands })` submits a task (a repository and a commit, never a command), asks for it by name every 5 seconds until its turn comes, and answers `{ turn }` (run it inside `turn.hold()`, which sends the lease's heartbeats and reports the result), `{ reused }` (a pass of exactly these commands on the same code: nothing to run), or null: run it as before. Null whenever the Seneschal isn't on the PC, doesn't answer, is off duty, the PC has no Developer Pro, the turn doesn't come in 20 minutes, or the run is already inside a checks pace turn (`KIT_CHECKS_TURN`). A failure it holds is never taken for this run's: the task is asked for again, and run. A run under its lease sets `TURN_HELD_ENV` for its commands, so the checks pace's launcher takes no turn of its own. Under node --test it asks only a Seneschal the test gave a home of its own.
+
+### What changed
+
+- **node/work.ts:** a `WORK` entry for the Seneschal: handing out the staff's work in order, by lane and as the PC has room, and its look at the PC's room every 15 seconds. It is a developer role (`developerRole`), so with Developer options off its Settings page has no "Where its work runs". Its notes say it runs no work of its own and comes with Developer Pro.
+- **node/look.ts:** the Seneschal's look: deep blue, "Handing out work" on its pill, and a scene where each line of a ledger is ticked in turn and its task goes out to a free slot beside the steward's staff.
+- **node/developer-pro.ts:** Developer Pro covers the Seneschal too. Without it, the Seneschal hands out no work, and each agent runs its own as before.
+- **spec/DEVELOPER-OPTIONS.md** lists the Seneschal among the developer roles.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Seneschal's own page asks `developerPro()` itself.
+
+## 2.78.0
+
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values. Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
+
+### What's new
+
+- **npu-vendors.ts:**
+  - **`NpuGeneration.smallPc`** (`{ models, basis }`): the models a generation runs in the route's place on a PC with little memory (`smallPc`: under `idleStop.smallPcGb`, 20).
+  - **`routeFor(route, generation, small)`**: with `small`, the generation's `smallPc` models in the route's place; without it, as before. **`planNpu({ small })`** passes it on.
+  - **`NpuModel.serve`**: server arguments a model needs beside the route's `serve`. `npuEntry` adds the chat model's after the route's, so they go with that model alone.
+- **npu-check.ts and npu-bench.ts: `--small-pc`** runs a small PC's models on any PC. On a PC under 20 GB they run anyway, as setup would run them. `npu-bench --model` one of a small PC's models runs them too, and `--model` one of the route's own measures it on a small PC. The report's model says which ran.
+
+### What changed
+
+- **npu-vendors.json's qualcomm route**, the `snapdragon-x2` generation's `smallPc`: `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, chat and vision.
+  - Pulled from Hugging Face (`--model-hub hf --model-type vlm`): AI Hub has no QAIRT build of the 2B, only this GGUF.
+  - Served by GenieX's llama.cpp plugin with `--compute npu --vit-compute GPUOpenCL`: the language model on the Hexagon, the pictures' encoder on the Adreno. GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon, and on the processor each picture takes about 5.5 s of its time, against 0.8 s on the Adreno.
+  - 1,876,179,296 bytes, its Q4_0 GGUF and F16 projector pinned for the X2 (unsloth's repository at 8dcb98e5). Apache-2.0, the base model's.
+  - The route's cap (2,400), timeouts and idle stop are unchanged. Its cold start, 5.1 to 9.1 s, is inside the route's 15 s.
+  - **Measured** with the full benchmark (`castellan-npu-bench/2`) on the 48 GB X2 Elite, 2026-10-15, against the 4B:
+
+    | | Qwen3-VL-2B (Q4_0, llama.cpp) | Qwen3-VL-4B (W4A16, QAIRT) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 22 of 24 |
+    | Pictures | 4 of 4 | 3 of 4 |
+    | Tokens written a second | 75.0 | 41.1 |
+    | Jobs: triage, reply, summary | 0.56, 0.43 and 1.95 s | 0.73, 0.98 and 3.88 s |
+    | Cold / cached load | 5.1 / 5.4 s | 10.0 / 9.9 s |
+    | Speed held over 10 minutes | 95% (100% run again quiet) | 100% |
+    | Working set / private | 4.31 / 2.34 GB | 6.12 / 1.68 GB |
+    | On the NPU | 2.1 GB | 4.2 GB |
+    | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
+
+    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs and a 4.3 s cold load, and its speed held 100%. Only the reply job's spread kept it off the board (508 to 666 ms), judged then on whole times: see npu-bench.ts below.
+- **setup.ts**: on a PC under 20 GB, the NPU is planned with its generation's `smallPc` models (`smallPc(detection.ramBytes)`).
+- **npu-refresh.ts**: the keeper's look plans with the PC's memory too. On a 16 GB X2 set up with the 4B, it leaves the NPU for setup (`needs-setup`) while the 2B isn't there, since it never downloads. Once it is there, the look tests it in the NPU's turn, as any new command, and switches. Its log and `changes` name a model change: `model … in …'s place`.
+- **npu-bench.ts: a job's tries are judged at one answer length.**
+  - Each try of a job is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer one takes longer to write without the server being slower. That most likely kept every GenieX full run off the board, even on a quiet X2 Elite: the 4B's summary took 3.3 to 4.3 s and the 2B's reply 508 to 666 ms, while the short answer, writing and reading held within 5%. Those runs recorded no token counts, so the next run will show it.
+  - Each job's tries now record their answer tokens (`answerTokens`, the server's count) and first-token times (`firstTokenMs`). Whether they are steady is the spread with each try's writing scaled to the tries' median answer length (`spreadAtLength`; `atAnswerLength`, `jobMeasure`).
+  - The job's median, the job time and every other measurement are as before, so runs still compare within `castellan-npu-bench/2`, and a report from before keeps its verdict. A server that doesn't stream or count tokens is judged on whole times, as before (it is marked anyway).
+  - The `noisy` mark names such a job "at one answer length". **spec/npu-bench.schema.json**: the three new fields, optional so earlier reports still match.
+- **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row, `--small-pc`, and a job's steadiness.
+- **named.cs and named.ts:**
+  - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
+  - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
+  - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
+- **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
+- **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before. `pageLaunch`'s `args` are the page's arguments after its entry, `serve` unless given, for an agent whose page has a command of its own (Reeve's `dashboard --port <n>`).
+
 - **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
 - **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
+
+### For an agent
+
+- Nothing to do.
+- A 16 GB Snapdragon X2 already set up keeps the 4B until it is set up again (Manor's Set up local AI), which pulls the 2B (1.9 GB) and writes it. The 4B stays in `%USERPROFILE%\.cache\geniex\models` (4.4 GB) until removed (`geniex remove qualcomm/Qwen3-VL-4B-Instruct`).
+- Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB, the kit's own command through `npu-bench --small-pc`), its pull through setup, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
 
 ## 2.77.9
 

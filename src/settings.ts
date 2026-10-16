@@ -227,6 +227,12 @@ export const blankEmployee = (id: string, name: string): Employee => ({
  */
 export const wrightInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.WRIGHT_HOME ?? path.join(os.homedir(), '.wright'), 'app'));
 
+/**
+ * The Seneschal is installed here when its home (%USERPROFILE%\.seneschal, or SENESCHAL_HOME) has an app folder, and it
+ * comes with Developer Pro: only then are its jams read (Steward 0.36.65).
+ */
+export const seneschalInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.SENESCHAL_HOME ?? path.join(os.homedir(), '.seneschal'), 'app'));
+
 /** Reeve is installed here when his home (%USERPROFILE%\.reeve, or REEVE_HOME) has an app folder: only then are his alerts read. */
 export const reeveInstalled = (env: NodeJS.ProcessEnv = process.env) => existsSync(path.join(env.REEVE_HOME ?? path.join(os.homedir(), '.reeve'), 'app'));
 export const REEVE_URL = 'http://127.0.0.1:18383';
@@ -251,6 +257,8 @@ export interface AgentPages {
   bailiff: string;
   /** Reeve's jobs' open alerts, and the repositories he finds. */
   reeve: string;
+  /** The Seneschal's jams, the tasks waiting far past their usual run: only where it is installed, with Developer Pro. */
+  seneschal: string;
 }
 
 /**
@@ -264,6 +272,7 @@ export function agentPages(): AgentPages {
     wright: wrightInstalled() ? (agentUrl('wright') ?? '') : '',
     bailiff: bailiffInstalled() ? (agentUrl('bailiff') ?? '') : '',
     reeve: agentUrl('reeve') ?? '',
+    seneschal: seneschalInstalled() ? (agentUrl('seneschal') ?? '') : '',
   };
 }
 
@@ -493,7 +502,7 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs wait, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
+    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs merge ahead of the next build, and wait on their branch to be released at it, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
     fields: [
       // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
       // whatever it says is left out (pipeline.ts' normalizePipeline).

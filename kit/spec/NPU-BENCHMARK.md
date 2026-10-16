@@ -27,6 +27,7 @@ Every model Castellan runs today is a Qwen model at 4-bit weights:
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
+| Qualcomm, an X2 under 20 GB | GenieX 0.8.0 (its llama.cpp plugin) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Adreno |
 | Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
@@ -42,7 +43,7 @@ The suite is data, `npu-bench-suite.json` beside this file, with a version (`cas
 
 - `temperature: 0` and a fixed `max_tokens` per request, as the kit's own `chatBody` sends, and the model's thinking turned off where it has any.
 - **Every read and job is new to the server.** Its prompt starts with a line of its own, `[bench <run>-<count>]`, different in every request: the warm-up, each try, each size, the read near the cap, holding speed and energy (`freshPrompt`). OpenVINO Model Server turns the NPU's prefix caching on, which keeps every whole block of a prompt it has read (128 tokens on an NPU 3720) and doesn't read them again. Asked the same prompt a warm-up and three times over, the NPU 3720 took 0.74 s to the first token at 512 tokens; asked one it hadn't seen, 2.26 s, and 3.6 s at 1,024 against the same 0.75 s (Core Ultra 5 225U, 2026-10-14). An agent's prompts are mostly new text, so the new prompt's time is the one that counts. The short answer and the writing prompt stay the same every time, being shorter than a block, and so do the quality items, which are graded, not timed. GenieX's requests were already new, by their nonce (next), and only its route has vision.
-- **The server's quirks, as an agent's requests carry them** (the route's `quirks`, ACCELERATORS.md). GenieX's `prefix-leak`: every request starts with a nonce, because GenieX leaks state between requests that share a prompt's start, and the benchmark asks each prompt a warm-up and five times over. GenieX's `image-path`: each picture is written to a file of its own in the temporary folder and its path sent, because GenieX reads a local path, not a `data:` URL. Other servers get pictures as `data:` URLs. The run's log names the quirks it applied.
+- **The server's quirks, as an agent's requests carry them** (the route's `quirks`, ACCELERATORS.md). GenieX's `prefix-leak`: every request starts with a nonce, because GenieX leaks state between requests that share a prompt's start, and the benchmark asks each prompt a warm-up and five times over. GenieX's `image-path`: each picture is written to a file of its own in the temporary folder and its path sent, because GenieX reads a local path, not a `data:` URL. Other servers get pictures as `data:` URLs. FastFlowLM's `sides-of-32`: a picture 720 px tall or less with a side of a whole number of 32 px gets that side a pixel longer, as an agent's does (three of the suite's four pictures), before its request's clock starts. The run's log names the quirks it applied.
 - **Streamed** (`stream: true`, with usage in the last chunk), so the time to the first token (reading the prompt) and the time between tokens (writing) are measured separately. The NPU check doesn't stream, so it estimates writing speed by taking off half a short answer's time. That is close enough for a timeout, but not for a ranking. A server that can't stream is measured without it and the run is marked: its job times still count, its reading and writing speeds are shown as estimates and not ranked.
 - Token counts come from the server's own usage numbers. A server that doesn't report them is marked the same way.
 - Every prompt fits under 1,280 tokens, prompt and answer together, so it runs under every route's cap (the smallest chat cap is Qualcomm's 2,400). A route whose cap is lower can't run the suite, and the website says so rather than leaving it out silently.
@@ -88,6 +89,9 @@ Laptops vary with power and heat, so every run records how it was measured, and 
 - **Plugged in** (except the energy part, which needs the battery), with Windows' power mode recorded. The power mode Windows ships with is the one ranked. Whether "Best performance" changes much on an NPU is worth measuring once.
 - **Nothing else working**: the processor under 15% busy for 30 seconds before the start, and no other model server answering (as the NPU check refuses to measure beside the keeper's server).
 - **Steady**: for each measurement, the spread of its five tries ((slowest − fastest) / median) is under 15%. A noisy measurement is shown as noisy and the run isn't ranked.
+  - A job's tries are judged at one answer length (kit 2.78.0). Each try is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer answer takes longer to write without the server being slower. So each try's writing, from its first token to its last, is scaled to the tries' median answer length (the server's token counts) before the spread is taken: `spreadAtLength`. The job's median is still of the whole times, what a person waits.
+  - Before, the jobs kept every GenieX full run off the board, even with the PC quiet. On the X2 Elite the 4B's summary took 3.3 to 4.3 s and the 2B's reply 508 to 666 ms, while the short answer, writing and reading held within 5%: the server was steady, and most likely only the answers' lengths varied. Those runs didn't record token counts. The first run that does will show it.
+  - A server that doesn't stream or count tokens (marked so anyway) has its jobs judged on whole times. No number changes, so runs still compare within version 2, and a report from before keeps its verdict.
 - **Passed the gate**, with every job answered.
 
 Before the five measured tries of each kind, there is one warm-up try, which isn't counted.
@@ -104,7 +108,7 @@ One JSON file per run, `castellan-npu-bench-report/1`, with its schema beside th
 - **pc**: the processor and its chip generation (as detection labels it, e.g. "Intel Core Ultra 7 256V, Lunar Lake"), the NPU's name, PCI device and driver version and date, RAM, Windows build, and the laptop's make and model (cooling and power limits differ between laptops with the same chip).
 - **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start.
 - **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured once setup has pulled it, except on FastFlowLM's route: see `--candidate` in **What's built**), and whether it is shipped or a candidate. On a played run (`--generation`, below), `played`: the older Snapdragon's generation this NPU played.
-- **results**: each measurement's five tries, their median and spread, and the job time.
+- **results**: each measurement's five tries, their median and spread, and the job time. Each job also has each try's answer tokens (`answerTokens`) and first-token time (`firstTokenMs`), and its spread at one answer length (`spreadAtLength`).
 - **quality**: each item's answer, its grade, the score, and whether the gate passed.
 - **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed, played), each with its reason in plain words.
 
@@ -191,6 +195,7 @@ The route is GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16), one mode
 - **Energy on the X2 Elite is unseen.** On the Lunar Lake laptop the battery's rate didn't hold up (Energy, above). Whether the Snapdragon's does is what step 7 finds out.
 - **Setup checks the model's files.** On the X2 Elite each of Qwen3-VL-4B's pinned files is read and its SHA-256 checked before the server starts (4.3 GB), so the first lines take a little while. A `--candidate`'s files are read once too, after setup, for the report's SHA-256s.
 - **A start again waits for GenieX's port.** GenieX killed is gone at once, but its port stays bound about 2 s: requests time out for the first second, then are reset, then refused (measured on the X2 Elite, 2026-10-15). The benchmark, like the NPU check, waits until a connection is refused before it starts GenieX again (kit 2.74.7). Before, it started it while the port was held: GenieX couldn't bind it ("Only one usage of each socket address" in its log), and the cached load failed with "no correct answer".
+- **A small PC's model** (kit 2.78.0). On a PC under 20 GB the benchmark measures the models setup runs there, the generation's `smallPc`: a 16 GB X2's Qwen3-VL-2B. `--small-pc` measures them on a bigger X2, as does `--model unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`; `--model` the 4B measures the 4B on a small one. The report's `run.model` says which.
 - **An X played on the X2.** `--generation snapdragon-x` (kit 2.74.7) runs the first X's code on the X2's NPU: AI Hub's X Elite build of the model, served by GenieX from a folder of its own (`{tools}\played\snapdragon-x\geniex`, whose `config.json` names the X Elite to AI Hub), checked against the X Elite's pins there. The report says `run.played`, carries a `played` mark, and is never ranked: its numbers are the X's code on the X2, not an X's speed. A newer Snapdragon on an older one is refused (exit 2), as is `--generation` on any NPU but a Snapdragon, where it would be another generation's starting values alone (NPU-VENDORS.md, Playing an older Snapdragon on a newer one).
 
 The plugged-in full run's report is what the website's speed table takes for the Snapdragon row.
@@ -236,7 +241,7 @@ The same model on the Arc 140V, measured with the experiment harness rather than
 6. **`npu-bench.ts`**, the command:
 
    ```
-   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]
+   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
    node <agent>\src\kit\npu-bench.ts --mix [days]
    ```
 

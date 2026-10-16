@@ -95,6 +95,8 @@ export interface Ctx {
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
+  /** The share of this PC's memory in use now, 0 to 1 (the kit's pace.ts memoryInUse); tests stand in for it. Under node --test, none unless given. */
+  memoryInUse?: () => number;
   /** How each repository is worked with (scm.ts): GitHub's way, GitLab's, or plain git. Not given: GitHub's, as before. */
   host?: (e: Pick<Employee, 'repo'>) => Host;
   /**
@@ -110,8 +112,13 @@ export interface Ctx {
    * One of a build's rounds (pipeline.ts): its build time, and its name in words ("the 13:00 build"). A repository's
    * ready PRs are then stacked as one batch, and a batch that fails is halved to find the PR that broke it
    * (stages/build.ts). Absent between builds, and without the pipeline.
+   *
+   * `ahead`: between builds, the merge pass ahead of the next build (stages/prepare.ts), whose build time `due` is. Its
+   * ready PRs merge as in a build (stacked, tested once, halved to find the one that broke it, a kit's trial first), and
+   * nothing is released: the build releases them. A PR it leaves out is tried again by the build itself, and a kit's
+   * trial in it is not the build's one kit (trial.ts).
    */
-  build?: { due: string; name: string } | null;
+  build?: { due: string; name: string; ahead?: boolean } | null;
   /**
    * Between builds, the next build prepared for (stages/prepare.ts): its build time, and its name in words. A repository's
    * ready PRs are then tested as that build would test them (each at its head, stacked as its train or batch, a kit's
@@ -120,6 +127,13 @@ export interface Ctx {
    */
   prepare?: { due: string; name: string; inBuild?: boolean } | null;
 }
+
+/**
+ * The build this work is part of, by its build time: the build under way (not a merge pass ahead of it), or the one whose
+ * rounds the Steward's own PRs are tested beside (ctx.prepare `inBuild`). Null between builds. A build tries one kit (trial.ts).
+ */
+export const buildUnderWay = (ctx: Pick<Ctx, 'build' | 'prepare'>): string | null =>
+  ctx.build ? (ctx.build.ahead ? null : ctx.build.due) : ctx.prepare?.inBuild ? ctx.prepare.due : null;
 
 /** How a repository is worked with in this stage (scm.ts). */
 export const hostIs = (ctx: Pick<Ctx, 'host'>, e: Employee): Host => ctx.host?.(e) ?? 'github';
