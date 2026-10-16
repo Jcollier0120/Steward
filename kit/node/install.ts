@@ -24,6 +24,9 @@ import { pageAt, ping, shutdown } from './service.ts';
 /** The sign-in task, in a Task Scheduler folder named after the agent, as Reeve's and Heiward's are. */
 export const TASK_NAME = `\\${APP.name}\\Home page`;
 
+/** The task that wakes the PC for work due at set times (wake.ts, kit 2.78.2), beside it; uninstall deletes it too. */
+export const WAKE_TASK_NAME = `\\${APP.name}\\Wake`;
+
 /** conhost --headless gives node its console without a window; the task's "Hidden" only hides it in the UI. */
 export const CONHOST = 'C:\\Windows\\System32\\conhost.exe';
 const SCHTASKS = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'schtasks.exe');
@@ -503,7 +506,7 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
     return 2;
   }
   if (opts.dryRun) {
-    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME}, and remove ${app}.`);
+    out(`${APP.name}: would end its page process if it's running, end and delete the task ${TASK_NAME} (and ${WAKE_TASK_NAME}, if it has one), and remove ${app}.`);
     out(opts.purge ? `--purge: would also remove its data folder, ${d.dataDir}.` : `Its data folder would stay: ${d.dataDir}.`);
     out('--dry-run: nothing changed.');
     return 0;
@@ -519,6 +522,16 @@ export async function uninstall(opts: { purge?: boolean; dryRun?: boolean } = {}
       code = del.code;
     }
   } else out(`There's no task ${TASK_NAME}.`);
+  // The task that wakes the PC for work at set times (wake.ts), where the agent has one.
+  if ((await d.schtasks(['/Query', '/TN', WAKE_TASK_NAME])).code === 0) {
+    await d.schtasks(['/End', '/TN', WAKE_TASK_NAME]);
+    const del = await d.schtasks(['/Delete', '/TN', WAKE_TASK_NAME, '/F']);
+    if (del.code === 0) out(`Deleted the task ${WAKE_TASK_NAME}.`);
+    else {
+      out(`Couldn't delete the task ${WAKE_TASK_NAME}:\n${del.out}`);
+      code ||= del.code;
+    }
+  }
 
   if (!(await endPage(d)).ended) {
     out(`${APP.name}'s page is still running, so ${app} was left in place.`);
