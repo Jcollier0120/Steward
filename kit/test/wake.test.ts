@@ -11,7 +11,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'fixture-wake-'));
 process.env.FIXTURE_HOME = path.join(home, 'data');
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { WAKE_RETRY_MS, keepWakeTask, setWakeDeps, wakesPc, wakeTaskXml, wakeTimes } = await import('./fixture/src/kit/wake.ts');
+const { WAKE_RETRY_MS, endWakeTask, keepWakeTask, setWakeDeps, wakesPc, wakeTaskXml, wakeTimes } = await import('./fixture/src/kit/wake.ts');
 const { WAKE_TASK_NAME } = await import('./fixture/src/kit/install.ts');
 const { awakeCompileScript } = await import('./fixture/src/kit/awake.ts');
 const { powershell } = await import('./fixture/src/kit/ps.ts');
@@ -52,7 +52,7 @@ test('the task wakes the PC on AC only, runs the helper for its hold, and never 
 });
 
 /** Task Scheduler stood in for: the tasks registered, and every call made. */
-function fakeScheduler(o: { failCreate?: boolean } = {}) {
+function fakeScheduler(o: { failCreate?: boolean; failEnd?: boolean } = {}) {
   const calls: string[][] = [];
   const tasks = new Set<string>();
   let now = Date.parse('2026-10-16T12:00:00Z');
@@ -71,6 +71,7 @@ function fakeScheduler(o: { failCreate?: boolean } = {}) {
         tasks.add(name);
       }
       if (verb === '/Delete') tasks.delete(name);
+      if (verb === '/End' && o.failEnd) return { code: 1, out: 'ERROR: Access is denied.' };
       return { code: 0, out: 'SUCCESS' };
     },
   };
@@ -125,6 +126,27 @@ test("a task Task Scheduler refuses is said once, and tried again an hour later;
   setWakeDeps({ registers: false, schtasks: async () => assert.fail('nothing asked') });
   assert.equal(await keepWakeTask(PLAN), 'none');
   assert.equal(await keepWakeTask(null), 'none');
+});
+
+test("the wake task's run is ended once the work is done (Task Scheduler answers SUCCESS whether it ran or not); kept registered", async () => {
+  const f = fakeScheduler();
+  const lines: string[] = [];
+  const log = (line: string) => lines.push(line);
+  assert.equal(await endWakeTask(log), 'none', 'no task kept: nothing asked');
+  assert.deepEqual(f.calls, []);
+  await keepWakeTask(PLAN, log);
+  assert.equal(await endWakeTask(log), 'ended');
+  assert.deepEqual(f.calls.at(-1), ['/End', '/TN', WAKE_TASK_NAME]);
+  assert.deepEqual([...f.tasks], [WAKE_TASK_NAME], 'still there for the next time');
+
+  const g = fakeScheduler({ failEnd: true });
+  await keepWakeTask(PLAN, log);
+  assert.equal(await endWakeTask(log), 'failed');
+  assert.match(lines.at(-1)!, /couldn't end the task that woke the PC .*Access is denied/);
+  assert.equal(g.calls.at(-1)![0], '/End');
+
+  setWakeDeps({ registers: false, schtasks: async () => assert.fail('nothing asked') });
+  assert.equal(await endWakeTask(log), 'none');
 });
 
 test("on Windows the helper's timed hold, as the wake task runs it, holds and ends by itself", { skip: process.platform !== 'win32' }, async () => {

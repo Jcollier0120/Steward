@@ -52,9 +52,10 @@ test('the PC is held from five minutes before a build time until its build close
   assert.equal(buildHold(ON, none, at(10, 1)), null);
 });
 
-test("the wake task's plan: five minutes before each build time, on its days, the day before for a midnight build", () => {
+test("the wake task's plan: five minutes before each build time, on its days, the day before for a midnight build, held as long as a build is", () => {
   const plan = buildWakePlan(ON);
-  assert.deepEqual(plan, { times: ON.times, days: ON.days, beforeMinutes: 5, holdMinutes: 15, why: 'the 08:00, 13:00 and 18:00 builds' });
+  assert.deepEqual(plan, { times: ON.times, days: ON.days, beforeMinutes: 5, holdMinutes: 5 + ON.windowMinutes + 30, why: 'the 08:00, 13:00 and 18:00 builds' });
+  assert.equal(buildWakePlan({ ...ON, windowMinutes: 60 }).holdMinutes, 95);
   assert.deepEqual(wakeTimes(plan), [
     { time: '07:55', days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] },
     { time: '12:55', days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] },
@@ -68,7 +69,7 @@ test("the wake task's plan: five minutes before each build time, on its days, th
   assert.equal(buildWakePlan({ ...ON, times: ['18:00'] }).why, 'the 18:00 build');
 });
 
-test('the watch holds the PC for each build, starts a round at its time once, lets go when it closes, and keeps the wake task in step', async () => {
+test('the watch holds the PC for each build, starts a round at its time once, lets go when it closes (and ends the wake task), and keeps the wake task in step', async () => {
   let now = at(7, 50);
   let state: PipelineState = none;
   let pipeline: typeof ON | null = ON;
@@ -87,6 +88,7 @@ test('the watch holds the PC for each build, starts a round at its time once, le
       return () => void calls.push(`let go ${what}`);
     },
     wake: async (plan) => void plans.push(plan),
+    endWake: async () => void calls.push('end the wake task'),
     everyMs: 3_600_000,
   });
   try {
@@ -109,7 +111,8 @@ test('the watch holds the PC for each build, starts a round at its time once, le
     state = endRound(state, state.open!, { merged: [], released: [], failed: [], closed: true, now: at(8, 45) });
     now = at(8, 45);
     watch.look();
-    assert.deepEqual(calls, ['hold the 08:00 build', 'let go the 08:00 build']);
+    await until(() => calls.length === 3);
+    assert.deepEqual(calls, ['hold the 08:00 build', 'let go the 08:00 build', 'end the wake task']);
     assert.equal(watch.holding(), null);
     assert.equal(rounds, 1);
     assert.match(lines.join('\n'), /held up for the 08:00 build[\s\S]*let go after the 08:00 build/);
@@ -118,18 +121,19 @@ test('the watch holds the PC for each build, starts a round at its time once, le
     now = at(12, 56);
     pipeline = null;
     watch.look();
-    assert.deepEqual(calls.slice(2), []);
+    assert.deepEqual(calls.slice(3), []);
     await until(() => plans.length === 7);
     assert.deepEqual(plans.slice(0, 6), Array(6).fill(buildWakePlan(ON)), 'in step at every look');
     assert.equal(plans[6], null);
     // Back on duty inside a hold's time: held at once.
     pipeline = ON;
     watch.look();
-    assert.deepEqual(calls.slice(2), ['hold the 13:00 build']);
+    assert.deepEqual(calls.slice(3), ['hold the 13:00 build']);
   } finally {
     watch.stop();
   }
-  assert.deepEqual(calls.slice(2), ['hold the 13:00 build', 'let go the 13:00 build'], 'stopping lets go');
+  await stillFor(() => calls.length === 5);
+  assert.deepEqual(calls.slice(3), ['hold the 13:00 build', 'let go the 13:00 build'], 'stopping lets go, and leaves the wake task running for the build');
 });
 
 test('a watch that fails to read its state says so, and holds nothing', () => {
@@ -158,4 +162,12 @@ test('a watch that fails to read its state says so, and holds nothing', () => {
 async function until(ok: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setImmediate(r));
   assert.ok(ok(), 'the condition never held');
+}
+
+/** Lets the watch's promises settle, and checks a condition still holds after them. */
+async function stillFor(ok: () => boolean): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    assert.ok(ok(), 'the condition stopped holding');
+    await new Promise((r) => setImmediate(r));
+  }
 }

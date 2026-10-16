@@ -13,9 +13,13 @@ import { dataFile, readJson, writeJson } from './store.ts';
  * desktop app until something wakes it; the owner's PC slept so from 00:35 to 08:39 on 2026-10-16, past its 08:00 build.
  *
  * One Task Scheduler task per agent, \<Name>\Wake, with a trigger a few minutes before each time and "wake the computer
- * to run this task". It runs the awake helper (awake.cs) for a while (`--for`), which keeps the woken PC up until the
- * agent's own holds (awake.ts) take over. Kept in step with the agent's times by `keepWakeTask`, and removed when there
- * is nothing to wake for (and at uninstall).
+ * to run this task". It runs the awake helper (awake.cs) for as long as the work may take (`--for`), and the agent ends
+ * it once the work is done (`endWakeTask`). While a task that woke the PC runs, Task Scheduler itself keeps the PC out
+ * of sleep: measured on the owner's Snapdragon (kit/spec/ROUND.md), standby's sleep was cut short at once by "PDC Task
+ * Client: Maintenance Scheduler" while such a task ran, and `powercfg /requests` listed the Schedule service's system
+ * request for it. An app's own hold didn't keep its process from being throttled there, so the task covers the work.
+ * Kept in step with the agent's times by `keepWakeTask`, and removed when there is nothing to wake for (and at
+ * uninstall).
  *
  * Lean: never on battery. The task starts only on AC power and stops if the PC goes on battery, and Windows' own
  * "Allow wake timers" on battery (off unless the person turned it on) keeps the PC from waking at all. It never turns
@@ -34,7 +38,7 @@ export interface WakePlan {
   days: readonly WeekDay[];
   /** How many minutes before each time the PC is woken. */
   beforeMinutes: number;
-  /** How long the woken PC is held up, at most, if the agent's own holds don't take over (minutes). */
+  /** How long the woken PC is held up at most (minutes): the work's longest, unless the agent ends it sooner (endWakeTask). */
   holdMinutes: number;
   /** What it wakes for, in the task's description: "the 00:00, 06:00, 12:00 and 18:00 builds". */
   why: string;
@@ -84,7 +88,7 @@ export function wakeTaskXml(plan: WakePlan, o: { exe: string; user: string }): s
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>${xmlEscape(`Wakes the PC, when it's plugged in, ${plan.beforeMinutes} minutes before ${plan.why}, and keeps it up for at most ${hold} minutes, until ${APP.name} holds it itself. Never on battery, and never the display. ${APP.name} keeps this task in step with its Settings.`)}</Description>
+    <Description>${xmlEscape(`Wakes the PC, when it's plugged in, ${plan.beforeMinutes} minutes before ${plan.why}, and keeps it up until ${APP.name} has done that work, ${hold} minutes at most. Never on battery, and never the display. ${APP.name} keeps this task in step with its Settings.`)}</Description>
     <URI>${xmlEscape(WAKE_TASK_NAME)}</URI>
   </RegistrationInfo>
   <Triggers>${triggers}
@@ -234,4 +238,21 @@ export async function keepWakeTask(plan: WakePlan | null, log: (line: string) =>
     log(`${new Date(deps.now()).toISOString()} couldn't keep the task that wakes the PC (${WAKE_TASK_NAME}): ${(e as Error).message.slice(0, 300)}`);
     return 'failed';
   }
+}
+
+/**
+ * Ends the wake task's run: the work it held the PC up for is done, so the PC may sleep again. Nothing happens to a task
+ * that isn't running (Task Scheduler answers SUCCESS), and the task stays registered for the next time. 'none' where no
+ * task is kept. Never throws.
+ */
+export async function endWakeTask(log: (line: string) => void = console.log): Promise<'ended' | 'none' | 'failed'> {
+  if (!deps.registers || !wakesPc()) return 'none';
+  try {
+    const end = await deps.schtasks(['/End', '/TN', WAKE_TASK_NAME]);
+    if (end.code === 0) return 'ended';
+    log(`${new Date(deps.now()).toISOString()} couldn't end the task that woke the PC (${WAKE_TASK_NAME}): ${end.out.slice(0, 300)}`);
+  } catch (e) {
+    log(`${new Date(deps.now()).toISOString()} couldn't end the task that woke the PC (${WAKE_TASK_NAME}): ${(e as Error).message.slice(0, 300)}`);
+  }
+  return 'failed';
 }

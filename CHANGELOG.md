@@ -10,7 +10,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **The PC wakes for its builds.** When it's plugged in, Windows wakes the PC five minutes before each build time in Settings' Build pipeline, on its days. The Steward then keeps it up until that build has closed. Before, a PC that had gone to sleep missed its build until someone woke it.
   - The wake is a hidden task in Task Scheduler (`\Steward\Wake`), kept in step with Settings' build times and days. It goes when the Steward has no builds to run (off duty, say, or not running rounds by itself).
-  - Lean by default: the screen stays off, nothing is held between builds, and a PC on battery is never woken.
+  - Lean by default: the screen stays off, nothing is held between builds, and a PC on battery is never woken. With the screen off, Windows runs the build a little slower than while someone uses the PC.
   - The Steward's page says so under the build times.
 - **A build the PC slept through says so.** It still begins as soon as the PC wakes, and the page and the round's log say, for example, "the 08:00 build was late: the PC was in standby until 08:39".
 

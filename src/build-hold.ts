@@ -1,5 +1,5 @@
 import { stayAwake } from './kit/awake.ts';
-import { keepWakeTask, type WakePlan } from './kit/wake.ts';
+import { endWakeTask, keepWakeTask, type WakePlan } from './kit/wake.ts';
 import { buildWhen, lastBuildTime, nextBuildTime, type BuildPipeline, type BuildRun, type PipelineState } from './pipeline.ts';
 
 /**
@@ -11,15 +11,15 @@ import { buildWhen, lastBuildTime, nextBuildTime, type BuildPipeline, type Build
  * - From BEFORE_BUILD_MINUTES before each build time until its build closes, the Steward holds the PC (stayAwake), and
  *   at the build time it starts a round, so the build begins on time rather than at the next round.
  * - Plugged in, the PC is woken for each build: the kit's wake task (wake.ts) wakes it BEFORE_BUILD_MINUTES early, and
- *   holds it until the Steward's own hold has begun. It's kept in step with Settings' build times, and removed when the
- *   Steward doesn't build here (off duty, not merging by itself).
+ *   runs until the build closes, when the Steward ends it (or for the most a build is held, by itself). While it runs,
+ *   Task Scheduler keeps the PC out of sleep, which an app's hold doesn't on Modern Standby (kit/spec/ROUND.md). It's
+ *   kept in step with Settings' build times, and removed when the Steward doesn't build here (off duty, not merging by
+ *   itself).
  * Lean: nothing is held between builds, the display is never kept on, and a PC on battery is never woken. A build the
  * PC slept through anyway (on battery, say) still begins once it wakes, and says it was late (pipeline.ts' lateLine).
  */
 
 export const BEFORE_BUILD_MINUTES = 5;
-/** How long the wake task holds the woken PC at most: past the build time, until the Steward's own hold has begun. */
-export const WAKE_HOLD_MINUTES = 15;
 /** An open build is held this long past its window at most: its closing round's release holds the PC itself. */
 export const AFTER_WINDOW_MS = 30 * 60_000;
 
@@ -63,9 +63,15 @@ export function buildHold(p: BuildPipeline, state: PipelineState, now: Date): Bu
   return null;
 }
 
-/** The wake task's plan for Settings' build times. */
+/** The wake task's plan for Settings' build times: it holds the PC as long as a build is held at most (buildHold). */
 export function buildWakePlan(p: BuildPipeline): WakePlan {
-  return { times: p.times, days: p.days, beforeMinutes: BEFORE_BUILD_MINUTES, holdMinutes: WAKE_HOLD_MINUTES, why: `the ${timesWords(p.times)} build${p.times.length === 1 ? '' : 's'}` };
+  return {
+    times: p.times,
+    days: p.days,
+    beforeMinutes: BEFORE_BUILD_MINUTES,
+    holdMinutes: BEFORE_BUILD_MINUTES + p.windowMinutes + AFTER_WINDOW_MS / 60_000,
+    why: `the ${timesWords(p.times)} build${p.times.length === 1 ? '' : 's'}`,
+  };
 }
 
 /** What holdForBuilds reaches outside itself, so a test can stand in for each. */
@@ -81,6 +87,8 @@ export interface BuildHoldDeps {
   hold?: (what: string) => () => void;
   /** Puts the wake task in step (the kit's keepWakeTask). */
   wake?: (plan: WakePlan | null, log: (line: string) => void) => Promise<unknown>;
+  /** Ends the wake task's run, if it runs, once a build is let go (the kit's endWakeTask). */
+  endWake?: (log: (line: string) => void) => Promise<unknown>;
   /** How often it looks (30 s); a test calls look() itself. */
   everyMs?: number;
 }
@@ -94,6 +102,7 @@ export function holdForBuilds(d: BuildHoldDeps): { look: () => void; stop: () =>
   const now = d.now ?? (() => new Date());
   const hold = d.hold ?? ((what: string) => stayAwake(what, log));
   const wake = d.wake ?? keepWakeTask;
+  const endWake = d.endWake ?? endWakeTask;
   let held: { what: string; letGo: () => void } | null = null;
   /** The build time a round was started for. */
   let nudged: string | null = null;
@@ -113,6 +122,9 @@ export function holdForBuilds(d: BuildHoldDeps): { look: () => void; stop: () =>
         log(`${at.toISOString()} the PC is held up for ${h.what}, until it has closed`);
       } else if (!h && held) {
         held.letGo();
+        // The wake task that woke the PC for it, if it still runs, lets go too. A Steward that stops (an update, say)
+        // leaves it running, so the PC stays up for the build until the Steward is back.
+        waking = waking.then(() => endWake(log)).catch(() => {});
         log(`${at.toISOString()} the PC is let go after ${held.what}`);
         held = null;
       }

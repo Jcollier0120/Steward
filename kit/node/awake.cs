@@ -23,7 +23,7 @@ public static class KitAwake
     public static int Main(string[] args)
     {
         // `--for <seconds>`: the wake task's (wake.ts), run by Task Scheduler with no agent and no input. It holds the woken
-        // PC that long, then lets go: by then the agent's own hold (awake.ts) has begun, if the agent wants the PC.
+        // PC that long at most, then lets go; the agent ends the task sooner once its work is done (endWakeTask).
         int seconds;
         if (args.Length > 1 && args[0] == "--for" && int.TryParse(args[1], out seconds) && seconds > 0)
         {
