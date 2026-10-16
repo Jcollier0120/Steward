@@ -91,6 +91,18 @@ llama.cpp's builds and the models go into the accelerators' folder (`servers\`, 
 
 Setup (Manor's Set up local AI, `smith accelerators setup` and the Set up button on the Smith's Settings page; Reeve's where there is no Smith: the kit's `setup.ts`) sets the NPU up first, with its maker's server (NPU-VENDORS.md: downloaded, checked against its pinned SHA-256, installed for the user, its models pulled, and its entry written only after a test request), then downloads llama.cpp's build for each card from ggml-org/llama.cpp's releases into the tools home's `servers\llama.cpp\`, and the models, as GGUF files, from Hugging Face into its `models\`: the same models as on the NPU (Qwen3-4B-Instruct-2507 for chat, Qwen3-VL-4B-Instruct for vision, Qwen3-Embedding-0.6B for embeddings), so answers stay comparable, and, when asked for, Qwen3-Reranker-0.6B (llama.cpp's own GGUF, ggml-org's) for reranking. A reranker is set up beside what its accelerator already serves, on a port of its own, and setting the others up again keeps it; a graphics card or the processor can serve one. It says how much it will download and asks first. It matches each card to llama-server's device by name (`llama-server --list-devices`), and gives each server its own port from 18191 up.
 
+**Where a card's vision encoder runs.** A vision server is llama-server with Qwen3-VL-4B's projector (`--mmproj`), which encodes each picture into tokens before the model reads them; on a card both run on the card. Intel's integrated graphics (a card whose id is `gpu-intel-…`, with under 2 GB of its own, on the Vulkan build) encode on the processor instead (`--no-mmproj-offload`, setup.ts' `encodesOnProcessor`), and the model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics (driver 32.0.101.8831, llama.cpp b11624 and b11669, 2026-10-15) the encoder lost the device (`ggml_vulkan: device lost`, no display driver reset) at the server's warm-up, so the server exited as it started, in every one of the Smith's audits that day. Measured on that PC, one server at a time at below-normal priority:
+
+| The vision server | Starts | The Smith's check picture (290 tokens) | A 1,920 × 1,200 screenshot (2,309 tokens) | The same at 3,840 × 2,400 (4,029 tokens) |
+|---|---|---|---|---|
+| As set up before | exits at the warm-up | | | |
+| `--no-warmup` | 5.8 s | 8.8 s | device lost | device lost |
+| `--image-max-tokens 1024` | 6.1 s | device lost | device lost | device lost |
+| `-fa off`, or GGML_VK_DISABLE_COOPMAT | exits at the warm-up | | | |
+| `--no-mmproj-offload` | 5 s | 5.8 s, "TALLY 4827" | 93 s, read properly | 228 s, read properly |
+
+On the processor a big picture takes long: the screenshot's 2,309 tokens were read at 26 a second while other work kept the processor busy. A PC set up before gets the flag at the keeper's next look (setup.ts' `refreshCardVision`): once for each kit version, recorded in `card-refresh.json` beside config.json. It adds the flag after the projector of such a card's llama-server vision command that doesn't say where its encoder runs, and starts and stops nothing. A person who takes it out keeps it out until the next kit. Intel's cards with memory of their own (Arc A and B) and other makers' integrated graphics weren't measured, and keep their encoder on the card.
+
 ## The lock and the line, per accelerator
 
 Reeve's `docs/NPU-QUEUE.md` protocol, unchanged in its rules, once per accelerator:
