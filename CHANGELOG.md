@@ -108,7 +108,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **A build is under way from its start.** Before, a build was recorded as under way only when its first round ended, and that round is often its longest. Until then Manor saw no build, so it could install updates in the middle of it, and the Steward's page showed none.
 - Uninstalling the Steward removes its wake task too.
-- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX, and each agent shows under its own name in Task Manager.
+- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times.
 
 ### Before you update
 
@@ -135,6 +135,25 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
+
+## 0.36.64
+
+**Kit 2.78.0: on a 16 GB Snapdragon X2, the local AI on the NPU uses a smaller model, Qwen3-VL-2B. It is faster, better with pictures, and leaves the PC about 2 GB more memory.**
+
+### What changed
+
+- On a Snapdragon X2 PC with 16 GB of memory, the local AI on the NPU now uses Qwen3-VL-2B for chat and pictures instead of Qwen3-VL-4B. On the same tests it wrote nearly twice as fast (75 tokens a second against 41), did the test jobs in half the time, started in about 5 seconds instead of 10, and read all four test pictures right (the 4B read three). On the quality checks it scored 22 of 24, as the 4B did, with every must-pass item right.
+- It leaves the PC about 2 GB more memory once loaded, room a 16 GB PC needs beside Windows and the other agents.
+- The pictures are read by the PC's graphics (the Adreno) rather than the NPU: the current GenieX can't read them properly on the NPU with this model.
+- Snapdragon X2 PCs with more memory, first-generation Snapdragon X PCs, and Intel and AMD PCs are unchanged.
+- The NPU benchmark no longer counts a test job as unsteady just because the model wrote answers of different lengths from one try to the next: it now compares the tries as if their answers were the same length. Until now this most likely kept every full run on a Snapdragon off the leaderboard, even on a quiet PC.
+- The kit the Steward hands out (2.78.0) brings this to every agent.
+- That kit also brings work not released before: each agent shows under its own name in Task Manager, and on a PC with a Core Ultra 200H or 200HX, the NPU is named for that processor.
+
+### Before you update
+
+- A 16 GB Snapdragon X2 already set up keeps the 4B until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3-VL-2B (1.9 GB). The 4B stays on disk (4.4 GB) until you remove it: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- It was measured on a Snapdragon X2 Elite with 48 GB, not yet on a 16 GB PC.
 
 ## 0.36.63
 

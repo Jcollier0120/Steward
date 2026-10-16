@@ -7,7 +7,7 @@ import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, t
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { expandRoute, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File } from './npu-vendors.ts';
+import { expandRoute, generationOf, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -20,7 +20,11 @@ import { mixSummary, readTally } from './token-tally.ts';
  * isn't ranked.
  *
  *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
- *                                     [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]
+ *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
+ *
+ * It measures the models setup would run on this PC: on one with little memory (under idleStop.smallPcGb), its
+ * generation's smallPc models, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` measures those on a
+ * bigger PC, and `--model` one of them does too; `--model` one of the route's own measures it on a small PC.
  *
  * `--generation snapdragon-x` on a Snapdragon X2 plays the older chip (npu-vendors.ts' playGeneration): AI Hub's X Elite
  * build and Hexagon v73 code on this NPU. Its report says so (`run.played`), and it is never ranked.
@@ -235,13 +239,47 @@ export interface Measure {
   steady: boolean;
 }
 
+const medianOf = (xs: number[]): number | null => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+};
+
 export function measure(tries: number[], maxSpread: number): Measure {
   const xs = tries.filter((x) => Number.isFinite(x));
-  if (!xs.length) return { tries, median: null, spread: null, steady: false };
-  const s = [...xs].sort((a, b) => a - b);
-  const median = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
-  const spread = median > 0 ? Number(((s[s.length - 1] - s[0]) / median).toFixed(3)) : 0;
+  const median = medianOf(xs);
+  if (median === null) return { tries, median: null, spread: null, steady: false };
+  const spread = median > 0 ? Number(((Math.max(...xs) - Math.min(...xs)) / median).toFixed(3)) : 0;
   return { tries, median: Number(median.toFixed(2)), spread, steady: xs.length === tries.length && spread <= maxSpread };
+}
+
+/**
+ * A job's tries. Each is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer answer
+ * takes longer to write without the server being any slower: the 4B's summaries on the X2 Elite took 3.3 to 4.3 s on a
+ * quiet PC while its writing held within 1%, about 40 tokens' writing apart. So the median is of the whole times, what a person waits, and whether the tries are
+ * steady is judged at one answer length (atAnswerLength): spreadAtLength, from each try's answer tokens and first-token time.
+ */
+export interface JobMeasure extends Measure {
+  answerTokens: (number | null)[];
+  firstTokenMs: (number | null)[];
+  spreadAtLength: number | null;
+}
+
+/**
+ * Each try's time with its writing (from its first token to its last) scaled to the tries' median answer length, so only
+ * the server's speed, reading or writing, differs between them. A try without its token count or first-token time (a
+ * server that doesn't stream or count tokens, marked so) or with a one-token answer is taken whole.
+ */
+export function atAnswerLength(tries: number[], answerTokens: (number | null)[], firstTokenMs: (number | null)[]): number[] {
+  const usable = (i: number) => Number.isFinite(tries[i]) && typeof firstTokenMs[i] === 'number' && tries[i] >= firstTokenMs[i]! && (answerTokens[i] ?? 0) > 1;
+  const n = medianOf(tries.flatMap((_, i) => (usable(i) ? [answerTokens[i]!] : [])));
+  if (n === null) return tries;
+  return tries.map((t, i) => (usable(i) ? firstTokenMs[i]! + ((t - firstTokenMs[i]!) * (n - 1)) / (answerTokens[i]! - 1) : t));
+}
+
+export function jobMeasure(tries: number[], answerTokens: (number | null)[], firstTokenMs: (number | null)[], maxSpread: number): JobMeasure {
+  const atLength = measure(atAnswerLength(tries, answerTokens, firstTokenMs), maxSpread);
+  return { ...measure(tries, maxSpread), answerTokens, firstTokenMs, spreadAtLength: atLength.spread, steady: atLength.steady };
 }
 
 export interface Mark {
@@ -288,7 +326,7 @@ export interface BenchReport {
     writeTokensPerSecond: Measure | null;
     readFirstTokenMs: Record<string, Measure>;
     readAtCap: { promptTokens: number | null; firstTokenMs: number | null } | null;
-    jobs: Record<string, Measure & { passed: number }>;
+    jobs: Record<string, JobMeasure & { passed: number }>;
     jobTimeS: number | null;
     memory: { workingSetBytes: number; privateBytes: number } | null;
     holding: { minutes: number; firstMinuteMs: number | null; lastMinuteMs: number | null; held: number | null } | null;
@@ -310,7 +348,7 @@ export function marksFor(r: BenchReport, suite: Suite): Mark[] {
   if (r.conditions.cpuBusyPercent !== null && r.conditions.cpuBusyPercent > suite.quiet.cpuBusyMax) marks.push({ code: 'busy', say: `the processor was ${r.conditions.cpuBusyPercent}% busy before the start (no more than ${suite.quiet.cpuBusyMax}% for a ranked run)` });
   if (r.run.streamed === false) marks.push({ code: 'not-streamed', say: "the server didn't stream, so reading and writing are estimates" });
   if (r.run.usageReported === false) marks.push({ code: 'no-usage', say: "the server didn't report token counts, so they are estimates" });
-  const noisy = [['short answer', res.short], ['writing', res.writeTokensPerSecond], ...Object.entries(res.readFirstTokenMs).map(([k, v]) => [`reading ${k} tokens`, v]), ...Object.entries(res.jobs).map(([k, v]) => [`the ${k} job`, v])].filter(([, m]) => m && !(m as Measure).steady && (m as Measure).median !== null).map(([n]) => n as string);
+  const noisy = [['short answer', res.short], ['writing', res.writeTokensPerSecond], ...Object.entries(res.readFirstTokenMs).map(([k, v]) => [`reading ${k} tokens`, v]), ...Object.entries(res.jobs).map(([k, v]) => [`the ${k} job${typeof v.spreadAtLength === 'number' ? ' (at one answer length)' : ''}`, v])].filter(([, m]) => m && !(m as Measure).steady && (m as Measure).median !== null).map(([n]) => n as string);
   if (noisy.length) marks.push({ code: 'noisy', say: `tries varied by more than ${suite.steady.maxSpread * 100}%: ${noisy.join(', ')}` });
   const failedJobs = suite.jobs.filter((j) => !res.jobs[j.id] || res.jobs[j.id].passed < res.jobs[j.id].tries.length).map((j) => j.id);
   if (failedJobs.length) marks.push({ code: 'job-failed', say: `not every try of a job answered correctly: ${failedJobs.join(', ')}` });
@@ -489,6 +527,8 @@ export interface NpuBenchOptions {
   device?: string;
   /** An older Snapdragon to play on this one (`--generation snapdragon-x` on an X2: npu-vendors.ts' playGeneration). */
   generation?: string;
+  /** The models a PC with little memory runs (its generation's smallPc), whatever this PC's memory. */
+  smallPc?: boolean;
   model?: string;
   candidate?: string;
   /** The candidate sees too (`--vision`): pulled as a vision model where the server asks, and asked the pictures. */
@@ -592,7 +632,10 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   let route: NpuRoute;
   try {
     // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
-    route = routeOnDevice(routeFor(catalog.routes[vendor], generation), device);
+    // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked; --model's own.
+    const smallIds = generationOf(catalog.routes[vendor], generation)?.smallPc?.models.map((m) => m.id) ?? [];
+    const small = o.model ? smallIds.includes(o.model) : !!o.smallPc || smallPc(d.ramBytes);
+    route = routeOnDevice(routeFor(catalog.routes[vendor], generation, small), device);
     if (played) route = playedRoute(route, played);
     if (o.candidate) route = candidateRoute(route, o.candidate, { vision: o.vision });
     else if (o.model) route = routeWithModel(route, o.model);
@@ -714,10 +757,14 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     }
     for (const job of suite.jobs) {
       let passed = 0;
+      const answerTokens: (number | null)[] = [];
+      const firstTokenMs: (number | null)[] = [];
       const m = await tryTimes(fresh({ prompt: promptOf(suite, job), maxTokens: job.maxTokens }), (r) => r.ms, (r) => {
         if (r.ok && grade(job.grade, r.answer)) passed++;
+        answerTokens.push(r.ok ? Number(r.usage?.completion_tokens) || null : null);
+        firstTokenMs.push(r.ok ? r.firstTokenMs : null);
       });
-      report.results.jobs[job.id] = { ...m, passed };
+      report.results.jobs[job.id] = { ...jobMeasure(m.tries, answerTokens, firstTokenMs, suite.steady.maxSpread), passed };
       log(`the ${job.id} job: ${m.median} ms, ${passed} of ${tries} answered correctly`);
     }
     const jobMedians = suite.jobs.map((j) => report.results.jobs[j.id]?.median);
@@ -902,7 +949,8 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
       const v = argv[++i];
       if (!v) return { error: '--generation takes an older Snapdragon to play on this one (snapdragon-x)' };
       o.generation = v;
-    } else if (a === '--model') o.model = argv[++i];
+    } else if (a === '--small-pc') o.smallPc = true;
+    else if (a === '--model') o.model = argv[++i];
     else if (a === '--candidate') o.candidate = argv[++i];
     else if (a === '--vision') o.vision = true;
     else if (a === '--cap') {
@@ -924,7 +972,7 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
+    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
     process.exit(2);
   }
   if (o.mix) {
