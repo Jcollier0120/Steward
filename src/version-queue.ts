@@ -11,6 +11,7 @@ import { checkoutOf, glanceOf, hostIs, type Ctx } from './stages/common.ts';
 import { holdReason, prVersions } from './stages/merge.ts';
 import { openPrs as listOpenPrs, parsePrs, type PrInfo } from './stages/staff.ts';
 import { agreedVersion, readVersion } from './versions.ts';
+import { claimsOn, movedTo, type Claim } from './claims.ts';
 import { hostFor } from './hosts/index.ts';
 
 /**
@@ -42,6 +43,17 @@ export interface QueuedPr {
   draft?: boolean;
   /** One of the Wright's drafts (labelled wright), which the Bailiff reviews. */
   wright?: boolean;
+  /**
+   * The version it was moved to, past the others (move-past.ts), while its files still say `version`: its place in line.
+   * Not ready, it holds nothing (it gave up its turn).
+   */
+  moved?: string;
+  /**
+   * Not one the merges take, in a repository the Steward merges in: opened by someone outside Settings' team, from a
+   * branch that isn't the Steward's (stages/staff.ts whosePr). Listed for Manor, but out of the merges' line: it holds
+   * nothing, and nothing waits for it.
+   */
+  outside?: boolean;
 }
 
 /**
@@ -83,6 +95,11 @@ export interface QueueHold {
   behind: number[];
   /** Since when it has held them: the first round that saw it hold the queue. */
   since: string;
+  /**
+   * The drafts above it with a ready PR above them, which would hold the queue next: moving it past the others moves
+   * them too (move-past.ts), so one move frees the queue.
+   */
+  drafts?: number[];
 }
 
 /** How a PR waits for its turn in the merge stage's words (merge.ts): ready, behind a lower version. */
@@ -94,25 +111,38 @@ const GIVES_WAY = /gives up its turn/;
  * What holds `queue` (lowest version first), or null when nothing does: the lowest PR that isn't ready, with at least
  * one ready PR above it. `held`: why the merge stage held each PR this round, by number, which says more than GitHub
  * does (a team PR untested, or failing its checks here). `before`: the hold kept from the last round, whose `since`
- * stands while the same PR holds it. Pure.
+ * stands while the same PR holds it. One moved past the others holds nothing; one the merges never take (`outside`)
+ * neither holds nor waits. Pure.
  */
-export function queueHold(queue: QueuedPr[], at: string, o: { held?: Map<number, string>; before?: QueueHold | null } = {}): QueueHold | null {
+export function queueHold(all: QueuedPr[], at: string, o: { held?: Map<number, string>; before?: QueueHold | null } = {}): QueueHold | null {
+  const queue = all.filter((q) => !q.outside);
   const stage = (q: QueuedPr) => o.held?.get(q.number) ?? null;
   const ready = (q: QueuedPr) => {
     const why = stage(q);
     return q.ready && (!why || TURN_WAIT.test(why));
   };
+  const givesWay = (q: QueuedPr) => !!q.moved || GIVES_WAY.test(stage(q) ?? q.why ?? '');
+  let last = -1;
+  queue.forEach((q, j) => {
+    if (ready(q)) last = j;
+  });
   for (const [i, q] of queue.entries()) {
-    if (ready(q)) continue;
+    if (ready(q) || givesWay(q)) continue;
     const why = stage(q) ?? q.why ?? 'not ready';
-    if (GIVES_WAY.test(why)) continue;
     const behind = queue.slice(i + 1).filter(ready).map((x) => x.number);
     if (!behind.length) return null;
     const since = o.before?.number === q.number ? o.before.since : at;
-    return { number: q.number, title: q.title, url: q.url, version: q.version, why, draft: !!q.draft, behind, since };
+    const drafts = queue.slice(i + 1, last).filter((x) => x.draft && !ready(x) && !givesWay(x)).map((x) => x.number);
+    return { number: q.number, title: q.title, url: q.url, version: q.version, why, draft: !!q.draft, behind, since, ...(drafts.length ? { drafts } : {}) };
   }
   return null;
 }
+
+/** Where a PR stands in line: the version it was moved to, else its own. Pure. */
+export const placeOf = (q: Pick<QueuedPr, 'version' | 'moved'>) => q.moved ?? q.version;
+
+/** A queue in the order the merges take it: by place in line (placeOf), then number. Pure. */
+export const inLine = <T extends Pick<QueuedPr, 'number' | 'version' | 'moved'>>(queue: T[]): T[] => [...queue].sort((a, b) => compareVersions(placeOf(a), placeOf(b)) || a.number - b.number);
 
 /** A queue's hold in words, for the round's log: "#233 (v0.36.41, a draft) holds #266, #268 since …". Pure. */
 export const holdWords = (h: QueueHold) => `#${h.number} (v${h.version}, ${h.why}) holds its version queue: ${h.behind.map((n) => `#${n}`).join(', ')} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it, since ${h.since}`;
@@ -120,14 +150,19 @@ export const holdWords = (h: QueueHold) => `#${h.number} (v${h.version}, ${h.why
 /** How near the front a draft is told it is coming up: within the first three. */
 export const UPCOMING_WITHIN = 3;
 
-/** The drafts coming up in the queues: within UPCOMING_WITHIN of the front, or holding a ready PR back. Front first. Pure. */
+/**
+ * The drafts coming up in the queues: within UPCOMING_WITHIN of the front, or holding a ready PR back. Front first. In
+ * the merges' line only: one they never take (`outside`) neither comes up nor is held back. Pure.
+ */
 export function upcomingDrafts(repos: VersionQueue[]): UpcomingDraft[] {
   const out: UpcomingDraft[] = [];
   for (const r of repos) {
     if (!r.repo) continue;
-    r.queue.forEach((q, position) => {
-      if (!q.draft) return;
-      const holds = r.queue.slice(position + 1).filter((x) => x.ready).map((x) => x.number);
+    const line = r.queue.filter((q) => !q.outside);
+    line.forEach((q, position) => {
+      // Moved past the others: its author was told then, and it holds nothing back.
+      if (!q.draft || q.moved) return;
+      const holds = line.slice(position + 1).filter((x) => x.ready).map((x) => x.number);
       if (position >= UPCOMING_WITHIN && !holds.length) return;
       out.push({ id: r.id, name: r.name, repo: r.repo!, number: q.number, url: q.url, title: q.title, version: q.version, position, holds, wright: !!q.wright, head: q.head });
     });
@@ -218,13 +253,17 @@ async function versionAt(ctx: Ctx, t: Target, ref: string): Promise<{ version: s
   return 'error' in v ? v : { version: v.version, files };
 }
 
-/** Its open PRs: from the round's glance for an employee, else asked of GitHub. Everyone's, not only the team's. */
-async function openPrs(ctx: Ctx, t: Target): Promise<PrInfo[]> {
-  if (!t.prs || !t.repo) return [];
+/**
+ * Its open PRs: from the round's glance for an employee, else asked of GitHub. Everyone's, not only the team's; `taken`:
+ * the numbers of those the merges take (the team's and the Steward's, as stages/merge.ts lists them).
+ */
+async function openPrs(ctx: Ctx, t: Target): Promise<{ prs: PrInfo[]; taken: Set<number> }> {
+  if (!t.prs || !t.repo) return { prs: [], taken: new Set() };
   const g = t.kind === 'agent' ? glanceOf(ctx, { id: t.id } as Employee) : null;
   const raw = g ? g.prs : JSON.parse((await listOpenPrs(hostFor(ctx, { repo: t.repo }), t.repo)) || '[]');
   const authors = [...new Set(raw.map((p: any) => String(p?.author?.login ?? '')).filter(Boolean))] as string[];
-  return parsePrs(JSON.stringify(raw), authors);
+  const json = JSON.stringify(raw);
+  return { prs: parsePrs(json, authors), taken: new Set(parsePrs(json, ctx.settings.team).map((p) => p.number)) };
 }
 
 /**
@@ -264,12 +303,15 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
   const v = same && before.version && before.files?.length ? { version: before.version, files: before.files } : same && !before.version && before.note ? { error: before.note } : await versionAt(ctx, t, ref);
   if ('error' in v) return empty(v.error, null, head);
   let prs: PrInfo[];
+  let taken: Set<number>;
   try {
-    prs = await openPrs(ctx, t);
+    ({ prs, taken } = await openPrs(ctx, t));
   } catch (err) {
     return empty(`couldn't list its PRs: ${(err as Error).message}`, v.version, head, v.files);
   }
   const read = new Map((before?.queue ?? []).map((q) => [q.head, q.version]));
+  // The PRs moved past the others (move-past.ts), by their branches' claims, where the Steward merges.
+  const claims = t.merges && t.repo ? claimsOn(t.repo) : [];
   const queue: QueuedPr[] = [];
   for (const pr of prs) {
     if (pr.base !== t.branch || !pr.headOid) continue;
@@ -288,13 +330,16 @@ async function queueOf(ctx: Ctx, t: Target, before: VersionQueue | undefined, at
     }
     if (!sets || compareVersions(sets, v.version) <= 0) continue;
     const why = holdReason(pr, t.branch);
-    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid, draft: pr.draft, wright: pr.labels.includes('wright') });
+    const to = movedTo(claims, pr);
+    // Where the Steward merges, one it never takes is outside its line (queueHold); elsewhere the order is the person's.
+    const outside = t.merges && !taken.has(pr.number);
+    queue.push({ number: pr.number, title: pr.title, url: pr.url, version: sets, ready: why === null, why, head: pr.headOid, draft: pr.draft, wright: pr.labels.includes('wright'), ...(to && compareVersions(to, sets) > 0 ? { moved: to } : {}), ...(outside ? { outside } : {}) });
   }
-  queue.sort((a, b) => compareVersions(a.version, b.version) || a.number - b.number);
-  const ready = queue.filter((q) => q.ready);
+  const line = inLine(queue);
+  const ready = line.filter((q) => q.ready);
   // What holds it, where the Steward merges lowest first; elsewhere the order is the person's.
-  const hold = t.merges ? queueHold(queue, at, { held, before: before?.held }) : null;
-  return { ...base, version: v.version, head, files: v.files, queue, working: queue[0]?.version ?? null, latest: ready.length ? ready[ready.length - 1].version : null, ...(hold ? { held: hold } : {}), note: null };
+  const hold = t.merges ? queueHold(line, at, { held, before: before?.held }) : null;
+  return { ...base, version: v.version, head, files: v.files, queue: line, working: line[0] ? placeOf(line[0]) : null, latest: ready.length ? placeOf(ready[ready.length - 1]) : null, ...(hold ? { held: hold } : {}), note: null };
 }
 
 /**
@@ -348,7 +393,13 @@ export interface HeldQueue {
 
 /**
  * What holds each queue kept. `turns` (lease.ts's turns.json): those whose repository another PC has its turn in left
- * out, as that PC's Steward merges there and raises its alarm, so two PCs never raise one twice. Pure.
+ * out, as that PC's Steward merges there and raises its alarm, so two PCs never raise one twice. `claims`: a hold by a PR
+ * moved past the others since the queue was kept (move-past.ts) left out too, so a round that kept it meanwhile never
+ * raises its alarm again. Pure.
  */
-export const heldQueues = (v: VersionQueues, turns?: Pick<TurnsState, 'repos'>): HeldQueue[] =>
-  v.repos.flatMap((r) => (r.held && r.repo && turns?.repos[r.repo.toLowerCase()]?.status !== 'elsewhere' ? [{ id: r.id, name: r.name, repo: r.repo, branch: r.branch, hold: r.held }] : []));
+export const heldQueues = (v: VersionQueues, turns?: Pick<TurnsState, 'repos'>, claims: Pick<Claim, 'repo' | 'moved'>[] = []): HeldQueue[] =>
+  v.repos.flatMap((r) =>
+    r.held && r.repo && turns?.repos[r.repo.toLowerCase()]?.status !== 'elsewhere' && !claims.some((c) => c.moved === r.held!.number && c.repo.toLowerCase() === r.repo!.toLowerCase())
+      ? [{ id: r.id, name: r.name, repo: r.repo, branch: r.branch, hold: r.held }]
+      : [],
+  );
