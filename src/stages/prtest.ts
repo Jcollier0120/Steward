@@ -80,6 +80,12 @@ export const kitMayClear = (e: Employee, t: Tested, newest: string | null) => !t
 /** How the hold of a PR whose kit isn't released yet begins, when it waits for it (not when nothing brings it). */
 export const KIT_WAIT = 'waits for kit ';
 
+/** How the hold of a PR whose kit isn't released begins when no open PR of the Steward's brings it. */
+const PINS_KIT = 'pins kit ';
+
+/** Whether a PR waits for its kit's release (kitReleaseHold), whether or not an open PR of the Steward's brings that kit. */
+export const waitsForKit = (why: string) => why.startsWith(KIT_WAIT) || why.startsWith(PINS_KIT);
+
 /** An open PR to the Steward's own repository that raises the kit, and the kit version it brings (null when unread). */
 export interface KitPr {
   number: number;
@@ -131,7 +137,8 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
  * against its commit (no "failed twice"), and it keeps its place in the version line. Its hold names the open Steward
  * PR that brings that kit ("waits for kit 2.42.0, which Steward#126 brings: it merges once that's released"), and
  * whether it passed with that kit in the kit's trial (trial.ts's pairs); or says that none brings it, a real problem.
- * It is tested once that kit is released (the round releases the Steward's kit before the agents' merges: steward.ts).
+ * It is tested once that kit is released (the round releases the Steward's kit before the agents' merges, or in a build
+ * beside them, then looks at those that waited for it again: steward.ts).
  * Null when the kit's releases couldn't be read, or its pin can't: then it is tested as before.
  */
 export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise<string | null> {
@@ -149,7 +156,7 @@ export async function kitReleaseHold(ctx: Ctx, e: Employee, pr: PrInfo): Promise
   }
   const where = ctx.settings.stewardRepo.split('/').pop() || 'Steward';
   const brings = prs.find((p) => p.kit === pin.kit);
-  if (!brings) return `pins kit ${pin.kit}, which isn't released, and no open ${where} PR brings it: release that kit, or pin a released one`;
+  if (!brings) return `${PINS_KIT}${pin.kit}, which isn't released, and no open ${where} PR brings it: release that kit, or pin a released one`;
   const pair = readJson<Record<string, KitTrial>>(kitTrialsFile(), {})[`${brings.number}@${brings.headOid}`]?.pairs?.find((p) => p.id === e.id && p.number === pr.number && p.head === pr.headOid);
   const tried = pair?.ok ? ' (it passes with that kit here)' : '';
   const draft = brings.draft ? ` (#${brings.number} is a draft)` : '';
