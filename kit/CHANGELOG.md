@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.3
 
-**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%. It also brings what wasn't released before: each agent shows under its own name in Task Manager, and Intel's NPU labels name the Core Ultra 200H and 200HX.**
 
 ### What changed
 
@@ -46,28 +46,22 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
 - **work-status.ts:** the checks' turns come from `checksAtOnce()`.
 - **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
-
-### Before you update
-
-- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts. Nothing to do: it updates itself as usual.
-
-## Unreleased (its version needs claiming on the main laptop)
-
-**Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
-
-**Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
-
-### What changed
-
+- **Each agent under its own name in Task Manager** (brought from before): its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page's console, its log and its pace are as they were.
 - **named.cs and named.ts:**
   - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
   - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
   - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
 - **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
 - **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before. `pageLaunch`'s `args` are the page's arguments after its entry, `serve` unless given, for an agent whose page has a command of its own (Reeve's `dashboard --port <n>`).
-
+- **Intel's NPU labels name the Core Ultra 200H and 200HX** (brought from before): the NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.
 - **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
 - **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
+
+### Before you update
+
+- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts.
+- An agent builds its named launcher a minute or two after its page starts, so it shows under its own name from its next start: after the update, a sign-in or a restart.
+- Nothing to do: it updates itself as usual.
 
 ## 2.77.9
 
