@@ -20,6 +20,7 @@ import { context, refreshStaff, runStage, type StageAsk } from './steward.ts';
 import { markMine } from './strangers.ts';
 import { claimRefused, DEVELOPER_ONLY, makersOnly, makersPc, stewardActs } from './maker.ts';
 import { askRoundSoon, vouch } from './stages/vouch.ts';
+import { movePast } from './move-past.ts';
 import { usesChanges } from './stages/stamp.ts';
 import { CHANGES_DIR, fragmentFor, KIT_CHANGES_DIR } from './entries.ts';
 import { CHANGELOG } from './kit/notes.ts';
@@ -91,6 +92,10 @@ const USAGE = `${APP.id}: ${APP.role}
                    Reeve found on this PC, or the clone this runs in
   release-version <employee or owner/repo> <version>
                    give a claimed version back (the work was dropped)
+  move-past <employee or owner/repo> <pr number>
+                   a PR that isn't ready and holds its version queue moved past the others: a version above
+                   the rest claimed for its branch, its author told on GitHub, nothing pushed to it; with the
+                   drafts that would hold the queue next. The PRs that waited merge at the next round
   vouch [<pr number>]
                    in the clone a PR was pushed from, once it is pushed: run the repository's checks (Settings')
                    at HEAD, which must be the PR's head with nothing uncommitted, and once they pass, record it
@@ -190,7 +195,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 const cliFile = fileURLToPath(import.meta.url);
 
 /** The commands that work on repositories: a developer's, so only while Developer options are on (maker.ts' stewardActs). */
-const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'build', 'staff','employ', 'claim-version', 'release-version', 'claims', 'vouch'];
+const DEVELOPER_COMMANDS = ['bump', 'push', 'merge', 'release', 'round', 'build', 'staff','employ', 'claim-version', 'release-version', 'move-past', 'claims', 'vouch'];
 /** The commands only the PC Castellan is made on has: the ports of Castellan's new agents, and its merges done by hand. */
 const MAKERS_COMMANDS: Record<string, string> = {
   'claim-port': "Claiming a port for a new agent of Castellan's",
@@ -424,6 +429,25 @@ switch (cmd) {
     }
     const name = kit ? 'Kit' : e.name;
     console.log((await releaseClaim(kit ? kitClaimKey(e.repo) : e.repo, rest[1], { remote: await remoteFor(ctx.run, ctx.settings, e).catch(() => null), run: ctx.run })) ? `${name} ${rest[1]} is free again.` : `${name} ${rest[1]} wasn't claimed.`);
+    break;
+  }
+  case 'move-past': {
+    const n = Number(rest[1]);
+    const ctx = rest[0] && Number.isInteger(n) && n > 0 ? await context({ glance: false, log: (line) => console.log(line) }) : null;
+    const e = ctx ? employeeFor(ctx.settings, rest[0]) : null;
+    if (!ctx || !e) {
+      console.error(ctx ? `${rest[0]} isn't one the Steward looks after.` : 'move-past takes an employee and a PR number: move-past steward 233');
+      process.exitCode = 2;
+      break;
+    }
+    const r = await movePast(ctx, e, n, { by: 'owner' });
+    if (r.status !== 200) {
+      console.error(r.message);
+      process.exitCode = 1;
+      break;
+    }
+    console.log(r.message);
+    console.log(await askRoundSoon({ look: e.id }));
     break;
   }
   case 'vouch': {

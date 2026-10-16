@@ -25,6 +25,161 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 Nothing to do. On an AMD NPU, the next setup checks xrt-smi by itself. On a PC with the old DLLs, the NPU's note says so.
 
+## 2.77.6
+
+**Each accelerator's servers stop when that accelerator has been idle, whatever the others do. Before, a let-go of any accelerator's lock counted as use of all of them, so Reeve indexing on a graphics card kept the NPU's servers loaded, and the NPU kept a card's.**
+
+### What changed
+
+- **keeper.ts**: the Reaper's idle time for an accelerator counts only its own lock and line.
+  - `ownActivityMs(lockDirs)`: when the accelerator's own lock folder or line last changed.
+  - `locksActivityMs(lockDirs)`: when anyone last took or let go of any accelerator's lock (the folder every lock shares).
+  - `lastActivityMs(lockDirs)` is the later of the two, as before, for the quiet looks that wait for the whole PC (the Smith's, the NPU refresh's).
+  - A let-go leaves its time only on the shared folder, since the slot's folder is removed. So the Reaper counts that folder's time for an accelerator only when it saw the accelerator held, waited on or taken since its last look: at most a minute late, never early. At its first look, no later than `lock.staleMs` after the accelerator's lock was last taken.
+  - `ReaperDeps.locksActivityMs` is new and optional. A Reaper given only `lastActivityMs` works as before.
+- The idle-stop times (`npuIdleStopMinutes`, `gpuIdleStopMinutes`), `npuMemoryFit` and `NPU_MEMORY_SHARE` are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The keeper of a PC that runs on more than one accelerator now stops each one's servers on its own idle time.
+
+## 2.77.5
+
+**On a PC under 20 GB, the NPU's embedding server gives way to its chat: a chat or vision request stops it first once no embedding has been answered for 30 s, so the chat has its 1.4 GB of the NPU's memory.**
+
+### What changed
+
+- **npu.ts**: a chat or vision request on the NPU, in its own turn and before its server is asked, lets the NPU's own embedding server give way (`embedGivesWay`). This applies on a PC under npu-vendors.json's `idleStop.smallPcGb` (20) with no `npuIdleStopMinutes` in config.json. A bigger PC never loads the code for it.
+  - It frees the chat 1,408 MB of the NPU's memory and a 1.7 to 2.0 GB working set on a Snapdragon, or 1.7 GB on Intel.
+  - Only the embedding side gives way. It starts again for the next embedding in 2 to 3 s (1.7 s beside a loaded GenieX, measured), where GenieX loads in 9 to 17 s.
+- **keeper.ts**: `ownEmbedServer(acc)` finds the NPU's own embedding server, and `yieldEmbedServer` stops it.
+  - **Which servers**: Qualcomm's llama-server and Intel's second OpenVINO Model Server. Not FastFlowLM's route, npu-embed, a server shared with chat, or one whose requests take another device's turn.
+  - **When it stops one**: only when the server answers ready (a loading one is left alone) and the NPU hasn't answered an embedding for `YIELD_GRACE_MS` (30 s).
+  - **How**: by its program and the address its command line serves. It waits up to 10 s for the port to close, and each stop is written in the keeper's log.
+  - **When it gives up**: if finding the processes takes more than 5 s, or on any error, the chat goes on beside the server. It never throws.
+- **accelerators.ts**: `noteEmbedded(id)` and `embeddedAt(id)` keep `<accelerators>/<id>.embedded.json` (`{at}`). Every agent writes it after its embeddings on the NPU, at most every 5 s per process.
+- **Why 30 s**: the manor's traffic, watched for two hours and merged onto one NPU as on a 16 GB Snapdragon. Giving way at every chat would start the embedding server 4 more times an hour, mostly for Reeve's search right after its map or summary. After 30 s without an embedding, it's 1 more an hour.
+- **Measured** on private ports through the kit's own requests: a warm chat that stops the server takes 0.47 to 0.63 s, against 0.10 s with nothing to stop. The NPU's memory falls by 1,409 MB.
+- **spec/NPU-VENDORS.md** (The embedding server gives way to chat) has the traffic, the measurements and what's left alone. spec/ACCELERATORS.md's keeper bullet points there.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual. On a 20 GB PC or bigger, nothing changes.
+
+## 2.77.3
+
+**On an AMD Ryzen AI 300, one smaller model, Qwen3.5-2B, answers chat and pictures on the NPU. It writes half again as fast, holds 0.4 GB less of the PC's memory for chat and 1.2 GB less for pictures, downloads 2.0 GB instead of 7.4, and never switches models between a chat and a picture. It starts about 1.7 s slower.**
+
+### What changed
+
+- **npu-vendors.json's amd route** (AMD's alone; Qualcomm's and Intel's routes, the keeper and `npuMemoryFit` are unchanged):
+  - **`models`**: `qwen3.5:2b` (Qwen3.5-2B, FastFlowLM's NPU2 build, Apache-2.0) for chat and vision. It replaces `qwen3-it:4b` for chat and `qwen3vl-it:4b` for vision. It is 2,014,970,646 bytes with its vision weights and tokenizer, and its `present` file is the vision weights (`vision_weight.q4nx`). The 8 to 9 s switch between the two 4B models, either way, is gone: the one server holds one model that does both.
+  - **Measured with the benchmark** (`castellan-npu-bench/2`, quick, on the Krackan, Ryzen AI 7 350 with 16 GB, FastFlowLM 1.0.7, 2026-10-15), against the 4B:
+
+    | | Qwen3.5-2B | Qwen3-4B (and its VL model) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 23 of 24 |
+    | Tokens written a second | 20.4 to 21.0 | 13.6 |
+    | Jobs: triage, reply, summary | 2.1, 2.9 and 4.4 s | 3.3, 8.8 and 7.1 s |
+    | First token of a 1,024-token prompt | 1.47 s | 2.43 s |
+    | Short answer | 0.82 s | 1.37 s |
+    | Working set | 4.0 GB | 5.7 GB |
+    | Pictures | 3 of 4, 1.2 to 1.4 s | 3 of 4, 1.8 to 2.0 s |
+
+    It missed `apples`, as the 4B did, and `json-list`: it listed the bread and milk with the fruit. On pictures, it misread a number. Its full profile scored the same 22 of 24 and passed all 15 jobs. Its speed held 89% over 10 minutes, against the 4B's 96%.
+  - **Smaller or other models**:
+    - Qwen3.5-0.8B scored 19 of 24, Gemma3-1B and LFM2.5-1.2B 18, Qwen3-1.7B 17 and Qwen3-0.6B 13.
+    - Llama 3.2 1B failed setup's first-load check.
+    - Gemma4-E2B scored 24 but held 6.8 GB.
+    - Qwen2.5-VL-3B scored 23, with every picture right, but it is under Qwen's research licence, which bars commercial use.
+  - **Thinking:** FastFlowLM serves Qwen3.5 with its thinking off, and the benchmark's answers carried none. The kit sends it no `/no_think`, since `thinks()` already left out Qwen3.5.
+  - **From the NPU check on the Krackan** (2026-10-15). These were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU, so the starts are on the slow side:
+    - **`memoryGb`**: 4.1 for chat and for pictures. It held 3.7 GB started and 4.0 to 4.1 GB after the benchmark's jobs and pictures, against 4.5 and 5.3 for the 4B pair.
+    - **xdna2 `timeouts`**: 15 s + 150 ms a token, and a 30 s cold load. The base was 20 s. Measured: 19.4 tokens written a second, 3,272 tokens read in 4.1 s, and the slowest start to a first answer 17 s.
+    - **`idleStop`**:
+      - 15.1 s for chat: `--idle`'s cold answer took 15.0 s, and the keeper's stop freed 3.7 GB.
+      - 16.6 s for pictures: the kit's test request on a stopped server, a picture and then chat.
+      - Both give 6 minutes. A person waking it is told about 15 s, where the 4B's chat was 6.6 s.
+    - **The start:** timed alike from Node, three starts each, Qwen3.5-2B answered first in 11.8 to 12.4 s and the 4B in 10.1 to 10.7 s. So it starts about 1.7 s slower, but nothing switches afterwards. The 4B took 9.2 s more for its first picture.
+  - **`notes`**: rewritten for the one model, and corrected on FastFlowLM's power mode (below).
+- **FastFlowLM's `--pmode` was never measured on the Krackan** (spec/NPU-VENDORS.md, npu-vendors.json's notes):
+  - `flm serve` sets its mode by running `C:\Windows\System32\AMD\xrt-smi.exe configure --pmode`, and ignores the result.
+  - There, an older driver's `xrt_coreutil.dll` (2024) beside the newer `xrt-smi.exe` lacks a function `xrt-smi` needs. So `xrt-smi` failed to load at every start, and every `--pmode` run was in one mode.
+  - The failure is silent from Node, which the kit starts it from. From anywhere else, each start shows an "Entry Point Not Found" dialog.
+  - The route still sets no mode. The modes are still to measure, on a PC whose `xrt-smi` runs.
+- **`npu-check --harden`'s harden-nonsense step fails on FastFlowLM, for both models.** It puts `OpenVINO/Qwen3-4B-int4-ov` in the chat model's place, and `flm serve` exits at once ("Model not found"). So setup's note says the server didn't pass its test, not that the model doesn't run properly. The NPU is left out either way.
+  - It fails the same on the Qwen3-4B route, run the same day. Its earlier passes were most likely another server answering on 18184.
+  - Not changed here: the step has no model that answers nonsense on FastFlowLM to force.
+- **spec/NPU-VENDORS.md** has the AMD model row, the licences row, and the Krackan's runs with Qwen3.5-2B under "Verified, and not". **spec/NPU-BENCHMARK.md** has the AMD row. It also says that Qwen3.5's tokenizer (248,320 tokens) isn't the Qwen3 models' (151,936). So its tokens a second compare only roughly with the other rows', while its jobs, timed in seconds, compare as they are.
+
+### For an agent
+
+- Nothing to do.
+- A PC already set up keeps serving the 4B models until it is set up again (Manor's Set up local AI), which pulls Qwen3.5-2B (2.0 GB).
+- The 4B models stay in `%USERPROFILE%\.flm\models` (7.4 GB) until removed (`flm remove qwen3-it:4b`, `flm remove qwen3vl-it:4b`).
+
+## 2.77.2
+
+**A graphics card's embedding server holds about 600 MB less: it starts with `-c 4096 -ub 512`, and a request to it is capped at 1,365 tokens (4,095 characters), with the same vectors and times.**
+
+### What changed
+
+- **setup.ts**: the embedding server on a graphics card (or the processor) starts with `-c 4096 -b 2048 -ub 512`, not `-c 8192 -b 2048 -ub 2048`. Its endpoint gets its own `maxContextTokens`, 1,365 (`EMBED_CAP`), below the card's: by the kit's estimate of 3 characters a token, an input under it is at most 4,095 characters, and so fits 4,096 tokens even at a token a character.
+  - On a Radeon 860M (WEASELDEV03, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
+  - **On a Core Ultra 5 225U's Intel Graphics** (WEASELDEV02, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
+    - working set 1.37 GB against 1.97;
+    - private bytes 1.41 GB against 2.01;
+    - the card's shared memory 1.25 GB against 1.85;
+    - by llama.cpp's own buffers, the KV cache took 448 MiB against 896, and compute 26 + 12 MiB against 120 + 64.
+
+    The times were the same within noise:
+    - a query 145–147 ms against 137–138 (minimums 133–134 against 132–133);
+    - a 430-token chunk 759–766 ms against 749–759;
+    - 2,679 tokens 9.02–9.30 s against 9.06–9.10;
+    - a dense chunk at the new limit (4,095 characters, 3,379 tokens) 13.4–13.9 s against 13.5–13.8, answered in 7 passes of 512.
+
+    Every vector matched (cosine 1.000000), old against new, old against old, and new against new.
+  - `-b 2048` stays, as on Qualcomm's route (2.75.1). With embeddings, llama-server sets the batch to the micro-batch itself, 512, and warns so ("embeddings enabled with n_batch (2048) > n_ubatch (512)").
+  - An input longer than a 512-token micro-batch is split across several, so nothing that fit before is refused by the server for its length.
+  - The reranker keeps `-c 8192 -ub 2048`.
+  - Sizing is unchanged. `serverContext` and `SERVER_GB` still count the embedding server as it was, so every card is sized as before. That estimate is now high for it: it counts 2.7 GB, and the Radeon's server held 1.3 GB.
+- **npu.ts**: a request over every serving accelerator's cap for its kind is refused before it's sent, saying that cap ("refusing a request of ~1400+0 tokens (cap 1365); split the input"). Before, a request under the accelerator's cap but over its kind's was dropped from the candidates, and said only that no accelerator could take it. `budget(maxTokens, work)` gives the largest cap for that kind, so chunking for embeddings fits 1,365 on a card.
+
+### For an agent
+
+- Nothing to do for the agents of the manor: their longest input is Reeve's cluster item, about 2,060 characters, and Clerk's and Chamberlain's are cut at 600. An agent that embeds more than 4,095 characters at once on a card should chunk by `budget(0, 'embed')`.
+- A PC set up before keeps its embedding server's old flags and no cap until it's set up again (Manor's Set up local AI, or the Smith's Set up). Nothing rewrites a card's entry on its own.
+
+## 2.77.0
+
+**A pass anywhere, for the same code: before an agent runs work again on a clean checkout, it can take a pass of exactly that code tree from this PC's results, or from another PC on the licence through Manor (spec/WORK-STATUS.md, A pass anywhere, for the same code).**
+
+### What's new
+
+- **work-status.ts**:
+  - `passFor({ kind, repo, tree, commands })` gives the pass that stands in for running that work again, or null. It looks at this PC's own result for the tree first, then asks another PC's through Manor.
+  - `whyNotPass(result, query)` says why a result doesn't stand in, or null when it does. To stand in, a result must:
+    - have passed;
+    - be of the same kind: an `affected checks` pass never stands in for `checks`;
+    - be for the same repository and tree;
+    - be under a day old (`PASS_STANDS_MS`);
+    - have run on the same Node.js major and OS (`toolchainHere()`);
+    - have run every command asked.
+  - A failure here newer than the other PC's pass, and that pass isn't taken. A failure elsewhere never stands in. A pass taken from another PC is kept here as that PC's (`from`).
+- **The kit's server**: `GET /api/peer/result?kind=…&repo=…&tree=…` answers this agent's own result for one tree (`peerResult`), from all of `work-results.json`, not only the 50 a status lists. It never passes on a pass taken from another PC. It is read only, so Manor's link passes it on as `GET /agents/<id>/result`.
+- **manor.ts**: `passOnOtherPcs(query, { agent })` asks Manor on this PC (`GET /api/peers/result`, Manor 0.16.163 and later) for the first pass among the other PCs it hears from. It answers null when:
+  - Manor isn't here, or is older (its 404);
+  - Other PCs is off;
+  - under `node --test`, unless the test gives Manor a home (`MANOR_HOME` or `home`).
+
+### What changed
+
+- **WorkResult** has `commands`, `node`, `platform` and `from`. A result kept before 2.77.0 says none of them, and so never stands in.
+
+### For an agent
+
+- Nothing to do: the route comes with the kit's server. To skip work that already passed, call `passFor` before running it, and record what it ran with `recordResult({ …, commands, ...toolchainHere() })`.
+
 ## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**

@@ -321,13 +321,13 @@ test('config entries per vendor: one server on its own port, its caps and timeou
   assert.equal(core.candidates(RULES, [ieAcc], { work: 'embed', tokens: 700, lane: 'background' }).list.length, 0, 'past its cap: not a candidate');
 
   const a = V.npuEntry(V.NPU_CATALOG.routes.amd, { tools, exe: `${tools}\\servers\\fastflowlm-1.0.7\\flm.exe` });
-  assert.deepEqual(a.chat!.startCommand!.slice(1), ['serve', 'qwen3-it:4b', '--port', '18184', '--ctx-len', '4096']);
+  assert.deepEqual(a.chat!.startCommand!.slice(1), ['serve', 'qwen3.5:2b', '--port', '18184', '--ctx-len', '4096']);
   // FastFlowLM holds its whole context from the start: its own default (the model's 40,960) didn't load on a 16 GB
   // XDNA 2. Its context is the cap, never more (memory nothing uses) nor less (a request the cap lets through, refused).
   const amd = V.NPU_CATALOG.routes.amd;
   assert.equal(Number(amd.serve[amd.serve.indexOf('--ctx-len') + 1]), amd.maxContextTokens);
   assert.ok(Object.values(amd.caps).every((c) => c! <= amd.maxContextTokens));
-  assert.deepEqual(a.vision, { model: 'qwen3vl-it:4b' }, "FastFlowLM switches models on its one server");
+  assert.deepEqual(a.vision, { model: 'qwen3.5:2b' }, 'one model for chat and pictures, on its one server: no switch between them');
 
   // Every agent reads them the same way: the core takes the caps per kind and the timeouts.
   const raw = { accelerators: [{ ...i, vision: { model: 'v', maxContextTokens: 1024 } }] };
@@ -399,7 +399,7 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
   const amd = await planSetup({ detection: parseDetection(`${AMD_IGPU}${NPU.strix}\n${X64('AMD Ryzen AI 9 HX 370 w/ Radeon 890M')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
   assert.equal(amd.npu?.route.server, 'FastFlowLM');
   assert.deepEqual(amd.npu?.kinds, ['chat', 'vision']);
-  assert.equal(amd.npu?.models.length, 2);
+  assert.deepEqual(amd.npu?.models.map((m) => m.id), ['qwen3.5:2b'], 'one model for chat and pictures');
 
   const phoenix = await planSetup({ detection: parseDetection(`${AMD_IGPU}${NPU.phoenix}\n${X64('AMD Ryzen 7 8840U')}`), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk() });
   assert.equal(phoenix.npu, null);
@@ -592,11 +592,11 @@ test('setting the NPU up: download (pinned), install for this user, pull, test r
   const noRuntime = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...fakeNpuIo().io, download: async (d: { what: string }) => { if (d.what.endsWith('.vsix')) throw new Error('404 Not Found'); } });
   assert.equal(noRuntime.entry, undefined);
   assert.match(noRuntime.problems[0], /^npu: the Microsoft Visual C\+\+ runtime 14\.44's download failed: 404 Not Found\. config\.json gets no NPU entry/);
-  // AMD: FastFlowLM's zip, then each model, then, once it answered, AMD's xrt-smi (FastFlowLM's power tool), read only.
+  // AMD: FastFlowLM's zip, then its one model, for chat and pictures, then, once it answered, AMD's xrt-smi (FastFlowLM's power tool), read only.
   const a = planFor(NPU.strix, 'x64', tools);
   const ar = fakeNpuIo();
   assert.deepEqual((await setUpNpu(a, tools, ar.io)).problems, []);
-  assert.deepEqual(ar.did.slice(2), ['run flm.exe pull qwen3-it:4b', 'run flm.exe pull qwen3vl-it:4b', 'run xrt-smi.exe examine']);
+  assert.deepEqual(ar.did.slice(2), ['run flm.exe pull qwen3.5:2b', 'run xrt-smi.exe examine']);
 
   // Each failure leaves no entry, and says which step failed.
   const fails: [string, Parameters<typeof fakeNpuIo>[0], RegExp][] = [
@@ -624,7 +624,7 @@ test("AMD's xrt-smi that can't start (an older driver's DLLs beside it): the NPU
     return { ...w.io, run: async (exe: string, args: string[]) => (/xrt-smi\.exe$/i.test(exe) ? { code, out: '' } : w.io.run(exe, args)), exists: (p: string) => (/xrt-smi\.exe$/i.test(p) ? xrtSmi : w.io.exists(p)) };
   };
   const broken = await setUpNpu(plan, tools, withExit(0xc0000139));
-  assert.equal(broken.entry?.chat?.model, 'qwen3-it:4b', 'used all the same');
+  assert.equal(broken.entry?.chat?.model, 'qwen3.5:2b', 'used all the same');
   assert.deepEqual(broken.problems, []);
   assert.deepEqual(broken.power, { exe: 'C:\\Windows\\System32\\AMD\\xrt-smi.exe', missing: false, code: 3221225785, broken: true });
   assert.match(broken.note!, /^The NPU \(.+\) is used, at its default power mode: an older AMD NPU driver left its files in Windows\\System32\\AMD, .* \(an administrator's job, with pnputil \/delete-driver\)\.$/);

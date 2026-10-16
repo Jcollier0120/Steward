@@ -2,6 +2,122 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.59
+
+**Kit 2.77.6: the local AI's NPU unloads its models about five minutes after its last request, even while Reeve indexes on the graphics card.**
+
+### What changed
+
+- On a PC whose local AI runs on more than one accelerator (an NPU and a graphics card), each one's models now unload when that one has been idle. Before, work on any of them kept them all loaded, so Reeve indexing on the graphics card held the NPU's memory, and the NPU's chat held the card's.
+- How long each waits before it unloads is unchanged.
+
+## 0.36.58
+
+**Kit 2.77.5: on a PC with under 20 GB of memory, the local AI's search model steps aside while you chat, so the chat model gets its memory.**
+
+### What changed
+
+- On a PC with under 20 GB of memory, the search model on the NPU now stops when a chat or a picture question starts, if nothing has searched in the last 30 seconds. The chat model gets the memory back: about 1.4 GB of the NPU's on a Snapdragon, and close to 2 GB of the PC's. The next search wakes the search model again in about 2 seconds.
+- The search model keeps running while it's in use, for example a search right after a summary, or an index being built between chats. Measured on two hours of the manor's own traffic, that means about one extra wake-up an hour.
+- PCs with 20 GB or more, and PCs where you've set how long the local AI stays loaded, are unchanged.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.57
+
+**The Steward's notifications come under Castellan's name, with the castle, instead of Windows PowerShell.**
+
+### What changed
+
+- The Steward's Windows notifications (an alarm that needs you, a release that stopped) now say **Castellan**, as Manor's own do, with the castle on each one. In Windows' notification settings, Castellan's notifications are turned on or off together, without touching Windows PowerShell's.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The castle shows once Manor 0.16.165 or later is installed; before that, the notifications already say Castellan.
+
+## 0.36.56
+
+**Kit 2.77.3: on an AMD Ryzen AI PC, one smaller model answers chat and pictures on the NPU: faster, lighter, and a much smaller download.**
+
+### What changed
+
+- On an AMD Ryzen AI 300 PC, the local AI on the NPU now uses one model, Qwen3.5-2B, for both chat and pictures, instead of two 4B models. It writes about half again as fast, holds 0.4 GB less memory for chat and 1.2 GB less for pictures, and downloads 2.0 GB instead of 7.4 GB. It no longer pauses 8 to 9 seconds to switch models between a chat and a picture. On the quality checks it scored 22 of 24 against the 4B's 23, with every must-pass item right.
+- It takes about 1.7 seconds longer to start. Waking it after a rest is now announced as about 15 seconds, where the 4B's chat took about 7.
+- The kit the Steward hands out (2.77.3) brings this to every agent. Intel and Snapdragon PCs are unchanged.
+
+### Before you update
+
+- A PC already set up keeps using the two 4B models until its local AI is set up again (in Manor, Set up local AI), which downloads Qwen3.5-2B (2.0 GB). The 4B models stay on disk (7.4 GB) until you remove them: `flm remove qwen3-it:4b` and `flm remove qwen3vl-it:4b`.
+
+## 0.36.55
+
+**Kit 2.77.2: the local AI's search model on a graphics card or the processor holds about 600 MB less memory, as fast and with the same results.**
+
+### What changed
+
+- The search model that runs on a graphics card, or on the processor, now starts with a smaller working space and holds about 600 MB less memory: 1.3 GB instead of 1.9 GB on an AMD Radeon 860M, and 1.4 GB instead of 2.0 GB on a Core Ultra 5's Intel graphics. It answers just as fast and gives the same results, so existing search indexes carry over. Where the graphics share the PC's memory, as on most laptops, that is 600 MB more for everything else.
+- One piece of text sent to it at once is now limited to about 4,000 characters. The manor's agents send at most about 2,000, so nothing changes for them; a longer text is refused with a note to split it.
+- The kit the Steward hands out (2.77.2) brings this to every agent. Snapdragon PCs had the same change in kit 2.75.1.
+
+### Before you update
+
+- A PC whose local AI is already set up keeps the search model's old settings until its local AI is set up again (in Manor, Set up local AI). Otherwise nothing: it updates itself as usual.
+
+## 0.36.52
+
+**A draft holding a repository's version queue can be moved out of the way in one click.**
+
+### What's new
+
+- The alarm for a pull request that has held a version queue for an hour (a draft, usually) now has a **Move it past the others** button, here and in Manor's **Needs you**. It asks first. Then the Steward gives that pull request a version above every other one in line, tells its author in a comment on the pull request, and clears the alarm. The pull requests that waited behind it merge at the round that follows, which comes at once.
+- Nothing is pushed to the moved pull request's branch, so it works for anyone's pull request, a fork's too. Once it is ready, the Steward catches it up to its new version itself where it can (a pull request from the repository itself, with Catch up on); otherwise the comment asks its author to set that version.
+- Drafts just above it that would hold the queue next are moved with it, so one click frees the queue. The alarm names them.
+- **What holds the version queues** on the Steward's page has the same button, so you needn't wait for the hour.
+- `move-past <repository> <pull request number>` does the same from a terminal.
+
+### What changed
+
+- A moved pull request that isn't ready gives up its turn. One marked ready afterwards waits its turn at its new version, behind the pull requests it was moved past, rather than merging first at its old one.
+- The move is recorded with the version claims every PC shares, so another PC whose turn it is to merge in that repository honours it too.
+- A pull request by someone outside Settings' team, which the Steward never merges, no longer counts as holding a version queue. Its draft no longer raises an alarm or a heads-up, and the pull requests above it no longer count as waiting for it. It is still listed in the queue.
+- Settings' **A PR holding others up for** (it was "A conflicting PR holding others up for") now says it covers drafts and other pull requests that aren't ready, as the alarm already did.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Manor shows the button in Needs you from Manor 0.16.164; an older Manor shows these alarms with Dismiss only.
+
+## 0.36.51
+
+**Code that already passed its checks isn't tested again: not on this PC, and, with Manor's Other PCs on, not on another of your PCs either.**
+
+### What's new
+
+- Before the Steward runs a repository's checks, it looks for a pass of exactly the same code. It doesn't matter which commit the code came from, only that the code is the same. It looks in three places:
+  - the Assayer's check of that folder, as before for a vouch;
+  - this PC's own results;
+  - with Other PCs on, the other PCs on your licence, asked through Manor (Manor 0.16.163 and later).
+
+  If it finds one, it takes it and runs nothing. The round's log says so ("its checks passed on LAPTOP at 14:02, on exactly this code: not run again"), and so does Manor's Work page ("passed on LAPTOP, not run again here").
+- This counts wherever the Steward runs checks: testing a pull request, a vouch, a merge train, a build, a catch-up, and the whole suite before a kit's release. A vouch whose pass came from another PC says so on GitHub ("… passed on LAPTOP at abc1234").
+- A pass stands in only when:
+  - it covers all of the checks, not only the tests a change reached;
+  - it is for the same repository;
+  - it is less than a day old;
+  - it ran on the same Node.js major version and the same OS;
+  - it ran every check your Settings give that repository.
+- A failure never stands in. If the code failed here after it passed on another PC, the checks run here again.
+
+### What changed
+
+- Every run of the checks now records which commands it ran and on which Node.js and OS.
+- This release brings the Steward's kit 2.77.0, which gives every agent the same: a pass by code tree, from this PC or another PC on the licence.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Results kept before this version don't say which Node.js or checks they ran, so they are run again once. With Other PCs off, or with an older Manor, only this PC's own passes count.
+
 ## 0.36.50
 
 **Kit 2.76.0: the Steward, and every agent, say what they are working on and what is waiting, for Manor's Work page.**

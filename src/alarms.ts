@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { APP, pageUrl } from './app.ts';
+import { manorHome } from './kit/manor.ts';
 import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
@@ -85,6 +87,17 @@ export interface Condition {
   since?: string;
   /** How long it must last to be an alarm. */
   afterMs: number;
+  /** What the person can have the Steward do about it, in one click (POST /api/alarms/act). */
+  action?: AlarmAction;
+}
+
+/**
+ * What an alarm's button does, in its words, and the question asked before it (Steward 0.36.52): moving a PR that holds a
+ * version queue past the others (move-past.ts). Its page and Manor's Needs you show it beside Dismiss.
+ */
+export interface AlarmAction {
+  label: string;
+  confirm: string;
 }
 
 export interface Alarm {
@@ -97,6 +110,7 @@ export interface Alarm {
   raisedAt: string;
   /** When the person dismissed it; it stays dismissed until it clears. */
   dismissedAt?: string;
+  action?: AlarmAction;
 }
 
 export interface AlarmState {
@@ -128,6 +142,7 @@ export function reconcile(state: AlarmState, conditions: Condition[], now: Date)
     const was = state.open.find((a) => a.id === c.id);
     const alarm: Alarm = { id: c.id, who: c.who, title: c.title, detail: c.detail, since, raisedAt: was?.raisedAt ?? at };
     if (c.url) alarm.url = c.url;
+    if (c.action) alarm.action = c.action;
     if (was?.dismissedAt) alarm.dismissedAt = was.dismissedAt;
     open.push(alarm);
     if (!was) raised.push(alarm);
@@ -146,7 +161,30 @@ export function dismiss(id: string, now = new Date()): boolean {
   return true;
 }
 
+/**
+ * An open alarm cleared now, its condition gone by the person's hand (a PR moved past the others): not waiting for the
+ * next round to see so. Its condition is forgotten too, so should it come back, its hour starts again. False when there's
+ * no such alarm open.
+ */
+export function clearAlarm(id: string, now = new Date()): boolean {
+  const s = loadAlarms();
+  const a = s.open.find((x) => x.id === id);
+  if (!a) return false;
+  const { [id]: _gone, ...watching } = s.watching;
+  writeJson(alarmsFile(), { ...s, watching, open: s.open.filter((x) => x !== a), cleared: [{ ...a, clearedAt: now.toISOString() }, ...s.cleared].slice(0, KEEP_CLEARED) });
+  return true;
+}
+
 const hours = (h: number) => `${h} hour${h === 1 ? '' : 's'}`;
+
+/** The id of the alarm a PR holding its version queue raises: "queue:Jcollier0120/Steward#233". */
+export const queueAlarmId = (repo: string, number: number) => `queue:${repo}#${number}`;
+
+/** The repository and PR a queue alarm's id names, or null for any other alarm's. Pure. */
+export function queueAlarmOf(id: string): { repo: string; number: number } | null {
+  const m = /^queue:([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(id);
+  return m ? { repo: m[1], number: Number(m[2]) } : null;
+}
 
 /** A PR the merge stage held, as it said why. */
 export interface Held {
@@ -262,21 +300,26 @@ export function roundConditions(o: {
     if (h.why.startsWith(CONFLICTS)) continue;
     const block = o.settings.alarms.blockingHours;
     const behind = h.behind.map((n) => `#${n}`).join(', ');
+    const moving = [h.number, ...(h.drafts ?? [])].map((n) => `#${n}`);
+    const them = moving.length === 1 ? moving[0] : `${moving.slice(0, -1).join(', ')} and ${moving.at(-1)}`;
     out.push({
-      id: `queue:${q.repo}#${h.number}`,
+      id: queueAlarmId(q.repo, h.number),
       who: q.id,
       title: `${q.name} #${h.number} (v${h.version}) has held its version queue for ${hours(block)} or more: ${behind} ${h.behind.length === 1 ? 'waits' : 'wait'} behind it`,
       detail: [
         h.title,
         `Why it isn't ready: ${h.why}.`,
         `${behind} ${h.behind.length === 1 ? 'is' : 'are'} ready, and ${h.behind.length === 1 ? 'waits its' : 'wait their'} turn after it: the lowest version merges first. Held since ${h.since}.`,
-        h.draft
-          ? 'Mark it ready once it is done, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.'
-          : 'Get it ready to merge, or give it a version above the others (claim one from the Steward) or close it: the PRs behind it merge at the next round.',
+        ...(h.drafts?.length ? [`${h.drafts.map((n) => `#${n}`).join(', ')}, a draft${h.drafts.length === 1 ? '' : ' each'}, would hold it next: they are moved with it.`] : []),
+        `${h.draft ? 'Mark it ready once it is done' : 'Get it ready to merge'}, or close it; or move it past the others: the Steward gives ${them} a version above the rest, tells ${moving.length === 1 ? 'its author' : 'their authors'} on GitHub, and the PRs behind merge at the next round.`,
       ],
       url: h.url,
       since: h.since,
       afterMs: block * HOUR,
+      action: {
+        label: 'Move it past the others',
+        confirm: `Give ${them} ${moving.length === 1 ? 'a version' : 'versions'} above the rest of ${q.name}'s queue, so ${behind} can merge? ${moving.length === 1 ? 'Its author is' : 'Their authors are'} told on GitHub; nothing is pushed to ${moving.length === 1 ? 'its branch' : 'their branches'}.`,
+      },
     });
   }
   for (const [id, commit] of Object.entries(o.failedReleases)) {
@@ -643,16 +686,33 @@ export const getJson: GetJson = async (url) => {
 };
 
 const powershellExe = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-/** Windows PowerShell's own AppUserModelID, so a toast needs no registered app (as Reeve's). */
+/** Windows PowerShell's own AppUserModelID: the toast goes under it should Castellan's not take. */
 const POWERSHELL_AUMID = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';
-// Text arrives in environment variables and is XML-escaped in PowerShell, so nothing is spliced into code.
+/** Castellan's AppUserModelID, as Manor's own notifications use it (its needs-you.ts): one name for the manor's. */
+export const TOAST_APP_ID = 'Castellan';
+/** Manor's castle, as a PNG: the name's icon, and the toast's own picture, since Windows may leave the name's out. */
+const toastIcon = () => path.join(manorHome(), 'app', 'art', 'manor-icon.png');
+// Text arrives in environment variables and is XML-escaped in PowerShell, so nothing is spliced into code. The app id
+// is put in the registry first with Castellan's name and icon (a key, no shortcut, no admin); should that fail, the
+// toast goes under Windows PowerShell's own, as before.
 const TOAST_PS = `$ErrorActionPreference = 'Stop'
 [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
 [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
 function E([string]$s) { [System.Security.SecurityElement]::Escape($s) }
+$icon = $env:STEWARD_TOAST_ICON -and (Test-Path -LiteralPath $env:STEWARD_TOAST_ICON)
+$id = $env:STEWARD_TOAST_FALLBACK
+try {
+  $k = 'HKCU:\\Software\\Classes\\AppUserModelId\\' + $env:STEWARD_TOAST_APPID
+  if (-not (Test-Path $k)) { [void](New-Item -Path $k -Force) }
+  Set-ItemProperty -Path $k -Name DisplayName -Value $env:STEWARD_TOAST_NAME
+  if ($icon) { Set-ItemProperty -Path $k -Name IconUri -Value $env:STEWARD_TOAST_ICON }
+  $id = $env:STEWARD_TOAST_APPID
+} catch { }
+$logo = ''
+if ($icon) { $logo = "<image placement=""appLogoOverride"" hint-crop=""none"" src=""$(E $env:STEWARD_TOAST_LOGO)""/>" }
 $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xml.LoadXml("<toast activationType=""protocol"" launch=""$(E $env:STEWARD_TOAST_LAUNCH)""><visual><binding template=""ToastGeneric""><text>$(E $env:STEWARD_TOAST_TITLE)</text><text>$(E $env:STEWARD_TOAST_BODY)</text></binding></visual></toast>")
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:STEWARD_TOAST_APPID).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+$xml.LoadXml("<toast activationType=""protocol"" launch=""$(E $env:STEWARD_TOAST_LAUNCH)""><visual><binding template=""ToastGeneric""><text>$(E $env:STEWARD_TOAST_TITLE)</text><text>$(E $env:STEWARD_TOAST_BODY)</text>$logo</binding></visual></toast>")
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
 `;
 
 export type Toast = (title: string, body: string) => Promise<void>;
@@ -664,7 +724,21 @@ export const toast: Toast = (title, body) => {
     execFile(
       powershellExe,
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(TOAST_PS, 'utf16le').toString('base64')],
-      { windowsHide: true, timeout: 30_000, env: { ...process.env, STEWARD_TOAST_TITLE: title.slice(0, 120), STEWARD_TOAST_BODY: body.slice(0, 400), STEWARD_TOAST_APPID: POWERSHELL_AUMID, STEWARD_TOAST_LAUNCH: `${pageUrl}#alarms` } },
+      {
+        windowsHide: true,
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          STEWARD_TOAST_TITLE: title.slice(0, 120),
+          STEWARD_TOAST_BODY: body.slice(0, 400),
+          STEWARD_TOAST_APPID: TOAST_APP_ID,
+          STEWARD_TOAST_NAME: 'Castellan',
+          STEWARD_TOAST_ICON: toastIcon(),
+          STEWARD_TOAST_LOGO: pathToFileURL(toastIcon()).href,
+          STEWARD_TOAST_FALLBACK: POWERSHELL_AUMID,
+          STEWARD_TOAST_LAUNCH: `${pageUrl}#alarms`,
+        },
+      },
       (err) => (err ? reject(new Error(`toast failed: ${err.message.slice(0, 300)}`)) : resolve()),
     );
   });

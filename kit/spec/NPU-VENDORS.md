@@ -284,6 +284,53 @@ A route's minutes are 20 times its cold start (stopped to its first answer), nev
 
 An idle stop never races a request: the keeper stops a server only holding the NPU's turn, joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
+### The embedding server gives way to chat (kit 2.77.5)
+
+On a PC under 20 GB, with no `npuIdleStopMinutes` in config.json, a chat or vision request on the NPU first stops the NPU's own embedding server when the NPU hasn't answered an embedding for 30 s. That is Qualcomm's llama-server (18182) or Intel's second OpenVINO Model Server (18186). The chat gets its memory: on a Snapdragon, 1,408 MB of the NPU's and a 1.7 to 2.0 GB working set; on Intel, 1.7 GB. Only the embedding side gives way. It starts again for the next embedding in 2 to 3 s, where GenieX takes 9 to 17 s to load a model.
+
+- **In the chat's own turn**, so no embedding is in flight (the kit's `embedGivesWay`, with keeper.ts' `yieldEmbedServer`):
+  - It looks at the server's `/v1/models`, and stops it only when it answers ready. A server still loading is left alone.
+  - It finds the server by its program and the address its command line serves, never by the port alone, then waits up to 10 s for the port to close.
+  - Finding the processes may take 5 s. Past that, or on any error, the chat goes on beside the server.
+  - Each stop is written in the keeper's log.
+- **When the NPU last answered an embedding**: every agent writes `<accelerators>/<id>.embedded.json` (`{at}`) after its embeddings there, at most every 5 s. With no record, the server counts as unused.
+- **Never stopped**:
+  - FastFlowLM's route, which has no NPU embeddings.
+  - npu-embed, which exits by itself.
+  - A server shared with chat.
+  - A server whose requests take another device's turn.
+  - Anything on a bigger PC, which never loads this code.
+
+**Why 30 s.** The manor's NPU and graphics-card turns were watched for two hours on the 48 GB X2 Elite (2026-10-15, 20:48 to 22:48 UTC). They were merged onto one NPU, as on a 16 GB Snapdragon where chat and embeddings both run on it. Tests and other sessions' benchmark runs were left out. That left 3,525 embeddings and 17 chats:
+
+- **Embeddings**: Reeve indexing four repositories, plus 35 searches and maps for Claude.
+- **Chats**: Reeve's map, triage and summarize for Claude, Heiward, Porter, and two unnamed.
+
+The embedding server's own 5-minute idle stop started it again 4 times (2 an hour). Giving way to chat adds:
+
+| Gives way | Extra starts in 2 h | An hour |
+|---|---|---|
+| At every chat | 8 | 4 |
+| After 10 s without an embedding | 5 | 2.5 |
+| After 30 s | 2 | 1 |
+| After 60 s | 2 | 1 |
+| After 120 s | 1 | 0.5 |
+
+At every chat, 5 of the 8 extra starts fell on Reeve's requests for Claude a second or so after its map or summary, and the other 3 on an index being built between chats. With 30 s, 2 remain: chats more than half a minute after the last embedding. Counting the benchmark sessions, it's 8 an hour at every chat and 2 an hour with 30 s.
+
+**Measured** on the X2 Elite on private ports (28181 GenieX, 28182 llama-server, `-c 4096 -ub 512`). Every request went through the kit's `Npu` in the NPU's turn, as a 15.6 GB PC would run it:
+
+| | |
+|---|---|
+| The embedding server's cold start, alone / beside a loaded GenieX | 3.6 s / 1.7 s (twice) |
+| An embedding, warm | 16 ms |
+| A warm chat that stops the embedding server / with nothing to stop | 0.47 to 0.63 s (the stop 0.35 to 0.53 s, mostly finding the process) / 0.10 s |
+| A cold chat that stops it | 12.3 s (the stop 0.7 s) |
+| The NPU's memory when it stops | 1,409 MB less (10,152 to 8,743 MB) |
+| The PC's memory when it stops | the server's 1,680 MB working set freed, 1.4 GB more available |
+
+So a chat that finds the embedding server idle pays about half a second once, and the next embedding about 1.7 s. On an NPU 3720, whose embedding server runs on the processor's graphics (`embedArgs`), the server gives way too while its requests take the NPU's turn. That frees the PC's memory rather than the NPU's.
+
 ## Models and sizes
 
 | Maker | Model | Kinds | Download |
@@ -292,7 +339,7 @@ An idle stop never races a request: the keeper stops a server only holding the N
 | Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
 | Intel | `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (Castellan's channel-wise INT4 export, the kind the NPU runs properly; its files pinned) | chat | 2.2 GB |
 | Intel | `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` (OpenVINO's channel-wise INT4 export; its files pinned) | embeddings | 428 MB |
-| AMD | `qwen3-it:4b` (Qwen3-4B-Instruct-2507), `qwen3vl-it:4b` (Qwen3-VL-4B-Instruct) | chat, vision | about 3.3 GB and 4.1 GB |
+| AMD | `qwen3.5:2b` (Qwen3.5-2B, FastFlowLM's NPU2 build) | chat, vision | 2.0 GB |
 
 Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embeddings), OpenVINO Model Server 140 MB (and its Visual C++ runtime, 3 MB), FastFlowLM 40 MB.
 
@@ -307,7 +354,7 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 | The Microsoft Visual C++ runtime DLLs beside it | Visual Studio's "Distributable Code" terms | Microsoft lets an application carry these DLLs in its own folder; here each PC downloads them from Microsoft, so Castellan doesn't redistribute them either: **have it reviewed**. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
 | FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
-| Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-Embedding-0.6B | Apache-2.0 | |
+| Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-Embedding-0.6B, Qwen3.5-2B | Apache-2.0 | |
 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own export, so Castellan publishes this one: with the base model's LICENSE, and a model card saying what was changed (the weights converted and compressed, nothing else) and how, as Apache-2.0 asks. |
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
@@ -404,11 +451,28 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 - FastFlowLM 1.0.7's zip and both models pulled by setup's steps (`qwen3-it:4b` and `qwen3vl-it:4b`, 7.4 GB in 521 s), `--no-setup` finding them by their files (through kit 2.74.4 the route named none, so it never did);
 - its own default context never loaded: the chat model at FastFlowLM's default (`--ctx-len` -1, the model's 40,960 tokens: about 5.6 GB of context beside 3.3 GB of weights) failed every time, from a fresh start too, with XRT's 0xc01e0200 (the video memory manager couldn't page every allocation in at once). Windows lets a device hold half the PC's memory at once, 7.6 GB there. It served on all the same, `/v1/models` answering, every chat request answered 200 with only `{"error":"Failed to load qwen3-it:4b model!"}`, and the kit took that for an empty answer; the NPU check's start passed on `/v1/models` (the kit after 2.74.4 fails both: `failedWithOk`, and `/api/ps` for the model it holds);
 - at `--ctx-len 4096`, the cap: started with its model in 4 to 6 s, 4.5 GB; a short answer warm in 1.3 s; about 14 tokens written and 475 read a second (3,115 tokens in 6.6 s); 3,827 answered and 4,352 refused plainly (400, "Max length reached!"), the server still up; two at once in 3.0 s; a start again 5 s; the kit's test request in the NPU's turn. At 8,192: 10.6 s to start, 5.1 GB, the same speed. Its vision model at 4,096: 5.3 GB, a picture's colour named right, 9.2 s with its switch from chat, 1.8 s warm; the switch back 7.7 s;
-- its `--pmode` (powersaver, balanced, performance, turbo) wrote and read alike on mains power, 14.0 tokens a second each, and on battery, each doing the same jobs in the same time; none drew clearly less there, their differences inside the battery meter's own swing (4.7 to 11.3 W at rest from one run to the next); prefill chunks smaller than its 4,096 only read slower;
+- its `--pmode` (powersaver, balanced, performance, turbo) wrote and read alike on mains power, 14.0 tokens a second each, and on battery, each doing the same jobs in the same time; none drew clearly less there, their differences inside the battery meter's own swing (4.7 to 11.3 W at rest from one run to the next). **That says nothing of the modes** (found 2026-10-15): `flm serve` sets its mode by running `cd "C:\Windows\System32\AMD" && .\xrt-smi.exe configure --pmode <mode> > NUL 2>&1`, and ignores the result. On the Krackan, an older driver's `xrt_coreutil.dll` (2024) still sits in `System32\AMD` beside the newer `xrt-smi.exe` (32.00.20102.3931), and it lacks a constructor that `xrt-smi` needs (`xrt::ext::kernel(const hw_context&, const std::string&)`; the current one, in `System32`, has it). Windows loads the DLL beside the program first, so `xrt-smi` failed to load at every start, and every run was in one mode. From Node, which the kit starts it from, the failure is silent; from anywhere else, each start shows an "Entry Point Not Found" dialog and waits for it. Prefill chunks smaller than its 4,096 only read slower;
 - its vision model's picture size (`--img-pre-resize`: a large picture is scaled down to a height before it's read; a small one isn't enlarged), on a 1920×1080 desktop screen and a 1080×2400 phone screen with a dialog and an error, asked Reeve's own questions about the phone's (`screenFacts`): at its default, a height of 720, the desktop screen cost 960 tokens and 4.5 s an answer and the phone screen 270 tokens and 2.3 s, every answer right; at the original size 2,080 and 2,600 tokens, 8.8 s and 10.5 s, and nothing more right; at 1,080 and 1,440 slower again, and nothing more right; at 480 the desktop screen's small text was misread. The suite's pictures (224 to 448 px) cost 97 to 137 tokens at any setting. So the route keeps the default. The kit counts 400 tokens a picture (rules.json's `imageTokens`), under a desktop screen's 960, which the cap and the timeouts absorb. It keeps no prefix cache: every request asked twice took the same time both times, so each question about a picture reads all of it again (Reeve's eight about one phone screen took 19 s);
 - on battery (`npu-bench --profile full --energy`, the Balanced plan, the screen on): 20.7 mJ a token (6.6 W at rest, 11.6 W working: 49 jobs, 44,637 tokens in 3 minutes), 13.1 tokens written a second against 14.4 on mains power, its jobs 21.9 s against 19.8 s, and its model loaded in 12.7 s against 5.4 s (the idle stop's rule still gives 5 minutes for chat). Writing costs far more than reading: roughly 1 J a token written against 15 to 28 mJ a token read, by the power modes' runs (their rest readings swung, so these are rough);
 - the keeper's idle stop (`--idle`): the stop freed 4.3 GB, a person's request after it was told the local AI was waking and answered in 6.6 s, and a request in flight was never stopped;
 - `--harden`: a driver below the minimum, a test given 1 s and a model answering nonsense each left the NPU out with a plain note. Its calibration measured the switch back from the vision model as a short answer, warm (9.2 s, so a 105 s base): setup's test request now asks about the picture first, and chat last. Run again with kit 2.74.5, every step passing: chat warm in 1.31 s, 9.7 tokens a second over two short requests, the first answer (now the picture's) 26 s after the start, so 90 s, 250 ms a token and a cold load of 60 s. The base is mostly calibrate's reading estimate, a tenth of writing speed (4,096 tokens at 97 a second), where FastFlowLM read about 34 times faster than it wrote: the route's `readPerWrite` is now 30, which gives the same measurement a 35 s base. The Krackan's own timeouts (20 s + 0.15 s a token, 30 s) are the NPU check's, not calibrate's.
+- **Qwen3.5-2B in the Qwen3-4B pair's place** (`qwen3.5:2b`, one model for chat and pictures, 2026-10-15). Measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU; the starts below are on the slow side for it.
+  - **The NPU check:** every measuring step passed:
+    - a start with its model in 12.0 s, and its first answer 13 s from the start;
+    - a short answer warm in 0.89 to 0.96 s;
+    - 19.4 tokens written a second, and 3,272 tokens read in 4.1 s;
+    - at the 4,096 cap, 3,827 tokens answered and 4,352 refused plainly;
+    - two requests at once in 2.3 s;
+    - 3.73 GB held;
+    - a start again in 13 s, and the kit's test request (a picture, then chat) 16.5 s from a stopped server.
+    - Suggested timeouts: 15 s + 0.15 s a token, and a 30 s cold load.
+  - **`--idle`:** every step passed. The stop freed 3.7 GB, and a person's request after it answered in 15.0 s, told it was waking. That gives 6 minutes for chat and for pictures.
+  - **`--harden`:**
+    - The driver and 1 s cases passed.
+    - Calibration measured a first answer (the picture's) 14 s after the start, 0.99 s warm and 13.4 tokens a second, and wrote 25 s, 150 ms a token and a 30 s cold load.
+    - **harden-nonsense failed, and fails the same on the Qwen3-4B route run that day.** The check puts `OpenVINO/Qwen3-4B-int4-ov` in the chat model's place. FastFlowLM doesn't know that model, so `flm serve` exits at once ("Model not found"), and setup's note says the server didn't pass its test, not that the model doesn't run properly. The NPU is left out either way. Its earlier passes, an answer of "No", were most likely another server answering on 18184. The step has no nonsense model to force on FastFlowLM.
+  - **Started alike from Node,** on a spare port, three times each, alternating: Qwen3.5-2B came up in 10.8 to 11.5 s and answered first in 11.8 to 12.4 s, holding 3.72 GB. Qwen3-4B came up in 8.5 to 9.3 s and answered first in 10.1 to 10.7 s, holding 4.26 GB. Qwen3-4B came up in 4 to 6 s on the quieter PC before.
+  - **The benchmark** (quick, then full; Models and sizes, and the kit's CHANGELOG): 22 of 24 quality items, every must-pass one right, against the 4B's 23. 20.4 to 21.0 tokens written a second against 13.6, and its jobs 1.4 to 3 times faster. Pictures 3 of 4, in 1.2 to 1.4 s, as the 4B vision model's 3 of 4 in 1.8 to 2.0 s. Its speed held 89% over 10 minutes.
 
 **Played on the X2 Elite Extreme** (2026-10-15), the first X's code on the X2's NPU (Playing an older Snapdragon, above): what an X runs, not at an X's speed:
 - the embeddings with `GGML_HEXAGON_ARCH=v73` against the native v81, Qwen3-Embedding-0.6B at `-c 8192`, each request with a fresh nonce (llama-server's prompt cache otherwise fakes the timings): cosine 1.000 on every text; a start in 1.8 s either way; 20 tokens in 21 ms either way; 551 tokens in 184 ms native and 195 ms on v73; 2,112 tokens in 970 ms native and 1,014 ms on v73 (about 5% slower); the same memory, 4.36 GB working set and 1.55 GB private. It ran the v73 code: without `libggml-htp-v73.so` it fails (0x80000406);
@@ -436,7 +500,7 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 - the prompt settings estimated from the NPU 3720 (Estimated, above): Lunar Lake's and Panther Lake's 512-token chunks and `BEST_PERF`, their prefix cache off, and Wildcat Lake's NPU 3720 settings. Only a benchmark on the Lunar Lake can check any of them;
 - the NPU 3720's embeddings on the processor's graphics through setup and the NPU check (`embedArgs`; measured with the same command started by hand, and the entry the kit writes started once from a scratch tools home: a query in 43–50 ms), on a Meteor Lake's Arc graphics, and with a game on the graphics (the keeper defers the card's models for one, not the NPU entry's); and their energy for each chunk against the NPU's;
 - AMD beyond the Krackan: Strix Point, Strix Halo and Gorgon Point (XDNA 2 too, the same PCI id, but not run on one), a PC with 24 GB or more (where FastFlowLM's default context may well load: the cap keeps it at 4,096 everywhere), and the driver minimum, 32.0.203.311 (only 32.0.20101.3760 and 32.0.20102.3930 ran);
-- whether FastFlowLM's `--pmode` saves energy on battery by less than a laptop's battery meter can tell (on the Krackan's the modes wrote at the same speed, and it swung by several watts at rest);
+- FastFlowLM's `--pmode`: on the Krackan its `xrt-smi` never ran (above), so no mode has been measured. Still to run on a PC whose `xrt-smi.exe configure` works;
 - that AMD's XDNA (Phoenix, Hawk Point) is refused with the right words on a real PC;
 - a known maker's NPU of a generation setup doesn't know, tried on guessed values: no such NPU has run it (the tests run it on the kit's fake servers, and the NPU check's patch for one). A Snapdragon before the X is refused before anything downloads (above), but one that lists a Neural processor by a name that doesn't say which, under an ACPI id `devices` doesn't know, is still tried, and downloads GenieX and its 4.4 GB model before its test request can fail; on Intel, the latest driver minimum (32.0.100.5540) may refuse an NPU that would run on an older driver;
 - the keeper's idle stops of OpenVINO Model Server and its cold starts after one on a Lunar Lake (`npu-check --idle`: it passed on the NPU 3720).
