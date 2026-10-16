@@ -5,12 +5,13 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { chatBody, ensureServer, expandEnv, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, visionBody } from './accelerators.ts';
+import { chatBody, ensureServer, expandEnv, lockDirsOf, npuNoteFile, postJson, readNpuNote, rememberHardware, rememberNpuNote, serverEnv, type ServerReady, visionBody } from './accelerators.ts';
 import { type Accelerator, acceleratorConfigFile, type AcceleratorEntry, entryOf, autoOrder, OWN_MEMORY_GB, orderAccelerators, readAccelerator, readAccelerators, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serverBase, serves, toolsHome, validateKeeperConfig, writeConfigFile } from './accelerator-config.ts';
 import { type Detection, detect, detectedAccelerators, type GpuCard, hardwareOf, noNpu, recommendedCard } from './detect.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { withAcceleratorTurn } from './npu-queue.ts';
+import { NO_SPEEDS, type NpuFailStep, npuReportFile, npuReportFromSetup, type NpuSpeeds, rememberNpuReport, reporterId, skippedStep } from './npu-report.ts';
 import { calibrate, checkPinned, checkPowerTool, compareVersions, expandRoute, isPulled, NPU_CATALOG, type NpuMeasured, type NpuPlan, npuEntry, npuMemoryFit, planNpu, type PowerToolCheck, routeEnv, routeFor, runProgram, testImage } from './npu-vendors.ts';
 
 /**
@@ -518,6 +519,8 @@ export interface SetupPlan {
   npuNote?: string;
   /** Why the NPU, or its embeddings, won't be used, in words for the person (npuNoteFor), when the plan already knows. */
   npuPlain?: string;
+  /** Why the NPU is left out before anything is set up, as its report's code (npu-report.ts): unsupported, its driver, or memory. */
+  npuLeftOut?: NpuFailStep;
   /** Each graphics card's work left to the NPU (gpuWithNpu off): not set up on it. A card the NPU would leave nothing (a Snapdragon's) is set up whole, as before, so isn't here. */
   leftToNpu?: { id: string; name: string; kinds: EndpointKind[] }[];
   build: string | null;
@@ -587,9 +590,11 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   let npu: NpuPlan | null = null;
   let npuNote: string | undefined;
   let npuPlain: string | undefined;
+  let npuLeftOut: NpuFailStep | undefined;
   if (det && !det.supported) {
     npuNote = `${det.label} (npu): not set up: ${det.why}. The graphics card or the processor takes its work.`;
     npuPlain = npuNoteFor(det.label, 'chat', det.why ?? 'the manor can\'t run its models on it');
+    if (!o.skipNpu && (askedNpu || !o.ids.length)) npuLeftOut = skippedStep(det, false) ?? undefined;
   }
   // A reranker alone is no reason to set the NPU up: none of its servers reranks.
   else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
@@ -600,6 +605,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     if (!fit.chat) {
       npuNote = `${det.label} (npu): not set up: ${fit.why}. The graphics card or the processor takes its work.`;
       npuPlain = npuNoteFor(det.label, 'chat', fit.why!);
+      npuLeftOut = 'memory';
     } else {
       npu = planNpu({ support: det, tools: o.home, downloadsDir: path.join(o.home, 'servers', 'downloads'), env: o.env, exists, noEmbed: !fit.embed, cards: o.detection.cards });
       if (!fit.embed && route?.embedServer) {
@@ -722,7 +728,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     npu.port = next;
   }
   const downloadBytes = downloads.filter((d) => !d.have).reduce((n, d) => n + d.size, 0) + (npu?.downloadBytes ?? 0);
-  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
+  return { npu, ...(npuNote ? { npuNote } : {}), ...(npuPlain ? { npuPlain } : {}), ...(npuLeftOut ? { npuLeftOut } : {}), ...(leftToNpu.length ? { leftToNpu } : {}), build, dropNpu, localAppData, targets, downloads, models: found.models, downloadBytes, problems, serversDir, modelsDir };
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(bytes >= 1e10 ? 0 : 1)} GB`;
@@ -925,8 +931,11 @@ export interface NpuIo {
   hash?: (file: string) => Promise<string>;
   /** Copies one file (the runtime's DLLs beside the server). */
   copy?: (from: string, to: string) => void;
-  /** The measuring requests on a generation nobody has measured (measureNpu); null skips them (the NPU check measures its own). */
-  measure?: (entry: AcceleratorEntry) => Promise<{ warmMs: number; tokensPerSecond: number } | { problems: string[] } | null>;
+  /**
+   * The measuring requests on every NPU set up (measureNpu): its report's numbers, and on a generation nobody has
+   * measured its calibration; null skips them (the NPU check measures its own).
+   */
+  measure?: (entry: AcceleratorEntry) => Promise<NpuMeasuring | { problems: string[] } | null>;
   /** The clock the first start is timed by, in milliseconds. Not `now`: an agent's own io that extends NpuIo may have a `now` of its own (the Smith's trial does, returning a Date). */
   clockMs?: () => number;
 }
@@ -1074,6 +1083,10 @@ export interface NpuSetup {
   measured?: NpuMeasured;
   /** Its route's power tool, run once its server answered (checkPowerTool), when the route has one. */
   power?: PowerToolCheck;
+  /** The step that failed, as its report's code (npu-report.ts): the one that kept it out, or `embed` or `measure` beside an entry. */
+  failed?: NpuFailStep;
+  /** What its report says it measured, on any generation: the first start, the warm answer, writing and reading. */
+  speeds?: NpuSpeeds;
 }
 
 /**
@@ -1089,9 +1102,10 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
   const run = io.run ?? runProgram;
   const now = io.clockMs ?? (() => performance.now());
   const label = n.support.label;
-  const fail = (what: string, reason = "its model server couldn't be set up"): NpuSetup => ({
+  const fail = (what: string, step: NpuFailStep, reason = "its model server couldn't be set up"): NpuSetup => ({
     problems: [`npu: ${what}. config.json gets no NPU entry; its work goes to the graphics card or the processor`],
     note: npuNoteFor(label, 'chat', reason),
+    failed: step,
   });
   if (!n.installed && n.download) {
     const d: Download = { what: n.download.what, url: n.download.url, size: n.download.size, sha256: n.download.sha256, dest: n.download.dest, have: false };
@@ -1099,39 +1113,39 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     try {
       await (io.download ?? download)(d, (done, total) => io.log(`  ${d.what}: ${mb(done)} of ${mb(total)}`));
     } catch (e: any) {
-      return fail(`${n.route.server}'s download failed: ${e?.message ?? e}`);
+      return fail(`${n.route.server}'s download failed: ${e?.message ?? e}`, 'download');
     }
     const inst = n.route.install;
     if (inst.kind === 'inno') {
       io.log(`installing ${n.route.server} for this user (no administrator)`);
       const r = await run(d.dest, inst.args, { timeoutMs: 15 * 60_000 });
-      if (r.code !== 0) return fail(`${n.route.server}'s installer ended with ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''}`);
+      if (r.code !== 0) return fail(`${n.route.server}'s installer ended with ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''}`, 'install');
     } else {
       const into = expandRoute(inst.into, { tools });
       io.log(`unpacking ${n.route.server} into ${into}`);
       try {
         (io.unpack ?? unpack)(d.dest, into);
       } catch (e: any) {
-        return fail(`${n.route.server} couldn't be unpacked: ${e?.message ?? e}`);
+        return fail(`${n.route.server} couldn't be unpacked: ${e?.message ?? e}`, 'install');
       }
     }
     rmSync(d.dest, { force: true });
-    if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`);
+    if (!exists(n.exe)) return fail(`${n.route.server} was installed, but ${n.exe} isn't there`, 'install');
   }
   // Before the pull: the server's own program pulls its models, and it needs the runtime to start.
   if (n.runtime) {
     const why = await installRuntime(n.runtime, io);
-    if (why) return fail(why);
+    if (why) return fail(why, 'runtime');
   }
   const env = serverEnv({ env: routeEnv(n.route, tools) });
   for (const m of n.models) {
     if (!m.have) {
       io.log(`downloading ${m.id} (${mb(m.size)}) with ${n.route.server}; this takes a while`);
       const r = await run(n.exe, m.pull, { timeoutMs: 3 * 3600_000, env });
-      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, "its model couldn't be downloaded");
+      if (r.code !== 0) return fail(`${n.route.server} couldn't download ${m.id} (exit ${r.code}${r.out.trim() ? `: ${tail(r.out)}` : ''})`, 'pull', "its model couldn't be downloaded");
     }
     const bad = await checkPinned(m, n.support.generation, { tools, hash: io.hash });
-    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, "its model couldn't be downloaded whole");
+    if (bad.length) return fail(`${m.id} isn't the build that was checked: ${bad.join('; ')}`, 'checksum', "its model couldn't be downloaded whole");
   }
   // Its own embedding server, where the route has one: a failure there leaves the NPU's chat as it is, and its
   // embeddings go where they went before.
@@ -1141,31 +1155,46 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     later.push(`npu: ${what}. The NPU's entry has no embeddings; they go to the graphics card or the processor`);
     note = npuNoteFor(label, 'embed', reason);
   };
+  // The step its report names when something beside the entry failed (its embeddings, or measuring a verified NPU).
+  let failed: NpuFailStep | undefined;
   let embedAt: { exe: string; model: string; turn?: string } | undefined;
   if (n.embed) {
     const why = await setUpNpuEmbed(n, tools, io, env);
-    if (why) noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`, "its embedding server couldn't be set up");
-    else embedAt = { exe: n.embed.exe, model: n.embed.model, ...(n.embed.turn ? { turn: n.embed.turn } : {}) };
+    if (why) {
+      noEmbed(`${n.embed.server.server} ${n.embed.server.version}, its embedding server, couldn't be set up: ${why}`, "its embedding server couldn't be set up");
+      failed = 'embed';
+    } else embedAt = { exe: n.embed.exe, model: n.embed.model, ...(n.embed.turn ? { turn: n.embed.turn } : {}) };
   }
   const entry = npuEntry(n.route, { tools, exe: n.exe, port: n.port, portable: (p) => portablePath(p), embed: embedAt });
   io.log(`asking ${n.route.server} a test question on the NPU (its first load can take a minute or more)`);
+  // Whether the test started the server: its time to the answers is a cold start only then (the report's coldMs).
+  let started = undefined as boolean | undefined;
   const t0 = now();
-  const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e)))(entry);
+  const problems = await (io.testNpu ?? ((e: AcceleratorEntry) => testNpuEntry(e, { onReady: (r) => (started = r.started) })))(entry);
   const coldMs = Math.round(now() - t0);
-  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, plainReason(problems, 'chat'));
-  // A generation nobody has measured: this PC's own numbers, rather than the route's guess.
+  if (problems.length) return fail(`${n.route.server} didn't answer its test request: ${problems.join('; ')}`, testStep(problems), plainReason(problems, 'chat'));
+  // Every NPU is measured for its report; a generation nobody has measured also gets this PC's own timeouts from it,
+  // rather than the route's guess, and is kept out when it fails them. A verified one is used as before whatever they say.
+  const speeds: NpuSpeeds = { ...NO_SPEEDS, coldMs: started === false ? null : coldMs };
   let measured: NpuMeasured | undefined;
-  if (!n.support.verified) {
-    io.log(`measuring ${n.route.server} on this NPU (this kind hasn't been measured before): two short requests`);
-    const m = await (io.measure ?? ((e: AcceleratorEntry) => measureNpu(e)))(entry);
-    if (m && 'problems' in m) return fail(`${n.route.server} failed its measuring requests: ${m.problems.join('; ')}`, plainReason(m.problems, 'chat'));
-    if (m) {
+  const verified = n.support.verified;
+  io.log(`measuring ${n.route.server} on this NPU${verified ? '' : " (this kind hasn't been measured before)"}: three short requests`);
+  const m = await (io.measure ?? ((e: AcceleratorEntry) => measureNpu(e)))(entry);
+  if (m && 'problems' in m) {
+    if (!verified) return fail(`${n.route.server} failed its measuring requests: ${m.problems.join('; ')}`, 'measure', plainReason(m.problems, 'chat'));
+    io.log(`its measuring requests failed (${m.problems.join('; ')}): it's used all the same, as its kind is verified`);
+    failed ??= 'measure';
+  } else if (m) {
+    Object.assign(speeds, { warmMs: m.warmMs, tokensPerSecond: m.tokensPerSecond, readTokens: m.readTokens ?? null, readMs: m.readMs ?? null });
+    const read = m.readMs != null && m.readTokens ? `, ${m.readTokens} tokens read in ${(m.readMs / 1000).toFixed(1)} s` : '';
+    if (verified) io.log(`measured: the first answer ${(coldMs / 1000).toFixed(0)} s after the start, a short one warm in ${(m.warmMs / 1000).toFixed(1)} s, ${m.tokensPerSecond.toFixed(1)} tokens a second${read}`);
+    else {
       measured = { coldMs, warmMs: m.warmMs, tokensPerSecond: m.tokensPerSecond };
       const c = calibrate(measured, n.route);
-      if (c.tooSlow) return { ...fail(`${n.route.server} is too slow on this NPU: ${c.tooSlow}`, 'it is too slow for the chat model'), measured };
+      if (c.tooSlow) return { ...fail(`${n.route.server} is too slow on this NPU: ${c.tooSlow}`, 'too-slow', 'it is too slow for the chat model'), measured, speeds };
       entry.timeouts = c.timeouts;
       io.log(
-        `measured: the first answer ${(coldMs / 1000).toFixed(0)} s after the start, a short one warm in ${(m.warmMs / 1000).toFixed(1)} s, ${m.tokensPerSecond.toFixed(1)} tokens a second; ` +
+        `measured: the first answer ${(coldMs / 1000).toFixed(0)} s after the start, a short one warm in ${(m.warmMs / 1000).toFixed(1)} s, ${m.tokensPerSecond.toFixed(1)} tokens a second${read}; ` +
           `this PC's timeouts: ${c.timeouts.requestBaseMs / 1000} s and ${c.timeouts.requestPerTokenMs} ms a token, a cold load ${c.timeouts.coldLoadMs / 1000} s`,
       );
     }
@@ -1176,6 +1205,7 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     if (bad.length) {
       delete entry.embed;
       noEmbed(`${n.embed.server.server}, its embedding server, didn't answer its test request: ${bad.join('; ')}`, plainReason(bad, 'embed'));
+      failed = 'embed';
     }
   }
   io.log(`${n.route.server} answered on the NPU: ${n.kinds.filter((k) => entry[k]).join(', ')}`);
@@ -1188,7 +1218,15 @@ export async function setUpNpu(n: NpuPlan, tools: string, io: NpuIo): Promise<Np
     io.log(`${path.win32.basename(power.exe)} couldn't start (exit ${power.code}): ${n.route.server} can't set the NPU's power mode`);
     note = [note, npuPowerNote(label, n.powerTool!.broken)].filter(Boolean).join(' ');
   }
-  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}), ...(power ? { power } : {}) };
+  return { entry, problems: later, ...(note ? { note } : {}), ...(measured ? { measured } : {}), ...(power ? { power } : {}), ...(failed ? { failed } : {}), speeds };
+}
+
+/** The test request's failure as its report's code: out of time, nonsense, or anything else. */
+export function testStep(problems: string[]): NpuFailStep {
+  const s = problems.join('; ');
+  if (/nonsense|dimensions|all zero|not a number|unrelated/i.test(s)) return 'test-nonsense';
+  if (/timed? ?out|in time|aborted|didn't answer in/i.test(s)) return 'test-timeout';
+  return 'test';
 }
 
 /** Three sentences, two about the same thing: an embedding model that runs properly puts those two closer. */
@@ -1402,16 +1440,44 @@ export const countsSensibly = (s: string) => {
 };
 
 /**
- * Measures the NPU's chat server for calibrate, in the NPU's turn, once its test request has loaded it: a short answer
- * warm, then a count to twenty (its tokens over its time: writing speed, taken low). Both answers must make sense.
+ * A prompt of about `tokens` tokens (4 characters a token) a server reads whole and answers in a word: the measuring
+ * read, setup's and the NPU check's.
  */
-export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number; tokensPerSecond: number } | { problems: string[] }> {
+export function fillerPrompt(tokens: number): string {
+  const lines: string[] = [];
+  let chars = 0;
+  for (let i = 1; chars < tokens * 4; i++) {
+    const line = `Line ${i}: the steward counts the barrels in the cellar and writes the number down.`;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  return `${lines.join('\n')}\n\nHow many lines are above? Reply with the number only.`;
+}
+
+/** The measuring read's size, in tokens: under every route's cap (the smallest, 2,048, takes 45% of it). */
+export const READ_TOKENS = 1_000;
+
+/** What measureNpu found: the warm answer, writing speed, and the read (null when the read itself failed). */
+export interface NpuMeasuring {
+  warmMs: number;
+  tokensPerSecond: number;
+  readTokens?: number | null;
+  readMs?: number | null;
+}
+
+/**
+ * Measures the NPU's chat server, in the NPU's turn, once its test request has loaded it: a short answer warm, then a
+ * count to twenty (its tokens over its time: writing speed, taken low), then a prompt of about READ_TOKENS read and
+ * answered in a word (the time to read it). The first two must make sense; a read that fails leaves its numbers null.
+ * Calibrate takes the first two; the NPU's report takes all three.
+ */
+export async function measureNpu(e: AcceleratorEntry): Promise<NpuMeasuring | { problems: string[] }> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return { problems: ['the entry has no chat server'] };
   const problems: string[] = [];
   const text = (j: any): string => (typeof j?.choices?.[0]?.message?.content === 'string' ? j.choices[0].message.content : '');
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
-  let out: { warmMs: number; tokensPerSecond: number } | null = null;
+  let out: NpuMeasuring | null = null;
   await withAcceleratorTurn(
     lockDirsOf({ id: 'npu', slots: 1 }),
     async () => {
@@ -1429,7 +1495,14 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
         return;
       }
       const tokens = Number(c.json?.usage?.completion_tokens) || Math.max(1, Math.round(said.length / 4));
-      out = { warmMs: Math.round(w.ms), tokensPerSecond: Math.round((tokens / (Math.max(1, c.ms) / 1000)) * 100) / 100 };
+      out = { warmMs: Math.round(w.ms), tokensPerSecond: Math.round((tokens / (Math.max(1, c.ms) / 1000)) * 100) / 100, readTokens: null, readMs: null };
+      const size = Math.min(READ_TOKENS, Math.floor((acc.maxContextTokens || 2_048) * 0.45));
+      try {
+        const r = await postJson(chat, '/v1/chat/completions', chatBody(kitAcc, chat, [{ role: 'user', content: fillerPrompt(size) }], 4), 10 * 60_000);
+        if (typeof r.json?.choices?.[0]?.message?.content === 'string') out = { ...out, readTokens: Number(r.json?.usage?.prompt_tokens) || size, readMs: Math.round(r.ms) };
+      } catch {
+        // The read is for the report alone: its failure keeps the rest.
+      }
     },
     { who: 'setup', lane: 'interactive', waitMs: 10 * 60_000, staleMs: 40 * 60_000 },
   ).catch((err: any) => problems.push(String(err?.message ?? err).split(/\r?\n/)[0]));
@@ -1446,7 +1519,7 @@ export async function measureNpu(e: AcceleratorEntry): Promise<{ warmMs: number;
  * given 15, or `timeoutMs` (the NPU check's forced timeout). `held`: the caller holds the
  * NPU's turn already, and has stopped its servers, so the entry's own command answers (npu-refresh.ts).
  */
-export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean } = {}): Promise<string[]> {
+export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeoutMs?: number; held?: boolean; onReady?: (r: ServerReady) => void } = {}): Promise<string[]> {
   const acc = readAccelerator(e);
   if (!acc?.chat?.baseUrl) return ['the entry has no chat server'];
   const problems: string[] = [];
@@ -1458,7 +1531,8 @@ export async function testNpuEntry(e: AcceleratorEntry, o: { dir?: string; timeo
     !!o.held,
     async () => {
       const chat = { baseUrl: acc.chat!.baseUrl!, model: acc.chat!.model, startCommand: acc.chat!.startCommand, ...(acc.chat!.env ? { env: acc.chat!.env } : {}) };
-      await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit });
+      // Whether it was started for the test (setup's report times a cold start only then).
+      o.onReady?.(await ensureServer(chat, { waitMs: Math.min(120_000, limit), readyMs: limit }));
       if (acc.vision?.model) {
         const v = { ...chat, model: acc.vision.model };
         const img = testImage(o.dir ?? path.join(toolsHome(), 'servers', 'downloads'));
@@ -1586,8 +1660,42 @@ export interface SetupOptions {
   env?: Record<string, string | undefined>;
   /** Where the NPU's note is kept (npuNoteFile(); tests give their own, and a given detection keeps none). */
   npuNoteFile?: string;
+  /**
+   * Where the NPU's report is kept (npu-report.ts, spec/NPU-REPORTS.md), for the app to offer to send: npuReportFile()
+   * by default; tests give their own, and with a given detection none is kept unless they do.
+   */
+  npuReportFile?: string | null;
+  /** The app running setup, for the NPU's report ("manor 0.16.200"). */
+  app?: string;
   /** Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu() read now, when left out). */
   gpuWithNpu?: boolean;
+}
+
+/**
+ * Keeps the NPU's report of this setup (npu-report.ts): what it set up on the NPU and measured there, or why it left
+ * the NPU out. Nothing on a PC without an NPU, or when setup left an NPU it had set up before alone.
+ */
+function keepNpuReport(o: SetupOptions, detection: Detection, plan: SetupPlan, npu: NpuSetup | undefined, log: (line: string) => void): void {
+  const file = o.npuReportFile !== undefined ? o.npuReportFile : o.detection ? null : npuReportFile();
+  if (!file || (!plan.npu && !plan.npuLeftOut)) return;
+  try {
+    const report = npuReportFromSetup({
+      detection,
+      route: plan.npu?.route ?? null,
+      verified: !!plan.npu?.support.verified,
+      skipped: plan.npuLeftOut ?? null,
+      failed: npu?.failed ?? null,
+      speeds: npu?.speeds,
+      kit: kitVersion(),
+      app: o.app,
+      reporter: reporterId(path.join(path.dirname(file), 'npu-reporter.json')),
+    });
+    if (!report) return;
+    const bad = rememberNpuReport(report, file);
+    if (bad.length) log(`note: the NPU's report wasn't kept: ${bad.join('; ')}`);
+  } catch (e: any) {
+    log(`note: the NPU's report couldn't be kept: ${e?.message ?? e}`);
+  }
 }
 
 /** Accelerator setup as a command: plan, ask, download, find devices, write config.json. Exit code. */
@@ -1611,6 +1719,8 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const settingUp = plan.targets.some((t) => !t.problem) || !!plan.npu;
   if (!settingUp && !plan.dropNpu) {
     log('Nothing to set up.');
+    // An NPU left out is still worth its report (why, and its PCI id when nobody has it in npu-vendors.json yet).
+    if (!o.dryRun) keepNpuReport(o, detection, plan, undefined, log);
     return { code: plan.targets.length || o.ids.length ? 1 : 0, plan };
   }
   if (o.dryRun) {
@@ -1671,6 +1781,7 @@ export async function setupCommand(o: SetupOptions): Promise<{ code: number; pla
   const noteFile = o.npuNoteFile ?? (o.detection ? null : npuNoteFile());
   if (plain !== undefined && noteFile) rememberNpuNote(plain, noteFile);
   if (plain) log(`note: ${plain}`);
+  keepNpuReport(o, detection, plan, r.npu, log);
   if (!entries.length && !plan.dropNpu) return { code: 1, plan };
   const saved = writeConfigFile(configFile, raw, o.validate ?? validateKeeperConfig);
   if (saved.problems.length) {

@@ -21,6 +21,7 @@ const C = await import('./fixture/src/kit/npu-check.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 const { portablePath } = await import('./fixture/src/kit/setup.ts');
+const { checkNpuReport } = await import('./fixture/src/kit/npu-report.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 258V\nram|34359738368\n';
@@ -197,6 +198,54 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   const kept = JSON.parse(readFileSync(s.opts.out, 'utf8'));
   assert.equal(kept.steps.length, 13);
   assert.ok(s.lines.some((l) => l.startsWith('Suggested for npu-vendors.json')));
+  assert.ok(!existsSync(path.join(s.tools, 'npu-report.json')), 'a given detection keeps no NPU report unless asked to');
+});
+
+test("the NPU's report (npu-report.ts): kept after a check on this PC's NPU, with its numbers and the route as the catalog has it; none for a rehearsal or a check that never reached the NPU", async () => {
+  const s = await scene();
+  const file = path.join(s.tools, 'acc', 'npu-report.json');
+  const { code, report } = await C.npuCheck({ ...s.opts, npuReportFile: file, app: 'manor 0.16.200' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.ok(existsSync(file), s.lines.join('\n'));
+  const r = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual(checkNpuReport(r), []);
+  assert.equal(r.source, 'npu-check');
+  assert.equal(r.app, 'manor 0.16.200');
+  assert.equal(r.day, report.at.slice(0, 10));
+  assert.deepEqual(r.chip, { ...r.chip, vendor: 'intel', generation: 'lunar-lake', pciDevice: '643E', driver: '32.0.100.4239', driverDate: '2025-09-01', ramGb: 32 });
+  assert.match(r.chip.cpu, /Ultra 7 258V$/);
+  assert.match(r.chip.npu, /AI Boost$/);
+  const intel = V.routeFor(V.NPU_CATALOG.routes.intel, 'lunar-lake');
+  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', cap: intel.maxContextTokens, verified: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.failed, null);
+  const by = Object.fromEntries(report.steps.map((x: any) => [x.step, x]));
+  assert.equal(r.speeds.coldMs, by['first-answer'].data.loadMs);
+  assert.equal(r.speeds.warmMs, by.warm.ms);
+  // The fake answers at once: a speed past what any NPU writes is left out, not the report.
+  const tps = by.speed.data.tokensPerSecond;
+  assert.equal(r.speeds.tokensPerSecond, tps > 100_000 ? null : Math.round(tps * 100) / 100);
+  assert.equal(r.speeds.readTokens, by.read.data.promptTokens);
+  // The reporter: random, made once beside it, and the same for the next report.
+  const id = JSON.parse(readFileSync(path.join(s.tools, 'acc', 'npu-reporter.json'), 'utf8')).id;
+  assert.equal(r.reporter, id);
+  assert.match(id, /^[0-9a-f-]{36}$/);
+
+  // A server that dies past its cap: the report says the cap failed.
+  const d = await scene({ cap: 1536, dieOverCap: true });
+  const dFile = path.join(d.tools, 'npu-report.json');
+  await C.npuCheck({ ...d.opts, npuReportFile: dFile });
+  assert.ok(existsSync(dFile), d.lines.join('\n'));
+  const dr = JSON.parse(readFileSync(dFile, 'utf8'));
+  assert.equal(dr.ok, false);
+  assert.deepEqual(dr.failed, { step: 'cap' });
+  assert.equal(dr.reporter, JSON.parse(readFileSync(path.join(d.tools, 'npu-reporter.json'), 'utf8')).id);
+
+  // An NPU this kit can't use stops at detection, before the NPU: no report from the check (setup's says so).
+  const o = await scene();
+  const oFile = path.join(o.tools, 'npu-report.json');
+  await C.npuCheck({ ...o.opts, npuReportFile: oFile, detection: parseDetection(`${X64}${LUNAR.replace('32.0.100.4239', '31.0.100.2016')}\n`) });
+  assert.ok(!existsSync(oFile));
 });
 
 test("a route's power tool (AMD's xrt-smi, for FastFlowLM): its run noted after setup, never failed and never timed as setup, so the reports count the PCs where it can't start", async () => {

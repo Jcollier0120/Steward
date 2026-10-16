@@ -8,8 +8,28 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 **Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
 
+**Setup keeps a report of how this PC's NPU did, for its owner to send if they choose (spec/NPU-REPORTS.md). It measures every NPU it sets up now, verified or not: three short requests and a 1,000-token read, a few seconds in the NPU's turn. Only an unverified generation is calibrated from them, as before; a verified one is used whatever they say. The report holds hardware ids, versions and times, and never a file, a path, a name or the licence. Nothing in the kit sends it: the app shows it to its owner and sends it only on their word. `npu-reports.ts` turns the Exchequer's count of the reports into the patch for npu-vendors.json that they support.**
+
+### What's new
+
+- **npu-report.ts:** the report, `castellan-npu-report/1` (spec/npu-report.schema.json):
+  - **`npuReportFromSetup` and `npuReportFromCheck`:** the report of a setup, or of an NPU check on this PC's NPU. A failure is a step's code (`test-timeout`, `driver`, `cap`…), never setup's words, which can hold a path.
+  - **`rememberNpuReport` and `readNpuReport`:** `npu-report.json` beside `npu-note.json`, written whole and read back only when it matches its schema.
+  - **`reporterId`:** a random id kept in `npu-reporter.json`, made for these reports alone, so one PC counts once.
+  - **`npuReportKey`:** what makes two reports the same, for an app that offers each once.
+  - **`checkNpuReport`:** the schema, which the Exchequer checks too.
+- **npu-reports.ts:** `node <agent>\src\kit\npu-reports.ts <summary.json>`, or `--fetch` with the publisher's key. It reads the Exchequer's `castellan-npu-summary/1` against this kit's npu-vendors.json and prints, per generation, what the reports say and the merge patch they support. A generation is verified by 3 PCs passing with under 1 in 5 failing. Timeouts come from the slow end, by calibrate's formulas and bounds, and are never lowered. `measured` is for the site. A PCI id nobody has listed gets a line once 2 PCs report it. It changes nothing.
+- **json-schema.ts:** the small part of JSON Schema npu-bench.ts used, now shared with npu-report.ts, with `$ref` to a schema's own `$defs`.
+- **spec/NPU-REPORTS.md** and **spec/npu-report.schema.json.**
+- **NpuGeneration's `measured`:** a generation's speed from its owners' reports, for the website: `{ pcs, server, model, tokensPerSecond, coldStartS, at }`.
+
 ### What changed
 
+- **setup.ts:**
+  - **`setupCommand`:** keeps the NPU's report (`npuReportFile`, the accelerators folder's `npu-report.json` by default; none with a given detection unless a file is given). It writes one whenever it set the NPU up or left it out, and none when it left a configured NPU alone. `app` names the app in it ("manor 0.16.200").
+  - **`setUpNpu`:** measures every NPU after its test request. Its result has `failed`, the step's code, and `speeds`. `measureNpu` also reads a prompt of about 1,000 tokens (`readTokens`, `readMs`). `fillerPrompt` moved here from npu-check.ts, which exports it still.
+  - **Code that fakes `NpuIo.measure`:** it is now called for a verified generation too. A fake that returns null there leaves the NPU on the route's values, as before.
+- **npu-check.ts:** a run on this PC's NPU (not a rehearsal) keeps the same report from its own steps (`npuReportFile`, `app`).
 - **named.cs and named.ts:**
   - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. The job sets no limits and ends nothing when the launcher ends. A program may leave it, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
   - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.

@@ -87,6 +87,17 @@ export interface NpuRoute {
   notes: string;
 }
 
+/** A generation's speed from its owners' reports: on `pcs` PCs that passed, the median writing speed and cold start. */
+export interface NpuMeasuredSpeeds {
+  pcs: number;
+  server: string;
+  model: string;
+  tokensPerSecond: number;
+  coldStartS: number;
+  /** The day the Exchequer counted them. */
+  at: string;
+}
+
 /** One generation of a maker's NPU. */
 export interface NpuGeneration {
   label: string;
@@ -111,6 +122,11 @@ export interface NpuGeneration {
   memoryGb?: NpuRoute['memoryGb'];
   /** Why its values are what they are, in a sentence. */
   basis?: string;
+  /**
+   * Its speed as its owners' reports measured it (npu-reports.ts, spec/NPU-REPORTS.md), for the website: the medians
+   * of the PCs that passed, on the server and model named. Only while those are the route's does the site show it.
+   */
+  measured?: NpuMeasuredSpeeds;
   /** A Snapdragon's Hexagon version (`v73`, `v81`): the code llama.cpp's Hexagon backend runs on it (GGML_HEXAGON_ARCH, when played). */
   hexagonArch?: string;
   /** The chip Qualcomm AI Hub builds its models for (`qualcomm-snapdragon-x-elite`): GenieX's config.json chipset, when played. */

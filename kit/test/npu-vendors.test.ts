@@ -24,6 +24,7 @@ const { orderAccelerators, readAccelerators, validateAccelerators, validateKeepe
 const core = await import('./fixture/src/kit/core/index.js');
 const { serverEnv } = await import('./fixture/src/kit/accelerators.ts');
 const { RULES } = await import('./fixture/src/kit/rules.ts');
+const R = await import('./fixture/src/kit/npu-report.ts');
 // Intel's model files are pinned (2.2 GB of them): these tests' pulls are fakes that leave none, so the pins are kept for the test of them alone.
 const intelPins = V.NPU_CATALOG.routes.intel.models[0].pinned!;
 delete V.NPU_CATALOG.routes.intel.models[0].pinned;
@@ -438,7 +439,7 @@ test('the plan per vendor: the NPU first, its server and models with their sizes
 });
 
 /** A setUpNpu world: what it ran, downloaded and unpacked, and whether its test request answers. */
-function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean; measured?: { warmMs: number; tokensPerSecond: number } | { problems: string[] } } = {}) {
+function fakeNpuIo(o: { answers?: boolean; installs?: boolean; pullFails?: boolean; downloadFails?: string; embeds?: boolean; overlayFails?: boolean; measured?: { warmMs: number; tokensPerSecond: number; readTokens?: number; readMs?: number } | { problems: string[] } } = {}) {
   const did: string[] = [];
   const present = new Set<string>();
   const io = {
@@ -1044,11 +1045,19 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   assert.deepEqual(r.entry?.timeouts, { requestBaseMs: 110_000, requestPerTokenMs: 500, coldLoadMs: 450_000 });
   assert.deepEqual(r.entry?.timeouts, V.calibrate(r.measured!, arrow().route).timeouts);
   assert.equal(r.note, undefined);
-  // Lunar Lake's measured already: no measuring requests, the route's own timeouts.
+  assert.deepEqual(r.speeds, { coldMs: 300_000, warmMs: 3_000, tokensPerSecond: 4, readTokens: null, readMs: null });
+  assert.equal(r.failed, undefined);
+  // Lunar Lake's measured already: measured all the same, for its report, but on the route's own timeouts.
   let asked = 0;
-  const lunar = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), measure: async () => (asked++, null) });
-  assert.equal(asked, 0);
+  const lunar = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), measure: async () => (asked++, { warmMs: 1_000, tokensPerSecond: 0.5, readTokens: 1_000, readMs: 2_500 }) });
+  assert.equal(asked, 1);
   assert.equal(lunar.entry?.timeouts?.requestPerTokenMs, V.NPU_CATALOG.routes.intel.timeouts.requestPerTokenMs);
+  assert.equal(lunar.measured, undefined, 'verified: never calibrated, even when it measures slow');
+  assert.deepEqual(lunar.speeds, { coldMs: 300_000, warmMs: 1_000, tokensPerSecond: 0.5, readTokens: 1_000, readMs: 2_500 });
+  // Its measuring failing: still used, as verified, and its report says so.
+  const shaky = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), measure: async () => ({ problems: ['chat answered nothing when asked to count to twenty'] }) });
+  assert.ok(shaky.entry?.chat);
+  assert.equal(shaky.failed, 'measure');
 
   // Each failure: no entry, and a note in plain words for the accelerators' page.
   const label = parseNpus(NPU.arrowS, 'x64')[0].label;
@@ -1058,9 +1067,11 @@ test("setup on a generation nobody has measured: two more requests, and its entr
     ['nonsense when counting', world({ measured: { problems: ['chat answered nonsense ("?option?") when asked to count to twenty'] } }), /its chat model doesn't run properly on it/],
     ['too slow', world({ measured: { warmMs: 9_000, tokensPerSecond: 1.2 } }), /it is too slow for the chat model/],
   ];
+  const codes = ['test-nonsense', 'test-timeout', 'measure', 'too-slow'];
   for (const [what, io, re] of cases) {
     const f = await setUpNpu(arrow(), tools, io);
     assert.equal(f.entry, undefined, what);
+    assert.equal(f.failed, codes[cases.findIndex((c) => c[0] === what)], what);
     assert.match(f.note!, re, what);
     assert.ok(f.note!.startsWith(`The NPU (${label}) isn't used: `), f.note);
     assert.match(f.note!, /The graphics card or the processor does its work instead\.$/, what);
@@ -1068,6 +1079,7 @@ test("setup on a generation nobody has measured: two more requests, and its entr
   // Its embeddings failing their sanity check: chat stays on the NPU, embeddings go elsewhere, and the note says so.
   const e = await setUpNpu(planFor(NPU.lunar, 'x64', tools), tools, { ...world({}), testEmbed: async () => ['embeddings gave a vector of all zero'] });
   assert.ok(e.entry?.chat && !e.entry.embed);
+  assert.equal(e.failed, 'embed');
   assert.equal(e.note, "The NPU (Core Ultra 200V, Lunar Lake (NPU 4)) makes no embeddings: its embedding model doesn't run properly on it. The graphics card or the processor makes them instead.");
 });
 
@@ -1146,7 +1158,8 @@ test("setup as a command, with no card: the NPU failing is no error; the process
   const noteFile = path.join(home, 'cmd-nocard-npu-note.json');
   writeFileSync(file, '{}');
   const detection = parseDetection(`${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
-  const base = { ids: [], detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: noteFile };
+  const reportFile = path.join(home, 'cmd-nocard-npu-report.json');
+  const base = { ids: [], detection, releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: noteFile, npuReportFile: reportFile, app: 'manor 0.16.200' };
   const silent = fakeNpuIo({ answers: false });
   const log: string[] = [];
   const r = await setupCommand({ ...base, log: (l: string) => log.push(l), io: { ...silent.io, exists: (p: string) => disk()(p) || silent.io.exists(p), listDevices: async () => '' } });
@@ -1158,10 +1171,43 @@ test("setup as a command, with no card: the NPU failing is no error; the process
   assert.ok(cpu?.chat && cpu?.embed, JSON.stringify(written));
   assert.ok(!written.accelerators.some((a: any) => a.kind === 'npu'));
   assert.match(A.readNpuNote(noteFile)!.note, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: its model server didn't pass its test\./);
-  // Set up whole the next time: the note goes.
-  const good = fakeNpuIo();
+  // Its report says the test failed, as a code, and names the route it tried (npu-report.ts).
+  const failedReport = R.readNpuReport(reportFile)!;
+  assert.equal(failedReport.source, 'setup');
+  assert.equal(failedReport.app, 'manor 0.16.200');
+  assert.equal(failedReport.ok, false);
+  assert.match(failedReport.failed!.step, /^test/);
+  assert.deepEqual(failedReport.route, R.reportRoute(V.routeFor(V.NPU_CATALOG.routes.intel, 'lunar-lake'), true));
+  assert.equal(failedReport.speeds.tokensPerSecond, null);
+  // Set up whole the next time: the note goes, and the report says it passed, with what it measured.
+  const good = fakeNpuIo({ measured: { warmMs: 1_500, tokensPerSecond: 21.456, readTokens: 1_000, readMs: 3_200 } });
   await setupCommand({ ...base, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' } });
   assert.equal(A.readNpuNote(noteFile), null);
+  const passed = R.readNpuReport(reportFile)!;
+  assert.equal(passed.ok, true);
+  assert.equal(passed.failed, null);
+  assert.deepEqual({ ...passed.speeds, coldMs: 0 }, { coldMs: 0, warmMs: 1_500, tokensPerSecond: 21.46, readTokens: 1_000, readMs: 3_200 });
+  assert.equal(passed.reporter, failedReport.reporter, 'one PC, one reporter');
+  assert.notEqual(R.npuReportKey(passed), R.npuReportKey(failedReport));
+  // Its driver too old the time after: the NPU's left out, and the report says why.
+  const old = parseDetection(`${NPU.lunar.replace('32.0.100.4239', '31.0.100.2016')}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
+  await setupCommand({ ...base, detection: old, log: () => {}, io: { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' } });
+  const left = R.readNpuReport(reportFile)!;
+  assert.deepEqual([left.ok, left.failed, left.route, left.chip.driver], [false, { step: 'driver' }, null, '31.0.100.2016']);
+});
+
+test("setup with a detection given keeps no NPU report unless told where; a PC without an NPU never has one", async () => {
+  const tools = path.join(home, 'cmd-noreport');
+  const file = path.join(home, 'cmd-noreport-config.json');
+  writeFileSync(file, '{}');
+  const good = fakeNpuIo();
+  const io = { ...good.io, exists: (p: string) => disk()(p) || good.io.exists(p), listDevices: async () => '' };
+  const base = { ids: [], releases: async () => RELEASES, hfFiles: hf, configFile: file, home: tools, env: ENV, yes: true, npuNoteFile: path.join(home, 'cmd-noreport-note.json'), log: () => {}, io };
+  await setupCommand({ ...base, detection: parseDetection(`${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`) });
+  assert.ok(!existsSync(R.npuReportFile()), 'not the real one');
+  const none = path.join(home, 'cmd-noreport-report.json');
+  await setupCommand({ ...base, detection: parseDetection(X64('Intel(R) Core(TM) Ultra 7 155H')), npuReportFile: none });
+  assert.ok(!existsSync(none));
 });
 
 // Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu, off by default): a card beside an NPU is
