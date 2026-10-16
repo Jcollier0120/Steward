@@ -24,7 +24,57 @@
           "supported": true,
           "verified": true,
           "hexagonArch": "v81",
-          "aiHubChipset": "qualcomm-snapdragon-x2-elite"
+          "aiHubChipset": "qualcomm-snapdragon-x2-elite",
+          "smallPc": {
+            "models": [
+              {
+                "id": "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0",
+                "kinds": [
+                  "chat",
+                  "vision"
+                ],
+                "pull": [
+                  "pull",
+                  "unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0",
+                  "--model-hub",
+                  "hf",
+                  "--model-type",
+                  "vlm",
+                  "--skip-update"
+                ],
+                "serve": [
+                  "--compute",
+                  "npu",
+                  "--vit-compute",
+                  "GPUOpenCL"
+                ],
+                "list": [
+                  "list",
+                  "--skip-update"
+                ],
+                "listed": "unsloth/Qwen3-VL-2B-Instruct-GGUF",
+                "size": 1876179296,
+                "licence": "Qwen3-VL-2B-Instruct: Apache-2.0; unsloth's Q4_0 GGUF of it (Hugging Face, unsloth/Qwen3-VL-2B-Instruct-GGUF at 8dcb98e5): Apache-2.0",
+                "pinned": {
+                  "snapdragon-x2": {
+                    "dir": "%USERPROFILE%\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF",
+                    "files": {
+                      "Qwen3-VL-2B-Instruct-Q4_0.gguf": {
+                        "size": 1056784064,
+                        "sha256": "d9ca31f524d063c04e49d1af7b0b37061b21e7f8a7e460141654efe287600234"
+                      },
+                      "mmproj-F16.gguf": {
+                        "size": 819395232,
+                        "sha256": "cd5a851d3928697fa1bd76d459d2cc409b6cf40c9d9682b2f5c8e7c6a9f9630f"
+                      }
+                    }
+                  }
+                },
+                "present": "%USERPROFILE%\\.cache\\geniex\\models\\unsloth\\Qwen3-VL-2B-Instruct-GGUF\\geniex.json"
+              }
+            ],
+            "basis": "Qwen3-VL-2B (Q4_0 GGUF) through GenieX's llama.cpp plugin, its language model on the Hexagon and its pictures' encoder on the Adreno (--vit-compute GPUOpenCL: GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon). The full npu-bench on the X2 Elite (castellan-npu-bench/2, 2026-10-15), against the 4B: 22 of 24 quality items, every must-pass one right (the same); pictures 4 of 4 (3); 75.0 tokens written a second (41.1); jobs 2.95 s (5.59); cold load 5.1 s (10.0); 4.31 GB working set (6.12), with 2.1 GB on the NPU (4.2) and about 1.5 GB of the PC's memory for the Adreno; the PC's available memory 3.5 to 4.2 GB lower once it loaded (6.1). Not ranked: the PC was busy and GenieX's reply and summary jobs were noisy, as in the 4B's run"
+          }
         },
         "snapdragon-8cx": {
           "label": "Snapdragon 8cx, 8c, 7c, SQ1–SQ3, 850 or 835 (Hexagon v68 or older)",

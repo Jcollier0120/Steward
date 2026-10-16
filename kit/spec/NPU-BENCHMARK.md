@@ -27,6 +27,7 @@ Every model Castellan runs today is a Qwen model at 4-bit weights:
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
+| Qualcomm, an X2 under 20 GB | GenieX 0.8.0 (its llama.cpp plugin) | unsloth/Qwen3-VL-2B-Instruct-GGUF (Q4_0) | 4-bit; also does vision, its encoder on the Adreno |
 | Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
 | AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
@@ -191,6 +192,7 @@ The route is GenieX 0.8.0 with Qualcomm's Qwen3-VL-4B-Instruct (W4A16), one mode
 - **Energy on the X2 Elite is unseen.** On the Lunar Lake laptop the battery's rate didn't hold up (Energy, above). Whether the Snapdragon's does is what step 7 finds out.
 - **Setup checks the model's files.** On the X2 Elite each of Qwen3-VL-4B's pinned files is read and its SHA-256 checked before the server starts (4.3 GB), so the first lines take a little while. A `--candidate`'s files are read once too, after setup, for the report's SHA-256s.
 - **A start again waits for GenieX's port.** GenieX killed is gone at once, but its port stays bound about 2 s: requests time out for the first second, then are reset, then refused (measured on the X2 Elite, 2026-10-15). The benchmark, like the NPU check, waits until a connection is refused before it starts GenieX again (kit 2.74.7). Before, it started it while the port was held: GenieX couldn't bind it ("Only one usage of each socket address" in its log), and the cached load failed with "no correct answer".
+- **A small PC's model** (kit 2.78.0). On a PC under 20 GB the benchmark measures the models setup runs there, the generation's `smallPc`: a 16 GB X2's Qwen3-VL-2B. `--small-pc` measures them on a bigger X2, as does `--model unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`; `--model` the 4B measures the 4B on a small one. The report's `run.model` says which.
 - **An X played on the X2.** `--generation snapdragon-x` (kit 2.74.7) runs the first X's code on the X2's NPU: AI Hub's X Elite build of the model, served by GenieX from a folder of its own (`{tools}\played\snapdragon-x\geniex`, whose `config.json` names the X Elite to AI Hub), checked against the X Elite's pins there. The report says `run.played`, carries a `played` mark, and is never ranked: its numbers are the X's code on the X2, not an X's speed. A newer Snapdragon on an older one is refused (exit 2), as is `--generation` on any NPU but a Snapdragon, where it would be another generation's starting values alone (NPU-VENDORS.md, Playing an older Snapdragon on a newer one).
 
 The plugged-in full run's report is what the website's speed table takes for the Snapdragon row.
@@ -236,7 +238,7 @@ The same model on the Arc 140V, measured with the experiment harness rather than
 6. **`npu-bench.ts`**, the command:
 
    ```
-   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]
+   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
    node <agent>\src\kit\npu-bench.ts --mix [days]
    ```
 

@@ -2,6 +2,50 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.0
+
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments.**
+
+### What's new
+
+- **npu-vendors.ts:**
+  - **`NpuGeneration.smallPc`** (`{ models, basis }`): the models a generation runs in the route's place on a PC with little memory (`smallPc`: under `idleStop.smallPcGb`, 20).
+  - **`routeFor(route, generation, small)`**: with `small`, the generation's `smallPc` models in the route's place; without it, as before. **`planNpu({ small })`** passes it on.
+  - **`NpuModel.serve`**: server arguments a model needs beside the route's `serve`. `npuEntry` adds the chat model's after the route's, so they go with that model alone.
+- **npu-check.ts and npu-bench.ts: `--small-pc`** runs a small PC's models on any PC. On a PC under 20 GB they run anyway, as setup would run them. `npu-bench --model` one of a small PC's models runs them too, and `--model` one of the route's own measures it on a small PC. The report's model says which ran.
+
+### What changed
+
+- **npu-vendors.json's qualcomm route**, the `snapdragon-x2` generation's `smallPc`: `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, chat and vision.
+  - Pulled from Hugging Face (`--model-hub hf --model-type vlm`): AI Hub has no QAIRT build of the 2B, only this GGUF.
+  - Served by GenieX's llama.cpp plugin with `--compute npu --vit-compute GPUOpenCL`: the language model on the Hexagon, the pictures' encoder on the Adreno. GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon, and on the processor each picture takes about 5.5 s of its time, against 0.8 s on the Adreno.
+  - 1,876,179,296 bytes, its Q4_0 GGUF and F16 projector pinned for the X2 (unsloth's repository at 8dcb98e5). Apache-2.0, the base model's.
+  - The route's cap (2,400), timeouts and idle stop are unchanged. Its cold start, 5.1 to 9.1 s, is inside the route's 15 s.
+  - **Measured** with the full benchmark (`castellan-npu-bench/2`) on the 48 GB X2 Elite, 2026-10-15, against the 4B:
+
+    | | Qwen3-VL-2B (Q4_0, llama.cpp) | Qwen3-VL-4B (W4A16, QAIRT) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 22 of 24 |
+    | Pictures | 4 of 4 | 3 of 4 |
+    | Tokens written a second | 75.0 | 41.1 |
+    | Jobs: triage, reply, summary | 0.56, 0.43 and 1.95 s | 0.73, 0.98 and 3.88 s |
+    | Cold / cached load | 5.1 / 5.4 s | 10.0 / 9.9 s |
+    | Speed held over 10 minutes | 95% | 100% |
+    | Working set / private | 4.31 / 2.34 GB | 6.12 / 1.68 GB |
+    | On the NPU | 2.1 GB | 4.2 GB |
+    | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
+
+    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run.
+- **setup.ts**: on a PC under 20 GB, the NPU is planned with its generation's `smallPc` models (`smallPc(detection.ramBytes)`).
+- **npu-refresh.ts**: the keeper's look plans with the PC's memory too. On a 16 GB X2 set up with the 4B, it leaves the NPU for setup (`needs-setup`) while the 2B isn't there, since it never downloads. Once it is there, the look tests it in the NPU's turn, as any new command, and switches. Its log and `changes` name a model change: `model … in …'s place`.
+- **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row and `--small-pc`.
+
+### For an agent
+
+- Nothing to do.
+- A 16 GB Snapdragon X2 already set up keeps the 4B until it is set up again (Manor's Set up local AI), which pulls the 2B (1.9 GB) and writes it. The 4B stays in `%USERPROFILE%\.cache\geniex\models` (4.4 GB) until removed (`geniex remove qualcomm/Qwen3-VL-4B-Instruct`).
+- Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB and the route's command changed by hand), the kit's own setup of it, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
+
 ## 2.77.8
 
 **PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

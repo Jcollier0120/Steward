@@ -145,7 +145,8 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   const catalog = structuredClone(V.NPU_CATALOG);
   const route = catalog.routes[vendor];
   route.port = port;
-  for (const m of route.models) delete m.pinned; // its pull is a fake that leaves no files to check
+  // Its pull is a fake that leaves no files to check: a small PC's models' (a generation's smallPc) too.
+  for (const m of [...route.models, ...Object.values(route.generations).flatMap((g) => g.smallPc?.models ?? [])]) delete m.pinned;
   const tools = mkdtempSync(path.join(home, 'tools-'));
   let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
   if (vendor === 'qualcomm') {
@@ -545,6 +546,31 @@ test('a candidate chats only unless --vision says it sees: pulled as its own typ
   assert.throws(() => B.candidateRoute(V.NPU_CATALOG.routes.intel, 'a/b', { vision: true }), /has no vision/);
   assert.deepEqual(B.parseBenchArgs(['--candidate', 'a/b', '--vision']), { candidate: 'a/b', vision: true });
   assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
+});
+
+test("a small PC's models: a 16 GB X2 measures Qwen3-VL-2B as setup runs it, as does --small-pc on a bigger one; --model the 4B on a small one", async () => {
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+  const FOUR_B = 'qualcomm/Qwen3-VL-4B-Instruct:W4A16';
+  const ARM16 = ARM.replace(/ram\|\d+/, 'ram|16876666880');
+  const run = async (o: object, arm = ARM) => {
+    const s = await scene({ vendor: 'qualcomm' });
+    const pulls: string[][] = [];
+    const r = await B.npuBench({ ...s.opts, detection: parseDetection(`${arm}${X2}\n`), profile: 'quick', ...o, io: { ...s.opts.io, setup: { run: async (_exe: string, args: string[]) => (pulls.push(args), { code: 0, out: '' }) } } });
+    assert.equal(r.code, 0, s.lines.join('\n'));
+    return { ...r, s, pulls };
+  };
+  const small = await run({}, ARM16);
+  assert.equal(small.report.run.model, TWO_B);
+  assert.deepEqual(small.pulls, [['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update']], 'from Hugging Face');
+  assert.deepEqual(small.s.fake.commands[0].slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], "its pictures' encoder on the Adreno, as setup starts it");
+  assert.ok(small.s.fake.seen.every((j) => j.model === TWO_B), 'every request names the 2B');
+  assert.equal((await run({ smallPc: true })).report.run.model, TWO_B, '--small-pc on the 47.6 GB X2');
+  assert.equal((await run({ model: TWO_B })).report.run.model, TWO_B, "--model a small PC's own, on the 47.6 GB X2");
+  const four = await run({ model: FOUR_B }, ARM16);
+  assert.equal(four.report.run.model, FOUR_B, "--model the route's own on a 16 GB X2");
+  assert.ok(!four.s.fake.commands[0].includes('--vit-compute'), "GenieX's QAIRT model never gets the 2B's arguments");
+  assert.equal((await run({})).report.run.model, FOUR_B, 'the 47.6 GB X2 as setup runs it');
+  assert.deepEqual(B.parseBenchArgs(['--small-pc']), { smallPc: true });
 });
 
 test("a text candidate on a Snapdragon is pulled as one and asked no pictures; with --vision it's asked them, not the route's model", async () => {

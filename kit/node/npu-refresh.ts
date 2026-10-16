@@ -3,7 +3,7 @@ import { type AcceleratorEntry, readConfigFile, validateKeeperConfig, writeConfi
 import { expandEnv } from './accelerators.ts';
 import type { Detection } from './detect.ts';
 import { LockTimeout, QueueFull } from './npu-queue.ts';
-import { compareVersions, NPU_CATALOG, type NpuCatalog, npuEntry, planNpu, runsRoute } from './npu-vendors.ts';
+import { compareVersions, NPU_CATALOG, type NpuCatalog, npuEntry, planNpu, runsRoute, smallPc } from './npu-vendors.ts';
 import { mergeEntries, portablePath, type NpuRefreshRecord, readNpuRefresh, rememberNpuRefresh } from './setup.ts';
 
 /**
@@ -122,8 +122,9 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const route = catalog.routes[npu.vendor];
   if (!route || !runsRoute(entry, route, d.tools)) return done('not-route');
 
-  // What setup would write now, on the same ports, with or without its embeddings as before.
-  const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length, cards });
+  // What setup would write now, on the same ports, with or without its embeddings as before, and the models this PC's
+  // memory takes (a small one's own, smallPc: pulled by setup, so a model not here yet is needs-setup).
+  const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length, cards, small: smallPc(detected.ramBytes) });
   if (!plan) return done('no-npu');
   if (!plan.installed || plan.runtime || plan.downloadBytes > 0) return done('needs-setup');
   // The graphics' turn its embeddings take (embedTurn); a detection that listed no cards keeps the entry's.
@@ -135,6 +136,8 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   if (served(entry) === served(next)) return done('current');
 
   const changes = [
+    // Another model (a small PC's own, once setup has pulled it: a 16 GB Snapdragon X2's Qwen3-VL-2B).
+    ...(entry.chat.model !== next.chat!.model ? [`model ${next.chat!.model} in ${entry.chat.model}'s place`] : []),
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
     ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),

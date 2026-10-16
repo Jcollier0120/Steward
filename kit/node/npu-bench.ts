@@ -7,7 +7,7 @@ import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, t
 import { type Detection, detect, runPowerShell } from './detect.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
-import { expandRoute, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File } from './npu-vendors.ts';
+import { expandRoute, generationOf, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
 import { mb, type NpuIo, saysReady } from './setup.ts';
 import { mixSummary, readTally } from './token-tally.ts';
 
@@ -20,7 +20,11 @@ import { mixSummary, readTally } from './token-tally.ts';
  * isn't ranked.
  *
  *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
- *                                     [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]
+ *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
+ *
+ * It measures the models setup would run on this PC: on one with little memory (under idleStop.smallPcGb), its
+ * generation's smallPc models, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` measures those on a
+ * bigger PC, and `--model` one of them does too; `--model` one of the route's own measures it on a small PC.
  *
  * `--generation snapdragon-x` on a Snapdragon X2 plays the older chip (npu-vendors.ts' playGeneration): AI Hub's X Elite
  * build and Hexagon v73 code on this NPU. Its report says so (`run.played`), and it is never ranked.
@@ -489,6 +493,8 @@ export interface NpuBenchOptions {
   device?: string;
   /** An older Snapdragon to play on this one (`--generation snapdragon-x` on an X2: npu-vendors.ts' playGeneration). */
   generation?: string;
+  /** The models a PC with little memory runs (its generation's smallPc), whatever this PC's memory. */
+  smallPc?: boolean;
   model?: string;
   candidate?: string;
   /** The candidate sees too (`--vision`): pulled as a vision model where the server asks, and asked the pictures. */
@@ -592,7 +598,10 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   let route: NpuRoute;
   try {
     // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
-    route = routeOnDevice(routeFor(catalog.routes[vendor], generation), device);
+    // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked; --model's own.
+    const smallIds = generationOf(catalog.routes[vendor], generation)?.smallPc?.models.map((m) => m.id) ?? [];
+    const small = o.model ? smallIds.includes(o.model) : !!o.smallPc || smallPc(d.ramBytes);
+    route = routeOnDevice(routeFor(catalog.routes[vendor], generation, small), device);
     if (played) route = playedRoute(route, played);
     if (o.candidate) route = candidateRoute(route, o.candidate, { vision: o.vision });
     else if (o.model) route = routeWithModel(route, o.model);
@@ -902,7 +911,8 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
       const v = argv[++i];
       if (!v) return { error: '--generation takes an older Snapdragon to play on this one (snapdragon-x)' };
       o.generation = v;
-    } else if (a === '--model') o.model = argv[++i];
+    } else if (a === '--small-pc') o.smallPc = true;
+    else if (a === '--model') o.model = argv[++i];
     else if (a === '--candidate') o.candidate = argv[++i];
     else if (a === '--vision') o.vision = true;
     else if (a === '--cap') {
@@ -924,7 +934,7 @@ export function parseBenchArgs(argv: string[]): NpuBenchOptions | { error: strin
 if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const o = parseBenchArgs(process.argv.slice(2));
   if ('error' in o) {
-    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
+    console.error(`${o.error}\nUsage: node npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]] [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]\n       node npu-bench.ts --mix [days]`);
     process.exit(2);
   }
   if (o.mix) {
