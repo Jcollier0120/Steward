@@ -197,6 +197,8 @@ export interface Held {
   blocks?: number[];
   /** The files it conflicts with its branch in that need judgement, when a catch-up found them. */
   files?: string[];
+  /** A PR to the Steward that raises its kit (trial.ts's raisesKit): a build's rollout waits for it (stages/buildkit.ts). */
+  kit?: boolean;
 }
 
 

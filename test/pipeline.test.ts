@@ -27,15 +27,19 @@ const none: PipelineState = { open: null, builds: [] };
 test("the pipeline's settings: no switch, four builds a day to start with, each value checked, a bad one its default", () => {
   assert.deepEqual(normalizePipeline(undefined), DEFAULT_PIPELINE);
   assert.deepEqual(DEFAULT_PIPELINE.times, ['00:00', '06:00', '12:00', '18:00']);
-  assert.deepEqual([DEFAULT_PIPELINE.days.length, DEFAULT_PIPELINE.kit, DEFAULT_PIPELINE.windowMinutes], [7, 'every', 120]);
+  assert.deepEqual([DEFAULT_PIPELINE.days.length, DEFAULT_PIPELINE.kit, DEFAULT_PIPELINE.windowMinutes], [7, 'every', 30]);
   assert.equal('on' in DEFAULT_PIPELINE, false, 'no switch');
   // A settings.json saved while there was a switch, off or on: it builds at its times all the same.
   assert.deepEqual(normalizePipeline({ on: false }), DEFAULT_PIPELINE);
   assert.deepEqual(normalizePipeline({ on: false, times: ['07:30'] }), { ...DEFAULT_PIPELINE, times: ['07:30'] });
   const p = normalizePipeline({ on: true, times: ['18:00', '8:00', 'noon', '08:00', '24:00'], days: ['mon', 'fri', 'xyz'], kit: 'first', windowMinutes: 9999 });
-  assert.deepEqual(p, { times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 360, bisectRuns: 3 });
+  assert.deepEqual(p, { times: ['08:00', '18:00'], days: ['mon', 'fri'], kit: 'first', windowMinutes: 60, bisectRuns: 3 });
   assert.deepEqual(normalizePipeline({ times: ['nope'], kit: 'sometimes', windowMinutes: 'x' }).times, DEFAULT_PIPELINE.times);
   assert.equal(normalizePipeline({ windowMinutes: 1 }).windowMinutes, 15);
+  // A build takes half an hour unless Settings say otherwise, and never more than an hour; the old default of two hours,
+  // stored when the pipeline was turned on, was never chosen, and reads as today's.
+  assert.equal(DEFAULT_PIPELINE.windowMinutes, 30);
+  assert.deepEqual([45, 60, 90, 120, 360].map((windowMinutes) => normalizePipeline({ windowMinutes }).windowMinutes), [45, 60, 60, 30, 60]);
   assert.equal(DEFAULT_PIPELINE.bisectRuns, 3);
   assert.deepEqual([0, '5', 99, 1.5].map((bisectRuns) => normalizePipeline({ bisectRuns }).bisectRuns), [0, 5, 6, 3]);
 });
@@ -49,11 +53,11 @@ test("Settings: no switch shown; Manor's save of the group with its old switch, 
   assert.equal(on?.hidden && on.optional, true, 'kept for older Manors, never drawn');
   assert.doesNotMatch(group.help ?? '', /\bOff\b/);
   assert.ok(schemaFor(SETTINGS_SPEC.schema, true).some((f) => f.key === 'buildPipeline'));
-  const r = await saveSettingsReply(SETTINGS_SPEC, { values: { buildPipeline: { on: false, times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 90, bisectRuns: 3 } } }, true);
+  const r = await saveSettingsReply(SETTINGS_SPEC, { values: { buildPipeline: { on: false, times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45, bisectRuns: 3 } } }, true);
   assert.equal((r.json as { ok?: boolean }).ok, true, JSON.stringify(r.json));
   const stored = JSON.parse(readFileSync(SETTINGS_SPEC.file(), 'utf8'));
   assert.equal('on' in stored.buildPipeline, false);
-  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 90, bisectRuns: 3 });
+  assert.deepEqual(loadSettings().buildPipeline, { times: ['07:00', '19:00'], days: ['mon', 'tue', 'wed', 'thu', 'fri'], kit: 'every', windowMinutes: 45, bisectRuns: 3 });
   rmSync(SETTINGS_SPEC.file(), { force: true });
 });
 
@@ -70,7 +74,7 @@ test("the old default times, stored when the switch was turned on, were never ch
   for (const times of [['08:00', '13:00'], ['08:00', '13:00', '18:00', '21:00'], ['08:00', '12:00', '18:00'], ['07:30']]) {
     assert.deepEqual(normalizePipeline({ ...saved, times }).times, times);
   }
-  assert.deepEqual(normalizePipeline({ ...saved, kit: 'first', windowMinutes: 90 }), { ...DEFAULT_PIPELINE, kit: 'first', windowMinutes: 90 }, 'the rest of the group stays');
+  assert.deepEqual(normalizePipeline({ ...saved, kit: 'first', windowMinutes: 45 }), { ...DEFAULT_PIPELINE, kit: 'first', windowMinutes: 45 }, 'the rest of the group stays');
 });
 
 test('the build times: the last one come and the next, on the days builds run', () => {
