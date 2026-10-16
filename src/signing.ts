@@ -19,6 +19,12 @@ import { checksLogOf } from './stages/bump.ts';
  * (`skipped`, nothing failed), signing-waits.json keeps it for one alarm that names them all, and the next round that can
  * sign releases them by itself. A release that fails anyway for the key (SimplySign's session ended mid-build) waits the
  * same way, and so does one a round gave up on for it before.
+ *
+ * Nor does the wait hold a round (0.36.60). A trial signature that didn't answer (SimplySign Desktop waiting for its
+ * sign-in, which holds signtool until someone answers it) counted as "can sign", so the release went on to build and then
+ * sat in its own signtool until its half-hour limit, the round and every merge after it waiting. Now the trial has
+ * TRIAL_MS, one that doesn't answer in it is "can't sign", and that answer stands for HUNG_MS: the rounds meanwhile don't
+ * wait on signtool again, and the release waits as above.
  */
 
 /** A release waiting for the code-signing key, as signing-waits.json keeps it for the alarm. */
@@ -104,7 +110,11 @@ export function keptSigningDown(dir: string): boolean {
 
 /** How long one look at a certificate answers for: the releases of one round share it. */
 const LOOK_MS = 60_000;
-const looks = new Map<string, { at: number; answer: Promise<string | null> }>();
+/** How long a trial signature may take: a key in the cloud signs a small script in seconds. */
+export const TRIAL_MS = 60_000;
+/** How long a look whose trial signature didn't answer stands: the rounds within it don't wait on signtool again. */
+export const HUNG_MS = 15 * 60_000;
+const looks = new Map<string, { at: number; answer: Promise<string | null>; forMs: Promise<number> }>();
 
 /** Forgets the looks taken (for a test). */
 export const forgetSigningLooks = () => looks.clear();
@@ -115,21 +125,29 @@ const quotedPs = (s: string) => `'${s.replace(/'/g, "''")}'`;
  * Whether this PC can sign with the certificate now: null when it can, else why, in a line a person can act on. The
  * certificate in Cert:\CurrentUser\My with its key, then a trial signature of a throwaway script (no timestamp), as the
  * kit's readySigner does before a release builds: "No certificates were found" is signtool's answer while SimplySign
- * Desktop isn't connected. Anything else the trial says is left to the release, which says it better. One look a minute
- * per certificate, shared by the releases that ask at once. Never throws.
+ * Desktop isn't connected; no answer within TRIAL_MS, its sign-in waiting. Anything else the trial says is left to the
+ * release, which says it better. One look a minute per certificate, shared by the releases that ask at once; one whose
+ * trial didn't answer stands for HUNG_MS. Never throws.
  */
-export function signingProblem(run: Runner, thumbprint: string, o: { now?: number; signtool?: string | null } = {}): Promise<string | null> {
+export async function signingProblem(run: Runner, thumbprint: string, o: { now?: number; signtool?: string | null } = {}): Promise<string | null> {
   const now = o.now ?? Date.now();
   const was = looks.get(thumbprint);
-  if (was && now - was.at < LOOK_MS) return was.answer;
-  const answer = look(run, thumbprint, o.signtool === undefined ? findSignTool() : o.signtool).catch(() => null);
-  looks.set(thumbprint, { at: now, answer });
+  if (was && now - was.at < (await was.forMs)) return was.answer;
+  const seen = look(run, thumbprint, o.signtool === undefined ? findSignTool() : o.signtool).catch(() => ({ why: null, hung: false }));
+  const answer = seen.then((s) => s.why);
+  looks.set(thumbprint, { at: now, answer, forMs: seen.then((s) => (s.hung ? HUNG_MS : LOOK_MS)) });
   return answer;
 }
 
 const connect = 'connect SimplySign Desktop (your SimplySign ID and the token from the phone app)';
 
-async function look(run: Runner, thumbprint: string, signtool: string | null): Promise<string | null> {
+/** One look: why this PC can't sign (null: it can), and whether that is a trial signature that didn't answer. */
+async function look(run: Runner, thumbprint: string, signtool: string | null): Promise<{ why: string | null; hung: boolean }> {
+  const said = await lookFor(run, thumbprint, signtool);
+  return typeof said === 'object' && said !== null ? said : { why: said, hung: false };
+}
+
+async function lookFor(run: Runner, thumbprint: string, signtool: string | null): Promise<string | null | { why: string; hung: true }> {
   if (!signtool) return "the Windows SDK's signtool isn't installed, so nothing can be signed here";
   const store = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$c = Get-Item ${quotedPs(`Cert:\\CurrentUser\\My\\${thumbprint}`)} -ErrorAction SilentlyContinue; if (-not $c) { 'none' } elseif (-not $c.HasPrivateKey) { 'nokey' } else { 'ok' }`], { timeoutMs: 60_000 });
   const said = store.out.trim();
@@ -140,8 +158,10 @@ async function look(run: Runner, thumbprint: string, signtool: string | null): P
   try {
     const file = path.join(dir, 'trial.ps1');
     writeFileSync(file, '# A trial signature, before a release that signs.\r\n');
-    const t = await run(signtool, ['sign', '/sha1', thumbprint, '/fd', 'SHA256', file], { timeoutMs: 2 * 60_000 });
+    const t = await run(signtool, ['sign', '/sha1', thumbprint, '/fd', 'SHA256', file], { timeoutMs: TRIAL_MS });
     if (t.code === 0) return null;
+    // Its sign-in waiting for someone: no release builds meanwhile, and no round waits on it again for a while.
+    if (t.timedOut) return { why: `signtool didn't answer within ${TRIAL_MS / 1000} seconds with the code-signing key (${thumbprint}): SimplySign Desktop may be waiting for you to sign in (your SimplySign ID and the token from the phone app)`, hung: true };
     return signProblem(`${t.out}\n${t.err}`, thumbprint) ? `signtool can't reach the code-signing key (${thumbprint}): ${connect}` : null;
   } finally {
     rmSync(dir, { recursive: true, force: true });
