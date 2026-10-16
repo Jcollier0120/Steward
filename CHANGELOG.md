@@ -13,6 +13,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### What changed
 
 - **The keeper's look now does its PC chores under the Smith.** Once a day the look should update the PC's record of its hardware, and once for each new kit it should bring the NPU's command and the graphics cards' picture settings up to what that kit's setup writes. On a PC where the Smith runs, none of the three ever ran, so a change a kit made to them reached only PCs where Set up local AI was pressed again. Now they run there too.
+- **The local AI's own folder is found where its servers really are.** On a PC set up in Manor's folder for the local AI, a Reeve folder that holds only logs made the kit look there for the AI's servers and models, so the NPU's refresh couldn't find them. The kit now looks in the folder the PC's own settings run the servers from. A PC whose servers are in Reeve's folder keeps it.
 
 ### Before you update
 
