@@ -24,6 +24,37 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do: take the kit and release as usual. On a 20 GB PC or bigger, nothing changes.
+
+## 2.77.0
+
+**A pass anywhere, for the same code: before an agent runs work again on a clean checkout, it can take a pass of exactly that code tree from this PC's results, or from another PC on the licence through Manor (spec/WORK-STATUS.md, A pass anywhere, for the same code).**
+
+### What's new
+
+- **work-status.ts**:
+  - `passFor({ kind, repo, tree, commands })` gives the pass that stands in for running that work again, or null. It looks at this PC's own result for the tree first, then asks another PC's through Manor.
+  - `whyNotPass(result, query)` says why a result doesn't stand in, or null when it does. To stand in, a result must:
+    - have passed;
+    - be of the same kind: an `affected checks` pass never stands in for `checks`;
+    - be for the same repository and tree;
+    - be under a day old (`PASS_STANDS_MS`);
+    - have run on the same Node.js major and OS (`toolchainHere()`);
+    - have run every command asked.
+  - A failure here newer than the other PC's pass, and that pass isn't taken. A failure elsewhere never stands in. A pass taken from another PC is kept here as that PC's (`from`).
+- **The kit's server**: `GET /api/peer/result?kind=…&repo=…&tree=…` answers this agent's own result for one tree (`peerResult`), from all of `work-results.json`, not only the 50 a status lists. It never passes on a pass taken from another PC. It is read only, so Manor's link passes it on as `GET /agents/<id>/result`.
+- **manor.ts**: `passOnOtherPcs(query, { agent })` asks Manor on this PC (`GET /api/peers/result`, Manor 0.16.163 and later) for the first pass among the other PCs it hears from. It answers null when:
+  - Manor isn't here, or is older (its 404);
+  - Other PCs is off;
+  - under `node --test`, unless the test gives Manor a home (`MANOR_HOME` or `home`).
+
+### What changed
+
+- **WorkResult** has `commands`, `node`, `platform` and `from`. A result kept before 2.77.0 says none of them, and so never stands in.
+
+### For an agent
+
+- Nothing to do: the route comes with the kit's server. To skip work that already passed, call `passFor` before running it, and record what it ran with `recordResult({ …, commands, ...toolchainHere() })`.
+
 ## 2.76.0
 
 **Every agent says what it is working on. `GET /api/peer/work` answers with its work status (spec/WORK-STATUS.md): what it may run at once, what it runs, what waits and in which line, the PC's lines, its results by code tree, and what holds its work up. Manor's Work page reads it. It also brings the NPU work not released before: the NPU 3720's embeddings run on the processor's graphics, a query in 50 ms rather than 1.1 s, Reeve's indexing 3.7 times as fast, the same vectors, and chat on the NPU no slower beside it.**

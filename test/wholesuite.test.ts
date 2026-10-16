@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,7 +25,9 @@ const { runChecks } = await import('../src/stages/bump.ts');
 const { resultFor } = await import('../src/kit/work-status.ts');
 const { workTasks } = await import('../src/kit/work-tasks.ts');
 const { until } = await import('../kit/test/until.ts');
+const { freePort } = await import('../kit/test/free-port.ts');
 type WholeJob = import('../src/stages/wholesuite.ts').WholeJob;
+type StoodIn = import('../src/stages/standin.ts').StoodIn;
 
 const dir = path.join(home, 'steward');
 const origin = path.join(dir, 'origin.git');
@@ -313,9 +316,65 @@ test("every check run is a task in the Steward's work status, and what it came t
   writeFileSync(failTests, '');
   assert.match((await runChecks(ctx, steward, checkout, { say, doing: 'its checks at main' })) ?? '', /npm test failed/);
   unlinkSync(failTests);
-  assert.deepEqual({ ...resultFor(key), at: undefined, note: undefined }, { kind: 'checks', repo: steward.repo, tree: key.tree, commit: head(), ok: false, what: 'Steward: its checks at main', at: undefined, note: undefined });
+  assert.deepEqual({ ...resultFor(key), at: undefined, note: undefined }, { kind: 'checks', repo: steward.repo, tree: key.tree, commit: head(), ok: false, what: 'Steward: its checks at main', commands: steward.test, node: process.versions.node, platform: process.platform, at: undefined, note: undefined }, 'with the commands it ran, on which Node.js and OS');
   assert.equal(await runChecks(ctx, steward, checkout, { say, doing: 'its checks at main' }), null);
   assert.equal(resultFor(key)?.ok, true, 'the latest for the same code');
   assert.ok(seen.includes('trial Steward: a kit trial true') && seen.includes('checks Steward: its checks at main true'), seen.join('\n'));
   assert.deepEqual(workTasks(), [], 'each ended once it ran');
+});
+
+test('code that already passed its checks, here or on another PC on the licence, is not run again: never for a trial nor a run meant for this PC, and a failure elsewhere spares nothing', async () => {
+  const steward = stewardEmployee(ctx.settings, checkout);
+  const key = { kind: 'checks', repo: steward.repo, tree: tree() };
+  const said: string[] = [];
+  const say = (l: string) => said.push(l);
+  const tests = () => lines().filter((l) => l.startsWith('test')).length;
+  assert.equal(resultFor(key)?.ok, true, 'it passed just now (the test before)');
+  let n = tests();
+  const here: StoodIn = {};
+  assert.equal(await runChecks(ctx, steward, checkout, { say, doing: 'its checks at main', stoodIn: here }), null);
+  assert.equal(tests(), n, 'nothing run');
+  assert.deepEqual([here.by, here.where], ['here', 'here']);
+  assert.match(said.join('\n'), /^its checks passed here at \d\d:\d\d, on exactly this code \(tree [0-9a-f]{7}\): not run again$/m);
+  await runChecks(ctx, steward, checkout, { say, env: { STEWARD_KIT: path.join(home, 'trial-kit') }, doing: 'a kit trial' });
+  assert.equal(tests(), ++n, "a kit under trial isn't the tree's own: run");
+  writeFileSync(failTests, '');
+  assert.match((await runChecks(ctx, steward, checkout, { say, here: true })) ?? '', /npm test failed/, 'a run meant for this PC: run');
+  assert.equal(tests(), ++n);
+  assert.equal(resultFor(key)?.ok, false);
+
+  // Another PC on the licence, through Manor here (its GET /api/peers/result, Manor 0.16.163).
+  const manor = path.join(home, 'manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  const port = await freePort();
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port }));
+  let answer: Record<string, unknown> | null = null;
+  const fake = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: 1, result: answer })));
+  await new Promise<void>((resolve) => fake.listen(port, '127.0.0.1', resolve));
+  process.env.MANOR_HOME = manor;
+  try {
+    const there = (o: Record<string, unknown> = {}) => ({ kind: 'checks', repo: steward.repo, tree: key.tree, commit: head(), ok: true, at: new Date().toISOString(), commands: steward.test, node: process.versions.node, platform: process.platform, pc: { id: 'pc-2', name: 'LAPTOP' }, ...o });
+    answer = there({ at: new Date(Date.now() - 3600_000).toISOString() });
+    assert.match((await runChecks(ctx, steward, checkout, { say })) ?? '', /npm test failed/, 'a failure here after the pass there: run here');
+    assert.equal(tests(), ++n);
+    unlinkSync(failTests);
+
+    commit('tools/typecheck.js', `${note('typecheck')}// another tree\n`);
+    answer = there({ tree: tree(), ok: false });
+    assert.equal(await runChecks(ctx, steward, checkout, { say }), null);
+    assert.equal(tests(), ++n, 'a failure elsewhere spares nothing');
+
+    commit('tools/typecheck.js', `${note('typecheck')}// a third tree\n`);
+    const key3 = { ...key, tree: tree() };
+    answer = there({ tree: key3.tree, commit: head() });
+    const pc: StoodIn = {};
+    assert.equal(await runChecks(ctx, steward, checkout, { say, stoodIn: pc }), null);
+    assert.equal(tests(), n, 'its pass on LAPTOP stands in');
+    assert.deepEqual([pc.by, pc.where], ['pc', 'on LAPTOP']);
+    assert.match(said.at(-1) ?? '', /^its checks passed on LAPTOP at \d\d:\d\d, on exactly this code \(tree [0-9a-f]{7}\): not run again$/);
+    assert.deepEqual(resultFor(key3)?.from, { id: 'pc-2', name: 'LAPTOP' }, "kept here, as LAPTOP's");
+  } finally {
+    delete process.env.MANOR_HOME;
+    await new Promise((resolve) => fake.close(resolve));
+  }
 });

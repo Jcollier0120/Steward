@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -20,6 +21,7 @@ const { askRoundSoon, vouch } = await import('../src/stages/vouch.ts');
 const { assayerChecksFile, ASSAYED_MS, choseOf, covers, whyShort } = await import('../src/stages/assayed.ts');
 const { noteVouchTime, vouchLimit, vouchTimes, vouchTimesFile } = await import('../src/stages/vouchtime.ts');
 const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
+const { freePort } = await import('../kit/test/free-port.ts');
 
 const vouchStatus = { __typename: 'StatusContext', context: VOUCH_CONTEXT, state: 'SUCCESS' };
 
@@ -239,6 +241,44 @@ test("steward vouch takes the Assayer's passing check of exactly HEAD's tree, an
     assert.match(t.v.message, /checks failed at .*Nothing was recorded/, why);
     assert.doesNotMatch(t.said.join('\n'), /the Assayer passed/, why);
     assert.ok(!t.r.gh.some((a) => a[0] === 'api'), why);
+  }
+});
+
+test("steward vouch takes a pass of the whole checks on exactly HEAD's tree on another PC on the licence, and its vouch says where it passed", async () => {
+  const f = fakeEmployee(path.join(tmp, 'elsewhere'), { version: '0.4.0' });
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/elsewhere');
+  writeFileSync(path.join(f.checkout, 'b.txt'), 'passed on LAPTOP\n');
+  sh(f.checkout, 'add', '-A');
+  sh(f.checkout, 'commit', '--quiet', '-m', 'b');
+  const head = sh(f.checkout, 'rev-parse', 'HEAD');
+  const tree = sh(f.checkout, 'rev-parse', 'HEAD^{tree}');
+  sh(f.checkout, 'remote', 'set-url', 'origin', 'https://github.com/Jcollier0120/Fake.git');
+  writeFileSync(assayerChecksFile(), '{}');
+  // Its checks here always fail: a vouch that passes proves they weren't run.
+  const failing = 'node -e process.exit(1)';
+  const e = employee(f.checkout, { fill: '', test: [failing] });
+  const manor = path.join(tmp, 'manor');
+  mkdirSync(path.join(manor, 'app'), { recursive: true });
+  const port = await freePort();
+  writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port }));
+  const pass = { kind: 'checks', repo: e.repo, tree, commit: head, ok: true, at: new Date().toISOString(), commands: [failing], node: process.versions.node, platform: process.platform, pc: { id: 'pc-2', name: 'LAPTOP' } };
+  const fake = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: 1, result: pass })));
+  await new Promise<void>((resolve) => fake.listen(port, '127.0.0.1', resolve));
+  process.env.MANOR_HOME = manor;
+  try {
+    const r = runner((a) => {
+      if (a[0] === 'pr' && a[1] === 'view') return ok({ number: 10, state: 'OPEN', headRefOid: head, isCrossRepository: false });
+      if (a[0] === 'api') return ok('{}');
+    });
+    const said: string[] = [];
+    const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work'), run: r.run, neutralDir: tmp });
+    const v = await vouch(ctx, { dir: f.checkout, say: (l) => said.push(l) });
+    assert.equal(v.ok, true, `${v.message}\n${said.join('\n')}`);
+    assert.match(said.join('\n'), /^its checks passed on LAPTOP at \d\d:\d\d, on exactly this code \(tree [0-9a-f]{7}\): not run again$/m);
+    assert.equal(r.gh.find((a) => a[0] === 'api')?.at(-1), `description=${failing} passed on LAPTOP at ${head.slice(0, 7)}`);
+  } finally {
+    delete process.env.MANOR_HOME;
+    await new Promise((resolve) => fake.close(resolve));
   }
 });
 
