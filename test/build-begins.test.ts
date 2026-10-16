@@ -19,7 +19,7 @@ const { fakeEmployee, ok, runner } = await import('./helpers.ts');
 type BuildRun = import('../src/pipeline.ts').BuildRun;
 
 const f = fakeEmployee(path.join(home, 'fake'), { version: '0.4.0' });
-const pipeline = normalizePipeline({ on: true, times: ['08:00'], days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], kit: 'every', windowMinutes: 120 });
+const pipeline = normalizePipeline({ times: ['08:00'], days: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], kit: 'every', windowMinutes: 120 });
 writeFileSync(
   path.join(home, 'settings.json'),
   JSON.stringify({
@@ -42,7 +42,7 @@ const r = runner((args) => {
 test("a build is under way from its first round's start: pipeline.json has it open, at round 0, while that round runs", async () => {
   const now = new Date(2026, 9, 16, 8, 2);
   assert.equal(loadPipeline().open, null);
-  const out = await runStage('round', {}, { run: r.run, now: () => now, alarms: { manorUrl: 'http://127.0.0.1:9' } });
+  const out = await runStage('round', {}, { run: r.run, now: () => now, alarms: { manorUrl: 'http://127.0.0.1:9' }, pipeline: true });
   assert.equal(out.error, undefined);
   assert.match(out.log.join('\n'), /the 08:00 build begins/);
   assert.ok(seen.length > 0, 'the round asked GitHub something');

@@ -23,12 +23,6 @@ export const BEFORE_BUILD_MINUTES = 5;
 /** An open build is held this long past its window at most: its closing round's release holds the PC itself. */
 export const AFTER_WINDOW_MS = 30 * 60_000;
 
-/**
- * Whether builds run at set times: from Steward 0.36.63 always (Settings have no switch); before it, while Settings'
- * Build pipeline switch is on.
- */
-export const buildsOn = (p: BuildPipeline): boolean => (p as { on?: boolean }).on !== false;
-
 /** "08:00", "08:00 and 18:00", "00:00, 06:00, 12:00 and 18:00". */
 export function timesWords(times: string[]): string {
   return times.length <= 1 ? (times[0] ?? '') : `${times.slice(0, -1).join(', ')} and ${times.at(-1)}`;

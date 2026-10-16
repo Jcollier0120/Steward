@@ -30,9 +30,9 @@ export interface RoundView {
   /** This PC releases Castellan itself: its rounds also approve Reeve's jobs, and as above roll the kit out and release the Steward. */
   castellan?: boolean;
   /**
-   * Settings' build pipeline, when on (pipeline.ts): its build times, the next, and whether one is under way; `late`, the
-   * line for the last build when the PC slept through its time (pipeline.ts' lateLine); `wakes`, the PC is woken for
-   * each, plugged in (build-hold.ts).
+   * Settings' build pipeline, how the Steward always works (pipeline.ts): its build times, the next, and whether one is
+   * under way; `late`, the line for the last build when the PC slept through its time (pipeline.ts' lateLine); `wakes`,
+   * the PC is woken for each, plugged in (build-hold.ts).
    */
   build?: { times: string[]; next: string | null; building: boolean; late?: string | null; wakes?: boolean } | null;
 }

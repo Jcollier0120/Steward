@@ -57,7 +57,9 @@ const USAGE = `${APP.id}: ${APP.role}
   round [--employees a,b]
                    one round, as the Steward runs by itself on duty (Settings): merge --yes --team, with
                    what each merged PR asks for after, then a release of every version not yet released.
-                   With the build pipeline on (Settings), between builds a round only looks
+                   It goes by the build pipeline (Settings: Build pipeline): between builds a round only looks,
+                   except for an urgent fix (a ready PR whose changelog entry starts "**Urgent fix:"),
+                   which builds at once for its repository
   build [--employees a,b] [--to-customers]
                    the owner's override of the build pipeline: a build now, outside the set times, for the
                    repositories named or all; --to-customers lets its releases out to customers at once, not
@@ -391,9 +393,9 @@ switch (cmd) {
       process.exitCode = 2;
       break;
     }
-    // The build pipeline on, in a repository that writes its entries in changes/: no version to claim. The work writes
-    // changes/<branch>.md, and the Steward gives it the next release's version as it merges (stages/stamp.ts).
-    if (!kit && ctx.settings.buildPipeline.on && (await usesChanges(ctx, e).catch(() => false))) {
+    // The build pipeline (always), in a repository that writes its entries in changes/: no version to claim. The work
+    // writes changes/<branch>.md, and the Steward gives it the next release's version as it merges (stages/stamp.ts).
+    if (!kit && (await usesChanges(ctx, e).catch(() => false))) {
       const branch = opt(rest, '--branch');
       const entry = fragmentFor(branch ?? 'your-branch');
       if (rest.includes('--json')) console.log(JSON.stringify({ fragment: entry, version: null }));
