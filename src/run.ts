@@ -6,6 +6,7 @@ import { pacedCommand, type Paced } from './kit/checks-pace.ts';
 import { sharesConsole } from './kit/console.ts';
 import { gitExe } from './kit/git-exe.ts';
 import { endProcesses } from './kit/native.ts';
+import { redact } from './redact.ts';
 
 /** What a command did: its exit code, and what it printed. */
 export interface Ran {
@@ -290,6 +291,41 @@ export function failedTests(text: string): { name: string; error: string | null 
       break;
     }
     out.push({ name: m[1], error });
+  }
+  return out;
+}
+
+/** A line that says what went wrong: a JavaScript error's (`TypeError: …`, `Error [ERR_X]: …`) or TypeScript's. */
+const ERROR_LINE = /^(?:Uncaught )?(?:[A-Z]\w*)?(?:Error|Exception)\b(?: \[[A-Z_\d]+\])?:\s*\S|\berror TS\d+:/;
+
+/**
+ * The first distinct lines of a failed step's output that say what went wrong (`max` at most, each cut to 200
+ * characters, secrets taken out): an error's own line (`ReferenceError: Cannot access 'APP' before initialization`,
+ * `src/x.ts(3,1): error TS2304: …`), wherever node --test printed it (a test's `error:` in its TAP, a test file's own
+ * stderr as `# ` lines). The same error from forty test files, at other paths and lines, is one. TAP's
+ * `error: 'test failed'`, which says only that a file's tests failed, isn't one. Empty when the output names none. Pure.
+ */
+export function errorLines(output: string, max = 3): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (line: string) => {
+    const l = line.trim().replace(/^'(.*)'$/, '$1').trim();
+    if (!l || /^(test failed|\d+ subtests? failed)$/i.test(l)) return;
+    // Its words without the paths, line numbers and positions that differ from one file to the next.
+    const key = l.replace(/file:\/\/\S+|[A-Za-z]:[\\/]\S+|(?:\.{1,2}[\\/])?[\w.-]+(?:[\\/][\w.-]+)+|:\d+(?::\d+)?|\(\d+,\d+\)/g, '…');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(redact(l.length > 200 ? `${l.slice(0, 199)}…` : l));
+  };
+  const lines = output.replace(/\r/g, '').split('\n').map((x) => x.replace(/^\s*#\s?/, '').trim());
+  for (let i = 0; i < lines.length && out.length < max; i++) {
+    const said = /^error: (.*)$/.exec(lines[i]);
+    // A TAP test's `error: |-` and the block under it: the block's first line.
+    if (said && /^[|>][-+]?$/.test(said[1])) {
+      const next = lines.slice(i + 1).find(Boolean);
+      if (next) add(next);
+    } else if (said) add(said[1]);
+    else if (ERROR_LINE.test(lines[i])) add(lines[i]);
   }
   return out;
 }

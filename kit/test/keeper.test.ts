@@ -81,7 +81,7 @@ test("a program's name reaches Windows' process list as text: quotes, curly quot
   assert.equal(wqlName('llama-server.exe'), "Name='llama-server.exe'");
   // Run for real: a name made to end the string early finds no process, and runs nothing. The PowerShell worker up and its
   // CIM cmdlets loaded first, with time to spare: at the checks pace on a busy PC that alone can take most of the 30 s a
-  // query is allowed.
+  // query is allowed, which the pace stretches too (ps.ts's psPaced, kit 2.77.8).
   const { powershell } = await import('./fixture/src/kit/ps.ts');
   await powershell("Get-CimInstance Win32_OperatingSystem | Out-Null; 'ready'", { timeoutMs: 180_000 });
   for (const name of ["x\u2019; Write-Output INJECTED; \u2019y.exe", "x'; Write-Output INJECTED; 'y.exe", 'x$(Write-Output INJECTED)`n.exe', 'x" ; Write-Output INJECTED ; ".exe']) {

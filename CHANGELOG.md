@@ -16,6 +16,26 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The staff whose releases sign get the one-minute limit when they take kit 2.77.9.
 
+## 0.36.61
+
+**Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors and has time for all the tests it runs.**
+
+### What changed
+
+- **Catch-up and `## Unreleased` entries.** A PR whose changelog entry is `## Unreleased` is now caught up like one with a version: its entry stays on top, above the branch's new ones. Before, it went back to its author as a conflict.
+- **The branch's `## Unreleased` entries go into a caught-up PR's own.** When a PR with a version is caught up past an `## Unreleased` entry on its branch, the PR's entry takes it in. Its headline goes on to say "It also brings what wasn't released before: …", and each section's lines go under the section of the same name (What's new, What changed, then Before you update or For an agent). A "Nothing to do" gives way to a line that says more. Before, the Unreleased notes were left below the new version, where no release reads them.
+  - The same goes for the kit's changelog, and for the merge train. A catch-up that resolved only these keeps the PR's vouch, as before.
+  - Only an entry still waiting for its release is taken in. One below a version the branch has released since already went out with that version, so it stays where it is.
+- **A kit trial's comment quotes what failed.** Under each agent the new kit fails, the comment now shows the first few distinct error lines its checks printed. The same error from forty test files shows once.
+  - The failed step's whole output is kept in the work folder's `_kit-trial-logs`, one file for each agent and kit (the newest 40). It is still there after the agent's next try, which used to clear it. The comment and the Wright's issue point to it.
+- **A vouch gets past GitHub's passing trouble.** Sometimes GitHub's answer to the vouch's status is cut short, or is a server error, or the network drops. The vouch now tries again after 2, 5 and 10 s before it gives up. A refusal (no access, no such commit) still stops it at once. The Steward's own PR test sets its vouch the same way.
+- **A vouch's time limit allows for how many tests it runs.** A vouch is stopped five minutes past the average of its recent runs. When a change reaches far more test files than usual, its limit now grows to match, up to the whole suite's limit. Before, a change that reached most of the tests was stopped before it could finish, and the Steward had to test it again itself. A vouch now records how many test files it ran, so the longer limit applies once three vouches since the update have recorded theirs.
+- **Kit 2.77.8**: PowerShell's time limits stretch at the checks pace, so the kit's PowerShell tests no longer time out on a busy PC.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.60
 
 **A new kit's rollout no longer holds up merges: ready pull requests merge while the staff are being moved to it.**

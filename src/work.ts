@@ -8,7 +8,7 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { redact, trimmed } from './redact.ts';
 import type { Runner } from './run.ts';
 import type { Employee, Settings } from './settings.ts';
-import { checksLogOf, trialDirOf } from './stages/bump.ts';
+import { checksLogOf, kitTrialLogOf, trialDirOf } from './stages/bump.ts';
 import { latestTrial, standingFailures, trialFails } from './stages/trial.ts';
 import { bumpBranch, bumpDirOf, checkoutOf, releaseDirOf, type StageResult } from './stages/common.ts';
 import { showFile } from './git.ts';
@@ -95,9 +95,8 @@ export const marker = (id: string) => `<!-- steward:work:${id} -->`;
 const fence = (text: string) => ['```text', text.replace(/```/g, "'''"), '```'];
 const footer = (id: string) => ['', `_Filed by the ${APP.name} ${APP.version} for the manor's work queue. Its alarm waits while this is worked on; it is raised if the work gets stuck, or nothing has landed in a day._`, '', marker(id)];
 
-/** The end of a failed step's output kept beside a worktree (<worktree>.log), or null when there is none. */
-function outputBeside(dir: string): string | null {
-  const file = checksLogOf(dir);
+/** The end of a failed step's output kept beside a worktree (<worktree>.log), or in `file`; null when there is none. */
+function outputBeside(dir: string, file = checksLogOf(dir)): string | null {
   try {
     return existsSync(file) ? trimmed(readFileSync(file, 'utf8')) : null;
   } catch {
@@ -287,7 +286,9 @@ export function conflictItems(o: { held: { employee: Employee; prs: Held[] }[]; 
  */
 export function kitTrialItem(e: Employee, f: { message: string; main?: string | null }, kit: string, steward: Employee, pr: { number: number; url: string; title: string }, settings: Settings): WorkItem {
   const id = `kittrial:${e.id}:${kit}`;
-  const output = outputBeside(trialDirOf(settings, e));
+  // The trial's own copy (kitTrialLogOf), which the agent's next try doesn't clear; else the one beside its worktree.
+  const kept = kitTrialLogOf(settings, e, kit);
+  const output = outputBeside(trialDirOf(settings, e), existsSync(kept) ? kept : undefined);
   const tests = e.test.join(' && ') || '(Settings give it no checks)';
   return {
     id,

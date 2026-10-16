@@ -82,9 +82,10 @@ export interface KitTrial extends TrialPasses {
   kit: string;
   /**
    * Each employee whose checks failed with it, what failed, and the commit of its branch on origin it was tried from
-   * (null when that isn't known; missing in one kept before Steward 0.27.14).
+   * (null when that isn't known; missing in one kept before Steward 0.27.14), and the first distinct lines its failed
+   * step printed that say what went wrong (none named, or one kept before Steward 0.36.61: none).
    */
-  failed: { id: string; name: string; message: string; main?: string | null }[];
+  failed: { id: string; name: string; message: string; main?: string | null; errors?: string[] }[];
   /** How many were tried, and passed. */
   passed: number;
   /** The employees (by id) still to try, while the trial goes on over several rounds; gone once all are tried. */
@@ -265,7 +266,9 @@ export function trialGivesWay(e: Employee, prs: PrInfo[], kept = readJson<Record
 /** The comment on the PR: the employees the kit breaks, and what to do. Pure. */
 export function trialComment(t: KitTrial, sha: string): string {
   const standing = standingFailures(t);
-  const lines = standing.map((f) => `- **${f.name}**: ${f.message.replace(/\r?\n/g, ' ')}${pairNote(t, f.id)}`);
+  // What its failed step said went wrong, under each: the reason is on the PR, without the log on the Steward's PC.
+  const said = (f: KitTrial['failed'][number]) => (f.errors?.length ? ['', `  It printed${f.errors.length > 1 ? ', first' : ''}:`, '', '  ```text', ...f.errors.map((l) => `  ${l.replace(/```/g, "'''")}`), '  ```'] : []);
+  const lines = standing.flatMap((f) => [`- **${f.name}**: ${f.message.replace(/\r?\n/g, ' ')}${pairNote(t, f.id)}`, ...said(f)]);
   const moves = pairWords(t);
   return [
     `The Steward tried kit ${t.kit}, as this PR has it at ${sha}, on every agent before releasing it: ${standing.length} of ${t.failed.length + t.passed} fail their checks with it.`,
@@ -440,7 +443,7 @@ async function pairUp(ctx: Ctx, steward: Employee, pr: PrInfo, t: KitTrial): Pro
 }
 
 const failuresOf = (results: EmployeeResult[]): KitTrial['failed'] =>
-  results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null }));
+  results.filter((r) => r.outcome === 'failed').map((r) => ({ id: r.id, name: r.name, message: r.message, main: r.base ?? null, ...(r.errors?.length ? { errors: r.errors } : {}) }));
 
 /** The ones that failed without the kit too (bump.ts's withoutTheKit): not the kit's doing. */
 const ownFailuresOf = (results: EmployeeResult[]): NonNullable<KitTrial['own']> =>
