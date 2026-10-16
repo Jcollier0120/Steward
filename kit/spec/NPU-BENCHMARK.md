@@ -22,15 +22,17 @@ The website shows two boards:
 - **Chips**: one row per chip generation (Snapdragon X2 Elite, Lunar Lake, Ryzen AI 300...), each with the model Castellan ships for it, measured by us. This is what a customer gets on that chip.
 - **Models**: per chip, every model we've measured on it, shipped or a candidate. This is how we choose what to ship.
 
-Every model Castellan runs today is a Qwen3 4B model at 4-bit weights, all with the same tokenizer, so token counts mean the same thing on every row:
+Every model Castellan runs today is a Qwen model at 4-bit weights:
 
 | Maker | Server | Model | Weights |
 |---|---|---|---|
 | Qualcomm | GenieX 0.8.0 | Qwen3-VL-4B-Instruct (W4A16) | 4-bit, 16-bit activations; also does vision |
 | Intel | OpenVINO Model Server 2026.4.1 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov | 4-bit symmetric, channel-wise |
-| AMD | FastFlowLM 1.0.7 | qwen3-it:4b (Qwen3-4B-Instruct-2507) | 4-bit |
+| AMD | FastFlowLM 1.0.7 | qwen3.5:2b (Qwen3.5-2B) | 4-bit; also does vision |
 
-They are not the same weights: each maker's NPU needs its own format, and Qualcomm's is the vision model. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
+They are not the same weights: each maker's NPU needs its own format, Qualcomm's is the vision model, and AMD's is a smaller model that does both. So the chips board doesn't claim identical models. It compares what each chip delivers with its shipped model, names the model on every row, and shows a quality score beside the speed, so a faster chip whose model answers worse can't hide it.
+
+The Qwen3 models share one tokenizer (151,936 tokens), so their token counts mean the same thing. Qwen3.5's is larger (248,320), so the same text is usually fewer tokens to it, and its tokens a second aren't quite the Qwen3 rows' tokens a second. The jobs, timed in seconds, compare as they are.
 
 ## The suite
 

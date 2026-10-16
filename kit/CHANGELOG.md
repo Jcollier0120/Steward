@@ -25,6 +25,90 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do: take the kit and release as usual. On a 20 GB PC or bigger, nothing changes.
 
+## 2.77.3
+
+**On an AMD Ryzen AI 300, one smaller model, Qwen3.5-2B, answers chat and pictures on the NPU. It writes half again as fast, holds 0.4 GB less of the PC's memory for chat and 1.2 GB less for pictures, downloads 2.0 GB instead of 7.4, and never switches models between a chat and a picture. It starts about 1.7 s slower.**
+
+### What changed
+
+- **npu-vendors.json's amd route** (AMD's alone; Qualcomm's and Intel's routes, the keeper and `npuMemoryFit` are unchanged):
+  - **`models`**: `qwen3.5:2b` (Qwen3.5-2B, FastFlowLM's NPU2 build, Apache-2.0) for chat and vision. It replaces `qwen3-it:4b` for chat and `qwen3vl-it:4b` for vision. It is 2,014,970,646 bytes with its vision weights and tokenizer, and its `present` file is the vision weights (`vision_weight.q4nx`). The 8 to 9 s switch between the two 4B models, either way, is gone: the one server holds one model that does both.
+  - **Measured with the benchmark** (`castellan-npu-bench/2`, quick, on the Krackan, Ryzen AI 7 350 with 16 GB, FastFlowLM 1.0.7, 2026-10-15), against the 4B:
+
+    | | Qwen3.5-2B | Qwen3-4B (and its VL model) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 23 of 24 |
+    | Tokens written a second | 20.4 to 21.0 | 13.6 |
+    | Jobs: triage, reply, summary | 2.1, 2.9 and 4.4 s | 3.3, 8.8 and 7.1 s |
+    | First token of a 1,024-token prompt | 1.47 s | 2.43 s |
+    | Short answer | 0.82 s | 1.37 s |
+    | Working set | 4.0 GB | 5.7 GB |
+    | Pictures | 3 of 4, 1.2 to 1.4 s | 3 of 4, 1.8 to 2.0 s |
+
+    It missed `apples`, as the 4B did, and `json-list`: it listed the bread and milk with the fruit. On pictures, it misread a number. Its full profile scored the same 22 of 24 and passed all 15 jobs. Its speed held 89% over 10 minutes, against the 4B's 96%.
+  - **Smaller or other models**:
+    - Qwen3.5-0.8B scored 19 of 24, Gemma3-1B and LFM2.5-1.2B 18, Qwen3-1.7B 17 and Qwen3-0.6B 13.
+    - Llama 3.2 1B failed setup's first-load check.
+    - Gemma4-E2B scored 24 but held 6.8 GB.
+    - Qwen2.5-VL-3B scored 23, with every picture right, but it is under Qwen's research licence, which bars commercial use.
+  - **Thinking:** FastFlowLM serves Qwen3.5 with its thinking off, and the benchmark's answers carried none. The kit sends it no `/no_think`, since `thinks()` already left out Qwen3.5.
+  - **From the NPU check on the Krackan** (2026-10-15). These were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU, so the starts are on the slow side:
+    - **`memoryGb`**: 4.1 for chat and for pictures. It held 3.7 GB started and 4.0 to 4.1 GB after the benchmark's jobs and pictures, against 4.5 and 5.3 for the 4B pair.
+    - **xdna2 `timeouts`**: 15 s + 150 ms a token, and a 30 s cold load. The base was 20 s. Measured: 19.4 tokens written a second, 3,272 tokens read in 4.1 s, and the slowest start to a first answer 17 s.
+    - **`idleStop`**:
+      - 15.1 s for chat: `--idle`'s cold answer took 15.0 s, and the keeper's stop freed 3.7 GB.
+      - 16.6 s for pictures: the kit's test request on a stopped server, a picture and then chat.
+      - Both give 6 minutes. A person waking it is told about 15 s, where the 4B's chat was 6.6 s.
+    - **The start:** timed alike from Node, three starts each, Qwen3.5-2B answered first in 11.8 to 12.4 s and the 4B in 10.1 to 10.7 s. So it starts about 1.7 s slower, but nothing switches afterwards. The 4B took 9.2 s more for its first picture.
+  - **`notes`**: rewritten for the one model, and corrected on FastFlowLM's power mode (below).
+- **FastFlowLM's `--pmode` was never measured on the Krackan** (spec/NPU-VENDORS.md, npu-vendors.json's notes):
+  - `flm serve` sets its mode by running `C:\Windows\System32\AMD\xrt-smi.exe configure --pmode`, and ignores the result.
+  - There, an older driver's `xrt_coreutil.dll` (2024) beside the newer `xrt-smi.exe` lacks a function `xrt-smi` needs. So `xrt-smi` failed to load at every start, and every `--pmode` run was in one mode.
+  - The failure is silent from Node, which the kit starts it from. From anywhere else, each start shows an "Entry Point Not Found" dialog.
+  - The route still sets no mode. The modes are still to measure, on a PC whose `xrt-smi` runs.
+- **`npu-check --harden`'s harden-nonsense step fails on FastFlowLM, for both models.** It puts `OpenVINO/Qwen3-4B-int4-ov` in the chat model's place, and `flm serve` exits at once ("Model not found"). So setup's note says the server didn't pass its test, not that the model doesn't run properly. The NPU is left out either way.
+  - It fails the same on the Qwen3-4B route, run the same day. Its earlier passes were most likely another server answering on 18184.
+  - Not changed here: the step has no model that answers nonsense on FastFlowLM to force.
+- **spec/NPU-VENDORS.md** has the AMD model row, the licences row, and the Krackan's runs with Qwen3.5-2B under "Verified, and not". **spec/NPU-BENCHMARK.md** has the AMD row. It also says that Qwen3.5's tokenizer (248,320 tokens) isn't the Qwen3 models' (151,936). So its tokens a second compare only roughly with the other rows', while its jobs, timed in seconds, compare as they are.
+
+### For an agent
+
+- Nothing to do.
+- A PC already set up keeps serving the 4B models until it is set up again (Manor's Set up local AI), which pulls Qwen3.5-2B (2.0 GB).
+- The 4B models stay in `%USERPROFILE%\.flm\models` (7.4 GB) until removed (`flm remove qwen3-it:4b`, `flm remove qwen3vl-it:4b`).
+
+## 2.77.2
+
+**A graphics card's embedding server holds about 600 MB less: it starts with `-c 4096 -ub 512`, and a request to it is capped at 1,365 tokens (4,095 characters), with the same vectors and times.**
+
+### What changed
+
+- **setup.ts**: the embedding server on a graphics card (or the processor) starts with `-c 4096 -b 2048 -ub 512`, not `-c 8192 -b 2048 -ub 2048`. Its endpoint gets its own `maxContextTokens`, 1,365 (`EMBED_CAP`), below the card's: by the kit's estimate of 3 characters a token, an input under it is at most 4,095 characters, and so fits 4,096 tokens even at a token a character.
+  - On a Radeon 860M (WEASELDEV03, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
+  - **On a Core Ultra 5 225U's Intel Graphics** (WEASELDEV02, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
+    - working set 1.37 GB against 1.97;
+    - private bytes 1.41 GB against 2.01;
+    - the card's shared memory 1.25 GB against 1.85;
+    - by llama.cpp's own buffers, the KV cache took 448 MiB against 896, and compute 26 + 12 MiB against 120 + 64.
+
+    The times were the same within noise:
+    - a query 145–147 ms against 137–138 (minimums 133–134 against 132–133);
+    - a 430-token chunk 759–766 ms against 749–759;
+    - 2,679 tokens 9.02–9.30 s against 9.06–9.10;
+    - a dense chunk at the new limit (4,095 characters, 3,379 tokens) 13.4–13.9 s against 13.5–13.8, answered in 7 passes of 512.
+
+    Every vector matched (cosine 1.000000), old against new, old against old, and new against new.
+  - `-b 2048` stays, as on Qualcomm's route (2.75.1). With embeddings, llama-server sets the batch to the micro-batch itself, 512, and warns so ("embeddings enabled with n_batch (2048) > n_ubatch (512)").
+  - An input longer than a 512-token micro-batch is split across several, so nothing that fit before is refused by the server for its length.
+  - The reranker keeps `-c 8192 -ub 2048`.
+  - Sizing is unchanged. `serverContext` and `SERVER_GB` still count the embedding server as it was, so every card is sized as before. That estimate is now high for it: it counts 2.7 GB, and the Radeon's server held 1.3 GB.
+- **npu.ts**: a request over every serving accelerator's cap for its kind is refused before it's sent, saying that cap ("refusing a request of ~1400+0 tokens (cap 1365); split the input"). Before, a request under the accelerator's cap but over its kind's was dropped from the candidates, and said only that no accelerator could take it. `budget(maxTokens, work)` gives the largest cap for that kind, so chunking for embeddings fits 1,365 on a card.
+
+### For an agent
+
+- Nothing to do for the agents of the manor: their longest input is Reeve's cluster item, about 2,060 characters, and Clerk's and Chamberlain's are cut at 600. An agent that embeds more than 4,095 characters at once on a card should chunk by `budget(0, 'embed')`.
+- A PC set up before keeps its embedding server's old flags and no cap until it's set up again (Manor's Set up local AI, or the Smith's Set up). Nothing rewrites a card's entry on its own.
+
 ## 2.77.0
 
 **A pass anywhere, for the same code: before an agent runs work again on a clean checkout, it can take a pass of exactly that code tree from this PC's results, or from another PC on the licence through Manor (spec/WORK-STATUS.md, A pass anywhere, for the same code).**

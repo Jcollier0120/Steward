@@ -338,7 +338,7 @@ export class Npu {
     if (!serving.length) return 0;
     const games = readGames();
     const { list } = candidates(serving, { work, tokens: 0, lane: 'background' }, { failure: readFailure, games: gamesStale(games) ? null : games, deferredMs });
-    return Math.max(...(list.length ? list : serving).map((a) => a.maxContextTokens)) - maxTokens;
+    return Math.max(...(list.length ? list : serving).map((a) => core.capFor(a, work))) - maxTokens;
   }
 
   /** Whether any chat server is running (ready, or busy loading or answering), without starting one. */
@@ -425,7 +425,7 @@ export class Npu {
       throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }
     const tokens = promptTokens + maxTokens;
-    const refused = core.tooBig(serving, promptTokens, maxTokens);
+    const refused = core.tooBig(serving, promptTokens, maxTokens, work);
     if (refused) throw new NpuError(refused);
     const games = lane === 'background' && serving.some((a) => a.kind === 'gpu') ? await currentGames(cfg.accelerators) : null;
     let first: { acc: Accelerator; reason: string } | null = null;
