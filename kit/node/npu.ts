@@ -10,6 +10,7 @@ import {
   embeddedAt,
   ensureServer,
   expandEnv,
+  fitPicture,
   gamesStale,
   lineLook,
   loadAccelerators,
@@ -372,13 +373,14 @@ export class Npu {
   /**
    * One question about one image, by a vision model. Small vision models perceive well and reason
    * badly: ask what is there ("what text is the title", "is there a chart"), and leave conclusions to
-   * code. `image` is a local path: GenieX reads it itself, other servers get it as a data: URL.
+   * code. `image` is a local path: GenieX reads it itself, other servers get it as a data: URL. FastFlowLM gets a picture
+   * with a side of a whole number of 32 px that side a pixel longer, which it reads right (fitPicture).
    */
   async vision(image: string, question: string, opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 64;
     // The image is a fixed 256 tokens in the NPU's bundle; count 400 to be safe (the spec's rules.json).
     return this.ask('vision', core.visionTokens(RULES, question), maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
-      const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, image, question, maxTokens), timeoutMs, { loading });
+      const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, await fitPicture(acc, image), question, maxTokens), timeoutMs, { loading });
       return answerOf(json, ep.model, ms);
     });
   }

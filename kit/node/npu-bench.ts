@@ -511,6 +511,7 @@ export function benchServe(route: NpuRoute, o: { device: string; cap?: number })
 const QUIRK_SAYS: Record<Quirk, string> = {
   'prefix-leak': 'a nonce first in every request (prefix-leak)',
   'image-path': 'each picture as a file of its own, its path sent (image-path)',
+  'sides-of-32': 'a picture 720 px tall or less with a side of a whole number of 32 px, that side a pixel longer (sides-of-32)',
 };
 
 /** How much more than at rest working must draw for its energy to count: the battery's rate wobbles by about this much. */
@@ -783,7 +784,8 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
 
     if (acc.vision?.model && suite.vision.length) {
       // A server that reads a local path (GenieX: image-path) gets each picture as a file, as an agent's pictures go to
-      // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one.
+      // it; a `data:` URL is sent as it is, whatever the quirk says (imageUrl), and GenieX doesn't read one. FastFlowLM's
+      // (sides-of-32) are fitted as an agent's are (fitPicture, in serverClient): three of the suite's four have such sides.
       const dir = acc.quirks.includes('image-path') ? mkdtempSync(path.join(os.tmpdir(), 'npu-bench-pictures-')) : null;
       const imageOf = (v: Suite['vision'][number]) => {
         if (!dir) return picture(v.image);
