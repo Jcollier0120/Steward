@@ -174,12 +174,13 @@ export async function idleSteps(c: { entry: AcceleratorEntry; route: NpuRoute; v
   });
   log(`For npu-vendors.json's ${c.vendor} idleStop, from this cold start (${rule.coldStartTimes} times it, at least ${rule.floorMinutes} min): ${JSON.stringify(suggest)}`);
 
-  // A keeper's look while a request holds the NPU's turn: in use, nothing stopped.
+  // A keeper's look while a request holds the NPU's turn: in use, nothing stopped. Only the servers in the NPU's turn:
+  // one on another device (the NPU 3720's embeddings, on the graphics) is used in that device's turn, free meanwhile.
   const busy = d.chat('Write the numbers from one to forty in words, separated by commas.', 200, coldLoadMs + RULES.accelerators.requestBaseMs);
   const h0 = d.now();
   while (!d.npuHeld() && d.now() - h0 < 30_000) await d.sleep(50);
   const holding = d.npuHeld();
-  const during = holding ? await d.look(servers, 1) : [];
+  const during = holding ? await d.look(servers.filter((s) => s.acc.id === entry.id), 1) : [];
   const answered = await busy;
   const inUse = holding && during.length > 0 && during.every((r) => r.did === 'in-use');
   add({

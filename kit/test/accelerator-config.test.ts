@@ -86,6 +86,15 @@ test("the keeper's idle times: rules.json's defaults (10 and 10) unless config.j
   assert.match(C.validateKeeperConfig({ npuIdleStopMinutes: 2000 }).join('\n'), /npuIdleStopMinutes .* from 0 to 1440/);
 });
 
+test("an endpoint's turn: a graphics card's id or the processor's, read by the keeper; the NPU's or anything else named", () => {
+  const entry = (turn: unknown) => ({ accelerators: [{ id: 'npu', kind: 'npu', chat: { baseUrl: 'http://127.0.0.1:18183', model: 'c' }, embed: { baseUrl: 'http://127.0.0.1:18186', model: 'e', turn } }] });
+  assert.deepEqual(C.validateAccelerators(entry('gpu-intel-r-graphics')), []);
+  assert.deepEqual(C.validateAccelerators(entry('cpu')), []);
+  for (const bad of ['npu', 'GPU 1', 7]) assert.match(C.validateAccelerators(entry(bad)).join('\n'), /embed: turn must be a graphics card's id \(gpu-…\) or cpu/, String(bad));
+  assert.equal(C.configuredAccelerators(entry('gpu-intel-r-graphics'))[0].embed!.turn, 'gpu-intel-r-graphics');
+  assert.equal(C.configuredAccelerators(entry('npu'))[0].embed!.turn, undefined);
+});
+
 test("a save: only the keeper's keys, everything else kept, refused when the file changed since it was read or doesn't validate", () => {
   const file = path.join(home, 'save.json');
   writeFileSync(file, JSON.stringify({ repos: { roots: ['C:\Projects'] }, jobs: { toast: false }, accelerators: [NPU] }));
