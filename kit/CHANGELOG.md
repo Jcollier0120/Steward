@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.1
+
+**The Seneschal is one of the manor's developer roles, and comes with Developer Pro.**
+
+### What changed
+
+- **node/work.ts:** a `WORK` entry for the Seneschal: handing out the staff's work in order, by lane and as the PC has room, and its look at the PC's room every 15 seconds. It is a developer role (`developerRole`), so with Developer options off its Settings page has no "Where its work runs". Its notes say it runs no work of its own and comes with Developer Pro.
+- **node/look.ts:** the Seneschal's look: deep blue, "Handing out work" on its pill, and a scene where each line of a ledger is ticked in turn and its task goes out to a free slot beside the steward's staff.
+- **node/developer-pro.ts:** Developer Pro covers the Seneschal too. Without it, the Seneschal hands out no work, and each agent runs its own as before.
+- **spec/DEVELOPER-OPTIONS.md** lists the Seneschal among the developer roles.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Seneschal's own page asks `developerPro()` itself.
+
 ## 2.77.8
 
 **PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

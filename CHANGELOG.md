@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.65
+
+**Kit 2.78.1: the Seneschal is one of the developer agents, and comes with Developer Pro.**
+
+### What changed
+
+- The kit the Steward hands out lists the Seneschal, the new agent that hands out your agents' work on this PC in order, among the developer agents. With Developer options off, its Settings page no longer shows a "Where its work runs" section for work that doesn't run then.
+- Its page gets its own colour and title-bar scene: a ledger whose lines are ticked one by one as their work goes out to free slots.
+- Its Settings page says it comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.61
 
 **Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors and has time for all the tests it runs.**
