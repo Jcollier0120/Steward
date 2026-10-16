@@ -116,8 +116,9 @@ export interface Ctx {
    * Between builds, the next build prepared for (stages/prepare.ts): its build time, and its name in words. A repository's
    * ready PRs are then tested as that build would test them (each at its head, stacked as its train or batch, a kit's
    * trial), and nothing is merged, pushed, caught up or released: the build finds those passes and only merges.
+   * `inBuild`: the build under way, its Steward's own PRs tested the same way beside its rounds (stages/selftests.ts).
    */
-  prepare?: { due: string; name: string } | null;
+  prepare?: { due: string; name: string; inBuild?: boolean } | null;
 }
 
 /** How a repository is worked with in this stage (scm.ts). */

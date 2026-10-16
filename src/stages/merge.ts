@@ -118,14 +118,18 @@ export const CAUGHT_UP = 'caught up by the Steward';
 
 /**
  * Whether a PR waits only on something that settles itself within minutes, so a round soon after can merge it: its checks
- * running, its head just caught up (checks starting there), GitHub working out whether it merges, it being just opened, or
- * its kit being tried on the agents a few each round (trial.ts).
+ * running, its head just caught up (checks starting there), GitHub working out whether it merges, it being just opened,
+ * its kit being tried on the agents a few each round (trial.ts), or a Steward PR's tests beside a build's rounds
+ * (selftests.ts).
  */
 export const waitsBriefly = (why: string) =>
-  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING);
+  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING) || why.startsWith(TESTED_BESIDE);
 
 /** How a PR's hold begins while it is younger than Settings' mergeMinAgeMinutes. */
 export const JUST_OPENED = 'opened ';
+
+/** How a Steward PR's hold begins while it is tested beside a build's rounds (selftests.ts): a round merges it once that ends. */
+export const TESTED_BESIDE = 'being tested beside the rounds';
 
 /** How young a PR may be and still merge, and the time now: Settings' mergeMinAgeMinutes, and the round's clock. */
 export interface AgeRule {
@@ -302,7 +306,7 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   return { why: null, sets: v.head };
 }
 
-const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}), ...(raisesKit(pr) ? { kit: true } : {}) });
+export const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}), ...(raisesKit(pr) ? { kit: true } : {}) });
 
 /** How the hold of a PR that gave up its turn (givesWay) reads. */
 export const GAVE_WAY = `${CONFLICTS}, beyond what the Steward resolves, and was handed on: it gives up its turn, so the PRs above it merge first, and once it is resolved it is caught up to a version of its own`;

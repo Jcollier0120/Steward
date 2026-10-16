@@ -29,6 +29,7 @@ import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { rolloutsBeside } from './stages/rollout.ts';
 import { preparesBeside } from './stages/prepare.ts';
+import { selfTestsBeside } from './stages/selftests.ts';
 import { buildTimeLine } from './buildtimes.ts';
 import { trialsOnTheirOwn } from './stages/trial.ts';
 import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from './stages/wholesuite.ts';
@@ -354,6 +355,18 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   // And the next build's tests between builds (stages/prepare.ts): run beside the rounds, so the build only merges. Not
   // under node --test, where a page's round tests what it asks for alone.
   if (!process.env.NODE_TEST_CONTEXT) preparesBeside({ log: (line) => console.log(`build prep: ${line}`) });
+  // And in a build, the Steward's own PRs that moved since they were tested for it (stages/selftests.ts): tested beside the
+  // rounds, which go on merging the agents'. Once their tests end, a round at once: it merges what passed. Not under
+  // node --test either.
+  if (!process.env.NODE_TEST_CONTEXT)
+    selfTestsBeside({
+      log: (line) => console.log(`self tests: ${line}`),
+      ended: () => {
+        if (!loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
+        if (rounding() || slotsFull()) roundAfter = true;
+        else startRound();
+      },
+    });
   // And a kit's rollout (stages/rollout.ts): its bumps, checks and pushes run beside the rounds, which go on merging. Once
   // it ends, a round at once: it merges the kit PRs opened, reports what the rollout did, and looks again at the
   // employees whose bump or push failed.

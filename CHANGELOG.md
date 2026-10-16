@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.71
+
+**In a build, the Steward's own pull requests are tested beside its rounds, which no longer wait for them.**
+
+### What changed
+
+- In a build, the Steward's own pull requests pushed since they were tested for it are tested beside the build's rounds, as the next build's are tested between builds. The rounds go on merging the agents' pull requests and the kit's rollout pull requests meanwhile, rather than each one lasting as long as the Steward's tests.
+- While those tests run, the build stays open for them, and a kit pull request among them holds the rollout for its newer kit, as before. Once they end, a round comes at once and merges what passed, without testing it again.
+- The build's timings count those tests as the build's own time.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.69
 
 **In a build, the agents' pull requests no longer wait while the Steward tests its own.**
