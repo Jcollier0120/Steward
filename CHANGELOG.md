@@ -18,7 +18,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - **A build is under way from its start.** Before, a build was recorded as under way only when its first round ended, and that round is often its longest. Until then Manor saw no build, so it could install updates in the middle of it, and the Steward's page showed none.
 - Uninstalling the Steward removes its wake task too.
-- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX.
+- **Kit 2.78.2** lets every agent wake the PC, plugged in, for work due at set times. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX, and each agent shows under its own name in Task Manager.
 
 ### Before you update
 
