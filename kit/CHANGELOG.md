@@ -15,6 +15,15 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **gentle.cs, gentle.ts:** an agent in no job (one run from a terminal) joins the ceiling before its own job is made. `KitGentle.Set` takes the ceiling's cap as a fourth argument, and `gentleScript()` as a sixth. `keepResponsive()` keeps Manor's page out.
   - **The ceiling is only ever made for a program in no job**, so it is never inside another program's job tree (a Claude session's, a terminal's, Task Scheduler's), whose end could end what joined it later. A program that couldn't leave such a job can't join it, and keeps its family's cap alone, as before.
   - It ends nothing and limits nothing else. Each program in it holds a handle to it, so it lasts while any runs.
+  - **Measured on an 18-thread Snapdragon X2 Elite**, with a check run, a server started apart and an agent's page at full each keeping every processor busy at once, all read over the same 8 s:
+
+    | | The three together, by their jobs' own accounting | The whole PC, by Windows' % Processor Utility |
+    |---|---|---|
+    | Each family at its own 85%, no ceiling | 98.3% | 100% |
+    | In the manor's ceiling | 86.6% | 88.8% (the PC's other work took about 7% just before and after) |
+
+    Windows' accounting read the ceiling a point or two above its 85% hard cap in each of five runs (86.5% to 87.7%). The check run, at its low priority, got almost nothing while the other two were busy, in both rounds.
+  - **Under test**, with a ceiling of 10%: a check run and a server started apart, each keeping every processor busy at its family's cap of 10%, took under 14% together. With no ceiling the same two took 23.8%, a cap each.
 - **checks-pace.cs:** `KIT_CHECKS_JOB_NAME` names the check runs' job, so a test's runs share a job of their own. Before, a test's launcher set the PC's real job's limits to the test's.
 - **Pictures on the AMD route** (not released before):
   - **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
