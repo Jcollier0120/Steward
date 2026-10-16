@@ -214,10 +214,11 @@ test("in a vouch's clone: npm test becomes node --test with only the files the b
   const { run } = runner();
   const ctx = ctxFor({ employees: [employee(checkout)], workRoot: path.join(dir, 'work'), run, neutralDir: dir });
   const said: string[] = [];
-  const scope: { base: string; chose?: string } = { base: 'origin/main' };
+  const scope: { base: string; chose?: string; files?: number } = { base: 'origin/main' };
   const steps = await affectedSteps(ctx, checkout, scope, (l) => said.push(l));
   assert.deepEqual(steps, ['npm run pretest', 'node --test "test/a.test.ts"']);
   assert.equal(scope.chose, 'affected: 1 of 2 test files');
+  assert.equal(scope.files, 1, "how many, for a vouch's time limit");
   assert.match(said.join('\n'), /package\.json: a version step/);
 
   // Only the changelog and the version: no test runs, its pretest still does.
