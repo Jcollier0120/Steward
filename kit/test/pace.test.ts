@@ -13,7 +13,7 @@ process.env.FIXTURE_HOME = path.join(home, 'data');
 process.env.NPU_AGENT_NPU_LOCK = path.join(home, 'locks', 'npu');
 mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
-const { AGENTS_AT_ONCE, FIRST_ROUND_WAITING, LOAD, WORK_WAITING, agentsAtOnce, inFirstRoundTurn, inWorkTurn, measureLoad, pace, setPriorityFor, slotsFor } = await import('./fixture/src/kit/pace.ts');
+const { AGENTS_AT_ONCE, CEILING_CAP, CEILING_WORDS, FIRST_ROUND_WAITING, LOAD, MEMORY_WAITING, NoRoom, PACE_CEILING, WORK_WAITING, agentsAtOnce, inFirstRoundTurn, inWorkTurn, measureLoad, memoryInUse, pace, roomToStart, setPriorityFor, shortOfMemory, slotsFor } = await import('./fixture/src/kit/pace.ts');
 const { LockTimeout } = await import('./fixture/src/kit/npu-queue.ts');
 const { every, firstRoundDone, roundFile } = await import('./fixture/src/kit/schedule.ts');
 const { readJson } = await import('./fixture/src/kit/store.ts');
@@ -126,7 +126,14 @@ test('the gentle script: compiles the helper only when asked to, to a name of it
   const first = gentleScript(42, false, 1111, "C:/o'k/gentle.dll", "class A { // can't }");
   assert.match(first, /Add-Type -TypeDefinition 'class A \{ \/\/ can''t \}' -OutputAssembly \$tmp/);
   assert.ok(first.includes("'C:/o''k/gentle.dll'"), 'paths quoted');
-  assert.match(first, /\[KitGentle\]::Set\(42, \$false, 1111\)/);
+  assert.match(first, /\[KitGentle\]::Set\(42, \$false, 1111\) \+ ' ' \+ \[KitGentle\]::Join\(42\)$/, 'a cap at either pace: the worker joins its job');
+  assert.match(gentleScript(42, false, 0, 'C:/x/gentle.dll', null), /\[KitGentle\]::Set\(42, \$false, 0\)$/, 'no cap: no job to join');
+});
+
+test("the manor's ceiling (kit 2.78.3): 85% of the processor and of memory, written once", () => {
+  assert.equal(PACE_CEILING, 0.85);
+  assert.equal(CEILING_CAP, 8500, 'in hundredths of a percent, as a job takes it');
+  assert.equal(CEILING_WORDS, '85%');
 });
 
 test('on Windows, a process set gentle and back: efficiency mode, disk priority and the cap all take, and the worker joins its job', { skip: process.platform !== 'win32' }, async () => {
@@ -141,7 +148,8 @@ test('on Windows, a process set gentle and back: efficiency mode, disk priority 
   try {
     assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, source), { timeoutMs: 120_000 })).trim(), 'eco io cap worker');
     assert.equal((await powershell(gentleScript(child.pid!, true, 2500, dll, null))).trim(), 'eco io cap worker', 'again: the same job, the worker in it already');
-    assert.equal((await powershell(gentleScript(child.pid!, false, 2500, dll, null))).trim(), 'eco io cap', 'lifted');
+    assert.equal((await powershell(gentleScript(child.pid!, false, CEILING_CAP, dll, null))).trim(), 'eco io cap worker', 'full: still in its job, at the ceiling');
+    assert.equal((await powershell(gentleScript(child.pid!, false, 0, dll, null))).trim(), 'eco io cap', 'a cap of 0: lifted');
   } finally {
     child.kill();
     stopPowerShellWorker();
@@ -161,14 +169,16 @@ test("agents at once: Manor's agentsAtOnce, else two at a gentle pace and four a
   assert.equal(agentsAtOnce('gentle', manorWith('a-env', { agentsAtOnce: 3 }), { MANOR_AGENTS_AT_ONCE: '0' }), null, 'the variable says instead of Manor');
 });
 
-test('the load: every slot on a quiet PC, half on a fairly busy one, one on a busy one or short of memory', () => {
+test("the load: every slot on a quiet PC, half on a fairly busy one, one on a busy one or short of memory (more than the ceiling's share in use)", () => {
   const quiet = { busy: 0.1, freeMemory: 0.5 };
   assert.equal(slotsFor(4, quiet), 4);
   assert.equal(slotsFor(4, { ...quiet, busy: LOAD.someBusy }), 2);
   assert.equal(slotsFor(3, { ...quiet, busy: LOAD.someBusy }), 2);
   assert.equal(slotsFor(2, { ...quiet, busy: LOAD.someBusy }), 1);
   assert.equal(slotsFor(4, { ...quiet, busy: LOAD.busy }), 1);
-  assert.equal(slotsFor(4, { ...quiet, freeMemory: LOAD.lowMemory / 2 }), 1);
+  assert.equal(slotsFor(4, { ...quiet, freeMemory: 0.1 }), 1, '90% in use: short of memory');
+  assert.equal(slotsFor(4, { ...quiet, freeMemory: 0.2 }), 4, '80% in use: room');
+  assert.deepEqual([shortOfMemory({ freeMemory: 0.14 }), shortOfMemory({ freeMemory: 0.15 }), shortOfMemory({ freeMemory: 0.5 })], [true, false, false], 'more than 85% in use');
   assert.equal(slotsFor(1, quiet), 1);
 });
 
@@ -176,6 +186,71 @@ test("the load is measured from Node's own counters: shares between 0 and 1", as
   const l = await measureLoad(50);
   assert.ok(l.busy >= 0 && l.busy <= 1, String(l.busy));
   assert.ok(l.freeMemory > 0 && l.freeMemory <= 1, String(l.freeMemory));
+  const used = memoryInUse();
+  assert.ok(used >= 0 && used < 1, String(used));
+});
+
+test('room to start (kit 2.78.3): at once at the ceiling or under it; above it, waits until there is room, told once; NoRoom at its deadline', async () => {
+  let looked = 0;
+  await roomToStart({ deadline: Date.now() + 1_000, inUse: () => (looked++, PACE_CEILING), onWait: () => assert.fail('no wait at the ceiling') });
+  assert.equal(looked, 1);
+  let used = 0.95;
+  let told = 0;
+  let room = false;
+  const waits = roomToStart({ deadline: Date.now() + 60_000, inUse: async () => used, lookMs: 20, onWait: () => told++ }).then(() => (room = true));
+  await until(() => told === 1, 10_000, 'the wait to be told');
+  await stillFor(100);
+  assert.equal(room, false, 'no room above the ceiling');
+  used = 0.6;
+  await until(() => room, 10_000, 'room once memory is freed');
+  await waits;
+  assert.equal(told, 1, 'told once, however long it looked');
+  await assert.rejects(roomToStart({ deadline: Date.now() + 100, inUse: () => 0.9, lookMs: 20 }), (e: Error) => e instanceof NoRoom && e instanceof LockTimeout && /90% of this PC's memory was in use, more than 85%/.test(e.message));
+  assert.match(MEMORY_WAITING, /more than 85% of this PC's memory is in use/);
+});
+
+test('the work line starts nothing new above the ceiling (kit 2.78.3): with no line or in its turn, a round waits for room, says so, and throws NoRoom when there is none', async () => {
+  const dir = path.join(home, 'locks', 'work-room');
+  const quiet = async () => ({ busy: 0.05, freeMemory: 0.6 });
+  mkdirSync(path.dirname(dir), { recursive: true });
+  const ran: string[] = [];
+  let told = 0;
+  await assert.rejects(inWorkTurn('full', async () => void ran.push('no line'), { who: 'a', limitMs: 60_000, waitMs: 300, slots: null, inUse: () => 0.9, lookMs: 20, onRoom: () => told++ }), NoRoom);
+  await assert.rejects(inWorkTurn('full', async () => void ran.push('in line'), { who: 'b', limitMs: 60_000, waitMs: 300, dir, slots: 2, load: quiet, inUse: () => 0.9, lookMs: 20 }), NoRoom);
+  // What the load says of memory stands in when nothing else does: 10% free is 90% in use.
+  await assert.rejects(inWorkTurn('full', async () => void ran.push('by load'), { who: 'c', limitMs: 60_000, waitMs: 300, dir, slots: 2, load: async () => ({ busy: 0.05, freeMemory: 0.1 }), lookMs: 20 }), NoRoom);
+  assert.deepEqual([...ran], [], 'nothing started');
+  assert.equal(told, 1);
+  let used = 0.9;
+  const later = inWorkTurn('full', async () => void ran.push('once there is room'), { who: 'd', limitMs: 60_000, waitMs: 60_000, dir, slots: 2, load: quiet, inUse: () => used, lookMs: 20 });
+  await stillFor(100);
+  assert.deepEqual([...ran], []);
+  used = 0.5;
+  await later;
+  assert.deepEqual(ran, ['once there is room']);
+  // The slot it took in the meantime is free again: the next one goes at once.
+  await inWorkTurn('full', async () => void ran.push('next'), { who: 'e', limitMs: 60_000, waitMs: 1_000, dir, slots: 1, inUse: () => 0.5 });
+  assert.deepEqual(ran, ['once there is room', 'next']);
+});
+
+test("a scheduled round above the ceiling waits for room, and its state says so; it runs once there is room", async () => {
+  const { setDuty } = await import('./fixture/src/kit/duty.ts');
+  setDuty(true);
+  let used = 0.9;
+  const ran: string[] = [];
+  const job = every(3_600_000, async () => void ran.push('round'), { name: 'room', firstDelayMs: 20, room: { inUse: () => used, lookMs: 20 } });
+  try {
+    await until(() => job.state.waiting === MEMORY_WAITING, 10_000, 'the round to wait for room');
+    await stillFor(100);
+    assert.deepEqual([...ran], [], 'no room: it waits');
+    assert.equal(job.state.runningSince, null, 'not running while it waits');
+    used = 0.5;
+    await until(() => ran.length > 0 && !job.running, 10_000, 'the round, once there is room');
+    assert.equal(job.state.waiting, null);
+    assert.equal(readJson<{ rounds: Record<string, { ok: boolean }> }>(roundFile(), { rounds: {} }).rounds.room.ok, true);
+  } finally {
+    job.stop();
+  }
 });
 
 test('the work line: rounds side by side up to its slots, the next when one ends; one at a time on a busy PC; none with no line', async () => {

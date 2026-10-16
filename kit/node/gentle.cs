@@ -1,6 +1,7 @@
 // The kit's gentle pace in Windows' own terms (gentle.ts), as Heiward sets it for itself (Program.cs, Power.SetPace):
 // Windows' efficiency mode (EcoQoS), a very low disk priority, and a hard cap on the processor through a job object,
-// which every program the agent starts afterwards is in too. Compiled once to a DLL (gentle.ts) and loaded by the
+// which every program the agent starts afterwards is in too. At a full pace (kit 2.78.3) the job stays, capped at the
+// manor's ceiling (85% of the processor), without the rest. Compiled once to a DLL (gentle.ts) and loaded by the
 // agent's PowerShell worker, which sets them on the agent's process from outside it, then joins the job itself (Join).
 // The job lets a program started with CREATE_BREAKAWAY_FROM_JOB leave it (the kit's apart launcher, for the model
 // servers every agent shares); nothing else the agents run asks to.
@@ -49,9 +50,10 @@ public static class KitGentle
     public static string JobName(int pid) { return @"Local\Castellan-pace-" + pid; }
 
     /// <summary>
-    /// Sets process <paramref name="pid"/> gentle (efficiency mode, very low disk priority, its job capped at
-    /// <paramref name="capHundredths"/> hundredths of a percent of the processor) or back to normal. Each part is tried on
-    /// its own; the answer says which took ("eco io cap", or "-" for one that didn't), for the agent's log.
+    /// Sets process <paramref name="pid"/> gentle (efficiency mode, very low disk priority) or back to normal, and its job
+    /// capped at <paramref name="capHundredths"/> hundredths of a percent of the processor, either way (0: no cap, and
+    /// no job made for it). Each part is tried on its own; the answer says which took ("eco io cap", or "-" for one that
+    /// didn't), for the agent's log.
     /// </summary>
     public static string Set(int pid, bool gentle, int capHundredths)
     {
@@ -64,20 +66,21 @@ public static class KitGentle
             // Very low (0) in the background; normal (2) otherwise.
             int io = gentle ? 0 : 2;
             bool ioOk = NtSetInformationProcess(p, ProcessIoPriority, ref io, 4) >= 0;
-            return (ecoOk ? "eco" : "-") + " " + (ioOk ? "io" : "-") + " " + (Cap(p, pid, gentle, capHundredths) ? "cap" : "-");
+            return (ecoOk ? "eco" : "-") + " " + (ioOk ? "io" : "-") + " " + (Cap(p, pid, capHundredths) ? "cap" : "-");
         }
         finally { CloseHandle(p); }
     }
 
-    // The cap is on a job of the agent's own, made the first time it's gentle. Its handle is copied into the agent's
-    // process, so the job and its name last as long as the agent does: a later worker opens it by name to lift the cap
-    // for a round someone asked for, or set it again. A process can't leave a job, so lifting is the cap switched off.
-    static bool Cap(IntPtr p, int pid, bool gentle, int capHundredths)
+    // The cap is on a job of the agent's own, made the first time it has one (gentle, or full at the manor's ceiling).
+    // Its handle is copied into the agent's process, so the job and its name last as long as the agent does: a later
+    // worker opens it by name to set the cap again for the other pace. A process can't leave a job, so a cap of 0
+    // switches it off.
+    static bool Cap(IntPtr p, int pid, int capHundredths)
     {
         IntPtr job = OpenJobObject(JOB_OBJECT_ALL_ACCESS, false, JobName(pid));
         if (job == IntPtr.Zero)
         {
-            if (!gentle) return true;
+            if (capHundredths <= 0) return true;
             job = CreateJobObject(IntPtr.Zero, JobName(pid));
             if (job == IntPtr.Zero) return false;
             var limits = new ExtendedLimits();
@@ -96,7 +99,7 @@ public static class KitGentle
         }
         try
         {
-            var rate = gentle
+            var rate = capHundredths > 0
                 ? new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, Math.Min(10000, capHundredths)) }
                 : new CpuRateControl { ControlFlags = 0, CpuRate = 0 };
             return SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));

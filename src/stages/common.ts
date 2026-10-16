@@ -95,6 +95,8 @@ export interface Ctx {
   tasting?: TastingDeps;
   /** Whether this PC is online (the kit's net.ts); tests stand in for it. Under node --test, online unless given. */
   online?: () => Promise<boolean>;
+  /** The share of this PC's memory in use now, 0 to 1 (the kit's pace.ts memoryInUse); tests stand in for it. Under node --test, none unless given. */
+  memoryInUse?: () => number;
   /** How each repository is worked with (scm.ts): GitHub's way, GitLab's, or plain git. Not given: GitHub's, as before. */
   host?: (e: Pick<Employee, 'repo'>) => Host;
   /**
