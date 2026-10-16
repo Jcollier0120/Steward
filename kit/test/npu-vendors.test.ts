@@ -77,7 +77,8 @@ test('detection: every NPU Windows lists as a Neural processor, by maker and gen
   assert.equal(lunar.driver, '32.0.100.4239');
   assert.equal(lunar.verified, true, 'the NPU check passed on a Lunar Lake (2026-10-12)');
   assert.equal(at(NPU.meteor, 'x64').verified, true, 'the NPU check passed on an Arrow Lake-U, whose NPU 3720 shows 7D1D (2026-10-14)');
-  assert.equal(at(NPU.meteor, 'x64').label, 'Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)');
+  assert.equal(at(NPU.meteor, 'x64').label, 'Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)');
+  assert.equal(at(NPU.arrowS, 'x64').label, 'Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)');
   assert.equal(at(NPU.arrowS, 'x64').verified, false, 'never run on an Arrow Lake-S');
   assert.equal(at(NPU.x2, 'arm64').verified, true, 'this laptop');
   assert.deepEqual(V.npuVendorOf('Qualcomm Technologies, Inc.', 'x'), 'qualcomm');

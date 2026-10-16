@@ -6,6 +6,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 **Pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, including Smith's audit's 512×512 vision check and a 1280×720 picture. The kit now makes such a side a pixel longer before sending the picture.**
 
+**Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
+
 ### What's new
 
 - **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
@@ -21,6 +23,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **`Npu.vision`, setup's vision test, and the NPU check's and benchmark's requests** (npu-server.ts' `serverClient`) fit each picture first. On the AMD route, three of the benchmark's four pictures go a pixel larger. The benchmark's log names the quirk, and its times leave out the redraw.
 - **spec/NPU-VENDORS.md:** the measurements, in "FastFlowLM's pictures with sides of 32 px".
 - `visionBody` is unchanged and stays synchronous.
+- **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
+- **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
 
 ### What an agent must do
 
