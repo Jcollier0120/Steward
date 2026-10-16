@@ -31,7 +31,7 @@ The kit's server answers it for every agent (`node/server.ts`), built by `workSt
 - **`slots`**: the agent's own limits, each kind of work it runs at once (`of`, null for none) and how many it runs now. The kit has none of its own; the Steward gives its stages.
 - **`running`, `waiting`**: its **tasks**. A task has a kind (one word: `round`, `check`, `trial`, `whole-suite`…), what it is in words, and what it runs on when that's a repository's code: the repository, the commit, its tree, the PR. `parent` is the task it is part of. A running task has `runningSince`; a waiting one the `line` it waits in (a line's id), `inLineSince`, and `ahead`, how many in that line have waited longer.
 - **`lines`**: the lines work waits in, with who holds a place (`holders`) and who waits (`waiting`), since when. The PC's are the same from every agent on it: `checks` (the checks pace's turns, `slots` null when the pace is full), `work` (the kit pace's work line), `first-round`, and `accelerator:<id>` for each accelerator. An agent may add its own, `<agent>:<name>`, kind `agent`. A place names its agent (`who`) when the line says, else its process (`pid`); `work` is that agent's task.
-- **`results`**: what its work came to, **one per kind, repository and code tree** (git's tree id: the same code has the same tree, whatever the commit), the latest; the newest first, at most 50. A result with no tree known has `tree` null and its commit.
+- **`results`**: what its work came to, **one per kind, repository and code tree** (git's tree id: the same code has the same tree, whatever the commit), the latest; the newest first, at most 50. A result with no tree known has `tree` null and its commit. Since kit 2.77.0 a result also says the `commands` it ran, the `node` (Node.js's version) and `platform` (the OS) it ran on, and, for a pass taken from another PC, `from` (`{ id, name }`: that PC).
 - **`blocked`**: what holds its work up, by what, since when: a version queue held by a PR that isn't ready, with what waits behind it.
 
 ## In the kit
@@ -39,3 +39,19 @@ The kit's server answers it for every agent (`node/server.ts`), built by `workSt
 - **Tasks** (`node/work-tasks.ts`): `withWork(fields, fn)` runs `fn` as a task, ended however it ends; `startWork(fields)` gives a handle to `waitIn(line)`, `running()`, `set(fields)` and `done()`. A task started inside another's `withWork` is its part; work started in `outsideWork(fn)` is a task of its own, for a job that outlives the task that started it. Every scheduled round is a task (`node/schedule.ts`): waiting in the first-round line or the work line, then running, the work it tracks its part.
 - **The checks pace's runs** (`node/checks-pace.ts`): each paced run's launcher writes `<pid>.run` in `checksRunsDir()` while it runs: `waiting -1 <since>`, `turn <n> <since>` or `running -1 <since>`, then a line naming the agent, its task and what it runs, tab apart (`KIT_CHECKS_WHO`, set by `pacedCommand` from the task it runs in). A task whose every check waits for a turn waits in the `checks` line. A file whose launcher has gone is removed by the next reader.
 - **Results** (`node/work-status.ts`): `recordResult({ kind, repo, tree, commit, ok, note })` keeps the latest per key in `work-results.json` (200 of them); `resultFor({ kind, repo, tree })` finds one. `codeAt(dir)` reads a checkout's commit, tree and whether it's clean, for a task's fields and before its result is kept: the Steward keeps each check run's this way, unless a kit under trial filled it.
+
+## A pass anywhere, for the same code
+
+Since kit 2.77.0 an agent about to run work on a clean checkout can take a pass of exactly that code instead, from this PC or another PC on the licence.
+
+- **`passFor({ kind, repo, tree, commands })`** looks for one: this PC's own result for the tree first, else another PC's through Manor (`passOnOtherPcs`, `node/manor.ts`). Either is taken only when `whyNotPass` finds nothing against it:
+  - it **passed**;
+  - it is of the **same kind** (`checks` is the whole checks; `affected checks`, only the tests a change reached, never stands in for them);
+  - it is for the **same repository** and **tree**;
+  - it is under **a day** old (`PASS_STANDS_MS`), and not more than ten minutes ahead of this PC's clock;
+  - it ran on the **same Node.js major and OS** as here (`toolchainHere()`). The kit, the lockfile and everything else the tree holds are already the same, since the tree is;
+  - it ran **every command asked**.
+
+  A failure here newer than the other PC's pass, and that pass isn't taken. A failure elsewhere never stands in for anything. A pass taken from another PC is kept here as that PC's (`from`, at the time it ran there). A result from before kit 2.77.0 says no Node.js or OS, and never stands in.
+- **`GET /api/peer/result?kind=<kind>&repo=<owner/name>&tree=<tree>`** (`node/server.ts`, `peerResult`) answers `{ "v": 1, "result": … }` with this agent's own result for that tree, read from all it keeps, or `null`. It never passes on a pass it took from another PC. It is read only, so Manor's link passes it on as `GET /agents/<id>/result`.
+- **Manor** (0.16.163 and later) answers `GET /api/peers/result?agent=<id>&kind=…&repo=…&tree=…&node=<major>&platform=…` on this PC, with an `X-Castellan-Peer` header, as the first pass from the PCs it hears from, asked all at once for a few seconds: `{ "v": 1, "result": { …, "pc": { "id", "name" } } | null, "asked": <n>, "why": … }`. With Other PCs off it asks no one. An older Manor's 404, like any other answer that isn't a pass, is no pass: the work runs.

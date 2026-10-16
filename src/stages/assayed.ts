@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { gitMaybe } from '../git.ts';
 import { readJson } from '../kit/store.ts';
+import { PASS_STANDS_MS } from '../kit/work-status.ts';
 import type { Employee } from '../settings.ts';
 import type { Runner } from '../run.ts';
 import { affectedPick, type AffectedScope, type TestPick } from './bump.ts';
@@ -43,8 +44,11 @@ export interface Assayed {
   chose?: string;
 }
 
-/** How old a pass may be and still stand in for running the checks: the Assayer's own (SAME_CODE_MS), a day. */
-export const ASSAYED_MS = 24 * 3600_000;
+/**
+ * How old a pass may be and still stand in for running the checks: the Assayer's own (SAME_CODE_MS), a day, and the
+ * kit's for a pass here or on another PC (work-status.ts PASS_STANDS_MS), so every pass that stands in has one age.
+ */
+export const ASSAYED_MS = PASS_STANDS_MS;
 
 /** The Assayer's record of checks: ASSAYER_HOME's mcp-checks.json, else %USERPROFILE%\.assayer's. */
 export const assayerChecksFile = (env: NodeJS.ProcessEnv = process.env) => path.join(env.ASSAYER_HOME || path.join(os.homedir(), '.assayer'), 'mcp-checks.json');
