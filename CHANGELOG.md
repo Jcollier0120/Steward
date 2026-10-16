@@ -14,6 +14,28 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.73
+
+**A build tests the kit once: kit pull requests go last, all together, in one trial on the agents, and a trial's result stays with the kit it tried.**
+
+### What changed
+
+- **Kit pull requests wait for the rest of the build.** In a build, a pull request that raises the kit no longer starts a trial on the agents as soon as it's ready.
+  - It waits while the build's other pull requests merge, test and are caught up, and gives up its turn meanwhile, so they don't wait for it.
+  - Then the build stacks every kit pull request ready by then, in version order, and tries that stack once on every agent.
+  - If the stack passes, they all merge with no trial each. If it fails an agent, each is tried alone in turn, in the same build, to find whose kit it was.
+  - Between builds, when the Steward merges ahead of the build, a kit pull request now waits for the build instead of being tried on its own.
+  - A kit pull request that turns up after the build's trial has started still waits for the next build, as before.
+- **A trial's result stays with the kit, not with the pull request's commit.** What decides it is what the agents get: the kit's parts and its install script.
+  - A catch-up, a new kit version number or a new changelog keeps the result, and the agents aren't tried again. So does another pull request that carries the very same kit, such as one stacked on a kit pull request.
+  - On 16 October one build tried the same kit on all 35 agents three times. Only catch-ups and new version numbers had moved the pull requests that carried it.
+- **A pull request stacked on a kit pull request keeps that kit's version.** The Steward no longer counts a kit version inherited from the pull request below as a second claim and renumbers it.
+  - On 16 October this renumbered three stacked pull requests' kit entries to 2.78.4, 2.78.5 and 2.78.6. Once the pull request below merged, those entries conflicted with main.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.70
 
 **Builds do less work: ready pull requests merge between builds and wait on main to be released at the build, one kit is tried and rolled out per build, an agent is released for a new kit alone only when the kit changes what it runs, and the whole suite is never tested beside a kit's trial.**
