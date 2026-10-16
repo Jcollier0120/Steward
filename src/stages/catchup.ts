@@ -169,9 +169,11 @@ export function mergeChangelogs(base: string, ours: string, theirs: string, to: 
     return VERSION_IN.test(heading) ? [heading.replace(VERSION_IN, to), ...rest].join('\n') : null;
   });
   if (renamed.includes(null)) return null;
-  // The branch's new Unreleased entries, below the PR's version once it is above them: released with it, so in its entry.
-  const waiting = renamed.length && !isUnreleased(renamed[0]!) ? theirsNew.filter(isUnreleased) : [];
-  const moved = waiting.length ? [foldUnreleased(renamed[0]!, waiting), ...theirsNew.filter((p) => !isUnreleased(p))] : [...(renamed as string[]), ...theirsNew];
+  // The branch's new Unreleased entries above its newest version, below the PR's once it is above them: released with
+  // it, so in its entry. One below a version the branch has since released went out with that one, and stays.
+  const released = theirsNew.findIndex((p) => !isUnreleased(p));
+  const waiting = renamed.length && !isUnreleased(renamed[0]!) ? theirsNew.slice(0, released < 0 ? theirsNew.length : released) : [];
+  const moved = waiting.length ? [foldUnreleased(renamed[0]!, waiting), ...theirsNew.slice(waiting.length)] : [...(renamed as string[]), ...theirsNew];
   // Each section is its lines, joined again with the line breaks between them; one moved above another ends with a blank line.
   const parts = [...moved.map((p, i) => (i < moved.length - 1 || n ? spaced(p) : p)), ...older];
   const text = (head === '' && parts.length ? parts : [head, ...parts]).join('\n');

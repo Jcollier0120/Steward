@@ -180,6 +180,16 @@ test("the changelog's Unreleased entries: the PR's goes above the branch's new o
     ['For an agent', '- A refused PC is tried at its next Set up.'],
   );
   assert.equal(mergeChangelogs(base, ours, theirs, '0.4.2'), log(['0.4.2', folded], ['0.4.1', 'A fix.'], ['0.4.0', 'The first.']));
+  // One below a version the branch released since (as Steward 0.36.60 merged after #278's Unreleased entry) went out
+  // with that version: it stays where it is, and the PR's entry takes nothing of it.
+  const npu = entry('The NPU writes faster.', ['What changed', '- BEST_PERF.']);
+  const mine = entry('Work status.', ["What's new", '- **work-status.ts**: a status.'], ['For an agent', '- Nothing to do.']);
+  assert.equal(mergeChangelogs(base, ours, log(['0.4.1', 'A fix.'], ['Unreleased', npu], ['0.4.0', 'The first.']), '0.4.2'), log(['0.4.2', mine], ['0.4.1', 'A fix.'], ['Unreleased', npu], ['0.4.0', 'The first.']));
+  // Above it still waits: the PR's entry takes that one, and the one below stays.
+  assert.equal(
+    mergeChangelogs(base, ours, log(['Unreleased', npu], ['0.4.1', 'A fix.'], ['Unreleased', 'Older.'], ['0.4.0', 'The first.']), '0.4.2'),
+    log(['0.4.2', entry("Work status. It also brings what wasn't released before: The NPU writes faster.", ["What's new", '- **work-status.ts**: a status.'], ['What changed', '- BEST_PERF.'], ['For an agent', '- Nothing to do.'])], ['0.4.1', 'A fix.'], ['Unreleased', 'Older.'], ['0.4.0', 'The first.']),
+  );
   // "Nothing to do" gives way to what says more: here, the only what-to-do line is the Unreleased entry's.
   assert.match(foldUnreleased(`## 0.4.2\n\n${entry('A.', ['Before you update', NOTHING_TO_DO])}`, [`## Unreleased\n\n${entry('B.', ['Before you update', '- Restart it.'])}`]), /### Before you update\n\n- Restart it\.\n$/);
   assert.match(foldUnreleased(`## 0.4.2\n\n${entry('A.', ['Before you update', '- Restart it.'])}`, [`## Unreleased\n\n${entry('B.', ['Before you update', NOTHING_TO_DO])}`]), /### Before you update\n\n- Restart it\.\n$/);

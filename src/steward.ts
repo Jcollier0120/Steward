@@ -30,7 +30,7 @@ import { loadInstallHolds } from './installscripts.ts';
 import { release } from './stages/release.ts';
 import { approveMerged } from './stages/jobs.ts';
 import { releaseUnreleased, roundDidSomething, roundFailuresFile } from './stages/round.ts';
-import { clearRolloutHolds, loadRolloutFailures, rollout } from './stages/rollout.ts';
+import { clearRolloutHolds, loadRolloutFailures, rollout, takeRolloutResults } from './stages/rollout.ts';
 import { loadSelfFailures, releaseSelf, selfFactsAlone } from './stages/self.ts';
 import { settleWholeSuite } from './stages/wholesuite.ts';
 import { staff, type Staff } from './stages/staff.ts';
@@ -46,7 +46,7 @@ import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
-import { repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
+import { heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
@@ -597,6 +597,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       // A round looks only at the employees with something new on GitHub since the last (stages/changes.ts).
       const seen = name === 'round' ? loadSeen() : null;
       let plan: RoundPlan | null = null;
+      /** Those a rollout beside the rounds is bumping now, which this round leaves to it (stages/rollout.ts). */
+      let bumping: Employee[] = [];
       const own = o.ownKit !== undefined ? o.ownKit : ownKit();
       /** A new kit that waits for this Steward to carry it (stages/rollout.ts), for the alarms. */
       let rolloutWaits: { kit: string; own: string } | null = null;
@@ -697,12 +699,20 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             const looked = await takeTurnsFor(ctx, o, plan.look, null, true);
             plan = { ...plan, look: looked.acting };
             elsewhere = looked.elsewhere;
-            employees = plan.look;
             if (plan.quiet.length) log(`nothing new on GitHub since the last round for ${plan.quiet.map((e) => e.name).join(', ')}: not looked at again`);
+            // Those a rollout beside the rounds is bumping or pushing now (stages/rollout.ts): left to it, rather than this
+            // round waiting for that bump's checks, and looked at again next round (kept as they were seen before).
+            bumping = plan.look.filter((e) => heldBy(e.id) === 'rollout');
+            if (bumping.length) {
+              log(`${bumping.map((e) => e.name).join(', ')}: the kit's rollout beside the rounds is bumping ${bumping.length === 1 ? 'it' : 'them'} now, so ${bumping.length === 1 ? 'it is' : 'they are'} looked at next round`);
+              plan = { ...plan, look: plan.look.filter((e) => !bumping.includes(e)), quiet: [...plan.quiet, ...bumping] };
+            }
+            employees = plan.look;
           }
           const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
           mergedHere.push(...merged.flatMap((r) => r.merged.map((p) => `${r.id} #${p.number}`)));
-          out.results = [...elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : [])];
+          // And what a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
+          out.results = [...elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : []), ...(round ? takeRolloutResults() : [])];
           held.push(
             ...merged.flatMap((r) => {
               const employee = employees.find((e) => e.id === r.id);
@@ -742,8 +752,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             };
             // A new kit, rolled out to each employee looked at that is behind it (stages/rollout.ts): bumped and pushed now,
             // merged and released by the next round, which comes sooner for them (their checks passed here, and a kit PR
-            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold). The kit PRs opened, if any.
-            const rollOut = async (): Promise<EmployeeResult[]> => {
+            // of the Steward's doesn't wait to be old enough: merge.ts's ageHold). The kit PRs opened, if any. On the
+            // Steward's page the bumps run beside the rounds instead (`beside`): this round goes on at once, and those
+            // after it merge meanwhile; a round comes as soon as they end, to merge their PRs (agent.ts).
+            const rollOut = async (): Promise<{ opened: EmployeeResult[]; beside: boolean }> => {
               const newest = latestKit(ctx.kit);
               try {
                 const rolled = await rollout(ctx, employees, { kit: newest, ownKit: own, changelog: (k) => changelogFor(ctx, k) });
@@ -754,18 +766,20 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                   out.soon = true;
                   log(`the next round comes sooner: kit ${rolled.plan.kit ?? newest}'s PRs for ${opened.map((r) => r.name).join(', ')} merge${mode.kind === 'build' ? ' in this build' : ' and release'} then`);
                 }
-                return opened;
+                return { opened, beside: !!rolled.beside };
               } catch (err) {
                 log(`rollout: ${(err as Error).message}`);
-                return [];
+                return { opened: [], beside: false };
               }
             };
             if (mode.kind === 'build') {
               // A build: the kit's PRs opened first, so they merge in this build too; then, once nothing is left that
-              // settles within minutes (checks running, a kit's trial, kit PRs just opened), every repository's new
-              // version released at once, the one release of this build. Or when the build's time has run out.
-              const opened = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run) ? await rollOut() : (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), []);
-              buildCloses = mode.closing || (!brief.length && !opened.length);
+              // settles within minutes (checks running, a kit's trial, kit PRs just opened, a rollout beside the rounds),
+              // every repository's new version released at once, the one release of this build. Or when the build's time
+              // has run out.
+              const rolled = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run) ? await rollOut() : (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false });
+              const opened = rolled.opened;
+              buildCloses = mode.closing || (!brief.length && !opened.length && !rolled.beside);
               if (buildCloses) {
                 // The build's one release is every repository of the build's, looked at this round or not: their turns
                 // taken first, as this round took only those it looked at (above).
@@ -773,8 +787,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
                 await releaseNow(all.acting);
               }
               else {
-                out.soon = true;
-                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : ''}`);
+                // A rollout beside the rounds alone: no round sooner, as the one after it comes once it ends (agent.ts).
+                if (brief.length || opened.length) out.soon = true;
+                log(`the build releases once it has settled${brief.length ? `: ${brief.join(', ')} ${brief.length === 1 ? 'waits' : 'wait'} on something brief` : !opened.length && rolled.beside ? ": the kit's rollout goes on beside the rounds" : ''}`);
               }
               out.results.push(...selfReleases);
             } else {
@@ -784,7 +799,8 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               await rollOut();
             }
             // Then each employee's jobs whose installed script is the merged one, approved, so an update never leaves them waiting.
-            for (const e of picked.employees) {
+            // Not one a rollout beside the rounds is bumping now: the next round approves its jobs, rather than this one waiting.
+            for (const e of picked.employees.filter((x) => heldBy(x.id) !== 'rollout')) {
               let r: EmployeeResult | null;
               try {
                 r = await withRepo(log, e.id, () => approveMerged(ctx, e));
@@ -794,7 +810,7 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               }
               if (r) out.results.push({ ...r, message: `jobs: ${r.message}` });
             }
-            if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', 'nothing new on GitHub since the last round')));
+            if (plan) out.results.push(...plan.quiet.map((e) => result(e, 'skipped', bumping.includes(e) ? "the kit's rollout beside the rounds is bumping it now: looked at next round" : 'nothing new on GitHub since the last round')));
           }
         } else if (name === 'release' && ask.hire) {
           // A hire: the agents named, installed here from their clones, whatever kit is being rolled out, on this PC's own

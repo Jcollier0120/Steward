@@ -4,11 +4,17 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.77.8
 
-**PowerShell's time limits stretch at the checks pace, as a test's own waits do.**
+**PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**
 
 ### What changed
 
 - **ps.ts**: `powershell(script, { timeoutMs })` stretches its time limit (60 s unless given) by as much as the checks pace slows the process (`psPaced`, which reads `KIT_CHECKS_SLOWER` as checks-pace.ts's `paced` does). A test run at the pace starts its own powershell.exe inside the pace's job, beside every other test file's, and .NET's start alone could pass the keeper's 30 s process query, or a script's 60 s, there. The keeper's and psQuote's tests timed out so on a busy PC. Unpaced, as an agent's own work runs, nothing changes.
+- **npu-check.ts's `--harden`** waits, up to a minute, for the server the timeout case's setup started to answer before stopping it. Given 1 s, that server hadn't opened its port when the check stopped servers, and only a server that answers is stopped, so it was left loading the route's model, and the nonsense case's test asked it instead of starting its own: a 404 for the nonsense model, and the step failed (the NPU 3720, 2026-10-15). With it, every `--harden` step passes on the NPU 3720, the nonsense case too: OpenVINO's group-wise Qwen3-4B compiles there (its first load 125 s) and answers nonsense, as on the Lunar Lake, and setup leaves the NPU out.
+- **spec/NPU-VENDORS.md** gains Memory on a 16 GB Intel PC: on the NPU 3720, with the route's commands, chat held 3.20 GB and embeddings 1.16 GB on the NPU (1.14–1.27 on the graphics), 4.2–4.4 GB of the PC's available memory together, under the route's `memoryGb` (5.54) and the 6.2 GB budget; Windows lets the NPU hold 8.80 GB. Nothing changes: the Snapdragon's smaller embedding context (kit 2.75.1) saves nothing on OpenVINO's NPU.
+
+### For an agent
+
+- Nothing to do: take the kit and release as usual.
 
 ## 2.77.6
 
@@ -100,8 +106,6 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 ### For an agent
 
 - Nothing to do.
-
-
 - A PC already set up keeps serving the 4B models until it is set up again (Manor's Set up local AI), which pulls Qwen3.5-2B (2.0 GB).
 - The 4B models stay in `%USERPROFILE%\.flm\models` (7.4 GB) until removed (`flm remove qwen3-it:4b`, `flm remove qwen3vl-it:4b`).
 

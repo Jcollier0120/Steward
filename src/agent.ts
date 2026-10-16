@@ -27,6 +27,7 @@ import { handOver, turnsView, type TurnsDeps } from './lease.ts';
 import { claimClashes, employeeFor } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
+import { rolloutsBeside } from './stages/rollout.ts';
 import { trialsOnTheirOwn } from './stages/trial.ts';
 import { endWholeOrphans, endWholeSuite, loadWholeJob, wholeSuitesBeside } from './stages/wholesuite.ts';
 import { githubReady, hostOf, loadScm, type Host } from './scm.ts';
@@ -343,6 +344,19 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
   wholeSuitesBeside({
     log: (line) => console.log(`whole suite: ${line}`),
     ended: () => {
+      if (!loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
+      if (rounding() || slotsFull()) roundAfter = true;
+      else startRound();
+    },
+  });
+  // And a kit's rollout (stages/rollout.ts): its bumps, checks and pushes run beside the rounds, which go on merging. Once
+  // it ends, a round at once: it merges the kit PRs opened, reports what the rollout did, and looks again at the
+  // employees whose bump or push failed.
+  rolloutsBeside({
+    log: (line) => console.log(`rollout: ${line}`),
+    ended: ({ results }) => {
+      if (!results.some((r) => r.outcome === 'done' || r.outcome === 'failed')) return;
+      lookNext = [...new Set([...lookNext, ...results.filter((r) => r.outcome === 'failed').map((r) => r.id)])];
       if (!loadSettings().byItself || !duty().onDuty || !stewardActs()) return;
       if (rounding() || slotsFull()) roundAfter = true;
       else startRound();
