@@ -15,7 +15,7 @@ import { openPrs, parsePrs, readPin, type PrInfo } from './staff.ts';
 import { hostFor } from '../hosts/index.ts';
 import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
-import { apart, withRepo } from './slots.ts';
+import { apart, apartNow, withRepo } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 
 /**
@@ -131,6 +131,8 @@ export interface KitTrial extends TrialPasses {
   base?: string;
   /** Carried from another trial (its key): this PR's at another head, or the kit PRs tried together with it. */
   from?: string;
+  /** The build it began in (its build time), when it began in one (oneKitPerBuild); none for one tried between builds. */
+  build?: string;
 }
 
 /** A kit PR tried together with others (KitTrial's `members`). */
@@ -175,6 +177,13 @@ export const trialsOnTheirOwn = (ended: typeof onTheirOwn) => void (onTheirOwn =
 
 /** The trial being tried on its own in this process: one at a time, so two never try the same agent's folder. */
 let running: { key: string; pr: number; kit: string } | null = null;
+
+/**
+ * A trial's wait while the Steward's whole suite runs beside the rounds (wholesuite.ts), or null: never the two at once,
+ * as on 2026-10-16, when one beside a trial ran into its 20-minute limit. The round that comes when it ends starts it.
+ */
+const wholeGoing = (): string | null =>
+  onTheirOwn && apartNow('whole suite') ? `${TRIAL_GOING}: it waits for the Steward's whole suite running beside the rounds to end first, so the two never test at once; the rounds go on meanwhile` : null;
 
 /** How long a trial's process may go without saving before another counts it gone: longer than any one agent's try. */
 const BY_QUIET_MS = 30 * 60_000;
@@ -262,6 +271,38 @@ export function trialGivesWay(e: Employee, prs: PrInfo[], kept = readJson<Record
     return !!t && !leftOf(t) && !!t.commented && standingFailures(t).length > 0;
   };
   return new Set(prs.filter((pr) => raisesKit(pr) && !pr.draft && !!pr.headOid && !pr.labels.includes(KIT_BREAKS_LABEL) && fails(pr)).map((pr) => pr.number));
+}
+
+/**
+ * One kit per build (Steward 0.36.70): a build tries one kit, the stack of every kit PR ready as it tries it (combineKits),
+ * and rolls that one out; between builds, the next build's is tried ahead of it (prepare.ts). A kit PR whose head moved
+ * in the build (its author pushed, or it went back to draft and the stack changed) isn't tried a second time in it: it
+ * waits for the trial between builds, and merges in the next. On 2026-10-16 the 08:00 build tried two 34-agent stacks,
+ * 30 minutes apart, because #289's head moved after the first. The trial that began in build `due`, if one did. Pure.
+ */
+const begunIn = (kept: Record<string, KitTrial>, due: string): [string, KitTrial] | undefined => Object.entries(kept).find(([, t]) => t.build === due);
+
+/** How the hold of a kit PR waiting for the next build's trial begins. */
+export const NEXT_BUILD_TRIAL = 'its kit is tried between builds, for the next build';
+
+/** The hold of a kit PR at `sha` that would need a second trial in a build that tried `begun` (its key and trial). Pure. */
+export const nextBuildWords = (sha: string, [key, t]: [string, KitTrial]): string =>
+  `${NEXT_BUILD_TRIAL}: this build tried kit ${t.kit} already (${key.replace(TOGETHER, '').split('+').map((m) => `#${m.split('@')[0]}`).join(' with ')}), before it moved to ${sha}, and a build tries one kit`;
+
+/**
+ * Before a kit PR is tested in a build: why it waits for the next build's trial instead (begunIn), or null. Not when its
+ * head was tried, or is covered by kit PRs tried together, or carries a trial from an earlier head (kitTrialHold).
+ */
+export async function trialWaitsForNextBuild(ctx: Ctx, steward: Employee, pr: PrInfo, line: PrInfo[] = []): Promise<string | null> {
+  if (!ctx.build || steward.id !== APP.id || !raisesKit(pr) || !pr.headOid) return null;
+  const kept = readJson<Record<string, KitTrial>>(kitTrialsFile(), {});
+  const begun = begunIn(kept, ctx.build.due);
+  if (!begun || kept[keyOf(pr)]) return null;
+  const repo = checkoutOf(steward);
+  await fetchFor(ctx.run, repo, pr.headOid, `refs/pull/${pr.number}/head`);
+  if (await togetherFor(ctx, steward, pr, kept, triedWith(pr, line))) return null;
+  if (await carriedFrom(ctx, repo, pr, await triedAt(ctx, repo, pr.headOid), kept)) return null;
+  return nextBuildWords(pr.headOid.slice(0, 7), begun);
 }
 
 /** The comment on the PR: the employees the kit breaks, and what to do. Pure. */
@@ -845,6 +886,14 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
       ctx.log(`[${APP.id}] #${pr.number}: ${was} was tried at ${before[0].split('@')[1].slice(0, 7)}, and its kit and tools/kit.ts are the same at ${sha} but for versions and changelogs: not tried again`);
       t = { ...before[1], kit, ...tried, from: before[0] };
     } else {
+      // A build tries one kit (begunIn): this head waits for the trial between builds.
+      const begun = ctx.build ? begunIn(kept, ctx.build.due) : undefined;
+      if (begun) return nextBuildWords(sha, begun);
+      const whole = wholeGoing();
+      if (whole) {
+        o.going?.();
+        return whole;
+      }
       const employees = ctx.settings.employees.filter((e) => e.usesKit && existsSync(checkoutOf(e)));
       const how = onTheirOwn ? `${trialParallel(ctx.settings.parallel)} at a time, beside the rounds` : 'a few each round';
       // The kit PRs queued after it, tried with it once, unless they were already, or failed an agent together.
@@ -863,6 +912,7 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
         ctx.log(`[${APP.id}] #${pr.number} raises the kit to ${kit}: trying it on ${employees.length} agents before it merges, ${how}`);
         t = { kit, failed: [], passed: 0, at: new Date().toISOString(), ...tried, mains: {}, pending: employees.map((e) => e.id), steward: APP.version };
       }
+      if (ctx.build) t.build = ctx.build.due;
     }
   }
   const at: TrialAt = { key, pr, commit: t.commit ?? pr.headOid };
@@ -887,6 +937,11 @@ export async function kitTrialHold(ctx: Ctx, steward: Employee, pr: PrInfo, o: {
   if (leftOf(t) && onTheirOwn) {
     const waits = otherGoing();
     if (waits) return waits;
+    const whole = wholeGoing();
+    if (whole) {
+      o.going?.();
+      return whole;
+    }
     tryOnItsOwn(ctx, steward, at, t, saveOf(t));
     o.going?.();
     return goingWords(t);

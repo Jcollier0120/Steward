@@ -18,6 +18,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const { releaseSelf, loadSelfFailures } = await import('../src/stages/self.ts');
 const { endWholeOrphans, endWholeSuite, loadWholeJob, wholeJobFile, wholeSuiteBefore, wholeSuiteDone, wholeSuitesBeside } = await import('../src/stages/wholesuite.ts');
 const { stewardEmployee } = await import('../src/stages/selfmerge.ts');
+const { apart } = await import('../src/stages/slots.ts');
 const { keepWhole, ranWhole, wholePassOf } = await import('../src/whole.ts');
 const { alive } = await import('../src/kit/apart.ts');
 const { ctxFor, runner, sh } = await import('./helpers.ts');
@@ -200,6 +201,30 @@ test('beside the rounds, a round starts the whole suite and goes on at once; lat
   assert.deepEqual(third.map((x) => x.outcome), ['done', 'done'], third.map((x) => x.message).join('\n'));
   assert.ok(lines().includes('kit-release --publish'), 'the kit released');
   assert.equal(testsRan(), 1, 'not run again');
+});
+
+test('beside the rounds, the whole suite never runs beside a kit trial or a rollout: it waits for them to end, and the round after starts it', async (t) => {
+  besideOn();
+  t.after(() => wholeSuitesBeside(null));
+  commit('NOTES.md', 'beside a trial\n');
+  fresh();
+  for (const work of ['kit trial', 'rollout']) {
+    let end!: () => void;
+    const ended = new Promise<void>((r) => (end = r));
+    const other = apart(work, () => ended);
+    const waits = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+    end();
+    await other;
+    assert.deepEqual(waits.map((x) => x.outcome), ['skipped'], waits.map((x) => x.message).join('\n'));
+    assert.equal(waits[0].message, `self: kit-v1.1.0 waits: its whole suite waits for the ${work} running beside the rounds to end, so the two never test at once: the rounds go on merging meanwhile`);
+    assert.equal(testsRan(), 0, 'nothing run');
+  }
+  const starts = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  assert.match(starts[0].message, new RegExp(`^self: kit-v1\\.1\\.0 waits: its whole suite started beside the rounds at ${sha()}`));
+  await wholeSuiteDone();
+  const done = await releaseSelf(ctx, facts(['v0.8.0', 'kit-v1.0.0']));
+  assert.deepEqual(done.map((x) => x.outcome), ['done', 'done'], done.map((x) => x.message).join('\n'));
+  assert.equal(testsRan(), 1);
 });
 
 test('beside the rounds, a whole suite that fails twice holds the kit as a failed release, which later rounds leave held', async (t) => {

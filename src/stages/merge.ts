@@ -19,7 +19,7 @@ import { vouchedBy } from './vouch.ts';
 import { runTrain, trainCars, type TrainRun } from './train.ts';
 import { buildCars, forgetEarlierBuilds, leftIn, loadReadySince, runBatch, type BuildBatch } from './build.ts';
 import { loadRolloutFailures } from './rollout.ts';
-import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
+import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, trialWaitsForNextBuild, TRIAL_GOING } from './trial.ts';
 import { claimsOn, movedTo, reclaim, type Claim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
@@ -615,8 +615,20 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // A conflict handed on to its author gives up its turn (givesWay): the queue goes on without it.
   const gaveWay = givesWay(e, hold);
   for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
-  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes.
+  // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes. And,
+  // in a build that tried a kit already, one at a head that trial didn't try (trialWaitsForNextBuild, a catch-up's head
+  // carrying its verdict being one it did): it waits for the next build's.
   const trialWay = trialGivesWay(e, prs);
+  const nextBuild = new Map<number, string>();
+  if (ctx.build) {
+    const kits = prs.filter((p) => raisesKit(p) && !p.draft).sort((a, b) => compareVersions(pending.get(a.number) ?? '0.0.0', pending.get(b.number) ?? '0.0.0') || a.number - b.number);
+    for (const pr of kits) {
+      const why = await trialWaitsForNextBuild(ctx, e, pr, kits).catch(() => null);
+      if (!why) continue;
+      nextBuild.set(pr.number, why);
+      trialWay.add(pr.number);
+    }
+  }
   // And one moved past the others (movedPast): not ready, it gives up its turn; ready, it waits its turn at the version
   // it was moved to.
   const moves = movedPast(claimsOn(e.repo), prs, pending);
@@ -723,6 +735,14 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       if (kitWaits) {
         waits.push(`${describe(pr)} waits: ${kitWaits}`);
         held.push(heldOf(pr, kitWaits));
+        continue;
+      }
+      // A kit PR at a head this build's one trial didn't try isn't tested in it either: it waits for the next build.
+      const later = nextBuild.get(pr.number);
+      if (later) {
+        const why = `${later}; meanwhile it gives up its turn, so the PRs above it merge first`;
+        waits.push(`${describe(pr)} waits: ${why}`);
+        held.push(heldOf(pr, why));
         continue;
       }
       const before = testedBefore(e, pr);
