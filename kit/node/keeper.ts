@@ -691,11 +691,17 @@ export function logLine(file: string, line: string): void {
 /** The keeper's log: %USERPROFILE%\.reeve\servers\logs\reaper.log, where Reeve's reaper always wrote it. */
 export const reaperLog = (env: NodeJS.ProcessEnv = process.env) => path.join(toolsHome(env), 'servers', 'logs', 'reaper.log');
 
+/** The reapers pcReaper made: keeperLook asks the PC itself (hardware, the cards', the NPU's commands) only for these. */
+const pcReapers = new WeakSet<Reaper>();
+
+/** Whether keeperLook asks the PC itself before its look: only with the PC's own reaper (pcReaper's), never a test's. */
+export const asksPc = (reaper: Reaper) => pcReapers.has(reaper);
+
 /** The real PC's reaper. `who` names it in the lines it waits in ("smith", "reeve"). */
 export function pcReaper(o: { who?: string; logFile?: string; config?: () => Record<string, any>; options?: ReaperOptions } = {}): Reaper {
   const logFile = o.logFile ?? reaperLog();
   const config = o.config ?? (() => readConfigFile().raw);
-  return new Reaper(
+  const reaper = new Reaper(
     {
       now: Date.now,
       processes: serverProcesses,
@@ -724,6 +730,8 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
     },
     o.options,
   );
+  pcReapers.add(reaper);
+  return reaper;
 }
 
 /**
@@ -954,10 +962,16 @@ export function refreshCards(o: { logFile?: string } = {}): void {
   }
 }
 
-/** One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the next look. */
+/**
+ * One look: each server, then the orphans. config.json and Manor's switch are read afresh, so a change applies at the
+ * next look. With the PC's own reaper (pcReaper's), it first brings hardware.json, the cards' vision commands and the
+ * NPU's command up to date, whether or not it's handed config.json: the Smith hands the one it read for its round, and
+ * until kit 2.78.8 that kept all three from ever running under it (Reeve leaves the looks to the Smith). A test's
+ * reaper asks no PC.
+ */
 export async function keeperLook(reaper: Reaper, o: { config?: () => Record<string, any>; withNpu?: () => boolean } = {}): Promise<{ servers: ReapOutcome[]; orphans: OrphanOutcome[] }> {
-  if (!o.config) {
-    await refreshHardware().catch(() => false); // a test hands its config, and asks no PC
+  if (asksPc(reaper)) {
+    await refreshHardware().catch(() => false);
     refreshCards();
     startNpuRefresh();
   }

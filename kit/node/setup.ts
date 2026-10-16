@@ -595,7 +595,7 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   else if (det && !o.skipNpu && (askedNpu || (!o.ids.length && (!configuredNpu || installDefault) && kinds.some((k) => k !== 'rerank')))) {
     // Only what fits in this PC's memory beside everything else (npuMemoryFit, at this generation's sizes): the rest
     // goes to the card or the processor.
-    // A PC with little memory runs its generation's smallPc models, where it has any (a 16 GB Snapdragon X2: Qwen3-VL-2B).
+    // Its generation's own models (a Snapdragon X2: Qwen3-VL-2B), and on a PC with little memory its smallPc ones, where it has any.
     const small = smallPc(o.detection.ramBytes);
     const route = det.vendor ? routeFor(NPU_CATALOG.routes[det.vendor], det.generation, small) : null;
     const fit: { chat: boolean; embed: boolean; why?: string } = route ? npuMemoryFit(route, o.detection.ramBytes) : { chat: true, embed: true };

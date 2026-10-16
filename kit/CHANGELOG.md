@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.8
+
+**Qwen3-VL-2B is every Snapdragon X2's NPU model, whatever its memory, and a first-generation X keeps Qwen3-VL-4B. And under the Smith, the keeper's look now runs the PC's refreshes (the NPU's command, the cards' vision, hardware.json), which until now never ran there.**
+
+### What's new
+
+- **A generation's own models** (npu-vendors.ts, npu-vendors.json): `NpuGeneration.models` are the models a generation runs in the route's place on every PC of it, whatever its memory. `routeFor` puts them there, and a small PC's `smallPc` still goes over them. The Snapdragon X2 has Qwen3-VL-2B (`unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, 1.9 GB, its pictures' encoder on the Adreno with `--vit-compute GPUOpenCL`) as its `models`. Kit 2.78.0 gave it as `smallPc`, so only an X2 under 20 GB ran it. No generation has `smallPc` now; the mechanism stays. The route's own `models` stays Qwen3-VL-4B, which the first-generation X (Hexagon v73) runs, as does a Snapdragon setup doesn't know.
+
+### What changed
+
+- **Setup, the NPU check and the NPU's refresh** plan, check and refresh the 2B on an X2 of any memory, through `routeFor`. An X2 set up with the 4B is `needs-setup` until setup has pulled the 2B. Once the 2B is there, the refresh puts it in the 4B's place and adds `--compute npu` and `--vit-compute GPUOpenCL`.
+- **npu-bench** measures what setup runs on the PC. `--model` takes the generation's models or the route's own, so `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the 4B on an X2. A `--candidate` is pulled and served as the route's own model is (AI Hub's build on a Snapdragon), whatever the generation runs.
+- **`keeperLook`** (keeper.ts) brings hardware.json, the cards' vision commands and the NPU's command up to date whenever its reaper is the PC's own (`pcReaper`'s; `asksPc` says so), whether or not it's handed config.json. Until now a handed config.json meant a test. The Smith always hands the one it read for its round, and Reeve leaves its looks to the Smith, so on every PC with the Smith none of the three ever ran: no npu-refresh.json or card-refresh.json was written, and hardware.json changed only when setup ran. A test's reaper asks no PC.
+- **Measured** on the 47.6 GB X2 Elite (2026-10-16) with this kit, beside the card's own embedding llama-server on the Adreno under a steady load. The NPU check passed every step: 74.7 tokens a second, 1,812 tokens read in 0.7 s, both cap sizes answered, 3.95 GB held. A quick npu-bench gave 22 of 24 quality items, pictures 4 of 4, 75.4 tokens a second and jobs in 3.3 s, with 4.30 GB working set. The card's server answered all 52 of its requests with the same vectors throughout, at a median of 432 ms, its working set 3.54 GB before and 3.73 GB after.
+
+### Before you update
+
+- Nothing for an agent to change: it takes this kit as usual.
+- A Snapdragon X2 that is set up and already has Qwen3-VL-2B switches to it at the keeper's next look, once nobody has used the NPU for two minutes.
+- Any other Snapdragon X2 switches when Set up local AI is pressed, which pulls 1.9 GB.
+- Qwen3-VL-4B (4.4 GB) stays on the PC until it's removed: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- Under the Smith, the first look with this kit may also change the cards' vision commands in config.json, as earlier kits' looks meant to (`refreshCardVision`: each flag only where it's missing). Each change goes in the keeper's log.
+
 ## 2.78.3
 
 **A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
