@@ -295,7 +295,7 @@
       "arch": "x64",
       "generations": {
         "meteor-lake": {
-          "label": "Core Ultra Series 1 or 200U, Meteor Lake or Arrow Lake-U (NPU 3720)",
+          "label": "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)",
           "supported": true,
           "verified": true,
           "timeouts": {
@@ -320,7 +320,7 @@
           "basis": "Measured by the NPU check on Intel Core Ultra 5 225U (Arrow Lake-U, whose NPU 3720 shows Meteor Lake's 7D1D), NPU driver 32.0.100.5540, 2026-10-14, every step passing, the prompt read 128 tokens at a time: writes 10.1 tokens a second: 200 ms a token allows twice that; reading 1550 tokens took 6.4 s: a 15 s base allows twice that and a warm answer. OpenVINO's own 1,024-token chunks cost every prompt a whole chunk: a short answer 3.1 s against 0.5, two at once 6.4 s against 1.2, 1,550 tokens 7.0 s against 4.0 to 6.4. Then 20 quick benchmarks on the same PC (npu-bench, 2026-10-14), each also reading prompts no cache had seen: in 64-token chunks a short answer took 0.35 s and 1,740 tokens 8.1 s; in 128, 0.5 s and 6.3 s; in 256, 0.78 s and 6.0 s; in 512, 1.43 s and 6.4 s; in 1,024, 3.1 s and 6.9 s: 128 stays. GENERATE_HINT BEST_PERF writes 12.3 to 13.1 tokens a second against 9.3 to 11.2, and the benchmark's jobs took 27.3 to 28.0 s against 29.1 to 35.6 (castellan-npu-bench/2, whose prompts no cache has seen, 2026-10-15), the same reads and answers; it doubles the first compile, 56.5 to 68.7 s against 25.8 to 28.9: the slowest start to a first answer took 69 s: 120 s allows half again. OpenVINO Model Server turns the NPU's prefix caching on: at the benchmark's end the server held 5.98 GB with its 128 blocks of 128 tokens, 4.30 GB with 32, and 3.72 GB with the cache off, which also read 2 to 5% faster and did the jobs in 27.25 to 27.48 s against 27.67 to 28.01 with 32 blocks (two runs each). The agents' prompts share 25 to 90 tokens at their start, less than a block, so a cache is hardly ever hit: the route's command turns it off (--enable_prefix_caching false: --plugin_config can't, OpenVINO Model Server refusing its key there as doubled), and 3.8 GB. PREFILL_HINT STATIC read every prompt in 7.4 s; NPU_TURBO was no faster, and STATIC prefill attention read 15 to 20% slower. A 3,072-token prompt held 0.4 GB more and read 5 to 10% slower; a 4,096-token one 1.0 GB more, past a 16 GB PC's room for chat and embeddings together. Its embeddings run on the processor's graphics (embedArgs), measured on the same PC's Intel Graphics, 2026-10-15, two runs each, the same model and command started by hand: a query in 49 to 50 ms against the NPU's 1.13 s, 16 of Reeve's chunks in 4.8 s against 18.0, a dense one (1,100 to 1,320 tokens) in 0.73 to 0.95 s against 2.5, the NPU's vectors (cosine 0.997 to 0.999), and 1.25 GB of the PC's memory against 1.14 to 1.18. Beside the chat server with this command, chat wrote 13.1 to 13.3 tokens a second while the graphics indexed, as alone, against 6.5 to 6.8 with both on the NPU. The NPU at --max_length 512 answered a query in 0.27 s but refused Reeve's dense chunks; the processor slowed chat by a fifth and took 2.3 GB."
         },
         "arrow-lake": {
-          "label": "Core Ultra 200S, Arrow Lake-S (NPU 3720)",
+          "label": "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)",
           "supported": true,
           "verified": false,
           "timeouts": {

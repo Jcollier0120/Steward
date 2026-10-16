@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.0
 
-**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board.**
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
 
 ### What's new
 
@@ -44,6 +44,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - The job's median, the job time and every other measurement are as before, so runs still compare within `castellan-npu-bench/2`, and a report from before keeps its verdict. A server that doesn't stream or count tokens is judged on whole times, as before (it is marked anyway).
   - The `noisy` mark names such a job "at one answer length". **spec/npu-bench.schema.json**: the three new fields, optional so earlier reports still match.
 - **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row, `--small-pc`, and a job's steadiness.
+- **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
+- **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
 
 ### For an agent
 
