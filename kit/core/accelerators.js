@@ -26,6 +26,8 @@ import { slotNames } from './queue.js';
  * @property {string} [turn] The accelerator whose lock and line its requests take, when its server runs on another
  * device than its accelerator's: the NPU 3720's embedding server, on the processor's graphics, takes the graphics'
  * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
+ * @property {Timeouts} [timeouts] This kind's own request timings, over its accelerator's, when they differ (vision on
+ * a card whose pictures are encoded on the processor): timeoutsFor.
  */
 
 /**
@@ -158,7 +160,7 @@ const baseUrlOf = (u) => String(u).replace(/\/(v1\/?)?$/, '');
 /** @param {unknown} v */
 const positiveInt = (v) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
 
-/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number, turn?: string }} Written */
+/** @typedef {{ baseUrl?: string, model: string, startCommand?: string[], env?: Record<string, string>, maxContextTokens?: number, turn?: string, timeouts?: Timeouts }} Written */
 
 /**
  * A server's own environment as written: names to strings, anything else left out.
@@ -188,11 +190,12 @@ function readEndpoint(v) {
     ...(positiveInt(v.maxContextTokens) ? { maxContextTokens: v.maxContextTokens } : {}),
     // Another device's turn: a graphics card's or the processor's, never the NPU's (an NPU's own servers are in its turn).
     ...(kindOfId(v.turn) && v.turn !== 'npu' ? { turn: v.turn } : {}),
+    ...(readTimeouts(v.timeouts) ? { timeouts: readTimeouts(v.timeouts) } : {}),
   };
 }
 
 /**
- * An accelerator's own timings as written: each a whole number of ms, the others left to the rules.
+ * An accelerator's (or one of its kinds') own timings as written: each a whole number of ms, the others left to the rules.
  * @param {any} v
  * @returns {Timeouts | undefined}
  */
@@ -219,6 +222,18 @@ export function capFor(a, work) {
 }
 
 /**
+ * The timings for one kind of request on an accelerator (requestTimeoutMs): its endpoint's own over the accelerator's,
+ * each one it gives; none when neither has any.
+ * @param {Pick<Accelerator, 'timeouts'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {Timeouts | undefined}
+ */
+export function timeoutsFor(a, work) {
+  const own = a[work]?.timeouts;
+  return own ? { ...a.timeouts, ...own } : a.timeouts;
+}
+
+/**
  * Each kind's endpoint with its server: vision without one of its own on the chat endpoint's.
  * @param {Omit<Accelerator, Work>} a
  * @param {Partial<Record<Work, Written | undefined>>} eps
@@ -230,11 +245,12 @@ function withServers(a, eps) {
   for (const w of WORKS) {
     const ep = eps[w];
     if (!ep) continue;
-    const cap = ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {};
-    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...cap, ...(ep.turn ? { turn: ep.turn } : {}) };
+    // Its cap and timings are its own, on whichever server.
+    const own = { ...(ep.maxContextTokens ? { maxContextTokens: ep.maxContextTokens } : {}), ...(ep.timeouts ? { timeouts: ep.timeouts } : {}) };
+    if (ep.baseUrl) out[w] = { baseUrl: ep.baseUrl, model: ep.model, ...(ep.startCommand ? { startCommand: ep.startCommand } : {}), ...(ep.env ? { env: ep.env } : {}), ...own, ...(ep.turn ? { turn: ep.turn } : {}) };
     // On the chat endpoint's server, it takes that server's turn.
     else if (w === 'vision' && eps.chat?.baseUrl)
-      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...cap, ...(eps.chat.turn ? { turn: eps.chat.turn } : {}) };
+      out[w] = { baseUrl: eps.chat.baseUrl, model: ep.model, ...(eps.chat.startCommand ? { startCommand: eps.chat.startCommand } : {}), ...(eps.chat.env ? { env: eps.chat.env } : {}), ...own, ...(eps.chat.turn ? { turn: eps.chat.turn } : {}) };
   }
   return out;
 }
@@ -937,8 +953,8 @@ export function tooBig(serving, promptTokens, maxTokens, work) {
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
- * the rules' place, each one it gives.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's), and its
+ * endpoint's over those (timeoutsFor), take the rules' place, each one they give.
  * @param {Rules} rules
  * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}
