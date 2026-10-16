@@ -4,7 +4,18 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.7
 
-**The NPU check's and the NPU benchmark's server starts apart, in the servers' job at the manor's ceiling, as an agent's does, so they measure the server an agent gets. Before, it was a plain detached child, outside that job.**
+**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets.**
+
+### What's new
+
+- **The manor's ceiling, one job above every family's** (`Local\kit-manor-ceiling`). It is hard-capped at `CEILING_CAP` (85%), and the agents' own jobs, the check runs' job and the servers' job nest inside it, so their 85% caps no longer add up.
+  - **pace.ts:** `ceilingCap()` gives its cap, and `CEILING_ENV` (`KIT_CEILING`) is the variable the launchers read it from. Under node --test there is none unless `KIT_CEILING_CAP` sets one, and then only in `KIT_CEILING_JOB_NAME`'s ceiling, never the PC's.
+  - **checks-pace.cs:** a check run or a server started apart joins the ceiling before its family's job (`Local\kit-checks-pace`, `Local\kit-apart-pace`), which then nests inside it. `pacedCommand()` and `startApart()` pass the cap.
+  - **named.cs:** with a ceiling, the agent's launcher starts the page out of the jobs that let it leave (Task Scheduler's, which Manor runs in), puts it in the ceiling, then in `Local\Castellan-<id>`. Where Windows refuses, the page starts in the launcher's jobs, as before. `open()` passes the cap, and 0 for Manor's own page.
+  - **gentle.cs, gentle.ts:** an agent in no job (one run from a terminal) joins the ceiling before its own job is made. `KitGentle.Set` takes the ceiling's cap as a fourth argument, and `gentleScript()` as a sixth. `keepResponsive()` keeps Manor's page out.
+  - **The ceiling is only ever made for a program in no job**, so it is never inside another program's job tree (a Claude session's, a terminal's, Task Scheduler's), whose end could end what joined it later. A program that couldn't leave such a job can't join it, and keeps its family's cap alone, as before.
+  - It ends nothing and limits nothing else. Each program in it holds a handle to it, so it lasts while any runs.
+- **checks-pace.cs:** `KIT_CHECKS_JOB_NAME` names the check runs' job, so a test's runs share a job of their own. Before, a test's launcher set the PC's real job's limits to the test's.
 
 ### What changed
 
@@ -21,6 +32,9 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ### Before you update
 
+- With the agents, their checks and the servers all busy, together they now get 85% of the processor where they could take all of it, so a heavy hour may run a little longer.
+- The checks launcher, the agents' launchers and the pace helper changed, so each PC builds them once more. An agent joins the ceiling at its next start through its launcher.
+- A page that leaves Task Scheduler's job is no longer ended when Manor's task is ended in Task Scheduler. It already outlived Manor's own process.
 - Nothing to do: it updates itself as usual. An NPU benchmark run after it is measured at the manor's ceiling. A route whose server leans on the processor (a llama.cpp one, the processor's own) may score a little lower than before. One that runs on the NPU, like FastFlowLM's, scores the same.
 
 ## 2.78.3
