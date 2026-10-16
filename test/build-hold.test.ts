@@ -35,7 +35,7 @@ test('the PC is held from five minutes before a build time until its build close
   assert.deepEqual(buildHold(THREE, none, at(8, 0)), { what: 'the 08:00 build', due: at(8).toISOString() });
   // Begun: held while it's open, and its window, then let go however it stands (its closing round holds its own work).
   const open = opened(at(8, 1));
-  assert.deepEqual(buildHold(THREE, open, at(9, 30)), { what: 'the 08:00 build', due: null });
+  assert.deepEqual(buildHold(THREE, open, new Date(at(8, 1).getTime() + THREE.windowMinutes * 60_000)), { what: 'the 08:00 build', due: null }, 'held to the end of its window');
   assert.equal(buildHold(THREE, open, new Date(at(8, 1).getTime() + THREE.windowMinutes * 60_000 + AFTER_WINDOW_MS)), null);
   // Closed: nothing held until five minutes before 13:00.
   const closed = endRound(open, open.open!, { merged: [], released: [], failed: [], closed: true, now: at(8, 40) });
