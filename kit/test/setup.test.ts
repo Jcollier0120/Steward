@@ -321,7 +321,9 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
   });
   assert.ok(e.vision!.startCommand!.includes('--mmproj'));
   assert.ok(e.vision!.startCommand!.some((s) => s.endsWith('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf')));
-  assert.deepEqual(e.embed!.startCommand!.slice(-13), ['--embeddings', '--pooling', 'last', '-c', '8192', '-b', '2048', '-ub', '2048', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf']);
+  assert.deepEqual(e.embed!.startCommand!.slice(-13), ['--embeddings', '--pooling', 'last', '-c', '4096', '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf']);
+  assert.equal(e.embed!.maxContextTokens, 1365, 'its own cap: 4,095 characters fit -c 4096 at a token each');
+  assert.ok(!('maxContextTokens' in e.chat!), "chat's is the card's");
   assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18193');
   // The file: the old fields and unknown keys kept, the NPU put in the list as it was, then the card.
   assert.equal(r.raw.mine, 1);
