@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.7
 
-**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. It also brings what wasn't released before: pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, so the kit now makes such a side a pixel longer before sending it.**
+**Everything the manor runs now stays within 85% of the PC together. The agents, their check runs and the model servers each had a cap of 85%, so all three busy at once could take the whole processor; now they share one. And the NPU check's and the NPU benchmark's server starts apart, as an agent's does, so they measure the server an agent gets. It also brings what wasn't released before: pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, so the kit now makes such a side a pixel longer before sending it. And if kit 2.78.0 to 2.78.3 weren't released on their own, this release brings them too: their entries follow.**
 
 ### What's new
 
