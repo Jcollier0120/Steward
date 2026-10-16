@@ -74,6 +74,12 @@ test("pageLaunch with the launcher: start runs it, and it the page; an id or pat
   assert.deepEqual(pageLaunch(node, entry, { platform: 'win32', comspec, named: { exe, id: 'a b' } }).args, line(''), "an id it wouldn't take");
   assert.deepEqual(pageLaunch(node, entry, { platform: 'win32', comspec, named: { exe: 'C:\\100%\\n.exe', id: 'smith' } }).args, line(''), '%NAME% would be expanded');
   assert.deepEqual(pageLaunch(node, entry, { platform: 'linux', named: { exe, id: 'smith' } }).args, [entry, 'serve'], 'elsewhere: detached, as before');
+  // A page with a command of its own (Reeve's dashboard), and an argument with a space quoted.
+  const reeve = (args: string[]) => pageLaunch(node, entry, { platform: 'win32', comspec, named: { exe, id: 'reeve' }, args }).args;
+  assert.deepEqual(reeve(['dashboard', '--port', '18383']), ['/d', '/s', '/c', `"start "" /b "${exe}" reeve "${node}" "${entry}" dashboard --port 18383"`]);
+  assert.deepEqual(reeve(['x y']).at(-1), `"start "" /b "${exe}" reeve "${node}" "${entry}" "x y""`);
+  assert.deepEqual(pageLaunch(node, entry, { platform: 'win32', args: ['a"b'] }).args, [entry, 'a"b'], 'one cmd would misread: detached, as before');
+  assert.deepEqual(pageLaunch(node, entry, { platform: 'linux', args: ['dashboard'] }).args, [entry, 'dashboard']);
 });
 
 test("on Windows the launcher compiles with the agent's name, runs the page as it was in the agent's job, and what the page starts detached outlives it", { skip: process.platform !== 'win32' }, async () => {

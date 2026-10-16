@@ -70,16 +70,20 @@ export async function start(cliFile: string): Promise<number> {
  * With `o.named`, the agent's launcher (named.ts) and the id its job is named for, `start` runs the launcher and the
  * launcher the page, in a job of the agent's own: Task Manager shows the page under the agent's name, its console and
  * output as they were.
+ *
+ * `o.args` are the page's arguments after its entry, `serve` unless said (an agent with a command of its own for its
+ * page: Reeve's `dashboard --port <n>`).
  */
 export function pageLaunch(
   node: string,
   entry: string,
-  o: { platform?: NodeJS.Platform; comspec?: string; named?: { exe: string; id: string } | null } = {},
+  o: { platform?: NodeJS.Platform; comspec?: string; named?: { exe: string; id: string } | null; args?: string[] } = {},
 ): { file: string; args: string[]; options: { windowsHide: true; detached?: true; windowsVerbatimArguments?: true } } {
-  if ((o.platform ?? process.platform) !== 'win32' || /[%"]/.test(node + entry)) return { file: node, args: [entry, 'serve'], options: { windowsHide: true, detached: true } };
+  const args = o.args ?? ['serve'];
+  if ((o.platform ?? process.platform) !== 'win32' || /[%"]/.test(node + entry + args.join(''))) return { file: node, args: [entry, ...args], options: { windowsHide: true, detached: true } };
   // /s: cmd takes what's between the outer quotes as it is; start's first quoted word is a window title, here none.
   const named = o.named && !/[%"]/.test(o.named.exe) && namedId(o.named.id) ? `"${o.named.exe}" ${o.named.id} ` : '';
-  const line = `"start "" /b ${named}"${node}" "${entry}" serve"`;
+  const line = `"start "" /b ${named}"${node}" "${entry}" ${args.map((a) => (/^[^\s]+$/.test(a) ? a : `"${a}"`)).join(' ')}"`;
   return { file: o.comspec ?? process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', line], options: { windowsHide: true, windowsVerbatimArguments: true } };
 }
 
