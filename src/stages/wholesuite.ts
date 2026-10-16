@@ -147,7 +147,9 @@ async function runWhole(ctx: Ctx, repo: string, dir: string, o: { tag: string; c
     return why ? { verdict: 'ended', why: `its whole suite at ${at} was stopped: ${why}` } : null;
   };
   const stoodIn: StoodIn = {};
-  const first = await runChecks(ctx, e, dir, { say, failed: firstFailed, stoodIn });
+  // A kit's release waits on it: the Seneschal's blocking lane, as a full-suite task (stages/seneschal.ts).
+  const task = { kind: 'full-suite', lane: 'blocking' } as const;
+  const first = await runChecks(ctx, e, dir, { say, failed: firstFailed, stoodIn, task });
   // The whole checks already passed on exactly this code (standin.ts): here, in the Assayer, or on another PC.
   if (!first && stoodIn.by) {
     const why = `the whole suite passed ${stoodIn.where} at ${at}, not run again`;
@@ -161,7 +163,7 @@ async function runWhole(ctx: Ctx, repo: string, dir: string, o: { tag: string; c
   }
   if (first && interrupted(first)) return ended(first);
   if (first) say(`its whole suite once more (${first})`);
-  const again = first ? await runChecks(ctx, e, dir, { say, failed: againFailed }) : null;
+  const again = first ? await runChecks(ctx, e, dir, { say, failed: againFailed, task }) : null;
   if (again) {
     const c = cut();
     if (c) return c;

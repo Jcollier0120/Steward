@@ -31,6 +31,7 @@ import { noteMerged } from '../strangers.ts';
 import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conflicts.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
+import { withLane } from './seneschal.ts';
 
 /**
  * Stage 3, `steward merge [--yes] [--team]`: the Steward's open PRs (head steward/…), each with its checks
@@ -709,7 +710,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       const before = testedBefore(e, pr);
       let t: Tested;
       try {
-        t = await testAtHead(ctx, e, pr);
+        // What the merge waits on: the Seneschal's blocking lane (stages/seneschal.ts).
+        t = await withLane('blocking', () => testAtHead(ctx, e, pr));
       } catch (err) {
         t = { ok: false, note: `couldn't test it here: ${(err as Error).message}`, at: new Date().toISOString() };
       }
