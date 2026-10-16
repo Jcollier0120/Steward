@@ -23,6 +23,28 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
 
+## 0.36.63
+
+**The Steward now always builds at set times, four a day, and an urgent fix goes out at once.**
+
+### What changed
+
+- **The build pipeline is how the Steward works, with no switch.** Ready pull requests wait for the next build. At each build time the Steward merges every ready pull request, tests each repository's together once, and releases each repository once. Then it tells Manor once, so each agent is installed at most once a build. Before, the pipeline was off unless switched on, and every round merged and released as pull requests went ready, all day.
+  - The **Build at set times** switch is gone from Settings' Build pipeline tab. A setting saved with it, on or off, builds at its times all the same.
+- **Four builds a day to start with**: 00:00, 06:00, 12:00 and 18:00, every day. Before, it was 08:00, 13:00 and 18:00. Settings' Build pipeline tab still changes them, and the rest stays as it was: a build still takes at most two hours, and the newest kit still goes into every build.
+- **An urgent fix doesn't wait for a build time.** A ready pull request whose changelog entry has a line starting `**Urgent fix:` builds at once, in its own build for its repository alone, the Steward's own included. It doesn't wait for the next build, and it doesn't bring the newest kit. Its release goes out to customers at once, as any urgent release does.
+  - A vouch between builds asks for a round straight away, so an urgent fix boards within a minute or so. The vouch says so.
+  - A pull request boards once at the commit it is at. If its checks fail, it waits for a new push or for the next build.
+- **Claiming a version** in a repository that writes its entries in `changes/` now always tells you to write `changes/<your branch>.md`. The Steward gives it the next release's version as it merges.
+- The Steward's page and `steward round --help` describe the build times and urgent fixes. The Steward always answers Manor's question about its build times, so Manor shows the next build on the Steward's card.
+
+### Before you update
+
+- From this version, the Steward merges and releases only at its build times, four a day: 00:00, 06:00, 12:00 and 18:00. A pull request marked ready waits for the next build, unless its changelog entry marks it an urgent fix.
+- If a build time has passed when it updates, the first build begins at once.
+- If you switched the build pipeline on and kept its build times as they were (08:00, 13:00 and 18:00), they become the new four. Build times you chose yourself stay as you set them.
+- Manor's Settings may still show a **Build at set times** switch for the Steward. It no longer does anything: the Steward builds at its times whatever it says.
+
 ## 0.36.62
 
 **SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**

@@ -502,14 +502,16 @@ export const SETTINGS_SCHEMA: Field[] = [
     kind: 'group',
     tab: 'Build pipeline',
     label: 'Build pipeline',
-    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs wait. Off: each PR merges and releases as soon as it is ready.",
+    help: "At set times a day, a build: every repository's ready PRs merged together, tested once and released once, and Manor told once. Between builds, ready PRs wait, except an urgent fix (its changelog entry starting \"**Urgent fix:\"), which builds at once for its repository.",
     fields: [
-      { key: 'on', kind: 'switch', label: 'Build at set times' },
+      // The switch it had (0.36.40 to 0.36.62), never drawn: a Manor that still sends it saves this group as before, and
+      // whatever it says is left out (pipeline.ts' normalizePipeline).
+      { key: 'on', kind: 'switch', label: 'Build at set times', help: 'No longer used: the Steward always builds at its build times.', optional: true, hidden: true },
       {
         key: 'times',
         kind: 'list',
         label: 'Build times',
-        help: 'Local times, like 08:00. A build the PC slept through begins once it wakes.',
+        help: 'Local times, like 06:00. A build the PC slept through begins once it wakes.',
         item: { label: 'Time', maxLength: 5, pattern: '([01]?[0-9]|2[0-3]):[0-5][0-9]', patternHint: 'a time, like 13:00' },
         minItems: 1,
         maxItems: 12,
