@@ -119,7 +119,7 @@ test('an employee without a usable id is left out, and said so; the stages take 
 test("the other agents' pages are Manor's to say, never Settings'; the Wright's and the Bailiff's only where each is installed, neither taken on by itself", () => {
   const before = process.env.MANOR_HOME;
   process.env.MANOR_HOME = path.join(home, 'no-manor');
-  assert.deepEqual(agentPages(), { manor: '', surveyor: '', wright: '', bailiff: '', reeve: '' }, 'no Manor here: none read');
+  assert.deepEqual(agentPages(), { manor: '', surveyor: '', wright: '', bailiff: '', reeve: '', seneschal: '' }, 'no Manor here: none read');
   const manor = path.join(home, 'pages-manor');
   mkdirSync(path.join(manor, 'app'), { recursive: true });
   writeFileSync(path.join(manor, 'settings.json'), JSON.stringify({ port: 18585 }));
@@ -127,7 +127,7 @@ test("the other agents' pages are Manor's to say, never Settings'; the Wright's 
   writeFileSync(path.join(manor, 'agents.json'), JSON.stringify({ agents }));
   process.env.MANOR_HOME = manor;
   try {
-    assert.deepEqual(agentPages(), { manor: 'http://manor.localhost:18585/', surveyor: 'http://surveyor.localhost:19008/', wright: '', bailiff: '', reeve: 'http://reeve.localhost:19005/' }, "the Wright and the Bailiff not installed: not read, though Manor knows them");
+    assert.deepEqual(agentPages(), { manor: 'http://manor.localhost:18585/', surveyor: 'http://surveyor.localhost:19008/', wright: '', bailiff: '', reeve: 'http://reeve.localhost:19005/', seneschal: '' }, "the Wright and the Bailiff not installed: not read, though Manor knows them");
     mkdirSync(path.join(process.env.WRIGHT_HOME!, 'app'), { recursive: true });
     mkdirSync(path.join(process.env.BAILIFF_HOME!, 'app'), { recursive: true });
     assert.deepEqual([agentPages().wright, agentPages().bailiff], ['http://wright.localhost:19006/', 'http://bailiff.localhost:19007/']);
