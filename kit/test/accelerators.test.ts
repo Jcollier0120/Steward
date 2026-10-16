@@ -508,6 +508,86 @@ test("quirks: the nonce only for GenieX's prefix leak; an image as a path only w
   assert.ok(!(A.visionBody(card, ep, png, 'What?', 8) as any).messages[0].content.startsWith('[req'));
 });
 
+test('pictureSize: the sides from a PNG, JPEG, GIF or BMP header; null for anything else', () => {
+  const png = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(png);
+  png.writeUInt32BE(1280, 16);
+  png.writeUInt32BE(720, 20);
+  assert.deepEqual(A.pictureSize(png), { width: 1280, height: 720 });
+  assert.deepEqual(A.pictureSize(Buffer.from('4749463839614001f000', 'hex')), { width: 320, height: 240 }, 'GIF89a');
+  const bmp = Buffer.alloc(54);
+  bmp.write('BM', 0, 'latin1');
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(512, 18);
+  bmp.writeInt32LE(-384, 22);
+  assert.deepEqual(A.pictureSize(bmp), { width: 512, height: 384 }, 'a top-down BMP: its height negative');
+  // A JPEG: SOI, an APP0 segment, then the frame header (SOF0): its precision, then height and width.
+  const jpeg = Buffer.concat([Buffer.from('ffd8ffe000104a46494600010100000100010000', 'hex'), Buffer.from('ffc000110801f4029e03012200021101031101', 'hex')]);
+  assert.deepEqual(A.pictureSize(jpeg), { width: 670, height: 500 });
+  assert.equal(A.pictureSize(jpeg.subarray(0, 24)), null, 'cut short before its frame header');
+  assert.equal(A.pictureSize(Buffer.from('ffd8ffda000c', 'hex')), null, 'its scan before any frame header');
+  assert.equal(A.pictureSize(Buffer.from('RIFF\0\0\0\0WEBPVP8 ', 'latin1')), null, 'WebP: not read');
+  assert.equal(A.pictureSize(Buffer.from('not a picture')), null);
+});
+
+test("sides-of-32: a picture FastFlowLM doesn't shrink, with a side of a whole number of 32 px, gets that side a pixel longer", async () => {
+  // Measured on a Krackan with Qwen3.5-2B: 512x512 misread, 513x513 read right, at the same 284 tokens; 1280x720
+  // misread, 1281x721 right; a picture taller than 720 px FastFlowLM shrinks itself, and reads right.
+  assert.deepEqual(A.sidesOff32({ width: 512, height: 512 }), { width: 513, height: 513 });
+  assert.deepEqual(A.sidesOff32({ width: 1280, height: 720 }), { width: 1281, height: 720 }, '720 is no whole number of 32');
+  assert.deepEqual(A.sidesOff32({ width: 2560, height: 720 }), { width: 2561, height: 720 });
+  assert.deepEqual(A.sidesOff32({ width: 300, height: 224 }), { width: 300, height: 225 });
+  assert.equal(A.sidesOff32({ width: 1272, height: 360 }), null);
+  assert.equal(A.sidesOff32({ width: 1920, height: 1088 }), null, 'taller than 720 px: FastFlowLM shrinks it');
+  assert.equal(A.sidesOff32({ width: 0, height: 0 }), null);
+
+  const dir = mkdtempSync(path.join(home, 'pictures-'));
+  const header = (w: number, h: number) => {
+    const b = Buffer.alloc(33);
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b);
+    b.writeUInt32BE(w, 16);
+    b.writeUInt32BE(h, 20);
+    return b;
+  };
+  const square = path.join(dir, 'square.png');
+  writeFileSync(square, header(512, 512));
+  const big = path.join(dir, 'big.png');
+  writeFileSync(big, header(1280, 1080));
+  const flm = { quirks: ['sides-of-32'] };
+  const asked: { from: string; to: string; size: object; was: string }[] = [];
+  const redraw = async (from: string, to: string, size: { width: number; height: number }) => {
+    asked.push({ from, to, size, was: readFileSync(from).toString('hex') });
+    writeFileSync(to, 'redrawn');
+  };
+  const redrawn = `data:image/png;base64,${Buffer.from('redrawn').toString('base64')}`;
+
+  assert.equal(await A.fitPicture({ quirks: [] }, square, redraw), square, 'another server: as it is');
+  assert.equal(await A.fitPicture(flm, big, redraw), big, 'taller than 720 px: as it is');
+  assert.equal(await A.fitPicture(flm, 'https://example.com/a.png', redraw), 'https://example.com/a.png');
+  assert.equal(await A.fitPicture(flm, path.join(dir, 'missing.png'), redraw), path.join(dir, 'missing.png'), 'the request says what is wrong');
+  assert.equal(asked.length, 0);
+
+  assert.equal(await A.fitPicture(flm, square, redraw), redrawn);
+  assert.deepEqual([asked[0].from, asked[0].size], [square, { width: 513, height: 513 }]);
+  assert.ok(!existsSync(path.dirname(asked[0].to)), 'its redraw went in a folder of its own, removed after');
+
+  const url = `data:image/png;base64,${header(1280, 720).toString('base64')}`;
+  assert.equal(await A.fitPicture(flm, url, redraw), redrawn, 'a data: URL, written out for the redraw');
+  assert.deepEqual([asked[1].was, asked[1].size], [header(1280, 720).toString('hex'), { width: 1281, height: 720 }]);
+  assert.ok(!existsSync(asked[1].from));
+
+  assert.equal(await A.fitPicture(flm, square, async () => { throw new Error('no System.Drawing'); }), square, "a redraw that fails: as it is");
+});
+
+test('fitPicture redraws with System.Drawing: a 64 px square comes back 65 px a side, as a PNG', async () => {
+  const { picturePng } = await import('./fixture/src/kit/npu-bench.ts');
+  const file = path.join(home, 'red-64.png');
+  writeFileSync(file, picturePng({ solid: [220, 20, 20], width: 64, height: 64 }));
+  const url = await A.fitPicture({ quirks: ['sides-of-32'] }, file);
+  assert.match(url, /^data:image\/png;base64,/);
+  assert.deepEqual(A.pictureSize(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')), { width: 65, height: 65 });
+});
+
 // ---------------------------------------------------------------- requests, fallback and games
 
 test('every answer says where it ran, and a background request goes around a card a game is using', async () => {

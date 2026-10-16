@@ -61,7 +61,7 @@ export type Accelerator = {
     vision?: Endpoint;
     embed?: Endpoint;
     /**
-     * `prefix-leak`, `image-path` (QUIRKS).
+     * `prefix-leak`, `image-path`, `sides-of-32` (QUIRKS).
      */
     quirks: string[];
     /**
@@ -161,7 +161,7 @@ export type Look = {
  * @property {Endpoint} [chat]
  * @property {Endpoint} [vision] A vision endpoint without a server of its own is on the chat endpoint's.
  * @property {Endpoint} [embed]
- * @property {string[]} quirks `prefix-leak`, `image-path` (QUIRKS).
+ * @property {string[]} quirks `prefix-leak`, `image-path`, `sides-of-32` (QUIRKS).
  * @property {boolean} [enabled] false: kept in the list, sent nothing.
  * @property {Timeouts} [timeouts] Its own request timings (requestTimeoutMs), when its server needs other than the rules'.
  */

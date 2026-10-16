@@ -138,6 +138,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
     ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
+    ...(stable(entry.quirks ?? []) !== stable(next.quirks ?? []) ? [`quirks: ${next.quirks?.length ? next.quirks.join(', ') : 'none'}`] : []),
   ];
   if (!d.idle()) return { did: 'busy' };
   let problems: string[];

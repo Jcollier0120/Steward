@@ -4,7 +4,7 @@ import nodeHttp, { type IncomingMessage } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { chatBody, expandEnv, failedWithOk, listsWhenLoaded, reportsLoaded, serverEnv, visionBody } from './accelerators.ts';
+import { chatBody, expandEnv, failedWithOk, fitPicture, listsWhenLoaded, reportsLoaded, serverEnv, visionBody } from './accelerators.ts';
 import type { Accelerator, AcceleratorEntry } from './accelerator-config.ts';
 import { runPowerShell } from './detect.ts';
 import { type NpuPlan, runProgram } from './npu-vendors.ts';
@@ -178,15 +178,17 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
   const ep = { ...acc.chat!, baseUrl: acc.chat!.baseUrl! };
   const kitAcc = acc as unknown as Parameters<typeof chatBody>[0];
   const failed = (t0: number, e: any, timeoutMs: number) => ({ status: 0, ok: false, ms: Math.round(now() - t0), raw: '', answer: '', usage: null, error: e?.name === 'TimeoutError' ? `no answer in ${Math.round(timeoutMs / 1000)} s` : String(e?.cause?.code ?? e?.message ?? e) });
-  const bodyFor = (q: Question) => (q.image ? visionBody(kitAcc, { ...ep, model: acc.vision?.model ?? ep.model } as any, q.image, q.prompt, q.maxTokens) : chatBody(kitAcc, ep as any, [{ role: 'user', content: q.prompt }], q.maxTokens));
+  // A picture is fitted for the server as an agent's is (fitPicture) before the request's clock starts.
+  const bodyFor = async (q: Question) => (q.image ? visionBody(kitAcc, { ...ep, model: acc.vision?.model ?? ep.model } as any, await fitPicture(kitAcc, q.image), q.prompt, q.maxTokens) : chatBody(kitAcc, ep as any, [{ role: 'user', content: q.prompt }], q.maxTokens));
 
   /** One chat request, answered all at once; never throws. */
   const ask = async (prompt: string, maxTokens: number, timeoutMs: number): Promise<Asked> => {
+    const body = JSON.stringify(await bodyFor({ prompt, maxTokens }));
     const t0 = now();
     let res: Response;
     let text: string;
     try {
-      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bodyFor({ prompt, maxTokens })), signal: AbortSignal.timeout(timeoutMs) });
+      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(timeoutMs) });
       text = await res.text();
     } catch (e: any) {
       return failed(t0, e, timeoutMs);
@@ -208,10 +210,11 @@ export function serverClient(acc: Accelerator, o: { http?: typeof fetch; now?: (
    * says so (`streamed` false).
    */
   const askStream = async (q: Question, timeoutMs: number): Promise<Streamed> => {
+    const body = JSON.stringify({ ...(await bodyFor(q)), stream: true, stream_options: { include_usage: true } });
     const t0 = now();
     let res: Response;
     try {
-      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...bodyFor(q), stream: true, stream_options: { include_usage: true } }), signal: AbortSignal.timeout(timeoutMs) });
+      res = await http(`${ep.baseUrl}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(timeoutMs) });
     } catch (e: any) {
       return { ...failed(t0, e, timeoutMs), streamed: false, firstTokenMs: null, tokensPerSecond: null };
     }

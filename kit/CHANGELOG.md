@@ -2,6 +2,30 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Unreleased (its version needs claiming on the main laptop)
+
+**Pictures on the AMD route read right. FastFlowLM 1.0.7 misread a picture 720 px tall or less when a side was a whole number of 32 px, including Smith's audit's 512×512 vision check and a 1280×720 picture. The kit now makes such a side a pixel longer before sending the picture.**
+
+### What's new
+
+- **A quirk, `sides-of-32`** (accelerator-config.ts' and the core's `QUIRKS`), on the AMD route (spec/npu-vendors.json). A PC set up before it gets it from the keeper's refresh of the NPU's entry, after the refresh's usual test.
+- **accelerators.ts:**
+  - `fitPicture(acc, image)`: the picture as `acc`'s server should get it.
+  - `sidesOff32(size)`: the size it should have, or null.
+  - `pictureSize(bytes)`: a PNG's, JPEG's, GIF's or BMP's size, from its header.
+  - `redrawPicture(from, to, size)`: System.Drawing's high-quality bicubic.
+- **npu-refresh.ts:** a refresh that changes an entry's quirks names them in its `changes` and its log line.
+
+### What changed
+
+- **`Npu.vision`, setup's vision test, and the NPU check's and benchmark's requests** (npu-server.ts' `serverClient`) fit each picture first. On the AMD route, three of the benchmark's four pictures go a pixel larger. The benchmark's log names the quirk, and its times leave out the redraw.
+- **spec/NPU-VENDORS.md:** the measurements, in "FastFlowLM's pictures with sides of 32 px".
+- `visionBody` is unchanged and stays synchronous.
+
+### What an agent must do
+
+Nothing, if it asks through `Npu.vision`. An agent that builds its own vision requests with `visionBody` awaits `fitPicture(acc, image)` first.
+
 ## 2.77.8
 
 **PowerShell's time limits stretch at the checks pace, as a test's own waits do. It also brings what wasn't released before: The NPU 3720's embeddings, which run on the processor's graphics, answer in the graphics' turn, beside the NPU's chat. On the 225U, a search query while chat writes takes 52–57 ms instead of 6.9–7.4 s, and chat's first token while 16 chunks are indexed takes 0.52–0.60 s instead of 6.2–6.5 s. Setup notices when FastFlowLM can't set an AMD NPU's power mode, and says why. `npu-check --harden` passes every step on the NPU 3720: it waits for the server the timeout case started to answer, then stops it. spec/NPU-VENDORS.md has the NPU 3720's memory on a 16 GB PC.**

@@ -328,6 +328,7 @@ test('config entries per vendor: one server on its own port, its caps and timeou
   assert.equal(Number(amd.serve[amd.serve.indexOf('--ctx-len') + 1]), amd.maxContextTokens);
   assert.ok(Object.values(amd.caps).every((c) => c! <= amd.maxContextTokens));
   assert.deepEqual(a.vision, { model: 'qwen3.5:2b' }, 'one model for chat and pictures, on its one server: no switch between them');
+  assert.deepEqual(a.quirks, ['sides-of-32'], "FastFlowLM misreads a picture with a side of a whole number of 32 px that it doesn't shrink");
 
   // Every agent reads them the same way: the core takes the caps per kind and the timeouts.
   const raw = { accelerators: [{ ...i, vision: { model: 'v', maxContextTokens: 1024 } }] };

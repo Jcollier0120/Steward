@@ -45,9 +45,10 @@ export const ENDPOINT_KINDS: readonly EndpointKind[] = [...SERVE_KINDS, 'rerank'
 /**
  * Per server: `prefix-leak` (GenieX v0.7.0 leaks state between requests that share a prompt prefix,
  * so each request starts with a nonce), `image-path` (the server reads a local image path; otherwise
- * images go as data: URLs).
+ * images go as data: URLs), `sides-of-32` (FastFlowLM 1.0.7 misreads a picture with a side of a whole
+ * number of 32 px that it doesn't shrink, so such a side is made a pixel longer first: the kit's fitPicture).
  */
-export const QUIRKS = ['prefix-leak', 'image-path'] as const;
+export const QUIRKS = ['prefix-leak', 'image-path', 'sides-of-32'] as const;
 export type Quirk = (typeof QUIRKS)[number];
 
 /** One OpenAI-compatible endpoint: /v1/chat/completions, /v1/embeddings, or a reranker's /v1/rerank. */
