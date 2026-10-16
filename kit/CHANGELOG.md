@@ -2,7 +2,7 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## 2.78.2
+## 2.78.4
 
 **An agent can have Windows wake the PC, plugged in, for work due at set times (`node/wake.ts`), and keep it up, with the screen off, until the work is done (`endWakeTask`).**
 
