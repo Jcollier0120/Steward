@@ -20,6 +20,58 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **The keeper** (keeper.ts) looks after such a server in its turn's lock folders, with its accelerator's idle time and log (`otherTurn`). Its idle-in-flight check (`npu-check --idle`) looks only at the servers in the NPU's turn.
 - **spec/NPU-VENDORS.md** has The NPU 3720's embeddings in the graphics' turn, with the measurements before and after.
 
+## 2.77.3
+
+**On an AMD Ryzen AI 300, one smaller model, Qwen3.5-2B, answers chat and pictures on the NPU. It writes half again as fast, holds 0.4 GB less of the PC's memory for chat and 1.2 GB less for pictures, downloads 2.0 GB instead of 7.4, and never switches models between a chat and a picture. It starts about 1.7 s slower.**
+
+### What changed
+
+- **npu-vendors.json's amd route** (AMD's alone; Qualcomm's and Intel's routes, the keeper and `npuMemoryFit` are unchanged):
+  - **`models`**: `qwen3.5:2b` (Qwen3.5-2B, FastFlowLM's NPU2 build, Apache-2.0) for chat and vision. It replaces `qwen3-it:4b` for chat and `qwen3vl-it:4b` for vision. It is 2,014,970,646 bytes with its vision weights and tokenizer, and its `present` file is the vision weights (`vision_weight.q4nx`). The 8 to 9 s switch between the two 4B models, either way, is gone: the one server holds one model that does both.
+  - **Measured with the benchmark** (`castellan-npu-bench/2`, quick, on the Krackan, Ryzen AI 7 350 with 16 GB, FastFlowLM 1.0.7, 2026-10-15), against the 4B:
+
+    | | Qwen3.5-2B | Qwen3-4B (and its VL model) |
+    |---|---|---|
+    | Quality items | 22 of 24, every must-pass one right | 23 of 24 |
+    | Tokens written a second | 20.4 to 21.0 | 13.6 |
+    | Jobs: triage, reply, summary | 2.1, 2.9 and 4.4 s | 3.3, 8.8 and 7.1 s |
+    | First token of a 1,024-token prompt | 1.47 s | 2.43 s |
+    | Short answer | 0.82 s | 1.37 s |
+    | Working set | 4.0 GB | 5.7 GB |
+    | Pictures | 3 of 4, 1.2 to 1.4 s | 3 of 4, 1.8 to 2.0 s |
+
+    It missed `apples`, as the 4B did, and `json-list`: it listed the bread and milk with the fruit. On pictures, it misread a number. Its full profile scored the same 22 of 24 and passed all 15 jobs. Its speed held 89% over 10 minutes, against the 4B's 96%.
+  - **Smaller or other models**:
+    - Qwen3.5-0.8B scored 19 of 24, Gemma3-1B and LFM2.5-1.2B 18, Qwen3-1.7B 17 and Qwen3-0.6B 13.
+    - Llama 3.2 1B failed setup's first-load check.
+    - Gemma4-E2B scored 24 but held 6.8 GB.
+    - Qwen2.5-VL-3B scored 23, with every picture right, but it is under Qwen's research licence, which bars commercial use.
+  - **Thinking:** FastFlowLM serves Qwen3.5 with its thinking off, and the benchmark's answers carried none. The kit sends it no `/no_think`, since `thinks()` already left out Qwen3.5.
+  - **From the NPU check on the Krackan** (2026-10-15). These were measured while Reeve embedded on the Radeon 860M, which shares the PC's memory with the NPU, so the starts are on the slow side:
+    - **`memoryGb`**: 4.1 for chat and for pictures. It held 3.7 GB started and 4.0 to 4.1 GB after the benchmark's jobs and pictures, against 4.5 and 5.3 for the 4B pair.
+    - **xdna2 `timeouts`**: 15 s + 150 ms a token, and a 30 s cold load. The base was 20 s. Measured: 19.4 tokens written a second, 3,272 tokens read in 4.1 s, and the slowest start to a first answer 17 s.
+    - **`idleStop`**:
+      - 15.1 s for chat: `--idle`'s cold answer took 15.0 s, and the keeper's stop freed 3.7 GB.
+      - 16.6 s for pictures: the kit's test request on a stopped server, a picture and then chat.
+      - Both give 6 minutes. A person waking it is told about 15 s, where the 4B's chat was 6.6 s.
+    - **The start:** timed alike from Node, three starts each, Qwen3.5-2B answered first in 11.8 to 12.4 s and the 4B in 10.1 to 10.7 s. So it starts about 1.7 s slower, but nothing switches afterwards. The 4B took 9.2 s more for its first picture.
+  - **`notes`**: rewritten for the one model, and corrected on FastFlowLM's power mode (below).
+- **FastFlowLM's `--pmode` was never measured on the Krackan** (spec/NPU-VENDORS.md, npu-vendors.json's notes):
+  - `flm serve` sets its mode by running `C:\Windows\System32\AMD\xrt-smi.exe configure --pmode`, and ignores the result.
+  - There, an older driver's `xrt_coreutil.dll` (2024) beside the newer `xrt-smi.exe` lacks a function `xrt-smi` needs. So `xrt-smi` failed to load at every start, and every `--pmode` run was in one mode.
+  - The failure is silent from Node, which the kit starts it from. From anywhere else, each start shows an "Entry Point Not Found" dialog.
+  - The route still sets no mode. The modes are still to measure, on a PC whose `xrt-smi` runs.
+- **`npu-check --harden`'s harden-nonsense step fails on FastFlowLM, for both models.** It puts `OpenVINO/Qwen3-4B-int4-ov` in the chat model's place, and `flm serve` exits at once ("Model not found"). So setup's note says the server didn't pass its test, not that the model doesn't run properly. The NPU is left out either way.
+  - It fails the same on the Qwen3-4B route, run the same day. Its earlier passes were most likely another server answering on 18184.
+  - Not changed here: the step has no model that answers nonsense on FastFlowLM to force.
+- **spec/NPU-VENDORS.md** has the AMD model row, the licences row, and the Krackan's runs with Qwen3.5-2B under "Verified, and not". **spec/NPU-BENCHMARK.md** has the AMD row. It also says that Qwen3.5's tokenizer (248,320 tokens) isn't the Qwen3 models' (151,936). So its tokens a second compare only roughly with the other rows', while its jobs, timed in seconds, compare as they are.
+
+### For an agent
+
+- Nothing to do.
+- A PC already set up keeps serving the 4B models until it is set up again (Manor's Set up local AI), which pulls Qwen3.5-2B (2.0 GB).
+- The 4B models stay in `%USERPROFILE%\.flm\models` (7.4 GB) until removed (`flm remove qwen3-it:4b`, `flm remove qwen3vl-it:4b`).
+
 ## 2.77.2
 
 **A graphics card's embedding server holds about 600 MB less: it starts with `-c 4096 -ub 512`, and a request to it is capped at 1,365 tokens (4,095 characters), with the same vectors and times.**
