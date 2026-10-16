@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, renameSync, statSync } from 'node:fs';
-import { APP, dataDir, pageUrl, port } from '../app.ts';
+import { APP, dataDir, devCheckout, pageUrl, port } from '../app.ts';
 import { ago } from './page.ts';
 import { duty, setDuty, type Duty } from './duty.ts';
 import { licenseNow, licensePing, TRIAL_ENDED_TEXT } from './license-check.ts';
+import { namedBuilt, namedId } from './named.ts';
 import { dataFile, readJson } from './store.ts';
 
 /**
@@ -65,15 +66,20 @@ export async function start(cliFile: string): Promise<number> {
  * takes the page out of the job Node puts what it starts in, whose processes end when the process that ran open does.
  *
  * Elsewhere, and on Windows when a path holds a `%` or a `"` (which cmd would read), detached, with no console, as before.
+ *
+ * With `o.named`, the agent's launcher (named.ts) and the id its job is named for, `start` runs the launcher and the
+ * launcher the page, in a job of the agent's own: Task Manager shows the page under the agent's name, its console and
+ * output as they were.
  */
 export function pageLaunch(
   node: string,
   entry: string,
-  o: { platform?: NodeJS.Platform; comspec?: string } = {},
+  o: { platform?: NodeJS.Platform; comspec?: string; named?: { exe: string; id: string } | null } = {},
 ): { file: string; args: string[]; options: { windowsHide: true; detached?: true; windowsVerbatimArguments?: true } } {
   if ((o.platform ?? process.platform) !== 'win32' || /[%"]/.test(node + entry)) return { file: node, args: [entry, 'serve'], options: { windowsHide: true, detached: true } };
   // /s: cmd takes what's between the outer quotes as it is; start's first quoted word is a window title, here none.
-  const line = `"start "" /b "${node}" "${entry}" serve"`;
+  const named = o.named && !/[%"]/.test(o.named.exe) && namedId(o.named.id) ? `"${o.named.exe}" ${o.named.id} ` : '';
+  const line = `"start "" /b ${named}"${node}" "${entry}" serve"`;
   return { file: o.comspec ?? process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', line], options: { windowsHide: true, windowsVerbatimArguments: true } };
 }
 
@@ -90,7 +96,9 @@ export async function open(cliFile: string, opts: { quiet?: boolean } = {}): Pro
   // A built release (kit 2.17.0) runs src\cli.js through the src\cli.ts stub: the page is started as cli.ts, as ever,
   // so its command line says so (Pinder and the Surveyor know the manor's own agents by it).
   const entry = cliFile.endsWith('.js') && existsSync(`${cliFile.slice(0, -3)}.ts`) ? `${cliFile.slice(0, -3)}.ts` : cliFile;
-  const how = pageLaunch(process.execPath, entry);
+  // Under the agent's name in Task Manager once the page has built its launcher (named.ts); a checkout's job is its own.
+  const exe = namedBuilt(APP);
+  const how = pageLaunch(process.execPath, entry, { named: exe ? { exe, id: devCheckout ? `${APP.id}-dev` : APP.id } : null });
   const child = spawn(how.file, how.args, {
     ...how.options,
     stdio: ['ignore', log, log],

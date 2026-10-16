@@ -6,7 +6,16 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 **Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values.**
 
+**Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends what the page leaves when the launcher ends. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**
+
 ### What changed
+
+- **named.cs and named.ts:**
+  - **The launcher:** `named.cs` starts the command after the agent's id with its console and output, in the job `Local\Castellan-<id>`, and returns its exit code. Its title is the agent's name, which Windows shows as its description, and its product is Castellan. A program may leave the job, as a model server started apart does. Exit codes: 2 for an id it won't take, 127 for a program that isn't there.
+  - **`namedLauncher(app)`:** compiles it once per agent and per `named.cs` into the kit folder, `named-<id>-<hash>.exe` beside the checks pace's. `namedBuilt(app)` is that exe once it's there, else null.
+  - **`namedWanted(app)`:** Windows only, and an id of letters, digits and hyphens. Under `node --test` it is off unless `KIT_NAMED=1`.
+- **server.ts:** `serve` builds the agent's launcher in the background, 30 to 120 s after it starts.
+- **service.ts:** `open` starts the page through the launcher once it's built (`pageLaunch`'s `named`). A checkout's job is `<id>-dev`, so it never joins the installed agent's. An id or path that cmd would misread starts the page as before.
 
 - **spec/npu-vendors.json:** Intel's `meteor-lake` and `arrow-lake` labels. Their devices, `verified` and timings are as they were. No 200H or 200HX has been run.
 - **spec/NPU-VENDORS.md:** Detection's Generation cites Linux's intel_pmc_core for Arrow Lake-H's `7D1D` (commit `f2eae58c4428`, "Fix Arrow Lake U/H NPU PCI ID", which defines `ARL_H_NPU_PCI_DEV` `0x7d1d`), in place of "likely". Arrow Lake-HX is the S die in a laptop, so `AD1D` is expected, but it has never been seen.
