@@ -32,6 +32,25 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing to do: setup and npu-check keep the report by themselves, and nothing is sent. An app that offers it reads `npu-report.json` (`npuReportFile`) and passes its name and version as `app`.
 - A PC under 20 GB that runs its generation's `smallPc` models reports those models. `npu-reports.ts` lists them on their own and doesn't count them toward the route's model.
 
+## 2.78.1
+
+**The Seneschal is one of the manor's developer roles, comes with Developer Pro, and an agent can ask it for its turn: node/seneschal.ts.**
+
+### What's new
+
+- **node/seneschal.ts:** the Seneschal's work client. `seneschalTurn(task, { worker, commands })` submits a task (a repository and a commit, never a command), asks for it by name every 5 seconds until its turn comes, and answers `{ turn }` (run it inside `turn.hold()`, which sends the lease's heartbeats and reports the result), `{ reused }` (a pass of exactly these commands on the same code: nothing to run), or null: run it as before. Null whenever the Seneschal isn't on the PC, doesn't answer, is off duty, the PC has no Developer Pro, the turn doesn't come in 20 minutes, or the run is already inside a checks pace turn (`KIT_CHECKS_TURN`). A failure it holds is never taken for this run's: the task is asked for again, and run. A run under its lease sets `TURN_HELD_ENV` for its commands, so the checks pace's launcher takes no turn of its own. Under node --test it asks only a Seneschal the test gave a home of its own.
+
+### What changed
+
+- **node/work.ts:** a `WORK` entry for the Seneschal: handing out the staff's work in order, by lane and as the PC has room, and its look at the PC's room every 15 seconds. It is a developer role (`developerRole`), so with Developer options off its Settings page has no "Where its work runs". Its notes say it runs no work of its own and comes with Developer Pro.
+- **node/look.ts:** the Seneschal's look: deep blue, "Handing out work" on its pill, and a scene where each line of a ledger is ticked in turn and its task goes out to a free slot beside the steward's staff.
+- **node/developer-pro.ts:** Developer Pro covers the Seneschal too. Without it, the Seneschal hands out no work, and each agent runs its own as before.
+- **spec/DEVELOPER-OPTIONS.md** lists the Seneschal among the developer roles.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Seneschal's own page asks `developerPro()` itself.
+
 ## 2.78.0
 
 **On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: Intel's NPU labels name the Core Ultra 200H and 200HX. The NPU 3720 at PCI `7D1D` is "Core Ultra Series 1, 200U or 200H, Meteor Lake or Arrow Lake-U or -H (NPU 3720)", and the one at `AD1D` is "Core Ultra 200S or 200HX, Arrow Lake-S or -HX (NPU 3720)". Nothing a PC runs changes: each device is the same generation, with the same values. Each agent shows under its own name in Task Manager. Its page starts through a small launcher named for it, so the Processes tab shows "Smith" with its page, PowerShell and git inside, and the processor and memory they take together, in place of one more "Node.js JavaScript Runtime". They run in a Windows job of the agent's own (`Local\Castellan-<id>`), which ends nothing: what the page starts detached (an install's watcher, a model server) outlives it, as before. The page builds its launcher a minute or two after it starts, so its next start is named: after the update, a sign-in or a restart. The page's console, its log and its pace are as they were.**

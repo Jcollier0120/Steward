@@ -9,7 +9,7 @@ import { failureDetail, keptFailure } from './failure.ts';
 import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
 import { BAILIFF_WAIT } from './review.ts';
 import { CONFLICTS } from './conflicts.ts';
-import { agentPages, reeveInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
+import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
 import type { Migration } from './migrate.ts';
@@ -661,6 +661,29 @@ export function reeveConditions(answer: unknown): { conditions: Condition[]; job
 }
 
 /**
+ * From the Seneschal's GET /api/alerts (Steward 0.36.65): one condition per jam, a task waiting far past its kind's
+ * usual run (four times it, ten minutes at least), at once, as it gives it. A Seneschal without the endpoint, or whose
+ * page doesn't answer, is quiet here: its work goes on as before (each agent runs its own), and Manor says when its page
+ * is down.
+ */
+export function seneschalConditions(answer: unknown): Condition[] {
+  if (noAnswer(answer) !== null) return [];
+  const alerts = (answer as any).alerts;
+  if (!Array.isArray(alerts)) return [];
+  return alerts
+    .filter((a) => a && typeof a.id === 'string' && a.id && typeof a.title === 'string')
+    .map((a) => ({
+      id: `seneschal:${a.id}`,
+      who: 'seneschal',
+      title: a.title,
+      detail: Array.isArray(a.detail) ? a.detail.map(String) : [],
+      url: typeof a.url === 'string' ? a.url : undefined,
+      since: typeof a.since === 'string' && !Number.isNaN(Date.parse(a.since)) ? a.since : undefined,
+      afterMs: 0,
+    }));
+}
+
+/**
  * One alarm for one crashed job: the Surveyor reports a Reeve job that exited non-zero as the problem
  * agent.reeve.job.<job> (an alarm after problemHours), and Reeve lists the same crash as an open alert of that job. While
  * Reeve's alerts name a job, the Surveyor's condition for it (id survey:agent.reeve.job.<job>) is dropped, and Reeve's
@@ -761,7 +784,7 @@ export async function watchAlarms(
     run?: Runner;
     neutralDir?: string;
   },
-  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
+  deps: { getJson?: GetJson; toast?: Toast; now?: Date; manorUrl?: string | null; pages?: Partial<AgentPages>; reeveInstalled?: () => boolean; surveyorInstalled?: () => boolean; seneschalInstalled?: () => boolean; online?: () => Promise<boolean> } = {},
 ): Promise<AlarmState> {
   const a = o.settings.alarms;
   // The other agents' pages, as Manor says them.
@@ -812,6 +835,8 @@ export async function watchAlarms(
     conditions.push(...r.conditions);
     reeveJobs = r.jobs;
   }
+  // The Seneschal's jams, where it's installed (it comes with Developer Pro): manor-wide, like Reeve's.
+  if (manorWide && p.seneschal && (deps.seneschalInstalled ?? seneschalInstalled)()) conditions.push(...seneschalConditions(await get(new URL('/api/alerts', p.seneschal).href)));
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
   const kept = holdForWork(foldBailiffWaits(withoutReeveDuplicates(conditions, reeveJobs)), items, states, a.waitingHours);
   const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
