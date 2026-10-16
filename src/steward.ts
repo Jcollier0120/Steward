@@ -20,7 +20,8 @@ import { heldQueues, keepVersionQueues, loadVersionQueues } from './version-queu
 import { afterRound, heldBefore, loadSeen, planRound, saveSeen, type RoundPlan } from './stages/changes.ts';
 import { checkoutOf, pick, result, type Ctx, type EmployeeResult, type StageName, type StageResult } from './stages/common.ts';
 import { afterMerge } from './stages/aftermerge.ts';
-import { conflictsWaiting, merge, mergeOne, NO_CONFLICTS, waitsBriefly } from './stages/merge.ts';
+import { conflictsWaiting, joinLooks, merge, mergeOne, NO_CONFLICTS, waitsBriefly, type MergeLook } from './stages/merge.ts';
+import { waitsForKit } from './stages/prtest.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { loadUnsafe } from './safeinstall.ts';
 import { loadClaims, pruneClaims, shareClaims } from './claims.ts';
@@ -46,7 +47,7 @@ import { hostFor, must } from './hosts/index.ts';
 import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
-import { heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
+import { apart, heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
 import { lastWoke } from './fresh-start.ts';
 import { boardedUrgent, buildWhen, endRound, kitRides, lateLine, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
 import { urgentReady } from './stages/urgent.ts';
@@ -722,32 +723,47 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           let elsewhere = turns.elsewhere;
           // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
           // the head of its line (merge.ts), and the new kit released at once (selfRound), so the agents' PRs that take
-          // that kit are tested after it is there, in this round. Not in a stage asked about some others alone.
+          // that kit are tested after it is there, in this round. Not in a stage asked about others alone.
           const self = (round || ask.team) && withSelf && turns.selfActs ? selfEmployee(ctx, o) : null;
-          let selfLine: EmployeeResult | null = null;
-          let selfMovedMain = false;
-          if (self) {
-            const [r] = await merge(ctx, [self], { yes, team: true });
-            const { merged: selfMerged, held: prs, ...line } = r;
-            selfLine = line;
-            if (prs.length) held.push({ employee: self, prs });
-            if (selfMerged.length) selfMovedMain = true;
-            mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
-          }
-          // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about others alone.
-          const selfReleases = round && withSelf && turns.selfActs ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, selfMovedMain), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
-          // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
-          if (round && withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
-          if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
-            // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
-            // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
-            try {
-              ctx.kit = await kitInfo(ctx.run, ctx.neutralDir, ctx.settings.stewardRepo);
-              log(`kit ${latestKit(ctx.kit)} released: every employee's PRs looked at again with it`);
-            } catch (err) {
-              log(`couldn't read the kit's releases again: ${(err as Error).message}`);
+          /** The Steward's own: its team's PRs merged, its new versions released, and a new kit's releases read again. */
+          const selfPart = async (): Promise<{ line: EmployeeResult | null; releases: EmployeeResult[] }> => {
+            let line: EmployeeResult | null = null;
+            let moved = false;
+            if (self) {
+              const [r] = await merge(ctx, [self], { yes, team: true });
+              const { merged: selfMerged, held: prs, ...rest } = r;
+              line = rest;
+              if (prs.length) held.push({ employee: self, prs });
+              moved = selfMerged.length > 0;
+              mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
             }
-          }
+            // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about others alone.
+            const releases = round && withSelf && turns.selfActs ? await timed(phaseOf(ctx), 'releases', APP.id, () => selfRound(ctx, o, moved), (r) => r.some((x) => x.outcome === 'done' || x.outcome === 'failed')) : [];
+            // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
+            if (round && withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
+            if (releases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
+              // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
+              // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
+              try {
+                ctx.kit = await kitInfo(ctx.run, ctx.neutralDir, ctx.settings.stewardRepo);
+                log(`kit ${latestKit(ctx.kit)} released: every employee's PRs looked at again with it`);
+              } catch (err) {
+                log(`couldn't read the kit's releases again: ${(err as Error).message}`);
+              }
+            }
+            return { line, releases };
+          };
+          // In a build, the employees' merges go beside the Steward's own (Steward 0.36.69), which may test its PRs pushed
+          // since the build was prepared, ten minutes a run, a failing one twice: on 2026-10-16 the 08:00 build's 34 kit
+          // PRs, open at 13:44, merged at 14:44, once a round had tested #291 twice. The Steward's own goes apart
+          // (slots.ts), holding its own repository only, and the round waits for both before what hangs on it: the
+          // rollout, which waits for a kit coming in this build (buildkit.ts) or takes the one just released, and the
+          // build's release. Out of a build, the Steward's own first, as before.
+          const selfBeside = mode.kind === 'build' && !!self;
+          const kitBefore = latestKit(ctx.kit);
+          let selfLine: EmployeeResult | null = null;
+          let selfReleases: EmployeeResult[] = [];
+          if (!selfBeside) ({ line: selfLine, releases: selfReleases } = await selfPart());
           let employees = turns.acting;
           if (round) {
             // A build's first round looks at every repository: the PRs that waited since the last build board now,
@@ -767,7 +783,35 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             }
             employees = plan.look;
           }
-          const merged = await merge(ctx, employees, { yes, team: round || !!ask.team });
+          const theirs = (who: Employee[]) => merge(ctx, who, { yes, team: round || !!ask.team });
+          let merged: MergeLook[];
+          if (selfBeside) {
+            // Both at once, and neither one's failure thrown before the other has ended.
+            const [mine, others] = await Promise.allSettled([apart('self merge', selfPart), theirs(employees)]);
+            if (mine.status === 'rejected') throw mine.reason;
+            if (others.status === 'rejected') throw others.reason;
+            ({ line: selfLine, releases: selfReleases } = mine.value);
+            merged = others.value;
+            // A kit released beside them: what a round that released it first would have looked at with it, looked at now
+            // (changes.ts): those it makes new that this round's plan left out, so the rollout below takes it to them all
+            // at once; and those whose PRs waited for its release (prtest.ts), so they merge in this round.
+            const kitNow = latestKit(ctx.kit);
+            const first = plan;
+            if (round && first && kitNow !== kitBefore) {
+              const withKit = planRound({ employees: picked.employees, glance: ctx.glance, seen: seen!, settings: ctx.settings, look: ask.look ?? [], now: o.now?.(), kit: { newest: kitNow, own } });
+              const more = await takeTurnsFor(ctx, o, withKit.look.filter((e) => !first.look.includes(e) && heldBy(e.id) !== 'rollout'), null, true);
+              elsewhere = [...elsewhere, ...more.elsewhere];
+              const waited = employees.filter((e) => merged.some((r) => r.id === e.id && r.held.some((h) => waitsForKit(h.why))));
+              if (waited.length || more.acting.length) {
+                log(`kit ${kitNow} released beside the employees' merges: ${[...waited, ...more.acting].map((e) => e.name).join(', ')} looked at with it now`);
+                const again = await theirs([...waited, ...more.acting]);
+                merged = [...merged.map((r) => joinLooks([r, ...again.filter((a) => a.id === r.id)])), ...again.filter((a) => !merged.some((r) => r.id === a.id))];
+              }
+              // Those looked at first keep the kit before as what they were looked at with: the next round looks again.
+              plan = { ...first, look: [...first.look, ...more.acting], quiet: first.quiet.filter((e) => !more.acting.includes(e)), sigs: { ...first.sigs, ...Object.fromEntries(more.acting.flatMap((e) => (withKit.sigs[e.id] ? [[e.id, withKit.sigs[e.id]]] : []))) } };
+              employees = plan.look;
+            }
+          } else merged = await theirs(employees);
           mergedHere.push(...merged.flatMap((r) => r.merged.map((p) => `${r.id} #${p.number}`)));
           // And what a rollout beside the rounds did since the last round reported it (stages/rollout.ts): this round's to tell.
           out.results = [...elsewhere, ...merged.map(({ merged: _m, held: _h, ...r }) => r), ...(selfLine ? [selfLine] : []), ...(round ? takeRolloutResults() : [])];
