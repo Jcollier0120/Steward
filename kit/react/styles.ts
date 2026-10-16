@@ -1,14 +1,11 @@
 /**
  * The react part's own styles: what its components need beyond page.ts's (which every page already has: .card, .badge,
- * .muted, button, button.quiet, button.small, .icon-btn). Every colour is one of the manor's theme variables
+ * .muted, button, button.quiet, button.small, .icon-btn, the spinner, the modal card and the dialogs). Every colour is one of the manor's theme variables
  * (web/themes.css), so each theme, Manor's choice among them included, applies as it does to page.ts's own. `Page`
  * puts these in the page once.
  */
 export const UI_CSS = `
 .ui-icon { flex: none; vertical-align: -3px; }
-.ui-spinner { display: inline-block; flex: none; box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ui-spin .8s linear infinite; vertical-align: -2px; }
-@keyframes ui-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .ui-spinner { animation-duration: 2.4s; } }
 
 .ui-title { font-size: 20px; font-weight: 650; line-height: 1.3; color: var(--fg); margin: 0; }
 .ui-heading { font-size: 15px; font-weight: 600; color: var(--fg); }
@@ -34,7 +31,6 @@ p.ui-label { margin: 0 0 4px; }
 .ui-fill { flex: 1; min-width: 0; }
 .ui-shrink { flex: 0 1 auto; min-width: 0; }
 
-button:has(> .ui-icon, > .ui-spinner) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 button.ui-ghost { background: transparent; color: var(--accent-text); border-color: transparent; }
 button.ui-ghost:hover:not(:disabled) { background: var(--hover); filter: none; }
 button.ui-danger { background: var(--alert); color: #fff; }
@@ -100,8 +96,10 @@ button.ui-choice:hover:not(:disabled) { background: var(--hover); filter: none; 
 
 .ui-toast { position: fixed; left: 0; right: 0; bottom: 28px; z-index: 60; display: flex; justify-content: center; pointer-events: none; }
 .ui-toast > span { padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg); box-shadow: var(--shadow); }
-.ui-modal { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .45); }
-.ui-modal-card { width: min(560px, 100%); overflow: auto; padding: 16px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); outline: none; }
+/* BusyArea (busy.tsx): the part of a page whose work runs, disabled; a plain block. The spinner, the modal card and
+   the dialogs are page.ts's CSS: its script draws them too. */
+.ui-busy-area { border: 0; margin: 0; padding: 0; min-width: 0; }
+.sf-panel .ui-busy-area { background: inherit; }
 /* The Settings form (settings-form.tsx): sections, jump links and Advanced, beside settings-panel.css's own. */
 .sf-jump { position: sticky; top: var(--titlebar-h, 0); z-index: 5; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 0; margin-bottom: 4px; background: var(--card); border-bottom: 1px solid var(--line); }
 .sf-panel .sf-jump button.link { text-decoration: none; font-weight: 600; }
