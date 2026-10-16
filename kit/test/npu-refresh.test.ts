@@ -122,6 +122,17 @@ test("an older kit's command: the servers stopped in the NPU's turn, the new one
   assert.deepEqual(await refreshNpu(pc.deps), { did: 'looked' });
 });
 
+test("an entry whose quirks aren't its route's gets the route's, after the same test, its log naming them", async () => {
+  const old = { ...setUpEntry(), quirks: ['sides-of-32'] };
+  const pc = fakePc(old);
+  const r = await refreshNpu(pc.deps);
+  assert.equal(r.did, 'refreshed');
+  assert.deepEqual(r.changes, ['quirks: none']);
+  assert.ok(pc.did.includes(`test chat ${capOf(old)}`), pc.did.join(', '));
+  assert.deepEqual(pc.npu().quirks, []);
+  assert.match(pc.log.join('\n'), /now start with this kit's command \(2\.75\.0\): quirks: none/);
+});
+
 test("an NPU 3720 set up before its embeddings took the graphics' turn: moved into it after the same test, its chat in the NPU's; a detection listing no cards keeps the entry's", async () => {
   const IGPU = { id: 'gpu-intel-r-graphics', vendorId: 0x8086, memoryGb: 0.1 };
   const old = setUpEntry();
