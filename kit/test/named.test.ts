@@ -76,7 +76,7 @@ test("pageLaunch with the launcher: start runs it, and it the page; an id or pat
   assert.deepEqual(pageLaunch(node, entry, { platform: 'linux', named: { exe, id: 'smith' } }).args, [entry, 'serve'], 'elsewhere: detached, as before');
 });
 
-test('on Windows the launcher compiles with the agent\'s name, runs the page as it was, and what the page leaves ends with it', { skip: process.platform !== 'win32' }, async () => {
+test("on Windows the launcher compiles with the agent's name, runs the page as it was in the agent's job, and what the page starts detached outlives it", { skip: process.platform !== 'win32' }, async () => {
   const logged: string[] = [];
   const agent = { id: 'kit-named-test', name: 'Kit Named Test' };
   const exe = await namedLauncher(agent, { kitDir, env: { ...process.env, KIT_NAMED: '1' }, log: (l) => logged.push(l) });
@@ -103,17 +103,22 @@ test('on Windows the launcher compiles with the agent\'s name, runs the page as 
   const missing = await run([agent.id, 'no-such-program-anywhere']);
   assert.equal(missing.code, 127, 'a program that is not there: 127, as a shell says');
 
-  // A page that starts a child: ending the launcher ends both (its job), as signing out or Task Manager's End task would.
+  // A page that starts a program detached (as an install starts its watcher, which must outlive the page it replaces), then
+  // ends when told: both are in the agent's job while it runs, and the detached one runs on once the page and the launcher
+  // have ended.
   const page = path.join(home, 'page.cjs');
-  writeFileSync(page, `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore' });
-console.log(JSON.stringify({ page: process.pid, child: c.pid }));
-setTimeout(() => {}, 120000);
+  const go = path.join(home, 'go');
+  writeFileSync(page, `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', detached: true });
+c.unref();
+console.log(JSON.stringify({ page: process.pid, detached: c.pid }));
+const t = setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(go)})) { clearInterval(t); process.exit(3); } }, 100);
 `);
   const launcher = spawn(exe, [agent.id, `"${process.execPath}"`, `"${page}"`], { windowsHide: true, windowsVerbatimArguments: true, stdio: ['ignore', 'pipe', 'ignore'] });
   let said = '';
   launcher.stdout.on('data', (d) => (said += d));
+  const ended = new Promise<number | null>((resolve) => launcher.on('exit', (code) => resolve(code)));
   await until(() => said.includes('}'), paced(20_000), 'the page said its pids');
-  const { page: pagePid, child } = JSON.parse(said);
+  const { page: pagePid, detached } = JSON.parse(said);
   const alive = (pid: number) => {
     try {
       process.kill(pid, 0);
@@ -122,7 +127,29 @@ setTimeout(() => {}, 120000);
       return false;
     }
   };
-  assert.ok(alive(pagePid) && alive(child));
-  launcher.kill();
-  await until(() => !alive(pagePid) && !alive(child), paced(10_000), 'the page and its child ended with the launcher');
+  try {
+    const inJob = (await powershell(`Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class NamedTestJob {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsProcessInJob(IntPtr p, IntPtr job, out bool result);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  public static string In(int pid, string name) {
+    IntPtr j = OpenJobObject(0x4, false, name); if (j == IntPtr.Zero) return "no job";
+    IntPtr p = OpenProcess(0x1000, false, pid); bool r = false; bool ok = p != IntPtr.Zero && IsProcessInJob(p, j, out r);
+    if (p != IntPtr.Zero) CloseHandle(p); CloseHandle(j); return ok ? r.ToString() : "unknown";
+  }
+}
+'@
+[NamedTestJob]::In(${pagePid}, 'Local\\Castellan-${agent.id}') + ' ' + [NamedTestJob]::In(${detached}, 'Local\\Castellan-${agent.id}')`, { timeoutMs: paced(60_000) })).trim();
+    assert.equal(inJob, 'True True', "the page and what it starts are in the agent's job");
+    writeFileSync(go, '');
+    assert.equal(await ended, 3, "the launcher ends with the page, with the page's exit code");
+    assert.ok(!alive(pagePid));
+    await new Promise((r) => setTimeout(r, 500));
+    assert.ok(alive(detached), 'what the page started detached runs on: the job ends nothing');
+  } finally {
+    for (const pid of [pagePid, detached]) if (alive(pid)) process.kill(pid);
+  }
 });

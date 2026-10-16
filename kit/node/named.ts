@@ -10,7 +10,8 @@ import { powershell } from './ps.ts';
  * programs it starts under it. An agent's page was node.exe itself, so every agent showed as one more "Node.js
  * JavaScript Runtime", and its processor and memory couldn't be told from another's. Its page now runs through a small
  * launcher with the agent's name (named.cs), so it shows as "Smith (3)", the page, its PowerShell worker and its git
- * inside, in a Windows job of the agent's own (Local\Castellan-<id>) that ends with it.
+ * inside, in a Windows job of the agent's own (Local\Castellan-<id>). The job ends nothing: what the page starts
+ * detached (an install's watcher, a model server) outlives it, as before.
  *
  * Compiled once per agent and version of named.cs, its name written in, into the folder every agent's launchers share
  * (beside the checks pace's). The page builds it, a while after it starts (server.ts), so open never waits on a

@@ -5,11 +5,12 @@
 // written into the title below, into the folder every agent's launchers share. Its own command line: the agent's id, a
 // word, then the command line to run, as is.
 //
-// The job (Local\Castellan-<id>) is the agent's container: everything the page starts is in it, and it ends with the
-// launcher (its last handle closed), so "End task" on the group ends the agent whole, and no page is left running under
-// no name. It lets a program leave it (CREATE_BREAKAWAY_FROM_JOB): the model servers every agent shares are started apart
-// (apart.ts) and outlive the agent that started them, and the checks pace takes its runs into its own job
-// (checks-pace.cs). The gentle pace's job (gentle.cs) nests inside it. It sets no cap of its own: the pace does.
+// The job (Local\Castellan-<id>) holds everything the page starts, so a tool can find the agent's processes, and add up
+// what they take, by its id. It ends nothing: what the page starts detached outlives it as it always has (a model
+// server started without the apart launcher, an install's watcher, which must outlive the page it replaces). It lets a
+// program leave it (CREATE_BREAKAWAY_FROM_JOB): the model servers every agent shares are started apart (apart.ts), and
+// the checks pace takes its runs into its own job (checks-pace.cs). The gentle pace's job (gentle.cs) nests inside it.
+// It sets no cap of its own: the pace does.
 //
 // The page shares the launcher's console, the windowless one cmd's `start /b` gave it (service.ts's pageLaunch), so its
 // git and gh share that too (console.ts), and its standard handles (serve.log). Ctrl+C goes to the page, which the
@@ -73,7 +74,7 @@ public static class KitNamed
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetCommandLineW();
 
     const int JobObjectExtendedLimitInformation = 9;
-    const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+    const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x800;
     const uint CREATE_SUSPENDED = 0x4;
     const int STARTF_USESTDHANDLES = 0x100;
     const uint INFINITE = 0xFFFFFFFF;
@@ -106,18 +107,17 @@ public static class KitNamed
         uint code;
         if (!GetExitCodeProcess(pi.hProcess, out code)) code = 1;
         CloseHandle(pi.hProcess);
-        // Closing the job's last handle ends what the page left in it.
         if (job != IntPtr.Zero) CloseHandle(job);
         return (int)code;
     }
 
-    // The job with its limits set (what is left in it ends with it; a program may leave it) and the process in it; zero,
+    // The job with its limits set (a program may leave it; nothing in it is ended with it) and the process in it; zero,
     // and the handle closed, when it couldn't be (a job the launcher is in that won't take another inside it).
     static IntPtr Joined(IntPtr job, IntPtr p)
     {
         if (job == IntPtr.Zero) return IntPtr.Zero;
         var limit = new ExtendedLimit();
-        limit.Basic.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+        limit.Basic.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
         SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limit, Marshal.SizeOf(typeof(ExtendedLimit)));
         if (AssignProcessToJobObject(job, p)) return job;
         CloseHandle(job);
