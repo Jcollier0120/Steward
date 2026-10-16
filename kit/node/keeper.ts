@@ -187,8 +187,14 @@ export interface ReaperDeps {
   probe: (base: string) => Promise<'ready' | 'busy' | 'loading' | 'down'>;
   /** Someone holds its accelerator's lock, or waits in its line. */
   inUse: (s: ReapedServer) => boolean;
-  /** When someone last took or let go of its accelerator's lock, or joined or left its line (ms since the epoch). */
+  /** When someone last took its accelerator's lock, or joined or left its line: its own folders (ownActivityMs; ms since the epoch). */
   lastActivityMs: (s: ReapedServer) => number;
+  /**
+   * When anyone last took or let go of any accelerator's lock (locksActivityMs). Letting go leaves no other trace, so the
+   * reaper counts this for an accelerator only when that one was in use since its last look. Without it, a request
+   * counts from when it took the lock.
+   */
+  locksActivityMs?: (s: ReapedServer) => number;
   /** Runs `fn` holding all its accelerator's slots; throws when they can't be had at once (someone is in line). */
   withTurn: <T>(s: ReapedServer, fn: () => Promise<T>) => Promise<T>;
   /** The programs of a game using its graphics card now; empty or null when none is (or it isn't a card). */
@@ -218,6 +224,8 @@ export interface ReaperOptions {
 
 export class Reaper {
   private lastInUse = new Map<string, number>();
+  /** Each accelerator's last look: when, and whether someone held or waited on it then. */
+  private looked = new Map<string, { atMs: number; held: boolean }>();
   private lastSkip = new Map<string, string>();
   private silentSince = new Map<string, number>();
   private orphanSince = new Map<number, number>();
@@ -258,6 +266,7 @@ export class Reaper {
     }
     if (d.inUse(s)) {
       this.lastInUse.set(s.acc.id, d.now());
+      this.looked.set(s.acc.id, { atMs: d.now(), held: true });
       this.silentSince.delete(s.base);
       return { base: s.base, did: 'in-use' };
     }
@@ -269,13 +278,15 @@ export class Reaper {
       d.log(`stopped ${program} (${pids.join(', ')}) at ${s.base}: Castellan's Settings keep the graphics card out while the NPU serves (gpuWithNpu is off)`);
       return { base: s.base, did: 'stopped-kept-out', pids };
     }
-    const lastUse = Math.max(this.lastInUse.get(s.acc.id) ?? 0, d.lastActivityMs(s), ...procs.map((p) => p.startedMs));
+    const own = d.lastActivityMs(s);
+    const lastUse = Math.max(this.lastInUse.get(s.acc.id) ?? 0, own, this.letGoMs(s, own), ...procs.map((p) => p.startedMs));
     const idleMs = d.now() - lastUse;
     const idleStopMs = s.idleMs ?? this.o.idleMs ?? 0;
     if (idleStopMs > 0 && idleMs >= idleStopMs) {
       const pids = await this.inTurn(s, false, true);
       if (pids === 'used') {
         this.lastInUse.set(s.acc.id, d.now());
+        this.looked.set(s.acc.id, { atMs: d.now(), held: true });
         return { base: s.base, did: 'in-use' };
       }
       if (!pids) return taken;
@@ -316,6 +327,24 @@ export class Reaper {
     this.silentSince.delete(s.base);
     d.log(`restarted ${program} (was ${pids.join(', ')}) at ${s.base}: running, but ${state === 'down' ? 'not listening' : 'not answering'} for ${Math.round(silentMs / 1000)} s`);
     return { base: s.base, did: 'restarted', pids, silentMs };
+  }
+
+  /**
+   * When someone last let go of this accelerator, as far as the folder every lock shares tells (`own`: when its lock was
+   * last taken): that folder's time, but only when this accelerator was in use since the last look (held or waited on
+   * then, or taken since), so another accelerator's lock never counts. At the reaper's first look, no later than a holder
+   * may keep a slot after taking it (rules.json's lock.staleMs). 0 when it can't tell. Remembered as use.
+   */
+  private letGoMs(s: ReapedServer, own: number): number {
+    const d = this.deps;
+    const now = d.now();
+    const was = this.looked.get(s.acc.id);
+    this.looked.set(s.acc.id, { atMs: now, held: false });
+    if (!d.locksActivityMs) return 0;
+    const shared = d.locksActivityMs(s);
+    const ms = was ? (was.held || own > was.atMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
+    if (ms > 0) this.lastInUse.set(s.acc.id, Math.max(this.lastInUse.get(s.acc.id) ?? 0, ms));
+    return ms;
   }
 
   /**
@@ -584,13 +613,30 @@ const mtimeMs = (p: string) => {
 };
 
 /**
- * When someone last used an accelerator, from its lock folders' times: taking or letting go of a slot creates or
- * removes its folder (which changes `locks\`), and joining or leaving the line changes its queue folder. Another
- * accelerator's lock in `locks\` counts too, which only ever keeps a server longer.
+ * When someone last took an accelerator's lock, from its own folders' times: taking a slot creates its folder, and
+ * joining or leaving its line changes its queue folder. Letting go removes the slot's folder, which leaves its time only
+ * on the folder every accelerator's lock shares (`locksActivityMs`), so it isn't counted here: another accelerator's
+ * lock would count with it. The keeper's idle time is this, and a let-go from the shared folder only when this
+ * accelerator was in use since its last look (Reaper). Before kit 2.77.6 it was `lastActivityMs`, and a card busy
+ * indexing kept the NPU's servers up, or the NPU a card's.
+ */
+export function ownActivityMs(lockDirs: string | string[]): number {
+  const dirs = [lockDirs].flat();
+  return Math.max(...dirs.map(mtimeMs), mtimeMs(queueDirFor(dirs[0])));
+}
+
+/** When anyone last took or let go of any accelerator's lock: the time of the folder their lock folders share. */
+export function locksActivityMs(lockDirs: string | string[]): number {
+  return mtimeMs(path.dirname([lockDirs].flat()[0]));
+}
+
+/**
+ * When anyone last took or let go of an accelerator's lock, or joined or left this one's line: its own folders and the
+ * folder every lock shares, so another accelerator's lock counts too. For a look at whether the PC's accelerators were
+ * used at all (the Smith's quiet look, the NPU refresh's quiet wait); an accelerator's idle time is `ownActivityMs`.
  */
 export function lastActivityMs(lockDirs: string | string[]): number {
-  const dirs = [lockDirs].flat();
-  return Math.max(mtimeMs(path.dirname(dirs[0])), ...dirs.map(mtimeMs), mtimeMs(queueDirFor(dirs[0])));
+  return Math.max(locksActivityMs(lockDirs), ownActivityMs(lockDirs));
 }
 
 /** Holds each folder's lock in turn (a plain mutex, at once or LockTimeout), then runs `fn`. */
@@ -639,7 +685,8 @@ export function pcReaper(o: { who?: string; logFile?: string; config?: () => Rec
         const l = lineState(s.lockDirs);
         return l.held > 0 || l.waiting > 0;
       },
-      lastActivityMs: (s) => lastActivityMs(s.lockDirs),
+      lastActivityMs: (s) => ownActivityMs(s.lockDirs),
+      locksActivityMs: (s) => locksActivityMs(s.lockDirs),
       withTurn: (s, fn) => reaperTurn(s.lockDirs, fn, o.who),
       gameOn: async (s) => {
         const games = await currentGames(configuredAccelerators(config()) as unknown as KitAccelerator[]);
