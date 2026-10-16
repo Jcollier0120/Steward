@@ -352,7 +352,7 @@ export interface Question {
 
 /**
  * Sets a route up as setup does, its server and models, each step timed, without writing config.json: the entry setup
- * would write (or the problems), and the time each kind of step took.
+ * would write (or the problems), the time each kind of step took, and its power tool's check (setUpNpu's `power`).
  */
 export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo>, log: (l: string) => void, now: () => number) {
   const timed: Record<string, number> = {};
@@ -379,7 +379,11 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
       (io.unpack ?? unpack)(zip, into);
       timed.unpack = Math.round(now() - t0);
     },
-    run: (exe, args, ro) => time(args.some((a) => /pull/i.test(a)) ? 'pull' : 'install', () => (io.run ?? ((e, a, o) => runProgram(e, a, o)))(exe, args, ro)),
+    run: (exe, args, ro) => {
+      const go = () => (io.run ?? ((e, a, o) => runProgram(e, a, o)))(exe, args, ro);
+      // The power tool's check is no part of setting up: reported by itself (`power`), not timed as an install.
+      return exe === plan.powerTool?.exe ? go() : time(args.some((a) => /pull/i.test(a)) ? 'pull' : 'install', go);
+    },
     testNpu: async (e) => {
       entry = e;
       return [];
@@ -388,5 +392,5 @@ export async function setUpRoute(plan: NpuPlan, tools: string, io: Partial<NpuIo
     testEmbed: async () => [],
     measure: io.measure ?? (async () => null),
   });
-  return { entry, problems: r.problems, timed };
+  return { entry, problems: r.problems, timed, power: r.power };
 }
