@@ -360,7 +360,7 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   report.generation = generation;
   let route: NpuRoute;
   try {
-    // The models setup runs on this PC (its generation's own; a small PC's, smallPc, where it has any), or a small PC's when asked.
+    // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked.
     const small = !!o.smallPc || smallPc(d.ramBytes);
     route = routeOnDevice(routeFor(catalog.routes[vendor], generation, small), report.device);
     if (small && generationOf(catalog.routes[vendor], generation)?.smallPc) log(`A small PC's models (${o.smallPc ? '--small-pc' : `this PC's ${report.pc.ramGb} GB`}): ${route.models.map((m) => m.id).join(', ')}.`);
