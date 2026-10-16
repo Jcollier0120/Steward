@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, useContext, type KeyboardEvent, type ReactNode } from 'react';
+import { useTracked } from './busy.tsx';
 import { Icon, Spinner, type IconName } from './icons.tsx';
+import { alertDialog, confirmDialog } from './modal.tsx';
 import { post } from './page-data.ts';
 
 /**
@@ -99,7 +101,7 @@ export interface ButtonProps {
   title: string;
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** A spinner in place of the icon, and no presses, while the work it started runs. */
+  /** A spinner in place of the icon, and no presses, while the work it started runs (a promise onPress returns says so by itself). */
   loading?: boolean;
   disabled?: boolean;
   /** Looks disabled and still takes presses: a gated action that explains itself when pressed. */
@@ -107,7 +109,8 @@ export interface ButtonProps {
   icon?: IconName;
   /** Any leading node; `icon` first. */
   leftIcon?: ReactNode;
-  onPress?: () => void;
+  /** What a press does: when it returns a promise, the button is busy until it settles, and so is its BusyArea. */
+  onPress?: () => unknown;
   /** The web's tooltip (GamerNexus's `title` is the label, so this is its own name). */
   tooltip?: string;
   /** A form's submit button rather than a plain one. */
@@ -120,19 +123,27 @@ export interface ButtonProps {
 
 /** The button: five weights (danger-quiet among other controls, danger only for the last step), three sizes. */
 export function Button({ title, variant = 'primary', size = 'md', loading = false, disabled, disabledLook = false, icon, leftIcon, onPress, tooltip, submit, accessibilityLabel, data }: ButtonProps) {
+  const [pending, track] = useTracked();
+  const busy = loading || pending;
+  const press = onPress
+    ? () => {
+        const r = onPress();
+        if (r && typeof (r as PromiseLike<unknown>).then === 'function') track(r as PromiseLike<unknown>);
+      }
+    : undefined;
   return (
     <button
       type={submit ? 'submit' : 'button'}
       className={cx(VARIANT[variant], SIZE[size], disabledLook && 'ui-dimmed') || undefined}
-      disabled={disabled || loading}
-      aria-busy={loading || undefined}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
       aria-disabled={disabledLook || undefined}
       title={tooltip}
       aria-label={accessibilityLabel}
-      onClick={onPress}
+      onClick={press}
       {...data}
     >
-      {loading ? <Spinner size={14} /> : icon ? <Icon name={icon} /> : leftIcon}
+      {busy ? <Spinner size={14} /> : icon ? <Icon name={icon} /> : leftIcon}
       {title}
     </button>
   );
@@ -187,24 +198,27 @@ const Reload = createContext<() => void | Promise<void>>(() => {});
 export const ReloadProvider = Reload.Provider;
 
 /**
- * A Button that POSTs to the agent's server with the page's token (the manor's own): `confirm` asks first (Cancel
- * sends nothing), `body` is what it sends (a function: worked out when pressed), an error or the server's `message` is
- * said, and the page then looks for news. It spins while it waits.
+ * A Button that POSTs to the agent's server with the page's token (the manor's own): `confirm` asks first, in the
+ * page's own dialog (Cancel sends nothing), `body` is what it sends (a function: worked out when pressed), and the page
+ * then looks for news. It spins while it waits, and its BusyArea is disabled as long; then an error or the server's
+ * `message` is said, in the page's own dialog too.
  */
 export function PostButton({ path, body, confirm, ...button }: { path: string; body?: unknown | (() => unknown); confirm?: string } & Omit<ButtonProps, 'onPress' | 'loading' | 'submit'>) {
   const reload = useContext(Reload);
-  const [waiting, setWaiting] = useState(false);
+  const [waiting, track] = useTracked();
+  // The page's server not answering is said as its error would be.
+  const send = async () => {
+    const r = await post(path, typeof body === 'function' ? (body as () => unknown)() : body).catch((e: unknown) => ({ ok: false, json: { error: (e as Error).message } as { error?: string; message?: string } }));
+    await reload();
+    return r;
+  };
   const press = async () => {
-    if (confirm && !window.confirm(confirm)) return;
-    setWaiting(true);
-    try {
-      const r = await post(path, typeof body === 'function' ? (body as () => unknown)() : body);
-      if (!r.ok) window.alert(r.json.error);
-      else if (typeof r.json.message === 'string') window.alert(r.json.message);
-      await reload();
-    } finally {
-      setWaiting(false);
-    }
+    if (confirm && !(await confirmDialog(confirm))) return;
+    const sent = send();
+    track(sent);
+    const r = await sent;
+    if (!r.ok) await alertDialog(r.json.error ?? 'Something went wrong.');
+    else if (typeof r.json.message === 'string') await alertDialog(r.json.message);
   };
   return <Button {...button} loading={waiting} onPress={() => void press()} data={{ 'data-post': path, ...button.data }} />;
 }

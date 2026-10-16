@@ -491,6 +491,27 @@
     status.className = `sf-status${isError ? ' error' : ' muted'}`;
   }
 
+  // While it saves: a spinner in Save, and the fields and the bar take no presses; then each is as it was, and so is
+  // the focus the browser let go of as they were disabled.
+  let held = null;
+  function busy(on) {
+    if (on) {
+      held = { els: [...form.querySelectorAll('button, input, select, textarea'), save, cancel, resetAll].filter((el) => !el.disabled), focus: document.activeElement, spin: h('span', { class: 'ui-spinner', 'aria-hidden': 'true' }) };
+      for (const el of held.els) el.disabled = true;
+      save.prepend(held.spin);
+      save.setAttribute('aria-busy', 'true');
+      form.setAttribute('aria-busy', 'true');
+      return;
+    }
+    if (!held) return;
+    for (const el of held.els) el.disabled = false;
+    held.spin.remove();
+    save.removeAttribute('aria-busy');
+    form.removeAttribute('aria-busy');
+    if ((!document.activeElement || document.activeElement === document.body) && held.focus?.isConnected) held.focus.focus();
+    held = null;
+  }
+
   function changed() {
     let dirty = false;
     for (const t of tracked) {
@@ -562,7 +583,13 @@
       data = await r.json();
     } catch (e) {
       const retry = h('button', { type: 'button', class: 'quiet small', text: 'Try again' });
-      retry.addEventListener('click', load);
+      // It spins, and takes no more presses, until the settings come or it's said again.
+      retry.addEventListener('click', () => {
+        retry.disabled = true;
+        retry.setAttribute('aria-busy', 'true');
+        retry.prepend(h('span', { class: 'ui-spinner', 'aria-hidden': 'true' }));
+        load();
+      });
       root.replaceChildren(h('p', { class: 'sf-msg error', text: `The settings couldn't be loaded: ${e.message}.` }), retry);
       return;
     }
@@ -595,7 +622,7 @@
     }
     changed();
     if (!Object.keys(values).length) return say('Nothing to save.');
-    save.disabled = true;
+    busy(true);
     say('Saving…');
     let r;
     let j = {};
@@ -603,11 +630,11 @@
       r = await fetch('/api/settings', { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ values }) });
       j = await r.json().catch(() => ({}));
     } catch (err) {
-      save.disabled = false;
+      busy(false);
       return say(`Not saved: ${err.message}.`, true);
     }
+    busy(false);
     if (!r.ok) {
-      save.disabled = false;
       show(j.errors || {}, 'error');
       say(j.error || `Not saved (${r.status}).`, true);
       const first = form.querySelector('[aria-invalid="true"]');
