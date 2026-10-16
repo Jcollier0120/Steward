@@ -398,8 +398,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     }
     const s = loadSettings();
     const busy = runs.length > 0 || refreshing !== null;
-    const pv = s.buildPipeline.on ? pipelineView(s.buildPipeline, loadPipeline()) : null;
-    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: pv ? { times: pv.times, next: pv.next, building: pv.building } : null };
+    const pv = pipelineView(s.buildPipeline, loadPipeline());
+    const round = { on: s.byItself, minutes: s.roundMinutes, onDuty: duty().onDuty, lastRunAt: rounds?.state?.lastRunAt ?? null, rollout: s.rollout, releaseSelf: s.releaseSelf, tend: s.tend && !!agentPages().manor, repos: reposHere(s), castellan: s.releasesCastellan, build: { times: pv.times, next: pv.next, building: pv.building } };
     // Settings' team, or when they name none the account gh is signed in as (team.ts; the kit keeps it once known).
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
@@ -459,8 +459,8 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
       },
       // The owner's Build now (pipeline.ts), asked first on Manor's page: a build at once, outside the schedule, for the
       // repositories named ({ employees: [id, …] }) or all, and with { toCustomers: true } its releases let out to
-      // customers at once rather than on their release day. Never for a session: CLAUDE.md says urgent work waits for
-      // the next build, and the page's token is the owner's.
+      // customers at once rather than on their release day. Never for a session: its urgent fix marks its changelog entry
+      // "**Urgent fix:" and builds at once by itself (stages/urgent.ts), and the page's token is the owner's.
       '/api/pipeline/build': ({ body }) => {
         const employees: string[] = Array.isArray(body?.employees) ? body.employees.filter((x: unknown): x is string => typeof x === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(x)).slice(0, 100) : [];
         if (rounding()) return { json: { started: false, message: 'A round is running; press Build now again once it has finished.' } };
@@ -480,17 +480,21 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         lookNext = [...new Set([...lookNext, ...look])];
         if (!loadSettings().byItself) return { json: { started: false, message: "The Steward doesn't merge by itself (Settings), so nothing merges until you press Run now." } };
         if (!duty().onDuty) return { json: { started: false, message: 'The Steward is off duty: it merges the PR at its first round once it is back.' } };
-        // The build pipeline on and no build under way: the PR goes into the next build, whatever a round would do now.
+        // No build under way (pipeline.ts): the PR goes into the next build, unless it is an urgent fix, which the round
+        // asked for here boards at once, as a build of its own (stages/urgent.ts). Otherwise that round only looks.
         const mode = pipelineMode(loadSettings().buildPipeline, loadPipeline(), new Date());
-        if (mode.kind === 'between') return { json: { started: false, message: `The Steward builds at set times (Settings: Build pipeline): the PR goes into the next build${mode.next ? `, at ${buildWhen(mode.next, new Date())}` : ''}.` } };
+        const waits =
+          mode.kind === 'between'
+            ? `The Steward builds at set times (Settings: Build pipeline): the PR goes into the next build${mode.next ? `, at ${buildWhen(mode.next, new Date())}` : ''}, unless it is an urgent fix (its changelog entry starting "**Urgent fix:"), which builds at once`
+            : null;
         if (rounding() || slotsFull()) {
           roundAfter = true;
-          return { json: { started: false, queued: true, message: `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
+          return { json: { started: false, queued: true, message: waits ? `${waits}: a round looks for one as soon as it can.` : `The Steward's ${runningWords()} ${isAre()} running: a round comes as soon as it can.` } };
         }
         // Manor's automatic update due (startRound): the round waits for it, a few minutes at most.
-        if (updateHold()) return { json: { started: false, queued: true, message: 'Manor is about to update the Steward, so its rounds wait a few minutes for it: a round comes after.' } };
+        if (updateHold()) return { json: { started: false, queued: true, message: waits ? `${waits}: a round looks for one once Manor has updated the Steward, in a few minutes.` : 'Manor is about to update the Steward, so its rounds wait a few minutes for it: a round comes after.' } };
         startRound();
-        return { json: { started: true, message: "The Steward's round has started: it merges the PR now if its turn has come." } };
+        return { json: { started: true, message: waits ? `${waits}: a round looks for one now.` : "The Steward's round has started: it merges the PR now if its turn has come." } };
       },
       // Manor, right after it installs an update: the jobs whose scripts it changed, approved now when they are exactly
       // what was merged (stages/jobs.ts), not at the next round's end. While every slot is taken, once one is free.
