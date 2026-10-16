@@ -20,7 +20,7 @@ import { runTrain, trainCars, type TrainRun } from './train.ts';
 import { buildCars, forgetEarlierBuilds, leftIn, loadReadySince, runBatch, type BuildBatch } from './build.ts';
 import { loadRolloutFailures } from './rollout.ts';
 import { kitMovedUnder, kitTrialHold, raisesKit, trialFails, trialGivesWay, trialGoingAt, TRIAL_GOING } from './trial.ts';
-import { claimsOn, reclaim } from '../claims.ts';
+import { claimsOn, movedTo, reclaim, type Claim } from '../claims.ts';
 import { kitInfo } from '../kitsource.ts';
 import { kitClaimKey, kitTitleVersions, KIT_VERSION_FILE } from './kitpart.ts';
 import type { Held } from '../alarms.ts';
@@ -318,6 +318,24 @@ export const givesWay = (e: Employee, hold: { pr: PrInfo; why: string }[]): Set<
   new Set(hold.filter((h) => h.why === CONFLICTS && !h.pr.draft && handedOn(e.repo, h.pr.number, h.pr.headOid)).map((h) => h.pr.number));
 
 /**
+ * The PRs moved past the others in the version queue (move-past.ts) that are still below the version they were moved
+ * to, by number: that version. Not ready, one gives up its turn, a draft too (the owner moved it); ready, it waits its
+ * turn at that version, and is caught up to it once the PRs below it have merged. Pure.
+ */
+export function movedPast(claims: Claim[], prs: PrInfo[], pending: Map<number, string>): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const pr of prs) {
+    const v = pending.get(pr.number);
+    const to = v ? movedTo(claims, pr) : null;
+    if (v && to && compareVersions(to, v) > 0) out.set(pr.number, to);
+  }
+  return out;
+}
+
+/** How the hold of a PR moved past the others reads, once it isn't ready (movedPast). */
+export const movedWords = (v: string) => `moved past the others to v${v}: it gives up its turn, so the PRs above it merge first, and once it is ready it is caught up to v${v}`;
+
+/**
  * A ready team PR from the repository itself, or a kit PR of the Steward's, that waits only on its branch: conflicting
  * with it, or behind it.
  */
@@ -589,12 +607,18 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   for (const h of hold) if (gaveWay.has(h.pr.number)) h.why = GAVE_WAY;
   // So does a kit PR its trial fails (trialGivesWay): it is still looked at below, and merges once its trial passes.
   const trialWay = trialGivesWay(e, prs);
-  const queue = gaveWay.size || trialWay.size ? new Map([...pending].filter(([n]) => !gaveWay.has(n) && !trialWay.has(n))) : pending;
+  // And one moved past the others (movedPast): not ready, it gives up its turn; ready, it waits its turn at the version
+  // it was moved to.
+  const moves = movedPast(claimsOn(e.repo), prs, pending);
+  for (const h of hold) if (moves.has(h.pr.number) && !gaveWay.has(h.pr.number)) h.why = `${h.why}; ${movedWords(moves.get(h.pr.number)!)}`;
+  const going = new Set(merge.map((p) => p.number));
+  const queue = new Map([...pending].flatMap(([n, v]): [number, string][] => (gaveWay.has(n) || trialWay.has(n) ? [] : moves.has(n) ? (going.has(n) ? [[n, moves.get(n)!]] : []) : [[n, v]])));
   // A merge train (stages/train.ts): the queue's ready PRs from its lowest version up, stacked, tested once and merged
   // together. Once it has merged, the next look takes what is left; where it didn't, they merge one at a time below.
   let trainLine: string[] = [];
   if (trains && queue.size > 1) {
-    const cars = trainCars(prs, queue, e.branch);
+    // One moved past the others rides in no train: its files still say the version it had.
+    const cars = trainCars(prs, moves.size ? new Map([...queue].filter(([n]) => !moves.has(n))) : queue, e.branch);
     if (cars.length) {
       let t: TrainRun;
       try {
@@ -905,7 +929,8 @@ async function catchUpAll(ctx: Ctx, e: Employee, o: { catchable: Map<number, PrI
       const kit = existsSync(path.join(checkoutOf(e), KIT_VERSION_FILE))
         ? { released: await kitReleased(), taken: [...kitTaken, ...kitTitleVersions(o.ready.filter((r) => r.pr.number !== pr.number && !merged.has(r.pr.number)).map((r) => r.pr.title)), ...claimsOn(kitClaimKey(e.repo)).filter((x) => x.branch !== pr.head).map((x) => x.version)] }
         : undefined;
-      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr) });
+      // One moved past the others (move-past.ts) is caught up to the version it was moved to.
+      c = await catchUp(ctx, e, pr, { released, taken: [...taken, ...claimed], ...(kit ? { kit } : {}), carry: await standingOf(ctx, e, pr), own: movedTo(claimsOn(e.repo), pr) });
     } catch (err) {
       c = { done: false, note: `couldn't: ${(err as Error).message}` };
     }

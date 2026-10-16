@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { dismiss, getJson, loadAlarms, type GetJson } from './alarms.ts';
+import { dismiss, getJson, loadAlarms, queueAlarmOf, type GetJson } from './alarms.ts';
+import { movePast } from './move-past.ts';
 import { APP, dataDir, port } from './app.ts';
 import { duty } from './kit/duty.ts';
 import { LockTimeout } from './kit/lock.ts';
@@ -23,7 +24,7 @@ import { loadClaims } from './claims.ts';
 import { testedView } from './tested.ts';
 import { findRepos, foundStale, foundView, loadFound, lookAfterAll } from './found.ts';
 import { handOver, turnsView, type TurnsDeps } from './lease.ts';
-import { claimClashes } from './claims.ts';
+import { claimClashes, employeeFor } from './claims.ts';
 import { loadConflicts } from './conflicts.ts';
 import { stewardEmployee } from './stages/selfmerge.ts';
 import { trialsOnTheirOwn } from './stages/trial.ts';
@@ -282,6 +283,28 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     if (updateHold()) return;
     void roundJob().catch((e) => console.error(`${new Date().toISOString()} round: ${(e as Error).message}`));
   };
+  /**
+   * A PR moved past the others in its version queue (move-past.ts), and then a round, as POST /api/round/soon brings one,
+   * so the PRs that waited behind it merge in minutes: one running or every slot taken, once it can.
+   */
+  const moveNow = async (repo: string, number: number): Promise<{ json: unknown; status?: number }> => {
+    const log = (line: string) => console.log(`move: ${line}`);
+    try {
+      const ctx = await context({ run: o.run, owner: o.owner, glance: false, log });
+      const e = employeeFor(ctx.settings, repo);
+      if (!e) return { json: { error: `${repo} isn't one the Steward looks after` }, status: 404 };
+      const r = await movePast(ctx, e, number);
+      log(`[${e.id}] ${r.message}`);
+      if (r.status !== 200) return { json: { error: r.message }, status: r.status };
+      const s = loadSettings();
+      const soon = s.byItself && duty().onDuty && pipelineMode(s.buildPipeline, loadPipeline(), new Date()).kind !== 'between';
+      if (soon && (rounding() || slotsFull())) roundAfter = true;
+      else if (soon) startRound();
+      return { json: { ok: true, message: r.message, moved: r.moved } };
+    } catch (err) {
+      return { json: { error: `couldn't move it: ${(err as Error).message}` }, status: 502 };
+    }
+  };
   // Beside the rounds (steward.ts's conflictsNow): every few minutes, while a stage's slot is free, the ready PRs that
   // conflict with their branch are caught up, rather than waiting for a round to reach their repository; a long round
   // (a vouch's tests, a kit trial) left them waiting for hours. It takes a slot only once it finds one to catch up, and
@@ -367,7 +390,7 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
     const team = teamOf(s.team, o.owner);
     const self = s.stewardRepo ? [{ id: APP.id, name: APP.name, repo: s.stewardRepo }] : [];
     const scm = loadScm();
-    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, queueHolds: heldQueues(loadVersionQueues()), wholeSuite: loadWholeJob() };
+    const body: StewardView = { turns: turnsView([...s.employees, ...self]), claimClashes: claimClashes(), castellan: s.releasesCastellan, found: foundView(loadFound(), s), finding: finding !== null, staff: staffView(loadStaff(), (r) => hostOf(r, s, scm)), conflicts: loadConflicts(), last: loadLastStage(), running: runs[0] ?? null, runs, full: slotsFull(), refreshing: refreshing !== null, team: team.team, teamNote: team.note, round, alarms: s.alarms.on ? loadAlarms() : undefined, tending: s.tend ? loadTending() : undefined, queueHolds: heldQueues(loadVersionQueues(), undefined, loadClaims()), wholeSuite: loadWholeJob() };
     return { shell: pageShell({ busy, title: runs.length ? `(${runs.map((r) => r.stage).join(', ')}) ${APP.name}` : APP.name }), body };
   };
 
@@ -471,6 +494,22 @@ export async function serveSteward(o: { run?: Runner; owner?: Owner; getJson?: G
         // An update the install rolled back: dismissing its alarm is looking at it, and allows that version again.
         if (id.startsWith('unsafe:')) allowUpdate(id.slice('unsafe:'.length));
         return dismiss(id) ? { json: { ok: true } } : { json: { error: 'no such alarm open' }, status: 404 };
+      },
+      // An alarm's button (its `action`), on the page or Manor's Needs you, asked first: { id }. A queue's alarm moves the
+      // PR holding it past the others (move-past.ts); none other has one yet.
+      '/api/alarms/act': async ({ body }) => {
+        const id = typeof body?.id === 'string' ? body.id.slice(0, 300) : '';
+        const a = loadAlarms().open.find((x) => x.id === id);
+        const q = queueAlarmOf(id);
+        if (!a || !a.action || !q) return { json: { error: a ? 'that alarm has nothing to do but be dismissed' : 'no such alarm open' }, status: 404 };
+        return moveNow(q.repo, q.number);
+      },
+      // The Version queues card's button, asked first: { repo, number } moves that PR past the others (move-past.ts).
+      '/api/queue/move': async ({ body }) => {
+        const repo = typeof body?.repo === 'string' ? body.repo.trim().slice(0, 140) : '';
+        const number = Number(body?.number);
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !Number.isInteger(number) || number < 1) return { json: { error: 'Send { "repo": "owner/name", "number": <the PR\'s number> }.' }, status: 400 };
+        return moveNow(repo, number);
       },
       // Look after repositories Reeve found (found.ts): added to Settings, merging and releasing only as ticked. One
       // ({ repo, merges, release }), or several at once ({ repos: [{ repo, merges, release }, …] }).
