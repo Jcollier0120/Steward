@@ -199,6 +199,34 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   assert.ok(s.lines.some((l) => l.startsWith('Suggested for npu-vendors.json')));
 });
 
+test("a route's power tool (AMD's xrt-smi, for FastFlowLM): its run noted after setup, never failed and never timed as setup, so the reports count the PCs where it can't start", async () => {
+  const s = await scene({ cap: 1536 });
+  // Intel's route given AMD's power tool, here a file in the scene's tools home, that ends as xrt-smi does beside an older driver's DLLs.
+  const exe = path.join(s.tools, 'AMD', 'xrt-smi.exe');
+  mkdirSync(path.dirname(exe), { recursive: true });
+  writeFileSync(exe, '');
+  s.catalog.routes.intel.powerTool = { ...V.NPU_CATALOG.routes.amd.powerTool!, exe };
+  const run = (code: number) => async (e: string, args: string[]) => (e === exe ? (s.ran.push(['power', ...args]), { code, out: '' }) : (s.ran.push(args), { code: 0, out: '' }));
+  const { code, report } = await C.npuCheck({ ...s.opts, io: { ...s.opts.io, setup: { run: run(0xc0000139) } } });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.steps.map((x: any) => x.step).slice(0, 5), ['detect', 'requirements', 'setup', 'power-tool', 'start']);
+  const power = report.steps.find((x: any) => x.step === 'power-tool')!;
+  assert.equal(power.ok, null);
+  assert.match(power.say, /^xrt-smi\.exe couldn't start \(exit 0xC0000139\): OpenVINO Model Server can't set the NPU's power mode, so the NPU runs at its default mode; an older AMD NPU driver left its files/);
+  assert.deepEqual(power.data, { exe, missing: false, code: 3221225785, broken: true });
+  assert.deepEqual(s.ran.filter((a) => a[0] === 'power'), [['power', 'examine']], 'run once, read only');
+  assert.equal((report.steps.find((x: any) => x.step === 'setup')!.data!.timed as Record<string, number>).install, undefined, 'not timed as an install');
+
+  const fine = await scene({ cap: 1536 });
+  fine.catalog.routes.intel.powerTool = { ...V.NPU_CATALOG.routes.amd.powerTool!, exe };
+  const ok = await C.npuCheck({ ...fine.opts, io: { ...fine.opts.io, setup: { run: async () => ({ code: 0, out: '' }) } } });
+  assert.match(ok.report.steps.find((x: any) => x.step === 'power-tool')!.say, /^xrt-smi\.exe ran: OpenVINO Model Server can set the NPU's power mode$/);
+  const gone = await scene({ cap: 1536 });
+  gone.catalog.routes.intel.powerTool = { ...V.NPU_CATALOG.routes.amd.powerTool!, exe: path.join(gone.tools, 'AMD', 'xrt-smi.exe') };
+  const missing = await C.npuCheck(gone.opts);
+  assert.match(missing.report.steps.find((x: any) => x.step === 'power-tool')!.say, /^xrt-smi\.exe isn't on this PC/);
+});
+
 test("a route's own embedding server: set up beside the server, started by the kit, a query and a chunk timed warm, then stopped", async () => {
   const s = await scene({ cap: 1536 });
   // The Intel route given an embedding server of its own, as Qualcomm's has, on a port of its own.

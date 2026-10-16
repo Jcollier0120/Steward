@@ -77,6 +77,8 @@ export interface NpuRoute {
   recycle: boolean;
   /** How soon the keeper stops its servers on a PC with little memory, per kind, and why (npuIdleStopMinutes). */
   idleStop?: NpuRouteIdleStop;
+  /** The maker's program its server runs to set the NPU's power mode, checked by setup and npu-check (checkPowerTool). */
+  powerTool?: NpuPowerTool;
   embeddings?: string;
   /** Its embeddings' own server, when the route's server serves none (GenieX's): set up and started beside it. */
   embedServer?: NpuEmbedServer;
@@ -178,6 +180,18 @@ export type NpuEmbedPull = Omit<NpuModel, 'kinds'>;
 
 /** Whether the embedding server's model is pulled by the route's program (else it's a file downloaded). */
 export const isPulled = (m: NpuEmbedServer['model']): m is NpuEmbedPull => 'pull' in m;
+
+/**
+ * The maker's program a route's server runs to set the NPU's power mode, ignoring what it says: FastFlowLM's `flm serve`
+ * runs AMD's xrt-smi.exe at each start. `args` only read (xrt-smi's `examine`). `brokenExit` is the exit of one that
+ * can't start, and `broken` says why, in words for the person: the NPU still works, at its default power mode.
+ */
+export interface NpuPowerTool {
+  exe: string;
+  args: string[];
+  brokenExit: number;
+  broken: string;
+}
 
 /** A route's cold start per kind (stopped to its first answer, in ms), the minutes it may sit unused on a small PC, and why. */
 export interface NpuRouteIdleStop {
@@ -743,6 +757,8 @@ export interface NpuPlan {
    * model downloaded as a file, or pulled by the route's program: the arguments that pull it).
    */
   embed: (ReturnType<typeof embedPaths> & { server: NpuEmbedServer; download: NpuDownload | null; modelDownload: NpuDownload | null; modelPull: string[] | null }) | null;
+  /** The route's power tool, its path expanded, when it has one. */
+  powerTool?: NpuPowerTool;
   /** Bytes still to download: the server's, its runtime's and the models', the embedding server's included. */
   downloadBytes: number;
 }
@@ -797,7 +813,8 @@ export function planNpu(o: {
     (embed?.download?.size ?? 0) +
     (embed?.modelDownload?.size ?? 0) +
     (embed?.modelPull ? embed.server.model.size : 0);
-  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, downloadBytes };
+  const powerTool = route.powerTool ? { ...route.powerTool, exe: expandRoute(route.powerTool.exe, { tools: o.tools, env: o.env }) } : undefined;
+  return { vendor: o.support.vendor, route, support: o.support, exe, installed, download, runtime, models, port: o.port ?? route.port, kinds: npuKinds(route), embed, ...(powerTool ? { powerTool } : {}), downloadBytes };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -810,6 +827,32 @@ export function runProgram(exe: string, args: string[], o: { timeoutMs?: number;
       resolve({ code: e ? (typeof (e as any).code === 'number' ? (e as any).code : null) : 0, out: `${stdout ?? ''}${stderr ?? ''}` }),
     ),
   );
+}
+
+/** What running a route's power tool came to (checkPowerTool). */
+export interface PowerToolCheck {
+  exe: string;
+  /** It isn't on this PC: nothing was run. */
+  missing: boolean;
+  code: number | null;
+  /** It exited with the route's `brokenExit`: the server can't set the NPU's power mode. */
+  broken: boolean;
+}
+
+/**
+ * Runs the plan's power tool once, with its arguments that only read. A program Node starts inherits Node's error mode,
+ * so a DLL that lacks what the tool needs fails it silently, with the loader's exit (xrt-smi's 0xC0000139); started
+ * from PowerShell's Start-Process, it shows a dialog and waits for a click. Null when the route has no power tool.
+ */
+export async function checkPowerTool(
+  plan: Pick<NpuPlan, 'powerTool'>,
+  io: { run?: (exe: string, args: string[], o?: { timeoutMs?: number }) => Promise<{ code: number | null; out: string }>; exists?: (p: string) => boolean } = {},
+): Promise<PowerToolCheck | null> {
+  const t = plan.powerTool;
+  if (!t) return null;
+  if (!(io.exists ?? existsSync)(t.exe)) return { exe: t.exe, missing: true, code: null, broken: false };
+  const r = await (io.run ?? runProgram)(t.exe, t.args, { timeoutMs: 60_000 });
+  return { exe: t.exe, missing: false, code: r.code, broken: r.code === t.brokenExit };
 }
 
 /** A file's SHA-256, read in chunks. */
