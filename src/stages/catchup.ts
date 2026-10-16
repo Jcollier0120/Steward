@@ -256,10 +256,12 @@ function nextFree(from: string, taken: Set<string>): string {
 /**
  * The version a PR caught up with its branch carries, and why when it isn't the PR's own: one it set stays while it is
  * still new (above the branch's, not released, no other PR's); else the next free one above the branch's. One that
- * left the version alone keeps the branch's, unless it asks for a release of a version already released.
+ * left the version alone keeps the branch's, unless it asks for a release of a version already released. `own`: the
+ * version it was moved to, past the others in its version queue (move-past.ts), which it carries while that is still new.
  */
-export function catchUpVersion(o: { head: string; from: string | null; base: string; released: string[]; taken: string[]; asksRelease: boolean }): { version: string; why: string | null } {
+export function catchUpVersion(o: { head: string; from: string | null; base: string; released: string[]; taken: string[]; asksRelease: boolean; own?: string | null }): { version: string; why: string | null } {
   const taken = new Set([...o.released, ...o.taken]);
+  if (o.own && compareVersions(o.own, o.head) > 0 && compareVersions(o.own, o.base) > 0 && !taken.has(o.own)) return { version: o.own, why: `it was moved past the others to v${o.own}` };
   const sets = o.head !== (o.from ?? o.base);
   if (sets) {
     if (o.released.includes(o.head)) return { version: nextFree(o.base, taken), why: `v${o.head} is already released` };
@@ -367,9 +369,9 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
  * One team PR (or kit PR of the Steward's) caught up with its branch, as the module's comment says: `released` are the employee's released
  * versions, `taken` the versions other open PRs set (which keep theirs). `carry`: what passed at its head before ("checks
  * passed here at abc1234", or its vouch), carried to the head it pushes where the catch-up touched only versions and
- * changelogs (keepsStanding), so it isn't tested again.
+ * changelogs (keepsStanding), so it isn't tested again. `own`: the version it was moved to (catchUpVersion).
  */
-export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null }): Promise<CaughtUp> {
+export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null; own?: string | null }): Promise<CaughtUp> {
   const { run } = ctx;
   const kitPr = isKitPr(pr);
   if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
@@ -401,7 +403,7 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
   const kitAt = async (ref: string) => (/^\s*(\d+\.\d+\.\d+)\s*$/.exec((await showFile(run, repo, ref, KIT_VERSION_FILE)) ?? '')?.[1] ?? null);
   const [headV, fromV, baseV, kHead, kBase, kStart] = await Promise.all([read(head), start ? read(start) : null, read(branch), kitAt(head), kitAt(branch), start ? kitAt(start) : null]);
   if (!headV || !baseV) return { done: false, note: `its version can't be read (${e.versionFiles.join(', ')})` };
-  const choice = catchUpVersion({ head: headV, from: fromV, base: baseV, released: o.released, taken: o.taken, asksRelease: !!pr.after?.steps.includes('release') });
+  const choice = catchUpVersion({ head: headV, from: fromV, base: baseV, released: o.released, taken: o.taken, asksRelease: !!pr.after?.steps.includes('release'), own: o.own });
   // The kit, where the repository carries one (the Steward's own): its version settled the same way.
   const kFrom = kHead ? kStart : null;
   const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: o.kit?.taken ?? [], asksRelease: false }) : null;

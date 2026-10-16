@@ -149,6 +149,45 @@ test("a maker's other PC claims a version of the maker's repositories through it
   }
 });
 
+test("a PR moved past the others: its branch's claim made again above every version in line, marked, once; shared with its mark", async () => {
+  rmSync(claimsFile(), { force: true });
+  const { movedTo } = await import('../src/claims.ts');
+  const s = setup('moved', { titles: [{ title: 'Fake 0.4.11: a draft', headRefName: 'claude/draft' }] });
+  writeFileSync(claimsFile(), JSON.stringify([{ repo: s.e.repo, version: '0.4.11', branch: 'claude/draft', by: 'claude', for: 'the draft', at: new Date().toISOString() }]));
+  // The queue's versions too: a ready PR whose title names none sets 0.4.12, another 0.4.13.
+  const m = await claimVersion(s.ctx, s.e, { branch: 'claude/draft', by: 'steward', for: '#7 moved past the others', moved: 7, above: ['0.4.11', '0.4.12', '0.4.13'] });
+  assert.deepEqual([m.claim.version, m.claim.moved, m.again], ['0.4.14', 7, false]);
+  assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.moved]), [['claude/draft', '0.4.14', 7]], "in place of its branch's claim: 0.4.11 is no one's now");
+  const again = await claimVersion(s.ctx, s.e, { branch: 'claude/draft', by: 'steward', for: '#7 moved past the others', moved: 7, above: ['0.4.11', '0.4.12', '0.4.13', '0.4.14'] });
+  assert.deepEqual([again.claim.version, again.again], ['0.4.14', true], 'moved once: asked again, the same');
+  const worker = await claimVersion(s.ctx, s.e, { branch: 'claude/draft', by: 'claude', for: 'the draft' });
+  assert.deepEqual([worker.claim.version, worker.again], ['0.4.14', true], 'its worker, asking again, is given it');
+  assert.equal(movedTo(loadClaims(), { number: 7, head: 'claude/draft' }), '0.4.14');
+  assert.equal(movedTo(loadClaims(), { number: 8, head: 'claude/draft' }), null, 'another PR from a branch of that name: not moved');
+  assert.equal((await claimVersion(s.ctx, s.e, { branch: 'claude/next', by: 'claude', for: 'new work' })).claim.version, '0.4.15', 'new work counts from it');
+  assert.equal(parseClaims(JSON.stringify([{ ...m.claim, moved: 'seven' }]))[0].moved, undefined, 'a mark that is no number: none');
+
+  // Through the repository's claims ref, as every PC that looks after it reads it: the mark goes with it.
+  rmSync(claimsFile(), { force: true });
+  const t = setup('moved-shared', { titles: [{ title: 'Fake 0.4.11: a draft', headRefName: 'claude/draft' }] });
+  const remote = { key: 'jcollier0120/fake', url: path.join(home, 'moved-shared', 'origin.git'), scratch: path.join(home, 'moved-shared', 'turns.git') };
+  const shared = async () => {
+    const r = await readRef(t.ctx.run, remote, CLAIMS_REF, CLAIMS_FILE);
+    return parseClaims(r.kind === 'found' ? r.text : '').map((c) => [c.branch, c.version, c.moved ?? null]);
+  };
+  makersPcForTests(() => true);
+  try {
+    const canPush = async () => true;
+    assert.equal((await claimVersion(t.ctx, t.e, { branch: 'claude/draft', by: 'claude', for: 'the draft', remote, canPush })).claim.version, '0.4.12');
+    const sm = await claimVersion(t.ctx, t.e, { branch: 'claude/draft', by: 'steward', for: '#7 moved', moved: 7, above: ['0.4.12', '0.4.13'], remote, canPush });
+    assert.deepEqual([sm.claim.version, sm.claim.moved, sm.claim.source], ['0.4.14', 7, 'shared']);
+    assert.deepEqual(await shared(), [['claude/draft', '0.4.14', 7]]);
+    assert.deepEqual(loadClaims().map((c) => [c.branch, c.version, c.moved, c.source]), [['claude/draft', '0.4.14', 7, 'shared']]);
+  } finally {
+    makersPcForTests(null);
+  }
+});
+
 test("a catch-up's new version moves its branch's claim: the old one is free, the new one held, its worker given it again", async () => {
   rmSync(claimsFile(), { force: true });
   const { reclaim } = await import('../src/claims.ts');

@@ -574,6 +574,7 @@ export function AlarmsCard({ a, now }: { a: AlarmState | undefined; now: number 
     <div className="alarm" key={x.id}>
       <div className="row alarm-head">
         <strong>{x.url ? <Link url={x.url}>{x.title}</Link> : x.title}</strong>
+        {button && x.action && <PostButton title={x.action.label} path="/api/alarms/act" body={{ id: x.id }} confirm={x.action.confirm} />}
         {button && <PostButton title="Dismiss" variant="secondary" path="/api/alarms/dismiss" body={{ id: x.id }} />}
       </div>
       {x.detail.length > 0 && <Notes items={x.detail} />}
@@ -958,6 +959,7 @@ function KitCard({ s, now, handsOut }: { s: StaffView | null; now: number; hands
 /**
  * What holds each version queue the Steward merges (version-queue.ts's queueHold): the lowest version that isn't ready,
  * the ready PRs waiting their turn behind it, why, and since when. Its alarm comes once it has held an hour (alarms.ts).
+ * Move it past the others, asked first, frees the queue now (move-past.ts), with the drafts that would hold it next.
  */
 export function QueueHoldsCard({ holds, now }: { holds: HeldQueue[]; now: number }) {
   if (!holds.length) return null;
@@ -967,11 +969,20 @@ export function QueueHoldsCard({ holds, now }: { holds: HeldQueue[]; now: number
         <Notes
           items={holds.map((q) => {
             const behind = q.hold.behind.map((n) => `#${n}`).join(', ');
+            const moving = [q.hold.number, ...(q.hold.drafts ?? [])].map((n) => `#${n}`).join(', ');
             return (
               <span key={`${q.repo}#${q.hold.number}`}>
                 <Badge tone={q.hold.draft ? 'caution' : 'danger'} label={q.hold.draft ? 'draft' : 'not ready'} /> <strong>{q.name}</strong> <Link url={q.hold.url}>#{q.hold.number}</Link> (v{q.hold.version}) holds {behind}, ready and waiting their turn behind it since {ago(q.hold.since, now)}: {q.hold.why}.
+                {q.hold.drafts?.length ? ` ${q.hold.drafts.map((n) => `#${n}`).join(', ')}, a draft${q.hold.drafts.length === 1 ? '' : ' each'}, would hold it next.` : ''}
                 <br />
-                <Text variant="muted">{q.hold.title}</Text>
+                <Text variant="muted">{q.hold.title}</Text>{' '}
+                <PostButton
+                  title="Move it past the others"
+                  variant="secondary"
+                  path="/api/queue/move"
+                  body={{ repo: q.repo, number: q.hold.number }}
+                  confirm={`Give ${moving} a version above the rest of ${q.name}'s queue, so ${behind} can merge? The authors are told on GitHub; nothing is pushed to their branches.`}
+                />
               </span>
             );
           })}
