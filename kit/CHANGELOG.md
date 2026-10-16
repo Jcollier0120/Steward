@@ -2,9 +2,13 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
-## Unreleased
+## 2.77.9
 
-**A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
+**A release that signs gives up within a minute when SimplySign Desktop is waiting for its sign-in, before it builds or before it signs, instead of after ten minutes. It also brings what wasn't released before: A button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
+
+**Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again.**
+
+**On those graphics a picture's first question takes about 30 s, whatever its size, and has the time it needs. Their vision server caps each picture at 1,024 tokens (`--image-max-tokens 1024`), and their vision endpoint has its own `timeouts`: a background request may take 90 s and 0.3 s a token. Uncapped, a 1,920 × 1,200 screenshot took 89 s and a phone's 27 s, past the 16.2 s a 4-token question gets (Reeve's screens asks those), and a timeout marks the card failed, its chat too, for 10 minutes. Capped, every answer measured was the same. A PC set up before gets both at the keeper's next look, with or without the flag already.**
 
 ### What's new
 
@@ -16,9 +20,20 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **`confirmDialog(text, { ok, cancel, danger, title })`** and **`alertDialog(text, { ok, danger, title })`:** the page's own `confirm()` and `alert()`. The same words, and the same choices: OK and Cancel (OK alone for a message). `confirmDialog` is true for OK, false for Cancel or Escape. They draw themselves (no host for a page to mount), one at a time, oldest first, over the tour too. Inside an open modal `<dialog>`, they're drawn in it, so they can be pressed.
   - **Each dialog:** an `alertdialog` that names its text (`aria-describedby`). OK has the focus, as the browser's had. Tab stays in it, Escape is Cancel (OK for a message), and focus goes back to where it was. Line breaks in the text stay.
   - **`DialogHost`** (a page may draw its own; a test does), **`dialogsOpen()`** and **`nextStop`** (where Tab goes) are exported too.
+- **core:** an endpoint may carry its own `timeouts` (`requestBaseMs`, `requestPerTokenMs`, `coldLoadMs`), each over its accelerator's for that kind's requests alone: `timeoutsFor(accelerator, work)`. The core's config reader keeps them, on vision's own server or its chat endpoint's.
+- **accelerator-config.ts:** `Endpoint.timeouts`, read as an accelerator's are and checked by `validateAccelerators` the same way.
+- **setup.ts:**
+  - `encodesOnProcessor(card)`: whether a card's vision server encodes on the processor. That is Intel's graphics (its id is `gpu-intel-…`) with under `OWN_MEMORY_GB` of its own, on a Vulkan device. `ENCODER_ON_PROCESSOR` is the flag.
+  - `PICTURE_CAP` and `PICTURE_TOKENS` (1,024): the cap on a picture's tokens on such a card. `VISION_ON_PROCESSOR_TIMEOUTS` (`{ requestBaseMs: 90000 }`): its vision's own time, three times the slowest first question measured.
+  - `withEncoderOnProcessor(raw)`: config.json with each of the flag (after the `--mmproj` file), the cap (after the flag) and vision's `timeouts` added where missing, on each such card's llama-server vision, and the cards changed. A cap or time a person set stays theirs. A command that keeps the encoder on the card (`--mmproj-offload`), or that isn't llama-server's, is left alone.
+  - `refreshCardVision({ configFile, kit, log })` writes that into config.json once for each kit version, recorded in `card-refresh.json` beside it (`readCardRefresh`). A kit never redoes what a newer one looked at, so a person who takes the flag out keeps it out until the next kit.
+- **keeper.ts:** `refreshCards()`, called by the keeper's look (`keeperLook`) before the NPU's refresh. What it changed goes in the keeper's log.
 
 ### What changed
 
+- **sign.ts**: `trialProblem(signtool, thumbprint)` signs a throwaway script without a timestamp, within `TRIAL_MS` (60 s). If signtool says "No certificates were found", the key can't be reached. If it doesn't answer in time, SimplySign Desktop is waiting for someone to sign in, and that now counts as "can't sign" too. Before, `readySigner`'s trial gave signtool two minutes and counted no answer as "can sign", so the release built and then waited ten minutes on its first batch.
+- `signFiles` tries a trial signature before it signs, because SimplySign's session can end while the release builds. When that trial fails, the release stops with `couldn't sign the native files: signtool didn't answer within 60 seconds …`. Nothing has been signed by then.
+- A batch that runs past its ten minutes now says SimplySign Desktop may be waiting for you to sign in. The Steward (0.36.62) reads all of these as "waits until this PC can sign", not as a failed release.
 - **`ModalCard`** (moved to modal.tsx, still exported from feedback.tsx and index.ts) keeps focus in it: Tab and Shift+Tab go round it. Only the top modal hears Escape. Focus moves to an element marked `data-autofocus`, else the card. A page that draws `onClose` anew each render no longer moves focus about while it's open. New props: `role` (`alertdialog`), `describedBy` and `modalClassName`.
 - **`Button`:** an `onPress` that returns a promise spins the button until it settles, as `loading` does. `onPress` is `() => unknown` now; a `() => void` still fits.
 - **`PostButton`:** its `confirm` asks in the page's own dialog. The server's error or `message` is said there once the POST is done and the page has looked for news, and a server that doesn't answer is said too (before, nothing was). Its BusyArea waits with it.
@@ -27,6 +42,9 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **page.ts's script:** `data-confirm` asks in the page's own dialog, and the server's error or message is said there. While its POST runs, the button spins and takes no presses, and so do its `data-form` form or the form or card it's in. A failure gives them back, and on success the page reloads as before. A network failure is said, and the page doesn't reload itself under a dialog or a button that waits.
 - **settings-panel.js:** Save spins while it saves, and the fields, Cancel and "Set every field to its default" wait with it. "Try again" spins while the settings load.
 - **The CSS:** the spinner, the modal card and the dialogs are page.ts's CSS now (both kinds of page draw them), with `button:has(> .ui-spinner)`. The react part's UI_CSS adds `.ui-busy-area`.
+- **Setup** (`acceleratorEntry`) writes the flag into such a card's vision command, right after its projector, then the cap, and gives its vision endpoint `VISION_ON_PROCESSOR_TIMEOUTS`. The card's chat and embeddings, and every other card, are unchanged.
+- **npu.ts:** a request's timeout, and the wait for its server to be ready, take its kind's own `timeouts` over its accelerator's (`timeoutsFor`).
+- **spec/ACCELERATORS.md** says where a card's vision encoder runs, and why, with the measurements: `--no-warmup` started the server, but lost the device on the screenshot. So did flash attention off, cooperative matrices off, and pictures capped at 1,024 tokens. It also gives a picture's time on the processor, uncapped and capped, measured through the kit's own requests, and an endpoint's own `timeouts`.
 
 ### For an agent
 

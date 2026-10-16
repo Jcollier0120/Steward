@@ -12,7 +12,7 @@ import { releasedHere, releasesRepoEnv, TAG_RELEASE, type Employee } from '../se
 import { tasteFirst } from '../tasting.ts';
 import { agreedVersion } from '../versions.ts';
 import { keepFailure } from '../failure.ts';
-import { signingDown, signingProblem, signsWith } from '../signing.ts';
+import { noteSigningDown, signingDown, signingProblem, signsWith } from '../signing.ts';
 import { checksLogOf, needsNpmCi } from './bump.ts';
 import { recordTested } from '../tested.ts';
 import { guardPackages, installPackages } from './modules.ts';
@@ -149,9 +149,9 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
   // A release that signs waits while this PC can't (SimplySign Desktop not connected): nothing is built, nothing fails,
   // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again.
-  if (e.release !== TAG_RELEASE) {
-    const signs = signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });
-    const down = signs ? await signingProblem(run, signs) : null;
+  const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });
+  if (signs) {
+    const down = await signingProblem(run, signs);
     if (down) {
       ctx.log(`[${e.id}] v${version} waits until this PC can sign: ${down}`);
       return result(e, 'skipped', `v${version} waits until this PC can sign: ${down}`, { version, commit: commit.slice(0, 7), again: true, signing: down });
@@ -201,8 +201,10 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
     for (const line of tail(`${r.out}\n${r.err}`, 15).split('\n')) ctx.log(`[${e.id}]   ${line}`);
     if (r.code !== 0) {
       keepFailure(dir, e.release, r.code, `${r.out}\n${r.err}`);
-      // It couldn't reach the code-signing key after all (SimplySign's session ended while it built): it waits, as above.
+      // It couldn't reach the code-signing key after all (SimplySign's session ended while it built, or its sign-in waited
+      // there): it waits, as above, and what it met is the look for the releases after it (noteSigningDown).
       const down = signingDown(`${r.out}\n${r.err}`);
+      if (down && signs) noteSigningDown(signs, down);
       if (down) return result(e, 'skipped', `v${version} waits until this PC can sign: ${down}`, { version, commit: commit.slice(0, 7), again: true, signing: down });
       return result(e, 'failed', `${e.release} failed (exit ${r.code})${networkNote(`${r.out}\n${r.err}`)}`, { version, commit: commit.slice(0, 7) });
     }

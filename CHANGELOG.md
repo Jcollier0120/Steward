@@ -23,6 +23,24 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. If you left the build window at its old two hours, it becomes 30 minutes; if you set it to more than an hour yourself, it becomes an hour.
 
+## 0.36.62
+
+**SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**
+
+### What's new
+
+- With kit 2.77.9, a button on the Steward's page whose work takes a while spins until it's done, and the part of the page it changes waits with it. Questions and messages appear in the page's own dialogs instead of the browser's.
+
+### What changed
+
+- SimplySign Desktop's session sometimes ends while a release is being built. When that happened, the release used to wait ten minutes for signtool, then fail for good and raise an alarm. Every other release that signs in the same round then built and waited its own ten minutes. Now the release waits until this PC can sign, as it does when the Steward finds the key gone before it builds. The other releases that sign don't build, and the rounds don't try signtool again for a quarter of an hour.
+- This Steward hands out kit 2.77.9. A release made with it gives up on signtool within a minute: it checks once before building and again before signing, since the session may end in between.
+- This also covers Manor's setup, and the staff still on an older kit. Their releases still wait their ten minutes the first time, but no longer fail for it, and the round's other signed releases don't wait too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The staff whose releases sign get the one-minute limit when they take kit 2.77.9.
+
 ## 0.36.61
 
 **Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors and has time for all the tests it runs.**
