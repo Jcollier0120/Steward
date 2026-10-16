@@ -47,7 +47,8 @@ import { whereIs } from './hosts/gitlab.ts';
 import { whereAzure } from './hosts/azure.ts';
 import { whereGitea } from './hosts/gitea.ts';
 import { heldBy, repoBusy, withRepo, withStageSlot } from './stages/slots.ts';
-import { buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode } from './pipeline.ts';
+import { boardedUrgent, buildWhen, endRound, kitRides, loadPipeline, pipelineMode, savePipeline, type BuildNow, type PipelineMode, type PipelineState, type UrgentPr } from './pipeline.ts';
+import { urgentReady } from './stages/urgent.ts';
 import { letOut } from './kit/exchequer.ts';
 import { loadBuildLeft, noteReady } from './stages/build.ts';
 
@@ -332,7 +333,15 @@ export interface StageOptions {
    * PC's own; under node --test there are none unless given.
    */
   turns?: TurnsDeps | null;
+  /**
+   * Whether a round goes by the build pipeline (pipeline.ts), as the Steward's always do. Under node --test only when
+   * this is true, so a test's rounds merge and release what is ready unless it tests the pipeline. Tests only.
+   */
+  pipeline?: boolean;
 }
+
+/** Whether this stage's rounds go by the build pipeline: always, but under node --test only when asked (StageOptions.pipeline). */
+const pipelineRounds = (o: StageOptions): boolean => o.pipeline ?? !process.env.NODE_TEST_CONTEXT;
 
 /**
  * Whether this PC has a repository for the Steward to look after: an employee's clone, or its own checkout while Settings
@@ -376,6 +385,25 @@ function selfEmployee(ctx: Ctx, o: StageOptions): Employee | null {
   const checkout = o.self?.checkout ?? ctx.settings.stewardCheckout;
   if (!ctx.settings.stewardRepo || !checkout) return null;
   return existsSync(checkout) ? stewardEmployee(ctx.settings, checkout) : null;
+}
+
+/**
+ * The urgent fixes ready between builds (stages/urgent.ts) in the repositories the round asks about: all of them and the
+ * Steward's own when it names none. Said in the log; none without a glance at GitHub. Never throws: the round goes on
+ * between builds.
+ */
+async function urgentBetween(ctx: Ctx, o: StageOptions, ask: StageAsk, pipeline: PipelineState, log: (line: string) => void): Promise<UrgentPr[]> {
+  if (!ctx.glance) return [];
+  try {
+    const asked = ask.employees?.length ? ask.employees.map((x) => x.trim().toLowerCase()) : null;
+    const self = !asked || asked.includes(APP.id) ? selfEmployee(ctx, o) : null;
+    const urgent = await urgentReady(ctx, [...ctx.settings.employees.filter((e) => !asked || asked.includes(e.id)), ...(self ? [self] : [])], boardedUrgent(pipeline));
+    if (urgent.length) log(`an urgent fix is ready (${urgent.map((u) => `${u.id} #${u.number}`).join(', ')}): it builds at once, for its repository alone, rather than at the next build time`);
+    return urgent;
+  } catch (e) {
+    log(`couldn't look for an urgent fix: ${(e as Error).message}`);
+    return [];
+  }
 }
 
 /**
@@ -605,16 +633,24 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
       /** Whether this round took turns (lease.ts): then each repository's shared claims are looked at too. */
       let turnsOn = false;
       // The build pipeline (pipeline.ts): between builds a round only looks; a build's rounds merge, and its last releases.
-      const pipeline = name === 'round' && !quiet ? loadPipeline() : null;
-      const mode: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees }) : { kind: 'off' };
+      const pipeline = name === 'round' && !quiet && pipelineRounds(o) ? loadPipeline() : null;
+      const planned: PipelineMode = pipeline ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { buildNow: ask.buildNow, employees: ask.employees }) : { kind: 'outside' };
+      // An urgent fix between builds (stages/urgent.ts): a build of its own for its repository, at once.
+      const urgent = pipeline && planned.kind === 'between' ? await urgentBetween(ctx, o, ask, pipeline, log) : [];
+      const mode: PipelineMode = pipeline && urgent.length ? pipelineMode(ctx.settings.buildPipeline, pipeline, at(), { urgent }) : planned;
       /** This round ends its build: it released what the build merged. */
       let buildCloses = false;
       /** "<id> #<n>" for each PR this round merged, for the build's record. */
       const mergedHere: string[] = [];
       try {
-        // The owner's Build now for some repositories: each of its rounds looks at those alone.
+        // The owner's Build now, or an urgent fix's build, for some repositories: each of its rounds looks at those alone.
         const only = ask.employees?.length ? ask.employees : mode.kind === 'build' ? (mode.run.employees ?? null) : null;
-        const picked = pick(ctx.settings.employees, only);
+        // A merge or round with the Steward's own repository among them (an urgent fix of its own), or with no repository
+        // named: it merges and releases its own too.
+        const isSelf = (id: string) => (name === 'merge' || name === 'round') && id.trim().toLowerCase() === APP.id;
+        const withSelf = !only?.length || only.some(isSelf);
+        const agents = only?.filter((id) => !isSelf(id)) ?? null;
+        const picked = only?.length && !agents?.length ? { employees: [] as Employee[] } : pick(ctx.settings.employees, agents);
         if ('error' in picked) throw new Error(picked.error);
         if (tendOnly) {
           out.tendOnly = true;
@@ -637,7 +673,12 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           held.push(...heldBefore(seen!, picked.employees));
         } else if (name === 'merge' || name === 'round') {
           if (mode.kind === 'build') {
-            const when = mode.run.by === 'owner' ? "the owner's Build now" : `the ${buildWhen(new Date(mode.run.due), at())} build`;
+            const when =
+              mode.run.by === 'owner'
+                ? "the owner's Build now"
+                : mode.run.by === 'urgent'
+                  ? `the urgent fix's build (${(mode.run.urgent ?? []).map((k) => k.split(' ').slice(0, 2).join(' ')).join(', ')})`
+                  : `the ${buildWhen(new Date(mode.run.due), at())} build`;
             log(
               mode.fresh
                 ? `${when} begins${mode.run.employees?.length ? ` for ${mode.run.employees.join(', ')}` : ''}: every ready PR merged, tested once with the others, and released once it has all settled`
@@ -658,14 +699,13 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
           // Turns with this PC's others first (lease.ts): a repository another PC has its turn in is left to it. A round
           // takes the Steward's own and the refreshed repositories' now, and the employees' once its plan says which it
           // looks at (below): it publishes nothing to the rest.
-          const whole = !only?.length;
-          const turns = await takeTurnsFor(ctx, o, round ? [] : picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && whole, round && whole));
+          const turns = await takeTurnsFor(ctx, o, round ? [] : picked.employees, selfForTurns(ctx, o, (round || !!ask.team) && withSelf, round && withSelf));
           turnsOn = turns.on;
           let elsewhere = turns.elsewhere;
           // The team's PRs to the Steward's own repository, as an employee's (stages/selfmerge.ts), first: its kit's PRs at
           // the head of its line (merge.ts), and the new kit released at once (selfRound), so the agents' PRs that take
-          // that kit are tested after it is there, in this round. Not in a stage asked about some of them.
-          const self = (round || ask.team) && whole && turns.selfActs ? selfEmployee(ctx, o) : null;
+          // that kit are tested after it is there, in this round. Not in a stage asked about some others alone.
+          const self = (round || ask.team) && withSelf && turns.selfActs ? selfEmployee(ctx, o) : null;
           let selfLine: EmployeeResult | null = null;
           let selfMovedMain = false;
           if (self) {
@@ -676,10 +716,10 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
             if (selfMerged.length) selfMovedMain = true;
             mergedHere.push(...selfMerged.map((p) => `${APP.id} #${p.number}`));
           }
-          // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about some of them.
-          const selfReleases = round && whole && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
+          // The Steward's own new versions, apart from the employees' (stages/self.ts); not in a round asked about others alone.
+          const selfReleases = round && withSelf && turns.selfActs ? await selfRound(ctx, o, selfMovedMain) : [];
           // Its turn another PC's now (lease.ts): a whole suite beside the rounds here is that PC's to run, and is stopped.
-          if (round && whole && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
+          if (round && withSelf && !turns.selfActs) await settleWholeSuite(ctx, null, "the Steward's own turn is another PC's now");
           if (selfReleases.some((r) => r.outcome === 'done' && /\bkit-v\d/.test(r.message))) {
             // A new kit: the kit's releases read again, and every employee looked at, since a new kit is new for each (changes.ts):
             // a PR whose checks failed at its kit's fill, or that waited for its kit's release, is tried again now.
@@ -777,7 +817,9 @@ export async function runStage(name: Exclude<StageName, 'staff'>, ask: StageAsk,
               // settles within minutes (checks running, a kit's trial, kit PRs just opened, a rollout beside the rounds),
               // every repository's new version released at once, the one release of this build. Or when the build's time
               // has run out.
-              const rolled = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run) ? await rollOut() : (log("the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false });
+              const rolled = kitRides(ctx.settings.buildPipeline, pipeline!, mode.run)
+                ? await rollOut()
+                : (log(mode.run.by === 'urgent' ? 'the newest kit waits for the next build: this one is for an urgent fix' : "the newest kit waits for the day's first build (Settings: Build pipeline)"), { opened: [], beside: false });
               const opened = rolled.opened;
               buildCloses = mode.closing || (!brief.length && !opened.length && !rolled.beside);
               if (buildCloses) {
