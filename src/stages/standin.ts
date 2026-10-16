@@ -30,7 +30,8 @@ import type { Ctx } from './common.ts';
 
 /** What stood in for a run of the checks: who passed the code, where, when, and in a line for the log. */
 export interface StoodIn {
-  by?: 'assayer' | 'here' | 'pc';
+  /** The Seneschal: a pass it holds of exactly these checks on this code, run here by an agent of this PC (bump.ts). */
+  by?: 'assayer' | 'here' | 'pc' | 'seneschal';
   /** "in the Assayer", "here", "on LAPTOP": where the code passed. */
   where?: string;
   /** When it passed (ISO 8601). */

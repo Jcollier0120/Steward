@@ -10,6 +10,9 @@ import path from 'node:path';
  * be there: an agent asks developerPro() before showing a setting, a line or a button that names them, and before
  * doing the work.
  *
+ * The Seneschal comes with it too (kit 2.78.1): the agent that hands out the staff's work on a PC in order, as the PC
+ * has room. Without Developer Pro it hands out no work, and each agent runs its own as before.
+ *
  * Today that is the maker's laptop only: its firmware's (SMBIOS) UUID, hashed with a salt, the same check as the
  * Steward's maker.ts and Manor's customer view. No file, setting or environment variable makes another PC the maker's.
  * When the Exchequer sells a Developer Pro license, its tier turns it on here too (license.ts's LicenseTier gains it),

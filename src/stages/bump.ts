@@ -22,6 +22,9 @@ import { keepWhole, ranWhole } from '../whole.ts';
 import { trialPassOf } from './trialpass.ts';
 import { withRepo } from './slots.ts';
 import { standIn, type StoodIn } from './standin.ts';
+import { seneschalTurn, TURN_HELD_ENV, type SeneschalAnswer } from '../kit/seneschal.ts';
+import { APP } from '../app.ts';
+import { checksTask, type CheckTask } from './seneschal.ts';
 
 /**
  * Stage 1, `steward bump --kit <version>`: for each employee that takes the kit, a fresh worktree of its
@@ -148,6 +151,11 @@ export const needsNpmCi = (dir: string) =>
  *
  * The PC is kept awake while they run (the kit's awake.ts, Steward 0.36.45): on 2026-10-15 it slept on its own for an
  * hour in the middle of a round's checks.
+ *
+ * Where the Seneschal is on this PC (the kit's seneschal.ts, Steward 0.36.65), they wait their turn in its one order
+ * first (stages/seneschal.ts: the task and its lane), then run under its lease without a turn of the checks pace (the
+ * lease is their turn), and their result goes back to it; a pass of exactly these checks it holds stands in. Without
+ * it, off duty, or on a PC without Developer Pro, they run as before.
  */
 export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
   // A task in the Steward's work status (the kit's work-status.ts), with the commit and code tree it runs at; what it
@@ -155,7 +163,7 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
   const { commit, tree, clean } = await codeAt(dir);
   const trial = !!o.env?.STEWARD_KIT;
   const what = `${e.name}: ${o.doing ?? 'its checks'}`;
-  return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async () => {
+  return withWork({ kind: trial ? 'trial' : 'checks', what, repo: e.repo, ...(commit ? { commit } : {}), ...(tree ? { tree } : {}) }, async (h) => {
     // Code that already passed these checks, in the Assayer, here or on another PC on the licence, isn't run again
     // (standin.ts): never a trial's, one with settings of its own, nor one whose point is this PC.
     const stood = trial || o.here || Object.keys(o.env ?? {}).length || !clean || !commit || !tree ? null : await standIn(ctx, e, dir, { tree, scope: o.affected });
@@ -164,7 +172,44 @@ export async function runChecks(ctx: Ctx, e: Employee, dir: string, o: ChecksOpt
       if (o.stoodIn) Object.assign(o.stoodIn, stood);
       return null;
     }
-    const failed = await whileAwake(`${e.name}'s checks`, () => checksIn(ctx, e, dir, o), ctx.log);
+    // Its turn from the Seneschal, where it's on this PC (stages/seneschal.ts); null: as before, at the checks pace.
+    const ask = await checksTask(ctx, e, dir, { commit, tree, clean, env: o.env, here: o.here, affected: o.affected, task: o.task });
+    const answer: SeneschalAnswer | null =
+      'not' in ask
+        ? null
+        : await seneschalTurn(ask, {
+            worker: APP.id,
+            commands: e.test,
+            say: (line) => o.say(`the Seneschal: ${line}`),
+            waiting: (why) => {
+              h.waitIn(`seneschal:${ask.lane}`);
+              o.say(`waits its turn from the Seneschal: ${why}`);
+            },
+          });
+    h.running();
+    if (answer && 'reused' in answer) {
+      const r = answer.reused;
+      const where = r.by === APP.id ? 'here' : `here, in the ${r.by.charAt(0).toUpperCase()}${r.by.slice(1)}'s run`;
+      const line = `a pass of exactly these checks on this code, ${where} (the Seneschal's ${answer.id}): not run again`;
+      o.say(line);
+      if (o.stoodIn) Object.assign(o.stoodIn, { by: 'seneschal', where, at: r.at, line } satisfies StoodIn);
+      return null;
+    }
+    const turn = answer && 'turn' in answer ? answer.turn : null;
+    if (turn) o.say(`its turn from the Seneschal (${turn.id}${turn.waitedMs >= 1000 ? `, after ${duration(turn.waitedMs)}` : ''})`);
+    // A run that couldn't finish (a time limit, packages held, a locked clone) is the Seneschal's to try again, not a failure.
+    const seen: FailedChecks = o.failed ?? {};
+    const failed = await whileAwake(
+      `${e.name}'s checks`,
+      () =>
+        turn
+          ? turn.hold(
+              () => checksIn(ctx, e, dir, { ...o, failed: seen }, true),
+              (f) => ({ ok: !f, ...(f ? { note: f.slice(0, 500) } : {}), ...(f && (seen.timedOut || f.startsWith(PACKAGES_HELD)) ? { error: true } : {}), commands: e.test }),
+            )
+          : checksIn(ctx, e, dir, o),
+      ctx.log,
+    );
     const after = trial || !commit ? null : await codeAt(dir);
     if (after?.clean && after.commit === commit) recordResult({ kind: ranWhole(o.affected?.chose) ? 'checks' : 'affected checks', repo: e.repo, tree: tree ?? null, commit, ok: !failed, what, commands: e.test, ...toolchainHere(), ...(failed ? { note: failed.slice(0, 500) } : {}) });
     return failed;
@@ -182,9 +227,15 @@ type ChecksOptions = {
   here?: boolean;
   /** Filled with the pass that stood in, when one did (runChecks then ran nothing, and answers null). */
   stoodIn?: StoodIn;
+  /** What the run is to the Seneschal (stages/seneschal.ts): its kind, lane, PR and branch. False: it isn't asked. */
+  task?: CheckTask | false;
 };
 
-async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): Promise<string | null> {
+/** How a run whose packages Settings held begins its answer. */
+const PACKAGES_HELD = "its packages weren't installed";
+
+/** `held`: the run has its turn already (the Seneschal's lease), so its commands take none of the checks pace's. */
+async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions, held = false): Promise<string | null> {
   const started = Date.now();
   const picks = !!o.affected && e.test.some((s) => s.trim() === 'npm test');
   let limit: (TimeLimit & { at: number }) | null = null;
@@ -195,7 +246,7 @@ async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): P
     const g = await guardPackages(ctx, e, dir, o.doing ?? 'its checks');
     if (g.held) {
       o.say(`packages held: ${g.held}`);
-      return `its packages weren't installed: ${g.held}`;
+      return `${PACKAGES_HELD}: ${g.held}`;
     }
     if (!(await linkSharedModules(ctx, dir, o.say, g.plan))) before.push(...installLines(g.plan));
   }
@@ -223,7 +274,7 @@ async function checksIn(ctx: Ctx, e: Employee, dir: string, o: ChecksOptions): P
     const t0 = Date.now();
     // Its tests' throwaway commits signed with nobody's key and no upkeep after them (kit/unsigned-git.ts): never pushed,
     // and each would start ssh-keygen and git maintenance.
-    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
+    const r = await runLine(ctx.run, step, { cwd: dir, env: { ...o.env, ...(held ? { [TURN_HELD_ENV]: '1' } : {}), ...unsignedGitVars({ ...process.env, ...o.env }) }, paced: true, ...(left !== undefined ? { limitMs: left } : {}) });
     o.say(`${step}: ${r.code === 0 ? 'ok' : r.timedOut ? 'stopped at its time limit' : `exit ${r.code}`} (${Math.round((Date.now() - t0) / 1000)} s)`);
     if (r.code !== 0) {
       const output = `${r.out}\n${r.err}`;
@@ -543,10 +594,11 @@ export async function bumpOne(ctx: Ctx, e: Employee, o: BumpOptions): Promise<Em
   // the same checks on the same files but for the version, so they aren't run a second time.
   const tried = o.trial || fold || o.kitFrom ? null : await trialPassOf(ctx, e, { kit: o.kit, base: baseCommit, ...(tool !== undefined ? { tool } : {}) }).catch(() => null);
   if (tried) say(`its checks not run again: ${tried}`);
-  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
+  const task: CheckTask | undefined = o.trial ? { kind: 'kit-trial' } : undefined;
+  const first = tried ? null : await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
   if (first) {
     say(`its checks once more (${first})`);
-    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}` });
+    const again = await runChecks(ctx, e, dir, { env, say, affected: scope, doing: `the bump to kit ${o.kit}`, task });
     // A trial's failed step kept apart, before its checks without the kit write theirs beside the worktree.
     const kept = again && o.trial ? keepTrialLog(ctx.settings, e, o.kit, dir) : null;
     // A trial's failure isn't the kit's when the agent fails the very same way without it, on its main as it is. Failing
