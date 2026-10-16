@@ -8,7 +8,8 @@ import { runChecks, type AffectedScope } from './bump.ts';
 import { checkoutOf, freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { KIT_VERSION_FILE, kitTitleVersions } from './kitpart.ts';
 import { openPrs, parsePrs, readPin, VOUCH_CONTEXT, type PrInfo } from './staff.ts';
-import { setVouch, vouchDescription } from './vouch.ts';
+import { setVouch, stoodInDescription, vouchDescription } from './vouch.ts';
+import type { StoodIn } from './standin.ts';
 import { kitTrialsFile, raisesKit, type KitTrial } from './trial.ts';
 import { recordTested } from '../tested.ts';
 import { hostFor } from '../hosts/index.ts';
@@ -194,9 +195,9 @@ export async function carryVouched(ctx: Ctx, e: Employee, pr: PrInfo, head: stri
  * (vouch.ts's setVouch): the Assayer vouches for any team PR head without one, and would otherwise install and test it a
  * second time. A failure sets nothing, and a status GitHub won't take is only a line in the log: the result stands.
  */
-async function vouchedHere(ctx: Ctx, e: Employee, pr: PrInfo, scope: AffectedScope | undefined, tested: Tested): Promise<Tested> {
+async function vouchedHere(ctx: Ctx, e: Employee, pr: PrInfo, scope: AffectedScope | undefined, tested: Tested, description?: string): Promise<Tested> {
   if (pr.whose !== 'team' || pr.fork || !pr.headOid) return tested;
-  const why = await setVouch(ctx, e, e.repo, pr.headOid, vouchDescription(e, scope, pr.headOid, " in the Steward's test"));
+  const why = await setVouch(ctx, e, e.repo, pr.headOid, description ?? vouchDescription(e, scope, pr.headOid, " in the Steward's test"));
   ctx.log(`[${e.id}] #${pr.number}: ${why ?? `its head ${pr.headOid.slice(0, 7)} has the vouch (${VOUCH_CONTEXT}), so it isn't tested again elsewhere`}`);
   return tested;
 }
@@ -219,7 +220,10 @@ async function test(ctx: Ctx, e: Employee, pr: PrInfo): Promise<Tested> {
     // Only the tests its change reaches (affected.ts), unless Settings say the whole suite.
     const scope: AffectedScope | undefined = ctx.settings.affectedTests === false ? undefined : { base: `origin/${e.branch}` };
     const affected = scope ? { affected: scope } : {};
-    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}` });
+    const stoodIn: StoodIn = {};
+    const failed = await runChecks(ctx, e, dir, { say, ...affected, doing: `#${pr.number}'s checks at ${sha}`, stoodIn });
+    // A pass of exactly this code stood in (standin.ts): said as whose, and vouched for as such.
+    if (!failed && stoodIn.by) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed ${stoodIn.where} at ${sha}, not run again`, at: now(), branch }, stoodInDescription(e, stoodIn, pr.headOid));
     const which = scope?.chose && scope.chose !== 'the whole suite' ? ` (${scope.chose})` : '';
     if (!failed) return await vouchedHere(ctx, e, pr, scope, { ok: true, note: `checks passed here at ${sha}${which}`, at: now(), branch });
     say(`#${pr.number}: its checks once more (${failed})`);
