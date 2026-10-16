@@ -20,6 +20,27 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - At a full pace the manor now always leaves 15% of the processor and memory to you and Windows, so big jobs such as a whole suite or a kit trial may take a little longer than before. Nothing to set: it updates itself as usual. Each agent's own work gets the ceiling when it takes kit 2.78.3.
 
+## 0.36.65
+
+**Where the Seneschal is on this PC, the Steward's checks wait their turn in its one order, and its jams are alarms. Kit 2.78.1.**
+
+### What's new
+
+- With the Seneschal on this PC (it comes with Developer Pro), each run of a repository's checks asks it for a turn first: a PR's test, a vouch, the whole suite before a kit's release, and each kit trial (one per agent and kit). What a person waits on goes first (`steward vouch`, a round started by Run now or Build now), then what a merge or a release waits on, then the rest, and kit trials last. The checks then run without a turn of the checks pace: the Seneschal's turn is theirs, so the PC isn't held back twice.
+- A pass of exactly the same checks on the same code that the Seneschal already has (another agent ran them) stands in for running them again. A failure it has never does: the checks run here.
+- A task the Seneschal has left waiting far past its usual time is raised as an alarm, with a link to the Seneschal's page.
+- Without the Seneschal, with it off duty, or on a PC without Developer Pro, the checks run exactly as before.
+
+### What changed
+
+- The kit the Steward hands out lists the Seneschal, the new agent that hands out your agents' work on this PC in order, among the developer agents. With Developer options off, its Settings page no longer shows a "Where its work runs" section for work that doesn't run then.
+- Its page gets its own colour and title-bar scene: a ledger whose lines are ticked one by one as their work goes out to free slots.
+- Its Settings page says it comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
+
 ## 0.36.64
 
 **Kit 2.78.0: on a 16 GB Snapdragon X2, the local AI on the NPU uses a smaller model, Qwen3-VL-2B. It is faster, better with pictures, and leaves the PC about 2 GB more memory.**
