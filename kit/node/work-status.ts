@@ -370,11 +370,11 @@ export async function pcLines(o: { runs?: ChecksRun[] } = {}): Promise<WorkQueue
     lines.push({ id: 'first-round', kind: 'first-round', name: 'The first-round line', slots: p === 'gentle' ? 1 : null, holders: holdersOf(first.holders), waiting: waitersOf(first.waiting) });
   } catch {}
   try {
-    const { loadAccelerators, lockDirsOf } = await import('./accelerators.ts');
+    const { loadAccelerators, lockDirsOf, turnsWithoutEntry } = await import('./accelerators.ts');
     const cfg = loadAccelerators();
     if (!('error' in cfg)) {
-      for (const a of cfg.accelerators) {
-        if (a.enabled === false) continue;
+      // The entries, then a device whose turn an entry's server takes without an entry of its own (the NPU 3720's graphics).
+      for (const a of [...cfg.accelerators.filter((a) => a.enabled !== false), ...turnsWithoutEntry(cfg.accelerators)]) {
         const dirs = lockDirsOf(a);
         const s = lineSnapshot(dirs);
         lines.push({ id: `accelerator:${a.id}`, kind: 'accelerator', name: a.name ?? a.id, slots: dirs.length, holders: holdersOf(s.holders), waiting: waitersOf(s.waiting) });

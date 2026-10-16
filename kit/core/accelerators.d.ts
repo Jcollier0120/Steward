@@ -19,6 +19,12 @@ export type Endpoint = {
      * vision model may take less than its chat model): capFor.
      */
     maxContextTokens?: number;
+    /**
+     * The accelerator whose lock and line its requests take, when its server runs on another
+     * device than its accelerator's: the NPU 3720's embedding server, on the processor's graphics, takes the graphics'
+     * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
+     */
+    turn?: string;
 };
 export type Timeouts = {
     requestBaseMs?: number;
@@ -132,6 +138,9 @@ export type Look = {
  * PYTHONHOME and PATH), set when its startCommand starts it. `%NAME%` is expanded.
  * @property {number} [maxContextTokens] This kind's own request cap, when it differs from its accelerator's (an NPU's
  * vision model may take less than its chat model): capFor.
+ * @property {string} [turn] The accelerator whose lock and line its requests take, when its server runs on another
+ * device than its accelerator's: the NPU 3720's embedding server, on the processor's graphics, takes the graphics'
+ * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
  */
 /**
  * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
@@ -226,12 +235,26 @@ export declare function lockFoldersOf(acc: {
     id: string;
     slots?: number;
 }): string[];
+/**
+ * The accelerator whose turn a kind of request takes: its endpoint's `turn` when its server runs on another device
+ * (the NPU 3720's embeddings, on the processor's graphics), else its own. Its slots are that accelerator's in `list`
+ * when it's there, else one.
+ * @param {Pick<Accelerator, 'id' | 'slots'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @param {ReadonlyArray<Pick<Accelerator, 'id' | 'slots'>>} [list]
+ * @returns {{ id: string, slots: number }}
+ */
+export declare function turnOf(a: Pick<Accelerator, 'id' | 'slots'> & Partial<Pick<Accelerator, Work>>, work: Work, list?: ReadonlyArray<Pick<Accelerator, 'id' | 'slots'>>): {
+    id: string;
+    slots: number;
+};
 export type Written = {
     baseUrl?: string;
     model: string;
     startCommand?: string[];
     env?: Record<string, string>;
     maxContextTokens?: number;
+    turn?: string;
 };
 /**
  * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)

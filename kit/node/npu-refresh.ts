@@ -114,23 +114,31 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   const list: any[] = Array.isArray(file.raw.accelerators) ? file.raw.accelerators : [];
   const entry = list.find((a) => a && typeof a === 'object' && a.id === 'npu' && a.kind === 'npu');
   if (!entry?.chat?.startCommand?.length) return done('no-npu');
-  const npu = (await d.detect()).npu;
+  const detected = await d.detect();
+  const npu = detected.npu;
+  const cards = detected.cards ?? [];
   if (!npu?.supported || !npu.vendor) return done('no-npu');
   const catalog = d.catalog ?? NPU_CATALOG;
   const route = catalog.routes[npu.vendor];
   if (!route || !runsRoute(entry, route, d.tools)) return done('not-route');
 
   // What setup would write now, on the same ports, with or without its embeddings as before.
-  const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length });
+  const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length, cards });
   if (!plan) return done('no-npu');
   if (!plan.installed || plan.runtime || plan.downloadBytes > 0) return done('needs-setup');
-  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model } : undefined });
+  // The graphics' turn its embeddings take (embedTurn); a detection that listed no cards keeps the entry's.
+  const turn = plan.embed?.turn ?? (cards.length || typeof entry.embed?.turn !== 'string' ? undefined : entry.embed.turn);
+  const fresh = npuEntry(plan.route, { tools: d.tools, exe: plan.exe, port: plan.port, portable: (p) => portablePath(p, d.home), embed: plan.embed ? { exe: plan.embed.exe, model: plan.embed.model, ...(turn ? { turn } : {}) } : undefined });
   // Its slots, timeouts (measured on this PC, or a person's) and switch stay as they are.
   const { chat: _chat, vision: _vision, embed: _embed, ...kept } = entry;
   const next: AcceleratorEntry = { ...kept, maxContextTokens: fresh.maxContextTokens, quirks: fresh.quirks, chat: fresh.chat, ...(fresh.vision ? { vision: fresh.vision } : {}), ...(fresh.embed ? { embed: fresh.embed } : {}) };
   if (served(entry) === served(next)) return done('current');
 
-  const changes = [...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []), ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : [])];
+  const changes = [
+    ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
+    ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),
+    ...(next.embed && (entry.embed?.turn ?? null) !== (next.embed.turn ?? null) ? [`embeddings: in ${next.embed.turn ? `${next.embed.turn}'s` : "the NPU's"} turn`] : []),
+  ];
   if (!d.idle()) return { did: 'busy' };
   let problems: string[];
   try {

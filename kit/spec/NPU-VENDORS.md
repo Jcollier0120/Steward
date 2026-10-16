@@ -60,11 +60,29 @@ On an NPU 3720 (Core Ultra 5 225U, Arrow Lake-U, NPU driver 32.0.100.5540, 2026-
 | A query while chat writes | 2.1–2.2 s | | 50–53 ms | 75–85 ms | 147–155 ms |
 | The PC's memory it took, warm / its working set | 1.14–1.18 / 1.16 GB | 1.30–1.33 / 1.26–1.32 GB | 1.25–1.26 / 1.26–1.54 GB | 2.27–2.35 / 2.3–2.4 GB | 1.97–1.98 / 2.0 GB |
 
-The same model on the graphics gives the NPU's vectors under the NPU's model name, so Reeve's index stays as it is. Beside the chat server it leaves chat alone: chat wrote as fast while 16 chunks at a time were indexed, where on the NPU the two halved each other. The kit still gives the NPU's entry one request at a time, chat and embeddings alike (its turn), so chat waits for an indexing batch: about 5 s for 16 of Reeve's chunks on the graphics, against 18 s on the NPU and about 40 for 16 dense ones.
+The same model on the graphics gives the NPU's vectors under the NPU's model name, so Reeve's index stays as it is. Beside the chat server it leaves chat alone: chat wrote as fast while 16 chunks at a time were indexed, where on the NPU the two halved each other. So its requests take the graphics' turn, not the NPU's (below), and neither waits for the other.
 
 The rest don't do as well. A shorter `--max_length` on the NPU: this NPU runs it in 1,024-token blocks, a request of up to 1,024 tokens 1.1 s at 1,024 and at 2,048 alike (1,024 saves 4–6% and refuses Reeve's dense chunks), and 512 answers a query in 0.27 s, but refuses them too, so it would take a second server for queries (1.3 GB more), still in the NPU's turn. The processor slows chat by a fifth while it indexes, and takes twice the memory. On the graphics it takes about what it took on the NPU, inside the route's 1.74 GB (`memoryGb.embed`), and it is still counted in the NPU's share (Memory first, below): the graphics have no memory of their own either. llama.cpp's Vulkan build, setup's for a card, is slower than OpenVINO on the same graphics, with another model's vectors. The prompt-chunk setting that speeds this NPU's chat (Per generation, below) stops this server at its start (`NPUW_LLM_PREFILL_CHUNK_SIZE` 128 or 256 in its `--plugin_config`: OpenVINO Model Server exits 0xC0000409 without listing its model), so the embedding server never gets it.
 
 Arrow Lake-S, the same NPU, keeps its embeddings on the NPU: its F models have no graphics. A PC whose graphics can't run OpenVINO (no Intel graphics driver) fails the embedding server's test request at setup, and its embeddings go to the card or the processor, as any failure of the embedding server's does (Setup, below). The check (`npu-check`) runs the embedding server where the generation has it while it checks the NPU, and moves it with chat only to the processor or the graphics.
+
+### The NPU 3720's embeddings in the graphics' turn
+
+The kit gives an accelerator one request at a time (its turn: ACCELERATORS.md, The lock and the line), and until now the NPU's embeddings took the NPU's, wherever their server ran. On the NPU 3720 that made a search query wait for a whole chat answer, and chat wait for an indexing batch, though the two run on different devices. Setup now writes the embedding endpoint's `turn`: the id of the Intel graphics its server runs on (`embedTurn`: OpenVINO's `GPU` is the first Intel graphics, the one sharing the PC's memory, else the first Intel card; none known, none written, and the NPU's turn as before). Its requests take the graphics' lock and line, beside the NPU's chat; a card entry on the same graphics shares that turn with them. The keeper stops the server in the graphics' turn, after the NPU route's idle minutes, and the NPU's refresh writes the turn into a PC set up before it, after the same test, holding both turns. Its failure marker, its cap and its name in an answer stay the NPU's, and so does its memory, in the NPU's share (Memory first, below). Every other generation's embeddings are on its NPU and keep the NPU's turn.
+
+Measured through the kit's own requests on the 225U (2026-10-15), with the route's commands for `meteor-lake` on ports of their own, five times each: an agent's background chat (98 tokens) or a background batch of 16 of Reeve's chunks in one process, and a person's request (a search query, or a chat whose first token is timed) in another, sent once the background request held its turn. Before is the same entry without `turn`, as every kit until this one wrote it.
+
+| | Before (the NPU's turn) | After (the graphics') |
+|---|---|---|
+| A search query, alone | 50–77 ms | 60–78 ms |
+| A search query while chat writes | 6.9–7.4 s | 52–57 ms |
+| Chat's first token, alone | 0.55–0.62 s | 0.54–0.60 s |
+| Chat's first token while 16 chunks are indexed | 6.2–6.5 s (5.6–5.9 s of it waiting for the turn) | 0.52–0.60 s (its turn in 1–2 ms) |
+| Chat's tokens a second, a 25-token answer, alone / while indexing | 12.2–13.0 / after the batch | 13.2–13.5 / 14.1–14.2 |
+| The background chat's 98 tokens, a query sent meanwhile | 8.4–8.8 s | 8.0–8.5 s |
+| The 16-chunk batch, chat sent meanwhile | 6.0–6.2 s, alone | 5.2 s, beside chat |
+
+So a person searching while an agent writes is answered at once, and a person chatting while an agent indexes waits for neither; chat writes as fast beside the batch, and the batch, beside chat, isn't slower.
 
 ### Embeddings on the Hexagon
 
@@ -297,7 +315,7 @@ When, with no `npuIdleStopMinutes` in config.json (`npu-vendors.json`'s `idleSto
 
 A route's minutes are 20 times its cold start (stopped to its first answer), never under 5: waking it costs at most a twentieth of the quiet spell it ends, and a conversation's pauses, or an agent's rounds a minute apart, never pay it. GenieX starts and loads in 9 to 15 s (measured), so 5, and its llama-server answers in 2 to 3 s (measured; through kit 2.75.0 taken as 10 s), so 5; OpenVINO Model Server starts from its compile cache in 4 s on a Lunar Lake and 6.9 s on an NPU 3720, its embeddings in 2.8 s there (measured; the first compile is once per PC), so 5; FastFlowLM starts and loads its chat model in 6.6 s on an XDNA 2 (measured), so 5, and its vision model, its switch from chat included, in 15.7 s, so 6 (through kit 2.74.4 it wasn't measured, taken as 30 s, so 10). `npuIdleStopMinutes` in config.json (the Smith's Settings) overrides the rule on any PC, either way: 240 keeps it longer, 0 never stops it.
 
-An idle stop never races a request: the keeper stops a server only holding the NPU's turn, joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
+An idle stop never races a request: the keeper stops a server only holding the NPU's turn (the NPU 3720's embedding server, the graphics': its requests' turn, above), joining only an empty line, so a request in flight keeps it; a request that took the NPU after the keeper's look makes it give way (its turn wasn't had at once: `TURN_AT_ONCE_MS`), and a request arriving during the stop waits its turn, then starts the server again. That first request waits for the cold start: a server just started is given the cold-load allowance for its model's load, whatever shorter timeout the caller gave (`requestBaseMs` plus the larger of rules.json's and the route's `coldLoadMs`). A caller that passes `onWaking` (the kit's `AskOptions`) is told before it waits, with a line for the person: "Waking the local AI on the NPU: it rests when nobody uses it, so the first answer takes about 4 s longer."
 
 ### The embedding server gives way to chat (kit 2.77.5)
 
@@ -344,7 +362,7 @@ At every chat, 5 of the 8 extra starts fell on Reeve's requests for Claude a sec
 | The NPU's memory when it stops | 1,409 MB less (10,152 to 8,743 MB) |
 | The PC's memory when it stops | the server's 1,680 MB working set freed, 1.4 GB more available |
 
-So a chat that finds the embedding server idle pays about half a second once, and the next embedding about 1.7 s. On an NPU 3720, whose embedding server runs on the processor's graphics (`embedArgs`), the server gives way too while its requests take the NPU's turn. That frees the PC's memory rather than the NPU's.
+So a chat that finds the embedding server idle pays about half a second once, and the next embedding about 1.7 s. On an NPU 3720, whose embedding server runs on the processor's graphics (`embedArgs`), the server gives way too while its requests take the NPU's turn: an entry set up before the graphics' turn, until its refresh writes one. That frees the PC's memory rather than the NPU's. With its `turn`, it answers beside the chat instead and is never stopped for it ([The NPU 3720's embeddings in the graphics' turn](#the-npu-3720s-embeddings-in-the-graphics-turn)).
 
 ## Models and sizes
 

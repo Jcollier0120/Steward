@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
+import { type Accelerator, acceleratorConfigFile, type AcceleratorKind, acceleratorsHome, configuredAccelerators, endpointFor, keeperSettings, kindOfId, readableConfigFile, readConfigFile, ENDPOINT_KINDS, type EndpointKind, serves, toolsHome } from './accelerator-config.ts';
 import { currentGames, ensureServer, hardwareFile, lockDirsOf as kitLockDirsOf, probe as kitProbe, readFailure, readGames, readHardware, readStarted, rememberHardware, type StartedServer, type Accelerator as KitAccelerator } from './accelerators.ts';
 import { type Detection, detect, hardwareOf } from './detect.ts';
 import { expandEnv } from './accelerators.ts';
@@ -466,6 +466,19 @@ const NPU_EMBED_SERVER = /^(llama-server|ovms)(\.exe)?$/i;
 export const lockDirsOf = (a: Pick<Accelerator, 'id' | 'kind' | 'slots'>): string[] => kitLockDirsOf({ id: a.id, slots: a.kind === 'npu' ? 1 : a.slots });
 
 /**
+ * The other device whose turn a kind's server takes (its endpoint's `turn`, a vision endpoint on its chat endpoint's
+ * server by that one's): its id, kind, name (its entry's, else this PC's, hardware.json) and slots (its entry's, else
+ * one). Null when it takes its own accelerator's.
+ */
+export function otherTurn(a: Accelerator, kind: EndpointKind, list: Accelerator[]): { id: string; kind: AcceleratorKind; name: string; slots: number } | null {
+  const id = kind === 'vision' && !a.vision?.baseUrl ? a.chat?.turn : a[kind]?.turn;
+  const k = id && id !== a.id ? kindOfId(id) : null;
+  if (!id || !k || k === 'npu') return null;
+  const entry = list.find((x) => x.id === id);
+  return { id, kind: k, name: entry?.name ?? core.acceleratorName(k, id, readHardware()), slots: entry?.slots ?? 1 };
+}
+
+/**
  * The model servers the keeper can start again, each with its accelerator's idle time: an NPU's chat, vision and
  * embedding endpoints (the embedding one when llama-server runs it, Qualcomm's on the Hexagon, or OpenVINO Model
  * Server, Intel's; npu-embed exits by itself), and a graphics card's or the processor's chat, vision, embedding and
@@ -512,12 +525,23 @@ export function reapedServers(
       }
       if (!ep.startCommand?.length || out.has(ep.baseUrl)) continue;
       const idleMs = a.kind === 'npu' ? (idle.npuMsFor?.(expandEnv(ep.startCommand[0]), kind) ?? idle.npuMs) : idle.otherMs;
+      // A server on another device (its endpoint's `turn`: the NPU 3720's embeddings, on the processor's graphics) is
+      // used, and stopped, in that device's turn, not its accelerator's.
+      const on = otherTurn(a, kind, accelerators);
       out.set(ep.baseUrl, {
         base: ep.baseUrl,
         program: expandEnv(ep.startCommand[0]),
         spec: { base: ep.baseUrl, startCommand: ep.startCommand, ...(ep.env ? { serverEnv: ep.env } : {}), logFile: path.join(logDir, `${a.id}.${kind === 'vision' && !a.vision?.baseUrl ? 'chat' : kind}.log`) },
-        acc: { id: a.id, kind: a.kind, name: a.name },
-        lockDirs: typeof lockDirs === 'string' ? (a.kind === 'npu' ? [lockDirs] : slotDirs(path.join(path.dirname(lockDirs), a.id), a.slots)) : lockDirs(a),
+        acc: on ? { id: on.id, kind: on.kind, name: on.name } : { id: a.id, kind: a.kind, name: a.name },
+        lockDirs: on
+          ? typeof lockDirs === 'string'
+            ? slotDirs(path.join(path.dirname(lockDirs), on.id), on.slots)
+            : lockDirs({ ...a, id: on.id, kind: on.kind, slots: on.slots })
+          : typeof lockDirs === 'string'
+            ? a.kind === 'npu'
+              ? [lockDirs]
+              : slotDirs(path.join(path.dirname(lockDirs), a.id), a.slots)
+            : lockDirs(a),
         ...(idleMs !== undefined ? { idleMs } : {}),
         // GenieX alone keeps memory from every model load until it exits: the NPU's other servers aren't recycled.
         ...(a.kind === 'npu' && /geniex/i.test(path.win32.basename(expandEnv(ep.startCommand[0]))) ? { recycle: true } : {}),
@@ -872,6 +896,14 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
   if (npuRefresh) return;
   const logFile = o.logFile ?? reaperLog();
   const dirs = kitLockDirsOf({ id: 'npu', slots: 1 });
+  // The NPU's embedding server on another device (its `turn`: the NPU 3720's, on the processor's graphics) is stopped
+  // and tested in that device's turn too, and its use there counts as the NPU's.
+  const embedDirs = (): string[] => {
+    const accs = configuredAccelerators(readConfigFile().raw);
+    const npu = accs.find((a) => a.kind === 'npu');
+    const on = npu ? otherTurn(npu, 'embed', accs) : null;
+    return on ? kitLockDirsOf({ id: on.id, slots: on.slots }) : [];
+  };
   npuRefresh = refreshNpu({
     kit: kitVersion(),
     configFile: acceleratorConfigFile(),
@@ -882,12 +914,19 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
         npuDetected = null;
         throw e;
       })),
-    idle: () => {
-      const l = lineState(dirs);
-      return !l.held && !l.waiting && Date.now() - lastActivityMs(dirs) >= NPU_REFRESH_QUIET_MS;
-    },
+    idle: () =>
+      [dirs, embedDirs()]
+        .filter((d) => d.length)
+        .every((d) => {
+          const l = lineState(d);
+          return !l.held && !l.waiting && Date.now() - lastActivityMs(d) >= NPU_REFRESH_QUIET_MS;
+        }),
     // A first compile with a new command can take minutes: the turn isn't taken as a dead holder's meanwhile.
-    withTurn: (fn) => reaperTurn(dirs, fn, o.who ?? 'keeper', 40 * 60_000),
+    withTurn: (fn) => {
+      const e = embedDirs();
+      const who = o.who ?? 'keeper';
+      return reaperTurn(dirs, () => (e.length ? reaperTurn(e, fn, who, 40 * 60_000) : fn()), who, 40 * 60_000);
+    },
     stopServer: async (program, base) => {
       for (const p of await serverProcesses(program, base)) {
         try {
