@@ -18,11 +18,28 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The kit the Steward hands out lists the Seneschal, the new agent that hands out your agents' work on this PC in order, among the developer agents. With Developer options off, its Settings page no longer shows a "Where its work runs" section for work that doesn't run then.
 - Its page gets its own colour and title-bar scene: a ledger whose lines are ticked one by one as their work goes out to free slots.
 - Its Settings page says it comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.
-- On the Steward's page (and every agent's on kit 2.78.1), a button whose work takes time spins while it runs and takes no second press, and Settings' fields wait while it saves. Its questions and messages are the page's own dialogs, not the browser's.
 
 ### Before you update
 
 - Nothing: it updates itself as usual. The checks wait for the Seneschal only once the Seneschal 0.1.0 or later is on this PC.
+
+## 0.36.62
+
+**SimplySign Desktop waiting for you to sign in no longer holds up merges or fails a release, even when it starts waiting while a release builds.**
+
+### What's new
+
+- With kit 2.77.9, a button on the Steward's page whose work takes a while spins until it's done, and the part of the page it changes waits with it. Questions and messages appear in the page's own dialogs instead of the browser's.
+
+### What changed
+
+- SimplySign Desktop's session sometimes ends while a release is being built. When that happened, the release used to wait ten minutes for signtool, then fail for good and raise an alarm. Every other release that signs in the same round then built and waited its own ten minutes. Now the release waits until this PC can sign, as it does when the Steward finds the key gone before it builds. The other releases that sign don't build, and the rounds don't try signtool again for a quarter of an hour.
+- This Steward hands out kit 2.77.9. A release made with it gives up on signtool within a minute: it checks once before building and again before signing, since the session may end in between.
+- This also covers Manor's setup, and the staff still on an older kit. Their releases still wait their ten minutes the first time, but no longer fail for it, and the round's other signed releases don't wait too.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The staff whose releases sign get the one-minute limit when they take kit 2.77.9.
 
 ## 0.36.61
 
