@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.0
 
-**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: a button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm.**
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board. It also brings what wasn't released before: a button whose work takes time spins while it runs, and the part of the page it changes waits with it. Questions and messages are the page's own dialogs, never the browser's alert or confirm. And Intel's integrated graphics read pictures again: their vision server encodes each picture on the processor (`--no-mmproj-offload`), and its language model stays on the graphics. On a Core Ultra 5 225U's Intel Graphics, llama.cpp's Vulkan encoder lost the device at the server's warm-up, so it exited as it started (4 of 4 of the Smith's audits on 2026-10-15), and the kit marked the graphics failed for 10 minutes. Now it is ready in 5 s and reads the Smith's check picture in 6 s, a 1,920 × 1,200 screenshot in 93 s. A PC set up before gets the flag at the keeper's next look; nothing to download, nothing to set up again.**
 
 ### What's new
 
@@ -21,6 +21,11 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - **`confirmDialog(text, { ok, cancel, danger, title })`** and **`alertDialog(text, { ok, danger, title })`:** the page's own `confirm()` and `alert()`. The same words, and the same choices: OK and Cancel (OK alone for a message). `confirmDialog` is true for OK, false for Cancel or Escape. They draw themselves (no host for a page to mount), one at a time, oldest first, over the tour too. Inside an open modal `<dialog>`, they're drawn in it, so they can be pressed.
   - **Each dialog:** an `alertdialog` that names its text (`aria-describedby`). OK has the focus, as the browser's had. Tab stays in it, Escape is Cancel (OK for a message), and focus goes back to where it was. Line breaks in the text stay.
   - **`DialogHost`** (a page may draw its own; a test does), **`dialogsOpen()`** and **`nextStop`** (where Tab goes) are exported too.
+- **setup.ts:**
+  - `encodesOnProcessor(card)`: whether a card's vision server encodes on the processor. That is Intel's graphics (its id is `gpu-intel-…`) with under `OWN_MEMORY_GB` of its own, on a Vulkan device. `ENCODER_ON_PROCESSOR` is the flag.
+  - `withEncoderOnProcessor(raw)`: config.json with the flag added after the `--mmproj` file of each such card's llama-server vision command that lacks it, and the cards changed. A command that already says where the encoder runs (either flag), or that isn't llama-server's, is left alone.
+  - `refreshCardVision({ configFile, kit, log })` writes that into config.json once for each kit version, recorded in `card-refresh.json` beside it (`readCardRefresh`). A kit never redoes what a newer one looked at, so a person who takes the flag out keeps it out until the next kit.
+- **keeper.ts:** `refreshCards()`, called by the keeper's look (`keeperLook`) before the NPU's refresh. What it changed goes in the keeper's log.
 
 ### What changed
 
@@ -60,6 +65,8 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - **page.ts's script:** `data-confirm` asks in the page's own dialog, and the server's error or message is said there. While its POST runs, the button spins and takes no presses, and so do its `data-form` form or the form or card it's in. A failure gives them back, and on success the page reloads as before. A network failure is said, and the page doesn't reload itself under a dialog or a button that waits.
 - **settings-panel.js:** Save spins while it saves, and the fields, Cancel and "Set every field to its default" wait with it. "Try again" spins while the settings load.
 - **The CSS:** the spinner, the modal card and the dialogs are page.ts's CSS now (both kinds of page draw them), with `button:has(> .ui-spinner)`. The react part's UI_CSS adds `.ui-busy-area`.
+- **Setup** (`acceleratorEntry`) writes the flag into such a card's vision command, right after its projector. The card's chat and embeddings, and every other card, are unchanged.
+- **spec/ACCELERATORS.md** says where a card's vision encoder runs, and why, with the measurements: `--no-warmup` started the server, but lost the device on the screenshot. So did flash attention off, cooperative matrices off, and pictures capped at 1,024 tokens.
 
 ### For an agent
 

@@ -15,6 +15,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - The NPU benchmark no longer counts a test job as unsteady just because the model wrote answers of different lengths from one try to the next: it now compares the tries as if their answers were the same length. Until now this most likely kept every full run on a Snapdragon off the leaderboard, even on a quiet PC.
 - The kit the Steward hands out (2.78.0) brings this to every agent.
 - That kit also brings work not released before: on an agent's page, a button whose work takes time spins while it runs, the part of the page it changes waits with it, and questions and messages appear in the page's own dialogs instead of the browser's.
+- It also brings: on a PC with Intel's integrated graphics, reading pictures works again. Each picture is encoded on the processor, and the rest stays on the graphics. A PC set up before gets this at the keeper's next look, with nothing to download or set up again.
 
 ### Before you update
 
