@@ -15,7 +15,7 @@ So each maker gets its own server, chosen for being OpenAI-compatible, installab
 
 | Maker | Server | Version | What it serves on the NPU | Install |
 |---|---|---|---|---|
-| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model, Qwen3-VL-4B) | its Inno Setup installer, silent, per user, no administrator |
+| Qualcomm Snapdragon X, X2 | GenieX (Qualcomm, formerly Nexa) | 0.8.0 | chat, vision (one model, Qwen3-VL-4B; Qwen3-VL-2B on a 16 GB X2) | its Inno Setup installer, silent, per user, no administrator |
 | Intel Core Ultra (Meteor Lake, Arrow Lake, Lunar Lake, Panther Lake, Wildcat Lake) | OpenVINO Model Server | 2026.4.1 | chat (Qwen3-4B-Instruct-2507, channel-wise INT4) | a zip, unpacked into the accelerators' folder |
 | AMD Ryzen AI 300 and later (XDNA 2) | FastFlowLM | 1.0.7 | chat (Qwen3-4B-Instruct-2507), vision (Qwen3-VL-4B) | a portable zip, unpacked into the accelerators' folder |
 
@@ -148,6 +148,35 @@ What the ballast can't show:
 - **The device limit.** Windows sets how much one device may hold from the memory the PC starts with (half: 23.8 GB on this PC), and a ballast doesn't change that. The 7.8 GB a 16 GB PC's NPU may hold is still worked out: 5,646 MB at the new setting is 2.2 GB under it, and 7,114 MB at the old 0.7 GB under.
 - **All of the 32 GB.** A process can't hold its memory against the page file without the right to lock pages. At 32 GB Windows paged part of the ballast out as well (20.2 to 32.8 GB of it stayed resident while the servers ran), so they had somewhat more than a 16 GB PC would.
 
+### Qwen3-VL-2B on a 16 GB Snapdragon X2 (kit 2.78.0)
+
+On a Snapdragon X2 with less than 20 GB of memory (`idleStop.smallPcGb`: a 16 GB PC, which Windows shows as about 15.6), setup runs Qwen3-VL-2B in place of the 4B. It is the X2 generation's `smallPc` in `npu-vendors.json`, which `routeFor` puts in the route's place when it's told the PC is small (`smallPc` of detection's memory). A bigger X2, and every first-generation X, keep the 4B.
+
+- **What it is.** unsloth's Q4_0 GGUF of Qwen3-VL-2B-Instruct (`unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`, 1.9 GB with its F16 vision projector), pulled from Hugging Face by GenieX (`--model-hub hf`) and served by GenieX's llama.cpp plugin: the language model on the Hexagon (`--compute npu`), the pictures' encoder on the Adreno (`--vit-compute GPUOpenCL`). AI Hub has no QAIRT build of the 2B, only this GGUF. Its two files are pinned for the X2.
+- **Why the Adreno.** GenieX 0.8.0's llama.cpp reads every picture as grey on the Hexagon (GELU and IM2COL in its Hexagon backend, fixed in llama.cpp after the commit GenieX pins), and with the encoder on a second Hexagon session it aborts. On the processor it reads them right, but each picture takes about 5.5 s of processor time; on the Adreno 0.8 s, and the picture is read in 0.3 to 0.7 s.
+- **Per-model arguments.** `--compute` and `--vit-compute` are the model's own `serve` (`NpuModel.serve`), which `npuEntry` adds after the route's. The 4B's QAIRT command never gets them.
+- **Measured** with the full benchmark (`castellan-npu-bench/2`) on the 48 GB X2 Elite, 2026-10-15, against the 4B:
+
+  | | Qwen3-VL-2B (Q4_0, llama.cpp, pictures on the Adreno) | Qwen3-VL-4B (W4A16, QAIRT) |
+  |---|---|---|
+  | Quality items | 22 of 24, every must-pass one right (wrong: time, apples) | 22 of 24 (wrong: capitals, time) |
+  | Pictures | 4 of 4 | 3 of 4 |
+  | Tokens written a second | 75.0 | 41.1 |
+  | Short answer | 58 ms | 92 ms |
+  | First token at 512 / 1,024 / 2,056 tokens | 181 / 320 / 714 ms | 259 / 430 / 1,012 ms |
+  | Jobs: triage, reply, summary | 0.56, 0.43 and 1.95 s | 0.73, 0.98 and 3.88 s |
+  | Cold / cached load | 5.1 / 5.4 s | 10.0 / 9.9 s |
+  | Speed held over 10 minutes | 95% (100% run again quiet) | 100% |
+  | Working set / private | 4.31 / 2.34 GB | 6.12 / 1.68 GB |
+  | On the NPU | 2.1 GB | 4.2 GB |
+  | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
+
+  Not ranked: the processor was 31% busy at the start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15, the processor 6% busy), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs, a 4.3 s cold load and a 4.0 s cached one, and its speed held 100% over 10 minutes. Only the reply job kept that run off the board: its tries spread 24% (508 to 666 ms) with no outlier, judged then on whole times. Kit 2.78.0 judges a job's tries at one answer length (NPU-BENCHMARK.md, Steady), since each try's answer has a length of its own. Its private memory is 0.65 GB more, the vision encoder's weights in the PC's memory rather than the NPU's, and the Adreno holds about 1.5 GB of the PC's shared memory while it's loaded. With the embedding server beside it, the screen (the encoder on the processor) took 5.8 GB of the PC's available memory against the 4B's 8.2; the Adreno adds 0.2 to 0.7 GB to that.
+- **A PC already set up** keeps the 4B until its local AI is set up again (Set up local AI), which pulls the 2B. The keeper's look for a later kit's command never downloads: on a 16 GB X2 where the 2B is there already, it tests it and switches (its log says `model unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0 in qualcomm/Qwen3-VL-4B-Instruct:W4A16's place`); where it isn't, it leaves it for setup. The 4B stays on disk (4.4 GB) until removed: `geniex remove qualcomm/Qwen3-VL-4B-Instruct`.
+- **The 4B's cap, timeouts and idle stop**: 2,400 tokens, the rules' timeouts, 5 minutes. Its cold start (5.1 to 9.1 s with the encoder on the Adreno) is inside the route's 15 s.
+- **The Adreno's turn.** GenieX's encoder runs on the Adreno without the card's turn. A Snapdragon's Adreno is set up as a card too (the fallback), so a picture can be read beside the card's own llama-server. Each picture holds the Adreno well under a second.
+- **On a bigger X2**: `npu-check --small-pc` and `npu-bench --small-pc` (or `npu-bench --model unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0`) run a small PC's models whatever the PC's memory; `npu-bench --model qualcomm/Qwen3-VL-4B-Instruct:W4A16` measures the 4B on a small one.
+
 ### Memory on a 16 GB Intel PC (the NPU 3720)
 
 The NPU 3720's PC (a Core Ultra 5 225U with 16 GB) shows Windows 15.43 GB, and its NPU and graphics have no memory of their own. Windows lets each of them hold 8.80 GB at once (DXCore's `SharedSystemMemory`, 2026-10-15), more than half, while the kit's budget for the NPU's models (`NPU_MEMORY_SHARE`, 40%) is 6.2 GB. Measured with the kit's own commands for `meteor-lake` (`npuEntry`: chat at 2,048 tokens in 128-token chunks, `BEST_PERF`, the prefix cache off), on private ports from a scratch tools home, two passes each, both servers loaded and then given twice over three short answers, a 1,498-token prompt, 200 tokens written, four queries, two batches of 16 of the kit's own code chunks (6,490 and 6,708 tokens) and two dense chunks (1,360 and 1,906 tokens):
@@ -267,7 +296,7 @@ A cap can differ per kind (`maxContextTokens` on an endpoint: the core's `capFor
 
 ### Per generation, where nothing has been measured
 
-A generation in `npu-vendors.json` can carry its own `timeouts`, `maxContextTokens`, `caps`, `args` (replacing the value of a flag the route's command already has) and `memoryGb` over the route's (`routeFor`). Intel's, from the Lunar Lake's numbers and how the others compare (kit 2.68.0):
+A generation in `npu-vendors.json` can carry its own `timeouts`, `maxContextTokens`, `caps`, `args` (replacing the value of a flag the route's command already has) and `memoryGb` over the route's (`routeFor`), and `smallPc`, the models it runs in the route's place on a PC under 20 GB (kit 2.78.0: the X2's Qwen3-VL-2B, above). Intel's, from the Lunar Lake's numbers and how the others compare (kit 2.68.0):
 
 | Generation | NPU | Prompt cap | Background request | Cold load | Why |
 |---|---|---|---|---|---|
@@ -393,6 +422,7 @@ So a chat that finds the embedding server idle pays about half a second once, an
 | Maker | Model | Kinds | Download |
 |---|---|---|---|
 | Qualcomm | `qualcomm/Qwen3-VL-4B-Instruct:W4A16` (Qualcomm AI Hub's NPU build) | chat, vision | 4.4 GB |
+| Qualcomm, an X2 under 20 GB | `unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0` (unsloth's Q4_0 GGUF of Qwen3-VL-2B-Instruct and its F16 vision projector, from Hugging Face; its files pinned) | chat, vision | 1.9 GB |
 | Qualcomm | Qwen3-Embedding-0.6B Q8_0 (`Qwen/Qwen3-Embedding-0.6B-GGUF`, the graphics card's) | embeddings | 639 MB |
 | Intel | `Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov` (Castellan's channel-wise INT4 export, the kind the NPU runs properly; its files pinned) | chat | 2.2 GB |
 | Intel | `OpenVINO/Qwen3-Embedding-0.6B-int4-cw-ov` (OpenVINO's channel-wise INT4 export; its files pinned) | embeddings | 428 MB |
@@ -411,7 +441,8 @@ Plus the server: GenieX 65 MB (and llama.cpp b11125's zip, 13 MB, for its embedd
 | The Microsoft Visual C++ runtime DLLs beside it | Visual Studio's "Distributable Code" terms | Microsoft lets an application carry these DLLs in its own folder; here each PC downloads them from Microsoft, so Castellan doesn't redistribute them either: **have it reviewed**. |
 | OpenVINO's model exports | the base model's (Apache-2.0 for Qwen3) | |
 | FastFlowLM | MIT (its code and CLI); its NPU kernels free for any use, including commercial | It asks for "Powered by FastFlowLM" in the product's notices: add it to the third-party notices. |
-| Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-Embedding-0.6B, Qwen3.5-2B | Apache-2.0 | |
+| Qwen3-4B-Instruct-2507, Qwen3-VL-4B-Instruct, Qwen3-VL-2B-Instruct, Qwen3-Embedding-0.6B, Qwen3.5-2B | Apache-2.0 | |
+| unsloth/Qwen3-VL-2B-Instruct-GGUF (a 16 GB X2's model) | Apache-2.0, the base model's | A format conversion and Q4_0 quantization of Qwen's weights, nothing else. |
 | Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov, on Hugging Face | Apache-2.0, the base model's | Castellan's own export, so Castellan publishes this one: with the base model's LICENSE, and a model card saying what was changed (the weights converted and compressed, nothing else) and how, as Apache-2.0 asks. |
 | Avoided | Llama 3.2 (community licence), Gemma and EmbeddingGemma (Gemma's terms flow down to users), AMD's Ryzen AI ONNX runtime (AMD's software licence) | Not installed by setup. |
 
@@ -455,6 +486,8 @@ The report names the NPU's generation (`generation`) and runs it with that gener
 `--route intel --device CPU` rehearses Intel's route off the NPU (OpenVINO on the processor), on any PC that runs x64 programs, Windows on Arm included: its download, layout, environment, pull, serve and routes, all but the NPU. `--generation <id>` rehearses with a generation's starting values (e.g. `meteor-lake`, or `unknown` for the guessed ones). A rehearsal runs only with REEVE_HOME set to a scratch folder, so this PC's servers, models and locks are left alone, and never gives a patch. GenieX and FastFlowLM run on the NPU only, so they can't be rehearsed off it; an older Snapdragon is played on a newer one instead (below).
 
 On the NPU itself, `--generation <id>` of another generation runs that generation on this NPU, a rehearsal that gives no patch. On Intel and AMD that is its starting values alone (the Lunar Lake standing in for an NPU 3720): their servers build for the NPU they find, so nothing else of the other generation can be run.
+
+On a PC with little memory (under 20 GB) the check runs the models setup does there: its generation's `smallPc`, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` runs those on a bigger PC (kit 2.78.0).
 
 ### Playing an older Snapdragon on a newer one
 
@@ -551,6 +584,7 @@ node <agent>\src\kit\npu-bench.ts --generation snapdragon-x --yes
 **Unverified on hardware**, each needing a run on a real PC:
 - GenieX's silent install on a clean PC (the flags are Inno Setup's standard ones);
 - a real first-generation Snapdragon X, which the X2 only plays: GenieX's own V73 QAIRT runtime (played, the X's build ran on the X2's v81 runtime; GenieX's v73 runtime wasn't tried on the X2, for the risk of a bluescreen), the X's own speed (45 TOPS against the X2's 80), its memory, and the embedding server's `-c 4096 -ub 512` on its Hexagon (v73). On a 16 GB X Elite, GenieX (5.8 GB) and the embedding server (2.0 GB from kit 2.75.1, 4.4 GB before) beside it hold about 8 GB of the 16, and setup's memory check doesn't weigh them yet (Qualcomm's route has no `memoryGb`): whether a 16 GB X keeps both is the owner's to decide;
+- Qwen3-VL-2B (Qwen3-VL-2B on a 16 GB Snapdragon X2, above) on a real 16 GB X2: its pull from Hugging Face through setup, the Adreno's first OpenCL compile on a fresh PC, and its pictures beside the card's own llama-server on the Adreno. On the 48 GB X2 Elite, `npu-bench --small-pc` ran the kit's own command and checked its pinned files (pulled already). Neither full run was ranked, for the reply job's spread on whole times, and a run under kit 2.78.0's rule (a job judged at one answer length) is still to come;
 - a real 16 GB Snapdragon running chat, pictures and embeddings on the NPU beside the manor's agents. The X2 Elite ran them under a 16 GB PC's memory (a ballast: Memory on a 16 GB Snapdragon), but the 7.8 GB its NPU may hold is still worked out, since Windows sets it from the memory the PC starts with;
 - the Snapdragons before the X refused on a real one, and the ACPI ids from Qualcomm's driver files (`0D0A`, `0D19`, `104F`, `1050`): only `0FF0`, this laptop's, has been seen;
 - Intel beyond Lunar Lake and Arrow Lake-U: Meteor Lake itself (verified through the Arrow Lake-U, which shares its NPU and PCI id, but not run on one), Arrow Lake-S, -HX and -H, Panther Lake and Wildcat Lake (their PCI ids, speed, the driver minimum, and their starting values: setup calibrates them on each PC until the NPU check's patch verifies them);

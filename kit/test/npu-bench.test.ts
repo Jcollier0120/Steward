@@ -145,7 +145,8 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   const catalog = structuredClone(V.NPU_CATALOG);
   const route = catalog.routes[vendor];
   route.port = port;
-  for (const m of route.models) delete m.pinned; // its pull is a fake that leaves no files to check
+  // Its pull is a fake that leaves no files to check: a small PC's models' (a generation's smallPc) too.
+  for (const m of [...route.models, ...Object.values(route.generations).flatMap((g) => g.smallPc?.models ?? [])]) delete m.pinned;
   const tools = mkdtempSync(path.join(home, 'tools-'));
   let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
   if (vendor === 'qualcomm') {
@@ -266,6 +267,30 @@ test('a measurement: median, spread, and steady only when every try worked and t
   assert.equal(B.measure([10, 20], 1).median, 15);
 });
 
+test("a job's tries are judged at one answer length: answers of their own lengths aren't noise, a slower server is", () => {
+  // Reading 300 ms, then 25 ms a token: answers of 21 to 41 tokens take 800 to 1,300 ms, 48% apart as they stand.
+  const tokens = [21, 31, 41, 26, 36];
+  const first = [300, 300, 300, 300, 300];
+  const tries = tokens.map((n) => 300 + (n - 1) * 25);
+  assert.deepEqual(B.atAnswerLength(tries, tokens, first), [1050, 1050, 1050, 1050, 1050]);
+  const steady = B.jobMeasure(tries, tokens, first, 0.15);
+  assert.deepEqual(steady, { tries, median: 1050, spread: 0.476, steady: true, answerTokens: tokens, firstTokenMs: first, spreadAtLength: 0 });
+  assert.equal(B.measure(tries, 0.15).steady, false, 'the whole times alone would call it noisy');
+  // The same answer each time, but one try a third slower to write: noisy.
+  const slow = B.jobMeasure([1050, 1050, 1300, 1050, 1050], [31, 31, 31, 31, 31], first, 0.15);
+  assert.equal(slow.spreadAtLength, 0.238);
+  assert.equal(slow.steady, false);
+  // Reading slower once is noisy too: the first token is the server's, whatever the answer's length.
+  const slowRead = B.jobMeasure([800, 1050, 1650, 925, 1175], tokens, [300, 300, 650, 300, 300], 0.15);
+  assert.equal(slowRead.spreadAtLength, 0.333);
+  assert.equal(slowRead.steady, false);
+  // Without the counts or the first-token times (a server that doesn't stream or count, marked so), the whole times;
+  // and a failed try still keeps the job from being steady.
+  assert.deepEqual(B.atAnswerLength(tries, [null, null, null, null, null], first), tries);
+  assert.deepEqual(B.atAnswerLength(tries, tokens, [null, null, null, null, null]), tries);
+  assert.equal(B.jobMeasure([1050, Number.NaN, 1050], [31, null, 31], [300, null, 300], 0.15).steady, false);
+});
+
 test("conditions: plugged in or the battery, Windows' power mode on that source, the laptop's make and model", () => {
   const plugged = B.parseConditions('battery|1|True|60000|75000\npc|HP|HP OmniBook X Laptop 17-dd0xxx|26200\npower|ded574b5-45a0-4f42-8737-46345c09c238|\nbrightness|75');
   assert.deepEqual(plugged, { onBattery: false, batteryPercent: 80, powerMode: 'best performance', brightness: 75, windowsBuild: '26200', make: 'HP', model: 'HP OmniBook X Laptop 17-dd0xxx' });
@@ -323,7 +348,15 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   assert.equal(report.vision, null, "Intel's route has no vision model");
   assert.deepEqual(Object.keys(report.results.readFirstTokenMs), ['512', '1024']);
   assert.ok(report.results.writeTokensPerSecond!.median! > 0);
-  for (const j of SUITE.jobs) assert.equal(report.results.jobs[j.id].passed, SUITE.tries.full);
+  for (const j of SUITE.jobs) {
+    const m = report.results.jobs[j.id];
+    assert.equal(m.passed, SUITE.tries.full);
+    // Each try's answer tokens (the server's count) and first-token time, so its steadiness is judged at one length.
+    assert.equal(m.answerTokens.length, SUITE.tries.full);
+    assert.ok(m.answerTokens.every((n: number | null) => typeof n === 'number' && n > 0), JSON.stringify(m.answerTokens));
+    assert.ok(m.firstTokenMs.every((x: number | null) => typeof x === 'number'), JSON.stringify(m.firstTokenMs));
+    assert.equal(typeof m.spreadAtLength, 'number');
+  }
   // The fake answers in a millisecond or so, which rounds to 0.00 s: check the sum, not that it took time.
   const jobSum = SUITE.jobs.reduce((n, j) => n + report.results.jobs[j.id].median!, 0);
   assert.equal(report.results.jobTimeS, Number((jobSum / 1000).toFixed(2)));
@@ -342,6 +375,12 @@ test('a full run on an Intel NPU: streamed, every measurement taken, all 24 righ
   noisy.results.short!.steady = false;
   assert.deepEqual(B.marksFor(noisy, SUITE).map((m: any) => m.code), ['noisy']);
   assert.match(B.marksFor(noisy, SUITE)[0].say, /more than 15%: short answer/);
+  const noisyJob = structuredClone(report);
+  noisyJob.results.jobs.reply.steady = false;
+  assert.match(B.marksFor(noisyJob, SUITE)[0].say, /more than 15%: the reply job \(at one answer length\)$/);
+  // A report from before (no answer tokens) keeps its own verdict, said as it was.
+  delete (noisyJob.results.jobs.reply as Partial<typeof noisyJob.results.jobs.reply>).spreadAtLength;
+  assert.match(B.marksFor(noisyJob, SUITE)[0].say, /more than 15%: the reply job$/);
 });
 
 test("every read and job is a prompt the server hasn't seen, so no prefix cache answers it; the short answer, writing and quality are the same each time", async () => {
@@ -383,6 +422,8 @@ test("a server that doesn't stream or count tokens is measured all the same, and
   assert.equal(report.run.usageReported, false);
   assert.deepEqual(report.marks.map((m: any) => m.code), ['quick', 'not-streamed', 'no-usage']);
   assert.equal(report.ranked, false);
+  // Neither the answers' tokens nor their first tokens: each job is judged on its whole times.
+  for (const j of SUITE.jobs) assert.deepEqual(report.results.jobs[j.id].answerTokens, [null, null, null]);
   assert.equal(report.results.holding, null, 'a quick run skips holding speed');
 });
 
@@ -545,6 +586,31 @@ test('a candidate chats only unless --vision says it sees: pulled as its own typ
   assert.throws(() => B.candidateRoute(V.NPU_CATALOG.routes.intel, 'a/b', { vision: true }), /has no vision/);
   assert.deepEqual(B.parseBenchArgs(['--candidate', 'a/b', '--vision']), { candidate: 'a/b', vision: true });
   assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
+});
+
+test("a small PC's models: a 16 GB X2 measures Qwen3-VL-2B as setup runs it, as does --small-pc on a bigger one; --model the 4B on a small one", async () => {
+  const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
+  const FOUR_B = 'qualcomm/Qwen3-VL-4B-Instruct:W4A16';
+  const ARM16 = ARM.replace(/ram\|\d+/, 'ram|16876666880');
+  const run = async (o: object, arm = ARM) => {
+    const s = await scene({ vendor: 'qualcomm' });
+    const pulls: string[][] = [];
+    const r = await B.npuBench({ ...s.opts, detection: parseDetection(`${arm}${X2}\n`), profile: 'quick', ...o, io: { ...s.opts.io, setup: { run: async (_exe: string, args: string[]) => (pulls.push(args), { code: 0, out: '' }) } } });
+    assert.equal(r.code, 0, s.lines.join('\n'));
+    return { ...r, s, pulls };
+  };
+  const small = await run({}, ARM16);
+  assert.equal(small.report.run.model, TWO_B);
+  assert.deepEqual(small.pulls, [['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update']], 'from Hugging Face');
+  assert.deepEqual(small.s.fake.commands[0].slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], "its pictures' encoder on the Adreno, as setup starts it");
+  assert.ok(small.s.fake.seen.every((j) => j.model === TWO_B), 'every request names the 2B');
+  assert.equal((await run({ smallPc: true })).report.run.model, TWO_B, '--small-pc on the 47.6 GB X2');
+  assert.equal((await run({ model: TWO_B })).report.run.model, TWO_B, "--model a small PC's own, on the 47.6 GB X2");
+  const four = await run({ model: FOUR_B }, ARM16);
+  assert.equal(four.report.run.model, FOUR_B, "--model the route's own on a 16 GB X2");
+  assert.ok(!four.s.fake.commands[0].includes('--vit-compute'), "GenieX's QAIRT model never gets the 2B's arguments");
+  assert.equal((await run({})).report.run.model, FOUR_B, 'the 47.6 GB X2 as setup runs it');
+  assert.deepEqual(B.parseBenchArgs(['--small-pc']), { smallPc: true });
 });
 
 test("a text candidate on a Snapdragon is pulled as one and asked no pictures; with --vision it's asked them, not the route's model", async () => {
