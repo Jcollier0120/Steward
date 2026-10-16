@@ -96,7 +96,7 @@
         "writeTokensPerSecond": { "type": ["object", "null"] },
         "readFirstTokenMs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/measure", "type": "object" } },
         "readAtCap": { "type": ["object", "null"], "properties": { "promptTokens": { "type": ["number", "null"] }, "firstTokenMs": { "type": ["number", "null"] } } },
-        "jobs": { "type": "object", "additionalProperties": { "type": "object", "required": ["tries", "median", "spread", "steady", "passed"], "properties": { "passed": { "type": "number" } } } },
+        "jobs": { "type": "object", "additionalProperties": { "type": "object", "required": ["tries", "median", "spread", "steady", "passed"], "properties": { "passed": { "type": "number" }, "answerTokens": { "type": "array", "items": { "type": ["number", "null"] } }, "firstTokenMs": { "type": "array", "items": { "type": ["number", "null"] } }, "spreadAtLength": { "type": ["number", "null"] } } } },
         "jobTimeS": { "type": ["number", "null"] },
         "memory": { "type": ["object", "null"], "properties": { "workingSetBytes": { "type": "number" }, "privateBytes": { "type": "number" } } },
         "holding": { "type": ["object", "null"], "properties": { "minutes": { "type": "number" }, "firstMinuteMs": { "type": ["number", "null"] }, "lastMinuteMs": { "type": ["number", "null"] }, "held": { "type": ["number", "null"] } } },
