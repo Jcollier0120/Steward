@@ -61,6 +61,13 @@ test("a request's timeout: a background chat's scales with its answer, under the
   assert.equal(t({ lane: 'interactive' }), 180_000, 'a person waiting: the config');
   assert.equal(t({ work: 'embed' }), 180_000, 'embeddings: the config');
   assert.equal(t({ coldLoad: true }), 135_000, 'a model that may be loading: 90 s more');
+
+  // A kind's own timings over its accelerator's, each it gives: vision encoding pictures on the processor.
+  const acc = { timeouts: { requestPerTokenMs: 100, coldLoadMs: 60_000 }, chat: { baseUrl: 'http://x', model: 'c' }, vision: { baseUrl: 'http://x', model: 'v', timeouts: { requestBaseMs: 90_000 } } };
+  assert.deepEqual(core.timeoutsFor(acc, 'vision'), { requestBaseMs: 90_000, requestPerTokenMs: 100, coldLoadMs: 60_000 });
+  assert.deepEqual(core.timeoutsFor(acc, 'chat'), acc.timeouts);
+  assert.equal(core.timeoutsFor({ chat: acc.chat }, 'chat'), undefined);
+  assert.equal(t({ work: 'vision', maxTokens: 4, timeouts: core.timeoutsFor({ vision: acc.vision }, 'vision') }), 91_200, "a 4-token question about a picture: 90 s and the rules' 0.3 s a token");
 });
 
 test('the turn never hands a driver a state it changed, and never ends twice', () => {

@@ -9,10 +9,17 @@ import path from 'node:path';
  * connected, and its key provider comes as x64 and x86 DLLs only, which an Arm64 process can't load: so this always
  * runs the Windows SDK's x64 signtool (emulated on an Arm PC). Each file is signed, timestamped (RFC 3161, so the
  * signature outlives the certificate) and checked: Windows trusts it, it's the certificate's, it's timestamped.
+ *
+ * A trial signature that doesn't answer is "can't sign" (kit 2.77.9). SimplySign Desktop asks for its sign-in when its
+ * session has ended, and holds signtool until someone answers: a trial that timed out said nothing signProblem knew, so
+ * the release built and then sat in signFiles for SIGN_MS, the Steward's round waiting on it. Now the trial has TRIAL_MS,
+ * and signFiles tries one again before it signs, since the session may have ended while the release built.
  */
 
 /** The longest one signtool run may take: a cloud key's sign-in, waiting where no one sees it, would hang a release. */
 const SIGN_MS = 10 * 60_000;
+/** How long a trial signature may take: a key in the cloud signs a small script in seconds. */
+export const TRIAL_MS = 60_000;
 const TRIES = 3;
 /** Files signed per signtool run: one sign-in prompt per run at most, and a command line well under Windows' limit. */
 const BATCH = 40;
@@ -55,12 +62,36 @@ export function signProblem(text: string, thumbprint: string): string | null {
 
 const powershell = (script: string, timeout = 60_000) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 16 * 1024 * 1024 });
 
-const run = (tool: string, args: string[], timeout: number) => {
+/** One signtool run: whether it signed, whether it ran out of time, and what it said. */
+export type SignRun = (tool: string, args: string[], timeout: number) => { ok: boolean; timedOut: boolean; text: string };
+
+const signIn = 'SimplySign Desktop may be waiting for you to sign in (your SimplySign ID and the token from the phone app)';
+
+const run: SignRun = (tool, args, timeout) => {
   const r = spawnSync(tool, args, { encoding: 'utf8', windowsHide: true, timeout });
   const text = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
-  if (r.error && (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT') return { ok: false, timedOut: true, text: `signtool didn't finish within ${timeout / 60_000} minutes: is the certificate's sign-in waiting?` };
+  if (r.error && (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT') return { ok: false, timedOut: true, text: `signtool didn't finish within ${timeout / 60_000} minutes: ${signIn}` };
   return { ok: r.status === 0, timedOut: false, text: text || r.error?.message || `exit ${r.status}` };
 };
+
+/**
+ * Why a trial signature (no timestamp) of a throwaway script says this PC can't sign now, or null: signtool's "no
+ * certificates" (the key can't be reached), or no answer within TRIAL_MS (its sign-in waiting). Anything else it says is
+ * left to the real signing, which tries again and says so.
+ */
+export function trialProblem(signtool: string, thumbprint: string, o: { run?: SignRun } = {}): string | null {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kit-sign-'));
+  try {
+    const file = path.join(dir, 'trial.ps1');
+    writeFileSync(file, '# A trial signature, before a release signs.\r\n');
+    const t = (o.run ?? run)(signtool, ['sign', '/sha1', thumbprint, '/fd', 'SHA256', file], TRIAL_MS);
+    if (t.ok) return null;
+    if (t.timedOut) return `signtool didn't answer within ${TRIAL_MS / 1000} seconds with the signing certificate's key (${thumbprint}): ${signIn}`;
+    return signProblem(t.text, thumbprint);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 const quotedPs = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
@@ -82,16 +113,8 @@ export function readySigner(thumbprint: string, timestamp: string): Signer | { p
   if (said === 'none') return { problem: `the signing certificate (${thumbprint}) isn't in Cert:\\CurrentUser\\My. If its key is in Certum's cloud, start SimplySign Desktop and connect` };
   if (said === 'nokey') return { problem: `the signing certificate (${thumbprint}) is here without its key` };
   if (said !== 'ok') return { problem: `couldn't look for the signing certificate: ${(r.stderr || said || r.error?.message || 'no answer').trim()}` };
-  const dir = mkdtempSync(path.join(tmpdir(), 'kit-sign-'));
-  try {
-    const file = path.join(dir, 'trial.ps1');
-    writeFileSync(file, '# A trial signature, before the release builds.\r\n');
-    const t = run(signtool, ['sign', '/sha1', thumbprint, '/fd', 'SHA256', file], 2 * 60_000);
-    const problem = t.ok ? null : signProblem(t.text, thumbprint);
-    if (problem) return { problem };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const problem = trialProblem(signtool, thumbprint);
+  if (problem) return { problem };
   return { signtool, thumbprint, timestamp };
 }
 
@@ -113,13 +136,18 @@ export function unsignedOf(files: string[]): string[] {
 
 /**
  * Signs files and timestamps them, a batch at a time, trying a batch again when it fails (the timestamp server does now
- * and then); then checks every one is Valid, the certificate's, and timestamped. Throws with why when it can't.
+ * and then); then checks every one is Valid, the certificate's, and timestamped. Throws with why when it can't. A trial
+ * signature first: the key's session may have ended while the release built, and its sign-in would hold a batch for
+ * SIGN_MS where the trial gives up in TRIAL_MS.
  */
-export function signFiles(s: Signer, files: string[], log: (line: string) => void = () => {}): void {
+export function signFiles(s: Signer, files: string[], log: (line: string) => void = () => {}, o: { run?: SignRun } = {}): void {
+  const sign = o.run ?? run;
+  const lost = files.length ? trialProblem(s.signtool, s.thumbprint, { run: sign }) : null;
+  if (lost) throw new Error(`couldn't sign the native files: ${lost}`);
   for (let i = 0; i < files.length; i += BATCH) {
     const batch = files.slice(i, i + BATCH);
     for (let attempt = 1; ; attempt++) {
-      const r = run(s.signtool, signArgs(batch, s.thumbprint, s.timestamp), SIGN_MS);
+      const r = sign(s.signtool, signArgs(batch, s.thumbprint, s.timestamp), SIGN_MS);
       if (r.ok) break;
       const problem = signProblem(r.text, s.thumbprint);
       if (problem) throw new Error(`couldn't sign the native files: ${problem}`);
