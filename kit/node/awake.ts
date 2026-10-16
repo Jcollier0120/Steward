@@ -103,7 +103,8 @@ export function awakeCompileScript(exe: string, source: string): string {
 /** The helper being built, once per process; null once it couldn't be. */
 let building: Promise<string | null> | null = null;
 
-function awakeHelper(log: (line: string) => void): Promise<string | null> {
+/** The helper's exe, built if no agent on the PC has yet; null when it can't be (said once in the log). */
+export function awakeHelperExe(log: (line: string) => void): Promise<string | null> {
   return (building ??= (async () => {
     try {
       const source = awakeSource();
@@ -122,7 +123,7 @@ function awakeHelper(log: (line: string) => void): Promise<string | null> {
 
 /** Windows held awake by the helper, started for this process; null when it can't be. */
 async function helperHold(log: (line: string) => void): Promise<WindowsHold | null> {
-  const exe = await awakeHelper(log);
+  const exe = await awakeHelperExe(log);
   if (!exe) return null;
   try {
     const child = spawn(exe, [String(process.pid)], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: !sharesConsole() });
