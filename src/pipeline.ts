@@ -1,3 +1,4 @@
+import type { BuildPhase } from './buildtimes.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 
 /**
@@ -33,7 +34,11 @@ export interface BuildPipeline {
   days: Day[];
   /** The newest kit goes into every build, or only the day's first. */
   kit: 'every' | 'first';
-  /** A build's rounds go on at most this long; then the build releases what it merged, and ends. */
+  /**
+   * A build's rounds go on at most this long (15 to 60 minutes; 30 unless Settings say otherwise); then the build releases
+   * what it merged, and ends. Its tests run ahead of it, between builds (stages/prepare.ts), so a build mostly checks that
+   * nothing moved, merges and releases.
+   */
   windowMinutes: number;
   /**
    * A repository's stack that fails its checks (twice: once more for a flaky test) is halved at most this many times to
@@ -42,7 +47,10 @@ export interface BuildPipeline {
   bisectRuns: number;
 }
 
-export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
+export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 30, bisectRuns: 3 };
+
+/** The longest a build may take (Steward 0.36.67): an hour, which the owner already finds too long. */
+export const MAX_WINDOW_MINUTES = 60;
 
 /**
  * The default build times before Steward 0.36.63. Settings saves the whole group, so turning the switch on stored them
@@ -50,11 +58,15 @@ export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:0
  */
 const OLD_DEFAULT_TIMES = ['08:00', '13:00', '18:00'];
 
+/** The window's default before Steward 0.36.67, stored with the times the same way: it reads as today's default too. */
+const OLD_DEFAULT_WINDOW = 120;
+
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /**
  * settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. An `on` kept
- * from when there was a switch is left out, whatever it says, and times that are exactly the old default take today's.
+ * from when there was a switch is left out, whatever it says, and times or a window that are exactly the old default
+ * take today's; a window longer than MAX_WINDOW_MINUTES is cut to it.
  */
 export function normalizePipeline(raw: unknown): BuildPipeline {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -71,7 +83,7 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
     times: times.length && !oldDefault ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
-    windowMinutes: Number.isInteger(w) ? Math.min(360, Math.max(15, w)) : d.windowMinutes,
+    windowMinutes: Number.isInteger(w) && w !== OLD_DEFAULT_WINDOW ? Math.min(MAX_WINDOW_MINUTES, Math.max(15, w)) : d.windowMinutes,
     bisectRuns: Number.isInteger(b) ? Math.min(6, Math.max(0, b)) : d.bisectRuns,
   };
 }
@@ -99,6 +111,8 @@ export interface BuildRun {
   failed: string[];
   /** It ran out of its window before everything settled. */
   cut?: boolean;
+  /** Where its time went (buildtimes.ts): each phase with its start and end, those done between builds for it marked `ahead`. */
+  phases?: BuildPhase[];
   /** A build time the PC slept through (standby): when it woke (ISO), and the build began (pipelineMode's `wokeAt`). */
   late?: string;
 }

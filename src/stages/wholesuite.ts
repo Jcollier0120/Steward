@@ -12,6 +12,7 @@ import { onlyFlaky, runChecks, type FailedChecks } from './bump.ts';
 import { freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { stewardEmployee } from './selfmerge.ts';
 import { apart } from './slots.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 import type { StoodIn } from './standin.ts';
 
 /**
@@ -295,7 +296,7 @@ function startBeside(ctx: Ctx, repo: string, dir: string, o: { tag: string; comm
   };
   const jobCtx: Ctx = { ...ctx, run, log };
   going = g;
-  g.done = apart('whole suite', () => runWhole(jobCtx, repo, dir, o, say, () => (stop.signal.aborted ? (g.why ?? 'stopped') : null)))
+  g.done = apart('whole suite', () => timed(phaseOf(ctx), 'whole suite', o.tag, () => runWhole(jobCtx, repo, dir, o, say, () => (stop.signal.aborted ? (g.why ?? 'stopped') : null))))
     .catch((err: Error): Verdict => ({ verdict: stop.signal.aborted ? 'ended' : 'failed', why: `couldn't run its whole suite at ${o.commit.slice(0, 7)}: ${err.message}` }))
     .then(async (v) => {
       const stopped = stop.signal.aborted;

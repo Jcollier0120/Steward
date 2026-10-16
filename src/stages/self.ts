@@ -211,7 +211,7 @@ export async function releaseSelf(ctx: Ctx, o: { checkout: string; main: Steward
           const held = step.what === 'kit' ? await wholeSuiteBefore(ctx, repo, step) : null;
           // Windows ended its run, or it runs beside the rounds: a later round asks again; the Steward's version waits for it.
           if (held?.retry) {
-            results.push(selfResult('skipped', held.beside ? `${step.tag} waits: ${held.why}` : `${step.tag} waits for the next round: ${held.why}`, { version: step.version, commit: step.commit.slice(0, 7) }));
+            results.push(selfResult('skipped', held.beside ? `${step.tag} waits: ${held.why}` : `${step.tag} waits for the next round: ${held.why}`, { version: step.version, commit: step.commit.slice(0, 7), kitWaits: step.version }));
             break;
           }
           // The PC kept awake while it releases (the kit's awake.ts).

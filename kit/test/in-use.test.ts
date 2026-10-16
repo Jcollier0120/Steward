@@ -23,11 +23,22 @@ const BELOW_NORMAL = os.constants.priority.PRIORITY_BELOW_NORMAL;
 const NORMAL = os.constants.priority.PRIORITY_NORMAL;
 const capped = `gentle ${gentleCap()}`;
 
+/** How long the test waits for its page to answer a request, however starved this process is. */
+const ASK_DEADLINE_MS = 3 * 60_000;
+
 test("viewing a page leaves its pace and its job's cap as they are: a browser's requests and Manor's alike", async () => {
-  const { close } = await serve({ port, icon: '<svg/>' });
+  const { server, close } = await serve({ port, icon: '<svg/>' });
+  // Below normal on a busy PC (the whole suite beside other checks), this process can be starved for over a minute
+  // between taking a connection and reading its request. Node's server then times the request out (headersTimeout,
+  // 60 s) and drops the connection with the request unread, which reads as ECONNRESET here (2026-10-16, twice, after
+  // 100 and 124 s). So the page waits for its request however long that takes, and each ask has a deadline instead.
+  server.headersTimeout = 0;
+  server.requestTimeout = 0;
   const ask = (headers: Record<string, string>) =>
     new Promise<number>((resolve, reject) => {
-      http.get({ host: '127.0.0.1', port, path: '/api/ping', headers: { host: `127.0.0.1:${port}`, ...headers } }, (res) => (res.resume(), resolve(res.statusCode ?? 0))).on('error', reject);
+      const req = http.get({ host: '127.0.0.1', port, path: '/api/ping', headers: { host: `127.0.0.1:${port}`, ...headers } }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+      req.on('error', reject);
+      req.setTimeout(ASK_DEADLINE_MS, () => req.destroy(new Error(`the page didn't answer /api/ping within ${ASK_DEADLINE_MS / 60_000} minutes`)));
     });
   try {
     await paceProcess('gentle');

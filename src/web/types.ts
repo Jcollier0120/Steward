@@ -32,9 +32,9 @@ export interface RoundView {
   /**
    * Settings' build pipeline, how the Steward always works (pipeline.ts): its build times, the next, and whether one is
    * under way; `late`, the line for the last build when the PC slept through its time (pipeline.ts' lateLine); `wakes`,
-   * the PC is woken for each, plugged in (build-hold.ts).
+   * the PC is woken for each, plugged in (build-hold.ts); `took`, where the last build's time went (buildtimes.ts).
    */
-  build?: { times: string[]; next: string | null; building: boolean; late?: string | null; wakes?: boolean } | null;
+  build?: { times: string[]; next: string | null; building: boolean; took?: string | null; late?: string | null; wakes?: boolean } | null;
 }
 
 /** A PR as the page shows it: with what its steward block asks for once merged, in words (after.ts's afterWords). */

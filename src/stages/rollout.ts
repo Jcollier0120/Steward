@@ -13,6 +13,7 @@ import { LockTimeout, withLock } from '../kit/lock.ts';
 import { apart, STAGE_STALE_MS, withRepo } from './slots.ts';
 import { kitReach, type KitReach } from './kitreach.ts';
 import { releasedTool, releasedTree, stewardClone } from './trialpass.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 
 /**
  * The rollout, in a round: a new kit reaches every employee without anyone running `steward bump` and `steward push`.
@@ -359,8 +360,11 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   // One held for the network or GitHub's own failing (before common.ts's passingFailure knew a 5xx), or for a program
   // missing for a moment that is back (Git updating itself), is let go.
   for (const [id, h] of Object.entries(failed)) if (passingFailure(h.message)) delete failed[id];
-  // The newest kit, once it has settled; until then the one rolled out last, to those still behind it.
-  const settle = ctx.settings.rollout ? await settledKit(ctx, o.kit, o.changelog) : { kit: o.kit, settling: null, urgent: null };
+  // The newest kit, once it has settled; until then the one rolled out last, to those still behind it. In a build
+  // (pipeline.ts), the newest at once: the build is where every kit since the last goes out together, once, and its
+  // trial passed the agents as the build finds them, which spares their checks now (trialpass.ts). The kit settling
+  // instead, the one before it went to every agent with its checks run, and the next build bumped each one again.
+  const settle = ctx.settings.rollout && !ctx.build ? await settledKit(ctx, o.kit, o.changelog) : { kit: o.kit, settling: null, urgent: null };
   const target = settle.kit;
   const settling = settle.settling ? settlingLine(settle.settling, target) : undefined;
   if (settling) ctx.log(`rollout: ${settling}`);
@@ -408,7 +412,7 @@ export async function rollout(ctx: Ctx, employees: Employee[], o: { kit: string 
   if (!plan.bump.length) return { results, plan };
   const names = plan.bump.map((b) => b.employee.name).join(', ');
   // One at a time on this PC: a rollout another process runs (a round in a terminal) has the kit.
-  const bumps = (c: Ctx) => withLock(rolloutLock(), () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) }), { waitMs: 0, staleMs: STAGE_STALE_MS });
+  const bumps = (c: Ctx) => withLock(rolloutLock(), () => timed(phaseOf(c), 'rollout', `kit ${kit}`, () => bumpAndPush(c, plan, { kit, changelog: o.changelog, ...(tool ? { tool } : {}) })), { waitMs: 0, staleMs: STAGE_STALE_MS });
   if (beside) {
     ctx.log(`rollout: kit ${kit} for ${names}, beside the rounds: the rounds go on merging meanwhile`);
     startBeside(ctx, kit, plan.bump.map((b) => b.employee.name), bumps);

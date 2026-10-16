@@ -31,6 +31,7 @@ import { noteMerged } from '../strangers.ts';
 import { CONFLICTS, handedOn, noteConflict, type ConflictOutcome } from '../conflicts.ts';
 import { hostFor, must } from '../hosts/index.ts';
 import { withRepo } from './slots.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 import { withLane } from './seneschal.ts';
 
 /**
@@ -302,7 +303,7 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   return { why: null, sets: v.head };
 }
 
-const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}) });
+const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}), ...(raisesKit(pr) ? { kit: true } : {}) });
 
 /** How the hold of a PR that gave up its turn (givesWay) reads. */
 export const GAVE_WAY = `${CONFLICTS}, beyond what the Steward resolves, and was handed on: it gives up its turn, so the PRs above it merge first, and once it is resolved it is caught up to a version of its own`;
@@ -481,12 +482,15 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   if (!prs.length) return { ...result(e, 'skipped', none), merged: [], held: [] };
   // Merged only where the person said yes, repository by repository; elsewhere listed, nothing tested, and no alarm.
   if (o.yes && !e.merges) return { ...result(e, 'skipped', `${prs.length} open PR${prs.length === 1 ? '' : 's'} (${prs.map((p) => `#${p.number}`).join(', ')}) ${NOT_MERGING}`, { url: prs[0].url }), merged: [], held: [] };
+  // Between builds, preparing the next one (stages/prepare.ts): its tests run as the build would run them, and nothing on
+  // GitHub is changed but a PR's test status. The build finds those passes, and only merges.
+  const prep = !!ctx.prepare && !ctx.build;
   // Stacked on a branch whose PR has merged: pointed at the employee's branch, so it joins the line below.
-  if (o.yes && o.team && !only) await retargetStacked(ctx, e, prs);
+  if (o.yes && o.team && !only && !prep) await retargetStacked(ctx, e, prs);
   // The Wright's drafts: the Steward looks at each, and marks ready the ones that pass (review.ts).
-  if (o.yes && o.team && !only && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
+  if (o.yes && o.team && !only && !prep && ctx.settings.wrightReview.on) await lookAtWrightDrafts(ctx, e, prs);
   // GitHub still working out whether one merges (just retargeted, or pushed to): asked again, so it needn't wait a round.
-  if (o.yes && !only) await askAgainWhetherMerges(ctx, e, prs);
+  if (o.yes && !only && !prep) await askAgainWhetherMerges(ctx, e, prs);
   // Whoever wrote it, one whose lockfile brings new packages or a new install script waits for the owner (review.ts).
   if (o.yes && !only) await lookAtLockfiles(ctx, e, prs);
   const { merge: mergeable, hold } = mergeSelection(prs, e.branch, { minAgeMinutes: ctx.settings.mergeMinAgeMinutes });
@@ -537,8 +541,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     } else ready.push({ pr, sets: c.sets, stamps: c.stamps });
   }
   // A build's batch (stages/build.ts): its kit PR and the PRs that write fragments, stacked in the order they went
-  // ready and tested once; one that breaks it is found and dropped, and the rest leave together.
-  if (ctx.build && o.yes && o.team && existsSync(checkoutOf(e))) {
+  // ready and tested once; one that breaks it is found and dropped, and the rest leave together. Between builds, the
+  // next build's batch stacked and tested the same way, and left for the build to ship.
+  if ((ctx.build || prep) && o.yes && o.team && existsSync(checkoutOf(e))) {
     const cars = buildCars(prs, { id: e.id, branch: e.branch, since: loadReadySince(), left, kitHeld });
     if (cars.length > 1) {
       const numbers = cars.map((c) => `#${c.pr.number}`).join(', ');
@@ -553,7 +558,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       } catch (err) {
         b = { merged: [], dropped: [], kept: [], note: `couldn't stack them: ${(err as Error).message}`, tested: false };
       }
-      if (b.merged.length) {
+      if (b.prepared) {
+        const words = `${numbers}: ${b.note}`;
+        ctx.log(`[${e.id}] ${words}`);
+        return { ...result(e, b.prepared === 'failed' ? 'failed' : 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: [], did: [words], waits: [] };
+      }
+      if (b.merged.length && ctx.build) {
         const words = `merged ${b.merged.map((p) => `#${p.number}`).join(', ')} in ${ctx.build.name} (${b.note})`;
         return { ...result(e, 'done', words, { url: b.merged.at(-1)!.url }), merged: b.merged, held: [], did: [words], waits: [], lookAgain: true };
       }
@@ -564,7 +574,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         return { ...result(e, 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: cars.map((c) => heldOf(c.pr, CHECKS_RUNNING)), did: [], waits: [words], lookAgain: false };
       }
       // Tested, and none of it left: what it dropped and kept wait, and the next look takes the rest of the repository's PRs.
-      if (b.tested) {
+      if (b.tested && ctx.build) {
         const words = `${ctx.build.name} merged none of ${numbers}: ${b.note}`;
         const why = (pr: PrInfo) => b.dropped.find((d) => d.pr.number === pr.number)?.why;
         const held = [...b.dropped.map((d) => d.pr), ...b.kept].map((pr) => heldOf(pr, why(pr) ? `dropped from ${ctx.build!.name}: ${why(pr)}` : `left out of ${ctx.build!.name}: it waits for the next build`));
@@ -627,6 +637,13 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       } catch (err) {
         t = { merged: [], note: `couldn't stack them: ${(err as Error).message}`, tested: false };
       }
+      // Between builds: stacked and passed as the build will stack them, and left for it to merge. One that failed is
+      // kept as failed (train.ts), so the build merges them one at a time: each is tested at its head below, as then.
+      if (t.prepared) {
+        const words = `${cars.map((c) => `#${c.pr.number}`).join(', ')}: ${t.note}`;
+        ctx.log(`[${e.id}] ${words}`);
+        return { ...result(e, 'skipped', words, { url: cars.at(-1)!.pr.url }), merged: [], held: [], did: [words], waits: [] };
+      }
       if (t.merged.length) {
         const words = `merged ${t.merged.map((p) => `#${p.number}`).join(', ')} as one train (${t.note})`;
         return { ...result(e, 'done', words, { url: t.merged.at(-1)!.url }), merged: t.merged, held: [], did: [words], waits: [], lookAgain: true };
@@ -681,6 +698,8 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   let leftToAnother = false;
   // A kit PR whose trial goes on over the rounds (trial.ts): the next round looks at this repository again.
   let trialGoing = false;
+  /** Between builds: the PRs whose tests (and kit's trial) passed for the next build, each with what was said of it. */
+  const prepared: string[] = [];
   for (const pr of merge) {
     // A merge before this one moved the branch: what this one sets is checked again, against the branch as it is now.
     if (merged.length && pr.whose === 'team') {
@@ -711,7 +730,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       let t: Tested;
       try {
         // What the merge waits on: the Seneschal's blocking lane (stages/seneschal.ts).
-        t = await withLane('blocking', () => testAtHead(ctx, e, pr));
+        t = await timed(phaseOf(ctx), 'tests', `${e.id} #${pr.number}`, () => withLane('blocking', () => testAtHead(ctx, e, pr)));
       } catch (err) {
         t = { ok: false, note: `couldn't test it here: ${(err as Error).message}`, at: new Date().toISOString() };
       }
@@ -745,6 +764,11 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       }
       continue;
     }
+    // Between builds: its test and its kit's trial done, it merges at the build, which finds them.
+    if (prep) {
+      prepared.push(`#${pr.number}${notes.has(pr.number) ? ` (${notes.get(pr.number)})` : ''}`);
+      continue;
+    }
     // Another PC took its turn here meanwhile (lease.ts): it merges the rest.
     if (ctx.lease && !(await ctx.lease.ok(e))) {
       waits.push(`${describe(pr)} and the rest are left to another PC, whose turn it is now`);
@@ -776,7 +800,9 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     const mine = pr.whose === 'steward';
     // Only the head commit looked at and tested: one pushed since (a catch-up's, a person's) is refused, and waits.
     // The PC kept awake while it merges (the kit's awake.ts), as while it tests (runChecks).
-    const r = await whileAwake(`${e.name} #${pr.number}'s merge`, () => hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine }), ctx.log);
+    const r = await timed(phaseOf(ctx), 'merges', `${e.id} #${pr.number}`, () =>
+      whileAwake(`${e.name} #${pr.number}'s merge`, () => hostFor({ ...ctx, run }, e).mergePr(e.repo, pr.number, { ...(head ? { matchHead: head } : {}), deleteBranch: mine }), ctx.log),
+    );
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
       failed.push(`#${pr.number}: ${why}`);
@@ -806,6 +832,11 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   for (const [n, below] of turnAfter) {
     const pr = prs.find((p) => p.number === n)!;
     if (mergedNow.has(below) && !pr.fork && (pr.whose === 'team' || isKitPr(pr))) catchable.set(n, pr);
+  }
+  // Between builds, nothing is caught up (a catch-up pushes): what passed, failed and waits, for prepare.ts's line.
+  if (prep) {
+    const words = [...(prepared.length ? [`ready for ${ctx.prepare!.name}: ${prepared.join(', ')}`] : []), ...trainLine, ...failed.map((f) => `failed ${f}`), ...waits];
+    return { ...result(e, failed.length ? 'failed' : 'skipped', words.join('; ') || 'nothing to prepare', { url: prs[0].url }), merged: [], held, did: words, waits };
   }
   const caught = o.team && ctx.settings.catchUp ? await catchUpAll(ctx, e, { catchable, failedHere, ready, merged, held, lookup: () => ((looked = null), lookup()) }) : { lines: [], testedHere: false, gaveWay: false };
   const mergedWords = merged.map((p) => `#${p.number}${notes.has(p.number) ? ` (${notes.get(p.number)})` : ''}`);

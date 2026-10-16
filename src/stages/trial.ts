@@ -16,6 +16,7 @@ import { hostFor } from '../hosts/index.ts';
 import { kitReach } from './kitreach.ts';
 import { blobOf, kitTrialsFile, type TrialPasses } from './trialpass.ts';
 import { apart, withRepo } from './slots.ts';
+import { phaseOf, timed } from '../buildtimes.ts';
 
 /**
  * A new kit tried on every employee before it is released: when a team PR to the Steward's own repository raises
@@ -489,7 +490,8 @@ async function trySlice(ctx: Ctx, steward: Employee, at: TrialAt, t: KitTrial, s
   const repo = checkoutOf(steward);
   if (at.commit === at.pr.headOid) await fetchFor(ctx.run, repo, at.pr.headOid, `refs/pull/${at.pr.number}/head`);
   const t0 = Date.now();
-  return withKitTree(ctx, steward, at.commit, async (dir) => {
+  // A phase of the build it is for (buildtimes.ts): the one under way, or the next, tried ahead of it between builds.
+  return timed(phaseOf(ctx), 'trial', `kit ${t.kit}`, () => withKitTree(ctx, steward, at.commit, async (dir) => {
     let cut: string | null = null;
     const queue = [...(t.pending ?? [])];
     // The first of each slice always starts, so every round gets on with it.
@@ -530,7 +532,7 @@ async function trySlice(ctx: Ctx, steward: Employee, at: TrialAt, t: KitTrial, s
       while (again.length && goes()) await tryOne(again.shift()!, true);
     }
     return cut;
-  });
+  }));
 }
 
 /** What a trial at this head fills the agents with: the git tree of its kit\, and the blob of its tools/kit.ts (null for none). */
