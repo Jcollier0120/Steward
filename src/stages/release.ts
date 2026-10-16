@@ -23,6 +23,7 @@ import { hostFor } from '../hosts/index.ts';
 import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
 import { linkSharedModules } from './modules.ts';
+import { kitOnlyRelease, noteKitOnlyRelease, type KitOnly } from './kitonly.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -110,7 +111,11 @@ export async function releaseOne(ctx: Ctx, e: Employee, o: ReleaseOptions): Prom
   }
 }
 
-type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean };
+/**
+ * `kitOnly`: a round's release, which holds a version that is a new kit alone unless it changes what the agent runs (once
+ * a day), or the kit says it is urgent or a fix for it (kitonly.ts). A person's Release isn't held.
+ */
+type ReleaseOptions = { kit: string | null; unless?: (commit: string, version: string) => string | null; hire?: boolean; kitOnly?: boolean };
 
 async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what: string) => void): Promise<EmployeeResult> {
   const { run } = ctx;
@@ -147,6 +152,18 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   const version = (v as { version: string }).version;
   const not = o.unless?.(commit, version);
   if (not) return result(e, 'skipped', not, { version, commit: commit.slice(0, 7) });
+  // The release before: the versions merged since and never released on their own come in its notes.
+  const since = released.filter((r) => compareVersions(r, version) < 0).sort(compareVersions).at(-1) ?? null;
+  // A new kit alone (kitonly.ts): it waits, merged, for the agent's next release of its own, unless it changes what the
+  // agent runs (once a day) or its kit says it is urgent or a fix for it. Before the signing and the tasting, which it
+  // would only have to do again.
+  const alone: KitOnly | null = o.kitOnly && !o.hire ? await kitOnlyRelease(ctx, e, { repo, commit, version, since }) : null;
+  if (alone?.kitOnly && !alone.release) {
+    ctx.log(`[${e.id}] v${version} ${alone.why}`);
+    return result(e, 'skipped', `v${version} ${alone.why}`, { version, commit: commit.slice(0, 7) });
+  }
+  const kitWords = alone?.kitOnly ? `; ${alone.why}` : '';
+  const daily = () => void (alone?.kitOnly && alone.release && alone.daily && noteKitOnlyRelease(e.id, version));
   // A release that signs waits while this PC can't (SimplySign Desktop not connected): nothing is built, nothing fails,
   // and the next round looks again (signing.ts). Before the tasting, which it would only have to do again.
   const signs = e.release === TAG_RELEASE ? null : signsWith({ kitJson: pinText, signTs: await showFile(run, repo, remote, 'tools/sign.ts'), release: e.release });
@@ -169,9 +186,11 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   awake(`${e.name} v${version}'s release`);
 
   // A GitHub release the Steward makes itself: no worktree, no command of the repository's.
-  // The release before: the versions merged since and never released on their own come in its notes.
-  const since = released.filter((r) => compareVersions(r, version) < 0).sort(compareVersions).at(-1) ?? null;
-  if (e.release === TAG_RELEASE) return tagRelease(ctx, e, { repo, commit, version, remote, noted, since });
+  if (e.release === TAG_RELEASE) {
+    const tagged = await tagRelease(ctx, e, { repo, commit, version, remote, noted: `${noted}${kitWords}`, since });
+    if (tagged.outcome === 'done') daily();
+    return tagged;
+  }
 
   const dir = releaseDirOf(ctx.settings, e);
   await removeWorktree(run, repo, dir);
@@ -237,7 +256,8 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
     const exchequer = exchequerNote(`${r.out}\n${r.err}`);
     const urgent = exchequer ? '' : await urgentNote(ctx, e, { repo, commit, version, since });
     const after = byGit ? await afterReleaseNote(ctx, e, { repo, commit, version, since }) : '';
-    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${exchequer}${urgent}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
+    daily();
+    return result(e, 'done', `released v${version} from ${remote} (${commit.slice(0, 7)})${pinned ? `, with kit ${pinned}` : ''}${byGit && !releasedHere(e) ? `, tagged v${version} on its origin` : ''}${noted}${kitWords}${exchequer}${urgent}${after}`, { version, commit: commit.slice(0, 7), ...(byGit ? {} : { url: hostFor(ctx, e).releaseUrl(e.repo, `v${version}`) }) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);

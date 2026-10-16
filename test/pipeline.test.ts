@@ -100,7 +100,7 @@ test('there is no off: a first round builds at once for the build time gone by; 
   assert.equal(m.kind, 'between');
   if (m.kind === 'between') {
     assert.deepEqual(m.next, at(13));
-    assert.match(m.line, /ready PRs wait for the next build, at 13:00/);
+    assert.match(m.line, /ready PRs merge ahead of the next build, at 13:00, and are released at it/);
   }
 });
 
