@@ -5,6 +5,9 @@
 // agent's PowerShell worker, which sets them on the agent's process from outside it, then joins the job itself (Join).
 // The job lets a program started with CREATE_BREAKAWAY_FROM_JOB leave it (the kit's apart launcher, for the model
 // servers every agent shares); nothing else the agents run asks to.
+// The manor's ceiling (kit 2.78.7): an agent in no job (one its launcher, named.cs, didn't start: run from a terminal)
+// joins the job above every family's (Local\kit-manor-ceiling, as checks-pace.cs makes it) before its own is made, so
+// its own nests inside it, with the check runs' and the model servers'. One already in a job keeps the ones it has.
 using System;
 using System.Runtime.InteropServices;
 
@@ -53,9 +56,12 @@ public static class KitGentle
     /// Sets process <paramref name="pid"/> gentle (efficiency mode, very low disk priority) or back to normal, and its job
     /// capped at <paramref name="capHundredths"/> hundredths of a percent of the processor, either way (0: no cap, and
     /// no job made for it). Each part is tried on its own; the answer says which took ("eco io cap", or "-" for one that
-    /// didn't), for the agent's log.
+    /// didn't), for the agent's log. With <paramref name="ceilingHundredths"/> over 0, an agent in no job joins the
+    /// manor's ceiling at that cap before its own job is made (0: none, as Manor's own page).
     /// </summary>
-    public static string Set(int pid, bool gentle, int capHundredths)
+    public static string Set(int pid, bool gentle, int capHundredths) { return Set(pid, gentle, capHundredths, 0); }
+
+    public static string Set(int pid, bool gentle, int capHundredths, int ceilingHundredths)
     {
         IntPtr p = OpenProcess(PROCESS_TERMINATE | PROCESS_DUP_HANDLE | PROCESS_SET_QUOTA | PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
         if (p == IntPtr.Zero) return "no-process:" + Marshal.GetLastWin32Error();
@@ -66,7 +72,7 @@ public static class KitGentle
             // Very low (0) in the background; normal (2) otherwise.
             int io = gentle ? 0 : 2;
             bool ioOk = NtSetInformationProcess(p, ProcessIoPriority, ref io, 4) >= 0;
-            return (ecoOk ? "eco" : "-") + " " + (ioOk ? "io" : "-") + " " + (Cap(p, pid, capHundredths) ? "cap" : "-");
+            return (ecoOk ? "eco" : "-") + " " + (ioOk ? "io" : "-") + " " + (Cap(p, pid, capHundredths, ceilingHundredths) ? "cap" : "-");
         }
         finally { CloseHandle(p); }
     }
@@ -75,12 +81,13 @@ public static class KitGentle
     // Its handle is copied into the agent's process, so the job and its name last as long as the agent does: a later
     // worker opens it by name to set the cap again for the other pace. A process can't leave a job, so a cap of 0
     // switches it off.
-    static bool Cap(IntPtr p, int pid, int capHundredths)
+    static bool Cap(IntPtr p, int pid, int capHundredths, int ceilingHundredths)
     {
         IntPtr job = OpenJobObject(JOB_OBJECT_ALL_ACCESS, false, JobName(pid));
         if (job == IntPtr.Zero)
         {
             if (capHundredths <= 0) return true;
+            InCeiling(p, ceilingHundredths);
             job = CreateJobObject(IntPtr.Zero, JobName(pid));
             if (job == IntPtr.Zero) return false;
             var limits = new ExtendedLimits();
@@ -103,6 +110,31 @@ public static class KitGentle
                 ? new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, Math.Min(10000, capHundredths)) }
                 : new CpuRateControl { ControlFlags = 0, CpuRate = 0 };
             return SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));
+        }
+        finally { CloseHandle(job); }
+    }
+
+    // An agent in no job into the manor's ceiling (checks-pace.cs InCeiling: made only for a process in no job, a test's
+    // own, KIT_CEILING_JOB_NAME, anywhere). True once it is in it; never stops the rest.
+    static bool InCeiling(IntPtr p, int cap)
+    {
+        if (cap <= 0) return false;
+        string n = Environment.GetEnvironmentVariable("KIT_CEILING_JOB_NAME");
+        bool tests = !string.IsNullOrEmpty(n) && n.IndexOf('\\') < 0, inAny;
+        if (!IsProcessInJob(p, IntPtr.Zero, out inAny) || (inAny && !tests)) return false;
+        IntPtr job = CreateJobObject(IntPtr.Zero, @"Local\" + (tests ? n : "kit-manor-ceiling"));
+        if (job == IntPtr.Zero) return false;
+        try
+        {
+            bool already;
+            if (IsProcessInJob(p, job, out already) && already) return true;
+            var limits = new ExtendedLimits();
+            limits.Basic.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+            SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref limits, Marshal.SizeOf(typeof(ExtendedLimits)));
+            var rate = new CpuRateControl { ControlFlags = CPU_RATE_ENABLE | CPU_RATE_HARD_CAP, CpuRate = (uint)Math.Max(100, Math.Min(10000, cap)) };
+            SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, Marshal.SizeOf(typeof(CpuRateControl)));
+            IntPtr kept;
+            return AssignProcessToJobObject(job, p) && DuplicateHandle(GetCurrentProcess(), job, p, out kept, 0, false, DUPLICATE_SAME_ACCESS);
         }
         finally { CloseHandle(job); }
     }
