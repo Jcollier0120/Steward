@@ -475,6 +475,22 @@ ${B} .sc-pl { transform-origin: 14px 11px; ${run('sc-level', 6, 0, 'ease-in-out'
 ${B} .sc-pr { transform-origin: 50px 11px; ${run('sc-level', 6, 0, 'ease-in-out')} }`,
 };
 
+/* ---- The Seneschal: each line of the ledger is ticked in turn, and its task goes out to a free slot; the slots empty, and the next round begins. */
+const LEDGER_LINES = [14, 21, 28];
+/** When each line's task leaves the ledger, in % of the cycle, top to bottom. */
+const HAND_OUT = [8, 30, 52];
+const seneschal: Look = {
+  accent: { light: '#2d4f9a', dark: '#93b4f5' },
+  busy: 'Handing out work',
+  scene: `${GROUND}<rect class="sc-paper" x="8" y="7" width="26" height="28" rx="1.5"/><path class="sc-line" d="${LEDGER_LINES.map((y) => `M14 ${y}h14`).join('')}"/>
+${LEDGER_LINES.map((y, i) => `<circle class="sc-role sc-tick sc-k${i + 1}" cx="11" cy="${y}" r="1.4"/><rect class="sc-back" x="42" y="${y - 3}" width="8" height="6" rx="1"/><rect class="sc-role sc-task sc-h${i + 1}" x="44" y="${y - 1.8}" width="4" height="3.6" rx=".6"/>`).join('')}
+<path class="sc-staff" d="M56.4 35.5 59.4 7.2l1.4.15-2.6 28.15z"/><circle class="sc-front" cx="60.2" cy="6.6" r="1.6"/>`,
+  motion: HAND_OUT.map((s, i) => `@keyframes sc-hand${i + 1} { 0%, ${s}% { transform: translateX(-14px); opacity: 0; } ${s + 4}% { transform: translateX(-14px); opacity: 1; } ${s + 16}%, 86% { transform: translateX(0); opacity: 1; } 94%, 100% { transform: translateX(0); opacity: 0; } }
+@keyframes sc-tick${i + 1} { 0%, ${s}% { opacity: .25; } ${s + 4}%, 88% { opacity: 1; } 96%, 100% { opacity: .25; } }
+${B} .sc-h${i + 1} { ${run(`sc-hand${i + 1}`, 6, 0, 'ease-in-out')} }
+${B} .sc-k${i + 1} { ${run(`sc-tick${i + 1}`, 6)} }`).join('\n'),
+};
+
 /** Any other agent: a cog, turning while it works. */
 export const DEFAULT_LOOK: Look = {
   accent: { light: '#66717c', dark: '#a7b1bc' },
@@ -486,7 +502,7 @@ ${B} .sc-c1 { transform-origin: 27px 20px; ${run('sc-turn', 6)} } ${B} .sc-c2 { 
 };
 
 /** Each kit agent's look, by its id. */
-export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd, reeve, chamberlain, heiward, toller, assayer };
+export const LOOK: Record<string, Look> = { porter, auditor, clerk, herald, 'developer-herald': developerHerald, warrener, aletaster, miller, pinder, steward, surveyor, lamplighter, smith, thatcher, reckoner, weigher, shepherd, reeve, chamberlain, heiward, toller, assayer, seneschal };
 
 /** This agent's look, or the default for one not listed. */
 export const lookFor = (id: string): Look => (Object.hasOwn(LOOK, id) ? LOOK[id] : DEFAULT_LOOK);

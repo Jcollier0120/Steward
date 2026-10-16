@@ -42,7 +42,7 @@ export interface AgentWork {
   /** The notes in plain words, for when Developer options are off; `notes` when left out. */
   plainNotes?: string[];
   /**
-   * One of the manor's developer roles (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward, the Toller, the Assayer):
+   * One of the manor's developer roles (the Auditor, the Developer Herald, the Aletaster, the Pinder, the Steward, the Toller, the Assayer, the Seneschal):
    * its work runs only while Developer options are on, so with them off its page has no "Where its work runs".
    */
   developerRole?: boolean;
@@ -159,6 +159,15 @@ export const WORK: Record<string, AgentWork> = {
       { what: "Testing a branch or a draft: the project's test command, in a throwaway git worktree of its own", where: 'the processor and the disk, at below-normal priority, so never ahead of your own work', when: 'every 15 minutes (Settings), at most 3 test runs a round, one at a time; each project\'s branch once a day', dev: true },
     ],
     notes: ['It uses no model, and never merges, tags or releases anything: what passes becomes a pull request for you.'],
+  },
+  seneschal: {
+    model: false,
+    developerRole: true,
+    lines: [
+      { what: "Handing out the staff's work in order: each repository's checks, the kit's trials, full test suites and the Wright's jobs, in four lanes, never more at once than the PC has room for", where: 'the processor, a moment, and its ledger on the disk; the work itself runs in the agent that asked for it', when: 'when an agent asks for a turn, and in its sweep every 15 seconds, which takes back the turns of agents that stopped answering', dev: true },
+      { what: "A look at the PC's room: its processors and the checks pace, its memory, the accelerators' lines, whether you're using it and whether it's on battery", where: 'the processor; whether you are using it, one PowerShell call', when: 'every 15 seconds, a moment; whether you are using it, every minute', dev: true },
+    ],
+    notes: ["It uses no model and runs no work of its own: each task names a repository and a commit, and the agent that asked runs that repository's own checks.", 'It comes with Developer Pro: on a PC without it, it hands out no work, and each agent runs its own as before.'],
   },
   surveyor: {
     model: true,

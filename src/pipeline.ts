@@ -10,10 +10,12 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
  * once and tell Manor once, so each agent is installed at most once a build.
  *
  * A build that the PC slept through begins at the first round after it wakes, once (a later build time it also missed
- * is the same build). The owner's override, Build now (POST /api/pipeline/build, or `steward build` at a console),
- * begins one at once: for some repositories, or all, and, ticked, lets its releases out to customers at once too. An
- * urgent fix (a ready PR whose changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once
- * too, for its repository alone, without the kit.
+ * is the same build), and the page says it was late, and why (lateLine). The Steward wakes the PC for its builds, and
+ * holds it until they close (build-hold.ts), so on AC power that happens only when the PC can't be woken. The owner's
+ * override, Build now (POST /api/pipeline/build, or `steward build` at a console), begins one at once: for some
+ * repositories, or all, and, ticked, lets its releases out to customers at once too. An urgent fix (a ready PR whose
+ * changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once too, for its repository
+ * alone, without the kit.
  *
  * pipeline.json keeps the build that is open, and the last builds, each with what it merged and released.
  */
@@ -111,6 +113,8 @@ export interface BuildRun {
   cut?: boolean;
   /** Where its time went (buildtimes.ts): each phase with its start and end, those done between builds for it marked `ahead`. */
   phases?: BuildPhase[];
+  /** A build time the PC slept through (standby): when it woke (ISO), and the build began (pipelineMode's `wokeAt`). */
+  late?: string;
 }
 
 export interface PipelineState {
@@ -200,9 +204,10 @@ export const boardedUrgent = (state: PipelineState): Set<string> => new Set([...
 /**
  * What a round does now: between builds, or a build's round, the one open going on, a new one for a build time that has
  * come (or the owner's Build now, or an urgent fix found between builds: `urgent`, a build for its repositories alone).
- * Pure; the round saves the build it changes (endRound).
+ * A build time's build that begins after the PC woke from standby past it (`wokeAt`, fresh-start.ts' lastWoke) is
+ * `late`. Pure; the round saves the build it changes (endRound).
  */
-export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; urgent?: UrgentPr[] | null } = {}): PipelineMode {
+export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; urgent?: UrgentPr[] | null; wokeAt?: number | null } = {}): PipelineMode {
   const open = state.open;
   if (open && !open.finished) {
     const over = now.getTime() - Date.parse(open.started) >= p.windowMinutes * 60_000;
@@ -213,11 +218,20 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   if (o.buildNow) return fresh(now.toISOString(), 'owner', { employees: o.employees?.length ? o.employees : null, ...(o.buildNow.toCustomers ? { toCustomers: true } : {}) });
   const due = lastBuildTime(p, now);
   const lastDue = state.builds.filter((b) => b.by === 'schedule').at(-1)?.due;
-  if (due && (!lastDue || Date.parse(lastDue) < due.getTime())) return fresh(due.toISOString(), 'schedule');
+  if (due && (!lastDue || Date.parse(lastDue) < due.getTime())) {
+    const woke = o.wokeAt ?? null;
+    return fresh(due.toISOString(), 'schedule', woke !== null && woke > due.getTime() && woke <= now.getTime() ? { late: new Date(woke).toISOString() } : {});
+  }
   // An urgent fix between builds: a build of its own, for its repository, at once.
   if (o.urgent?.length) return fresh(now.toISOString(), 'urgent', { employees: [...new Set(o.urgent.map((u) => u.id))], urgent: o.urgent.map(urgentKey) });
   const next = nextBuildTime(p, now);
   return { kind: 'between', next, line: `between builds: ready PRs merge ahead of the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}, and are released at it` };
+}
+
+/** "the 08:00 build was late: the PC was in standby until 08:39", for a build the PC slept through; else null. */
+export function lateLine(run: BuildRun | null | undefined, now: Date): string | null {
+  if (!run?.late || run.by !== 'schedule') return null;
+  return `the ${buildWhen(new Date(run.due), now)} build was late: the PC was in standby until ${buildWhen(new Date(run.late), now)}`;
 }
 
 /**
