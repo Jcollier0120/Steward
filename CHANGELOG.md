@@ -4,12 +4,13 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.68
 
-**A full pace never takes the whole PC any more: everything the manor runs, together, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
+**A full pace never takes the whole PC any more: everything the manor runs, together, its AI model servers included, stays within 85% of the processor, and nothing new starts while more than 85% of the memory is in use.**
 
 ### What changed
 
 - At a full pace (Manor's Settings), the Steward's checks used to run with no cap at all. These are test runs, type checks, installs and builds, an agent's whole suite before it merges, and a kit's trial on every agent. Now they are held to 85% of the processor, all of them together. Up to six run at once, as many agents as run at once at full, and they share the 85% rather than each adding to it. Each check run also keeps the memory limits it has at a gentle pace.
 - An agent at a full pace keeps normal priority, but its own work, and everything it starts, stays within 85% of the processor too. So does Manor's own page.
+- The AI model servers the agents share (the graphics card's, the NPU's) used to run with no cap at any pace. Now they stay within 85% of the processor too, all of them together, whatever the pace. A server that's already running gets the cap the next time it starts.
 - While more than 85% of this PC's memory is in use, no agent starts a scheduled round, whatever the pace. It waits for room, and says why it waits. A round already running finishes, and a round you ask for (Run now) still runs.
 - A kit trial starts no new try while more than 85% of the memory is in use. It goes on at the next round. It also tries fewer agents at once when memory is tight: only as many as the free memory holds above the 15% left to you.
 - A checks pace you set (checksPace), or KIT_CHECKS_PACE, still sets a lower cap. 100% or "full" now means 85%.

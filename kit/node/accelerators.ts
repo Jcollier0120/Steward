@@ -746,7 +746,8 @@ async function start(ep: Endpoint, waitMs: number, readyMs: number, o: { logFile
       log = openSync(o.logFile, 'a');
     }
     const env = serverEnv(ep, o.env ?? process.env);
-    // Apart from the asker's job (apart.ts, kit 2.73.0): it serves every agent, at no asker's cap.
+    // Apart from the asker's job (apart.ts, kit 2.73.0): it serves every agent, at no asker's cap, in the servers' job at
+    // the manor's ceiling (kit 2.78.3).
     const apartPid = await startApart(cmd, args, { cwd: os.homedir(), env, ...(log === undefined ? {} : { out: log }) });
     if (apartPid) {
       apart = apartPid;

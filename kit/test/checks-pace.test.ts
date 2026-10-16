@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { paced as testsPaced } from './until.ts';
+import { paced as testsPaced, until } from './until.ts';
 
 // The checks pace (checks-pace.ts, kit 2.70.0): test runs, type checks, installs and builds held to a share of the processor.
 const home = mkdtempSync(path.join(os.tmpdir(), 'kit-checks-pace-'));
@@ -177,9 +177,45 @@ test('on Windows, a program started apart (a model server): detached, its output
   }
   assert.ok(pid && pid > 0, 'its process id');
   assert.ok(alive(pid), 'running after the launcher has gone');
-  for (let i = 0; i < 100 && !readFileSync(log, 'utf8').includes('up'); i++) await new Promise((r) => setTimeout(r, 100));
+  await until(() => readFileSync(log, 'utf8').includes('up'), 10_000, 'its output in the file');
   assert.equal(readFileSync(log, 'utf8').trim(), 'up a b', 'its arguments as they were, its output in the file');
   process.kill(pid);
+});
+
+test("the servers' cap (kit 2.78.3): the manor's ceiling, whatever the pace; none under node --test unless KIT_APART_CAP says", async () => {
+  const { apartCap } = await import('./fixture/src/kit/apart.ts');
+  assert.equal(apartCap({}), CEILING_CAP);
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child' }), 0, "a test's servers: no job, as before");
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child', KIT_APART_CAP: '1000' }), 1000);
+  assert.equal(apartCap({ NODE_TEST_CONTEXT: 'child', KIT_APART_CAP: '9900' }), CEILING_CAP, 'never past the ceiling');
+});
+
+test("on Windows, programs started apart share one capped job: together, they stay within its cap, after the launcher has gone", { skip: process.platform !== 'win32' }, async () => {
+  const { startApart } = await import('./fixture/src/kit/apart.ts');
+  // Each keeps every processor busy for 3 s, then writes the processor time it had against the PC's in that time.
+  const burn = [
+    'const { Worker } = require("worker_threads"); const os = require("os"); const t0 = Date.now(); const n = os.availableParallelism();',
+    'const spin = "const end = Date.now() + 3000; let x = 0; while (Date.now() < end) x = (x * 31 + 7) % 1000003;";',
+    'let left = n; for (let i = 0; i < n; i++) new Worker(spin, { eval: true }).on("exit", () => { if (--left) return;',
+    '  const u = process.cpuUsage(); require("fs").writeFileSync(process.argv[1], String((u.user + u.system) / ((Date.now() - t0) * 1000 * n))); });',
+  ].join(' ');
+  const said = { KIT_APART: process.env.KIT_APART, KIT_APART_CAP: process.env.KIT_APART_CAP, KIT_APART_JOB_NAME: process.env.KIT_APART_JOB_NAME };
+  Object.assign(process.env, { KIT_APART: '1', KIT_APART_CAP: '1000', KIT_APART_JOB_NAME: `kit-test-apart-${process.pid}` });
+  const files = [path.join(home, 'burn-a.txt'), path.join(home, 'burn-b.txt')];
+  try {
+    const pids = await Promise.all(files.map((f) => startApart(process.execPath, ['-e', burn, f])));
+    assert.ok(pids.every((p) => p && p > 0), 'both started');
+  } finally {
+    for (const [k, v] of Object.entries(said)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  await until(() => files.every((f) => existsSync(f) && readFileSync(f, 'utf8')), 60_000, 'both to have burned their 3 s');
+  const shares = files.map((f) => Number(readFileSync(f, 'utf8')));
+  // A tenth of the PC for the two together (each a job of its own would let them take a tenth each); a busy PC can only
+  // give them less.
+  assert.ok(shares[0] + shares[1] <= 0.14, `together ${(100 * (shares[0] + shares[1])).toFixed(1)}% of the processor, not past the job's 10%`);
 });
 
 test('on Windows, a paced run takes a turn, and the runs it starts take none (they would wait on their own)', { skip: process.platform !== 'win32' }, async () => {

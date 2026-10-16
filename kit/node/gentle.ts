@@ -160,7 +160,8 @@ let containTimer: NodeJS.Timeout | null = null;
  * kit 2.73.0): sets it at the owner's pace now (Manor's Settings; `own` when Manor doesn't say), gentle in a job with
  * the gentle cap that every program it starts afterwards is in too, and reads the setting again every
  * CONTAIN_CHECK_MS so a change applies without a restart. Call it first, before the process starts anything. Model
- * servers it starts leave its job (accelerators.ts, apart.ts): they serve every agent, and an asker's cap isn't theirs.
+ * servers it starts leave its job (accelerators.ts, apart.ts): they serve every agent, and an asker's cap isn't theirs;
+ * the servers' own job holds them to the manor's ceiling (kit 2.78.3).
  */
 export function containSelf(own: Pace = 'gentle', read: () => Pace = () => pace(own)): Promise<void> {
   const done = paceProcess(read());

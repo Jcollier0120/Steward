@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.3
 
-**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all.**
+**A full pace never takes the whole PC any more. Everything the manor runs, together, stays within 85% of the processor (the kit's `PACE_CEILING`), and no scheduled round starts while more than 85% of the PC's memory is in use. Before, full meant no cap at all. The model servers every agent shares, which ran with no cap at any pace, are held to the same 85%.**
 
 ### What changed
 
@@ -28,13 +28,28 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - A run's memory limits now apply at full too: an eighth of the PC's memory for each program, a quarter for the job.
   - `pacedTestConcurrency()` never gives more test files at once than there are processors.
   - Under node --test, commands are unpaced unless `KIT_CHECKS_PACE` says a percentage under 100, as before.
+- **apart.ts, checks-pace.cs (the model servers):**
+  - A server started apart (llama.cpp's, FastFlowLM's, the NPU routes') still leaves the asker's job. It now also joins the servers' job, one for the PC (`Local\kit-apart-pace`, `checks-pace.exe apart:<cap>`). That job is hard-capped at `CEILING_CAP` whatever the asker's pace, so all the servers together stay within 85% of the processor. Before, they ran with no cap at all.
+  - The job limits nothing else and ends nothing. Each server holds a handle to it, so it lasts while any server runs, and the next server joins the same job.
+  - A server that can't join it gets a job of its own with the same cap. If neither works, it runs as before.
+  - `apartCap()` gives the cap. Under node --test there is none unless `KIT_APART_CAP` sets one, and a test's servers use `KIT_APART_JOB_NAME`'s job.
+  - The launcher's source changed, so each PC builds it once more, at its next check run or server start.
+  - Measured on an 18-thread laptop with two programs each keeping every processor busy, started apart together:
+
+    | How they were started | Their share of the processor, together |
+    |---|---|
+    | `apart`, no cap | 88.4% (other work on the PC took the rest) |
+    | `apart:8500` | 83.5% |
+    | `apart:1000` | 10.5% |
+
+    At 10% they shared one job's cap: two jobs would have allowed 20%.
 - **schedule.ts:** every() takes a `room` option, so tests can stand in for the memory in use.
 - **work-status.ts:** the checks' turns come from `checksAtOnce()`.
 - **spec/ROUND.md:** the Pace section now describes the manor's ceiling and what full means.
 
 ### Before you update
 
-- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. Nothing to do: it updates itself as usual.
+- At a full pace, an agent and its checks now leave 15% of the processor and memory to the person and Windows, so heavy work at full (a test run, a build) may take a little longer. The same goes for the model servers at any pace. A server already running gets the cap the next time it starts. Nothing to do: it updates itself as usual.
 
 ## Unreleased (its version needs claiming on the main laptop)
 
