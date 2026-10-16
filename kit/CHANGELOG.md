@@ -30,12 +30,12 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
     | Tokens written a second | 75.0 | 41.1 |
     | Jobs: triage, reply, summary | 0.56, 0.43 and 1.95 s | 0.73, 0.98 and 3.88 s |
     | Cold / cached load | 5.1 / 5.4 s | 10.0 / 9.9 s |
-    | Speed held over 10 minutes | 95% | 100% |
+    | Speed held over 10 minutes | 95% (100% run again quiet) | 100% |
     | Working set / private | 4.31 / 2.34 GB | 6.12 / 1.68 GB |
     | On the NPU | 2.1 GB | 4.2 GB |
     | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
 
-    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run.
+    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs and a 4.3 s cold load, and its speed held 100%. Only the reply job's spread kept it off the board (508 to 666 ms).
 - **setup.ts**: on a PC under 20 GB, the NPU is planned with its generation's `smallPc` models (`smallPc(detection.ramBytes)`).
 - **npu-refresh.ts**: the keeper's look plans with the PC's memory too. On a 16 GB X2 set up with the 4B, it leaves the NPU for setup (`needs-setup`) while the 2B isn't there, since it never downloads. Once it is there, the look tests it in the NPU's turn, as any new command, and switches. Its log and `changes` name a model change: `model … in …'s place`.
 - **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row and `--small-pc`.
@@ -44,7 +44,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do.
 - A 16 GB Snapdragon X2 already set up keeps the 4B until it is set up again (Manor's Set up local AI), which pulls the 2B (1.9 GB) and writes it. The 4B stays in `%USERPROFILE%\.cache\geniex\models` (4.4 GB) until removed (`geniex remove qualcomm/Qwen3-VL-4B-Instruct`).
-- Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB and the route's command changed by hand), the kit's own setup of it, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
+- Not yet run: a real 16 GB X2 (the X2 Elite ran it with 48 GB, the kit's own command through `npu-bench --small-pc`), its pull through setup, the Adreno's first OpenCL compile on a fresh PC, and the encoder beside the card's own llama-server on the Adreno, whose turn it doesn't take.
 
 ## 2.77.8
 
