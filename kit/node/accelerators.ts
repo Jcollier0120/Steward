@@ -342,6 +342,30 @@ export function servedRecently(id: string, ep: Pick<Endpoint, 'baseUrl' | 'model
   }
 }
 
+/**
+ * When the NPU last answered an embedding: `{at}`, written by every agent after its embeddings there (no more than once
+ * every few seconds), so a chat's turn knows whether the embedding server is in use (keeper.ts' yieldEmbedServer).
+ */
+export const embeddedFile = (id: string) => path.join(acceleratorsDir, `${id}.embedded.json`);
+
+export function noteEmbedded(id: string, now = Date.now()): void {
+  try {
+    writeWhole(embeddedFile(id), { at: new Date(now).toISOString() });
+  } catch {
+    // Only a hint: without it, the embedding server is taken as unused.
+  }
+}
+
+/** When noteEmbedded last wrote, or null. */
+export function embeddedAt(id: string): number | null {
+  try {
+    const at = Date.parse(JSON.parse(readText(embeddedFile(id)) ?? 'null')?.at);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------- games
 
 /** A card counts as in use by a game while another program keeps one of its 3D engines over this. */
