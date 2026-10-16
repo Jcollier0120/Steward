@@ -2,6 +2,18 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.75
+
+**The Steward hands out kit 2.78.9: setup and the NPU check keep a report of how this PC's NPU did, for its owner to send if they choose, and nothing is sent by itself.**
+
+### What changed
+
+- **Kit 2.78.9** (kit/CHANGELOG.md): `npu-report.ts` writes `npu-report.json` beside the accelerators' config after a setup or an NPU check on this PC's NPU, with the steps, the speeds and a random id made for these reports alone. `npu-reports.ts` turns the reports the Exchequer collects into a generation's measured speed for the website.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.69
 
 **In a build, the agents' pull requests no longer wait while the Steward tests its own.**
