@@ -25,6 +25,11 @@ export type Endpoint = {
      * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
      */
     turn?: string;
+    /**
+     * This kind's own request timings, over its accelerator's, when they differ (vision on
+     * a card whose pictures are encoded on the processor): timeoutsFor.
+     */
+    timeouts?: Timeouts;
 };
 export type Timeouts = {
     requestBaseMs?: number;
@@ -141,6 +146,8 @@ export type Look = {
  * @property {string} [turn] The accelerator whose lock and line its requests take, when its server runs on another
  * device than its accelerator's: the NPU 3720's embedding server, on the processor's graphics, takes the graphics'
  * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
+ * @property {Timeouts} [timeouts] This kind's own request timings, over its accelerator's, when they differ (vision on
+ * a card whose pictures are encoded on the processor): timeoutsFor.
  */
 /**
  * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
@@ -255,6 +262,7 @@ export type Written = {
     env?: Record<string, string>;
     maxContextTokens?: number;
     turn?: string;
+    timeouts?: Timeouts;
 };
 /**
  * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
@@ -264,6 +272,14 @@ export type Written = {
  * @returns {number}
  */
 export declare function capFor(a: Pick<Accelerator, 'maxContextTokens'> & Partial<Pick<Accelerator, Work>>, work: Work): number;
+/**
+ * The timings for one kind of request on an accelerator (requestTimeoutMs): its endpoint's own over the accelerator's,
+ * each one it gives; none when neither has any.
+ * @param {Pick<Accelerator, 'timeouts'> & Partial<Pick<Accelerator, Work>>} a
+ * @param {Work} work
+ * @returns {Timeouts | undefined}
+ */
+export declare function timeoutsFor(a: Pick<Accelerator, 'timeouts'> & Partial<Pick<Accelerator, Work>>, work: Work): Timeouts | undefined;
 export type Hardware = {
     npu: boolean;
     /**
@@ -608,8 +624,8 @@ export declare function tooBig(serving: (Pick<Accelerator, 'maxContextTokens'> &
  * some ten times what it needs), and never more than the config's requestTimeoutMs (`ceilingMs`). A
  * person waiting, and embeddings, get the config's. A request that may load its model on the way
  * (`coldLoad`: its server was just started, or was busy loading) gets coldLoadMs more, and its timeout
- * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's) take
- * the rules' place, each one it gives.
+ * then is the model loading slowly, not the server failing. An accelerator's own `timeouts` (a slower NPU's), and its
+ * endpoint's over those (timeoutsFor), take the rules' place, each one they give.
  * @param {Rules} rules
  * @param {{ lane: 'interactive' | 'background', work: Work, maxTokens: number, ceilingMs: number, coldLoad?: boolean, timeouts?: Timeouts }} r
  * @returns {number}

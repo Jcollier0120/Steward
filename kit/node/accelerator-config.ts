@@ -67,6 +67,11 @@ export interface Endpoint {
    * the NPU 3720's embedding server, on the processor's graphics, takes the graphics' (`gpu-…`). A `gpu-…` id or `cpu`.
    */
   turn?: string;
+  /**
+   * This kind's own request timings, over its accelerator's (the core's timeoutsFor): vision on a card whose pictures
+   * are encoded on the processor (setup's encodesOnProcessor), so its chat keeps the shorter ones.
+   */
+  timeouts?: Timeouts;
 }
 
 /** An accelerator's own request timings, over rules.json's (the core's requestTimeoutMs): a slower NPU's. */
@@ -243,7 +248,17 @@ function readEndpoint(v: any): Endpoint | undefined {
   const cap = positiveInt(v.maxContextTokens);
   if (cap) ep.maxContextTokens = cap;
   if (typeof v.turn === 'string' && kindOfId(v.turn) && v.turn !== 'npu') ep.turn = v.turn;
+  const t = readTimeouts(v.timeouts);
+  if (t) ep.timeouts = t;
   return ep;
+}
+
+/** An accelerator's (or one of its kinds') own timings: each a whole number of ms, the others left to the rules. */
+function readTimeouts(v: any): Timeouts | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const t: Timeouts = {};
+  for (const k of TIMEOUT_KEYS) if (Number.isInteger(v[k]) && v[k] >= 0) t[k] = v[k];
+  return Object.keys(t).length ? t : undefined;
 }
 
 /**
@@ -269,11 +284,8 @@ export function readAccelerator(v: any, hw: Hardware | null = null): Accelerator
     if (ep) a[k] = ep;
   }
   if (v.enabled === false) a.enabled = false;
-  if (v.timeouts && typeof v.timeouts === 'object' && !Array.isArray(v.timeouts)) {
-    const t: Timeouts = {};
-    for (const k of TIMEOUT_KEYS) if (Number.isInteger(v.timeouts[k]) && v.timeouts[k] >= 0) t[k] = v.timeouts[k];
-    if (Object.keys(t).length) a.timeouts = t;
-  }
+  const t = readTimeouts(v.timeouts);
+  if (t) a.timeouts = t;
   return a;
 }
 
@@ -414,13 +426,14 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
       if (v.enabled !== undefined && typeof v.enabled !== 'boolean') problems.push(`${at}: enabled must be true or false`);
       if (v.quirks !== undefined && (!Array.isArray(v.quirks) || v.quirks.some((q: unknown) => !(QUIRKS as readonly unknown[]).includes(q))))
         problems.push(`${at}: quirks may only be ${QUIRKS.join(', ')}`);
-      if (v.timeouts !== undefined) {
-        const t = v.timeouts;
-        if (!t || typeof t !== 'object' || Array.isArray(t)) problems.push(`${at}: timeouts must be an object (${TIMEOUT_KEYS.join(', ')})`);
+      const timeoutProblems = (t: any, where: string) => {
+        if (t === undefined) return;
+        if (!t || typeof t !== 'object' || Array.isArray(t)) problems.push(`${where}: timeouts must be an object (${TIMEOUT_KEYS.join(', ')})`);
         else
           for (const k of Object.keys(t))
-            if (!(TIMEOUT_KEYS as readonly string[]).includes(k) || !(Number.isInteger(t[k]) && t[k] >= 0 && t[k] <= 3_600_000)) problems.push(`${at}: timeouts.${k} must be one of ${TIMEOUT_KEYS.join(', ')}, a whole number of ms up to an hour`);
-      }
+            if (!(TIMEOUT_KEYS as readonly string[]).includes(k) || !(Number.isInteger(t[k]) && t[k] >= 0 && t[k] <= 3_600_000)) problems.push(`${where}: timeouts.${k} must be one of ${TIMEOUT_KEYS.join(', ')}, a whole number of ms up to an hour`);
+      };
+      timeoutProblems(v.timeouts, at);
       for (const k of ENDPOINT_KINDS) {
         const ep = v[k];
         if (ep === undefined || ep === null) continue;
@@ -441,6 +454,7 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
           problems.push(`${where}: maxContextTokens must be a whole number from 512 to 1048576`);
         if (ep.turn !== undefined && !(typeof ep.turn === 'string' && kindOfId(ep.turn) && ep.turn !== 'npu'))
           problems.push(`${where}: turn must be a graphics card's id (gpu-…) or cpu, the device its server runs on`);
+        timeoutProblems(ep.timeouts, where);
         if (typeof ep.baseUrl === 'string' && isHttpUrl(ep.baseUrl)) {
           const base = serverBase(ep.baseUrl);
           const other = servers.get(base);

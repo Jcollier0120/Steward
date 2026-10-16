@@ -485,7 +485,8 @@ export class Npu {
             if (acc.kind === 'npu' && (work === 'chat' || work === 'vision')) await this.embedGivesWay(acc).catch(() => undefined);
             // A server loading its model is waited on as long as its accelerator's cold load allows (an NPU compiling it).
             const onWaking = opts.onWaking;
-            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, acc.timeouts?.coldLoadMs ?? 0), ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
+            const timeouts = core.timeoutsFor(acc, work);
+            const server = await ensureServer(ep, { start: opts.start, readyMs: Math.max(READY_WAIT_MS, timeouts?.coldLoadMs ?? 0), ...(onWaking ? { onWaking: (how) => onWaking(wakingOf(acc, work, ep, how)) } : {}) });
             // No warm-up when the server, already up, answered this same model within its keepalive: it has it loaded.
             const fresh = server.started || server.waited;
             const warmed = warmsUp(acc, work) && (fresh || !servedRecently(acc.id, ep));
@@ -495,8 +496,9 @@ export class Npu {
             if (warmed) await warmUp(acc, ep, fresh ? Math.max(opts.timeoutMs ?? 0, coldAllowanceMs(acc)) : opts.timeoutMs);
             // With no warm-up, a server just started or found busy may still be loading the model.
             const loading = !warmed && fresh;
-            // The accelerator's own timeouts (a slower NPU's, or what its check measured) take the rules' place.
-            const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading, timeouts: acc.timeouts });
+            // The accelerator's own timeouts (a slower NPU's, or what its check measured), and this kind's over those
+            // (vision encoding pictures on the processor), take the rules' place.
+            const timeoutMs = opts.timeoutMs ?? core.requestTimeoutMs(RULES, { lane, work, maxTokens, ceilingMs: cfg.requestTimeoutMs, coldLoad: loading, timeouts });
             const answer = await send(acc, ep, timeoutMs, loading);
             if (warmsUp(acc, work)) noteServed(acc.id, ep);
             // A chat's turn reads it: embeddings answered moments ago keep their server (embedGivesWay).
