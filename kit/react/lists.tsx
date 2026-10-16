@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { BusyArea } from './busy.tsx';
 import { EmptyNote } from './feedback.tsx';
 import { Card, PostButton, Section, Text } from './ui.tsx';
 
@@ -18,7 +19,7 @@ export interface OnPageItem {
  * page because a person finds an entry where its effect shows, and a setting would have them type what a button knows.
  *
  * Remove posts `{ [field]: id }` to `remove` (default field "id") through the page's PostButton, which reloads the page
- * when it's done. `confirm` asks first ("Stop trusting {label}?" style, said once for every entry). `tour` names it for
+ * when it's done; while one runs, every Remove waits (a BusyArea). `confirm` asks first ("Stop trusting {label}?" style, said once for every entry). `tour` names it for
  * the page's tour.
  */
 export function OnPageList({ title, items, remove, field = 'id', noun = 'entry', empty, help, confirm, tour }: { title: string; items: OnPageItem[]; remove: string; field?: string; noun?: string; empty: string; help?: ReactNode; confirm?: string; tour?: string }) {
@@ -31,21 +32,23 @@ export function OnPageList({ title, items, remove, field = 'id', noun = 'entry',
       )}
       {items.length ? (
         <Card className="ui-onpage-list">
-          <ul>
-            {items.map((it, i) => (
-              <li key={it.id}>
-                <div className="ui-onpage-what">
-                  <span>{it.label}</span>
-                  {it.detail && (
-                    <Text variant="muted" as="div">
-                      {it.detail}
-                    </Text>
-                  )}
-                </div>
-                <PostButton title="Remove" variant="secondary" size="sm" path={remove} body={{ [field]: it.id }} confirm={confirm} accessibilityLabel={`Remove ${noun} ${i + 1}`} />
-              </li>
-            ))}
-          </ul>
+          <BusyArea>
+            <ul>
+              {items.map((it, i) => (
+                <li key={it.id}>
+                  <div className="ui-onpage-what">
+                    <span>{it.label}</span>
+                    {it.detail && (
+                      <Text variant="muted" as="div">
+                        {it.detail}
+                      </Text>
+                    )}
+                  </div>
+                  <PostButton title="Remove" variant="secondary" size="sm" path={remove} body={{ [field]: it.id }} confirm={confirm} accessibilityLabel={`Remove ${noun} ${i + 1}`} />
+                </li>
+              ))}
+            </ul>
+          </BusyArea>
         </Card>
       ) : (
         <EmptyNote message={empty} />
