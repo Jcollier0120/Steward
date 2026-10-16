@@ -14,6 +14,38 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 - Nothing to do.
 
+## 2.77.2
+
+**A graphics card's embedding server holds about 600 MB less: it starts with `-c 4096 -ub 512`, and a request to it is capped at 1,365 tokens (4,095 characters), with the same vectors and times.**
+
+### What changed
+
+- **setup.ts**: the embedding server on a graphics card (or the processor) starts with `-c 4096 -b 2048 -ub 512`, not `-c 8192 -b 2048 -ub 2048`. Its endpoint gets its own `maxContextTokens`, 1,365 (`EMBED_CAP`), below the card's: by the kit's estimate of 3 characters a token, an input under it is at most 4,095 characters, and so fits 4,096 tokens even at a token a character.
+  - On a Radeon 860M (WEASELDEV03, llama.cpp b11669 Vulkan), the server held 1,278 MB of the card's memory against 1,891 MB, and its working set was 1,386 MB against 2,049 MB. The times were the same: 28 ms against 31 ms for a query, 288 ms against 293 ms for Reeve's longest input (2,060 characters, 451 tokens), and 2.22 s against 2.24 s for 2,694 tokens. Every vector matched old against new (cosine 1.000000), as it did old against old.
+  - **On a Core Ultra 5 225U's Intel Graphics** (WEASELDEV02, 4 Xe cores, llama.cpp b11624 Vulkan, 2026-10-15). Runs went old, new, old, new, with each input sent 5 times warm. It held 0.60 GB less:
+    - working set 1.37 GB against 1.97;
+    - private bytes 1.41 GB against 2.01;
+    - the card's shared memory 1.25 GB against 1.85;
+    - by llama.cpp's own buffers, the KV cache took 448 MiB against 896, and compute 26 + 12 MiB against 120 + 64.
+
+    The times were the same within noise:
+    - a query 145–147 ms against 137–138 (minimums 133–134 against 132–133);
+    - a 430-token chunk 759–766 ms against 749–759;
+    - 2,679 tokens 9.02–9.30 s against 9.06–9.10;
+    - a dense chunk at the new limit (4,095 characters, 3,379 tokens) 13.4–13.9 s against 13.5–13.8, answered in 7 passes of 512.
+
+    Every vector matched (cosine 1.000000), old against new, old against old, and new against new.
+  - `-b 2048` stays, as on Qualcomm's route (2.75.1). With embeddings, llama-server sets the batch to the micro-batch itself, 512, and warns so ("embeddings enabled with n_batch (2048) > n_ubatch (512)").
+  - An input longer than a 512-token micro-batch is split across several, so nothing that fit before is refused by the server for its length.
+  - The reranker keeps `-c 8192 -ub 2048`.
+  - Sizing is unchanged. `serverContext` and `SERVER_GB` still count the embedding server as it was, so every card is sized as before. That estimate is now high for it: it counts 2.7 GB, and the Radeon's server held 1.3 GB.
+- **npu.ts**: a request over every serving accelerator's cap for its kind is refused before it's sent, saying that cap ("refusing a request of ~1400+0 tokens (cap 1365); split the input"). Before, a request under the accelerator's cap but over its kind's was dropped from the candidates, and said only that no accelerator could take it. `budget(maxTokens, work)` gives the largest cap for that kind, so chunking for embeddings fits 1,365 on a card.
+
+### For an agent
+
+- Nothing to do for the agents of the manor: their longest input is Reeve's cluster item, about 2,060 characters, and Clerk's and Chamberlain's are cut at 600. An agent that embeds more than 4,095 characters at once on a card should chunk by `budget(0, 'embed')`.
+- A PC set up before keeps its embedding server's old flags and no cap until it's set up again (Manor's Set up local AI, or the Smith's Set up). Nothing rewrites a card's entry on its own.
+
 ## 2.77.0
 
 **A pass anywhere, for the same code: before an agent runs work again on a clean checkout, it can take a pass of exactly that code tree from this PC's results, or from another PC on the licence through Manor (spec/WORK-STATUS.md, A pass anywhere, for the same code).**

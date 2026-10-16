@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.54
+## 0.36.61
 
 **Merging stalls less: catch-up handles `## Unreleased` changelog entries, a kit trial's comment says what failed, and a vouch gets past GitHub's passing errors and has time for all the tests it runs.**
 
@@ -20,6 +20,20 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.55
+
+**Kit 2.77.2: the local AI's search model on a graphics card or the processor holds about 600 MB less memory, as fast and with the same results.**
+
+### What changed
+
+- The search model that runs on a graphics card, or on the processor, now starts with a smaller working space and holds about 600 MB less memory: 1.3 GB instead of 1.9 GB on an AMD Radeon 860M, and 1.4 GB instead of 2.0 GB on a Core Ultra 5's Intel graphics. It answers just as fast and gives the same results, so existing search indexes carry over. Where the graphics share the PC's memory, as on most laptops, that is 600 MB more for everything else.
+- One piece of text sent to it at once is now limited to about 4,000 characters. The manor's agents send at most about 2,000, so nothing changes for them; a longer text is refused with a note to split it.
+- The kit the Steward hands out (2.77.2) brings this to every agent. Snapdragon PCs had the same change in kit 2.75.1.
+
+### Before you update
+
+- A PC whose local AI is already set up keeps the search model's old settings until its local AI is set up again (in Manor, Set up local AI). Otherwise nothing: it updates itself as usual.
 
 ## 0.36.52
 

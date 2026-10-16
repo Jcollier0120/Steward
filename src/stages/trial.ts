@@ -83,7 +83,7 @@ export interface KitTrial extends TrialPasses {
   /**
    * Each employee whose checks failed with it, what failed, and the commit of its branch on origin it was tried from
    * (null when that isn't known; missing in one kept before Steward 0.27.14), and the first distinct lines its failed
-   * step printed that say what went wrong (none named, or one kept before Steward 0.36.54: none).
+   * step printed that say what went wrong (none named, or one kept before Steward 0.36.61: none).
    */
   failed: { id: string; name: string; message: string; main?: string | null; errors?: string[] }[];
   /** How many were tried, and passed. */

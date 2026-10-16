@@ -12,7 +12,7 @@ import { duration, type CheckKind, type TimeLimit } from './bump.ts';
  * fraction of the time. No limit until AT_LEAST runs of the kind have passed. A run that failed or was stopped isn't
  * counted: the average is only ever of runs that finished.
  *
- * A run of only the affected tests is kept with how many test files it ran (Steward 0.36.54). One that reaches more files
+ * A run of only the affected tests is kept with how many test files it ran (Steward 0.36.61). One that reaches more files
  * than its kind's usual runs gets that much more time, up to the whole suite's limit. On 2026-10-15 a change reaching
  * 89 of the Steward's 152 test files was stopped twice at 8 minutes: its runs averaged 3 minutes with far fewer files,
  * and it needed 12.
@@ -22,7 +22,7 @@ export const KEEP = 10;
 export const AT_LEAST = 3;
 export const OVER_MS = 5 * 60_000;
 
-/** A run kept: its time in ms, or (Steward 0.36.54) its time and how many test files it ran. */
+/** A run kept: its time in ms, or (Steward 0.36.61) its time and how many test files it ran. */
 type Run = number | { ms: number; files: number };
 type Times = Record<string, Partial<Record<CheckKind, Run[]>>>;
 
