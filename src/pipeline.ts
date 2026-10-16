@@ -1,15 +1,18 @@
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 
 /**
- * The build pipeline (Settings: Build pipeline): the Steward merges, tests and releases at set build times a day,
- * instead of whenever a PR goes ready. Between builds its rounds only look: no merges, catch-ups, kit rollouts,
- * releases or site refreshes. At a build time, a build begins: its rounds merge every ready PR (a repository's stacked
- * as one train and tested once, stages/train.ts), roll the newest kit out, and once nothing is left that settles in
- * minutes, release each repository once and tell Manor once, so each agent is installed at most once a build.
+ * The build pipeline (Settings: Build pipeline): how the Steward always works, with no switch to turn it off. It merges,
+ * tests and releases at set build times a day (four to start with: 00:00, 06:00, 12:00 and 18:00), instead of whenever
+ * a PR goes ready. Between builds its rounds only look: no merges, catch-ups, kit rollouts, releases or site refreshes.
+ * At a build time, a build begins: its rounds merge every ready PR (a repository's stacked as one train and tested once,
+ * stages/train.ts), roll the newest kit out, and once nothing is left that settles in minutes, release each repository
+ * once and tell Manor once, so each agent is installed at most once a build.
  *
  * A build that the PC slept through begins at the first round after it wakes, once (a later build time it also missed
  * is the same build). The owner's override, Build now (POST /api/pipeline/build, or `steward build` at a console),
- * begins one at once: for some repositories, or all, and, ticked, lets its releases out to customers at once too.
+ * begins one at once: for some repositories, or all, and, ticked, lets its releases out to customers at once too. An
+ * urgent fix (a ready PR whose changelog entry has a line starting "**Urgent fix:", stages/urgent.ts) begins one at once
+ * too, for its repository alone, without the kit.
  *
  * pipeline.json keeps the build that is open, and the last builds, each with what it merged and released.
  */
@@ -17,9 +20,11 @@ import { dataFile, readJson, writeJson } from './kit/store.ts';
 export const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 export type Day = (typeof DAYS)[number];
 
+/**
+ * The build pipeline's settings. There is no switch: Steward 0.36.40 to 0.36.62 had one (`on`, off by default), and a
+ * settings.json that still keeps it, on or off, builds at its times all the same (normalizePipeline leaves it out).
+ */
 export interface BuildPipeline {
-  /** Off: a round merges and releases whatever is ready, as before. */
-  on: boolean;
   /** The build times, local, HH:MM. */
   times: string[];
   /** The days builds run on. */
@@ -35,11 +40,14 @@ export interface BuildPipeline {
   bisectRuns: number;
 }
 
-export const DEFAULT_PIPELINE: BuildPipeline = { on: false, times: ['08:00', '13:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
+export const DEFAULT_PIPELINE: BuildPipeline = { times: ['00:00', '06:00', '12:00', '18:00'], days: [...DAYS], kit: 'every', windowMinutes: 120, bisectRuns: 3 };
 
 const TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-/** settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. */
+/**
+ * settings.json's buildPipeline over the defaults, each value checked: a bad one falls back to its default. An `on` kept
+ * from when there was a switch is left out, whatever it says.
+ */
 export function normalizePipeline(raw: unknown): BuildPipeline {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_PIPELINE;
@@ -51,7 +59,6 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
   const w = whole(r.windowMinutes);
   const b = whole(r.bisectRuns);
   return {
-    on: typeof r.on === 'boolean' ? r.on : d.on,
     times: times.length ? times : d.times,
     days,
     kit: r.kit === 'first' || r.kit === 'every' ? r.kit : d.kit,
@@ -62,13 +69,15 @@ export function normalizePipeline(raw: unknown): BuildPipeline {
 
 /** One build: when it was due, who began it, and what it did. */
 export interface BuildRun {
-  /** The build time it is for (ISO); for the owner's Build now, when it was pressed. */
+  /** The build time it is for (ISO); for the owner's Build now, when it was pressed; for an urgent fix, when it was found. */
   due: string;
-  by: 'schedule' | 'owner';
+  by: 'schedule' | 'owner' | 'urgent';
   started: string;
   finished?: string | null;
-  /** The owner's Build now for some repositories only (ids); none: all. */
+  /** The owner's Build now, or an urgent fix's build, for some repositories only (ids); none: all. */
   employees?: string[] | null;
+  /** An urgent fix's build: "<id> #<n> <head>" for each urgent PR that began it, which boards once at that head (stages/urgent.ts). */
+  urgent?: string[];
   /** The owner's Build now: its releases let out to customers at once, not on their release day. */
   toCustomers?: boolean;
   /** The rounds it took. */
@@ -143,19 +152,36 @@ export interface BuildNow {
 
 /** What a round does under the pipeline. */
 export type PipelineMode =
-  /** No pipeline: merges and releases as ever. */
-  | { kind: 'off' }
+  /**
+   * Not a round of the pipeline's: a stage asked for at a console (`steward merge`, `release`), a round that asks GitHub
+   * nothing, or a test's round that doesn't test the pipeline (steward.ts' StageOptions.pipeline). pipelineMode never
+   * gives it.
+   */
+  | { kind: 'outside' }
   /** Between builds: it only looks. */
   | { kind: 'between'; next: Date | null; line: string }
   /** A build's round: `closing` once its window has run out, when it releases whatever it merged and ends. */
   | { kind: 'build'; run: BuildRun; fresh: boolean; closing: boolean };
 
+/** An urgent PR that boards at once (stages/urgent.ts): its repository's id, its number and its head commit. */
+export interface UrgentPr {
+  id: string;
+  number: number;
+  head: string;
+}
+
+/** How an urgent PR is kept in its build's record, so it boards once at that head. */
+export const urgentKey = (u: UrgentPr) => `${u.id} #${u.number} ${u.head}`;
+
+/** The urgent PRs that boarded a build already, open or kept, by urgentKey: each boards once at its head. */
+export const boardedUrgent = (state: PipelineState): Set<string> => new Set([...state.builds, ...(state.open ? [state.open] : [])].flatMap((b) => b.urgent ?? []));
+
 /**
- * What a round does now: off (no pipeline), between builds, or a build's round, the one open going on, a new one for a
- * build time that has come (or the owner's Build now). Pure; the round saves the build it changes (endRound).
+ * What a round does now: between builds, or a build's round, the one open going on, a new one for a build time that has
+ * come (or the owner's Build now, or an urgent fix found between builds: `urgent`, a build for its repositories alone).
+ * Pure; the round saves the build it changes (endRound).
  */
-export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null } = {}): PipelineMode {
-  if (!p.on && !o.buildNow) return { kind: 'off' };
+export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, o: { buildNow?: BuildNow | null; employees?: string[] | null; urgent?: UrgentPr[] | null } = {}): PipelineMode {
   const open = state.open;
   if (open && !open.finished) {
     const over = now.getTime() - Date.parse(open.started) >= p.windowMinutes * 60_000;
@@ -167,12 +193,18 @@ export function pipelineMode(p: BuildPipeline, state: PipelineState, now: Date, 
   const due = lastBuildTime(p, now);
   const lastDue = state.builds.filter((b) => b.by === 'schedule').at(-1)?.due;
   if (due && (!lastDue || Date.parse(lastDue) < due.getTime())) return fresh(due.toISOString(), 'schedule');
+  // An urgent fix between builds: a build of its own, for its repository, at once.
+  if (o.urgent?.length) return fresh(now.toISOString(), 'urgent', { employees: [...new Set(o.urgent.map((u) => u.id))], urgent: o.urgent.map(urgentKey) });
   const next = nextBuildTime(p, now);
   return { kind: 'between', next, line: `between builds: ready PRs wait for the next build${next ? `, at ${buildWhen(next, now)}` : " (Settings name no build time to come: Build pipeline)"}` };
 }
 
-/** Whether the newest kit goes into this build: every build, or only the day's first scheduled one. */
+/**
+ * Whether the newest kit goes into this build: every build, or only the day's first scheduled one. Never an urgent fix's:
+ * a kit PR would hold its release until the kit's checks pass, and the next build takes the kit.
+ */
 export function kitRides(p: BuildPipeline, state: PipelineState, run: BuildRun): boolean {
+  if (run.by === 'urgent') return false;
   if (p.kit === 'every' || run.by === 'owner') return true;
   const day = new Date(run.due).toDateString();
   return !state.builds.some((b) => b.by === 'schedule' && b !== run && new Date(b.due).toDateString() === day && Date.parse(b.due) < Date.parse(run.due));
@@ -196,11 +228,12 @@ export function endRound(state: PipelineState, run: BuildRun, o: { merged: strin
 
 /** What Manor and the page read of the pipeline (GET /api/pipeline). */
 export interface PipelineView {
-  on: boolean;
+  /** Always true: there is no switch. Manor reads it, and shows the next build only while it is. */
+  on: true;
   times: string[];
   days: Day[];
   kit: BuildPipeline['kit'];
-  /** The next build time (ISO), when the pipeline is on. */
+  /** The next build time (ISO), or null when Settings name none to come. */
   next: string | null;
   /** The build under way: Manor holds its installs until it ends. */
   building: boolean;
@@ -210,5 +243,5 @@ export interface PipelineView {
 
 export function pipelineView(p: BuildPipeline, state: PipelineState, now = new Date()): PipelineView {
   const open = state.open && !state.open.finished ? state.open : null;
-  return { on: p.on, times: p.times, days: p.days, kit: p.kit, next: p.on ? (nextBuildTime(p, now)?.toISOString() ?? null) : null, building: !!open, open, last: state.builds.at(-1) ?? null };
+  return { on: true, times: p.times, days: p.days, kit: p.kit, next: nextBuildTime(p, now)?.toISOString() ?? null, building: !!open, open, last: state.builds.at(-1) ?? null };
 }
