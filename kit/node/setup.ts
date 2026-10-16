@@ -1326,26 +1326,67 @@ export function withEncoderOnProcessor(raw: Record<string, any>): { raw: Record<
   return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
 }
 
+/** The embedding server's context and micro-batch every kit's setup wrote from 2.11.0 until kindFlags' smaller ones. */
+const OLD_EMBED = { context: '8192', microBatch: '2048' } as const;
+
 /**
- * The cards' vision commands brought up to this kit's (withEncoderOnProcessor) on a PC an older kit set up: setup writes
- * them once, so the keeper's look does it, once for each kit version, as the NPU's refresh does (npu-refresh.ts), and a
- * kit never redoes what a newer one looked at. Nothing is started or stopped: on the cards it's for, a command without
- * the flag never stays up, a server running with the flag takes the cap at its next start, and an agent takes the time
- * when it next reads config.json. A person who takes the flag, the cap or the time out again keeps it out until the next kit. The cards
- * changed; none when config.json couldn't be read (the next look tries).
+ * config.json with each card's embedding server brought down to what setup now writes (kindFlags: -c EMBED_CONTEXT,
+ * -ub 512) where an older kit's setup wrote -c 8192 -ub 2048, and the cards changed. Its requests are capped at
+ * EMBED_CAP too, as setup caps them, so an input still fits the smaller context. Only those exact values change: a
+ * context or micro-batch a person set stays theirs, as does a cap already under EMBED_CAP. A command that isn't
+ * llama-server's embedding server is left as it is.
+ */
+export function withSmallerEmbedServer(raw: Record<string, any>): { raw: Record<string, any>; changed: string[] } {
+  if (!Array.isArray(raw.accelerators)) return { raw, changed: [] };
+  const changed: string[] = [];
+  const accelerators = raw.accelerators.map((a: any) => {
+    const cmd: unknown = a?.embed?.startCommand;
+    if (a?.kind !== 'gpu' || typeof a.id !== 'string' || !Array.isArray(cmd) || !cmd.every((s) => typeof s === 'string')) return a;
+    if (!/^llama-server(\.exe)?$/i.test(path.win32.basename(cmd[0] ?? '')) || !cmd.includes('--embeddings')) return a;
+    const c = cmd.indexOf('-c');
+    const ub = cmd.indexOf('-ub');
+    if (c < 0 || ub < 0 || cmd[c + 1] !== OLD_EMBED.context || cmd[ub + 1] !== OLD_EMBED.microBatch) return a;
+    changed.push(a.id);
+    const startCommand = cmd.map((s, i) => (i === c + 1 ? String(EMBED_CONTEXT) : i === ub + 1 ? '512' : s));
+    const had = typeof a.embed.maxContextTokens === 'number' ? a.embed.maxContextTokens : typeof a.maxContextTokens === 'number' ? a.maxContextTokens : EMBED_CAP;
+    return { ...a, embed: { ...a.embed, startCommand, maxContextTokens: Math.min(EMBED_CAP, had) } };
+  });
+  return changed.length ? { raw: { ...raw, accelerators }, changed } : { raw, changed };
+}
+
+/**
+ * The cards' vision and embedding commands brought up to this kit's (withEncoderOnProcessor, withSmallerEmbedServer)
+ * on a PC an older kit set up: setup writes them once, so the keeper's look does it, once for each kit version, as the
+ * NPU's refresh does (npu-refresh.ts), and a kit never redoes what a newer one looked at. Nothing is started or stopped:
+ * on the cards it's for, a vision command without the flag never stays up, a server running takes the cap or its
+ * smaller context at its next start, and an agent takes the time or the embedding cap when it next reads config.json.
+ * A person who takes the flag, the cap or the time out again, or sets the embedding server's context back, keeps it
+ * until the next kit. The cards changed; none when config.json couldn't be read (the next look tries).
  */
 export function refreshCardVision(o: { configFile: string; kit: string; now?: () => number; validate?: (raw: unknown) => string[]; log: (line: string) => void }): string[] {
   const had = readCardRefresh(o.configFile);
   if (had?.kit === o.kit || (had?.kit && compareVersions(had.kit, o.kit) > 0)) return [];
   const file = readConfigFile(o.configFile);
   if (file.error) return [];
-  const { raw, changed } = withEncoderOnProcessor(file.raw);
+  const vision = withEncoderOnProcessor(file.raw);
+  const embed = withSmallerEmbedServer(vision.raw);
+  const { raw } = embed;
+  const changed = [...new Set([...vision.changed, ...embed.changed])];
   const saved = changed.length ? writeConfigFile(o.configFile, raw, o.validate ?? validateKeeperConfig) : { problems: [] };
-  if (saved.problems.length) o.log(`the vision of ${changed.join(', ')} keeps its command and time: config.json wasn't written: ${saved.problems.join('; ')}`);
-  else if (changed.length)
-    o.log(
-      `${changed.join(', ')}: vision now encodes pictures on the processor, at most ${PICTURE_TOKENS} tokens each, with ${VISION_ON_PROCESSOR_TIMEOUTS.requestBaseMs / 1000} s a request (kit ${o.kit}): these graphics lose the device encoding them, and the processor takes about 30 s a picture`,
-    );
+  if (saved.problems.length) {
+    const why = `config.json wasn't written: ${saved.problems.join('; ')}`;
+    if (vision.changed.length) o.log(`the vision of ${vision.changed.join(', ')} keeps its command and time: ${why}`);
+    if (embed.changed.length) o.log(`the embedding server of ${embed.changed.join(', ')} keeps its command: ${why}`);
+  } else {
+    if (vision.changed.length)
+      o.log(
+        `${vision.changed.join(', ')}: vision now encodes pictures on the processor, at most ${PICTURE_TOKENS} tokens each, with ${VISION_ON_PROCESSOR_TIMEOUTS.requestBaseMs / 1000} s a request (kit ${o.kit}): these graphics lose the device encoding them, and the processor takes about 30 s a picture`,
+      );
+    if (embed.changed.length)
+      o.log(
+        `${embed.changed.join(', ')}: the embedding server now starts at -c ${EMBED_CONTEXT} -ub 512, its requests capped at ${EMBED_CAP} tokens (kit ${o.kit}): about 0.6 GB less of the graphics' memory, the same vectors, from its next start`,
+      );
+  }
   const record: CardRefreshRecord = { kit: o.kit, at: new Date((o.now ?? Date.now)()).toISOString(), ...(changed.length && !saved.problems.length ? { changed } : {}), ...(saved.problems.length ? { problems: saved.problems } : {}) };
   try {
     writeFileSync(cardRefreshFile(o.configFile), JSON.stringify(record, null, 2) + '\n');
