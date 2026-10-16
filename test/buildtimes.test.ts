@@ -104,7 +104,7 @@ test('the next build is prepared for a repository only once its branch, its read
 
   const due = at(0);
   const e = (id: string) => ({ id });
-  const kept = { porter: { key: 'k1', due, at: at(-30), line: '' }, clerk: { key: 'k2', due: at(-1440), at: at(-1500), line: '' } };
+  const kept = { porter: { key: 'k1', due, at: at(-20), line: '' }, clerk: { key: 'k2', due: at(-1440), at: at(-1500), line: '' } };
   const repos = [
     { e: e('porter'), key: 'k1' },
     { e: e('clerk'), key: 'k2' },
@@ -112,10 +112,11 @@ test('the next build is prepared for a repository only once its branch, its read
     { e: e('smith'), key: null },
   ];
   assert.deepEqual(
-    toPrepare(repos, kept, due).map((r) => r.id),
+    toPrepare(repos, kept, due, Date.parse(at(0))).map((r) => r.id),
     ['clerk', 'miller'],
     'porter was prepared at this key for this build; clerk only for an earlier one; smith has nothing',
   );
+  assert.deepEqual(toPrepare(repos, kept, due, Date.parse(at(10))).map((r) => r.id), ['porter', 'clerk', 'miller'], 'half an hour on, porter is looked at again');
   assert.deepEqual(toPrepare([{ e: e('porter'), key: 'k9' }], kept, due).map((r) => r.id), ['porter'], 'it moved since');
 });
 
