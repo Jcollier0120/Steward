@@ -4,7 +4,7 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 
 ## 2.78.0
 
-**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments.**
+**On a Snapdragon X2 under 20 GB of memory (a 16 GB PC), the NPU runs Qwen3-VL-2B in place of the 4B, its pictures' encoder on the Adreno. It writes 75 tokens a second against 41, reads 4 pictures of 4 against 3, scores the same 22 of 24, and leaves the PC about 2 GB more. A generation can now name the models a small PC runs, and a model its own server arguments. The NPU benchmark judges a job's tries at one answer length, so answers of different lengths no longer keep a run off the board.**
 
 ### What's new
 
@@ -35,10 +35,15 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
     | On the NPU | 2.1 GB | 4.2 GB |
     | The PC's available memory, lower once loaded | 3.5 to 4.2 GB | 6.1 GB |
 
-    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs and a 4.3 s cold load, and its speed held 100%. Only the reply job's spread kept it off the board (508 to 666 ms).
+    The Adreno holds about 1.5 GB of the PC's shared memory beside it. Not ranked: the processor was busy at its start, and GenieX's reply and summary jobs varied by more than 15%, as in the 4B's own full run. Run again on a quiet PC with the kit's own command (`npu-bench --small-pc`, later on 2026-10-15), it gave the same quality and pictures, 74.6 tokens a second, 3.01 s of jobs and a 4.3 s cold load, and its speed held 100%. Only the reply job's spread kept it off the board (508 to 666 ms), judged then on whole times: see npu-bench.ts below.
 - **setup.ts**: on a PC under 20 GB, the NPU is planned with its generation's `smallPc` models (`smallPc(detection.ramBytes)`).
 - **npu-refresh.ts**: the keeper's look plans with the PC's memory too. On a 16 GB X2 set up with the 4B, it leaves the NPU for setup (`needs-setup`) while the 2B isn't there, since it never downloads. Once it is there, the look tests it in the NPU's turn, as any new command, and switches. Its log and `changes` name a model change: `model … in …'s place`.
-- **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row and `--small-pc`.
+- **npu-bench.ts: a job's tries are judged at one answer length.**
+  - Each try of a job is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer one takes longer to write without the server being slower. That most likely kept every GenieX full run off the board, even on a quiet X2 Elite: the 4B's summary took 3.3 to 4.3 s and the 2B's reply 508 to 666 ms, while the short answer, writing and reading held within 5%. Those runs recorded no token counts, so the next run will show it.
+  - Each job's tries now record their answer tokens (`answerTokens`, the server's count) and first-token times (`firstTokenMs`). Whether they are steady is the spread with each try's writing scaled to the tries' median answer length (`spreadAtLength`; `atAnswerLength`, `jobMeasure`).
+  - The job's median, the job time and every other measurement are as before, so runs still compare within `castellan-npu-bench/2`, and a report from before keeps its verdict. A server that doesn't stream or count tokens is judged on whole times, as before (it is marked anyway).
+  - The `noisy` mark names such a job "at one answer length". **spec/npu-bench.schema.json**: the three new fields, optional so earlier reports still match.
+- **spec/NPU-VENDORS.md**: "Qwen3-VL-2B on a 16 GB Snapdragon X2", the model and licence rows, `--small-pc`, and what's still unverified. **spec/NPU-BENCHMARK.md**: its row, `--small-pc`, and a job's steadiness.
 
 ### For an agent
 

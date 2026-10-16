@@ -12,6 +12,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - It leaves the PC about 2 GB more memory once loaded, room a 16 GB PC needs beside Windows and the other agents.
 - The pictures are read by the PC's graphics (the Adreno) rather than the NPU: the current GenieX can't read them properly on the NPU with this model.
 - Snapdragon X2 PCs with more memory, first-generation Snapdragon X PCs, and Intel and AMD PCs are unchanged.
+- The NPU benchmark no longer counts a test job as unsteady just because the model wrote answers of different lengths from one try to the next: it now compares the tries as if their answers were the same length. Until now this most likely kept every full run on a Snapdragon off the leaderboard, even on a quiet PC.
 - The kit the Steward hands out (2.78.0) brings this to every agent.
 
 ### Before you update

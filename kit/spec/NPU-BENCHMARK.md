@@ -89,6 +89,9 @@ Laptops vary with power and heat, so every run records how it was measured, and 
 - **Plugged in** (except the energy part, which needs the battery), with Windows' power mode recorded. The power mode Windows ships with is the one ranked. Whether "Best performance" changes much on an NPU is worth measuring once.
 - **Nothing else working**: the processor under 15% busy for 30 seconds before the start, and no other model server answering (as the NPU check refuses to measure beside the keeper's server).
 - **Steady**: for each measurement, the spread of its five tries ((slowest − fastest) / median) is under 15%. A noisy measurement is shown as noisy and the run isn't ranked.
+  - A job's tries are judged at one answer length (kit 2.78.0). Each try is a prompt the server hasn't seen, so each gets an answer of its own length, and a longer answer takes longer to write without the server being slower. So each try's writing, from its first token to its last, is scaled to the tries' median answer length (the server's token counts) before the spread is taken: `spreadAtLength`. The job's median is still of the whole times, what a person waits.
+  - Before, the jobs kept every GenieX full run off the board, even with the PC quiet. On the X2 Elite the 4B's summary took 3.3 to 4.3 s and the 2B's reply 508 to 666 ms, while the short answer, writing and reading held within 5%: the server was steady, and most likely only the answers' lengths varied. Those runs didn't record token counts. The first run that does will show it.
+  - A server that doesn't stream or count tokens (marked so anyway) has its jobs judged on whole times. No number changes, so runs still compare within version 2, and a report from before keeps its verdict.
 - **Passed the gate**, with every job answered.
 
 Before the five measured tries of each kind, there is one warm-up try, which isn't counted.
@@ -105,7 +108,7 @@ One JSON file per run, `castellan-npu-bench-report/1`, with its schema beside th
 - **pc**: the processor and its chip generation (as detection labels it, e.g. "Intel Core Ultra 7 256V, Lunar Lake"), the NPU's name, PCI device and driver version and date, RAM, Windows build, and the laptop's make and model (cooling and power limits differ between laptops with the same chip).
 - **conditions**: plugged in or battery, power mode, battery charge, how busy the processor was before the start.
 - **run**: device, server and version, model id, size and each file's SHA-256 (as `npu-vendors.json` pins them; a candidate's are measured once setup has pulled it, except on FastFlowLM's route: see `--candidate` in **What's built**), and whether it is shipped or a candidate. On a played run (`--generation`, below), `played`: the older Snapdragon's generation this NPU played.
-- **results**: each measurement's five tries, their median and spread, and the job time.
+- **results**: each measurement's five tries, their median and spread, and the job time. Each job also has each try's answer tokens (`answerTokens`) and first-token time (`firstTokenMs`), and its spread at one answer length (`spreadAtLength`).
 - **quality**: each item's answer, its grade, the score, and whether the gate passed.
 - **marks**: anything that keeps it off the board (not streamed, estimated tokens, noisy, battery, gate failed, played), each with its reason in plain words.
 
