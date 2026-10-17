@@ -4,11 +4,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## 0.36.116
 
-**The Steward hands out kit 2.79.0, with which the Wright's jobs and Reeve's heavy background work can wait their turn from the Seneschal, as the Steward's checks do.**
+**The Steward hands out kit 2.79.3, with which the Wright's jobs and Reeve's heavy background work can wait their turn from the Seneschal, as the Steward's checks do.**
 
 ### What's new
 
-- **Kit 2.79.0** (kit/CHANGELOG.md). Its Seneschal client asks for two new kinds of turn: a job of the Wright's, and Reeve's heavy work (its search-index fills and the hourly `repo-sync`).
+- **Kit 2.79.3** (kit/CHANGELOG.md). Its Seneschal client asks for two new kinds of turn: a job of the Wright's, and Reeve's heavy work (its search-index fills and the hourly `repo-sync`).
   - **A turn and nothing else.** Only the agent that asks can run that work, so the Seneschal gives it only its place in line. The work is named by the job (an issue, a job, an index) rather than by a commit, so a new commit on main doesn't make it new work.
   - **What it needs of your PC:** a slot, its memory, and for the Wright, Claude Code's line. An index fill takes no slot, so it never keeps a PR check waiting.
   - **It can wait for its next round.** When your PC is busy, a Wright job or a Reeve job can be told "later" rather than run beside the work already there. With no Seneschal, one off duty, or an older one, everything runs as before.
