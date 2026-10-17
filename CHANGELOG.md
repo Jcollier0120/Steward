@@ -17,6 +17,14 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual.
 
+## 0.36.109
+
+**Brings kit 2.78.25: on a PC under 20 GB, the keeper stops an integrated graphics card's model servers after 5 minutes unused, not 10, so their models give the PC its memory back sooner.**
+
+### What changed
+
+- **The kit it hands out is 2.78.25** (kit/CHANGELOG.md): npu-vendors.ts' `cardIdleStopMinutes` and keeper.ts' `serversToReap`. A `gpuIdleStopMinutes` in config.json still wins. Nothing in the Steward's own code changed.
+
 ## 0.36.108
 
 **The Steward hands out kit 2.78.24: the local models take less of a PC's memory. Each llama.cpp server keeps no RAM cache of earlier prompts, and Intel's integrated graphics on a PC with under 32 GB answer chat and pictures from one Qwen3-VL-4B server, 5.0 GB where two servers took 8.5 GB.**
