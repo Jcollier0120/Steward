@@ -9,6 +9,7 @@ import { failureDetail, keptFailure } from './failure.ts';
 import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
 import { BAILIFF_WAIT } from './review.ts';
 import { CONFLICTS } from './conflicts.ts';
+import { deadKitIn, NEVER_RELEASED } from './stages/kitpart.ts';
 import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
@@ -32,6 +33,7 @@ import type { HeldQueue } from './version-queue.ts';
  * The conditions:
  * - a PR to an employee that has waited a day: a draft no one marked ready, conflicts, failing checks, a version
  *   that clashes (Settings: waitingHours);
+ * - a PR whose kit.json pins a kit that will never be released (stages/prtest.ts kitReleaseHold), a draft too: at once;
  * - a PR that conflicts with its branch and holds up others waiting their turn behind it (the lowest version merges
  *   first), for an hour (Settings: blockingHours): the whole queue stands still. One whose conflict was handed on to
  *   its author gives up its turn instead (stages/merge.ts), so this is the one nobody could be told about;
@@ -273,6 +275,20 @@ export function roundConditions(o: {
         url: pr.url,
         afterMs: wait * HOUR,
       });
+      // Its kit.json pins a kit that will never be released (stages/prtest.ts kitReleaseHold): no round clears it, so it
+      // is raised at once, a draft's too, rather than after a day.
+      const dead = deadKitIn(pr.why);
+      if (dead) {
+        const rest = pr.why.slice(pr.why.indexOf(NEVER_RELEASED) + NEVER_RELEASED.length);
+        out.push({
+          id: `deadkit:${e.repo}#${pr.number}`,
+          who: e.id,
+          title: `${e.name} #${pr.number} pins kit ${dead}, which will never be released`,
+          detail: [pr.title, `${rest.charAt(0).toUpperCase()}${rest.slice(1)}.`, 'The Steward tells its author on the PR, once for each commit.'],
+          url: pr.url,
+          afterMs: 0,
+        });
+      }
       // The lowest version, held by a conflict, with others waiting their turn behind it: the whole queue stands still,
       // so it is raised within the hour, not the day (Manor#226 held six ready PRs for five hours, 2026-10-12).
       if (pr.blocks?.length && !pr.draft && pr.why.startsWith(CONFLICTS)) {

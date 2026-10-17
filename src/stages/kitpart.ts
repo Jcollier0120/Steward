@@ -12,6 +12,18 @@ const norm = (f: string) => f.replace(/\\/g, '/').toLowerCase();
 export const isKitVersionFile = (f: string) => norm(f) === KIT_VERSION_FILE.toLowerCase();
 export const isKitChangelog = (f: string) => norm(f) === KIT_CHANGELOG.toLowerCase();
 
+/**
+ * How a PR's hold goes on when its kit.json pins a kit that will never be released (prtest.ts's kitReleaseHold): a
+ * release, or the Steward's main, is past it already, and no open Steward PR brings it.
+ */
+export const NEVER_RELEASED = ', which will never be released: ';
+
+/**
+ * The kit a PR's hold says will never be released, or null when it says none. A draft's hold says it after its own
+ * words ("a draft; it pins kit …"). Pure.
+ */
+export const deadKitIn = (why: string): string | null => new RegExp(`\\bpins kit (\\d+\\.\\d+\\.\\d+)${NEVER_RELEASED}`).exec(why)?.[1] ?? null;
+
 /** The claims ledger's key for a repository's kit, beside the repository's own. */
 export const kitClaimKey = (repo: string) => `${repo}#kit`;
 
