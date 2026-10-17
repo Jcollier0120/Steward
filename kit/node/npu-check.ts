@@ -7,7 +7,8 @@ import { type Detection, detect } from './detect.ts';
 import { calibrate, CALIBRATION, generationOf, MAKERS, NPU_CATALOG, type NpuCatalog, type NpuDevice, type NpuPlan, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, npuSupport, pciDevice, planNpu, type Played, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, smallPc, UNKNOWN_GENERATION } from './npu-vendors.ts';
 import { loadFailure, logLength, longFetch, processMemory, refusedConnection, type RunningServer, serverClient, setUpRoute, startServer, stopStartedAt } from './npu-server.ts';
 import { type IdleDeps, idleSteps, realIdleDeps } from './npu-idle.ts';
-import { mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
+import { npuReportFile, npuReportFromCheck, rememberNpuReport, reporterId } from './npu-report.ts';
+import { fillerPrompt, kitVersion, mb, measureNpu, type NpuIo, npuNoteFor, saysReady, setUpNpu, testNpuEmbed, testNpuEntry } from './setup.ts';
 
 export { processMemory, type RunningServer, startServer } from './npu-server.ts';
 
@@ -104,6 +105,13 @@ export interface NpuCheckOptions {
   yes?: boolean;
   confirm?: (question: string) => Promise<boolean>;
   out?: string;
+  /**
+   * Where the NPU's report goes (npu-report.ts, spec/NPU-REPORTS.md) after a run that measured this PC's own NPU:
+   * npuReportFile() by default; tests give their own, and with a given detection none is kept unless they do.
+   */
+  npuReportFile?: string | null;
+  /** The app running the check, for its report ("manor 0.16.200"). */
+  app?: string;
   log?: (line: string) => void;
   detection?: Detection;
   catalog?: NpuCatalog;
@@ -218,17 +226,8 @@ export async function routeOnFreePorts(route: NpuRoute, onNpu: boolean, free: (p
   return { route: { ...route, port, ...(es ? { embedServer: { ...es, port: await pick(es.port) } } : {}) }, moved };
 }
 
-/** A prompt of about `tokens` tokens (about four characters a token, as the kit's estimate): plain sentences, numbered so no two are alike. */
-export function fillerPrompt(tokens: number): string {
-  const lines: string[] = [];
-  let chars = 0;
-  for (let i = 1; chars < tokens * 4; i++) {
-    const line = `Line ${i}: the steward counts the barrels in the cellar and writes the number down.`;
-    lines.push(line);
-    chars += line.length + 1;
-  }
-  return `${lines.join('\n')}\n\nHow many lines are above? Reply with the number only.`;
-}
+/** A prompt of about `tokens` tokens: setup.ts' (setup's measuring read uses it too). */
+export { fillerPrompt };
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -308,6 +307,8 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     patch: null,
     ok: false,
   };
+  // The route measured on this PC's own NPU, once the measurements start: its NPU report is kept when the check ends.
+  let measuring: { route: NpuRoute; verified: boolean } | null = null;
   const finish = (code: number) => {
     report.ok = code === 0;
     const file = o.out ?? path.join(o.tools ?? toolsHome(env), `npu-check-${report.vendor ?? 'none'}-${report.at.slice(0, 19).replace(/[:T]/g, '-')}.json`);
@@ -317,6 +318,16 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
       log(`The whole report: ${file}`);
     } catch (e: any) {
       log(`The report couldn't be written to ${file}: ${e?.message ?? e}`);
+    }
+    const keep = o.npuReportFile !== undefined ? o.npuReportFile : o.detection ? null : npuReportFile();
+    if (measuring && keep) {
+      try {
+        const r = npuReportFromCheck(report, { ...measuring, ramBytes: d.ramBytes, kit: kitVersion(), app: o.app, reporter: reporterId(path.join(path.dirname(keep), 'npu-reporter.json')) });
+        const bad = rememberNpuReport(r, keep);
+        log(bad.length ? `The NPU report wasn't kept: ${bad.join('; ')}` : `The NPU report, which the app offers to send: ${keep}`);
+      } catch (e: any) {
+        log(`The NPU report couldn't be kept: ${e?.message ?? e}`);
+      }
     }
     return { code, report };
   };
@@ -359,10 +370,10 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
   const played = play?.kind === 'played' ? play.played : null;
   report.generation = generation;
   let route: NpuRoute;
+  // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked.
+  const small = !!o.smallPc || smallPc(d.ramBytes);
   try {
-    // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked.
-    const small = !!o.smallPc || smallPc(d.ramBytes);
-    route = routeOnDevice(routeFor(catalog.routes[vendor], generation, small), report.device);
+    route =routeOnDevice(routeFor(catalog.routes[vendor], generation, small), report.device);
     if (small && generationOf(catalog.routes[vendor], generation)?.smallPc) log(`A small PC's models (${o.smallPc ? '--small-pc' : `this PC's ${report.pc.ramGb} GB`}): ${route.models.map((m) => m.id).join(', ')}.`);
     if (played) route = playedRoute(route, played);
   } catch (e: any) {
@@ -467,6 +478,9 @@ export async function npuCheck(o: NpuCheckOptions = {}): Promise<{ code: number;
     add({ step: 'start', ok: false, say: `something already answers at ${ep.baseUrl} (the keeper's server?): stop it first, so the check measures a start of its own` });
     return finish(1);
   }
+  // From here on it measures this PC's own NPU (never a rehearsal's device): what it finds is the NPU's report.
+  // A small PC's models are what it ran, so the report names them (npu-reports.ts counts them apart from the route's).
+  if (!report.rehearsal) measuring = { route: routeFor(catalog.routes[vendor], generation, small), verified: !!support.verified };
   const cacheArg = route.serve.indexOf('--cache_dir');
   if (cacheArg >= 0) (o.io?.clearCache ?? ((p: string) => existsSync(p) && rmSync(p, { recursive: true, force: true })))(route.serve[cacheArg + 1].replace('{tools}', tools));
   const coldMs = route.timeouts.coldLoadMs ?? 180_000;

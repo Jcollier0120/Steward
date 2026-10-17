@@ -2,6 +2,35 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.78.9
+
+**Setup keeps a report of how this PC's NPU did, for its owner to send if they choose (spec/NPU-REPORTS.md). It measures every NPU it sets up now, verified or not: three short requests and a 1,000-token read, a few seconds in the NPU's turn. Only an unverified generation is calibrated from them, as before; a verified one is used whatever they say. The report holds hardware ids, versions and times, and never a file, a path, a name or the licence. Nothing in the kit sends it: the app shows it to its owner and sends it only on their word. `npu-reports.ts` turns the Exchequer's count of the reports into the patch for npu-vendors.json that they support.**
+
+### What's new
+
+- **npu-report.ts:** the report, `castellan-npu-report/1` (spec/npu-report.schema.json):
+  - **`npuReportFromSetup` and `npuReportFromCheck`:** the report of a setup, or of an NPU check on this PC's NPU. A failure is a step's code (`test-timeout`, `driver`, `cap`…), never setup's words, which can hold a path.
+  - **`rememberNpuReport` and `readNpuReport`:** `npu-report.json` beside `npu-note.json`, written whole and read back only when it matches its schema.
+  - **`reporterId`:** a random id kept in `npu-reporter.json`, made for these reports alone, so one PC counts once.
+  - **`npuReportKey`:** what makes two reports the same, for an app that offers each once.
+  - **`checkNpuReport`:** the schema, which the Exchequer checks too.
+- **npu-reports.ts:** `node <agent>\src\kit\npu-reports.ts <summary.json>`, or `--fetch` with the publisher's key. It reads the Exchequer's `castellan-npu-summary/1` against this kit's npu-vendors.json and prints, per generation, what the reports say and the merge patch they support. A generation is verified by 3 PCs passing with under 1 in 5 failing. Timeouts come from the slow end, by calibrate's formulas and bounds, and are never lowered. `measured` is for the site. A PCI id nobody has listed gets a line once 2 PCs report it. It changes nothing.
+- **json-schema.ts:** the small part of JSON Schema npu-bench.ts used, now shared with npu-report.ts, with `$ref` to a schema's own `$defs`.
+- **spec/NPU-REPORTS.md** and **spec/npu-report.schema.json.**
+- **NpuGeneration's `measured`:** a generation's speed from its owners' reports, for the website: `{ pcs, server, model, tokensPerSecond, coldStartS, at }`.
+
+### What changed
+
+- **setup.ts:**
+  - **`setupCommand`:** keeps the NPU's report (`npuReportFile`, the accelerators folder's `npu-report.json` by default; none with a given detection unless a file is given). It writes one whenever it set the NPU up or left it out, and none when it left a configured NPU alone. `app` names the app in it ("manor 0.16.200").
+  - **`setUpNpu`:** measures every NPU after its test request. Its result has `failed`, the step's code, and `speeds`. `measureNpu` also reads a prompt of about 1,000 tokens (`readTokens`, `readMs`). `fillerPrompt` moved here from npu-check.ts, which exports it still.
+  - **Code that fakes `NpuIo.measure`:** it is now called for a verified generation too. A fake that returns null there leaves the NPU on the route's values, as before.
+- **npu-check.ts:** a run on this PC's NPU (not a rehearsal) keeps the same report from its own steps (`npuReportFile`, `app`).
+
+### What an agent must do
+
+For NPU reports, nothing: setup and npu-check keep the report by themselves, and nothing is sent. An app that offers it reads `npu-report.json` (`npuReportFile`) and passes its name and version as `app`. A PC under 20 GB that runs its generation's `smallPc` models reports those models. `npu-reports.ts` lists them on their own and doesn't count them toward the route's model.
+
 ## 2.78.8
 
 **Qwen3-VL-2B is every Snapdragon X2's NPU model, whatever its memory, and a first-generation X keeps Qwen3-VL-4B. And under the Smith, the keeper's look now runs the PC's refreshes (the NPU's command, the cards' vision, hardware.json), which until now never ran there. The tools home is now the folder config.json's commands are in, so a PC set up in the accelerators' folder no longer looks for its servers in a ~\.reeve that holds only logs.**

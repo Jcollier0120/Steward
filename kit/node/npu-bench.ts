@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, runPowerShell } from './detect.ts';
+import { checkSchema } from './json-schema.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
 import { expandRoute, generationOf, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
@@ -910,29 +911,9 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
 }
 
 // ------------------------------------------------------------------------------------------------
-// The report's schema (the small part of JSON Schema it uses)
+// The report's schema: json-schema.ts's small part of JSON Schema, which the NPU report (npu-report.ts) uses too
 
-export function checkSchema(value: unknown, schema: any, at = 'report'): string[] {
-  const problems: string[] = [];
-  const types = schema.type ? (Array.isArray(schema.type) ? schema.type : [schema.type]) : null;
-  const typeOf = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v);
-  if (types) {
-    const t = typeOf(value);
-    if (!types.includes(t) && !(t === 'integer' && types.includes('number'))) return [`${at} is ${t}, not ${types.join(' or ')}`];
-  }
-  if (schema.enum && !schema.enum.includes(value)) problems.push(`${at} is ${JSON.stringify(value)}, not one of ${schema.enum.join(', ')}`);
-  if (schema.const !== undefined && value !== schema.const) problems.push(`${at} isn't ${JSON.stringify(schema.const)}`);
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const k of schema.required ?? []) if (!(k in (value as object))) problems.push(`${at}.${k} is missing`);
-    for (const [k, v] of Object.entries(value as object)) {
-      const sub = schema.properties?.[k] ?? (typeof schema.additionalProperties === 'object' ? schema.additionalProperties : undefined);
-      if (sub) problems.push(...checkSchema(v, sub, `${at}.${k}`));
-      else if (schema.additionalProperties === false) problems.push(`${at}.${k} isn't in the schema`);
-    }
-  }
-  if (Array.isArray(value) && schema.items) value.forEach((v, i) => problems.push(...checkSchema(v, schema.items, `${at}[${i}]`)));
-  return problems;
-}
+export { checkSchema };
 
 // ------------------------------------------------------------------------------------------------
 // As a command
