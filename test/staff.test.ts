@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { chooseKit, kitReleasesIn } from '../src/kitsource.ts';
 import { releaseDecision } from '../src/stages/release.ts';
-import { appReleasesIn, checksOf, parsePrs, readPin, staffRow } from '../src/stages/staff.ts';
+import { appReleasesIn, checksOf, parseLog, parsePrs, prOfCommit, readPin, staffRow } from '../src/stages/staff.ts';
 import { ctxFor, employee, fakeEmployee, ok, runner, sh } from './helpers.ts';
 
 // The staff's table from gh's JSON (a stand-in runner) and a fake employee's git; which employees release. (Which PRs
@@ -119,6 +119,91 @@ test("an employee's row: its checkout, its branch's version and kit, its PRs, it
   // An employee that doesn't take the kit says so.
   const off = await staffRow(ctx, { ...e, usesKit: false }, { fetch: false, kit: '1.0.0' });
   assert.deepEqual(off.notes, ['not using the kit yet']);
+});
+
+test("a commit on the branch names the PR it merged, in each host's words; one pushed without a PR is its subject", () => {
+  assert.deepEqual(prOfCommit('Merge pull request #335 from Jcollier0120/claude/ps-idle-4min', 'Kit 2.82.4: the PowerShell worker stays 4 minutes\n'), { pr: 335, title: 'Kit 2.82.4: the PowerShell worker stays 4 minutes' });
+  assert.deepEqual(prOfCommit('Merge pull request #7 from o/b', ''), { pr: 7, title: 'Merge pull request #7 from o/b' }, 'no title below: its subject');
+  assert.deepEqual(prOfCommit('Fix the thing (#12)', ''), { pr: 12, title: 'Fix the thing' }, "GitHub's squash");
+  assert.deepEqual(prOfCommit("Merge pull request 'Fix the thing' (#4) from fix into main", ''), { pr: 4, title: 'Fix the thing' }, "Gitea's");
+  assert.deepEqual(prOfCommit('Merged PR 31: Fix the thing', 'Related work items: #5'), { pr: 31, title: 'Fix the thing' }, "Azure DevOps'");
+  assert.deepEqual(prOfCommit('Merged in fix (pull request #9)', '\nFix the thing\n\nApproved-by: someone\n'), { pr: 9, title: 'Fix the thing' }, "Bitbucket's");
+  assert.deepEqual(prOfCommit("Merge branch 'fix' into 'main'", 'Fix the thing\n\nSee merge request group/fake!21'), { pr: 21, title: 'Fix the thing' }, "GitLab's");
+  assert.deepEqual(prOfCommit("Merge branch 'fix' into 'main'", 'See merge request group/fake!21'), { pr: 21, title: "Merge branch 'fix' into 'main'" });
+  assert.deepEqual(prOfCommit('Changelog: a line lost in the merge', 'Merge pull request #3 from o/b'), { pr: null, title: 'Changelog: a line lost in the merge' }, 'a PR named in the body alone is no merge');
+  assert.deepEqual(parseLog(`${'a'.repeat(40)}\x1fMerge pull request #2 from o/b\x1fTwo\n\x1e\n${'b'.repeat(40)}\x1fOne\x1f\x1e\n`), [
+    { sha: 'aaaaaaa', pr: 2, title: 'Two' },
+    { sha: 'bbbbbbb', pr: null, title: 'One' },
+  ]);
+  assert.deepEqual(parseLog(''), []);
+});
+
+test('what the next build brings: the branch since the commit its last release was built from, a merged PR as one line, the newest ten and the count', async () => {
+  const f = fakeEmployee(path.join(tmp, 'next'), { version: '0.4.0', kit: '1.0.0' });
+  const released = sh(f.checkout, 'rev-parse', 'HEAD');
+  const commit = (msg: string) => sh(f.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', msg);
+  commit('Changelog: a line lost in the merge');
+  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/fix');
+  commit('Fix the thing');
+  commit('Fix the thing, its test');
+  sh(f.checkout, 'switch', '--quiet', 'main');
+  sh(f.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '--quiet', '--no-ff', 'claude/fix', '-m', 'Merge pull request #12 from Jcollier0120/claude/fix', '-m', 'Fix the thing');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  // The clone's origin/main is left behind: the row's fetch brings it.
+  sh(f.checkout, 'update-ref', 'refs/remotes/origin/main', released);
+  let releases = [{ tagName: 'v0.4.0', isDraft: false, publishedAt: null }];
+  const r = runner((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok([]);
+    if (args[0] === 'release' && args[1] === 'list') return ok(releases);
+    if (args[0] === 'release' && args[1] === 'view') return ok({ targetCommitish: released });
+  });
+  const e = employee(f.checkout);
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'next', 'work'), run: r.run, neutralDir: tmp });
+  const row = await staffRow(ctx, e, { fetch: true, kit: '1.0.0' });
+  assert.deepEqual(row.nextBuild, {
+    tag: 'v0.4.0',
+    commit: released,
+    commits: [
+      { sha: sh(f.checkout, 'rev-parse', '--short=7', 'main'), pr: 12, title: 'Fix the thing' },
+      { sha: sh(f.checkout, 'rev-parse', '--short=7', 'main~1'), pr: null, title: 'Changelog: a line lost in the merge' },
+    ],
+    count: 2,
+  });
+  assert.equal(row.releaseNeeded, false, 'the same version: the build stamps it (stamp.ts), yet these are what it brings');
+
+  // More than ten: the newest ten, and how many in all.
+  for (let i = 1; i <= 11; i++) commit(`Commit ${i}`);
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  const long = (await staffRow(ctx, e, { fetch: true, kit: '1.0.0' })).nextBuild!;
+  assert.equal(long.count, 13);
+  assert.deepEqual(long.commits.map((c) => c.title), ['Commit 11', 'Commit 10', 'Commit 9', 'Commit 8', 'Commit 7', 'Commit 6', 'Commit 5', 'Commit 4', 'Commit 3', 'Commit 2']);
+
+  // Released at main's head: nothing to bring.
+  const head = sh(f.checkout, 'rev-parse', 'main');
+  const atHead = runner((args) => (args[0] === 'release' && args[1] === 'view' ? ok({ targetCommitish: head }) : args[0] === 'release' ? ok(releases) : ok([])));
+  const none = await staffRow(ctxFor({ employees: [e], workRoot: tmp, run: atHead.run, neutralDir: tmp }), e, { fetch: false, kit: '1.0.0' });
+  assert.deepEqual(none.nextBuild, { tag: 'v0.4.0', commit: head, commits: [], count: 0 });
+
+  // No release yet: nothing to count from, rather than the whole history.
+  releases = [];
+  assert.equal((await staffRow(ctx, e, { fetch: false, kit: '1.0.0' })).nextBuild, null);
+});
+
+test("released on this PC, the next build counts from the commit its installed copy was built from; a development build's says nothing", async () => {
+  const f = fakeEmployee(path.join(tmp, 'here'), { version: '0.4.0', kit: '1.0.0' });
+  const built = sh(f.checkout, 'rev-parse', 'HEAD');
+  sh(f.checkout, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '--allow-empty', '-m', 'Merge pull request #5 from o/claude/x', '-m', 'Something new');
+  sh(f.checkout, 'push', '--quiet', 'origin', 'main');
+  const installed = path.join(tmp, 'here', 'installed');
+  mkdirSync(installed, { recursive: true });
+  const r = runner(() => ok([]));
+  const e = employee(f.checkout, { release: 'npm run release -- --install', installed });
+  const ctx = ctxFor({ employees: [e], workRoot: tmp, run: r.run, neutralDir: tmp });
+  writeFileSync(path.join(installed, 'release.json'), `﻿${JSON.stringify({ version: '0.4.0', commit: built.slice(0, 12), dirty: false })}`);
+  const row = await staffRow(ctx, e, { fetch: true, kit: '1.0.0' });
+  assert.deepEqual(row.nextBuild, { tag: 'v0.4.0', commit: built, commits: [{ sha: sh(f.checkout, 'rev-parse', '--short=7', 'main'), pr: 5, title: 'Something new' }], count: 1 });
+  writeFileSync(path.join(installed, 'release.json'), JSON.stringify({ version: '0.4.0', commit: built, dirty: true }));
+  assert.equal((await staffRow(ctx, e, { fetch: false, kit: '1.0.0' })).nextBuild, null);
 });
 
 test("the table says whether an employee's tools/kit.ts is the Steward's", async () => {

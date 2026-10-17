@@ -85,6 +85,11 @@ export interface StaffRow {
   release: (ReleaseInfo & { kit: string | null | 'unknown' }) | null;
   /** The version on its branch has no release yet. */
   releaseNeeded: boolean;
+  /**
+   * What the next build releases: origin's branch since the commit its latest release was built from (nextBuildOf). Null
+   * when that can't be said (no release yet, or its commit isn't in the clone); absent in a row made before Steward 0.36.135.
+   */
+  nextBuild?: NextBuild | null;
   /** Settings merge its ready PRs (Employee.merges), and name a way to release it. */
   merges?: boolean;
   releases?: boolean;
@@ -93,6 +98,85 @@ export interface StaffRow {
   prepared: { branch: string; ahead: number } | null;
   /** Anything worth a word: not using the kit, a version mismatch, a failed lookup. */
   notes: string[];
+}
+
+/** A commit on an employee's branch since its last release: a merged PR is one, its merge commit (git log --first-parent). */
+export interface Unreleased {
+  /** Its commit, short. */
+  sha: string;
+  /** The PR it merged, where its message names one (prOfCommit); null for a commit pushed without one. */
+  pr: number | null;
+  /** The PR's title, or the commit's subject. */
+  title: string;
+}
+
+/** What the next build releases (StaffRow.nextBuild). */
+export interface NextBuild {
+  /** The release it counts from (v<x.y.z>), and the commit that release was built from. */
+  tag: string;
+  commit: string;
+  /** The newest NEXT_BUILD_SHOWN, newest first. */
+  commits: Unreleased[];
+  /** How many there are in all, these among them. */
+  count: number;
+}
+
+/** How many of the next build's commits a row keeps: the newest. */
+export const NEXT_BUILD_SHOWN = 10;
+
+/**
+ * The PR a commit on the branch merged, and its title, from its message as each host writes it: GitHub's merge commit
+ * ("Merge pull request #12 from owner/branch", the title on the next line) or squash ("Title (#12)"), Gitea's ("Merge
+ * pull request 'Title' (#12) from branch into main"), Azure DevOps' ("Merged PR 12: Title"), Bitbucket's ("Merged in
+ * branch (pull request #12)", the title below) and GitLab's ("Merge branch 'x' into 'main'", the title and "See merge
+ * request group/repo!12" below). Anything else was pushed without a PR: its subject, and no number. Pure.
+ */
+export function prOfCommit(subject: string, body: string): { pr: number | null; title: string } {
+  const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+  const first = lines[0] ?? '';
+  let m = /^Merge pull request #(\d+) from \S+/.exec(subject);
+  if (m) return { pr: Number(m[1]), title: first || subject };
+  m = /^Merge pull request '(.+)' \(#(\d+)\) from /.exec(subject);
+  if (m) return { pr: Number(m[2]), title: m[1] };
+  m = /^Merged PR (\d+): (.+)$/.exec(subject);
+  if (m) return { pr: Number(m[1]), title: m[2] };
+  m = /^Merged in \S+ \(pull request #(\d+)\)/.exec(subject);
+  if (m) return { pr: Number(m[1]), title: first || subject };
+  m = /^Merge branch '.+' into '.+'/.test(subject) ? /See merge request \S+!(\d+)/.exec(body) : null;
+  if (m) return { pr: Number(m[1]), title: first && !first.startsWith('See merge request') ? first : subject };
+  m = /^(.+) \(#(\d+)\)$/.exec(subject);
+  if (m) return { pr: Number(m[2]), title: m[1] };
+  return { pr: null, title: subject };
+}
+
+/** git log's answer in LOG_FORMAT (fields split by \x1f, commits ended by \x1e) as Unreleased lines, in its order. Pure. */
+export function parseLog(out: string): Unreleased[] {
+  return out
+    .split('\x1e')
+    .map((c) => c.replace(/^\s+/, ''))
+    .filter(Boolean)
+    .map((c) => {
+      const [sha = '', subject = '', body = ''] = c.split('\x1f');
+      return { sha: sha.trim().slice(0, 7), ...prOfCommit(subject.trim(), body) };
+    });
+}
+
+const LOG_FORMAT = '--format=%H%x1f%s%x1f%b%x1e';
+
+/**
+ * What the next build releases: `remote` since `from`, the commit a release was built from, as git log --first-parent
+ * lists it in the clone (a merged PR is its merge commit, one line). The newest NEXT_BUILD_SHOWN are read; their count
+ * is asked of git only when there are more. Null when git can't say.
+ */
+export async function nextBuildOf(run: Ctx['run'], dir: string, remote: string, from: { tag: string; commit: string }): Promise<NextBuild | null> {
+  const range = `${from.commit}..${remote}`;
+  const out = await gitMaybe(run, dir, 'log', '--first-parent', `-n${NEXT_BUILD_SHOWN + 1}`, LOG_FORMAT, range);
+  if (out === null) return null;
+  const read = parseLog(out);
+  const commits = read.slice(0, NEXT_BUILD_SHOWN);
+  let count = read.length;
+  if (read.length > NEXT_BUILD_SHOWN) count = Number((await gitMaybe(run, dir, 'rev-list', '--count', '--first-parent', range))?.trim()) || read.length;
+  return { tag: from.tag, commit: from.commit, commits, count };
 }
 
 export interface Staff {
@@ -231,6 +315,7 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     main: null,
     release: null,
     releaseNeeded: false,
+    nextBuild: null,
     merges: e.merges,
     releases: !!e.release,
     prs: [],
@@ -304,6 +389,8 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
 
   await Promise.all([local, prs]);
   const list = await releases;
+  // The release the next build counts from, and the commit it was built from, once that commit is in the clone.
+  let from: { tag: string; commit: string } | null = null;
   if (list) {
     const latest = list[0] ?? null;
     if (latest) {
@@ -312,7 +399,10 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
       try {
         const tagged = g?.releases.find((r) => r.tagName === latest.tag)?.commit;
         const target = tagged ?? (byGit ? null : JSON.parse(must(await hostFor({ ...ctx, run }, e).viewRelease(e.repo, latest.tag, 'targetCommitish'))).targetCommitish as string);
-        if (target && row.checkout.exists && /^[0-9a-f]{40}$/i.test(target) && (await commitOf(run, dir, target))) kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
+        if (target && row.checkout.exists && /^[0-9a-f]{40}$/i.test(target) && (await commitOf(run, dir, target))) {
+          from = { tag: latest.tag, commit: target.toLowerCase() };
+          kit = readPin(await showFile(run, dir, target, 'kit.json'))?.kit ?? null;
+        }
       } catch {
         // unknown
       }
@@ -324,19 +414,32 @@ export async function staffRow(ctx: Ctx, e: Employee, opts: { fetch: boolean; ki
     if (row.main?.version && e.release) row.releaseNeeded = !list.some((r) => r.version === row.main!.version);
   }
   // Released here (releasedHere): what counts is the installed copy, which no GitHub release lists.
-  if (here) row.releaseNeeded = !!row.main?.version && here.version !== row.main.version;
+  if (here) {
+    row.releaseNeeded = !!row.main?.version && here.version !== row.main.version;
+    const built = here.version && here.commit && row.checkout.exists ? await commitOf(run, dir, here.commit) : null;
+    from = built ? { tag: `v${here.version}`, commit: built } : null;
+  }
+  if (from && row.main) {
+    row.nextBuild = await nextBuildOf(run, dir, remote, from);
+    // git couldn't say: made again next time.
+    if (!row.nextBuild) shaky.add(row);
+  }
   return row;
 }
 
-/** The installed copy of an employee released here: its release.json's version. Null for one released on GitHub. */
-function releasedHereRow(e: Employee, row: StaffRow): { version: string | null } | null {
+/**
+ * The installed copy of an employee released here: its release.json's version, and the commit it was built from (none
+ * for a development build). Null for one released on GitHub.
+ */
+function releasedHereRow(e: Employee, row: StaffRow): { version: string | null; commit: string | null } | null {
   if (!releasedHere(e)) return null;
   try {
-    const r = JSON.parse(readFileSync(path.join(expandEnv(e.installed), 'release.json'), 'utf8')) as { version?: unknown };
-    return { version: typeof r.version === 'string' ? r.version : null };
+    const r = JSON.parse(readFileSync(path.join(expandEnv(e.installed), 'release.json'), 'utf8').replace(/^﻿/, '')) as { version?: unknown; commit?: unknown; dirty?: unknown };
+    const commit = r.dirty === false && typeof r.commit === 'string' && /^[0-9a-f]{7,40}$/i.test(r.commit) ? r.commit : null;
+    return { version: typeof r.version === 'string' ? r.version : null, commit };
   } catch {
     row.notes.push(`released on this PC, and not installed yet (${e.installed || 'no install folder set'})`);
-    return { version: null };
+    return { version: null, commit: null };
   }
 }
 
@@ -396,6 +499,7 @@ export function rowKey(ctx: Ctx, e: Employee, o: { kit: string | null; tool?: st
     }
   }
   const tool = o.tool ? createHash('sha256').update(o.tool).digest('hex') : null;
-  const what = { e, self: !!o.self, repo: repoSig(g), origin, prepared, installed, team: ctx.settings.team, kit: o.kit, tool };
+  // `made`: what a row holds, raised when it holds more (2: nextBuild, Steward 0.36.135), so a row kept from before is made again.
+  const what = { made: 2, e, self: !!o.self, repo: repoSig(g), origin, prepared, installed, team: ctx.settings.team, kit: o.kit, tool };
   return createHash('sha256').update(JSON.stringify(what)).digest('hex').slice(0, 32);
 }
