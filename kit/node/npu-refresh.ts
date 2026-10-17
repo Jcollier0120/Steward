@@ -123,7 +123,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   if (!route || !runsRoute(entry, route, d.tools)) return done('not-route');
 
   // What setup would write now, on the same ports, with or without its embeddings as before, and the models this PC's
-  // memory takes (a small one's own, smallPc: pulled by setup, so a model not here yet is needs-setup).
+  // generation and memory take (a Snapdragon X2's Qwen3-VL-2B: pulled by setup, so a model not here yet is needs-setup).
   const plan = planNpu({ support: npu, tools: d.tools, downloadsDir: path.join(d.tools, 'servers', 'downloads'), env: d.env, exists: d.exists, catalog, port: portOf(entry.chat.baseUrl), noEmbed: !entry.embed?.startCommand?.length, cards, small: smallPc(detected.ramBytes) });
   if (!plan) return done('no-npu');
   if (!plan.installed || plan.runtime || plan.downloadBytes > 0) return done('needs-setup');
@@ -136,7 +136,7 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   if (served(entry) === served(next)) return done('current');
 
   const changes = [
-    // Another model (a small PC's own, once setup has pulled it: a 16 GB Snapdragon X2's Qwen3-VL-2B).
+    // Another model (its generation's own, once setup has pulled it: a Snapdragon X2's Qwen3-VL-2B).
     ...(entry.chat.model !== next.chat!.model ? [`model ${next.chat!.model} in ${entry.chat.model}'s place`] : []),
     ...argChanges(entry.chat.startCommand, next.chat!.startCommand ?? []),
     ...(entry.embed?.startCommand && next.embed?.startCommand ? argChanges(entry.embed.startCommand, next.embed.startCommand).map((c) => `embeddings: ${c}`) : []),

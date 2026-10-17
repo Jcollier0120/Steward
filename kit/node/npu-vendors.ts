@@ -129,9 +129,15 @@ export interface NpuGeneration {
   /** Why its values are what they are, in a sentence. */
   basis?: string;
   /**
-   * The models it runs instead of the route's on a PC with little memory (smallPc: under idleStop.smallPcGb), and why:
-   * a 16 GB Snapdragon X2 runs Qwen3-VL-2B, its pictures on the Adreno, where a bigger one keeps the route's 4B.
-   * routeFor puts them in the route's place when it's told the PC is small.
+   * The models it runs instead of the route's, on every PC of the generation whatever its memory: the Snapdragon X2's
+   * Qwen3-VL-2B, its pictures on the Adreno, where the first-generation X keeps the route's 4B. routeFor puts them in
+   * the route's place.
+   */
+  models?: NpuModel[];
+  /**
+   * The models it runs instead of its own (or the route's) on a PC with little memory (smallPc: under
+   * idleStop.smallPcGb), and why. routeFor puts them in the route's place when it's told the PC is small. No generation
+   * has any now: the X2's 2B, a small X2's alone in kit 2.78.0, is every X2's (`models`).
    */
   smallPc?: { models: NpuModel[]; basis: string };
   /**
@@ -546,15 +552,28 @@ export function runsRoute(entry: { chat?: { startCommand?: string[] } } | undefi
 // Per generation, memory and calibration
 
 /**
+ * Whether a route's models are its own as npu-vendors.json has them (the same ids, in order), not a caller's. A route
+ * the catalog doesn't ship (a test's) counts as its own.
+ */
+function ownModels(route: NpuRoute): boolean {
+  const shipped = Object.values(NPU_CATALOG.routes).find((r) => r.server === route.server && r.arch === route.arch);
+  return !shipped || (shipped.models.length === route.models.length && shipped.models.every((m, i) => m.id === route.models[i].id));
+}
+
+/**
  * The route as it runs on one generation: the generation's own timeouts, caps and server arguments over the route's
  * (Meteor Lake's NPU 3720, about a quarter of Lunar Lake's speed, gets more time and a shorter compiled prompt); on
- * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). On a PC with little memory (`small`: smallPc of
- * its memory), the generation's smallPc models in the route's place. The route itself when the generation has none of
- * these, or isn't the route's.
+ * UNKNOWN_GENERATION, the route's most cautious (unknownGeneration). The generation's own models in the route's place
+ * (a Snapdragon X2's Qwen3-VL-2B), and on a PC with little memory (`small`: smallPc of its memory) its smallPc models
+ * over those. A caller's own models stay (the Smith's try of another model): a generation's go only in place of the
+ * route's own, as npu-vendors.json has them (ownModels). The route itself when the generation has none of these, or
+ * isn't the route's.
  */
 export function routeFor(route: NpuRoute, generation: string | null | undefined, small = false): NpuRoute {
   const g = generationOf(route, generation);
-  if (small && g?.smallPc) route = { ...route, models: g.smallPc.models };
+  const own = ownModels(route);
+  if (own && g?.models) route = { ...route, models: g.models };
+  if (own && small && g?.smallPc) route = { ...route, models: g.smallPc.models };
   if (!g || (!g.timeouts && !g.caps && !g.maxContextTokens && !g.args && !g.embedArgs && !g.memoryGb)) return route;
   const replaced = (args: string[], values: Record<string, string> | undefined) => {
     const serve = [...args];

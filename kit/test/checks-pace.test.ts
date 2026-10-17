@@ -15,7 +15,9 @@ mkdirSync(process.env.FIXTURE_HOME, { recursive: true });
 
 const { CHECKS_AT_ONCE, CHECKS_AT_ONCE_FULL, CHECKS_SLOWER_ENV, CHECKS_TURN_MS, checksAtOnce, checksCap, checksLimits, checksMemory, checksPaceCap, checksPaceCompileScript, checksPaceExe, checksSlower, paced, pacedCommand, pacedSlower, pacedTestConcurrency, withTestConcurrency } = await import('./fixture/src/kit/checks-pace.ts');
 const { psPaced } = await import('./fixture/src/kit/ps.ts');
-const { AGENTS_AT_ONCE, CEILING_CAP, PACE_CEILING } = await import('./fixture/src/kit/pace.ts');
+const { AGENTS_AT_ONCE, CEILING_CAP, CEILING_ENV, PACE_CEILING, ceilingCap } = await import('./fixture/src/kit/pace.ts');
+// The launchers these tests run share a job of the test's own, never setting the PC's real check runs' job's limits.
+process.env.KIT_CHECKS_JOB_NAME = `kit-test-checks-${process.pid}`;
 
 const manorWith = (name: string, settings: unknown) => {
   const dir = path.join(home, name);
@@ -145,6 +147,7 @@ test('on Windows, a paced command: through the launcher, its arguments and outpu
   assert.deepEqual([p.slower, p.waitMs], [4, CHECKS_TURN_MS], 'half the processor: four times its time, and the wait for a turn');
   assert.equal(p.env.MSBUILDDISABLENODEREUSE, '1', ".NET's build servers don't stay behind in the job");
   assert.equal(p.env.KIT_CHECKS_SLOWER, '4', 'told how much slower it runs, for its own waits');
+  assert.equal(p.env[CEILING_ENV], String(CEILING_CAP), "the launcher is given the manor's ceiling (kit 2.78.7)");
   const tests = await pacedCommand(process.execPath, ['--test', 'a.test.ts'], { env: { KIT_CHECKS_PACE: '25' }, home: path.join(home, 'no-manor'), processors: 16 });
   assert.deepEqual(tests.args, [checksLimits(2500), process.execPath, '--test', '--test-concurrency=8', 'a.test.ts'], 'a test run: as many files at once as the cap has room for');
   const script = 'console.log(JSON.stringify([process.argv.slice(1), require("os").getPriority()])); console.error("e"); process.exit(7)';
@@ -216,6 +219,53 @@ test("on Windows, programs started apart share one capped job: together, they st
   // A tenth of the PC for the two together (each a job of its own would let them take a tenth each); a busy PC can only
   // give them less.
   assert.ok(shares[0] + shares[1] <= 0.14, `together ${(100 * (shares[0] + shares[1])).toFixed(1)}% of the processor, not past the job's 10%`);
+});
+
+test("the manor's ceiling (kit 2.78.7): one cap for every family together, and under node --test only a test's own", () => {
+  assert.equal(CEILING_ENV, 'KIT_CEILING');
+  assert.equal(ceilingCap({}), CEILING_CAP);
+  assert.equal(ceilingCap({ NODE_TEST_CONTEXT: 'child' }), 0, "a test's programs: no ceiling, as before");
+  assert.equal(ceilingCap({ NODE_TEST_CONTEXT: 'child', KIT_CEILING_CAP: '1000' }), 0, "never the PC's own ceiling at a test's cap");
+  assert.equal(ceilingCap({ NODE_TEST_CONTEXT: 'child', KIT_CEILING_CAP: '1000', KIT_CEILING_JOB_NAME: 'kit-test-ceiling' }), 1000);
+  assert.equal(ceilingCap({ NODE_TEST_CONTEXT: 'child', KIT_CEILING_CAP: '9900', KIT_CEILING_JOB_NAME: 'kit-test-ceiling' }), CEILING_CAP, 'never past it');
+});
+
+test("on Windows, a check run and a server started apart, each in its own family's job, stay within the manor's ceiling together (kit 2.78.7)", { skip: process.platform !== 'win32' }, async () => {
+  const { startApart } = await import('./fixture/src/kit/apart.ts');
+  const p = await pacedCommand(process.execPath, ['x'], { env: { KIT_CHECKS_PACE: '50' }, home: path.join(home, 'no-manor') });
+  // Each says it's ready, waits for the go, then keeps every processor busy for 3 s and writes the processor time it had
+  // against the PC's in that time: so the two burn at once.
+  const burn = [
+    'const fs = require("fs"); const { Worker } = require("worker_threads"); const n = require("os").availableParallelism(); const [out, go] = process.argv.slice(1);',
+    'fs.writeFileSync(out + ".ready", ""); const wait = setInterval(() => { if (!fs.existsSync(go)) return; clearInterval(wait); const t0 = Date.now();',
+    'const spin = "const end = Date.now() + 3000; let x = 0; while (Date.now() < end) x = (x * 31 + 7) % 1000003;";',
+    'let left = n; for (let i = 0; i < n; i++) new Worker(spin, { eval: true }).on("exit", () => { if (--left) return;',
+    '  const u = process.cpuUsage(); fs.writeFileSync(out, String((u.user + u.system) / ((Date.now() - t0) * 1000 * n))); }); }, 20);',
+  ].join(' ');
+  const go = path.join(home, 'ceiling-go');
+  const files = [path.join(home, 'ceiling-check.txt'), path.join(home, 'ceiling-server.txt')];
+  // The check run's job and the servers' each at 10%, under a ceiling of 10%: apart, they'd take 20% together.
+  const keys = ['KIT_APART', 'KIT_APART_CAP', 'KIT_APART_JOB_NAME', 'KIT_CEILING_CAP', 'KIT_CEILING_JOB_NAME'] as const;
+  const said = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { KIT_APART: '1', KIT_APART_CAP: '1000', KIT_APART_JOB_NAME: `kit-test-ceiling-apart-${process.pid}`, KIT_CEILING_CAP: '1000', KIT_CEILING_JOB_NAME: `kit-test-ceiling-${process.pid}` });
+  let check: ReturnType<typeof ran>;
+  try {
+    check = ran(p.file, [checksLimits(1000, checksMemory(), 0), process.execPath, '-e', burn, files[0], go], { ...process.env, [CEILING_ENV]: String(ceilingCap()) });
+    const pid = await startApart(process.execPath, ['-e', burn, files[1], go]);
+    assert.ok(pid && pid > 0, 'the server started');
+  } finally {
+    for (const [k, v] of Object.entries(said)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  await until(() => files.every((f) => existsSync(`${f}.ready`)), testsPaced(60_000), 'both to be ready');
+  writeFileSync(go, '');
+  const r = await check;
+  assert.equal(r.code, 0, r.err);
+  await until(() => files.every((f) => existsSync(f) && readFileSync(f, 'utf8')), testsPaced(60_000), 'both to have burned their 3 s');
+  const shares = files.map((f) => Number(readFileSync(f, 'utf8')));
+  assert.ok(shares[0] + shares[1] <= 0.14, `together ${(100 * (shares[0] + shares[1])).toFixed(1)}% of the processor, not past the ceiling's 10%`);
 });
 
 test('on Windows, a paced run takes a turn, and the runs it starts take none (they would wait on their own)', { skip: process.platform !== 'win32' }, async () => {

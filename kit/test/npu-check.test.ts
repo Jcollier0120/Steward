@@ -5,7 +5,7 @@ import net, { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { paced } from './until.ts';
+import { paced, until } from './until.ts';
 
 // The NPU check (npu-check.ts): setup's steps timed, then the server measured, against a fake OpenVINO Model Server in
 // this process. Nothing is downloaded or started, and no real config.json, server or lock is touched.
@@ -425,6 +425,47 @@ test("the server is started from its entry's command with its %VARIABLES% expand
   await s.stop();
   delete process.env.NPU_CHECK_TEST_NODE;
   assert.equal(existsSync(mark), true, readFileSync(path.join(dir, 'server.log'), 'utf8'));
+});
+
+test("on Windows, the check's and the benchmark's server starts apart, in the servers' capped job, as an agent's does (kit 2.78.7)", { skip: process.platform !== 'win32' }, async () => {
+  // Found by the AMD Dev Manager (2026-10-16): startServer was a plain detached child, so npu-check and npu-bench measured
+  // a server outside the servers' job. This one keeps every processor busy for 3 s, then writes its process id and the
+  // processor time it had against the PC's in that time, and waits to be stopped.
+  const { alive } = await import('./fixture/src/kit/apart.ts');
+  const dir = path.join(home, 'apart');
+  mkdirSync(dir, { recursive: true });
+  const said = path.join(dir, 'burned.json');
+  const burn = [
+    'const { Worker } = require("worker_threads"); const os = require("os"); const t0 = Date.now(); const n = os.availableParallelism(); console.log("up");',
+    'const spin = "const end = Date.now() + 3000; let x = 0; while (Date.now() < end) x = (x * 31 + 7) % 1000003;";',
+    'let left = n; for (let i = 0; i < n; i++) new Worker(spin, { eval: true }).on("exit", () => { if (--left) return;',
+    '  const u = process.cpuUsage(); require("fs").writeFileSync(process.argv[1], JSON.stringify({ pid: process.pid, share: (u.user + u.system) / ((Date.now() - t0) * 1000 * n) })); });',
+    'setTimeout(() => {}, 60000);',
+  ].join(' ');
+  const entry = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [process.execPath, '-e', burn, said] } };
+  const before = { KIT_APART: process.env.KIT_APART, KIT_APART_CAP: process.env.KIT_APART_CAP, KIT_APART_JOB_NAME: process.env.KIT_APART_JOB_NAME };
+  Object.assign(process.env, { KIT_APART: '1', KIT_APART_CAP: '1000', KIT_APART_JOB_NAME: `kit-test-npu-apart-${process.pid}` });
+  let s: Awaited<ReturnType<typeof C.startServer>>;
+  try {
+    s = await C.startServer(entry as any, path.join(dir, 'server.log'));
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  try {
+    assert.ok(s.pid && s.pid > 0, 'its process id');
+    await until(() => existsSync(said) && readFileSync(said, 'utf8'), 60_000, 'the server to have burned its 3 s');
+    const burned = JSON.parse(readFileSync(said, 'utf8'));
+    assert.equal(burned.pid, s.pid, "the pid answered is the server's own, not the launcher's, so stop() stops it");
+    // The job's cap is a tenth of the PC here; a server outside it (a plain child) would take most of it.
+    assert.ok(burned.share <= 0.14, `${(100 * burned.share).toFixed(1)}% of the processor, not past the job's 10%`);
+    assert.match(readFileSync(path.join(dir, 'server.log'), 'utf8'), /up/, 'its output in the log');
+  } finally {
+    await s.stop();
+  }
+  await until(() => !alive(s.pid!), 10_000, 'the server to have stopped');
 });
 
 test('a model that answers nonsense on the NPU fails the check at its first answer, as setup refuses it', async () => {

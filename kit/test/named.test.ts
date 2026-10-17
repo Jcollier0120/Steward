@@ -119,7 +119,9 @@ c.unref();
 console.log(JSON.stringify({ page: process.pid, detached: c.pid }));
 const t = setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(go)})) { clearInterval(t); process.exit(3); } }, 100);
 `);
-  const launcher = spawn(exe, [agent.id, `"${process.execPath}"`, `"${page}"`], { windowsHide: true, windowsVerbatimArguments: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  // With the manor's ceiling (kit 2.78.7): a test's own, named for it.
+  const ceiling = `kit-test-ceiling-${process.pid}`;
+  const launcher = spawn(exe, [agent.id, `"${process.execPath}"`, `"${page}"`], { windowsHide: true, windowsVerbatimArguments: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, KIT_CEILING: '9000', KIT_CEILING_JOB_NAME: ceiling } });
   let said = '';
   launcher.stdout.on('data', (d) => (said += d));
   const ended = new Promise<number | null>((resolve) => launcher.on('exit', (code) => resolve(code)));
@@ -148,8 +150,8 @@ public static class NamedTestJob {
   }
 }
 '@
-[NamedTestJob]::In(${pagePid}, 'Local\\Castellan-${agent.id}') + ' ' + [NamedTestJob]::In(${detached}, 'Local\\Castellan-${agent.id}')`, { timeoutMs: paced(60_000) })).trim();
-    assert.equal(inJob, 'True True', "the page and what it starts are in the agent's job");
+[NamedTestJob]::In(${pagePid}, 'Local\\Castellan-${agent.id}') + ' ' + [NamedTestJob]::In(${detached}, 'Local\\Castellan-${agent.id}') + ' ' + [NamedTestJob]::In(${pagePid}, 'Local\\${ceiling}')`, { timeoutMs: paced(60_000) })).trim();
+    assert.equal(inJob, 'True True True', "the page and what it starts are in the agent's job, and the page in the manor's ceiling");
     writeFileSync(go, '');
     assert.equal(await ended, 3, "the launcher ends with the page, with the page's exit code");
     assert.ok(!alive(pagePid));
