@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { aheadOf, fetchBranch, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
+import { aheadOf, fetchBranch, fetchFor, git, gitMaybe, removeWorktree, showFile } from '../git.ts';
 import { compareVersions, KIT_VERSION, pinText } from '../kitfiles.ts';
 import { readPin } from './staff.ts';
 import type { Employee, Settings } from '../settings.ts';
@@ -27,7 +27,9 @@ import { hostFor } from '../hosts/index.ts';
  * left untouched, and goes back to the PR's author (kickback.ts).
  * In the Steward's own repository the kit is a second version (stages/kitpart.ts): kit/VERSION and kit/CHANGELOG.md are
  * settled by the same rules, against the kit's releases and the kit versions other PRs and claims hold, and the PR's own
- * changelog entry, its kit.json pin of its own kit and its title follow the kit's new version.
+ * changelog entry, its kit.json pin of its own kit and its title follow the kit's new version. A kit version it shares
+ * with the open PR that sets it (one is stacked on the other: the same commit raises the kit in both) isn't another
+ * PR's to it: it keeps it, and claims nothing.
  * Only the team's PRs from the repository itself (never a fork's, never a draft), and the Steward's own kit PRs
  * (steward/kit-…).
  *
@@ -275,6 +277,13 @@ export function catchUpVersion(o: { head: string; from: string | null; base: str
   return { version: o.base, why: null };
 }
 
+/** An open PR, or a claim, that sets a kit version: its branch on origin, and its head when it is a PR's. */
+export interface KitSetter {
+  version: string;
+  branch: string;
+  head?: string;
+}
+
 export interface CaughtUp {
   done: boolean;
   /** A kit PR of the Steward's it closed, since it conflicted beyond its versions: the next round bumps again. */
@@ -371,9 +380,10 @@ async function closeKitPr(ctx: Ctx, e: Employee, pr: PrInfo, repo: string, why: 
  * One team PR (or kit PR of the Steward's) caught up with its branch, as the module's comment says: `released` are the employee's released
  * versions, `taken` the versions other open PRs set (which keep theirs). `carry`: what passed at its head before ("checks
  * passed here at abc1234", or its vouch), carried to the head it pushes where the catch-up touched only versions and
- * changelogs (keepsStanding), so it isn't tested again. `own`: the version it was moved to (catchUpVersion).
+ * changelogs (keepsStanding), so it isn't tested again. `own`: the version it was moved to (catchUpVersion). `kit.setters`:
+ * who sets the kit versions `kit.taken` names, so one this PR shares with its setter is kept.
  */
-export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[] }; carry?: string | null; own?: string | null }): Promise<CaughtUp> {
+export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: string[]; taken: string[]; kit?: { released: string[]; taken: string[]; setters?: KitSetter[] }; carry?: string | null; own?: string | null }): Promise<CaughtUp> {
   const { run } = ctx;
   const kitPr = isKitPr(pr);
   if ((pr.whose !== 'team' && !kitPr) || pr.fork || pr.draft) return { done: false, note: "only a ready team PR from the repository itself, or a kit PR of the Steward's, is caught up" };
@@ -406,9 +416,30 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
   const [headV, fromV, baseV, kHead, kBase, kStart] = await Promise.all([read(head), start ? read(start) : null, read(branch), kitAt(head), kitAt(branch), start ? kitAt(start) : null]);
   if (!headV || !baseV) return { done: false, note: `its version can't be read (${e.versionFiles.join(', ')})` };
   const choice = catchUpVersion({ head: headV, from: fromV, base: baseV, released: o.released, taken: o.taken, asksRelease: !!pr.after?.steps.includes('release'), own: o.own });
+  // A kit version another open PR sets that this one shares with it: the one commit raises the kit in both (this PR is
+  // stacked on that one, or that one on this), so it is one claim, not two, and neither is given another. On 2026-10-16
+  // a build renumbered the kit entries #299, #301 and #304 carried from #297 and #302 to 2.78.4, 2.78.5 and 2.78.6, which
+  // then conflicted with main once #297 merged.
+  let shared = false;
+  for (const s of kHead && o.kit?.taken.includes(kHead) ? (o.kit.setters ?? []).filter((x) => x.version === kHead && x.branch !== pr.head) : []) {
+    try {
+      if (s.head) await fetchFor(run, repo, s.head, `refs/heads/${s.branch}`);
+      else await fetchBranch(run, repo, s.branch);
+    } catch {
+      continue;
+    }
+    const both = (await gitMaybe(run, repo, 'merge-base', head, s.head ?? `origin/${s.branch}`))?.trim();
+    if (both && (await kitAt(both)) === kHead) {
+      shared = true;
+      break;
+    }
+  }
   // The kit, where the repository carries one (the Steward's own): its version settled the same way.
   const kFrom = kHead ? kStart : null;
-  const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: o.kit?.taken ?? [], asksRelease: false }) : null;
+  const kTaken = (o.kit?.taken ?? []).filter((v) => !shared || v !== kHead);
+  const kit = kHead && kBase ? catchUpVersion({ head: kHead, from: kFrom, base: kBase, released: o.kit?.released ?? [], taken: kTaken, asksRelease: false }) : null;
+  // Kept as the other PR sets it: that PR's claim, not this one's.
+  const ownKit = !!kit && kit.version !== kBase && !(shared && kit.version === kHead);
   const behind = await aheadOf(run, repo, branch, head);
   if (!behind && !choice.why && !kit?.why) return { done: false, note: 'nothing to catch up' };
 
@@ -540,8 +571,9 @@ export async function catchUp(ctx: Ctx, e: Employee, pr: PrInfo, o: { released: 
     if (title !== pr.title) await host.editPr(e.repo, pr.number, { title }).catch(() => null);
     const next = kitPr ? 'The next round merges it.' : carried ? 'It merges without being tested again.' : 'It merges once its checks pass at the new head.';
     await host.commentPr(e.repo, pr.number, `Caught up by the Steward: ${note}. ${next}`).catch(() => null);
-    // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing.
-    return said({ done: true, note, version: choice.version, head: pushed, ...(carried ? { carried } : {}), ...(kit && kit.version !== kBase ? { kitVersion: kit.version } : {}) });
+    // A kit version only for a PR that raises the kit: one that leaves it alone carries the branch's, and claims nothing;
+    // one that carries another PR's (shared) claims nothing either.
+    return said({ done: true, note, version: choice.version, head: pushed, ...(carried ? { carried } : {}), ...(ownKit ? { kitVersion: kit!.version } : {}) });
   } finally {
     try {
       await removeWorktree(run, repo, dir);
