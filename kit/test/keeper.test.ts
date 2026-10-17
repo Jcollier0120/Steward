@@ -656,6 +656,42 @@ test("the NPU's idle stop by this PC's memory: under 20 GB, each server's route'
   assert.deepEqual(idle({ ...intel, npuIdleStopMinutes: -3 }, 15.6 * GB).map(([, m]) => m), [5, 5, 10]);
 });
 
+test("a card that shares the PC's memory stops by the NPU's rule on a PC under 20 GB (5 min from llama.cpp's cold start); a card with its own memory, the processor, a bigger PC and config.json's gpuIdleStopMinutes keep theirs", async () => {
+  const { serversToReap } = await import('./fixture/src/kit/keeper.ts');
+  const { cardIdleStopMinutes, NPU_CATALOG } = await import('./fixture/src/kit/npu-vendors.ts');
+  const ep = (port: number) => ({ baseUrl: `http://127.0.0.1:${port}`, model: `m${port}`, startCommand: [LLAMA, '--port', String(port)] });
+  // As WEASELDEV02's config.json has them: OpenVINO Model Server on the NPU, Intel's graphics with 0.1 GB of their own.
+  const raw = (memoryGb?: number, extra: Record<string, any> = {}) => ({
+    ...extra,
+    accelerators: [
+      { id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: 'http://127.0.0.1:18183', model: 'c', startCommand: [OVMS, '--port', '18183'] } },
+      { id: 'gpu-intel-r-graphics', kind: 'gpu', name: 'Intel(R) Graphics', slots: 1, ...(memoryGb !== undefined ? { memoryGb } : {}), chat: ep(18191), vision: ep(18192), embed: ep(18193) },
+      { id: 'cpu', kind: 'cpu', name: 'CPU', slots: 1, chat: ep(18194) },
+    ],
+  });
+  const idle = (r: Record<string, any>, ramBytes: number | null) => serversToReap(r, { withNpu: true, ramBytes }).map((s) => (s.idleMs ?? -1) / MIN);
+  // The rule's own numbers: 20 times 6 s is 2 minutes, under the floor.
+  assert.equal(NPU_CATALOG.idleStop.cardColdStartMs, 6000);
+  assert.equal(cardIdleStopMinutes({ memoryGb: 0.1, ramBytes: 15.4 * GB, otherwise: 10 }), 5);
+  // A 16 GB laptop's integrated graphics: chat, vision and embeddings after 5 minutes, as the NPU's; the processor keeps 10.
+  assert.deepEqual(idle(raw(0.1), 15.4 * GB), [5, 5, 5, 5, 10]);
+  assert.deepEqual(idle(raw(0), 7.6 * GB), [5, 5, 5, 5, 10], 'no memory of its own at all');
+  // A card with memory of its own (2 GB or more), or one whose memory isn't known: rules.json's 10, as before.
+  assert.deepEqual(idle(raw(2), 15.4 * GB), [5, 10, 10, 10, 10]);
+  assert.deepEqual(idle(raw(8), 15.4 * GB), [5, 10, 10, 10, 10]);
+  assert.deepEqual(idle(raw(), 15.4 * GB), [5, 10, 10, 10, 10]);
+  // A bigger PC, or memory unknown: 10, as before.
+  assert.deepEqual(idle(raw(0.1), 32 * GB), [10, 10, 10, 10, 10]);
+  assert.deepEqual(idle(raw(0.1), null), [10, 10, 10, 10, 10]);
+  // The owner's word, on any PC, wins: longer, shorter or never, and never the NPU's.
+  assert.deepEqual(idle(raw(0.1, { gpuIdleStopMinutes: 240 }), 15.4 * GB), [5, 240, 240, 240, 240]);
+  assert.deepEqual(idle(raw(0.1, { gpuIdleStopMinutes: 10 }), 15.4 * GB), [5, 10, 10, 10, 10], "the default's own value, given, is a word too");
+  assert.deepEqual(idle(raw(0.1, { gpuIdleStopMinutes: 0 }), 15.4 * GB), [5, 0, 0, 0, 0]);
+  assert.deepEqual(idle(raw(0.1, { npuIdleStopMinutes: 30 }), 15.4 * GB), [30, 5, 5, 5, 10], "the NPU's word is the NPU's alone");
+  // A value the keeper can't take is no word at all: the rule's.
+  assert.deepEqual(idle(raw(0.1, { gpuIdleStopMinutes: -3 }), 15.4 * GB), [5, 5, 5, 5, 10]);
+});
+
 test("Intel's embedding server (a second OpenVINO Model Server) is looked after with the NPU's lock and idle time; npu-embed still exits by itself", () => {
   const list = reapedServers(npuRaw(OVMS, OVMS).accelerators as any, 'C:\\logs', { npuMs: 7 * MIN, otherMs: 5 * MIN }, 'C:\\locks\\npu');
   const embed = list.find((s) => s.base === 'http://127.0.0.1:18186')!;

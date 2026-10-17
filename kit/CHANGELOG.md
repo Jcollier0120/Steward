@@ -28,6 +28,56 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
 - Nothing for an agent that sends pictures through the kit's `vision`. One that counts a picture with `visionTokens` itself should pass the accelerator.
 - An agent still on an older kit ignores `pictureTokens`: on an X2 it sends pictures at their own size, and a 4K screen is refused until it takes this kit.
 
+## 2.79.1
+
+**The title bar's status pill sits beside the agent's name, with the role alone on the line under them.**
+
+### What changed
+
+- **The title bar (page.ts and the React shell, shell.tsx):** the pill moved up from the role's line to the name's: `<div class="name-line"><h1>…</h1><span class="status-pill …">…</span></div><p class="role" title="…">…</p>`. `.role-line` is gone, and the role is a `p` of its own. The pill is still plain text in the brand's link, nothing to press. Its classes (on, off, busy and the busy pulse), its title and `data-tour="status"` are as they were.
+  - **The name and the pill** stay whole. The pill (16px) is centred on the name's 19.5px line, so the brand stays 43.7px high and the bar 57px.
+  - **The role** has its line to itself, up to its own width. It's cut with an ellipsis at a word when the bar has no room for it: one clamped line (`-webkit-line-clamp: 1`), not `nowrap`, so its least width is a word's. Its whole text is its title.
+  - **Wrapping:** the brand is never narrower than its icon, the name and the pill (`min-width: min-content`, now set by the name line). A window too narrow for that wraps the tools to a second row.
+  - **In a narrow window** (640px or less): the pill goes under the name when they don't fit side by side, and is cut with an ellipsis when it's longer than the line. The role keeps its one line under them. `--titlebar-h`'s narrow default stays 109px.
+- **Checked in a Chromium browser,** at 780px and 375px wide, for the Smith while it works ("At the forge") and the Porter on duty (a long pill and a long role): no sideways scroll, and the bar 57px and 109px.
+
+### Before you update
+
+- An agent whose own CSS styles `.brand .role-line`, or `.brand .role` as a `span`, should look at its title bar. No agent in the manor does. Otherwise there's nothing to do: it updates itself as usual.
+
+## 2.78.26
+
+**The NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too, and its check for what was missing counted only the route's models. On an Intel NPU 3720, whose chat model was there and embedder wasn't, `--no-setup` went on and pulled Qwen3-Embedding (428 MB) through OpenVINO Model Server.**
+
+### What changed
+
+- **npu-bench.ts plans the route without its embeddings (`planNpu`'s `noEmbed`, as the NPU check's hardening does).** The suite never asks for an embedding, so the embedding server and its model (Intel's second OpenVINO Model Server and Qwen3-Embedding, the Snapdragon's llama-server and its model) are no longer fetched or set up for a run. FastFlowLM's route is as it was.
+  - **`--no-setup`** stops with a `setup` mark, exit 1, whenever the plan would fetch anything: the server, its runtime, its model, or an embedding server and its model, if a plan ever carries one.
+  - **The download prompt** names the plan's own total (`downloadBytes`): on a fresh PC about 2.4 GB on Intel (was 2.8), 4.4 GB on a Snapdragon X (was 5.1) and 1.9 GB on an X2 (was 2.6).
+- **NPU-BENCHMARK.md** says what `--yes` fetches now, and that `--no-setup` refuses instead.
+
+### Before you update
+
+- Nothing to do: it updates itself as usual. A bench run in a tools home where setup already ran fetches nothing, as before.
+
+## 2.78.25
+
+**On a PC under 20 GB, the keeper stops a graphics card's model servers after 5 minutes unused, not 10, when the card shares the PC's memory (integrated graphics). Their models hold the PC's own memory, as the NPU's do, and they start again from the disk cache in 2 to 5 s.**
+
+### What changed
+
+- **npu-vendors.ts' `cardIdleStopMinutes`:** the NPU's small-PC rule (20 times the cold start, never under `floorMinutes`), for a card with under `OWN_MEMORY_GB` (2) of its own, from llama.cpp's cold start (`idleStop.cardColdStartMs`, 6 s in npu-vendors.json): 5 minutes. On a PC of 20 GB or more, for a card with memory of its own, or one whose `memoryGb` config.json doesn't give, it's `gpuIdleStopMinutes` (rules.json's 10), as before.
+- **keeper.ts:**
+  - **`serversToReap`** gives a card's servers that time when config.json has no `gpuIdleStopMinutes`, as it gives the NPU's servers their route's minutes when it has no `npuIdleStopMinutes`. A `gpuIdleStopMinutes` in config.json still wins, on any PC: longer, shorter or 0 for never. The processor keeps its 10.
+  - **`reapedServers`** takes `idle.otherMsFor`, a card's or the processor's own idle time, over `idle.otherMs`.
+- **Measured on a Core Ultra 5 225U with 15.4 GB** (Intel Graphics with 0.1 GB of their own; llama.cpp b11669-vulkan, from the disk cache), from start to the first answer:
+  - Qwen3-4B chat: 3.8 to 5.2 s.
+  - Qwen3-VL-4B vision with its projector: 3.8 to 5.4 s.
+  - The embedding model: 1.6 to 2.9 s.
+  - Its keeper had stopped the vision server three times in a day, each after 10 to 11 minutes unused, holding some 5 GB of the 15.4 for 5 minutes longer than this keeps it. spec/NPU-VENDORS.md has the table.
+- **spec:** NPU-VENDORS.md, A card that shares the PC's memory rests the same way, and ACCELERATORS.md's idle stop.
+- **What an agent must do:** nothing. The keeper takes the new time at its next look with this kit, and a `gpuIdleStopMinutes` the owner set stays theirs.
+
 ## 2.78.24
 
 **The local models take less of a PC's memory. llama-server keeps no RAM cache of earlier prompts: by default each server keeps up to 8 GB of them in the PC's memory, beside what its card holds, for prompts that start the same way, and the manor's rarely do. On a Core Ultra 5 225U's Intel Graphics, the chat server held 3.59 GB instead of 4.54 GB after 34 of the manor's kind of requests, and gave the same answers a little faster. And Intel's integrated graphics on a PC with under 32 GB chat on their vision server: one Qwen3-VL-4B for both, 5.0 GB of the PC's memory where Qwen3-4B beside it made 8.5 GB. On text it is as fast and passes the Smith's checks, but it got one of 18 of the manor's kind of tasks wrong that Qwen3-4B got right. A PC set up before gets both at the keeper's next look; nothing to download, nothing to set up again.**
