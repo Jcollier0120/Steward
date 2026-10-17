@@ -30,6 +30,10 @@ Each version of the Steward's kit, newest first. A version is released as `kit-v
   - A look that finds the NPU in use writes nothing, so a test that's due stays due.
 - **Tests:** npu-refresh.test.ts runs `testNpuEntry` with no `onReady` against a real server program, one that answers and one that exits while starting. The first fails on main's setup.ts with the refusal above. The tests also cover the port wait (a port that goes quiet, and one that doesn't), `whatAnswers` against real sockets, the retries, their record and log lines, and which failures count as the server's.
 
+### Before you update
+
+- Nothing: it updates itself as usual. A PC whose `npu-refresh.json` says `failed` for 2.78.12 tests its NPU's new command again by itself, once nobody is using the NPU.
+
 ## 2.78.12
 
 **npu-reports.ts counts a report against the model its generation runs (`routeFor`), so an X2's reports on its 2B count, and its reports on the route's 4B are stale. tools/kit.ts warns when a pin is a kit that has no release. Also brings 2.78.10, which wasn't released on its own.**
