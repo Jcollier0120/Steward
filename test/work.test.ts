@@ -19,6 +19,7 @@ const { DEFAULT_SETTINGS, normalizeSettings } = await import('../src/settings.ts
 const { STAFF: DEFAULT_EMPLOYEES } = await import('./fixtures/staff.ts');
 const { checksLogOf } = await import('../src/stages/bump.ts');
 const { bumpDirOf, releaseDirOf } = await import('../src/stages/common.ts');
+const { roundFailuresFile } = await import('../src/stages/round.ts');
 const { KEEP_TESTED, recordTested, testedFile, testedView } = await import('../src/tested.ts');
 const { employee, fakeEmployee, ok, runner } = await import('./helpers.ts');
 
@@ -62,6 +63,7 @@ function gh(o: { login?: string; open?: { number: number; url: string; body: str
 beforeEach(() => {
   rmSync(workFiledFile(), { force: true });
   rmSync(alarmsFile(), { force: true });
+  rmSync(roundFailuresFile(), { force: true });
 });
 
 test("a failed bump and a failed release are work, with the output kept beside their worktrees, secrets taken out; a push, or the Steward's own, isn't", () => {
@@ -338,7 +340,7 @@ test("a bump issue whose failure is gone is closed: the employee's branch pins t
   const r = runner((args) => (args[0] === 'issue' && args[1] === 'close' ? (args[2] === '46' ? { code: 1, out: '', err: 'issue #46 is already closed' } : ok('')) : undefined));
   const lines: string[] = [];
   await closeResolved({ items: [], employees: [past, behind], run: r.run, cwd: home, log: (l) => lines.push(l) });
-  // Past's two: closed, or found closed already; Behind's waits; a release's is never this one's to close.
+  // Past's two: closed, or found closed already; Behind's waits; a release's waits too, with no round-failed.json here to say it no longer fails.
   assert.deepEqual(r.gh.map((a) => [a[2], a[4]]), [['42', 'Jcollier0120/Past'], ['46', 'Jcollier0120/Past']]);
   assert.match(r.gh[0].at(-1)!, /Nothing left to do: main now carries kit 2\.26\.0, so Past's bump to kit 2\.23\.0 has passed/);
   assert.deepEqual(Object.keys(JSON.parse(readFileSync(workFiledFile(), 'utf8'))).sort(), ['bump:behind:2.23.0', 'release:past:abc1234']);
@@ -349,4 +351,60 @@ test("a bump issue whose failure is gone is closed: the employee's branch pins t
   const quiet = runner(() => ok(''));
   await closeResolved({ items: [{ id: 'bump:past:2.23.0', condition: 'x', repo: 'Jcollier0120/Past', title: 't', body: 'b' }], employees: [past], run: quiet.run, cwd: home, log: () => {} });
   assert.deepEqual(quiet.gh, []);
+});
+
+test("a release issue closes once round-failed.json no longer names its commit: released since, or a newer commit's failure has its own issue; never while it still does, or can't be read", async () => {
+  const entry = (repo: string, n: number, h = 0) => ({ url: `https://github.com/${repo}/issues/${n}`, number: n, repo, at: at(h).toISOString(), condition: 'x' });
+  const filedNow = () => JSON.parse(readFileSync(workFiledFile(), 'utf8'));
+  // Porter has released since its failure at abc1234 was filed; Herald's release failed again at a newer commit, filed as
+  // #12; Clerk's still fails at its commit, though this round's items don't name it (a round that didn't look at Clerk).
+  writeFileSync(workFiledFile(), JSON.stringify({
+    'release:porter:abc1234': entry('Jcollier0120/Porter', 9),
+    'release:herald:1111111': entry('Jcollier0120/Herald', 5),
+    'release:herald:2222222': entry('Jcollier0120/Herald', 12, 3),
+    'release:clerk:3333333': entry('Jcollier0120/Clerk', 3),
+  }));
+  writeFileSync(roundFailuresFile(), JSON.stringify({ herald: '2222222', clerk: '3333333' }));
+  const releases = [{ tagName: 'v1.4.2', isDraft: false, publishedAt: at(5).toISOString() }, { tagName: 'v1.4.1', isDraft: false, publishedAt: at(-48).toISOString() }];
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(releases) : args[0] === 'issue' && args[1] === 'close' ? ok('') : undefined));
+  const lines: string[] = [];
+  const current = { id: 'release:herald:2222222', condition: 'release:herald:2222222', repo: 'Jcollier0120/Herald', title: 't', body: 'b' };
+  await closeResolved({ items: [current], employees, run: r.run, cwd: home, log: (l) => lines.push(l) });
+  const closes = r.gh.filter((a) => a[0] === 'issue' && a[1] === 'close');
+  assert.deepEqual(closes.map((a) => [a[2], a[4], a[6]]), [['9', 'Jcollier0120/Porter', 'completed'], ['5', 'Jcollier0120/Herald', 'completed']]);
+  assert.equal(closes[0].at(-1), 'Nothing left to do: Porter has released v1.4.2 from main since, so its failed release at abc1234 holds nothing up any more. Closed by the Steward.');
+  assert.equal(closes[1].at(-1), "Superseded: Herald's release has failed since at a newer commit, 2222222, and https://github.com/Jcollier0120/Herald/issues/12 has it now. Closed by the Steward.");
+  assert.deepEqual(r.gh.filter((a) => a[0] === 'release').map((a) => a[3]), ['Jcollier0120/Porter'], "only Porter's releases asked for: Herald's newer failure says enough, and Clerk's still stands");
+  assert.deepEqual(Object.keys(filedNow()).sort(), ['release:clerk:3333333', 'release:herald:2222222']);
+  assert.deepEqual(lines, ['work: closed https://github.com/Jcollier0120/Porter/issues/9: Porter has released v1.4.2 since', "work: closed https://github.com/Jcollier0120/Herald/issues/5: Herald's release at 2222222 has failed since (https://github.com/Jcollier0120/Herald/issues/12)"]);
+
+  // round-failed.json missing, or not such a record: never closed on what can't be read, and nothing asked.
+  writeFileSync(workFiledFile(), JSON.stringify({ 'release:porter:abc1234': entry('Jcollier0120/Porter', 9) }));
+  for (const record of [null, '{ not json', '["abc1234"]', '{"porter": 7}']) {
+    if (record === null) rmSync(roundFailuresFile(), { force: true });
+    else writeFileSync(roundFailuresFile(), record);
+    const quiet = runner(() => ok(releases));
+    await closeResolved({ items: [], employees, run: quiet.run, cwd: home, log: () => {} });
+    assert.deepEqual(quiet.gh, [], `${record ?? 'no record'}: nothing asked`);
+  }
+  assert.ok(filedNow()['release:porter:abc1234'], 'still open');
+
+  // Read, and not naming it, but with no release since to name: the newest came before the issue was filed (one that
+  // waits for the signing key isn't made yet), its releases can't be listed, or Porter is gone from Settings.
+  writeFileSync(roundFailuresFile(), '{}');
+  for (const [why, run, staff] of [
+    ['released before', runner((args) => (args[1] === 'list' ? ok([releases[1]]) : ok(''))), employees],
+    ["releases can't be listed", runner((args) => (args[1] === 'list' ? { code: 1, out: '', err: 'HTTP 502' } : ok(''))), employees],
+    ['not in Settings', runner(() => ok(releases)), employees.filter((e) => e.id !== 'porter')],
+  ] as const) {
+    await closeResolved({ items: [], employees: [...staff], run: run.run, cwd: home, log: () => {} });
+    assert.ok(!run.gh.some((a) => a[1] === 'close'), `${why}: kept open`);
+  }
+  assert.ok(filedNow()['release:porter:abc1234'], 'still open');
+
+  // Found closed already (by a person): forgotten, without a word.
+  const quiet: string[] = [];
+  const closed = runner((args) => (args[1] === 'list' ? ok(releases) : { code: 1, out: '', err: 'issue #9 is already closed' }));
+  await closeResolved({ items: [], employees, run: closed.run, cwd: home, log: (l) => quiet.push(l) });
+  assert.deepEqual([filedNow(), quiet], [{}, []]);
 });

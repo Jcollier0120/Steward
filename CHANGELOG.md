@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.104
+## 0.36.112
 
 **Brings kit 2.79.1: on every staff page, the status pill sits beside the name, with the role on the line under them.**
 
@@ -15,6 +15,22 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
+
+## 0.36.105
+
+**An issue the Steward filed for a failed release closes by itself once that failure no longer stands, so the Wright isn't left stuck on it and Manor shows no alarm for it.**
+
+### What changed
+
+- **A staff member's failed-release issue closes once that failure is behind it.** Until now, the issue for "<name>'s release at <commit> fails" stayed open after the staff member released a later version. If the Wright had got stuck on it, Manor kept saying so for days. Now each round closes it as completed, in one of two cases:
+  - **It has released since.** The comment names the release, for example "Porter has released v1.4.2 from main since".
+  - **A newer commit's release failed too.** The comment links the newer failure's issue, which is the one to work on now.
+- **Nothing closes on missing information.** An issue stays open while the record of failed releases still names its commit, or when that record can't be read. It also stays open when the staff member's releases can't be listed, when no release has been made since the issue was filed (one waiting for the signing key, say), or when the staff member is no longer in Settings.
+- An issue someone already closed is forgotten quietly, as bump issues are.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Release issues left open from before close in the first round after the update, if their failure no longer stands.
 
 ## 0.36.98
 
