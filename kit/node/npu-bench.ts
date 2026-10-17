@@ -667,10 +667,13 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
     report.run.played = played.generation;
     log(`Played: ${playedSay(played, dir, catalog)}. Shown, never ranked.`);
   }
-  // The route is this generation's already: planned as it is, so the generation's own cap doesn't undo --cap.
-  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: { ...route, generations: {} } } } })!;
-  const needs = (!plan.installed ? (plan.download?.size ?? 0) : 0) + (plan.runtime?.size ?? 0) + plan.models.filter((m) => !m.have).reduce((n, m) => n + m.size, 0);
-  const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have);
+  // The route is this generation's already: planned as it is, so the generation's own cap doesn't undo --cap. The suite
+  // asks for no embeddings, so its embedding server and model are left out (noEmbed): never pulled for the benchmark,
+  // as Intel's Qwen3-Embedding (428 MB, in the route's embedServer, not its models) was past --no-setup.
+  const plan = planNpu({ support, tools, downloadsDir: path.join(tools, 'servers', 'downloads'), env, catalog: { ...catalog, routes: { ...catalog.routes, [vendor]: { ...route, generations: {} } } }, noEmbed: true })!;
+  // Everything the plan would fetch, an embedding server's too if it ever has one, so --no-setup and the prompt count it.
+  const needs = plan.downloadBytes;
+  const missing = !plan.installed || !!plan.runtime || plan.models.some((m) => !m.have) || !!(plan.embed?.download || plan.embed?.modelDownload || plan.embed?.modelPull);
   if (missing && o.setup === false) return finish(1, { code: 'setup', say: `${route.server} or its models aren't here, and --no-setup was given` });
   if (missing && !o.yes) {
     const ok = o.confirm ? await o.confirm(`Download ${needs ? mb(needs) : 'what it needs'} (${route.server} ${route.version} and its models)? [y/N] `) : false;

@@ -16,6 +16,18 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.79.1.
 
+## 0.36.110
+
+**The Steward hands out kit 2.78.26: the NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too. On an Intel NPU 3720 that had its chat model but not its embedder, `--no-setup` pulled Qwen3-Embedding (428 MB) without asking.**
+
+### What changed
+
+- **The NPU benchmark** (kit/node/npu-bench.ts) leaves the route's embedding server and its model out of its plan, since its questions never ask for an embedding. `--no-setup` stops, exit 1, whenever the plan would fetch anything, and the download prompt names the plan's whole size: on a fresh PC about 2.4 GB on Intel, 4.4 GB on a Snapdragon X and 1.9 GB on an X2.
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's benchmark changes once it takes kit 2.78.26.
+
 ## 0.36.109
 
 **Brings kit 2.78.25: on a PC under 20 GB, the keeper stops an integrated graphics card's model servers after 5 minutes unused, not 10, so their models give the PC its memory back sooner.**

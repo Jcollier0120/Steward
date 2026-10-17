@@ -21,7 +21,7 @@ const B = await import('./fixture/src/kit/npu-bench.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { routeOnDevice } = await import('./fixture/src/kit/npu-check.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
-const { portablePath } = await import('./fixture/src/kit/setup.ts');
+const { mb, portablePath } = await import('./fixture/src/kit/setup.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const METEOR = 'npu2|32.0.100.4023|2025-05-01|Intel Corporation|PCI\\VEN_8086&DEV_7D1D&SUBSYS_0B0A1028&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
@@ -425,6 +425,48 @@ test("a server that doesn't stream or count tokens is measured all the same, and
   // Neither the answers' tokens nor their first tokens: each job is judged on its whole times.
   for (const j of SUITE.jobs) assert.deepEqual(report.results.jobs[j.id].answerTokens, [null, null, null]);
   assert.equal(report.results.holding, null, 'a quick run skips holding speed');
+});
+
+test("--no-setup with the chat model here and Intel's embedder not: nothing pulled, the suite asks for no embeddings; with the chat model gone too, refused, and the prompt names the chat model's size", async () => {
+  // Intel's embedding model is in the route's embedServer, not its models: on WEASELDEV02 (2026-10-17) setup pulled it
+  // (428 MB through OpenVINO Model Server) past --no-setup, because the bench counted only the route's models.
+  const s = await scene();
+  const route = s.catalog.routes.intel;
+  const models = [...route.models, ...Object.values(route.generations).flatMap((g: any) => [...(g.models ?? []), ...(g.smallPc?.models ?? [])])];
+  for (const m of models.filter((m: any) => m.present)) {
+    const file = V.expandRoute(m.present, { tools: s.tools, env: s.opts.env });
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '');
+  }
+  const embedder = V.embedPaths(route, s.tools, s.opts.env).model;
+  assert.ok(route.embedServer && !existsSync(embedder), "Intel's route has an embedding server, and its model isn't here");
+  const ran: string[] = [];
+  const io = { ...s.opts.io, setup: { run: async (exe: string, args: string[]) => (ran.push([exe, ...args].join(' ')), { code: 0, out: '' }) } };
+  let asked: string | null = null;
+  const confirm = async (q: string) => ((asked = q), false);
+  const { code, report } = await B.npuBench({ ...s.opts, io, yes: false, setup: false, confirm, profile: 'quick' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.deepEqual(report.marks.map((m: any) => m.code), ['quick'], 'no setup mark: nothing was missing');
+  assert.equal(asked, null, 'nothing to ask');
+  assert.deepEqual(ran.filter((r) => /pull/i.test(r) || r.includes(route.embedServer!.model.id)), [], 'nothing pulled, the embedder least of all');
+  assert.doesNotMatch(s.lines.join('\n'), /downloading/);
+  assert.ok(!existsSync(embedder));
+
+  // Nothing here: --no-setup refuses before anything runs, and the prompt counts what setup would fetch, the chat model.
+  const bare = await scene();
+  const before = ran.length;
+  const off = await B.npuBench({ ...bare.opts, io: { ...bare.opts.io, setup: io.setup }, yes: false, setup: false, confirm });
+  assert.equal(off.code, 1);
+  assert.deepEqual(off.report.marks.map((m: any) => m.code), ['setup']);
+  assert.match(off.report.marks[0].say, /--no-setup was given/);
+  assert.equal(asked, null, '--no-setup refuses without asking');
+  const no = await B.npuBench({ ...bare.opts, io: { ...bare.opts.io, setup: io.setup }, yes: false, confirm });
+  assert.equal(no.code, 1);
+  const chat = models.find((m: any) => m.id === no.report.run.model)!;
+  assert.equal(asked, `Download ${mb(chat.size)} (${route.server} ${route.version} and its models)? [y/N] `);
+  assert.match(no.report.marks[0].say, new RegExp(`would download ${mb(chat.size)}: run again with --yes`));
+  assert.equal(bare.fake.starts, 0, 'nothing started where it refused');
+  assert.equal(ran.length, before, 'nor run');
 });
 
 test('a model that answers nonsense never gets past its first answer; a busy processor or the battery keeps a run off the board', async () => {
