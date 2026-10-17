@@ -45,6 +45,7 @@ import {
 } from './accelerators.ts';
 import { npuLockDir } from './lock.ts';
 import { gpuWithNpu } from './manor.ts';
+import { noteSpeed } from './boot-speed.ts';
 import { tallyRequest } from './token-tally.ts';
 import { LockTimeout, lineSnapshot, QueueFull, queueSnapshot, withAcceleratorTurn, type Lane } from './npu-queue.ts';
 import { RULES } from './rules.ts';
@@ -85,6 +86,8 @@ export interface NpuAnswer {
   /** Token counts as the server reports them (0 when it reports none). */
   promptTokens: number;
   completionTokens: number;
+  /** How fast it wrote the answer, in tokens a second, where the server says (FastFlowLM's usage.decoding_speed_tps). */
+  tokensPerSecond?: number;
   /** The accelerator it ran on. */
   accelerator: AcceleratorRef;
   /** The accelerator tried first, when it failed and the request went to this one. */
@@ -287,6 +290,7 @@ const tokensOn = (p: PromptTokens, a: Accelerator) => (typeof p === 'number' ? p
 
 function answerOf(json: any, model: string, ms: number) {
   const choice = json?.choices?.[0];
+  const tps = Number(json?.usage?.decoding_speed_tps);
   return {
     text: String(choice?.message?.content ?? '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(),
     model,
@@ -294,6 +298,7 @@ function answerOf(json: any, model: string, ms: number) {
     truncated: choice?.finish_reason === 'length',
     promptTokens: Number(json?.usage?.prompt_tokens) || 0,
     completionTokens: Number(json?.usage?.completion_tokens) || 0,
+    ...(Number.isFinite(tps) && tps > 0 ? { tokensPerSecond: tps } : {}),
   };
 }
 
@@ -414,6 +419,8 @@ export class Npu {
     const r = await this.route(work, promptTokens, maxTokens, opts, send);
     // The server's count where it gives one, the kit's estimate where it doesn't.
     tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, promptTokens: r.value.promptTokens || tokensOn(promptTokens, r.acc), answerTokens: r.value.completionTokens, ms: r.value.ms });
+    // Chat's decode speed, for a slow start (boot-speed.ts): vision's answers are too short, and a picture's encoding may count in.
+    if (work === 'chat' && r.value.tokensPerSecond) noteSpeed(APP.id, { acc: r.acc.id, model: r.value.model, answerTokens: r.value.completionTokens, tokensPerSecond: r.value.tokensPerSecond });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
   }
 

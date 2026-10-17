@@ -75,6 +75,17 @@
  */
 
 /**
+ * @typedef {object} SpeedRules How fast an accelerator answers on this boot, against earlier boots (ACCELERATORS.md, "A slow
+ *   start"): a PC can come up from a restart with its memory slower until the next restart (an AMD laptop that went into
+ *   Modern Standby in its first two minutes decoded at about 77% of its usual speed until it was restarted).
+ * @property {number} keptPerBoot Each program keeps this many of its latest speeds per boot, accelerator, model and answer size.
+ * @property {number} keptBoots Each program keeps its speeds from this many boots, the latest.
+ * @property {number} samplesNeeded A boot's speed for one answer size counts once there are this many of them.
+ * @property {number} slowPercent This boot is slow when its speed is this percent of the usual or less.
+ * @property {number} bootSlackMs Two boot times this close are the same boot (the clock may be set after the uptime starts).
+ */
+
+/**
  * @typedef {object} Rules
  * @property {QueueRules} queue
  * @property {LockRules} lock
@@ -82,6 +93,7 @@
  * @property {MannersRules} manners
  * @property {KeeperRules} keeper
  * @property {TokenRules} tokens
+ * @property {SpeedRules} speed
  */
 
 /** @type {Record<keyof Rules, string[]>} */
@@ -92,6 +104,7 @@ const SHAPE = {
   manners: ['maxWaitMs', 'backOffMs'],
   keeper: ['lookEveryMs', 'npuIdleStopMinutes', 'gpuIdleStopMinutes', 'gameGraceMs', 'unansweredMs', 'recycleBytes', 'turnWaitMs', 'turnMaxAhead', 'otherSlotsWaitMs', 'orphanGraceMs'],
   tokens: ['charsPerToken', 'messageChars', 'quirkRoomChars', 'imageTokens', 'minPieceChars'],
+  speed: ['keptPerBoot', 'keptBoots', 'samplesNeeded', 'slowPercent', 'bootSlackMs'],
 };
 
 /**

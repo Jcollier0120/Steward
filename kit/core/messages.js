@@ -153,4 +153,8 @@ export const say = Object.freeze({
   /** @param {string} text */
   notJson: (text) => `the model server's answer wasn't JSON: ${text}`,
   tooFewVectors: () => 'the embedding server returned too few vectors',
+
+  // ------------------------------------------------------------ speed
+  /** A boot slower than usual (bootSpeed's slow): "about 17 tokens a second since this PC started, against 23 after earlier starts; …". @param {number} now @param {number} usual */
+  slowBoot: (now, usual) => `about ${Math.round(now)} tokens a second since this PC started, against ${Math.round(usual)} after earlier starts; restarting the PC usually brings it back`,
 });

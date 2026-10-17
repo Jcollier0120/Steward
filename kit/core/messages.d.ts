@@ -132,4 +132,6 @@ export declare const say: Readonly<{
     /** @param {string} text */
     notJson: (text: string) => string;
     tooFewVectors: () => "the embedding server returned too few vectors";
+    /** A boot slower than usual (bootSpeed's slow): "about 17 tokens a second since this PC started, against 23 after earlier starts; …". @param {number} now @param {number} usual */
+    slowBoot: (now: number, usual: number) => string;
 }>;

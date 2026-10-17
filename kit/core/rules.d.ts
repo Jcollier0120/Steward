@@ -193,6 +193,28 @@ export type TokenRules = {
      */
     minPieceChars: number;
 };
+export type SpeedRules = {
+    /**
+     * Each program keeps this many of its latest speeds per boot, accelerator, model and answer size.
+     */
+    keptPerBoot: number;
+    /**
+     * Each program keeps its speeds from this many boots, the latest.
+     */
+    keptBoots: number;
+    /**
+     * A boot's speed for one answer size counts once there are this many of them.
+     */
+    samplesNeeded: number;
+    /**
+     * This boot is slow when its speed is this percent of the usual or less.
+     */
+    slowPercent: number;
+    /**
+     * Two boot times this close are the same boot (the clock may be set after the uptime starts).
+     */
+    bootSlackMs: number;
+};
 export type Rules = {
     queue: QueueRules;
     lock: LockRules;
@@ -200,6 +222,7 @@ export type Rules = {
     manners: MannersRules;
     keeper: KeeperRules;
     tokens: TokenRules;
+    speed: SpeedRules;
 };
 /**
  * spec/rules.json's contents as the core takes them: every timing and limit present, a whole number of
