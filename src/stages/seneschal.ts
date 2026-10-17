@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { commitOf } from '../git.ts';
-import type { SeneschalKind, SeneschalLane, SeneschalShard, SeneschalTask } from '../kit/seneschal.ts';
+import type { SeneschalCheckKind, SeneschalLane, SeneschalShard, SeneschalTask } from '../kit/seneschal.ts';
 import type { Employee } from '../settings.ts';
 import type { AffectedScope } from './bump.ts';
 import type { Ctx } from './common.ts';
@@ -43,7 +43,7 @@ export const laneHere = (): SeneschalLane | undefined => lanes.getStore();
 
 /** What a run of the checks is to the Seneschal: its kind (a PR check unless said), its lane, its PR and branch. */
 export interface CheckTask {
-  kind?: Exclude<SeneschalKind, 'wright-job'>;
+  kind?: SeneschalCheckKind;
   lane?: SeneschalLane;
   pr?: number;
   branch?: string;

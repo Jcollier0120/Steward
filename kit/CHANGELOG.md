@@ -2,6 +2,34 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.79.0
+
+**seneschal.ts asks for the Wright's and Reeve's turns (Seneschal 0.3.0): two turn kinds named by their job rather than a commit, what a task needs of the room, and `defer` for an asker that can come back at its next round instead of running beside a full PC.**
+
+### What's new
+
+- **The turn kinds, `wright-job` and `reeve-job`** (`SeneschalTurnKind`). Only their asker can run them, so the Seneschal hands out a turn and nothing else.
+  - **`SeneschalTask` names its `job`** (the key): the Wright's issue `#212`, or `pr#41` for a conflict run; Reeve's `repo-sync`, or `index:<name>:<8 hex>:<model>` for an index fill. A turn kind needs no `commit`: it names no code, so a new commit on main isn't new work.
+  - `SeneschalCheckKind` is the other three (`pr-check`, `kit-trial`, `full-suite`), which still name their commit. `SeneschalTask` is a union of the two, so a check without a commit, or a turn kind without a job, doesn't typecheck.
+- **`SeneschalTask.needs`** (`SeneschalNeeds`): `clone`, `accelerator`, `memoryMb`, and two for the turn kinds only:
+  - `light: true` takes no processor slot (an index fill spends the NPU, not the processors);
+  - `line: 'claude-code'` holds Claude Code's line, which has a cap of its own.
+- **`SeneschalTask.tries`**: how many runs a task gets before it fails for good. A lost lease counts as one, so 1 means it never starts twice (the Wright's job).
+- **`SeneschalTurnOptions.defer`**: a turn that doesn't come in `waitMs` answers **`{ later, id }`** instead of null. `later` is why it waits, in the Seneschal's words ("no room: 3 tasks running"), for the agent's status. Run nothing then, and ask again at the next round.
+  - **Only while the Seneschal answers.** No Seneschal, one off duty or without Developer Pro, a refused task, one that stopped answering, or a last ask that went unanswered: null, run as before, as without `defer`.
+  - **A deferring asker's wait counts all the time it asks,** including the time another run of the same work holds the task (another Reeve process filling that index). So a short `waitMs` (Reeve's 45 s, while it holds its runner lock) is the longest it waits.
+
+### What changed
+
+- **A `wright-job` never answers `{ reused }` or `{ failed }`.** An issue is never skipped for a job that finished: the client says so in its log and answers null (run as before). The Seneschal 0.3.0 never hands one back; this is in case an older one, keyed by commit, would.
+- **`jobOf` takes the check kinds by default** (it took `wright-job` too). A worker is never handed a turn kind, which only its asker runs.
+
+### Before you update
+
+- Nothing for an agent to do: the Steward's own calls are unchanged, and an agent that never asks for a turn kind sees no difference.
+- **An older Seneschal (0.2.x)** refuses a `reeve-job` (an unknown kind) and a `wright-job` with no commit: `seneschalTurn` answers null, and the work runs as before. Only the turn is lost.
+- An agent that switches on the answer and says `defer` should handle `{ later }`.
+
 ## 2.78.22
 
 **seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, `seneschalWork` is the worker's side, and a whole suite can be cut into shards.**
