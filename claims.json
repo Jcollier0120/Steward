@@ -1,0 +1,18 @@
+[
+  {
+    "repo": "Jcollier0120/Steward",
+    "version": "0.36.133",
+    "branch": "claude/npu-quiet-wait",
+    "by": "claude",
+    "for": "kit: the NPU refresh and patch looks' quiet wait counts only the NPU's own lock, not other staff's work turns",
+    "at": "2026-10-17T18:29:39.137Z"
+  },
+  {
+    "repo": "Jcollier0120/Steward#kit",
+    "version": "2.82.3",
+    "branch": "claude/npu-quiet-wait",
+    "by": "claude",
+    "for": "the NPU refresh and patch looks' quiet wait counts only the NPU's own lock",
+    "at": "2026-10-17T18:29:42.967Z"
+  }
+]
