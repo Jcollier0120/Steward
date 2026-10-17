@@ -28,6 +28,32 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual. Work moves between PCs only where each PC has the Seneschal 0.2.0 with sharing on, and Manor's Other PCs on; elsewhere nothing changes.
+## 0.36.91
+
+**A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
+
+### What changed
+
+- **A vouched PR's kit.json is looked at too** (stages/merge.ts `mergeOne`). A vouch is for a PR's checks, which its author's clone may have run with a kit filled from a Steward tree, not for the kit it pins. Before, a vouched PR skipped `kitReleaseHold`.
+  - Now every team PR the Steward would test itself has its pin read before its vouch: one whose kit has no release waits for it, and one whose kit will never be released is told on the PR and raises the `deadkit:` alarm, as 0.36.87 does for the others.
+  - Once its kit is released, the vouch still spares its checks here, as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
+## 0.36.89
+
+**The Last stage card says what the stage was asked in words, and a pull request made a draft again just before its merge waits instead of failing.**
+
+### What changed
+
+- After a Build now, the Last stage card read "(full true; buildNow [object Object])". It now says "(every employee looked at; Build now)", or "Build now, to customers" when that was ticked, and names the employees a stage was for.
+- A pull request made a draft again while the Steward was testing it, before its merge, now waits as any draft does. Before, GitHub refused the merge ("Pull Request is still a draft") and the round showed it as a failed merge, though nothing had gone wrong.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.87
 

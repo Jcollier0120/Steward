@@ -782,14 +782,12 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
       held.push(heldOf(pr, why));
       continue;
     }
-    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
-    // Its vouch set here, once its checks passed here (prtest.ts): what this PC's test said.
-    const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
-    const here = vouched ? testedBefore(e, pr) : null;
-    if (vouched) notes.set(pr.number, here?.ok ? here.note : `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
-    else if (untested(pr)) {
-      // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
-      // that brings that kit, or says none does (prtest.ts). One that will never be released is said to its author.
+    // Its kit not released yet: not tested, nor held against its commit, until it is; its hold names the Steward PR
+    // that brings that kit, or says none does (prtest.ts). One that will never be released is said to its author.
+    // Vouched for or not: a vouch is for its checks, which its author's clone may have run with a kit filled from a
+    // Steward tree, never for the kit its kit.json pins. Before, a vouched one skipped this, and could merge pinned to
+    // a kit that will never be released.
+    if (untested(pr)) {
       const kitWaits = await kitReleaseHold(ctx, e, pr).catch(() => null);
       if (kitWaits) {
         if (!prep && deadKitIn(kitWaits)) await tellDeadKit(ctx, e, pr, kitWaits).catch((err: Error) => ctx.log(`[${e.id}] #${pr.number}: couldn't tell its author its kit will never be released: ${err.message}`));
@@ -797,6 +795,13 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
         held.push(heldOf(pr, kitWaits));
         continue;
       }
+    }
+    // Its author ran its checks and saw them pass at this very head (stages/vouch.ts): not tested here again.
+    // Its vouch set here, once its checks passed here (prtest.ts): what this PC's test said.
+    const vouched = untested(pr) ? await vouchedBy(ctx, e, pr, ctx.settings.team) : null;
+    const here = vouched ? testedBefore(e, pr) : null;
+    if (vouched) notes.set(pr.number, here?.ok ? here.note : `checks passed at ${pr.headOid.slice(0, 7)} in ${vouched}'s clone, vouched for`);
+    else if (untested(pr)) {
       // A kit PR at a head this build's one trial didn't try isn't tested in it either: it waits for the next build.
       const later = nextBuild.get(pr.number);
       if (later) {
@@ -884,6 +889,14 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     );
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
+      // Made a draft again after it was looked at, while it was tested here (2026-10-17, #316: "Pull Request is still a
+      // draft"): it waits as a draft does, not a merge that failed.
+      if (/\bdraft\b/i.test(why ?? '')) {
+        ctx.log(`[${e.id}] #${pr.number} was made a draft again before its merge: it waits, as a draft does`);
+        waits.push(`${describe(pr)} waits: a draft (made one again before its merge)`);
+        held.push(heldOf({ ...pr, draft: true }, 'a draft'));
+        continue;
+      }
       failed.push(`#${pr.number}: ${why}`);
       held.push(heldOf(pr, `couldn't merge it: ${why}`));
       continue;
