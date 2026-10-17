@@ -135,7 +135,8 @@ export function openKitPrs(ctx: Ctx): Promise<KitPr[]> {
 
 /**
  * Why a PR on the kit waits before it is tested here, or null: the kit its kit.json pins at its head has no release yet
- * (a PR made beside the Steward's own that raises the kit), so its fill would fail. It isn't tested, so nothing is held
+ * (a PR made beside the Steward's own that raises the kit), so its fill would fail. A vouched PR is held too (merge.ts):
+ * a vouch is for its checks, not its kit. It isn't tested, so nothing is held
  * against its commit (no "failed twice"), and it keeps its place in the version line. Its hold names the open Steward
  * PR that brings that kit ("waits for kit 2.42.0, which Steward#126 brings: it merges once that's released"), and
  * whether it passed with that kit in the kit's trial (trial.ts's pairs); or says that none brings it, a real problem.
