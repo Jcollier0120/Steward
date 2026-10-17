@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { type Accelerator, type AcceleratorEntry, type Quirk, readAccelerator, toolsHome } from './accelerator-config.ts';
 import { type Detection, detect, runPowerShell } from './detect.ts';
+import { checkSchema } from './json-schema.ts';
 import { routeOnDevice } from './npu-check.ts';
 import { processMemory, type RunningServer, serverClient, setUpRoute, startServer, type Streamed } from './npu-server.ts';
 import { expandRoute, generationOf, NPU_CATALOG, type NpuCatalog, type NpuModel, type NpuRoute, type NpuSupport, type NpuVendor, NPU_VENDORS, pciDevice, planNpu, playedRoute, playedSay, playGeneration, routeFor, setUpPlayed, sha256File, smallPc } from './npu-vendors.ts';
@@ -22,9 +23,10 @@ import { mixSummary, readTally } from './token-tally.ts';
  *   node <agent>\src\kit\npu-bench.ts [--profile quick|full] [--device NPU|GPU|CPU] [--model <id>] [--candidate <id> [--vision]]
  *                                     [--cap <tokens>] [--generation <id>] [--small-pc] [--energy] [--yes] [--no-setup] [--out <file>]
  *
- * It measures the models setup would run on this PC: on one with little memory (under idleStop.smallPcGb), its
- * generation's smallPc models, where it has any (a 16 GB Snapdragon X2's Qwen3-VL-2B). `--small-pc` measures those on a
- * bigger PC, and `--model` one of them does too; `--model` one of the route's own measures it on a small PC.
+ * It measures the models setup would run on this PC: its generation's own, where it has any (a Snapdragon X2's
+ * Qwen3-VL-2B), and on one with little memory (under idleStop.smallPcGb) its generation's smallPc models, where it has
+ * any (none now). `--small-pc` measures those on a bigger PC. `--model` measures any of them, or one of the route's own:
+ * `--model qualcomm/Qwen3-VL-4B-Instruct:W4A16` the 4B on an X2.
  *
  * `--generation snapdragon-x` on a Snapdragon X2 plays the older chip (npu-vendors.ts' playGeneration): AI Hub's X Elite
  * build and Hexagon v73 code on this NPU. Its report says so (`run.played`), and it is never ranked.
@@ -633,10 +635,14 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
   let route: NpuRoute;
   try {
     // As setup runs it on this generation (routeFor): its own cap, timeouts and server arguments, before anything else.
-    // The models setup runs on this PC's memory (a small PC's own, smallPc), or a small PC's when asked; --model's own.
-    const smallIds = generationOf(catalog.routes[vendor], generation)?.smallPc?.models.map((m) => m.id) ?? [];
-    const small = o.model ? smallIds.includes(o.model) : !!o.smallPc || smallPc(d.ramBytes);
-    route = routeOnDevice(routeFor(catalog.routes[vendor], generation, small), device);
+    // The models setup runs on this PC (the generation's own, a small PC's where it has any), or a small PC's when asked.
+    // --model takes any of those or the route's own: the 4B on an X2, which runs the 2B. A candidate is pulled and
+    // served as the route's own model is (AI Hub's build on a Snapdragon), whatever the generation runs.
+    const generic = catalog.routes[vendor];
+    const g = generationOf(generic, generation);
+    const runs = routeFor(generic, generation, !!o.smallPc || smallPc(d.ramBytes));
+    const offered = [...runs.models, ...(g?.models ?? []), ...(g?.smallPc?.models ?? []), ...generic.models].filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i);
+    route = routeOnDevice(o.candidate ? { ...runs, models: generic.models } : o.model ? { ...runs, models: offered } : runs, device);
     if (played) route = playedRoute(route, played);
     if (o.candidate) route = candidateRoute(route, o.candidate, { vision: o.vision });
     else if (o.model) route = routeWithModel(route, o.model);
@@ -905,29 +911,9 @@ export async function npuBench(o: NpuBenchOptions = {}): Promise<{ code: number;
 }
 
 // ------------------------------------------------------------------------------------------------
-// The report's schema (the small part of JSON Schema it uses)
+// The report's schema: json-schema.ts's small part of JSON Schema, which the NPU report (npu-report.ts) uses too
 
-export function checkSchema(value: unknown, schema: any, at = 'report'): string[] {
-  const problems: string[] = [];
-  const types = schema.type ? (Array.isArray(schema.type) ? schema.type : [schema.type]) : null;
-  const typeOf = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v);
-  if (types) {
-    const t = typeOf(value);
-    if (!types.includes(t) && !(t === 'integer' && types.includes('number'))) return [`${at} is ${t}, not ${types.join(' or ')}`];
-  }
-  if (schema.enum && !schema.enum.includes(value)) problems.push(`${at} is ${JSON.stringify(value)}, not one of ${schema.enum.join(', ')}`);
-  if (schema.const !== undefined && value !== schema.const) problems.push(`${at} isn't ${JSON.stringify(schema.const)}`);
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    for (const k of schema.required ?? []) if (!(k in (value as object))) problems.push(`${at}.${k} is missing`);
-    for (const [k, v] of Object.entries(value as object)) {
-      const sub = schema.properties?.[k] ?? (typeof schema.additionalProperties === 'object' ? schema.additionalProperties : undefined);
-      if (sub) problems.push(...checkSchema(v, sub, `${at}.${k}`));
-      else if (schema.additionalProperties === false) problems.push(`${at}.${k} isn't in the schema`);
-    }
-  }
-  if (Array.isArray(value) && schema.items) value.forEach((v, i) => problems.push(...checkSchema(v, schema.items, `${at}[${i}]`)));
-  return problems;
-}
+export { checkSchema };
 
 // ------------------------------------------------------------------------------------------------
 // As a command

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://castellan-software.com/schemas/castellan-npu-report-1.json",
+  "title": "A Castellan NPU report",
+  "description": "How one PC's NPU did when setup (or the NPU check) set it up and measured it (NPU-REPORTS.md). Sent only when its owner says so. Nothing in it names the person or the PC: hardware ids, versions and times only. The Exchequer refuses anything not in this schema.",
+  "type": "object",
+  "required": ["format", "reporter", "day", "source", "kit", "app", "chip", "route", "ok", "failed", "speeds"],
+  "additionalProperties": false,
+  "$defs": {
+    "text": { "type": ["string", "null"], "maxLength": 100, "pattern": "^[^\\u0000-\\u001f\\u007f\\\\:]{1,100}$" },
+    "ms": { "type": ["integer", "null"], "minimum": 0, "maximum": 86400000 }
+  },
+  "properties": {
+    "format": { "const": "castellan-npu-report/1" },
+    "reporter": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "source": { "enum": ["setup", "npu-check"] },
+    "kit": { "type": "string", "pattern": "^\\d{1,4}\\.\\d{1,4}\\.\\d{1,6}$" },
+    "app": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]{0,30} \\d{1,4}\\.\\d{1,4}\\.\\d{1,6}$" },
+    "chip": {
+      "type": "object",
+      "required": ["vendor", "generation", "pciDevice", "cpu", "npu", "driver", "driverDate", "arch", "ramGb", "windows"],
+      "additionalProperties": false,
+      "properties": {
+        "vendor": { "enum": ["qualcomm", "intel", "amd", null] },
+        "generation": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+        "pciDevice": { "type": ["string", "null"], "pattern": "^[0-9A-F]{4}$" },
+        "cpu": { "$ref": "#/$defs/text" },
+        "npu": { "$ref": "#/$defs/text" },
+        "driver": { "type": ["string", "null"], "pattern": "^[0-9][0-9.]{0,39}$" },
+        "driverDate": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "arch": { "type": ["string", "null"], "pattern": "^[a-z0-9]{1,10}$" },
+        "ramGb": { "type": "integer", "minimum": 0, "maximum": 4096 },
+        "windows": { "type": ["string", "null"], "pattern": "^\\d{1,6}$" }
+      }
+    },
+    "route": {
+      "type": ["object", "null"],
+      "required": ["server", "version", "model", "cap", "verified"],
+      "additionalProperties": false,
+      "properties": {
+        "server": { "type": "string", "maxLength": 60, "pattern": "^[^\\u0000-\\u001f\\u007f\\\\]{1,60}$" },
+        "version": { "type": "string", "maxLength": 30, "pattern": "^[0-9A-Za-z.+-]{1,30}$" },
+        "model": { "type": "string", "maxLength": 120, "pattern": "^[0-9A-Za-z._:/+-]{1,120}$" },
+        "cap": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "ok": { "type": "boolean" },
+    "failed": {
+      "type": ["object", "null"],
+      "required": ["step"],
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "enum": [
+            "not-supported", "driver", "memory", "download", "install", "runtime", "pull", "checksum",
+            "test-timeout", "test-nonsense", "test", "measure", "too-slow", "embed",
+            "detect", "requirements", "setup", "start", "first-answer", "warm", "speed", "read", "cap",
+            "two-at-once", "restart", "kit-test"
+          ]
+        }
+      }
+    },
+    "speeds": {
+      "type": "object",
+      "required": ["coldMs", "warmMs", "tokensPerSecond", "readTokens", "readMs"],
+      "additionalProperties": false,
+      "properties": {
+        "coldMs": { "$ref": "#/$defs/ms" },
+        "warmMs": { "$ref": "#/$defs/ms" },
+        "tokensPerSecond": { "type": ["number", "null"], "minimum": 0, "maximum": 100000 },
+        "readTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 1048576 },
+        "readMs": { "$ref": "#/$defs/ms" }
+      }
+    }
+  }
+}
