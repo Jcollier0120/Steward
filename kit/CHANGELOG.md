@@ -2,6 +2,23 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.79.1
+
+**The title bar's status pill sits beside the agent's name, with the role alone on the line under them.**
+
+### What changed
+
+- **The title bar (page.ts and the React shell, shell.tsx):** the pill moved up from the role's line to the name's: `<div class="name-line"><h1>…</h1><span class="status-pill …">…</span></div><p class="role" title="…">…</p>`. `.role-line` is gone, and the role is a `p` of its own. The pill is still plain text in the brand's link, nothing to press. Its classes (on, off, busy and the busy pulse), its title and `data-tour="status"` are as they were.
+  - **The name and the pill** stay whole. The pill (16px) is centred on the name's 19.5px line, so the brand stays 43.7px high and the bar 57px.
+  - **The role** has its line to itself, up to its own width. It's cut with an ellipsis at a word when the bar has no room for it: one clamped line (`-webkit-line-clamp: 1`), not `nowrap`, so its least width is a word's. Its whole text is its title.
+  - **Wrapping:** the brand is never narrower than its icon, the name and the pill (`min-width: min-content`, now set by the name line). A window too narrow for that wraps the tools to a second row.
+  - **In a narrow window** (640px or less): the pill goes under the name when they don't fit side by side, and is cut with an ellipsis when it's longer than the line. The role keeps its one line under them. `--titlebar-h`'s narrow default stays 109px.
+- **Checked in a Chromium browser,** at 780px and 375px wide, for the Smith while it works ("At the forge") and the Porter on duty (a long pill and a long role): no sideways scroll, and the bar 57px and 109px.
+
+### Before you update
+
+- An agent whose own CSS styles `.brand .role-line`, or `.brand .role` as a `span`, should look at its title bar. No agent in the manor does. Otherwise there's nothing to do: it updates itself as usual.
+
 ## 2.78.22
 
 **seneschal.ts knows the Seneschal's other PCs (Seneschal 0.2.0): a task running on another PC isn't timed out, results name the PC they ran on and say flaky or confirmed, a failure's try on another PC can be waited for, `seneschalWork` is the worker's side, and a whole suite can be cut into shards.**
