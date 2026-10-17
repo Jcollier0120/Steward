@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Runner } from '../run.ts';
@@ -135,23 +135,6 @@ export class Gitea implements SourceHost {
     return this.repo(repo, 'POST', `/issues/${n}/comments`, { body });
   }
 
-  /** Out of draft: Gitea's draft is its title's "WIP:" mark, taken off. */
-  async readyPr(repo: string, n: number): Promise<Answer> {
-    const a = await this.repo(repo, 'GET', `/pulls/${n}`);
-    if (a.code !== 0) return a;
-    const title = String(parsed<any>(a.out)?.title ?? '');
-    const ready = unwip(title);
-    return ready === title ? a : this.repo(repo, 'PATCH', `/pulls/${n}`, { title: ready });
-  }
-
-  /** A draft here is a title marked WIP. */
-  async draftPr(repo: string, n: number): Promise<Answer> {
-    const a = await this.repo(repo, 'GET', `/pulls/${n}`);
-    if (a.code !== 0) return a;
-    const title = String(parsed<any>(a.out)?.title ?? '');
-    return unwip(title) !== title ? a : this.repo(repo, 'PATCH', `/pulls/${n}`, { title: `WIP: ${title}` });
-  }
-
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);
@@ -194,23 +177,6 @@ export class Gitea implements SourceHost {
   createRelease(repo: string, r: { tag: string; target: string; title: string; notesFile: string | null }): Promise<Answer> {
     const body = r.notesFile ? readFileSync(r.notesFile, 'utf8') : r.title;
     return this.repo(repo, 'POST', '/releases', { tag_name: r.tag, target_commitish: r.target, name: r.title, body }, 5 * MINUTE);
-  }
-
-  /** A release's files whose names match `patterns` (as gh's --pattern: * and ?), into `dir`, replacing any there. */
-  async downloadRelease(repo: string, tag: string, d: { patterns: string[]; dir: string }): Promise<Answer> {
-    const a = await this.repo(repo, 'GET', `/releases/tags/${encodeURIComponent(tag)}`);
-    if (a.code !== 0) return a;
-    const wanted = d.patterns.map(globOf);
-    const assets = ((parsed<any>(a.out)?.assets ?? []) as any[]).filter((x) => wanted.some((re) => re.test(String(x?.name ?? ''))));
-    if (!assets.length) return { ...a, code: 1, out: '', err: `no assets match the file pattern in ${tag}` };
-    mkdirSync(d.dir, { recursive: true });
-    for (const x of assets) {
-      const file = path.join(d.dir, path.basename(String(x.name)));
-      rmSync(file, { force: true });
-      const got = await this.api('GET', String(x.browser_download_url), undefined, { out: file, timeoutMs: 10 * MINUTE });
-      if (got.code !== 0) return got;
-    }
-    return { ...a, out: '' };
   }
 
   async listIssues(repo: string, q: { label: string; state: 'open' | 'closed'; limit?: number; fields: string }): Promise<Answer> {
@@ -264,10 +230,6 @@ export class Gitea implements SourceHost {
   async whoAmI(): Promise<Answer> {
     const a = await this.api('GET', 'user');
     return a.code === 0 ? { ...a, out: `${parsed<any>(a.out)?.login ?? ''}\n` } : a;
-  }
-
-  prRef(pr: { number: number }): string {
-    return `refs/pull/${pr.number}/head`;
   }
 
   releaseUrl(repo: string, tag: string): string {
@@ -337,9 +299,6 @@ const parsed = <T>(text: string): T | null => {
     return null;
   }
 };
-
-/** gh's --pattern as a regular expression: * any run, ? any one. Pure. */
-const globOf = (p: string) => new RegExp(`^${p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
 
 /** A title without Gitea's draft mark ("WIP:", "[WIP]", as Gitea's settings name them by default). Pure. */
 export const unwip = (title: string) => title.replace(/^\s*(?:wip:|\[wip\])\s*/i, '');

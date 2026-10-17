@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -151,7 +151,6 @@ test("Gitea's requests: tea api with the server's own login, bodies as JSON from
   // Closed, not merged, from the branch: Gitea has no such filter, so the Steward picks them out.
   assert.deepEqual(JSON.parse(must(await host.listPrs(R, { state: 'closed', head: 'claude/feature', fields: 'number' }))).map((p: any) => p.number), [6]);
   assert.equal(must(await host.createPr(R, { base: 'main', head: 'claude/x', title: 'T', body: '**B**' })), 'https://codeberg.org/acme/fake/pulls/8\n');
-  must(await host.readyPr(R, 7));
   must(await host.mergePr(R, 7, { matchHead: 'abc123', deleteBranch: true }));
   must(await host.closePr(R, 7, { comment: 'bye', deleteBranch: true }));
   const statuses = JSON.parse(must(await host.statuses(R, 'abc123')));
@@ -165,14 +164,12 @@ test("Gitea's requests: tea api with the server's own login, bodies as JSON from
   assert.ok(ran.every((c) => c.login === 'codeberg'), 'the login for codeberg.org');
   assert.deepEqual(ran.filter((c) => c.body).map((c) => [c.method, c.at, c.body]), [
     ['POST', `${P}/pulls`, { head: 'claude/x', base: 'main', title: 'T', body: '**B**' }],
-    ['PATCH', `${P}/pulls/7`, { title: 'Fake 0.4.1' }],
     ['POST', `${P}/pulls/7/merge`, { Do: 'merge', head_commit_id: 'abc123', delete_branch_after_merge: true }],
     ['POST', `${P}/issues/7/comments`, { body: 'bye' }],
     ['PATCH', `${P}/pulls/7`, { state: 'closed' }],
     ['POST', `${P}/statuses/abc123`, { state: 'success', context: 'steward/tested', description: 'npm test passed at abc123' }],
   ]);
   assert.deepEqual(ran.filter((c) => c.method === 'DELETE').map((c) => c.at), [`${P}/branches/claude%2Ffeature`]);
-  assert.equal(host.prRef({ number: 7, head: 'x' }), 'refs/pull/7/head');
   assert.equal(host.releaseUrl(R, 'v0.4.1'), 'https://codeberg.org/acme/fake/releases/tag/v0.4.1');
 });
 
@@ -183,22 +180,17 @@ test('a branch with no open pull request says so as gh does, so steward vouch vo
   assert.match(a.err, /no pull requests found for branch "claude\/feature"/);
 });
 
-test("releases, their files and issues in GitHub's words", async () => {
-  const files = path.join(tmp, 'download');
-  const { host, ran } = recorded(({ method, at, out }) => {
+test("releases and issues in GitHub's words", async () => {
+  const { host, ran } = recorded(({ method, at }) => {
     if (at === `${P}/releases?limit=50&page=1`) return http(200, [{ tag_name: 'v0.4.0', name: 'Fake 0.4.0', draft: false, published_at: '2026-10-01T00:00:00Z', body: 'First', target_commitish: 'c0' }]);
     if (at === `${P}/releases/tags/v0.4.0`) return http(200, { tag_name: 'v0.4.0', target_commitish: 'c0', assets: [{ name: 'fake-0.4.0.zip', browser_download_url: 'https://codeberg.org/acme/fake/releases/download/v0.4.0/fake-0.4.0.zip' }, { name: 'notes.txt', browser_download_url: 'https://codeberg.org/x' }] });
     if (at === `${P}/releases/tags/v9.9.9`) return http(404, { message: 'release not found' });
-    if (at.startsWith('https://codeberg.org/acme/fake/releases/download/') && out) return (writeFileSync(out, 'zip'), http(200, ''));
     if (at === `${P}/issues?type=issues&state=open&labels=manor%3Awork&limit=50&page=1`) return http(200, [{ number: 3, title: 'Bump', html_url: 'https://codeberg.org/acme/fake/issues/3', body: '<!-- steward:work:x -->' }]);
     if (at === `${P}/labels?limit=50&page=1`) return http(200, [{ id: 12, name: 'manor:work' }]);
     if (method !== 'GET') return http(201, { html_url: 'https://codeberg.org/acme/fake/issues/4' });
   });
   assert.deepEqual(JSON.parse(must(await host.listReleases(R, 'tagName,isDraft,publishedAt'))), [{ tagName: 'v0.4.0', name: 'Fake 0.4.0', isDraft: false, publishedAt: '2026-10-01T00:00:00Z', body: 'First', targetCommitish: 'c0' }]);
   assert.match((await host.viewRelease(R, 'v9.9.9', 'tagName')).err, /release not found/);
-  must(await host.downloadRelease(R, 'v0.4.0', { patterns: ['*.zip'], dir: files }));
-  assert.equal(readFileSync(path.join(files, 'fake-0.4.0.zip'), 'utf8'), 'zip');
-  assert.equal(existsSync(path.join(files, 'notes.txt')), false);
   assert.deepEqual(JSON.parse(must(await host.listIssues(R, { label: 'manor:work', state: 'open', fields: 'number,url,body' }))), [{ number: 3, title: 'Bump', url: 'https://codeberg.org/acme/fake/issues/3', body: '<!-- steward:work:x -->' }]);
   assert.equal(must(await host.createIssue(R, { title: 'New', body: 'b', label: 'manor:work' })), 'https://codeberg.org/acme/fake/issues/4\n');
   must(await host.editIssue(R, 3, { body: 'c', removeLabel: 'manor:work' }));

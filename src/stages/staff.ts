@@ -55,12 +55,6 @@ export interface PrInfo {
   closes?: number[];
   /** From a fork (gh's isCrossRepository): never pushed to. */
   fork?: boolean;
-  /** For one of the Wright's drafts: why the Steward's look (review.ts) leaves it to the person. Not from gh. */
-  reviewHold?: string;
-  /** For one of the Wright's drafts that passed the look: why it waits for the Bailiff's approval of its head (review.ts). Not from gh. */
-  bailiffHold?: string;
-  /** Why its package-lock.json waits for the owner: new packages, or a new install script (review.ts's lockfileHold). Not from gh. */
-  lockHold?: string;
 }
 
 export interface ReleaseInfo {

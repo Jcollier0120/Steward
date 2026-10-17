@@ -8,17 +8,14 @@
  * The steps are words the Steward knows, never commands: whoever can edit a PR's description chooses among
  * them, not what runs. Each employee's commands are its own, in Settings.
  *
- * - release: the version on its branch, released from the branch, as the release stage does (whatever kit it
- *   pins). Merge holds a PR that asks for one when its version after merging is already released.
- * - install: its newest release on this PC: the zip downloaded, checked against SHA256SUMS.txt, unpacked, and
- *   its install command (Settings) run in it. After a release it asked for, only when that release was made.
+ * - release: the version on its branch, released from the branch.
+ * - install: its newest release on this PC, installed with its install command (Settings).
  * - approve-jobs, with jobs: each job approved in the installed copy, with the employee's approve command
- *   (Settings), after the PR's install. Merging the PR counts as reading its scripts (your decision): an
- *   approval pins the script's sha256, so it is the merged script that runs unattended. It needs install,
- *   since the scripts approved are the installed copy's.
+ *   (Settings), after the PR's install. It needs install, since the scripts approved are the installed copy's.
  *
- * A block the Steward can't read, or a step it doesn't know, holds the PR: merged without it, what the PR
- * asked for would silently not happen.
+ * Since Steward 0.36.124 the Steward merges no PRs, so it runs none of these after a merge: a build releases main,
+ * and each round approves the jobs whose installed scripts are the merged ones (stages/jobs.ts). The block is still
+ * read for the staff's table, which shows what a PR asks for, and one the Steward can't read.
  */
 
 export const AFTER_STEPS = ['release', 'install', 'approve-jobs'] as const;

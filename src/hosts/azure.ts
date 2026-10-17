@@ -131,14 +131,6 @@ export class AzureDevOps implements SourceHost {
     return this.git(repo, 'post', `/pullrequests/${n}/threads`, { comments: [{ parentCommentId: 0, content: body, commentType: 1 }], status: 'closed' });
   }
 
-  readyPr(repo: string, n: number): Promise<Answer> {
-    return this.git(repo, 'patch', `/pullrequests/${n}`, { isDraft: false });
-  }
-
-  draftPr(repo: string, n: number): Promise<Answer> {
-    return this.git(repo, 'patch', `/pullrequests/${n}`, { isDraft: true });
-  }
-
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);
@@ -207,10 +199,6 @@ export class AzureDevOps implements SourceHost {
     return this.git(repo, 'post', '/annotatedtags', { name: r.tag, taggedObject: { objectId: r.target }, message: notes ? `${r.title}\n\n${notes}` : r.title }, 5 * MINUTE);
   }
 
-  async downloadRelease(repo: string, tag: string): Promise<Answer> {
-    return unsupported(`a release's files can't be downloaded from Azure DevOps (${repo} ${tag}): it has no releases, only tags`);
-  }
-
   async listIssues(): Promise<Answer> {
     return unsupported(NO_ISSUES);
   }
@@ -234,11 +222,6 @@ export class AzureDevOps implements SourceHost {
   async whoAmI(): Promise<Answer> {
     const a = await this.rest('get', `${this.org}/_apis/connectionData`);
     return a.code === 0 ? { ...a, out: `${parsed<any>(a.out)?.authenticatedUser?.properties?.Account?.$value ?? ''}\n` } : a;
-  }
-
-  /** Azure DevOps has no pull request head ref: the branch is fetched (a fork's isn't worked with). */
-  prRef(pr: { number: number; head: string }): string {
-    return `refs/heads/${pr.head}`;
   }
 
   releaseUrl(repo: string, tag: string): string {

@@ -47,10 +47,6 @@ export interface SourceHost {
   /** Changes a pull request's title, description or base branch. */
   editPr(repo: string, n: number, p: { title?: string; body?: string; base?: string }): Promise<Answer>;
   commentPr(repo: string, n: number, body: string): Promise<Answer>;
-  /** Takes a pull request out of draft. */
-  readyPr(repo: string, n: number): Promise<Answer>;
-  /** Turns a pull request back into a draft. */
-  draftPr(repo: string, n: number): Promise<Answer>;
   closePr(repo: string, n: number, p?: { comment?: string; deleteBranch?: boolean }): Promise<Answer>;
   /** Merges a pull request with a merge commit; only while its head is `matchHead`, when given. */
   mergePr(repo: string, n: number, p?: { matchHead?: string; deleteBranch?: boolean }): Promise<Answer>;
@@ -65,8 +61,6 @@ export interface SourceHost {
   viewRelease(repo: string, tag: string, fields: string): Promise<Answer>;
   /** Publishes a release of `target`, its notes from a file, or the host's own from the commits when there's none. */
   createRelease(repo: string, r: { tag: string; target: string; title: string; notesFile: string | null }): Promise<Answer>;
-  /** A release's files matching `patterns` into `dir`, replacing any there. */
-  downloadRelease(repo: string, tag: string, d: { patterns: string[]; dir: string }): Promise<Answer>;
 
   // Issues: the Wright's work queue (work.ts).
   listIssues(repo: string, q: { label: string; state: 'open' | 'closed'; limit?: number; fields: string }): Promise<Answer>;
@@ -79,9 +73,6 @@ export interface SourceHost {
 
   /** The account this PC is signed in to the host as (its login, alone on the answer's output). */
   whoAmI(): Promise<Answer>;
-
-  /** The ref a pull request's head is fetched by from origin (a fork's too, where the host keeps one). */
-  prRef(pr: { number: number; head: string }): string;
 
   /** A release's page, for the round's line and the page. */
   releaseUrl(repo: string, tag: string): string;

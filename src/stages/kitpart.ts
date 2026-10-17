@@ -7,10 +7,6 @@
 export const KIT_VERSION_FILE = 'kit/VERSION';
 export const KIT_CHANGELOG = 'kit/CHANGELOG.md';
 
-const norm = (f: string) => f.replace(/\\/g, '/').toLowerCase();
-export const isKitVersionFile = (f: string) => norm(f) === KIT_VERSION_FILE.toLowerCase();
-export const isKitChangelog = (f: string) => norm(f) === KIT_CHANGELOG.toLowerCase();
-
 /** The claims ledger's key for a repository's kit, beside the repository's own. */
 export const kitClaimKey = (repo: string) => `${repo}#kit`;
 
@@ -19,26 +15,6 @@ export const kitTitleVersions = (titles: string[]): string[] => titles.flatMap((
 
 /** kit/VERSION's text for a version, with the line ending the file had. */
 export const kitVersionText = (version: string, was = '') => `${version}${was.includes('\r\n') ? '\r\n' : '\n'}`;
-
-/**
- * The changelog's top entry with its mentions of the kit's version ("the kit 2.36.1", "kit 2.36.1:") moved from `from`
- * to `to`: the Steward's entry names the kit it hands out. Only the top entry, the PR's own; null when that has none.
- */
-export function renameKitInTopEntry(text: string, from: string, to: string): string | null {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const lines = text.split(/\r?\n/);
-  const top = lines.findIndex((l) => l.startsWith('## '));
-  if (top < 0) return null;
-  let end = lines.findIndex((l, i) => i > top && l.startsWith('## '));
-  if (end < 0) end = lines.length;
-  const mention = new RegExp(`\\b(kit )${from.replace(/\./g, '\\.')}\\b`, 'gi');
-  let found = false;
-  for (let i = top; i < end; i++) {
-    const next = lines[i].replace(mention, (m, kit: string) => ((found = true), `${kit}${to}`));
-    lines[i] = next;
-  }
-  return found ? lines.join(eol) : null;
-}
 
 /** kit.json pinning `to`, whatever it pins now (the Steward pins its own kit); null when it pins none, or `to` already. */
 export function repinKit(text: string, to: string): string | null {

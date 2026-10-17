@@ -11,7 +11,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), 'steward-jobs-'));
 process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-const { approveMerged, noteApproved, runApprove } = await import('../src/stages/jobs.ts');
+const { approveMerged, runApprove } = await import('../src/stages/jobs.ts');
 const { ctxFor, employee, fakeEmployee, runner, sh } = await import('./helpers.ts');
 
 const MANIFEST = JSON.stringify({ jobs: [{ name: 'fast-forward', script: 'fast-forward.ps1', every: '1h' }, { name: 'repo-sync', script: 'repo-sync.ps1', every: '1h' }, { name: 'sneaky', script: '../evil.ps1' }] });
@@ -92,17 +92,12 @@ test("a development build, a release from a commit that isn't merged, or no appr
   assert.deepEqual(approvals(), ['fast-forward', 'repo-sync', 'repo-sync'], 'none of these was approved');
 });
 
-test('a job you approved already is quiet; one a PR\'s approve-jobs approved is not approved again', async () => {
+test('a job you approved already is quiet', async () => {
   const at = merge('fast-forward.ps1', "'fast-forward 3'\n");
   install(at);
   // You approved it yourself, as it is now.
   writeFileSync(asked, readFileSync(asked, 'utf8') + "fast-forward='fast-forward 3'\n");
   assert.equal(await look(), null, "Reeve says it's approved already: nothing to say");
-  const next = merge('repo-sync.ps1', "'repo-sync 3'\n");
-  install(next);
-  noteApproved(e, 'repo-sync');
-  assert.equal(await look(), null);
-  assert.equal(approvals().filter((n) => n === 'repo-sync').length, 2, 'not asked again');
 });
 
 test('what the approve command pinned must be what was checked: a script swapped while being approved is said loudly, once', async () => {

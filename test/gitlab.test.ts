@@ -12,7 +12,7 @@ process.env.STEWARD_HOME = path.join(tmp, 'home');
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
 const { hostFor, must } = await import('../src/hosts/index.ts');
-const { mergeStatesOf, prOf, undraft, whereIs } = await import('../src/hosts/gitlab.ts');
+const { mergeStatesOf, prOf, whereIs } = await import('../src/hosts/gitlab.ts');
 const { autoWords, hostOf, isGitlabRepo } = await import('../src/scm.ts');
 const { parsePrs } = await import('../src/stages/staff.ts');
 const { ok } = await import('./helpers.ts');
@@ -109,10 +109,6 @@ test('whether GitLab can merge it, as GitHub would say', () => {
   assert.deepEqual(s({ detailed_merge_status: undefined, merge_status: 'unchecked' }), { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' });
   assert.deepEqual(s({ detailed_merge_status: 'not_approved' }), { mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' });
   assert.deepEqual(s({ detailed_merge_status: 'ci_still_running' }), { mergeable: 'MERGEABLE', mergeStateStatus: 'UNKNOWN' });
-  assert.equal(undraft('Draft: Fake 0.4.1'), 'Fake 0.4.1');
-  assert.equal(undraft('[Draft] Fake 0.4.1'), 'Fake 0.4.1');
-  assert.equal(undraft('WIP: Fake'), 'Fake');
-  assert.equal(undraft('Fake: Draft: stays'), 'Fake: Draft: stays');
 });
 
 test("GitLab's requests: glab api to the repository's own GitLab, bodies as JSON from a file", async () => {
@@ -132,7 +128,6 @@ test("GitLab's requests: glab api to the repository's own GitLab, bodies as JSON
   assert.deepEqual([list[0].number, list[0].files, list[0].statusCheckRollup.length], [7, [{ path: 'a.ts' }], 2]);
   assert.deepEqual(JSON.parse(must(await host.listPrs(R, { state: 'closed', head: 'claude/feature', fields: 'number,headRefOid' }))), []);
   assert.equal(must(await host.createPr(R, { base: 'main', head: 'claude/x', title: 'T', body: '**B**' })), 'https://gitlab.com/acme/fake/-/merge_requests/8\n');
-  await host.readyPr(R, 7);
   await host.mergePr(R, 7, { matchHead: 'abc123', deleteBranch: true });
   await host.closePr(R, 7, { comment: 'bye', deleteBranch: true });
   const statuses = JSON.parse(must(await host.statuses(R, 'abc123')));
@@ -144,14 +139,12 @@ test("GitLab's requests: glab api to the repository's own GitLab, bodies as JSON
   const writes = ran.filter((r) => r.body).map((r) => [...call(r), r.body]);
   assert.deepEqual(writes, [
     ['POST', `${P}/merge_requests`, { source_branch: 'claude/x', target_branch: 'main', title: 'T', description: '**B**' }],
-    ['PUT', `${P}/merge_requests/7`, { title: 'Fake 0.4.1' }],
     ['PUT', `${P}/merge_requests/7/merge`, { sha: 'abc123', should_remove_source_branch: true }],
     ['POST', `${P}/merge_requests/7/notes`, { body: 'bye' }],
     ['PUT', `${P}/merge_requests/7`, { state_event: 'close' }],
     ['POST', `${P}/statuses/abc123`, { state: 'success', name: 'steward/tested', description: 'npm test passed at abc123' }],
   ]);
   assert.deepEqual(call(ran.find((r) => r.args.includes('DELETE'))!), ['DELETE', `${P}/repository/branches/claude%2Ffeature`]);
-  assert.equal(host.prRef({ number: 7, head: 'x' }), 'refs/merge-requests/7/head');
   assert.equal(host.releaseUrl(R, 'v0.4.1'), 'https://gitlab.com/acme/fake/-/releases/v0.4.1');
 });
 

@@ -7,7 +7,6 @@ import { isNetworkError, online as kitOnline } from './kit/net.ts';
 import { dataFile, readJson, writeJson } from './kit/store.ts';
 import { failureDetail, keptFailure } from './failure.ts';
 import { allowedInstallScripts, installHoldConditions, type InstallHold } from './installscripts.ts';
-import { BAILIFF_WAIT } from './review.ts';
 import { agentPages, reeveInstalled, seneschalInstalled, surveyorInstalled, type AgentPages, type Employee, type Settings } from './settings.ts';
 import type { TastingHold } from './tasting.ts';
 import type { SigningWait } from './signing.ts';
@@ -151,20 +150,6 @@ export function dismiss(id: string, now = new Date()): boolean {
   if (!a) return false;
   a.dismissedAt = now.toISOString();
   writeJson(alarmsFile(), s);
-  return true;
-}
-
-/**
- * An open alarm cleared now, its condition gone by the person's hand (a PR moved past the others): not waiting for the
- * next round to see so. Its condition is forgotten too, so should it come back, its hour starts again. False when there's
- * no such alarm open.
- */
-export function clearAlarm(id: string, now = new Date()): boolean {
-  const s = loadAlarms();
-  const a = s.open.find((x) => x.id === id);
-  if (!a) return false;
-  const { [id]: _gone, ...watching } = s.watching;
-  writeJson(alarmsFile(), { ...s, watching, open: s.open.filter((x) => x !== a), cleared: [{ ...a, clearedAt: now.toISOString() }, ...s.cleared].slice(0, KEEP_CLEARED) });
   return true;
 }
 
@@ -517,22 +502,6 @@ export function bailiffConditions(reviews: unknown): Condition[] {
 }
 
 /**
- * While the Bailiff can't review at all (its page doesn't answer, or Claude Code can't be used), the Wright's drafts
- * that wait only for its review are named in that one alarm, not each raised again after a day: one cause, one alarm.
- * A draft held for anything else (the Steward's look, the Bailiff's asking for changes) keeps its own. Pure.
- */
-export function foldBailiffWaits(conditions: Condition[]): Condition[] {
-  const cant = conditions.find((c) => c.id === 'bailiff:down') ?? conditions.find((c) => c.id.startsWith('bailiff:') && c.title.startsWith("The Bailiff can't review:"));
-  if (!cant) return conditions;
-  const waits = conditions.filter((c) => c.id.startsWith('waiting:') && c.title.includes(`: ${BAILIFF_WAIT}`) && !/asked for changes/.test(c.title));
-  if (!waits.length) return conditions;
-  const named = waits.map((w) => w.url ?? w.id.slice('waiting:'.length));
-  return conditions
-    .filter((c) => !waits.includes(c))
-    .map((c) => (c === cant ? { ...c, detail: [...c.detail, `The Wright's drafts waiting on it: ${named.join(', ')}.`] } : c));
-}
-
-/**
  * From Reeve's GET /api/alerts: one condition per open alert of his jobs, at once, as he gives it; and the jobs they are
  * of. An older Reeve without the endpoint (404), or one whose page doesn't answer, is quiet here: no alarm about the
  * source (the Surveyor's agent.reeve.page problem already says when his page is down), and jobs null.
@@ -737,7 +706,7 @@ export async function watchAlarms(
   // The Seneschal's jams, where it's installed (it comes with Developer Pro): manor-wide, like Reeve's.
   if (manorWide && p.seneschal && (deps.seneschalInstalled ?? seneschalInstalled)()) conditions.push(...seneschalConditions(await get(new URL('/api/alerts', p.seneschal).href)));
   const offline = !(await (deps.online ?? (process.env.NODE_TEST_CONTEXT ? async () => true : kitOnline))().catch(() => true));
-  const kept = holdForWork(foldBailiffWaits(withoutReeveDuplicates(conditions, reeveJobs)), items, states, a.waitingHours);
+  const kept = holdForWork(withoutReeveDuplicates(conditions, reeveJobs), items, states, a.waitingHours);
   const { state, raised } = reconcile(loadAlarms(), withoutOffline(kept, offline), now);
   writeJson(alarmsFile(), state);
   for (const r of raised) o.log(`alarm: ${r.title}`);

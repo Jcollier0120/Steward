@@ -2,7 +2,6 @@ import { claimsOn, employeeFor } from '../claims.ts';
 import { gitMaybe } from '../git.ts';
 import { originRepo } from '../kit/manor.ts';
 import { originUrl, repoFromUrl } from '../scm.ts';
-import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { StoodIn } from './standin.ts';
@@ -29,6 +28,9 @@ import { hostFor } from '../hosts/index.ts';
  * merged while up to date with main). Anything else on main is tested there before it is released. The status isn't a
  * check GitHub runs (checksOf leaves it out), so it never makes a PR's checks "passing" on its own.
  */
+
+/** The label the Wright puts on its PRs. */
+export const WRIGHT_LABEL = 'wright';
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */
 export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');
