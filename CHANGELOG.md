@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## 0.36.113
+## 0.36.118
 
 **The Steward hands out kit 2.80.1: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
 
@@ -16,6 +16,26 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 ### Before you update
 
 - Nothing: it updates itself as usual.
+
+## 0.36.116
+
+**The Steward hands out kit 2.80.0, with which the Wright's jobs and Reeve's heavy background work can wait their turn from the Seneschal, as the Steward's checks do.**
+
+### What's new
+
+- **Kit 2.80.0** (kit/CHANGELOG.md). Its Seneschal client asks for two new kinds of turn: a job of the Wright's, and Reeve's heavy work (its search-index fills and the hourly `repo-sync`).
+  - **A turn and nothing else.** Only the agent that asks can run that work, so the Seneschal gives it only its place in line. The work is named by the job (an issue, a job, an index) rather than by a commit, so a new commit on main doesn't make it new work.
+  - **What it needs of your PC:** a slot, its memory, and for the Wright, Claude Code's line. An index fill takes no slot, so it never keeps a PR check waiting.
+  - **It can wait for its next round.** When your PC is busy, a Wright job or a Reeve job can be told "later" rather than run beside the work already there. With no Seneschal, one off duty, or an older one, everything runs as before.
+  - **A Wright job is never skipped** because an earlier job on that issue finished.
+
+### What changed
+
+- Nothing in how the Steward runs its own checks: it asks for its turns as before.
+
+### Before you update
+
+- Nothing: it updates itself as usual. The Wright and Reeve start asking once their own updates take this kit, and they need the Seneschal 0.3.0 for their turns. With an older Seneschal they run as before.
 
 ## 0.36.112
 
