@@ -2,12 +2,15 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 0.36.86
 
-**A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
+**The Steward hands out kit 2.78.14: on every staff page, the status pill sits on the line under the name, after the role, so the title bar stays one row in a normal desktop window. It also brings what wasn't released before: a pull request whose kit will never be released is told so at once, and a draft is too.**
 
 ### What changed
 
+- **The status pill** ("On duty · next round in 5 min", "Working", "Off duty") moved from beside About and Settings to the line under the name, after the role. When there isn't room for the whole role, it's cut short: hover over it to read it all. The pill always shows whole, and the title bar stays one row unless the window is narrower than about 1,000 pixels.
+- **In a narrow window,** the pill goes under the role, and About, Settings, the theme and Run now sit on their own row, at its end.
+- **A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too** (brought from before). Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.
 - **The hold says the kit will never be released** (stages/prtest.ts `kitReleaseHold`). That is when no open Steward PR brings the kit, and a newer kit is released already or the Steward's main has a newer one. A kit is released from main, and main's kit only goes up. Main's kit is read from the checkout's `origin/main`, once per stage, with nothing fetched for it.
   - **It names the fix:** keep the repository main's pin. Once a build releases its kit, the rollout pins it on main, and the Steward's catch-up brings it to the PR.
   - **A pin to main's own kit**, not released yet, is held as before: the next build may still release it.
@@ -16,6 +19,10 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
   - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
   - A draft whose kit will never be released is told, and its hold says so after "a draft".
+
+### Before you update
+
+- Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.78.14.
 
 ## 0.36.84
 

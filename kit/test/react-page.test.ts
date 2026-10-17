@@ -120,6 +120,10 @@ test("the react part's frame is page.ts's, class for class: title bar, notice, S
   assert.match(html, /<header class="titlebar busy" data-agent="[a-z-]+" data-tour="titlebar">/);
   assert.match(html, /<a class="manor-back" href="http:\/\/manor\.localhost:18585\/" title="Back to Weasel Manor">/);
   assert.match(html, /<span class="status-pill busy" title="A round is under way/);
+  // The pill on the role's line, after the role (its whole text its title), plain text in the brand's link; none in the tools.
+  assert.match(html, /<p class="role-line"><span class="role" title="([^"]+)">\1<\/span><span class="status-pill busy" title="A round is under way[^"]*" data-tour="status">[^<]+<\/span><\/p><\/div><\/a>/);
+  assert.match(html, /<div class="tools"><a class="tool-link" id="about-link"/);
+  assert.equal((html.match(/class="status-pill/g) ?? []).length, 1);
   assert.match(html, /<a class="tool-link" id="settings-link" href="#\/settings"/);
   assert.match(html, /Weasel Manor chooses the theme, for every page in the manor/);
   assert.match(html, /<span class="titlebar-action" data-tour="action"><button type="button" class="quiet" data-post="\/api\/run">Run now<\/button><\/span>/);
