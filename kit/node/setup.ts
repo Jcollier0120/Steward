@@ -92,10 +92,22 @@ export function variantFor(t: { kind: 'gpu' | 'cpu' | 'npu'; vendor?: string; ar
 
 export const assetName = (build: string, variant: string) => `llama-${build}-bin-win-${variant}.zip`;
 
-/** The newest build (b<number>, newest first as GitHub lists them) that has every asset needed; a build still uploading lacks some. */
+/**
+ * The oldest build a variant may be, where older ones serve SMALL_SPEC wrong. On an Adreno X2-90 (driver 32.0.172.2,
+ * 2026-10-17), b11511's OpenCL build turned Qwen3-VL-2B's answers to garbage after their first token or so with flash
+ * attention on, llama-server's default: 5 of the Smith's 13 checks right. b11715 got all 13, as b11511 did with flash
+ * attention off (about 1.3 GB more of the PC's memory); Qwen3-4B and Qwen3-VL-4B were right on both builds.
+ */
+export const OLDEST_BUILD: Readonly<Record<string, number>> = { 'opencl-adreno-arm64': 11715 };
+
+/**
+ * The newest build (b<number>, newest first as GitHub lists them) that has every asset needed, and is no older than any
+ * of its variants' OLDEST_BUILD; a build still uploading lacks some.
+ */
 export function pickRelease(releases: Release[], variants: Variant[]): { release: Release; assets: ReleaseAsset[] } | null {
   for (const r of releases) {
     if (!/^b\d+$/.test(r.tag)) continue;
+    if (variants.some((v) => Number(r.tag.slice(1)) < (OLDEST_BUILD[v.variant] ?? 0))) continue;
     const names = variants.flatMap((v) => [assetName(r.tag, v.variant), ...(v.cudart ? [v.cudart] : [])]);
     const assets = [...new Set(names)].map((n) => r.assets.find((a) => a.name === n));
     if (assets.every((a): a is ReleaseAsset => !!a && !!a.url)) return { release: r, assets };
@@ -106,8 +118,19 @@ export function pickRelease(releases: Release[], variants: Variant[]): { release
 // ------------------------------------------------------------------------------------------------
 // Which models
 
-/** The models, the same as on the NPU so answers stay comparable: Qwen's own GGUF repos first, then well-known quantizers. */
-export const MODEL_SPECS: Record<EndpointKind, { model: string; repos: string[]; file: RegExp; mmproj?: RegExp[] }> = {
+/** A model to download: its name (llama-server's alias), the repos it's looked for in, its file, and a projector to see with. */
+export interface ModelSpec {
+  model: string;
+  repos: string[];
+  file: RegExp;
+  mmproj?: RegExp[];
+}
+
+/**
+ * The models on graphics cards with memory of their own, the same as on the NPU so answers stay comparable: Qwen's own
+ * GGUF repos first, then well-known quantizers. Graphics that share the PC's memory and the processor run SMALL_SPEC.
+ */
+export const MODEL_SPECS: Record<EndpointKind, ModelSpec> = {
   chat: {
     model: 'qwen3-4b-instruct-2507',
     repos: ['Qwen/Qwen3-4B-Instruct-2507-GGUF', 'unsloth/Qwen3-4B-Instruct-2507-GGUF', 'bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF', 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF'],
@@ -134,13 +157,46 @@ export const MODEL_SPECS: Record<EndpointKind, { model: string; repos: string[];
 };
 
 /**
+ * Chat's and vision's model where an accelerator runs the small one (runsSmall): Qwen3-VL-2B, one server for both. It was
+ * measured against Qwen3-4B and Qwen3-VL-4B (2026-10-17) on 34 of the manor's kind of requests, then pictures and text in
+ * turn, on a Core Ultra 5 225U's Intel Graphics and processor, a Radeon 860M and an Adreno X2-90.
+ * - Its answers were as good: the Smith's 13 checks right, as both 4Bs'; 16 of 18 tasks right (15 on the Adreno), where
+ *   Qwen3-4B got 16 and Qwen3-VL-4B 15. Its one slip of its own: it read a command line's `-ngl 99` as its context.
+ * - It wrote 1.8 to 2.2 times as fast and read 2.4 to 2.6 times as fast.
+ * - Its server held 3.3 to 3.7 GB of the PC's memory, where Qwen3-VL-4B's held 5.0 to 5.5 and Qwen3-4B's another 3.5 to
+ *   4.0 beside it.
+ * - Pictures: it read the Smith's check picture (513 × 512) right; at 512 × 512 it misread it, as Qwen3-VL-4B did.
+ */
+export const SMALL_SPEC: ModelSpec = {
+  model: 'qwen3-vl-2b-instruct',
+  repos: ['Qwen/Qwen3-VL-2B-Instruct-GGUF', 'unsloth/Qwen3-VL-2B-Instruct-GGUF', 'bartowski/Qwen_Qwen3-VL-2B-Instruct-GGUF'],
+  file: /(^|\/)(Qwen_)?Qwen3-?VL-2B-Instruct-Q4_K_M\.gguf$/i,
+  mmproj: [/(^|\/)mmproj[^/]*Q8_0\.gguf$/i, /(^|\/)mmproj[^/]*(F16|f16)\.gguf$/i],
+};
+
+/**
+ * Whether an accelerator's chat and vision run SMALL_SPEC: the processor, and graphics that share the PC's memory (under
+ * OWN_MEMORY_GB of their own, as sizing counts it), where each server's memory is the PC's. Cards with memory of their
+ * own keep Qwen3-4B and Qwen3-VL-4B: the small one wasn't measured on them.
+ */
+export function runsSmall(a: { kind: 'gpu' | 'cpu'; memoryGb?: number }): boolean {
+  return a.kind === 'cpu' || (a.memoryGb ?? 0) < OWN_MEMORY_GB;
+}
+
+/** The model an accelerator runs for a kind: SMALL_SPEC for chat and vision where it runsSmall, else MODEL_SPECS'. */
+export function specFor(kind: EndpointKind, a: { kind: 'gpu' | 'cpu'; memoryGb?: number }): ModelSpec {
+  return (kind === 'chat' || kind === 'vision') && runsSmall(a) ? SMALL_SPEC : MODEL_SPECS[kind];
+}
+
+/**
  * The kinds every graphics card serves unless others are asked for. A reranker isn't one of them: it is an add-on, set
  * up only when asked for (`--serve rerank`), beside whatever its accelerator already serves (runSetup).
  */
 export const DEFAULT_KINDS: readonly EndpointKind[] = ['chat', 'vision', 'embed'];
 
 export interface ModelFile {
-  kind: EndpointKind;
+  /** Its spec's model (ModelSpec): one file can serve two kinds (SMALL_SPEC's chat and vision). */
+  model: string;
   role: 'model' | 'mmproj';
   repo: string;
   file: string;
@@ -154,12 +210,12 @@ export function parseHfFiles(json: any): { file: string; size: number; sha256?: 
   return (json?.siblings ?? []).map((s: any) => ({ file: String(s.rfilename), size: Number(s.size ?? s.lfs?.size) || 0, sha256: s.lfs?.sha256 }));
 }
 
-/** The first repo that has the file (and, for vision, a projector): what to download. */
-export async function findModels(kinds: EndpointKind[], files: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
+/** The first repo that has each model's file (and, for one that sees, a projector): what to download. A kind stands for its MODEL_SPECS'. */
+export async function findModels(wanted: (EndpointKind | ModelSpec)[], files: (repo: string) => Promise<{ file: string; size: number; sha256?: string }[] | null>): Promise<{ models: ModelFile[]; problems: string[] }> {
   const models: ModelFile[] = [];
   const problems: string[] = [];
-  for (const kind of kinds) {
-    const spec = MODEL_SPECS[kind];
+  for (const want of wanted) {
+    const spec = typeof want === 'string' ? MODEL_SPECS[want] : want;
     let found = false;
     for (const repo of spec.repos) {
       const list = await files(repo).catch(() => null);
@@ -169,7 +225,7 @@ export async function findModels(kinds: EndpointKind[], files: (repo: string) =>
       if (!main || (spec.mmproj && !proj)) continue;
       const picks: [ModelFile['role'], { file: string; size: number; sha256?: string }][] = [['model', main], ...(proj ? [['mmproj', proj] as [ModelFile['role'], typeof proj]] : [])];
       for (const [role, f] of picks) {
-        models.push({ kind, role, repo, file: f.file, url: `https://huggingface.co/${repo}/resolve/main/${f.file}`, size: f.size, sha256: f.sha256 });
+        models.push({ model: spec.model, role, repo, file: f.file, url: `https://huggingface.co/${repo}/resolve/main/${f.file}`, size: f.size, sha256: f.sha256 });
       }
       found = true;
       break;
@@ -289,6 +345,16 @@ export const PICTURE_TOKENS = 1024;
 export const VISION_ON_PROCESSOR_TIMEOUTS = { requestBaseMs: 90_000 } as const;
 
 /**
+ * Whether the processor encodes an accelerator's pictures, so its vision caps them (PICTURE_CAP) and has its own time
+ * (VISION_ON_PROCESSOR_TIMEOUTS): a card that encodes on the processor, and the processor itself, which sees with
+ * SMALL_SPEC (runsSmall). On the Core Ultra 5 225U's processor (b11669, 2026-10-17), Qwen3-VL-2B read the Smith's check
+ * picture in 5.6 s and a small table in 3.2 s.
+ */
+export function picturesOnProcessor(e: { kind?: 'gpu' | 'cpu'; id: string; memoryGb?: number; device: string | null }): boolean {
+  return e.kind === 'cpu' || encodesOnProcessor(e);
+}
+
+/**
  * llama-server's RAM cache of earlier prompts' states, turned off. By default it keeps up to 8,192 MiB of them in the PC's
  * memory, for each server, beside what the card holds. On a Core Ultra 5 225U's Intel Graphics (b11669, 2026-10-16), the
  * chat server held 4.54 GB after 34 of the manor's kind of requests with it and 3.59 GB without, with the same answers,
@@ -302,29 +368,31 @@ export const NO_RAM_CACHE: Readonly<Record<string, string>> = { LLAMA_ARG_CACHE_
 export const CHAT_ON_VISION_RAM_GB = 32;
 
 /**
- * Whether a card's chat runs on its vision server: one Qwen3-VL-4B for both, on chat's endpoint, with vision's flags, in
- * place of a Qwen3-4B beside it. That is a card that encodes on the processor (encodesOnProcessor: Intel's integrated
- * graphics, whose memory is the PC's) on a PC with under CHAT_ON_VISION_RAM_GB. On a Core Ultra 5 225U with 15.4 GB
+ * Whether a card an older kit set up with Qwen3-4B and Qwen3-VL-4B moves its chat onto its vision server
+ * (withChatOnVision): one Qwen3-VL-4B for both, on chat's endpoint, with vision's flags, in place of a Qwen3-4B beside
+ * it. Setup itself, from kit 2.83.0, gives every accelerator that runsSmall one SMALL_SPEC server for both; this moves
+ * only a PC that hasn't been set up again since, without a download. That is a card that encodes on the processor
+ * (encodesOnProcessor: Intel's integrated graphics, whose memory is the PC's) on a PC with under
+ * CHAT_ON_VISION_RAM_GB. On a Core Ultra 5 225U with 15.4 GB
  * (b11669, 2026-10-16), the chat server held 3.5 GB and the vision server 5.0 GB, both of the PC's memory, so the two at
  * once came to 8.5 GB of it and the one server to 5.0. On text the one server wrote as fast (12.5 tokens a second
  * against 11.1 to 12.4) and passed the Smith's golden, determinism and prefix-leak checks (13 of 13, as Qwen3-4B did),
  * but got 15 of 18 of the manor's kind of tasks right against Qwen3-4B's 16: it found the wrong line in a 2,700-token
  * log, and its sum was wrong where Qwen3-4B's was right (but for its working shown). A picture, text, then a picture
- * again all answered on the one server. Qwen3-VL-2B (2026-10-17) would hold 3.3 GB, but it read the Smith's check
- * picture, TALLY 4827, as "Tally 827".
- * `device` may be the build's backend before its device's number is known (planSetup).
+ * again all answered on the one server.
+ * `device` may be the build's backend before its device's number is known.
  */
 export function chatsOnVision(card: { id: string; memoryGb?: number; device: string | null }, ramGb: number): boolean {
   return encodesOnProcessor(card) && ramGb < CHAT_ON_VISION_RAM_GB;
 }
 
 /** A server's own flags after its model, by kind: what it serves, its context and batch, one request at a time but chat's. */
-function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
+function kindFlags(kind: EndpointKind, e: Pick<EntryInput, 'id' | 'kind' | 'memoryGb' | 'device' | 'slots' | 'maxContextTokens'>, mmproj: string | undefined, model: string): string[] {
   switch (kind) {
     case 'chat':
       return ['-c', String(serverContext('chat', e)), '--parallel', String(e.slots), '--jinja', '--alias', model];
     case 'vision':
-      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR, PICTURE_CAP, String(PICTURE_TOKENS)] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
+      return ['--mmproj', portablePath(mmproj ?? ''), ...(encodesOnProcessor(e) ? [ENCODER_ON_PROCESSOR] : []), ...(picturesOnProcessor(e) ? [PICTURE_CAP, String(PICTURE_TOKENS)] : []), '-c', String(serverContext('vision', e)), '--parallel', '1', '--jinja', '--alias', model];
     case 'embed':
       // The compute buffer grows with -c × -ub: at -c 8192 -ub 8192 it was one 4.7 GB allocation, which the Adreno
       // X2-90's OpenCL refused ("failed to allocate compute pp buffers"). At -c 4096 -ub 512 (b11669, 2026-10-15) a
@@ -376,7 +444,7 @@ export interface Sizing {
  * servers (each running at once, every layer on the card) fit with DESKTOP_GB to spare. When none does,
  * vision is left off (the rarest request, and the biggest server after chat), unless it was asked for
  * by name (`keepKinds`); when still none does, the smallest. A card that shares the PC's memory goes by
- * the PC's, and the processor only chats.
+ * the PC's, and the processor serves one request at a time.
  */
 export function sizing(t: { kind: 'gpu' | 'cpu'; memoryGb?: number; ramGb?: number; kinds?: EndpointKind[]; keepKinds?: boolean }): Sizing {
   const kinds = t.kinds ?? [...DEFAULT_KINDS];
@@ -405,11 +473,12 @@ export interface EntryInput {
   /** --device's name (none for the processor). */
   device: string | null;
   server: string;
-  models: Partial<Record<EndpointKind, { path: string; mmproj?: string }>>;
+  /** Each kind's model file, its projector, and its name (specFor's; MODEL_SPECS' for the kind when not given). */
+  models: Partial<Record<EndpointKind, { path: string; mmproj?: string; model?: string }>>;
   ports: Partial<Record<EndpointKind, number>>;
   slots: number;
   maxContextTokens: number;
-  /** Chat on the vision server (chatsOnVision): chat's port runs vision's model and flags, and vision has no server of its own. */
+  /** Chat on the vision server (runsSmall's one server for both): chat's port runs vision's model and flags, and vision has no server of its own. */
   chatOnVision?: boolean;
 }
 
@@ -427,7 +496,7 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
   for (const kind of ENDPOINT_KINDS) {
     // Vision on chat's server: the core's endpointFor gives it chat's.
     if (shared && kind === 'vision') {
-      a.vision = { model: MODEL_SPECS.vision.model, ...(encodesOnProcessor(e) ? { timeouts: { ...VISION_ON_PROCESSOR_TIMEOUTS } } : {}) };
+      a.vision = { model: e.models.vision!.model ?? MODEL_SPECS.vision.model, ...(picturesOnProcessor(e) ? { timeouts: { ...VISION_ON_PROCESSOR_TIMEOUTS } } : {}) };
       continue;
     }
     // The server it runs: vision's, for chat on it.
@@ -435,11 +504,11 @@ export function acceleratorEntry(e: EntryInput): AcceleratorEntry {
     const m = e.models[runs];
     const port = e.ports[kind];
     if (!m || !port) continue;
-    const model = MODEL_SPECS[runs].model;
+    const model = m.model ?? MODEL_SPECS[runs].model;
     const common = ['--host', '127.0.0.1', '--port', String(port), ...pin, '-m', portablePath(m.path)];
     a[kind] = { baseUrl: `http://127.0.0.1:${port}`, model, startCommand: [server, ...common, ...kindFlags(runs, e, m.mmproj, model)], env: { ...NO_RAM_CACHE } };
     if (kind === 'embed') a.embed!.maxContextTokens = Math.min(EMBED_CAP, e.maxContextTokens);
-    if (kind === 'vision' && encodesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
+    if (kind === 'vision' && picturesOnProcessor(e)) a.vision!.timeouts = { ...VISION_ON_PROCESSOR_TIMEOUTS };
   }
   return a;
 }
@@ -548,7 +617,7 @@ export interface SetupTarget {
    * had for them is kept as it was (keepingAddOns), never removed.
    */
   leftToNpu?: EndpointKind[];
-  /** Its chat runs on its vision server (chatsOnVision): Qwen3-4B isn't downloaded for it, and vision has no port of its own. */
+  /** Its chat runs on its vision server, one SMALL_SPEC for both (runsSmall): vision has no port of its own. */
   chatOnVision?: boolean;
   /** Filled in once its build is here (llama-server --list-devices). */
   device?: string | null;
@@ -585,7 +654,7 @@ export interface PlanInput {
   detection: Detection;
   /** Ids asked for; none: every graphics card (the processor too when there's no card and no NPU). */
   ids: string[];
-  /** What each card serves (default all three; the processor only chats). */
+  /** What each card serves (default all three; the processor chats and sees, and reranks when asked). */
   kinds?: EndpointKind[];
   /** config.json's content now. */
   raw: Record<string, any>;
@@ -664,11 +733,12 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
   const npuServes = new Set<EndpointKind>(npu ? npu.kinds : det?.supported && configuredNpu && !installDefault ? ENDPOINT_KINDS.filter((k) => serves(configuredNpu, k)) : []);
 
   // Which accelerators. Every graphics card serves all three, as before: the NPU comes first for what it serves, and a
-  // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats when the NPU
-  // doesn't, and makes the embeddings when the NPU chats but serves none (Intel's and AMD's routes).
+  // card takes it only when the NPU can't (too big, or failed lately). With no card, the processor chats and sees (one
+  // SMALL_SPEC server) when the NPU doesn't chat, and makes the embeddings when the NPU chats but serves none (Intel's and
+  // AMD's routes).
   const cards = o.detection.cards;
   let wanted = (o.ids.length ? o.ids : cards.map((c) => c.id)).filter((id) => id !== 'npu');
-  const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat'] : !npuServes.has('embed') ? ['embed'] : [];
+  const cpuDefault: EndpointKind[] = !npuServes.has('chat') ? ['chat', ...(npuServes.has('vision') ? [] : ['vision' as const])] : !npuServes.has('embed') ? ['embed'] : [];
   // Beside an NPU, with Manor's switch off, a card is never asked for the NPU's work (the keeper keeps it out): none of it is set up on the card.
   const besideNpu = o.gpuWithNpu === false && npuServes.size > 0 && !o.kinds?.length;
   const leftToNpu: NonNullable<SetupPlan['leftToNpu']> = [];
@@ -681,8 +751,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
       continue;
     }
     const kind = card ? 'gpu' : 'cpu';
-    // The processor chats (and reranks, when asked): a 0.6B reranker runs well enough on it, a vision model doesn't.
-    const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'rerank') : cpuDefault;
+    // The processor chats and sees, on one SMALL_SPEC server (and reranks, when asked: a 0.6B reranker runs well enough on it).
+    const cpuKinds = o.cpuKinds?.length ? o.cpuKinds : o.kinds?.length || o.ids.includes('cpu') || !cpuDefault.length ? kinds.filter((k) => k === 'chat' || k === 'vision' || k === 'rerank') : cpuDefault;
     // A card the NPU leaves nothing to (a Snapdragon's, whose NPU serves all three) is set up whole, as before: the
     // switch is offered only beside a configured card, and the person can't turn on a card that has no entry.
     const besideKinds = card && besideNpu ? core.cardWorkBesideNpu(kinds, [...npuServes]) : kinds;
@@ -704,7 +774,8 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     if ('none' in v) t.problem = v.none;
     else {
       t.variant = v;
-      if (card && size.kinds.includes('chat') && size.kinds.includes('vision') && chatsOnVision({ id, memoryGb: card.memoryGb, device: v.backend }, ramGb)) t.chatOnVision = true;
+      // One SMALL_SPEC server for chat and vision, on chat's port.
+      if (size.kinds.includes('chat') && size.kinds.includes('vision') && runsSmall(t)) t.chatOnVision = true;
     }
     targets.push(t);
   }
@@ -735,8 +806,9 @@ export async function planSetup(o: PlanInput): Promise<SetupPlan> {
     }
   }
 
-  // Which models.
-  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => (t.chatOnVision ? t.kinds.filter((k) => k !== 'chat') : t.kinds)))];
+  // Which models: each target's (specFor), each once; a projector only where it sees (SMALL_SPEC chatting alone hasn't one).
+  const seeing = new Set(targets.filter((t) => t.variant && t.kinds.includes('vision')).map((t) => specFor('vision', t)));
+  const needed = [...new Set(targets.filter((t) => t.variant).flatMap((t) => t.kinds.map((k) => specFor(k, t))))].map((s) => (s.mmproj && !seeing.has(s) ? { ...s, mmproj: undefined } : s));
   const found = needed.length ? await findModels(needed, o.hfFiles) : { models: [], problems: [] };
   problems.push(...found.problems);
   for (const m of found.models) {
@@ -811,7 +883,7 @@ export function describePlan(p: SetupPlan): string[] {
     }
     const serves = t.kinds
       .filter((k) => !(t.chatOnVision && k === 'vision'))
-      .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${MODEL_SPECS.vision.model} server)` : `${k} on ${t.ports[k]}`))
+      .map((k) => (t.chatOnVision && k === 'chat' ? `chat and vision on ${t.ports.chat} (one ${specFor('vision', t).model} server)` : `${k} on ${t.ports[k]}`))
       .join(', ');
     lines.push(`${t.name} (${t.id}): llama.cpp ${p.build ?? '?'} ${t.variant?.variant}, ${t.slots} slot${t.slots === 1 ? '' : 's'}, ${t.maxContextTokens} tokens a request; ${serves}${t.device ? `; device ${t.device}` : ''}`);
     if (t.left?.length) lines.push(`  ${t.left.join(' and ')} left off: the card's ${t.memoryGb} GB won't hold it beside ${t.kinds.join(' and ')} at once (to have it anyway: accelerators setup --serve chat,vision,embed)`);
@@ -924,8 +996,8 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
       rmSync(d.dest, { force: true });
     }
   }
-  const modelPath = (kind: EndpointKind, role: 'model' | 'mmproj') => {
-    const m = plan.models.find((x) => x.kind === kind && x.role === role);
+  const modelPath = (spec: ModelSpec, role: 'model' | 'mmproj') => {
+    const m = plan.models.find((x) => x.model === spec.model && x.role === role);
     return m ? path.join(plan.modelsDir, path.basename(m.file)) : undefined;
   };
   for (const t of plan.targets) {
@@ -946,8 +1018,9 @@ export async function runSetup(plan: SetupPlan, raw: Record<string, any>, io: Se
     }
     const models: EntryInput['models'] = {};
     for (const k of t.kinds) {
-      const p = modelPath(k, 'model');
-      if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(k, 'mmproj') : undefined };
+      const spec = specFor(k, t);
+      const p = modelPath(spec, 'model');
+      if (p) models[k] = { path: p, mmproj: k === 'vision' ? modelPath(spec, 'mmproj') : undefined, model: spec.model };
     }
     // Named as detection named it, for the caller; config.json gets the entry without it (mergeEntries).
     const made = acceleratorEntry({ id: t.id, kind: t.kind, memoryGb: t.memoryGb, device, server, models, ports: t.ports, slots: t.slots, maxContextTokens: t.maxContextTokens, ...(t.chatOnVision ? { chatOnVision: true } : {}) });

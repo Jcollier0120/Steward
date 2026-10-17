@@ -2,6 +2,29 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.83.0
+
+**Graphics that share the PC's memory, and the processor, now chat and see with one Qwen3-VL-2B server in place of Qwen3-4B and Qwen3-VL-4B: about twice as fast, about 2 GB less memory than Qwen3-VL-4B alone, and the same scores. Cards with memory of their own keep the 4B models. On the Adreno, setup takes llama.cpp b11715 or later.**
+
+Measured on 2026-10-17 on an Intel Core Ultra 5 225U (its graphics and its processor), an AMD Radeon 860M and a Qualcomm Adreno X2-90, with the same harness. The 2B passed all 13 of the Smith's checks on each, and 15 to 16 of 18 tasks scored by code, as the 4B models did. It wrote 1.8 to 2.2 times as fast and read 2.4 to 2.6 times as fast. Its server held 3.1 to 3.4 GB, against 4.7 to 5.8 GB for Qwen3-VL-4B (spec/ACCELERATORS.md has the table).
+
+### What changed
+
+- **setup.ts:**
+  - `SMALL_SPEC` is Qwen3-VL-2B-Instruct (Q4_K_M, with its Q8_0 projector). `runsSmall` is true for the processor and for graphics with under `OWN_MEMORY_GB` of their own. `specFor(kind, accelerator)` picks the model for each kind.
+  - Such an accelerator asked for chat and vision gets one server for both on chat's port (`chatOnVision`), whatever the PC's memory, and Qwen3-4B and Qwen3-VL-4B aren't downloaded for it.
+    - Asked for chat alone, it runs the 2B without its projector, which isn't downloaded.
+  - The processor now serves vision too, when no NPU does. Its pictures are capped and timed as on Intel's integrated graphics (`picturesOnProcessor`).
+  - `OLDEST_BUILD`: `pickRelease` skips Adreno builds before b11715. Earlier builds garble the 2B with flash attention on: b11511 passed 5 of the 13 checks, b11715 all 13.
+  - `findModels` takes a kind or a `ModelSpec`. `ModelFile` names its model (`model`) in place of its kind.
+  - Kept for a PC not set up again: `chatsOnVision` and `withChatOnVision`, the keeper's move of an Intel PC under 32 GB onto its Qwen3-VL-4B server.
+- **spec/ACCELERATORS.md:** "Chat and vision on one small model" replaces "Chat on the vision server", with the measurements.
+
+### Before you update
+
+- Nothing in an agent's code. A PC set up before keeps its models until its local AI is set up again (Manor's Set up local AI). That run downloads the 2B (1.55 GB with its projector) and, on the Adreno, a build from b11715 on. The keeper's look never downloads, so it doesn't make this change by itself.
+- Code that read `ModelFile.kind` from `findModels` or `planSetup`'s `models` reads `model`.
+
 ## 2.82.4
 
 **Each agent's PowerShell worker stays 4 minutes with nothing to run, not 2, so agents start PowerShell less often.**

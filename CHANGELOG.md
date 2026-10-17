@@ -2,6 +2,24 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.136
+
+**The kit 2.83.0: on graphics that share the PC's memory, and on the processor, local AI chats and sees with one smaller model, Qwen3-VL-2B. It is about twice as fast and holds about 2 GB less, with the same scores. Graphics cards with memory of their own keep the larger models.**
+
+### What changed
+
+- **The kit 2.83.0** ([kit/CHANGELOG.md](kit/CHANGELOG.md)):
+  - Setup gives integrated graphics (Intel's, AMD's and Qualcomm's) and the processor one Qwen3-VL-2B server for chat and pictures, in place of Qwen3-4B and Qwen3-VL-4B.
+    - It was measured on three PCs on 2026-10-17: an Intel Core Ultra 5 225U (graphics and processor), an AMD Radeon 860M and a Qualcomm Adreno X2-90.
+    - It passed every one of the Smith's checks and as many of the 18 tasks as the larger models.
+    - It wrote about twice as fast, read about 2.5 times as fast, and held 3.1 to 3.4 GB against 4.7 to 5.8 GB.
+  - The processor now answers questions about pictures too, when no NPU does.
+  - On the Adreno, setup takes llama.cpp b11715 or later: earlier builds garble the smaller model.
+
+### Before you update
+
+- Nothing for the Steward. To move a PC that's already set up onto the smaller model, set up its local AI again (Manor's Set up local AI): that downloads it (1.55 GB). Until then, the PC keeps the models it has.
+
 ## 0.36.135
 
 **The Steward's page shows what each repository's next build will release.**

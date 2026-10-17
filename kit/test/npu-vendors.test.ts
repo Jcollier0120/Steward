@@ -362,11 +362,12 @@ test('config entries per vendor: one server on its own port, its caps and timeou
 });
 
 const NO_RELEASES = parseReleases([]);
-const asset = (name: string, size = 1000) => ({ name, size, browser_download_url: `https://github.com/ggml-org/llama.cpp/releases/download/b1/${name}`, digest: `sha256:${'ab'.repeat(32)}` });
-const RELEASES = parseReleases([{ tag_name: 'b1', assets: [asset('llama-b1-bin-win-vulkan-x64.zip', 33e6), asset('llama-b1-bin-win-cpu-x64.zip', 19e6), asset('llama-b1-bin-win-opencl-adreno-arm64.zip', 13e6), asset('llama-b1-bin-win-cpu-arm64.zip', 12e6)] }]);
+const asset = (name: string, size = 1000) => ({ name, size, browser_download_url: `https://github.com/ggml-org/llama.cpp/releases/download/b11800/${name}`, digest: `sha256:${'ab'.repeat(32)}` });
+const RELEASES = parseReleases([{ tag_name: 'b11800', assets: [asset('llama-b11800-bin-win-vulkan-x64.zip', 33e6), asset('llama-b11800-bin-win-cpu-x64.zip', 19e6), asset('llama-b11800-bin-win-opencl-adreno-arm64.zip', 13e6), asset('llama-b11800-bin-win-cpu-arm64.zip', 12e6)] }]);
 const HF: Record<string, any> = {
   'Qwen/Qwen3-4B-Instruct-2507-GGUF': { siblings: [{ rfilename: 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf', size: 2497281120, lfs: { sha256: '36' } }] },
   'Qwen/Qwen3-VL-4B-Instruct-GGUF': { siblings: [{ rfilename: 'Qwen3VL-4B-Instruct-Q4_K_M.gguf', size: 2497281664, lfs: { sha256: '66' } }, { rfilename: 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf', size: 453974304, lfs: { sha256: '30' } }] },
+  'Qwen/Qwen3-VL-2B-Instruct-GGUF': { siblings: [{ rfilename: 'Qwen3VL-2B-Instruct-Q4_K_M.gguf', size: 1107409952, lfs: { sha256: '08' } }, { rfilename: 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', size: 445053216, lfs: { sha256: 'f9' } }] },
   'Qwen/Qwen3-Embedding-0.6B-GGUF': { siblings: [{ rfilename: 'Qwen3-Embedding-0.6B-Q8_0.gguf', size: 639150592, lfs: { sha256: '06' } }] },
 };
 const hf = async (repo: string) => (HF[repo] ? parseHfFiles(HF[repo]) : null);
@@ -1063,7 +1064,7 @@ test('the memory rule: the NPU takes 40% of the PC at most, chat 4.3 GB and embe
   const p8 = await planAt(7.6);
   assert.equal(p8.npu, null);
   assert.match(p8.npuPlain!, /^The NPU \(Core Ultra 200V, Lunar Lake \(NPU 4\)\) isn't used: this PC's 8 GB of memory hasn't room for the NPU's chat model/);
-  assert.deepEqual(p8.targets.map((t) => [t.id, t.kinds]), [['cpu', ['chat']]], 'the processor chats');
+  assert.deepEqual(p8.targets.map((t) => [t.id, t.kinds]), [['cpu', ['chat', 'vision']]], 'the processor chats and sees, on one Qwen3-VL-2B server');
 });
 
 test("calibration: this PC's timeouts from setup's measurements, never under the starting values, never past the bounds; too slow under 2 tokens a second", () => {
@@ -1293,8 +1294,8 @@ test("setup with a detection given keeps no NPU report unless told where; a PC w
 });
 
 // Manor's "Use the graphics card for models when there's an NPU" (gpuWithNpu, off by default): a card beside an NPU is
-// set up only for the work no NPU serves, the rule requests and the keeper follow (core.cardWorkBesideNpu), so its chat
-// and embedding models (about 3.1 GB on an Intel PC) aren't downloaded to sit unused.
+// set up only for the work no NPU serves, the rule requests and the keeper follow (core.cardWorkBesideNpu), so its
+// embedding model (0.64 GB) isn't downloaded to sit unused, nor its chat started on its Qwen3-VL-2B server.
 const LUNAR = () => parseDetection(`${INTEL_IGPU}${NPU.lunar}\n${X64('Intel(R) Core(TM) Ultra 7 258V')}`);
 const ARC = 'gpu-intel-r-arc-tm-140v-gpu-16gb';
 const ARC_VK = '  Vulkan0: Intel(R) Arc(TM) 140V GPU (16GB) (16384 MiB, 15000 MiB free)\n';
@@ -1323,14 +1324,14 @@ test('beside an Intel NPU, with the switch off, the card is planned for vision a
   assert.deepEqual(off.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['vision'], ['chat', 'embed']]]);
   assert.deepEqual(off.leftToNpu, [{ id: ARC, name: 'Intel(R) Arc(TM) 140V GPU (16GB)', kinds: ['chat', 'embed'] }]);
   const files = off.downloads.map((d) => path.win32.basename(d.dest));
-  assert.ok(files.includes('Qwen3VL-4B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf'), files.join());
+  assert.ok(files.includes('Qwen3VL-2B-Instruct-Q4_K_M.gguf') && files.includes('mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'), files.join());
   assert.ok(!files.some((f) => CHAT_GGUF.test(f) || EMBED_GGUF.test(f)), `no chat or embedding model for the card: ${files.join()}`);
   assert.ok(describePlan(off).includes(`Intel(R) Arc(TM) 140V GPU (16GB) (${ARC}): chat and embed not set up on it: the NPU does those, and "Use the graphics card for models when there's an NPU" is off`), describePlan(off).join('\n'));
   // The switch on (or left out, as for an agent with no Manor): the card is set up for everything, as before.
   const on = await planSetup({ detection: LUNAR(), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: true });
   assert.deepEqual(on.targets.map((t) => [t.id, t.kinds, t.leftToNpu]), [[ARC, ['chat', 'vision', 'embed'], undefined]]);
   assert.equal(on.leftToNpu, undefined);
-  assert.ok(on.downloadBytes - off.downloadBytes >= 2497281120 + 639150592, "the card's chat and embedding models: 3.1 GB more");
+  assert.equal(on.downloadBytes - off.downloadBytes, 639150592, "the card's embedding model more: its chat is its vision server's");
   // Kinds asked for by name are set up as asked.
   const asked = await planSetup({ detection: LUNAR(), ids: [ARC], kinds: ['chat', 'vision'], raw: {}, releases: RELEASES, hfFiles: hf, home: tools, env: ENV, exists: disk(), gpuWithNpu: false });
   assert.deepEqual(asked.targets.map((t) => t.kinds), [['chat', 'vision']]);
@@ -1340,7 +1341,7 @@ test('beside an Intel NPU, with the switch off, the card is planned for vision a
   assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
   assert.deepEqual(kindsOf(run.arc), ['vision']);
   const got = downloaded(run.did);
-  assert.ok(got.some((d) => /Qwen3VL-4B-Instruct-Q4_K_M\.gguf/.test(d)) && got.some((d) => /mmproj-Qwen3VL/.test(d)), got.join('\n'));
+  assert.ok(got.some((d) => /Qwen3VL-2B-Instruct-Q4_K_M\.gguf/.test(d)) && got.some((d) => /mmproj-Qwen3VL/.test(d)), got.join('\n'));
   assert.ok(!got.some((d) => CHAT_GGUF.test(d) || EMBED_GGUF.test(d)), got.join('\n'));
 });
 
@@ -1363,7 +1364,8 @@ test('the switch on: the card is set up for everything beside the NPU', async ()
   assert.equal(run.r.code, 0, run.log.join('\n'));
   assert.deepEqual(kindsOf(run.npuEntry), ['chat', 'embed']);
   assert.deepEqual(kindsOf(run.arc), ['chat', 'vision', 'embed']);
-  assert.ok(downloaded(run.did).some((d) => CHAT_GGUF.test(d)));
+  assert.equal(run.arc.chat.model, 'qwen3-vl-2b-instruct', 'one Qwen3-VL-2B server chats and sees');
+  assert.ok(!downloaded(run.did).some((d) => CHAT_GGUF.test(d)));
 });
 
 test("the switch turned on later: setting up again fills in the card's chat and embeddings, and keeps the NPU as it was", async () => {
@@ -1373,7 +1375,7 @@ test("the switch turned on later: setting up again fills in the card's chat and 
   assert.equal(later.r.code, 0, later.log.join('\n'));
   assert.deepEqual(kindsOf(later.arc), ['chat', 'vision', 'embed']);
   assert.deepEqual(later.npuEntry, first.npuEntry, 'the NPU set up before is left as it is');
-  assert.equal(later.arc.vision.baseUrl, first.arc.vision.baseUrl, 'the card keeps its vision port');
+  assert.equal(later.arc.chat.baseUrl, first.arc.vision.baseUrl, "chat takes its vision server's port, where that model runs");
   assert.ok(!later.did.some((d) => /OpenVINO|ovms/i.test(d)), later.did.join('\n'));
 });
 

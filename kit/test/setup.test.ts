@@ -12,7 +12,7 @@ process.env.MANOR_HOME = path.join(process.env.REEVE_HOME!, 'no-manor');
 after(() => rmSync(process.env.REEVE_HOME!, { recursive: true, force: true }));
 const { autoOrder, readAccelerators, validateAccelerators } = await import('./fixture/src/kit/accelerator-config.ts');
 const { detectedAccelerators, hardwareOf, keyCards, noNpu, npuName, parseAdapters, parseDetection, recommendedCard } = await import('./fixture/src/kit/detect.ts');
-const { acceleratorEntry, cardNeedGb, DESKTOP_GB, describePlan, findModels, matchDevice, mergeEntries, parseHfFiles, parseListDevices, parseReleases, pickRelease, planSetup, portablePath, runSetup, sizing, variantFor, withoutNpu } = await import('./fixture/src/kit/setup.ts');
+const { acceleratorEntry, cardNeedGb, DESKTOP_GB, describePlan, findModels, matchDevice, mergeEntries, parseHfFiles, parseListDevices, parseReleases, pickRelease, planSetup, portablePath, runSetup, sizing, SMALL_SPEC, variantFor, withoutNpu } = await import('./fixture/src/kit/setup.ts');
 const { genieXConfig, isInstallDefaultNpu } = await import('./fixture/src/kit/setup.ts');
 const { setupCommand } = await import('./fixture/src/kit/setup.ts');
 const { acceleratorConfigFile } = await import('./fixture/src/kit/accelerator-config.ts');
@@ -114,20 +114,20 @@ test('the llama.cpp build per vendor and architecture', () => {
 });
 
 const asset = (name: string, size = 1000) => ({ name, size, browser_download_url: `https://github.com/ggml-org/llama.cpp/releases/download/x/${name}`, digest: `sha256:${'ab'.repeat(32)}` });
-// GitHub lists the newest first; b11350 is still uploading its Windows builds.
+// GitHub lists the newest first; b11750 is still uploading its Windows builds.
 const RELEASES = parseReleases([
-  { tag_name: 'b11350', assets: [asset('llama-b11350-bin-win-cpu-x64.zip')] },
+  { tag_name: 'b11750', assets: [asset('llama-b11750-bin-win-cpu-x64.zip')] },
   { tag_name: 'v0.5.0', assets: [asset('nightly-tag.txt')] },
   {
-    tag_name: 'b11349',
+    tag_name: 'b11749',
     assets: [
-      asset('llama-b11349-bin-win-cuda-12.4-x64.zip', 263288146),
+      asset('llama-b11749-bin-win-cuda-12.4-x64.zip', 263288146),
       asset('cudart-llama-bin-win-cuda-12.4-x64.zip', 391443627),
-      asset('llama-b11349-bin-win-vulkan-x64.zip', 33192213),
-      asset('llama-b11349-bin-win-opencl-adreno-arm64.zip', 12934093),
-      asset('llama-b11349-bin-win-cpu-arm64.zip', 12118840),
-      asset('llama-b11349-bin-win-cpu-x64.zip', 19275576),
-      asset('llama-b11349-bin-ubuntu-x64.tar.gz'),
+      asset('llama-b11749-bin-win-vulkan-x64.zip', 33192213),
+      asset('llama-b11749-bin-win-opencl-adreno-arm64.zip', 12934093),
+      asset('llama-b11749-bin-win-cpu-arm64.zip', 12118840),
+      asset('llama-b11749-bin-win-cpu-x64.zip', 19275576),
+      asset('llama-b11749-bin-ubuntu-x64.tar.gz'),
     ],
   },
 ]);
@@ -135,11 +135,14 @@ const RELEASES = parseReleases([
 test('the newest b-release that has every asset needed; none is hard-coded', () => {
   const v = [variantFor({ kind: 'gpu', vendor: 'NVIDIA', arch: 'x64' }), variantFor({ kind: 'cpu', arch: 'x64' })] as any;
   const r = pickRelease(RELEASES, v);
-  assert.equal(r?.release.tag, 'b11349');
-  assert.deepEqual(r?.assets.map((a) => a.name), ['llama-b11349-bin-win-cuda-12.4-x64.zip', 'cudart-llama-bin-win-cuda-12.4-x64.zip', 'llama-b11349-bin-win-cpu-x64.zip']);
-  assert.equal(pickRelease(RELEASES, [variantFor({ kind: 'cpu', arch: 'x64' })] as any)?.release.tag, 'b11350', 'the CPU build is already there');
+  assert.equal(r?.release.tag, 'b11749');
+  assert.deepEqual(r?.assets.map((a) => a.name), ['llama-b11749-bin-win-cuda-12.4-x64.zip', 'cudart-llama-bin-win-cuda-12.4-x64.zip', 'llama-b11749-bin-win-cpu-x64.zip']);
+  assert.equal(pickRelease(RELEASES, [variantFor({ kind: 'cpu', arch: 'x64' })] as any)?.release.tag, 'b11750', 'the CPU build is already there');
   assert.equal(pickRelease(RELEASES.slice(0, 2), v), null);
   assert.equal(r?.assets[0].digest, `sha256:${'ab'.repeat(32)}`);
+  const older = parseReleases([{ tag_name: 'b11714', assets: [asset('llama-b11714-bin-win-opencl-adreno-arm64.zip'), asset('llama-b11714-bin-win-vulkan-x64.zip')] }]);
+  assert.equal(pickRelease(older, [variantFor({ kind: 'gpu', vendor: 'Qualcomm', arch: 'arm64' })] as any), null, "Adreno's builds before b11715 garble Qwen3-VL-2B");
+  assert.equal(pickRelease(older, [variantFor({ kind: 'gpu', vendor: 'AMD', arch: 'x64' })] as any)?.release.tag, 'b11714');
 });
 
 const HF: Record<string, any> = {
@@ -157,6 +160,13 @@ const HF: Record<string, any> = {
       { rfilename: 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf', size: 453974304, lfs: { sha256: '30' } },
     ],
   },
+  'Qwen/Qwen3-VL-2B-Instruct-GGUF': {
+    siblings: [
+      { rfilename: 'Qwen3VL-2B-Instruct-Q4_K_M.gguf', size: 1107409952, lfs: { sha256: '089d' } },
+      { rfilename: 'mmproj-Qwen3VL-2B-Instruct-F16.gguf', size: 819394336, lfs: { sha256: '2b16' } },
+      { rfilename: 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', size: 445053216, lfs: { sha256: 'f9a6' } },
+    ],
+  },
   'Qwen/Qwen3-Embedding-0.6B-GGUF': { siblings: [{ rfilename: 'Qwen3-Embedding-0.6B-Q8_0.gguf', size: 639150592, lfs: { sha256: '06' } }] },
 };
 const hf = async (repo: string) => (HF[repo] ? parseHfFiles(HF[repo]) : null);
@@ -165,13 +175,22 @@ test('models: Qwen\'s own GGUF repo first, else a well-known quantizer; the proj
   const { models, problems } = await findModels(['chat', 'vision', 'embed'], hf);
   assert.deepEqual(problems, []);
   assert.deepEqual(
-    models.map((m) => [m.kind, m.role, m.repo, m.file, m.size]),
+    models.map((m) => [m.model, m.role, m.repo, m.file, m.size]),
     [
-      ['chat', 'model', 'unsloth/Qwen3-4B-Instruct-2507-GGUF', 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf', 2497281120],
-      ['vision', 'model', 'Qwen/Qwen3-VL-4B-Instruct-GGUF', 'Qwen3VL-4B-Instruct-Q4_K_M.gguf', 2497281664],
-      ['vision', 'mmproj', 'Qwen/Qwen3-VL-4B-Instruct-GGUF', 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf', 453974304],
-      ['embed', 'model', 'Qwen/Qwen3-Embedding-0.6B-GGUF', 'Qwen3-Embedding-0.6B-Q8_0.gguf', 639150592],
+      ['qwen3-4b-instruct-2507', 'model', 'unsloth/Qwen3-4B-Instruct-2507-GGUF', 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf', 2497281120],
+      ['qwen3-vl-4b-instruct', 'model', 'Qwen/Qwen3-VL-4B-Instruct-GGUF', 'Qwen3VL-4B-Instruct-Q4_K_M.gguf', 2497281664],
+      ['qwen3-vl-4b-instruct', 'mmproj', 'Qwen/Qwen3-VL-4B-Instruct-GGUF', 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf', 453974304],
+      ['qwen3-embedding-0.6b-gguf', 'model', 'Qwen/Qwen3-Embedding-0.6B-GGUF', 'Qwen3-Embedding-0.6B-Q8_0.gguf', 639150592],
     ],
+  );
+  const small = await findModels([SMALL_SPEC], hf);
+  assert.deepEqual(
+    small.models.map((m) => [m.model, m.role, m.file, m.size]),
+    [
+      ['qwen3-vl-2b-instruct', 'model', 'Qwen3VL-2B-Instruct-Q4_K_M.gguf', 1107409952],
+      ['qwen3-vl-2b-instruct', 'mmproj', 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', 445053216],
+    ],
+    "the small one, for graphics sharing the PC's memory and the processor",
   );
   assert.equal(models[0].url, 'https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf');
   assert.match((await findModels(['chat'], async () => null)).problems[0], /no GGUF for qwen3-4b-instruct-2507/);
@@ -241,37 +260,41 @@ test("sizing by memory: all of a card's servers fit at once, with room for the d
 test('the plan for a desktop: CUDA with its runtime per card, ports from 18191, models once, sizes added up', async () => {
   const home = mkdtempSync(path.join(process.env.REEVE_HOME!, 'plan-'));
   const plan = await planSetup({ detection: parseDetection(DESKTOP), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home });
-  assert.equal(plan.build, 'b11349');
+  assert.equal(plan.build, 'b11749');
   assert.deepEqual(
     plan.targets.map((t) => [t.id, t.variant?.variant ?? t.problem, t.slots, t.maxContextTokens, t.ports]),
     [
       ['gpu-nvidia-geforce-rtx-4090', 'cuda-12.4-x64', 2, 16384, { chat: 18191, vision: 18192, embed: 18193 }],
       ['gpu-nvidia-geforce-rtx-4090-2', 'cuda-12.4-x64', 2, 16384, { chat: 18194, vision: 18195, embed: 18196 }],
-      ['gpu-intel-r-uhd-graphics-770', 'vulkan-x64', 1, 8192, { chat: 18197, vision: 18198, embed: 18199 }],
-      ['gpu-graphics-card-5', 'vulkan-x64', 1, 8192, { chat: 18200, vision: 18201, embed: 18202 }],
+      ['gpu-intel-r-uhd-graphics-770', 'vulkan-x64', 1, 8192, { chat: 18197, embed: 18198 }],
+      ['gpu-graphics-card-5', 'vulkan-x64', 1, 8192, { chat: 18199, embed: 18200 }],
     ],
   );
-  // One CUDA build and runtime (into one folder), one Vulkan build, four model files.
+  // The integrated ones chat and see on one Qwen3-VL-2B server each.
+  assert.deepEqual(plan.targets.map((t) => t.chatOnVision), [undefined, undefined, true, true]);
+  // One CUDA build and runtime (into one folder), one Vulkan build, six model files: the 4B ones for the cards, the 2B ones for the integrated graphics.
   assert.deepEqual(
     plan.downloads.map((d) => d.what),
     [
-      'llama-b11349-bin-win-cuda-12.4-x64.zip',
+      'llama-b11749-bin-win-cuda-12.4-x64.zip',
       'cudart-llama-bin-win-cuda-12.4-x64.zip',
-      'llama-b11349-bin-win-vulkan-x64.zip',
+      'llama-b11749-bin-win-vulkan-x64.zip',
       'unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
       'Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q4_K_M.gguf',
       'Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf',
       'Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf',
+      'Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf',
+      'Qwen/Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf',
     ],
   );
-  assert.equal(plan.targets[0].folder, path.join(home, 'servers', 'llama.cpp', 'b11349-cuda-12.4-x64'));
-  assert.equal(plan.downloadBytes, 263288146 + 391443627 + 33192213 + 2497281120 + 2497281664 + 453974304 + 639150592);
-  assert.ok(describePlan(plan).some((l) => /^Download: 6\.8 GB into /.test(l)));
+  assert.equal(plan.targets[0].folder, path.join(home, 'servers', 'llama.cpp', 'b11749-cuda-12.4-x64'));
+  assert.equal(plan.downloadBytes, 263288146 + 391443627 + 33192213 + 2497281120 + 2497281664 + 453974304 + 639150592 + 1107409952 + 445053216);
+  assert.ok(describePlan(plan).some((l) => /^Download: 8\.3 GB into /.test(l)));
   // A model already downloaded (right size) isn't fetched again.
   mkdirSync(path.join(home, 'models'), { recursive: true });
   const again = await planSetup({ detection: parseDetection(DESKTOP), ids: ['gpu-nvidia-geforce-rtx-4090'], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, fileSize: (p) => (p.endsWith('Q4_K_M.gguf') ? 2497281120 : -1) });
   assert.deepEqual(again.downloads.map((d) => [d.what.split('/').pop(), d.have]), [
-    ['llama-b11349-bin-win-cuda-12.4-x64.zip', false],
+    ['llama-b11749-bin-win-cuda-12.4-x64.zip', false],
     ['cudart-llama-bin-win-cuda-12.4-x64.zip', false],
     ['Qwen3-4B-Instruct-2507-Q4_K_M.gguf', true],
   ]);
@@ -288,7 +311,7 @@ test('the plan for this laptop: the Adreno\'s OpenCL build; the NPU is left alon
     ],
   };
   const plan = await planSetup({ detection: parseDetection(LAPTOP), ids: ['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'npu', 'gpu-nope'], raw, releases: RELEASES, hfFiles: hf, home });
-  assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant, t.ports]), [['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'opencl-adreno-arm64', { chat: 18192, vision: 18193, embed: 18300 }]]);
+  assert.deepEqual(plan.targets.map((t) => [t.id, t.variant?.variant, t.ports]), [['gpu-qualcomm-r-adreno-tm-x2-90-gpu', 'opencl-adreno-arm64', { chat: 18192, embed: 18300 }]]);
   assert.equal(plan.npu?.route.server, 'GenieX', 'asked for by name, the NPU is set up again on its route');
   assert.ok(plan.problems.some((p) => /^gpu-nope: no such graphics card/.test(p)));
 });
@@ -309,25 +332,24 @@ test('entries: llama-server pinned to its device, ports, models, cap and slots; 
     unpack: (zip, into) => unpacked.push(`${path.basename(zip)} -> ${path.basename(into)}`),
     listDevices: async () => ADRENO_BENCH,
   });
-  assert.equal(got.length, 5);
-  assert.deepEqual(unpacked, ['llama-b11349-bin-win-opencl-adreno-arm64.zip -> b11349-opencl-adreno-arm64']);
+  assert.deepEqual(got, ['llama-b11749-bin-win-opencl-adreno-arm64.zip', 'Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf', 'Qwen/Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf', 'Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf']);
+  assert.deepEqual(unpacked, ['llama-b11749-bin-win-opencl-adreno-arm64.zip -> b11749-opencl-adreno-arm64']);
   assert.deepEqual(r.problems, []);
   const [e] = r.entries;
-  const exe = path.join(home, 'servers', 'llama.cpp', 'b11349-opencl-adreno-arm64', 'llama-server.exe');
+  const exe = path.join(home, 'servers', 'llama.cpp', 'b11749-opencl-adreno-arm64', 'llama-server.exe');
+  // The Adreno shares the PC's memory: one Qwen3-VL-2B server chats and sees, its encoder on the card.
   assert.deepEqual(e.chat, {
     baseUrl: 'http://127.0.0.1:18191',
-    model: 'qwen3-4b-instruct-2507',
-    startCommand: [portablePath(exe), '--host', '127.0.0.1', '--port', '18191', '--device', 'GPUOpenCL', '-ngl', '99', '-m', portablePath(path.join(home, 'models', 'Qwen3-4B-Instruct-2507-Q4_K_M.gguf')), '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-4b-instruct-2507'],
+    model: 'qwen3-vl-2b-instruct',
+    startCommand: [portablePath(exe), '--host', '127.0.0.1', '--port', '18191', '--device', 'GPUOpenCL', '-ngl', '99', '-m', portablePath(path.join(home, 'models', 'Qwen3VL-2B-Instruct-Q4_K_M.gguf')), '--mmproj', portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf')), '-c', '8192', '--parallel', '1', '--jinja', '--alias', 'qwen3-vl-2b-instruct'],
     env: { LLAMA_ARG_CACHE_RAM: '0' },
   });
-  assert.ok(['vision', 'embed'].every((k) => (e as any)[k].env.LLAMA_ARG_CACHE_RAM === '0'), 'no RAM cache of earlier prompts on any of its servers');
-  assert.ok(e.vision!.startCommand!.includes('--mmproj'));
-  assert.ok(e.vision!.startCommand!.some((s) => s.endsWith('mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf')));
-  assert.ok(!e.vision!.startCommand!.includes('--no-mmproj-offload'), "the Adreno's encoder stays on the card");
+  assert.deepEqual(e.vision, { model: 'qwen3-vl-2b-instruct' }, "vision's requests go to chat's server");
+  assert.equal(e.embed!.env!.LLAMA_ARG_CACHE_RAM, '0', 'no RAM cache of earlier prompts on any of its servers');
   assert.deepEqual(e.embed!.startCommand!.slice(-13), ['--embeddings', '--pooling', 'last', '-c', '4096', '-b', '2048', '-ub', '512', '--parallel', '1', '--alias', 'qwen3-embedding-0.6b-gguf']);
   assert.equal(e.embed!.maxContextTokens, 1365, 'its own cap: 4,095 characters fit -c 4096 at a token each');
   assert.ok(!('maxContextTokens' in e.chat!), "chat's is the card's");
-  assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18193');
+  assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18192');
   // The file: the old fields and unknown keys kept, the NPU put in the list as it was, then the card.
   assert.equal(r.raw.mine, 1);
   assert.deepEqual(r.raw.chatEndpoint, LIVE.chatEndpoint);
@@ -730,8 +752,9 @@ ram|16541974528
 `;
 const INTEL_LIST = 'Available devices:\n  Vulkan0: Intel(R) Graphics (7887 MiB, 7000 MiB free)\n';
 const VL = 'qwen3-vl-4b-instruct';
+const SMALL = 'qwen3-vl-2b-instruct';
 
-test("setup on Intel's integrated graphics under 32 GB: one Qwen3-VL-4B server for chat and vision, on chat's port; Qwen3-4B not downloaded", async () => {
+test("setup on Intel's integrated graphics: one Qwen3-VL-2B server for chat and vision, on chat's port; no 4B downloaded", async () => {
   const { chatsOnVision, CHAT_ON_VISION_RAM_GB } = await import('./fixture/src/kit/setup.ts');
   assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan0' }, 15.4), true);
   assert.equal(chatsOnVision({ id: INTEL_ID, memoryGb: 0.1, device: 'Vulkan' }, 15.4), true, "the build's backend, before the device's number is known");
@@ -747,8 +770,8 @@ test("setup on Intel's integrated graphics under 32 GB: one Qwen3-VL-4B server f
   assert.equal(t.chatOnVision, true);
   assert.deepEqual(t.kinds, ['chat', 'vision', 'embed'], 'it still serves all three');
   assert.deepEqual(t.ports, { chat: 18191, embed: 18192 }, 'no port for vision');
-  assert.deepEqual(plan.models.map((m) => [m.kind, m.role]), [['vision', 'model'], ['vision', 'mmproj'], ['embed', 'model']], 'no Qwen3-4B to download');
-  assert.ok(describePlan(plan).some((l) => l.includes(`chat and vision on 18191 (one ${VL} server), embed on 18192`)), describePlan(plan).join('\n'));
+  assert.deepEqual(plan.models.map((m) => [m.model, m.role]), [[SMALL, 'model'], [SMALL, 'mmproj'], ['qwen3-embedding-0.6b-gguf', 'model']], 'neither 4B to download');
+  assert.ok(describePlan(plan).some((l) => l.includes(`chat and vision on 18191 (one ${SMALL} server), embed on 18192`)), describePlan(plan).join('\n'));
 
   const lines: string[] = [];
   const r = await runSetup(plan, {}, {
@@ -762,32 +785,32 @@ test("setup on Intel's integrated graphics under 32 GB: one Qwen3-VL-4B server f
   });
   assert.deepEqual(r.problems, []);
   const [e] = r.entries;
-  const exe = portablePath(path.join(home, 'servers', 'llama.cpp', 'b11349-vulkan-x64', 'llama-server.exe'));
-  const model = portablePath(path.join(home, 'models', 'Qwen3VL-4B-Instruct-Q4_K_M.gguf'));
-  const mmproj = portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf'));
+  const exe = portablePath(path.join(home, 'servers', 'llama.cpp', 'b11749-vulkan-x64', 'llama-server.exe'));
+  const model = portablePath(path.join(home, 'models', 'Qwen3VL-2B-Instruct-Q4_K_M.gguf'));
+  const mmproj = portablePath(path.join(home, 'models', 'mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf'));
   assert.deepEqual(e.chat, {
     baseUrl: 'http://127.0.0.1:18191',
-    model: VL,
-    startCommand: [exe, '--host', '127.0.0.1', '--port', '18191', '--device', 'Vulkan0', '-ngl', '99', '-m', model, '--mmproj', mmproj, '--no-mmproj-offload', '--image-max-tokens', '1024', '-c', '8192', '--parallel', '1', '--jinja', '--alias', VL],
+    model: SMALL,
+    startCommand: [exe, '--host', '127.0.0.1', '--port', '18191', '--device', 'Vulkan0', '-ngl', '99', '-m', model, '--mmproj', mmproj, '--no-mmproj-offload', '--image-max-tokens', '1024', '-c', '8192', '--parallel', '1', '--jinja', '--alias', SMALL],
     env: { LLAMA_ARG_CACHE_RAM: '0' },
   });
-  assert.deepEqual(e.vision, { model: VL, timeouts: { requestBaseMs: 90_000 } }, "its model and time, on chat's server");
+  assert.deepEqual(e.vision, { model: SMALL, timeouts: { requestBaseMs: 90_000 } }, "its model and time, on chat's server");
   assert.equal(e.embed!.baseUrl, 'http://127.0.0.1:18192');
   assert.deepEqual([e.slots, e.maxContextTokens], [1, 4096]);
   assert.ok(lines.some((l) => l.endsWith('chat and vision, embed on 18191, 18192')), lines.join('\n'));
   assert.deepEqual(validateAccelerators(r.raw), []);
   const { endpointFor } = await import('./fixture/src/kit/accelerator-config.ts');
   const read = readAccelerators(r.raw).accelerators[0];
-  assert.deepEqual(endpointFor(read, 'vision'), { baseUrl: 'http://127.0.0.1:18191', model: VL, startCommand: e.chat!.startCommand, env: { LLAMA_ARG_CACHE_RAM: '0' } }, "vision's requests go to chat's server");
+  assert.deepEqual(endpointFor(read, 'vision'), { baseUrl: 'http://127.0.0.1:18191', model: SMALL, startCommand: e.chat!.startCommand, env: { LLAMA_ARG_CACHE_RAM: '0' } }, "vision's requests go to chat's server");
 
-  // 32 GB: a chat server of its own, as before.
+  // 32 GB: the same, the 2B being faster there too.
   const big = await planSetup({ detection: parseDetection(INTEL_LAPTOP.replace('ram|16541974528', 'ram|34359738368')), ids: [], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
-  assert.equal(big.targets[0].chatOnVision, undefined);
-  assert.deepEqual(big.targets[0].ports, { chat: 18191, vision: 18192, embed: 18193 });
-  assert.ok(big.models.some((m) => m.kind === 'chat'));
-  // Asked for chat alone: no vision server to share.
+  assert.equal(big.targets[0].chatOnVision, true);
+  assert.deepEqual(big.targets[0].ports, { chat: 18191, embed: 18192 });
+  // Asked for chat alone: the 2B with no projector, and no vision server to share.
   const alone = await planSetup({ detection: parseDetection(INTEL_LAPTOP), ids: [], kinds: ['chat'], raw: {}, releases: RELEASES, hfFiles: hf, home, localAppData: LOCAL });
   assert.equal(alone.targets[0].chatOnVision, undefined);
+  assert.deepEqual(alone.models.map((m) => [m.model, m.role]), [[SMALL, 'model']]);
 
   // Set up again on a PC an older kit set up: chat takes the port its vision server had, where that model runs; the embeddings keep theirs.
   const embed = { baseUrl: 'http://127.0.0.1:18193', model: 'qwen3-embedding-0.6b-gguf', startCommand: [VK, '--port', '18193', '--embeddings'] };
