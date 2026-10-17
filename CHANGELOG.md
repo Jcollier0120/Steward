@@ -2,13 +2,16 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 0.36.96
 
-**Hands out a kit whose NPU refresh starts the server it tests again, so a PC set up on an older kit gets its route's new command. In kit 2.78.12 every refresh was refused.**
+**The Steward hands out kit 2.78.18: the keeper's NPU refresh starts the server it tests again, so a PC set up on an older kit gets its route's new command. In kit 2.78.12 every refresh was refused, on the Snapdragon X2, AMD's XDNA 2 and Intel's NPU alike.**
 
 ### What changed
 
-- The kit's `testNpuEntry` starts its server for a caller that passes no `onReady`, the keeper's NPU refresh among them. The refresh's test servers print to `npu-refresh.log`, and a test whose server went away is made again an hour later, three tests in all. kit/CHANGELOG.md has the details.
+- **Kit 2.78.18** (kit/CHANGELOG.md):
+  - The kit's `testNpuEntry` starts its server for a caller that passes no `onReady`, the keeper's NPU refresh among them.
+  - The refresh waits until the old server stops answering before its test, and its test's servers print to `npu-refresh.log`.
+  - A test whose server went away, or whose old server still answered, is made again an hour later, three tests in all.
 
 ### Before you update
 

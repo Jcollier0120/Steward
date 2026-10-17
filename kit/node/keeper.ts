@@ -9,7 +9,7 @@ import { withLock } from './lock.ts';
 import * as core from './core/index.js';
 import { gpuWithNpu } from './manor.ts';
 import { lineSnapshot, lineState, LockTimeout, QueueFull, queueDirFor, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
-import { refreshNpu } from './npu-refresh.ts';
+import { refreshNpu, whatAnswers } from './npu-refresh.ts';
 import { NPU_CATALOG, npuIdleStopMinutes, smallPc } from './npu-vendors.ts';
 import { powershell, psQuote } from './ps.ts';
 import { keyInside, pathKey, samePath } from './real-path.ts';
@@ -903,7 +903,7 @@ let npuDetected: Promise<Detection> | null = null;
 
 /**
  * The NPU's servers brought up to this kit's command (npu-refresh.ts): looked at once for each kit version, in the
- * background, so a look never waits for it; while someone uses the NPU, or after a test whose server went away, a later
+ * background, so a look never waits for it; while someone uses the NPU, or after a test that failed for its server, a later
  * look tries again. What it changed, or why it couldn't, goes in the keeper's log, and what its test's servers printed
  * in npuRefreshLog. This PC is asked once in the process, however many looks it takes.
  */
@@ -951,6 +951,7 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
       }
       for (let i = 0; i < 40 && (await serverProcesses(program, base)).length; i++) await sleep(250);
     },
+    answering: (base) => whatAnswers(base),
     testChat: (e) => {
       logLine(serverLog, `the NPU's refresh (kit ${kitVersion()}) tests ${e.chat?.model}: ${e.chat?.startCommand?.join(' ')}`);
       return testNpuEntry(e, { held: true, logFile: serverLog });

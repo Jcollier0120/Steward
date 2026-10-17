@@ -1290,7 +1290,7 @@ export interface NpuRefreshRecord {
   problems?: string[];
   /** A `failed` look's: the tests this kit has made of the new command. */
   tries?: number;
-  /** A `failed` look whose test's server went away (npu-refresh.ts' serverWentAway): a look from then on tests again. Without it, this kit doesn't. */
+  /** A `failed` look whose test failed for its server (npu-refresh.ts' serverFailed): a look from then on tests again. Without it, this kit doesn't. */
   retryAt?: string;
 }
 

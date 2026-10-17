@@ -13,27 +13,39 @@ import { mergeEntries, portablePath, type NpuRefreshRecord, readNpuRefresh, reme
  * after it, until someone pressed Set up again. The keeper (the Smith, else Reeve) now looks once for each kit version:
  * what setup would write on this PC's NPU, beside what config.json has. When they differ and nothing has to be
  * downloaded, it waits until nobody uses the NPU, then, holding the NPU's turn, stops its servers and asks the new
- * command the test question (and a test embedding, when the NPU makes them). Only when it answers properly is the new
- * command written; otherwise the old one stays, the next request starts it again, and this kit doesn't try again,
- * unless the test's server went away (serverWentAway): then a look an hour later tests it again, NPU_REFRESH_TRIES
- * tests in all. A command written by a newer kit is never taken back, and an entry a person pointed at another server
- * is left alone.
+ * command the test question (and a test embedding, when the NPU makes them), once nothing answers on its ports. Only when
+ * it answers properly is the new command written; otherwise the old one stays, the next request starts it again, and
+ * this kit doesn't try again, unless the test failed for its server (serverFailed): then a look an hour later tests it
+ * again, NPU_REFRESH_TRIES tests in all. A command written by a newer kit is never taken back, and an entry a person
+ * pointed at another server is left alone.
  */
 
-/** The tests one kit makes of a new command whose server keeps going away, the first included. */
+/** The tests one kit makes of a new command whose server keeps failing it, the first included. */
 export const NPU_REFRESH_TRIES = 3;
 
 /** How long after such a test the next look tests again. */
 export const NPU_REFRESH_RETRY_MS = 60 * 60_000;
 
 /**
- * Whether a test failed for its server, not its answers: it refused the connection (nothing listening, or it went away
- * mid-request), or it exited while starting (the core's connectionRefused and exitedWhileStarting). That may be the PC's
- * moment rather than the command (memory short while the model loaded, say), and one such failure kept a PC on its old
- * command for the whole kit. An answer that doesn't make sense ("chat answered nonsense", vectors that don't) is the
- * command's own, and stays final.
+ * How long a port may go on answering once its server is stopped, and how often it's asked meanwhile. Gone from the
+ * process list isn't always gone from the port (stopServer gives up after 10 s), and a test asked of a server still
+ * answering is the old command's answer: the new one would be written untested.
  */
-export const serverWentAway = (problems: string[]) => problems.length > 0 && problems.every((p) => /refused the connection|exited \(code [^)]*\) and .* isn't answering/.test(p));
+export const NPU_REFRESH_PORT_WAIT_MS = 30_000;
+export const NPU_REFRESH_PORT_STEP_MS = 500;
+
+/** The problem when an old server still answers: the new command isn't tested. */
+export const stillAnswered = (base: string, what: string) => `${base} still answered ${NPU_REFRESH_PORT_WAIT_MS / 1000} s after its server was stopped (${what}), so the new command wasn't tested`;
+
+/**
+ * Whether a test failed for its server, not its answers: it refused the connection (nothing listening, or it went away
+ * mid-request), it exited while starting (the core's connectionRefused and exitedWhileStarting), or the old server still
+ * answered on its port (stillAnswered). That may be the PC's moment rather than the command (memory short while the
+ * model loaded, an old server slow to go), and one such failure kept a PC on its old command for the whole kit. An
+ * answer that doesn't make sense ("chat answered nonsense", vectors that don't) is the command's own, and stays final.
+ */
+export const serverFailed = (problems: string[]) =>
+  problems.length > 0 && problems.every((p) => /refused the connection|exited \(code [^)]*\) and .* isn't answering|still answered \d+ s after its server was stopped/.test(p));
 
 /** What a look did: written to `npu-refresh.json` (setup's `set-up` included), except `looked`, `newer-kit`, `busy` and `unreadable`. */
 export type NpuRefreshDid = NpuRefreshRecord['did'] | 'looked' | 'newer-kit' | 'busy' | 'unreadable';
@@ -43,7 +55,7 @@ export interface NpuRefreshOutcome {
   problems?: string[];
   /** The arguments that changed, for the keeper's log: `--plugin_config {…} added`. */
   changes?: string[];
-  /** A failed test's server went away (serverWentAway): a look from then on tests again. */
+  /** A test that failed for its server (serverFailed): a look from then on tests again. */
   retryAt?: string;
 }
 
@@ -67,6 +79,10 @@ export interface NpuRefreshDeps {
   withTurn: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Stops whatever `program` serves `base`, and waits until it's gone. */
   stopServer: (program: string, base: string) => Promise<void>;
+  /** What answers at `base` now, in words (its /v1/models answer); null when nothing takes the connection. Without it, ports aren't waited on. */
+  answering?: (base: string) => Promise<string | null>;
+  /** The wait between asks of a port (a test's own clock). */
+  sleep?: (ms: number) => Promise<void>;
   /** The test question, in the turn the caller holds: the problems, none when it answered properly. */
   testChat: (e: AcceleratorEntry) => Promise<string[]>;
   /** A test embedding, the same way. */
@@ -96,6 +112,39 @@ function servers(e: Record<string, any>): { program: string; base: string }[] {
   return [...out].map(([base, program]) => ({ base, program }));
 }
 
+/**
+ * What answers at `base` now (its /v1/models), in words for the log: any answer at all is something on the port, a 404
+ * included (accelerators.ts' probe calls that `down`). Null when nothing takes the connection.
+ */
+export async function whatAnswers(base: string, ms = 2_000): Promise<string | null> {
+  try {
+    const res = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(ms) });
+    const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim();
+    return `${res.status}${body ? `: ${body.length > 120 ? `${body.slice(0, 120)}…` : body}` : ''}`;
+  } catch (e: any) {
+    return e?.name === 'TimeoutError' || e?.name === 'AbortError' ? `it took the connection but gave no answer in ${ms / 1000} s` : null;
+  }
+}
+
+/** Each port the test will ask, waited on until nothing answers there (NPU_REFRESH_PORT_WAIT_MS): what still answers, as problems. */
+async function stillAnswering(d: NpuRefreshDeps, bases: string[]): Promise<string[]> {
+  if (!d.answering) return [];
+  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const out: string[] = [];
+  for (const base of bases) {
+    for (let waited = 0; ; waited += NPU_REFRESH_PORT_STEP_MS) {
+      const what = await d.answering(base);
+      if (what === null) break;
+      if (waited >= NPU_REFRESH_PORT_WAIT_MS) {
+        out.push(stillAnswered(base, what));
+        break;
+      }
+      await sleep(NPU_REFRESH_PORT_STEP_MS);
+    }
+  }
+  return out;
+}
+
 /** The arguments one command has that the other hasn't, as `--flag value added` and `--flag value removed`. */
 export function argChanges(from: string[], to: string[]): string[] {
   const pairs = (cmd: string[]) => {
@@ -123,7 +172,7 @@ const portOf = (url: string | undefined) => {
 /** One look (refreshNpu above). Never throws for a PC that can't be looked at: the outcome says why. */
 export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> {
   const had = readNpuRefresh(d.configFile);
-  // This kit's test whose server went away is made again once its time comes; anything else this kit found stands.
+  // This kit's test that failed for its server is made again once its time comes; anything else this kit found stands.
   const again = had?.kit === d.kit && had.did === 'failed' && typeof had.retryAt === 'string';
   if (had?.kit === d.kit && !(again && d.now() >= Date.parse(had.retryAt!))) return { did: 'looked' };
   if (had?.kit && compareVersions(had.kit, d.kit) > 0) return { did: 'newer-kit' };
@@ -171,6 +220,9 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   try {
     problems = await d.withTurn(async () => {
       for (const s of servers(entry)) await d.stopServer(s.program, s.base);
+      // An old server that outlived its stop would answer the test itself, and the new command would be written untested.
+      const stayed = await stillAnswering(d, servers(next).map((s) => s.base));
+      if (stayed.length) return stayed;
       const p = await d.testChat(next);
       if (!p.length && next.embed?.startCommand?.length) p.push(...(await d.testEmbed(next, plan.embed?.server.model.dims)));
       // The old command starts again at the next request.
@@ -183,8 +235,8 @@ export async function refreshNpu(d: NpuRefreshDeps): Promise<NpuRefreshOutcome> 
   }
   if (problems.length) {
     const tries = (again ? (had!.tries ?? 1) : 0) + 1;
-    const retryAt = serverWentAway(problems) && tries < NPU_REFRESH_TRIES ? new Date(d.now() + NPU_REFRESH_RETRY_MS).toISOString() : undefined;
-    const then = retryAt ? `; its server went away, so a look from ${retryAt} tests it again (test ${tries} of ${NPU_REFRESH_TRIES})` : tries > 1 ? ` (test ${tries} of ${NPU_REFRESH_TRIES}: this kit doesn't try again)` : '';
+    const retryAt = serverFailed(problems) && tries < NPU_REFRESH_TRIES ? new Date(d.now() + NPU_REFRESH_RETRY_MS).toISOString() : undefined;
+    const then = retryAt ? `; that's its server's failure, so a look from ${retryAt} tests it again (test ${tries} of ${NPU_REFRESH_TRIES})` : tries > 1 ? ` (test ${tries} of ${NPU_REFRESH_TRIES}: this kit doesn't try again)` : '';
     d.log(`the NPU's servers keep their command: this kit's (${d.kit}: ${changes.join('; ') || 'its caps'}) didn't answer its test: ${problems.join('; ')}${then}${d.serverLog ? `. What its servers printed: ${d.serverLog}` : ''}`);
     return done('failed', { problems, changes, ...(retryAt ? { retryAt } : {}) }, tries);
   }

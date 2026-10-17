@@ -14,7 +14,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseNpus } = await import('./fixture/src/kit/detect.ts');
-const { argChanges, refreshNpu, serverWentAway } = await import('./fixture/src/kit/npu-refresh.ts');
+const { argChanges, NPU_REFRESH_PORT_STEP_MS, NPU_REFRESH_PORT_WAIT_MS, refreshNpu, serverFailed, stillAnswered, whatAnswers } = await import('./fixture/src/kit/npu-refresh.ts');
 const core = await import('../core/index.js');
 const { npuRefreshFile, portablePath, readNpuRefresh } = await import('./fixture/src/kit/setup.ts');
 type Deps = Parameters<typeof refreshNpu>[0];
@@ -57,6 +57,7 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
   if (o.record) writeFileSync(npuRefreshFile(configFile), JSON.stringify(o.record));
   const did: string[] = [];
   const log: string[] = [];
+  const slept: number[] = [];
   const deps: Deps = {
     kit: '2.75.0',
     configFile,
@@ -76,6 +77,9 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
       }
     },
     stopServer: async (program, base) => void did.push(`stop ${path.win32.basename(program)} ${base}`),
+    // Stopped servers gone from their ports at once, unless a test says otherwise.
+    answering: async () => null,
+    sleep: async (ms) => void slept.push(ms),
     testChat: async (e) => {
       did.push(`test chat ${capOf(e)}`);
       o.during?.(configFile);
@@ -85,7 +89,7 @@ function fakePc(entry: Record<string, any> | null, o: { record?: object; idle?: 
     log: (l) => log.push(l),
   };
   const config = () => JSON.parse(readFileSync(configFile, 'utf8'));
-  return { deps, did, log, configFile, config, npu: () => config().accelerators.find((a: any) => a.id === 'npu') };
+  return { deps, did, log, slept, configFile, config, npu: () => config().accelerators.find((a: any) => a.id === 'npu') };
 }
 
 test("an NPU set up by this kit's command: looked at once, nothing stopped or written", async () => {
@@ -199,7 +203,7 @@ function retryingPc(said: string[][], o: { serverLog?: string } = {}) {
   return { ...pc, tests, later: (ms: number) => void (t += ms) };
 }
 
-test('a test whose server went away: tested again at a look an hour on, three tests in all, and the old command kept meanwhile', async () => {
+test('a test that failed for its server: tested again at a look an hour on, three tests in all, and the old command kept meanwhile', async () => {
   const serverLog = path.join(tools, 'servers', 'logs', 'npu-refresh.log');
   const pc = retryingPc([[REFUSED], [EXITED], [REFUSED]], { serverLog });
   const before = readFileSync(pc.configFile, 'utf8');
@@ -209,7 +213,7 @@ test('a test whose server went away: tested again at a look an hour on, three te
   assert.deepEqual(readNpuRefresh(pc.configFile), { kit: '2.75.0', at: '2026-10-14T12:00:00.000Z', did: 'failed', problems: [REFUSED], tries: 1, retryAt: '2026-10-14T13:00:00.000Z' });
   assert.equal(pc.log.length, 1);
   assert.ok(pc.log[0].startsWith("the NPU's servers keep their command: this kit's (2.75.0: "), pc.log[0]);
-  assert.ok(pc.log[0].endsWith(`didn't answer its test: ${REFUSED}; its server went away, so a look from 2026-10-14T13:00:00.000Z tests it again (test 1 of 3). What its servers printed: ${serverLog}`), pc.log[0]);
+  assert.ok(pc.log[0].endsWith(`didn't answer its test: ${REFUSED}; that's its server's failure, so a look from 2026-10-14T13:00:00.000Z tests it again (test 1 of 3). What its servers printed: ${serverLog}`), pc.log[0]);
   assert.equal(pc.did.filter((d) => d.startsWith('stop')).length, 4, "its servers stopped after the test, so the old command starts at the next request");
 
   // Before its hour: looked at, nothing asked or stopped.
@@ -274,17 +278,80 @@ test('a test made again: written when it answers; final when its answer makes no
   assert.deepEqual([readNpuRefresh(next.configFile)?.kit, readNpuRefresh(next.configFile)?.tries], ['2.76.0', 1]);
 });
 
-test('which failures are the server going away: refused, or exited while starting; never an answer, a timeout, or one beside an answer', () => {
-  assert.equal(serverWentAway([REFUSED]), true);
-  assert.equal(serverWentAway([EXITED]), true);
-  assert.equal(serverWentAway([core.say.exitedWhileStarting('flm.exe', null, 'http://127.0.0.1:18184')]), true, 'started apart: no exit code');
-  assert.equal(serverWentAway([core.say.connectionRefused('/v1/models', 'http://127.0.0.1:18184', 'it stopped answering while busy')]), true);
-  assert.equal(serverWentAway([]), false);
-  assert.equal(serverWentAway(['chat answered nonsense ("?option?option"), not "ready": the model doesn\'t run properly on this NPU']), false);
-  assert.equal(serverWentAway(['the vectors are all zero']), false);
-  assert.equal(serverWentAway([`didn't answer in time (900 s): ${core.say.requestTimedOut('/v1/chat/completions', 'http://127.0.0.1:18184', 900)}`]), false);
-  assert.equal(serverWentAway([core.say.didNotAnswer('flm.exe', 'http://127.0.0.1:18184', 120)]), false);
-  assert.equal(serverWentAway(['vision gave no answer ({})', REFUSED]), false);
+test("which failures are its server's: refused, exited while starting, or an old server still answering; never an answer, a timeout, or one beside an answer", () => {
+  assert.equal(serverFailed([REFUSED]), true);
+  assert.equal(serverFailed([EXITED]), true);
+  assert.equal(serverFailed([core.say.exitedWhileStarting('flm.exe', null, 'http://127.0.0.1:18184')]), true, 'started apart: no exit code');
+  assert.equal(serverFailed([core.say.connectionRefused('/v1/models', 'http://127.0.0.1:18184', 'it stopped answering while busy')]), true);
+  assert.equal(serverFailed([stillAnswered('http://127.0.0.1:18184', '200: {"data":[]}')]), true);
+  assert.equal(serverFailed([stillAnswered('http://127.0.0.1:18185', 'it took the connection but gave no answer in 2 s'), REFUSED]), true);
+  assert.equal(serverFailed([]), false);
+  assert.equal(serverFailed(['chat answered nonsense ("?option?option"), not "ready": the model doesn\'t run properly on this NPU']), false);
+  assert.equal(serverFailed(['the vectors are all zero']), false);
+  assert.equal(serverFailed([`didn't answer in time (900 s): ${core.say.requestTimedOut('/v1/chat/completions', 'http://127.0.0.1:18184', 900)}`]), false);
+  assert.equal(serverFailed([core.say.didNotAnswer('flm.exe', 'http://127.0.0.1:18184', 120)]), false);
+  assert.equal(serverFailed(['vision gave no answer ({})', REFUSED]), false);
+});
+
+test("the old servers' ports waited on before the test: one that goes quiet is tested after it; one still answering isn't tested, and is tried again an hour on", async () => {
+  const old = olderEntry();
+  const fresh = setUpEntry();
+  const bases = [fresh.chat.baseUrl, fresh.embed.baseUrl];
+  assert.equal(new Set(bases).size, 2);
+
+  // The chat's port answers twice more after its stop, then nothing does: tested, and written.
+  const slow = fakePc(old);
+  const asked: string[] = [];
+  let left = 2;
+  slow.deps.answering = async (base) => (asked.push(base), base === bases[0] && left-- > 0 ? '200: {"data":[{"id":"qwen3-4b"}]}' : null);
+  assert.equal((await refreshNpu(slow.deps)).did, 'refreshed');
+  assert.deepEqual(asked, [bases[0], bases[0], bases[0], bases[1]]);
+  assert.deepEqual(slow.slept, [NPU_REFRESH_PORT_STEP_MS, NPU_REFRESH_PORT_STEP_MS]);
+  assert.ok(slow.did.indexOf(`test chat ${capOf(fresh)}`) > slow.did.indexOf(`stop ${path.win32.basename(old.chat.startCommand[0])} ${old.chat.baseUrl}`), slow.did.join(', '));
+
+  // It never goes quiet: asked for NPU_REFRESH_PORT_WAIT_MS, then no test, nothing written, its servers not stopped again.
+  const stuck = fakePc(old);
+  let asks = 0;
+  stuck.deps.answering = async (base) => (base === bases[0] ? (asks++, '200: {"data":[]}') : null);
+  const before = readFileSync(stuck.configFile, 'utf8');
+  const r = await refreshNpu(stuck.deps);
+  const problem = stillAnswered(bases[0], '200: {"data":[]}');
+  assert.deepEqual([r.did, r.problems, r.retryAt], ['failed', [problem], '2026-10-14T13:00:00.000Z']);
+  assert.equal(problem, `${bases[0]} still answered 30 s after its server was stopped (200: {"data":[]}), so the new command wasn't tested`);
+  assert.equal(asks, NPU_REFRESH_PORT_WAIT_MS / NPU_REFRESH_PORT_STEP_MS + 1);
+  assert.equal(stuck.slept.reduce((a, b) => a + b, 0), NPU_REFRESH_PORT_WAIT_MS);
+  assert.ok(!stuck.did.some((d) => d.startsWith('test')), stuck.did.join(', '));
+  assert.equal(stuck.did.filter((d) => d.startsWith('stop')).length, 2, 'the old servers only');
+  assert.equal(readFileSync(stuck.configFile, 'utf8'), before);
+  assert.ok(stuck.log[0].includes(`didn't answer its test: ${problem}; that's its server's failure, so a look from 2026-10-14T13:00:00.000Z tests it again (test 1 of 3)`), stuck.log[0]);
+  assert.deepEqual(readNpuRefresh(stuck.configFile), { kit: '2.75.0', at: '2026-10-14T12:00:00.000Z', did: 'failed', problems: [problem], tries: 1, retryAt: '2026-10-14T13:00:00.000Z' });
+
+  // An hour on, its port quiet: tested, and written.
+  stuck.deps.now = () => Date.parse('2026-10-14T13:00:00Z');
+  stuck.deps.answering = async () => null;
+  assert.equal((await refreshNpu(stuck.deps)).did, 'refreshed');
+  assert.equal(capOf(stuck.npu()), capOf(fresh));
+});
+
+test("what answers on a port, for the log: a server's status and words (a 404 too), one that takes the connection and says nothing, and nothing", async () => {
+  const http = await import('node:http');
+  const answers = http.createServer((_req, res) => ((res.statusCode = 404), res.end('Not  Found\n')));
+  await new Promise<void>((r) => answers.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(answers.address() as AddressInfo).port}`;
+  assert.equal(await whatAnswers(base), '404: Not Found');
+  answers.closeAllConnections();
+  await new Promise<void>((r) => answers.close(() => r()));
+  assert.equal(await whatAnswers(base), null);
+
+  const sockets: import('node:net').Socket[] = [];
+  const silent = createServer((s) => void sockets.push(s));
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', r));
+  try {
+    assert.equal(await whatAnswers(`http://127.0.0.1:${(silent.address() as AddressInfo).port}`, 300), 'it took the connection but gave no answer in 0.3 s');
+  } finally {
+    for (const s of sockets) s.destroy();
+    await new Promise<void>((r) => silent.close(() => r()));
+  }
 });
 
 const freePort = () =>
@@ -295,7 +362,7 @@ const freePort = () =>
     });
   });
 
-test("the refresh's test starts its server with no onReady to tell (kit 2.78.12's never did, so every refresh was refused), printing to the log it's given; one that exits while starting reads as gone away", async () => {
+test("the refresh's test starts its server with no onReady to tell (kit 2.78.12's never did, so every refresh was refused), printing to the log it's given; one that exits while starting reads as its server's failure", async () => {
   const { testNpuEntry } = await import('./fixture/src/kit/setup.ts');
   const logFile = path.join(home, 'logs', 'npu-refresh.log');
   const npu = (port: number, script: string) => ({ id: 'npu', kind: 'npu', name: 'NPU', chat: { baseUrl: `http://127.0.0.1:${port}`, model: 'm', startCommand: [process.execPath, '-e', script] } }) as any;
@@ -315,7 +382,7 @@ require('node:http').createServer((req, res) => {
   const exits = await testNpuEntry(npu(await freePort(), "console.log('[ERROR]  Failed to load model: the test said so'); process.exit(3)"), { held: true, timeoutMs: 20_000, logFile });
   assert.equal(exits.length, 1, exits.join('; '));
   assert.match(exits[0], /exited \(code 3\)/);
-  assert.equal(serverWentAway(exits), true);
+  assert.equal(serverFailed(exits), true);
   assert.match(readFileSync(logFile, 'utf8'), /Failed to load model: the test said so/, 'appended');
   assert.match(readFileSync(logFile, 'utf8'), new RegExp(`serving on ${port}`));
 });
