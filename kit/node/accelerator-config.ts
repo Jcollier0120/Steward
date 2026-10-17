@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { acceleratorConfigFile, acceleratorId, acceleratorsHome, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
+import { acceleratorConfigFile, acceleratorId, acceleratorsHome, expandEnv, type Hardware, legacyConfigFile, readableConfigFile, readHardware, slug } from './accelerators.ts';
 import * as core from './core/index.js';
-import { samePath } from './real-path.ts';
+import { inside, samePath } from './real-path.ts';
 import { RULES } from './rules.ts';
 
 /**
@@ -487,13 +487,58 @@ export { acceleratorConfigFile, acceleratorsHome, legacyConfigFile, readableConf
  * %USERPROFILE%\.manor\accelerators) since kit 2.31.0, servers\ and models\ in it. A PC set up before keeps
  * %USERPROFILE%\.reeve, where its builds and models already are, so nothing is downloaded twice and its config's
  * startCommands stay right. A scratch REEVE_HOME gets its own, as before.
+ *
+ * Which of the two is the folder config.json's startCommands are in (commandsHome): a PC set up in the accelerators'
+ * folder stays there when something later makes a ~\.reeve\servers (a test image, a log), and the keeper's NPU refresh
+ * and setup then use the folder its servers really run from. With no command in either, or as many in each, ~\.reeve
+ * is kept when it holds a server build or a model (reeveHoldsTools), not just logs and downloads.
  */
 export function toolsHome(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
   if (env.REEVE_HOME) return env.REEVE_HOME;
   if (env.ACCELERATORS_HOME || env.MANOR_HOME) return acceleratorsHome(env);
   const reeve = path.join(home, '.reeve');
-  if (existsSync(path.join(reeve, 'servers')) || existsSync(path.join(reeve, 'models'))) return reeve;
-  return acceleratorsHome(env);
+  const own = path.join(home, '.manor', 'accelerators');
+  const pointed = commandsHome(readableConfigFile(env, home), [own, reeve], env);
+  if (pointed === reeve) return reeve;
+  if (pointed === own) return acceleratorsHome(env);
+  return reeveHoldsTools(reeve) ? reeve : acceleratorsHome(env);
+}
+
+/**
+ * The folder of `homes` most of `file`'s startCommands are in: an endpoint counts for the first folder any word of its
+ * command is in (its program, or a path it is given, `--x=path` too), once %NAME% is expanded from `env`. A command in
+ * none of them (GenieX's, FastFlowLM's flm, a program on the PATH) doesn't count. Null when none counts, or two
+ * folders have as many, or the file isn't there or readable.
+ */
+export function commandsHome(file: string, homes: string[], env: NodeJS.ProcessEnv = process.env): string | null {
+  const list = readJsonObject(file).raw?.accelerators;
+  if (!Array.isArray(list)) return null;
+  const count = homes.map(() => 0);
+  const paths = (word: string) => [word, word.slice(word.indexOf('=') + 1)].map((w) => expandEnv(w, env)).filter((w) => path.isAbsolute(w));
+  for (const a of list) {
+    if (!a || typeof a !== 'object') continue;
+    for (const k of ENDPOINT_KINDS) {
+      const words: unknown = a[k]?.startCommand;
+      if (!Array.isArray(words)) continue;
+      const found = words.filter((w): w is string => typeof w === 'string').flatMap(paths);
+      const i = homes.findIndex((h) => found.some((p) => inside(p, h)));
+      if (i >= 0) count[i]++;
+    }
+  }
+  const most = Math.max(0, ...count);
+  return most && count.filter((n) => n === most).length === 1 ? homes[count.indexOf(most)] : null;
+}
+
+/** `reeve` (Reeve's ~\.reeve) holds a server build or a model: something in servers\ besides logs\ and downloads\, or in models\. */
+function reeveHoldsTools(reeve: string): boolean {
+  const names = (dir: string) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  };
+  return names(path.join(reeve, 'servers')).some((n) => !/^(logs|downloads)$/i.test(n)) || names(path.join(reeve, 'models')).length > 0;
 }
 
 /**

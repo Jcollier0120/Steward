@@ -12,7 +12,8 @@ import { loadPipeline, savePipeline, type BuildRun } from './pipeline.ts';
  * the rounds, so phases overlap: each one's minutes count its own spans once, however many ran at the same time.
  *
  * Work done between builds for the next one (stages/prepare.ts) is kept under the next build's time, marked `ahead`:
- * the build itself then only checks that nothing moved and merges.
+ * the build itself then only checks that nothing moved and merges. The Steward's own PRs tested the same way beside a
+ * build's rounds (stages/selftests.ts) are that build's own time, not marked.
  */
 
 export type PhaseName = 'tests' | 'trial' | 'merges' | 'whole suite' | 'rollout' | 'releases' | 'manor';
@@ -36,9 +37,12 @@ export interface PhaseOf {
   ahead?: boolean;
 }
 
-/** The build a stage's work counts for: the build under way, else the one it merges ahead of (ctx.build `ahead`) or prepares for, else none. */
-export const phaseOf = (ctx: { build?: { due: string; ahead?: boolean } | null; prepare?: { due: string } | null }): PhaseOf | null =>
-  ctx.build ? { due: ctx.build.due, ...(ctx.build.ahead ? { ahead: true } : {}) } : ctx.prepare ? { due: ctx.prepare.due, ahead: true } : null;
+/**
+ * The build a stage's work counts for: the build under way, else the one it merges ahead of (ctx.build `ahead`) or
+ * prepares for, else none. A prepare inside the build (`inBuild`: the Steward's own PRs tested beside its rounds) is the build's own time.
+ */
+export const phaseOf = (ctx: { build?: { due: string; ahead?: boolean } | null; prepare?: { due: string; inBuild?: boolean } | null }): PhaseOf | null =>
+  ctx.build ? { due: ctx.build.due, ...(ctx.build.ahead ? { ahead: true } : {}) } : ctx.prepare ? { due: ctx.prepare.due, ...(ctx.prepare.inBuild ? {} : { ahead: true }) } : null;
 
 export const buildPhasesFile = () => dataFile('build-phases.json');
 

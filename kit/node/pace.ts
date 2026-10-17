@@ -21,7 +21,8 @@ import { LockTimeout, slotDirs, withAcceleratorTurn } from './npu-queue.ts';
  *     (Windows gives a below-normal process's children its class), so it gives way to whatever the person is doing.
  * - **full**: normal priority, and no first-round line, but never past the manor's ceiling (PACE_CEILING, kit 2.78.3):
  *   the agent's own work and its check runs are each held to 85% of the processor (gentle.ts, checks-pace.ts), so
- *   Windows and the person always keep the rest. Before kit 2.78.3 full had no ceiling at all.
+ *   Windows and the person always keep the rest. Before kit 2.78.3 full had no ceiling at all. From kit 2.78.7 the
+ *   agents, the check runs and the model servers are held to it together, in one job above their own (ceilingCap()).
  *
  * Either way, the agents' scheduled rounds share **the work line** (kit 2.56.0): as many run side by side as Manor's
  * `"agentsAtOnce"` says (2 at a gentle pace, 4 at a full one, unless it says), and only one at a time while the PC is
@@ -49,6 +50,23 @@ export const CEILING_CAP = Math.round(PACE_CEILING * 10_000);
 
 /** PACE_CEILING in words: "85%". */
 export const CEILING_WORDS = `${Math.round(PACE_CEILING * 100)}%`;
+
+/**
+ * The variable the kit's launchers read for the manor's ceiling (kit 2.78.7; checks-pace.cs, named.cs): the cap, in
+ * hundredths of a percent, on the one job above every family's (`Local\kit-manor-ceiling`). Unset or 0: no ceiling.
+ */
+export const CEILING_ENV = 'KIT_CEILING';
+
+/**
+ * The cap on the manor's ceiling (kit 2.78.7): the agents' own jobs, their check runs' and the model servers' each nest
+ * in one job for the PC, so all of them together stay within PACE_CEILING, not each family on its own. CEILING_CAP.
+ * Under node --test, KIT_CEILING_CAP's, in a test's own ceiling (KIT_CEILING_JOB_NAME), else none, as before.
+ */
+export function ceilingCap(env: NodeJS.ProcessEnv = process.env): number {
+  if (!env.NODE_TEST_CONTEXT) return CEILING_CAP;
+  const n = Number(env.KIT_CEILING_CAP);
+  return env.KIT_CEILING_JOB_NAME && Number.isInteger(n) && n > 0 ? Math.min(n, CEILING_CAP) : 0;
+}
 
 /** How long an agent waits in the first-round line before it lets its place go (and joins again at its next round). */
 export const FIRST_ROUND_WAIT_MS = 6 * 3_600_000;

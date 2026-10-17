@@ -12,7 +12,7 @@ import { stamp, usesChanges, type StampResult } from './stamp.ts';
 import { openVouchedBranches } from './branchesin.ts';
 import { handInBranches } from './gitevents.ts';
 import { catchUp, isKitPr, type CaughtUp, type KitSetter } from './catchup.ts';
-import { bumpDirOf, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
+import { bumpDirOf, buildUnderWay, checkoutOf, forgetGlance, freshBranch, glanceOf, hostIs, mapLimit, NO_PRS, NOT_ON_KIT, releasedOf, result, type Ctx, type EmployeeResult } from './common.ts';
 import { kitReleaseHold, tellDeadKit, testAtHead, testedBefore, type Tested } from './prtest.ts';
 import { kickBack } from './kickback.ts';
 import { vouchedBy } from './vouch.ts';
@@ -119,11 +119,12 @@ export const CAUGHT_UP = 'caught up by the Steward';
 
 /**
  * Whether a PR waits only on something that settles itself within minutes, so a round soon after can merge it: its checks
- * running, its head just caught up (checks starting there), GitHub working out whether it merges, it being just opened, or
- * its kit being tried on the agents a few each round (trial.ts).
+ * running, its head just caught up (checks starting there), GitHub working out whether it merges, it being just opened,
+ * its kit being tried on the agents a few each round (trial.ts), a kit PR waiting for the build's one trial
+ * (KIT_GATHERS), or a Steward PR's tests beside a build's rounds (selftests.ts).
  */
 export const waitsBriefly = (why: string) =>
-  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING) || why.startsWith(KIT_GATHERS);
+  why === CHECKS_RUNNING || why === WORKING_OUT || why.startsWith(`${CAUGHT_UP} (`) || why.startsWith(JUST_OPENED) || why.startsWith(TRIAL_GOING) || why.startsWith(KIT_GATHERS) || why.startsWith(TESTED_BESIDE);
 
 /**
  * How a kit PR's hold begins in a build while the build's other PRs still merge (a brief wait: the build stays open for
@@ -134,6 +135,9 @@ export const KIT_WAITS_FOR_BUILD = 'its kit is tried in the build, together with
 
 /** How a PR's hold begins while it is younger than Settings' mergeMinAgeMinutes. */
 export const JUST_OPENED = 'opened ';
+
+/** How a Steward PR's hold begins while it is tested beside a build's rounds (selftests.ts): a round merges it once that ends. */
+export const TESTED_BESIDE = 'being tested beside the rounds';
 
 /** How young a PR may be and still merge, and the time now: Settings' mergeMinAgeMinutes, and the round's clock. */
 export interface AgeRule {
@@ -310,7 +314,7 @@ export async function teamHold(ctx: Ctx, e: Employee, pr: PrInfo, lookup: Lookup
   return { why: null, sets: v.head };
 }
 
-const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}), ...(raisesKit(pr) ? { kit: true } : {}) });
+export const heldOf = (pr: PrInfo, why: string, blocks: number[] = []): Held => ({ number: pr.number, url: pr.url, title: pr.title, why, draft: pr.draft, ...(blocks.length ? { blocks } : {}), ...(raisesKit(pr) ? { kit: true } : {}) });
 
 /** How the hold of a PR that gave up its turn (givesWay) reads. */
 export const GAVE_WAY = `${CONFLICTS}, beyond what the Steward resolves, and was handed on: it gives up its turn, so the PRs above it merge first, and once it is resolved it is caught up to a version of its own`;
@@ -651,7 +655,7 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // carrying its verdict being one it did): it waits for the next build's.
   const trialWay = trialGivesWay(e, prs);
   const nextBuild = new Map<number, string>();
-  if (ctx.build && !ctx.build.ahead) {
+  if (buildUnderWay(ctx)) {
     const kits = prs.filter((p) => raisesKit(p) && !p.draft).sort((a, b) => compareVersions(pending.get(a.number) ?? '0.0.0', pending.get(b.number) ?? '0.0.0') || a.number - b.number);
     for (const pr of kits) {
       const why = await trialWaitsForNextBuild(ctx, e, pr, kits).catch(() => null);
@@ -663,12 +667,13 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
   // Kit PRs last, in one trial (Steward 0.36.73): in a build, each waits while the build's other PRs still merge, test or
   // are caught up, so the build then tries every kit PR ready by then together, once (trial.ts's combineKits); ahead of
   // a build, each waits for the build. Meanwhile it gives up its turn, so the PRs above it merge first. On 2026-10-16 one
-  // build tried #302's kit three times, as catch-ups moved it and the PRs stacked on it.
+  // build tried #302's kit three times, as catch-ups moved it and the PRs stacked on it. The Steward's own PRs tested
+  // beside a build's rounds (ctx.prepare `inBuild`, selftests.ts) are in the build too.
   const gather = new Map<number, string>();
-  if (ctx.build && merge.some(raisesKit)) {
+  if ((ctx.build || ctx.prepare?.inBuild) && merge.some(raisesKit)) {
     const failsHere = (p: PrInfo) => untested(p) && testedBefore(e, p)?.ok === false;
     const settling = merge.some((p) => !raisesKit(p) && !failsHere(p)) || hold.some((h) => !raisesKit(h.pr) && !h.pr.draft && waitsBriefly(h.why));
-    const why = ctx.build.ahead ? KIT_WAITS_FOR_BUILD : settling ? KIT_GATHERS : null;
+    const why = ctx.build?.ahead ? KIT_WAITS_FOR_BUILD : settling ? KIT_GATHERS : null;
     for (const p of merge) {
       if (!why || !raisesKit(p) || nextBuild.has(p.number)) continue;
       gather.set(p.number, why);

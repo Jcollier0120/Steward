@@ -5,7 +5,7 @@ import net, { type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { paced } from './until.ts';
+import { paced, until } from './until.ts';
 
 // The NPU check (npu-check.ts): setup's steps timed, then the server measured, against a fake OpenVINO Model Server in
 // this process. Nothing is downloaded or started, and no real config.json, server or lock is touched.
@@ -21,6 +21,7 @@ const C = await import('./fixture/src/kit/npu-check.ts');
 const V = await import('./fixture/src/kit/npu-vendors.ts');
 const { parseDetection } = await import('./fixture/src/kit/detect.ts');
 const { portablePath } = await import('./fixture/src/kit/setup.ts');
+const { checkNpuReport } = await import('./fixture/src/kit/npu-report.ts');
 
 const LUNAR = 'npu2|32.0.100.4239|2025-09-01|Intel Corporation|PCI\\VEN_8086&DEV_643E&SUBSYS_00000000&REV_04\\3&11583659&0&58|Intel(R) AI Boost';
 const X64 = 'cpu|9|8|Intel(R) Core(TM) Ultra 7 258V\nram|34359738368\n';
@@ -198,6 +199,54 @@ test('on an Intel NPU: setup timed, every measurement taken, the report kept, an
   const kept = JSON.parse(readFileSync(s.opts.out, 'utf8'));
   assert.equal(kept.steps.length, 13);
   assert.ok(s.lines.some((l) => l.startsWith('Suggested for npu-vendors.json')));
+  assert.ok(!existsSync(path.join(s.tools, 'npu-report.json')), 'a given detection keeps no NPU report unless asked to');
+});
+
+test("the NPU's report (npu-report.ts): kept after a check on this PC's NPU, with its numbers and the route as the catalog has it; none for a rehearsal or a check that never reached the NPU", async () => {
+  const s = await scene();
+  const file = path.join(s.tools, 'acc', 'npu-report.json');
+  const { code, report } = await C.npuCheck({ ...s.opts, npuReportFile: file, app: 'manor 0.16.200' });
+  assert.equal(code, 0, s.lines.join('\n'));
+  assert.ok(existsSync(file), s.lines.join('\n'));
+  const r = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual(checkNpuReport(r), []);
+  assert.equal(r.source, 'npu-check');
+  assert.equal(r.app, 'manor 0.16.200');
+  assert.equal(r.day, report.at.slice(0, 10));
+  assert.deepEqual(r.chip, { ...r.chip, vendor: 'intel', generation: 'lunar-lake', pciDevice: '643E', driver: '32.0.100.4239', driverDate: '2025-09-01', ramGb: 32 });
+  assert.match(r.chip.cpu, /Ultra 7 258V$/);
+  assert.match(r.chip.npu, /AI Boost$/);
+  const intel = V.routeFor(V.NPU_CATALOG.routes.intel, 'lunar-lake');
+  assert.deepEqual(r.route, { server: intel.server, version: intel.version, model: 'Castellan-AI/Qwen3-4B-Instruct-2507-int4-cw-ov', cap: intel.maxContextTokens, verified: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.failed, null);
+  const by = Object.fromEntries(report.steps.map((x: any) => [x.step, x]));
+  assert.equal(r.speeds.coldMs, by['first-answer'].data.loadMs);
+  assert.equal(r.speeds.warmMs, by.warm.ms);
+  // The fake answers at once: a speed past what any NPU writes is left out, not the report.
+  const tps = by.speed.data.tokensPerSecond;
+  assert.equal(r.speeds.tokensPerSecond, tps > 100_000 ? null : Math.round(tps * 100) / 100);
+  assert.equal(r.speeds.readTokens, by.read.data.promptTokens);
+  // The reporter: random, made once beside it, and the same for the next report.
+  const id = JSON.parse(readFileSync(path.join(s.tools, 'acc', 'npu-reporter.json'), 'utf8')).id;
+  assert.equal(r.reporter, id);
+  assert.match(id, /^[0-9a-f-]{36}$/);
+
+  // A server that dies past its cap: the report says the cap failed.
+  const d = await scene({ cap: 1536, dieOverCap: true });
+  const dFile = path.join(d.tools, 'npu-report.json');
+  await C.npuCheck({ ...d.opts, npuReportFile: dFile });
+  assert.ok(existsSync(dFile), d.lines.join('\n'));
+  const dr = JSON.parse(readFileSync(dFile, 'utf8'));
+  assert.equal(dr.ok, false);
+  assert.deepEqual(dr.failed, { step: 'cap' });
+  assert.equal(dr.reporter, JSON.parse(readFileSync(path.join(d.tools, 'npu-reporter.json'), 'utf8')).id);
+
+  // An NPU this kit can't use stops at detection, before the NPU: no report from the check (setup's says so).
+  const o = await scene();
+  const oFile = path.join(o.tools, 'npu-report.json');
+  await C.npuCheck({ ...o.opts, npuReportFile: oFile, detection: parseDetection(`${X64}${LUNAR.replace('32.0.100.4239', '31.0.100.2016')}\n`) });
+  assert.ok(!existsSync(oFile));
 });
 
 test("a route's power tool (AMD's xrt-smi, for FastFlowLM): its run noted after setup, never failed and never timed as setup, so the reports count the PCs where it can't start", async () => {
@@ -376,6 +425,47 @@ test("the server is started from its entry's command with its %VARIABLES% expand
   await s.stop();
   delete process.env.NPU_CHECK_TEST_NODE;
   assert.equal(existsSync(mark), true, readFileSync(path.join(dir, 'server.log'), 'utf8'));
+});
+
+test("on Windows, the check's and the benchmark's server starts apart, in the servers' capped job, as an agent's does (kit 2.78.7)", { skip: process.platform !== 'win32' }, async () => {
+  // Found by the AMD Dev Manager (2026-10-16): startServer was a plain detached child, so npu-check and npu-bench measured
+  // a server outside the servers' job. This one keeps every processor busy for 3 s, then writes its process id and the
+  // processor time it had against the PC's in that time, and waits to be stopped.
+  const { alive } = await import('./fixture/src/kit/apart.ts');
+  const dir = path.join(home, 'apart');
+  mkdirSync(dir, { recursive: true });
+  const said = path.join(dir, 'burned.json');
+  const burn = [
+    'const { Worker } = require("worker_threads"); const os = require("os"); const t0 = Date.now(); const n = os.availableParallelism(); console.log("up");',
+    'const spin = "const end = Date.now() + 3000; let x = 0; while (Date.now() < end) x = (x * 31 + 7) % 1000003;";',
+    'let left = n; for (let i = 0; i < n; i++) new Worker(spin, { eval: true }).on("exit", () => { if (--left) return;',
+    '  const u = process.cpuUsage(); require("fs").writeFileSync(process.argv[1], JSON.stringify({ pid: process.pid, share: (u.user + u.system) / ((Date.now() - t0) * 1000 * n) })); });',
+    'setTimeout(() => {}, 60000);',
+  ].join(' ');
+  const entry = { id: 'npu', chat: { baseUrl: 'http://127.0.0.1:1', model: 'm', startCommand: [process.execPath, '-e', burn, said] } };
+  const before = { KIT_APART: process.env.KIT_APART, KIT_APART_CAP: process.env.KIT_APART_CAP, KIT_APART_JOB_NAME: process.env.KIT_APART_JOB_NAME };
+  Object.assign(process.env, { KIT_APART: '1', KIT_APART_CAP: '1000', KIT_APART_JOB_NAME: `kit-test-npu-apart-${process.pid}` });
+  let s: Awaited<ReturnType<typeof C.startServer>>;
+  try {
+    s = await C.startServer(entry as any, path.join(dir, 'server.log'));
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  try {
+    assert.ok(s.pid && s.pid > 0, 'its process id');
+    await until(() => existsSync(said) && readFileSync(said, 'utf8'), 60_000, 'the server to have burned its 3 s');
+    const burned = JSON.parse(readFileSync(said, 'utf8'));
+    assert.equal(burned.pid, s.pid, "the pid answered is the server's own, not the launcher's, so stop() stops it");
+    // The job's cap is a tenth of the PC here; a server outside it (a plain child) would take most of it.
+    assert.ok(burned.share <= 0.14, `${(100 * burned.share).toFixed(1)}% of the processor, not past the job's 10%`);
+    assert.match(readFileSync(path.join(dir, 'server.log'), 'utf8'), /up/, 'its output in the log');
+  } finally {
+    await s.stop();
+  }
+  await until(() => !alive(s.pid!), 10_000, 'the server to have stopped');
 });
 
 test('a model that answers nonsense on the NPU fails the check at its first answer, as setup refuses it', async () => {

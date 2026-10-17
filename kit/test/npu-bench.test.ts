@@ -145,8 +145,8 @@ async function scene(o: { stream?: boolean; wrong?: string; usage?: boolean; bus
   const catalog = structuredClone(V.NPU_CATALOG);
   const route = catalog.routes[vendor];
   route.port = port;
-  // Its pull is a fake that leaves no files to check: a small PC's models' (a generation's smallPc) too.
-  for (const m of [...route.models, ...Object.values(route.generations).flatMap((g) => g.smallPc?.models ?? [])]) delete m.pinned;
+  // Its pull is a fake that leaves no files to check: a generation's own models' (and a small PC's, smallPc) too.
+  for (const m of [...route.models, ...Object.values(route.generations).flatMap((g) => [...(g.models ?? []), ...(g.smallPc?.models ?? [])])]) delete m.pinned;
   const tools = mkdtempSync(path.join(home, 'tools-'));
   let env: NodeJS.ProcessEnv = { ...process.env, REEVE_HOME: home };
   if (vendor === 'qualcomm') {
@@ -588,7 +588,7 @@ test('a candidate chats only unless --vision says it sees: pulled as its own typ
   assert.match((B.parseBenchArgs(['--vision']) as any).error, /--vision says a --candidate sees/);
 });
 
-test("a small PC's models: a 16 GB X2 measures Qwen3-VL-2B as setup runs it, as does --small-pc on a bigger one; --model the 4B on a small one", async () => {
+test("every X2 measures Qwen3-VL-2B as setup runs it, whatever its memory; --model the 4B measures the 4B on one", async () => {
   const TWO_B = 'unsloth/Qwen3-VL-2B-Instruct-GGUF:Q4_0';
   const FOUR_B = 'qualcomm/Qwen3-VL-4B-Instruct:W4A16';
   const ARM16 = ARM.replace(/ram\|\d+/, 'ram|16876666880');
@@ -599,17 +599,22 @@ test("a small PC's models: a 16 GB X2 measures Qwen3-VL-2B as setup runs it, as 
     assert.equal(r.code, 0, s.lines.join('\n'));
     return { ...r, s, pulls };
   };
-  const small = await run({}, ARM16);
-  assert.equal(small.report.run.model, TWO_B);
-  assert.deepEqual(small.pulls, [['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update']], 'from Hugging Face');
-  assert.deepEqual(small.s.fake.commands[0].slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], "its pictures' encoder on the Adreno, as setup starts it");
-  assert.ok(small.s.fake.seen.every((j) => j.model === TWO_B), 'every request names the 2B');
-  assert.equal((await run({ smallPc: true })).report.run.model, TWO_B, '--small-pc on the 47.6 GB X2');
-  assert.equal((await run({ model: TWO_B })).report.run.model, TWO_B, "--model a small PC's own, on the 47.6 GB X2");
-  const four = await run({ model: FOUR_B }, ARM16);
-  assert.equal(four.report.run.model, FOUR_B, "--model the route's own on a 16 GB X2");
-  assert.ok(!four.s.fake.commands[0].includes('--vit-compute'), "GenieX's QAIRT model never gets the 2B's arguments");
-  assert.equal((await run({})).report.run.model, FOUR_B, 'the 47.6 GB X2 as setup runs it');
+  for (const [what, arm] of [['the 47.6 GB X2', ARM], ['a 16 GB X2', ARM16]] as const) {
+    const two = await run({}, arm);
+    assert.equal(two.report.run.model, TWO_B, what);
+    assert.deepEqual(two.pulls, [['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update']], `${what}: from Hugging Face`);
+    assert.deepEqual(two.s.fake.commands[0].slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], `${what}: its pictures' encoder on the Adreno, as setup starts it`);
+    assert.ok(two.s.fake.seen.every((j) => j.model === TWO_B), `${what}: every request names the 2B`);
+  }
+  assert.equal((await run({ smallPc: true })).report.run.model, TWO_B, '--small-pc: no generation has a small PC of its own now');
+  assert.equal((await run({ model: TWO_B })).report.run.model, TWO_B, '--model the X2 its own');
+  for (const [what, arm] of [['the 47.6 GB X2', ARM], ['a 16 GB X2', ARM16]] as const) {
+    const four = await run({ model: FOUR_B }, arm);
+    assert.equal(four.report.run.model, FOUR_B, `--model the route's own on ${what}`);
+    assert.ok(!four.s.fake.commands[0].includes('--vit-compute'), `${what}: GenieX's QAIRT model never gets the 2B's arguments`);
+  }
+  const none = await B.npuBench({ ...(await scene({ vendor: 'qualcomm' })).opts, detection: parseDetection(`${ARM}${X2}\n`), profile: 'quick', model: 'a/b' });
+  assert.match(none.report.marks.map((m) => m.say).join('\n'), new RegExp(`has no model a/b \\(it has ${TWO_B}, ${FOUR_B}\\)`), 'what it has: the X2\'s own, then the route\'s');
   assert.deepEqual(B.parseBenchArgs(['--small-pc']), { smallPc: true });
 });
 
