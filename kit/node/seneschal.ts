@@ -21,6 +21,17 @@ import path from 'node:path';
  *
  * A failure the Seneschal holds is never taken for this run's: it is asked for again (`again`), and run. Never throws:
  * a Seneschal that stops answering midway leaves the agent running its work as before.
+ *
+ * With other PCs on the licence (Seneschal 0.2.0, kit 2.78.22), a task may run on another of them: while it runs there
+ * (`leased`) its wait isn't counted against SENESCHAL_WAIT_MS, only against SENESCHAL_RUN_MS, and the result it comes to
+ * names that PC (`pc`). A failure is tried once more on another PC: a pass there is `flaky` (the first failure was the
+ * PC's, not the change's), and a failure there too `confirmed`. One confirmed while this agent waited for its turn is
+ * handed back as **{ failed }**: the change's failure, not run again here. After a failure its own `hold` reported, the
+ * turn's `elsewhere()` waits for the try on another PC. And `seneschalWork` is a worker's side: any task of the kinds
+ * and repositories it runs, this PC's or another's, at its turn.
+ *
+ * A whole suite may be cut into shards by test file (kit 2.78.22): each its own task (`shard`, part of its key), so the
+ * PCs whose workers run it (`seneschalSiblings`) each take a part.
  */
 
 export type SeneschalLane = 'person' | 'blocking' | 'normal' | 'background';
@@ -43,6 +54,8 @@ export interface SeneschalTask {
   kit?: string;
   /** A kit trial's agent, by its id. */
   agent?: string;
+  /** One part of a whole suite (a full-suite task only): its test files dealt out by name (part of the key). */
+  shard?: SeneschalShard;
   lane?: SeneschalLane;
   /** In words: "Reeve#212's checks". The Seneschal makes them up when left out. */
   what?: string;
@@ -50,14 +63,36 @@ export interface SeneschalTask {
   by: string;
 }
 
+/** One part of a whole suite: the `index`th of `of`, from 1. */
+export interface SeneschalShard {
+  index: number;
+  of: number;
+}
+
+/** The most shards a whole suite is cut into (the Seneschal's MOST_SHARDS). */
+export const SENESCHAL_MOST_SHARDS = 64;
+
+/** A PC on the licence, as Manor names it. */
+export interface SeneschalPc {
+  id: string;
+  name: string;
+}
+
 /** A finished run as the Seneschal keeps it. */
 export interface SeneschalResult {
   ok: boolean;
   at: string;
+  /** Its worker: "steward", or "steward on LAPTOP" for a run on another PC. */
   by: string;
   ms: number;
   note?: string;
   commands?: string[];
+  /** The PC it ran on, when that was another PC on the licence. */
+  pc?: SeneschalPc;
+  /** A pass after a failure on another PC (`on`, by name, with that failure's note): that failure was the PC's. */
+  flaky?: { on: string; note?: string };
+  /** A failure after a failure on another PC (`on`, by name): the change's. */
+  confirmed?: { on: string };
 }
 
 /** What a run came to, for its report. `error`: it couldn't finish (a locked clone, a time limit), and is tried again. */
@@ -81,9 +116,18 @@ export interface SeneschalTurn {
    * and how long it took. A `work` that throws is reported as a run that couldn't finish, and the error thrown on.
    */
   hold<T>(work: () => Promise<T>, outcome: (value: T) => SeneschalOutcome): Promise<T>;
+  /**
+   * After a failure `hold` reported, the Seneschal may try the task once more on another PC on the licence (its report
+   * answered `retry: 'elsewhere'`): this waits for that run and hands back its result, `flaky` (a pass there) or
+   * `confirmed` (a failure there too). Null at once when it isn't tried elsewhere; null too when the first failure
+   * stands (no other PC took it in time), or the Seneschal stops answering. Never throws.
+   */
+  elsewhere(): Promise<SeneschalResult | null>;
+  /** Hands the task back unstarted (a worker that can't run it now): it spends no try, and waits for another worker. */
+  giveBack(note: string): Promise<void>;
 }
 
-export type SeneschalAnswer = { reused: SeneschalResult; id: string } | { turn: SeneschalTurn };
+export type SeneschalAnswer = { reused: SeneschalResult; id: string } | { failed: SeneschalResult; id: string } | { turn: SeneschalTurn };
 
 /** Where the Seneschal's page listens, and its token. */
 export interface SeneschalAt {
@@ -101,6 +145,10 @@ export const TURN_HELD_ENV = 'KIT_CHECKS_TURN';
 
 /** How long a task waits for its turn before it runs as before: the checks pace's longest wait for a turn. */
 export const SENESCHAL_WAIT_MS = 20 * 60_000;
+/** How long a task asked for by name may run elsewhere (another worker's, another PC's) before it runs as before. */
+export const SENESCHAL_RUN_MS = 2 * 3600_000;
+/** How long a worker waits before it asks for work again, when the Seneschal says nothing of when. */
+export const SENESCHAL_IDLE_MS = 30_000;
 /** A call to the Seneschal that takes longer than this is no answer. */
 const CALL_MS = 10_000;
 /** Calls in a row with no answer, and the work runs as before. */
@@ -148,9 +196,53 @@ export interface SeneschalTurnOptions {
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
   waitMs?: number;
+  runMs?: number;
 }
 
 type Reply = { status: number; body: any } | null;
+type Call = (route: string, body: unknown) => Promise<Reply>;
+
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** The Seneschal these options reach: under node --test, only one the test gave a home of its own (or `at`), never this PC's. */
+function seneschalFor(o: { at?: SeneschalAt | null; env?: NodeJS.ProcessEnv }): SeneschalAt | null {
+  const env = o.env ?? process.env;
+  return o.at !== undefined ? o.at : env.NODE_TEST_CONTEXT && !env.SENESCHAL_HOME ? null : seneschalAt(seneschalHome(env));
+}
+
+/** A POST to the Seneschal with its token: null when it doesn't answer within CALL_MS. */
+const callerOf =
+  (at: SeneschalAt): Call =>
+  async (route, body) => {
+    try {
+      const r = await fetch(new URL(route, at.base), { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': at.token }, body: JSON.stringify(body), signal: AbortSignal.timeout(CALL_MS) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    } catch {
+      return null;
+    }
+  };
+
+/**
+ * How long a task asked for by name has waited, apart from how long it ran elsewhere (`leased`: another worker's run,
+ * another PC's). Each answer's state is `saw`; the time since the last is counted as that state.
+ */
+function waitClock(now: () => number) {
+  const start = now();
+  let ran = 0;
+  let since: number | null = null;
+  const running = () => ran + (since !== null ? now() - since : 0);
+  return {
+    saw(state: unknown) {
+      if (state === 'leased') since ??= now();
+      else if (since !== null) {
+        ran += now() - since;
+        since = null;
+      }
+    },
+    waited: () => now() - start - running(),
+    ran: running,
+  };
+}
 
 /** Asks the Seneschal for this task's turn: null (run it as before), a pass that stands in, or the turn. Never throws. */
 export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions): Promise<SeneschalAnswer | null> {
@@ -162,21 +254,18 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
   const env = o.env ?? process.env;
   // Already inside another's turn (the checks pace's launcher ran this): a turn of its own would hold the PC twice.
   if (env[TURN_HELD_ENV]) return null;
-  // Under node --test, only a Seneschal the test gave a home of its own (or `at`): never this PC's real one.
-  const at = o.at !== undefined ? o.at : env.NODE_TEST_CONTEXT && !env.SENESCHAL_HOME ? null : seneschalAt(seneschalHome(env));
+  const at = seneschalFor(o);
   if (!at) return null;
   const now = o.now ?? Date.now;
-  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const call = async (route: string, body: unknown): Promise<Reply> => {
-    try {
-      const r = await fetch(new URL(route, at.base), { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': at.token }, body: JSON.stringify(body), signal: AbortSignal.timeout(CALL_MS) });
-      return { status: r.status, body: await r.json().catch(() => null) };
-    } catch {
-      return null;
-    }
-  };
+  const sleep = o.sleep ?? pause;
+  const call = callerOf(at);
+  const pollMs = o.pollMs ?? SENESCHAL_POLL_MS;
+  const waitMs = o.waitMs ?? SENESCHAL_WAIT_MS;
+  const runMs = o.runMs ?? SENESCHAL_RUN_MS;
 
   const started = now();
+  // Its wait for a turn, apart from the time the task ran elsewhere meanwhile (on another PC, say): that isn't a wait.
+  const clock = waitClock(now);
   let afresh = 0;
   let misses = 0;
   let lastWhy = '';
@@ -188,12 +277,16 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
     if (!r.body.task) return { asBefore: r.body.why ?? 'the Seneschal took no task' };
     return { task: r.body.task };
   };
-  /** A task that stands done or failed: a pass that ran these commands stands in; anything else is asked for again. */
-  const settled = (id: string, state: string, result: SeneschalResult | null | undefined): SeneschalAnswer | 'again' | 'other' => {
+  /**
+   * A task that stands done or failed: a pass that ran these commands stands in, and so does a failure of them confirmed
+   * on two PCs while this asked (`fresh`): the change's. Anything else is asked for again.
+   */
+  const settled = (id: string, state: string, result: SeneschalResult | null | undefined, fresh: boolean): SeneschalAnswer | 'again' | 'other' => {
     if (state === 'done' && result?.ok) {
       if (sameCommands(result.commands, o.commands)) return { reused: result, id };
       return 'other';
     }
+    if (fresh && state === 'done' && result && !result.ok && result.confirmed && sameCommands(result.commands, o.commands)) return { failed: result, id };
     return 'again';
   };
 
@@ -203,7 +296,7 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
     const t = sub.task;
     const id = String(t.id);
     if (t.state === 'done' || t.state === 'failed') {
-      const s = settled(id, t.state, t.result);
+      const s = settled(id, t.state, t.result, false);
       if (s === 'other') return asBefore('the Seneschal has a pass of this code that ran other checks');
       if (s !== 'again') return s;
       if (++afresh > AFRESH) return asBefore('the Seneschal kept handing back a failure');
@@ -221,7 +314,8 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
       } else {
         misses = 0;
         const b = r.body;
-        if (b.task && b.lease?.token) return { turn: turnOf(call, say, now, id, b, now() - started) };
+        clock.saw(b.state);
+        if (b.task && b.lease?.token) return { turn: turnOf({ call, say, now, sleep, pollMs, waitMs, runMs, worker: o.worker, slot: o.slot }, id, b, now() - started) };
         if (b.asBefore) return asBefore(String(b.why ?? 'the Seneschal hands out no work'));
         if (b.gone) {
           if (++afresh > AFRESH) return asBefore('the Seneschal kept letting the task go');
@@ -229,7 +323,7 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
           break;
         }
         if (b.state === 'done' || b.state === 'failed') {
-          const s = settled(id, b.state, b.result);
+          const s = settled(id, b.state, b.result, true);
           if (s === 'other') return asBefore('it passed elsewhere running other checks');
           if (s !== 'again') return s;
           if (++afresh > AFRESH) return asBefore('the Seneschal kept handing back a failure');
@@ -242,36 +336,50 @@ export async function seneschalTurn(task: SeneschalTask, o: SeneschalTurnOptions
           o.waiting?.(why);
         }
       }
-      if (now() - started >= (o.waitMs ?? SENESCHAL_WAIT_MS)) {
-        return asBefore(`its turn didn't come in ${Math.round((o.waitMs ?? SENESCHAL_WAIT_MS) / 60_000)} minutes (${lastWhy || 'no answer'})`);
-      }
-      await sleep(o.pollMs ?? SENESCHAL_POLL_MS);
+      if (clock.waited() >= waitMs) return asBefore(`its turn didn't come in ${Math.round(waitMs / 60_000)} minutes (${lastWhy || 'no answer'})`);
+      if (clock.ran() >= runMs) return asBefore(`it ran elsewhere for more than ${Math.round(runMs / 60_000)} minutes (${lastWhy})`);
+      await sleep(pollMs);
     }
     sub = next;
   }
 }
 
-/** The turn for a lease the Seneschal gave: its heartbeats and its report. */
-function turnOf(call: (route: string, body: unknown) => Promise<Reply>, say: (line: string) => void, now: () => number, id: string, b: any, waitedMs: number): SeneschalTurn {
+/** What a turn needs of its asker: its calls, clock and log, and how it asks for the task by name afterwards (elsewhere). */
+interface TurnDeps {
+  call: Call;
+  say: (line: string) => void;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  pollMs: number;
+  waitMs: number;
+  runMs: number;
+  worker: string;
+  slot?: string;
+}
+
+/** The turn for a lease the Seneschal gave: its heartbeats, its report, and its try on another PC after a failure. */
+function turnOf(d: TurnDeps, id: string, b: any, waitedMs: number): SeneschalTurn {
   const token = String(b.lease.token);
   const heartbeatMs = Number(b.lease.heartbeatMs) > 0 ? Number(b.lease.heartbeatMs) : 15_000;
-  const report = async (out: SeneschalOutcome, ms: number) => {
-    const r = await call('/api/tasks/report', { id, token, ms, ...out, ...(out.note ? { note: out.note.slice(0, 500) } : {}) });
-    if (!r || r.status >= 400) say(`the Seneschal didn't take the result (${r ? (r.body?.error ?? `HTTP ${r.status}`) : 'no answer'}): it lets the task go in a few minutes`);
+  let retried = false;
+  const report = async (out: SeneschalOutcome & { returned?: boolean }, ms: number) => {
+    const r = await d.call('/api/tasks/report', { id, token, ms, ...out, ...(out.note ? { note: out.note.slice(0, 500) } : {}) });
+    if (!r || r.status >= 400) d.say(`the Seneschal didn't take the result (${r ? (r.body?.error ?? `HTTP ${r.status}`) : 'no answer'}): it lets the task go in a few minutes`);
+    else if (r.body?.retry === 'elsewhere') retried = true;
   };
   return {
     id,
     usualMs: Number(b.usualMs) || 0,
     waitedMs,
     async hold(work, outcome) {
-      const began = now();
+      const began = d.now();
       let lost = false;
       const beat = setInterval(() => {
-        void call('/api/tasks/heartbeat', { id, token }).then((h) => {
+        void d.call('/api/tasks/heartbeat', { id, token }).then((h) => {
           // Its lease ran out (the PC slept, say): the run goes on, and its late report still counts.
           if (h?.status === 409 && !lost) {
             lost = true;
-            say(`the Seneschal says its lease is gone (${h.body?.gone ?? 'ran out'}): it runs on, and reports when it ends`);
+            d.say(`the Seneschal says its lease is gone (${h.body?.gone ?? 'ran out'}): it runs on, and reports when it ends`);
           }
         });
       }, heartbeatMs);
@@ -281,7 +389,7 @@ function turnOf(call: (route: string, body: unknown) => Promise<Reply>, say: (li
         value = await work();
       } catch (err) {
         clearInterval(beat);
-        await report({ ok: false, error: true, note: (err as Error)?.message ?? String(err) }, now() - began);
+        await report({ ok: false, error: true, note: (err as Error)?.message ?? String(err) }, d.now() - began);
         throw err;
       }
       clearInterval(beat);
@@ -291,8 +399,190 @@ function turnOf(call: (route: string, body: unknown) => Promise<Reply>, say: (li
       } catch (err) {
         out = { ok: false, error: true, note: (err as Error)?.message ?? String(err) };
       }
-      await report(out, now() - began);
+      await report(out, d.now() - began);
       return value;
     },
+    async elsewhere() {
+      if (!retried) return null;
+      retried = false;
+      d.say('it failed here: the Seneschal tries it once more on another PC, and this waits for what it comes to there');
+      const clock = waitClock(d.now);
+      let misses = 0;
+      for (let first = true; ; first = false) {
+        if (!first) await d.sleep(d.pollMs);
+        const r = await d.call('/api/tasks/lease', { worker: d.worker, id, ...(d.slot ? { slot: d.slot } : {}) });
+        if (!r || r.status >= 500) {
+          if (++misses >= MISSES) return null;
+        } else if (r.status >= 400 || !r.body) {
+          return null;
+        } else {
+          misses = 0;
+          const a = r.body;
+          clock.saw(a.state);
+          if (a.task && a.lease?.token) {
+            // Handed back to this asker (the PC lost its name, say): it waits only for another PC's run, so none of its own.
+            await d.call('/api/tasks/report', { id, token: String(a.lease.token), ok: false, returned: true, note: 'its asker waits for its try on another PC' });
+            return null;
+          }
+          if (a.state === 'done') return a.result && (a.result.flaky || a.result.confirmed) ? (a.result as SeneschalResult) : null;
+          if (a.gone || a.asBefore || a.state === 'failed') return null;
+        }
+        if (clock.waited() >= d.waitMs || clock.ran() >= d.runMs) return null;
+      }
+    },
+    async giveBack(note) {
+      await report({ ok: false, returned: true, note }, 0);
+    },
   };
+}
+
+/** A task the Seneschal handed a worker that asked for any of its kinds: this PC's (t12) or another PC's (b3, `from`). */
+export interface SeneschalJob {
+  id: string;
+  kind: SeneschalKind;
+  repo: string;
+  commit: string;
+  tree?: string;
+  /** For only the tests a change reaches: the commit they're picked against. */
+  base?: string;
+  pr?: number;
+  branch?: string;
+  /** One part of a whole suite: run only its test files. */
+  shard?: SeneschalShard;
+  /** A kit trial's kit: a version, or a version and the Steward's commit it's made from (2.78.1-1a2b3c4d5e6f). */
+  kit?: string;
+  /** A kit trial's agent, by its id: the agent whose checks are tried with the kit. */
+  agent?: string;
+  lane: SeneschalLane;
+  what: string;
+  /** Another PC's task: that PC, and the task's id there. */
+  from?: { pc: SeneschalPc; id: string };
+  /** Its turn: run it under `hold`, or `giveBack` what this worker can't run now. */
+  turn: SeneschalTurn;
+}
+
+export interface SeneschalWorkOptions {
+  /** The agent that asks, by its id. */
+  worker: string;
+  /** The kinds it runs. */
+  kinds: SeneschalKind[];
+  /** The repositories it runs them for, owner/name. */
+  repos: string[];
+  slot?: string;
+  say?: (line: string) => void;
+  /** Tests: where the Seneschal is, the environment, the clock, and how its turn's elsewhere() asks. */
+  at?: SeneschalAt | null;
+  env?: NodeJS.ProcessEnv;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  pollMs?: number;
+  waitMs?: number;
+  runMs?: number;
+}
+
+const KINDS: readonly SeneschalKind[] = ['pr-check', 'kit-trial', 'full-suite', 'wright-job'];
+const LANES: readonly SeneschalLane[] = ['person', 'blocking', 'normal', 'background'];
+/** owner/name, neither of them "." or "..". */
+const REPO = /^(?!\.\.?\/)[A-Za-z0-9_.-]{1,100}\/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}$/;
+const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** A branch git takes as one: no leading dash or dot, no "..", no "//", not ending in "/" or ".lock". */
+const BRANCH = /^(?![-./])(?!.*\.\.)(?!.*\/\/)(?!.*\/$)(?!.*\.lock$)[A-Za-z0-9_./-]{1,200}$/;
+/** A kit trial's kit: a version, or a version and 12 hex digits of the Steward's commit it's made from. */
+const KIT = /^\d+\.\d+\.\d+(?:-[0-9a-f]{12})?$/;
+const AGENT = /^[a-z][a-z0-9-]{0,40}$/;
+
+/** A shard as the Seneschal names one, checked: whole numbers, 1 <= index <= of <= SENESCHAL_MOST_SHARDS. Pure. */
+export function shardOf(v: any): SeneschalShard | null {
+  if (!v || typeof v !== 'object' || !Number.isInteger(v.index) || !Number.isInteger(v.of)) return null;
+  return v.of >= 1 && v.of <= SENESCHAL_MOST_SHARDS && v.index >= 1 && v.index <= v.of ? { index: v.index, of: v.of } : null;
+}
+
+/** The job in a lease's task, checked again here (it may come from another PC); null when any of it isn't as it should be. Pure. */
+export function jobOf(t: any, kinds: readonly SeneschalKind[] = KINDS): Omit<SeneschalJob, 'turn'> | null {
+  if (!t || typeof t !== 'object') return null;
+  const id = String(t.id ?? '');
+  if (!/^[tb]\d{1,12}$/.test(id) || !kinds.includes(t.kind) || !REPO.test(String(t.repo)) || !OID.test(String(t.commit))) return null;
+  if (t.tree != null && !OID.test(String(t.tree))) return null;
+  if (t.base != null && !OID.test(String(t.base))) return null;
+  if (t.branch != null && !BRANCH.test(String(t.branch))) return null;
+  if (t.pr != null && !(Number.isInteger(t.pr) && t.pr > 0)) return null;
+  const shard = t.shard == null ? null : shardOf(t.shard);
+  if (t.shard != null && (!shard || t.kind !== 'full-suite')) return null;
+  // A kit trial names its kit and its agent; no other kind names either (a kit would change what runs).
+  if (t.kind === 'kit-trial' ? !KIT.test(String(t.kit ?? '')) || !AGENT.test(String(t.agent ?? '')) : t.kit != null || t.agent != null) return null;
+  const from =t.from && typeof t.from === 'object' && t.from.pc && typeof t.from.pc.name === 'string' ? { pc: { id: String(t.from.pc.id ?? ''), name: String(t.from.pc.name).slice(0, 60) }, id: String(t.from.id ?? '') } : undefined;
+  return {
+    id,
+    kind: t.kind,
+    repo: t.repo,
+    commit: t.commit,
+    ...(t.tree ? { tree: t.tree } : {}),
+    ...(t.base ? { base: t.base } : {}),
+    ...(t.pr ? { pr: t.pr } : {}),
+    ...(t.branch ? { branch: t.branch } : {}),
+    ...(shard ? { shard } : {}),
+    ...(t.kind === 'kit-trial' ? { kit: t.kit, agent: t.agent } : {}),
+    lane: LANES.includes(t.lane) ? t.lane : 'normal',
+    what: typeof t.what === 'string' && t.what ? t.what.slice(0, 200) : `${t.repo}'s ${t.kind}`,
+    ...(from ? { from } : {}),
+  };
+}
+
+/**
+ * A worker's ask (Seneschal 0.2.0): any task of `kinds` for `repos` that waits on this PC, or on another PC on the
+ * licence while this one has room, at its turn: the job, to run under its turn's `hold`. Or why there's none, and when to
+ * ask again (`retryMs`: soon while the Seneschal has asked another PC for a task, else SENESCHAL_IDLE_MS). Null when
+ * there's no Seneschal to ask: none on this PC, under node --test, or inside another's turn. Never throws.
+ */
+export async function seneschalWork(o: SeneschalWorkOptions): Promise<{ job: SeneschalJob } | { idle: string; retryMs: number } | null> {
+  const env = o.env ?? process.env;
+  if (env[TURN_HELD_ENV]) return null;
+  const at = seneschalFor(o);
+  if (!at) return null;
+  if (!o.kinds.length || !o.repos.length) return { idle: 'it runs no repository now', retryMs: SENESCHAL_IDLE_MS };
+  const call = callerOf(at);
+  const r = await call('/api/tasks/lease', { worker: o.worker, kinds: o.kinds, repos: o.repos.slice(0, 200), ...(o.slot ? { slot: o.slot } : {}) });
+  if (!r || r.status >= 500) return { idle: "the Seneschal didn't answer", retryMs: SENESCHAL_IDLE_MS };
+  if (r.status >= 400 || !r.body) return { idle: `the Seneschal refused the ask: ${r.body?.error ?? `HTTP ${r.status}`}`, retryMs: 10 * SENESCHAL_IDLE_MS };
+  const b = r.body;
+  const asked = Number(b.retryMs);
+  const retryMs = Number.isFinite(asked) && asked > 0 ? Math.min(Math.max(asked, 1_000), 10 * SENESCHAL_IDLE_MS) : SENESCHAL_IDLE_MS;
+  if (!b.task || !b.lease?.token) return { idle: String(b.why ?? 'nothing waits'), retryMs };
+  const say = o.say ?? (() => {});
+  const turn = turnOf(
+    { call, say, now: o.now ?? Date.now, sleep: o.sleep ?? pause, pollMs: o.pollMs ?? SENESCHAL_POLL_MS, waitMs: o.waitMs ?? SENESCHAL_WAIT_MS, runMs: o.runMs ?? SENESCHAL_RUN_MS, worker: o.worker, slot: o.slot },
+    String(b.task.id),
+    b,
+    0,
+  );
+  const job = jobOf(b.task, o.kinds);
+  if (!job) {
+    await turn.giveBack(`${o.worker} couldn't read the task it was handed`);
+    return { idle: `the Seneschal handed it a task it couldn't read (${String(b.task.id ?? '?').slice(0, 20)}), given back`, retryMs: SENESCHAL_IDLE_MS };
+  }
+  return { job: { ...job, turn } };
+}
+
+/**
+ * The other PCs on the licence whose workers run `kind` for `repo` now (Seneschal 0.2.0: each sibling's `works`, as
+ * this PC's Seneschal last read it): what a whole suite may be cut for (kit 2.78.22). Empty when none does, or the
+ * Seneschal shares no work; null when there's no Seneschal to ask, or it doesn't answer. Never throws.
+ */
+export async function seneschalSiblings(o: { kind: SeneschalKind; repo: string; at?: SeneschalAt | null; env?: NodeJS.ProcessEnv }): Promise<SeneschalPc[] | null> {
+  const env = o.env ?? process.env;
+  if (env[TURN_HELD_ENV]) return null;
+  const at = seneschalFor(o);
+  if (!at) return null;
+  try {
+    const r = await fetch(new URL('/api/tasks', at.base), { headers: { 'x-token': at.token }, signal: AbortSignal.timeout(CALL_MS) });
+    if (!r.ok) return null;
+    const b: any = await r.json();
+    const list = b?.siblings?.on && Array.isArray(b.siblings.siblings) ? b.siblings.siblings : [];
+    const repo = o.repo.toLowerCase();
+    return list
+      .filter((s: any) => s && typeof s.id === 'string' && typeof s.name === 'string' && Array.isArray(s.works?.kinds) && s.works.kinds.includes(o.kind) && (!Array.isArray(s.works.repos) || s.works.repos.some((x: unknown) => String(x).toLowerCase() === repo)))
+      .map((s: any) => ({ id: s.id, name: s.name.slice(0, 60) }));
+  } catch {
+    return null;
+  }
 }

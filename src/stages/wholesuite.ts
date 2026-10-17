@@ -1,19 +1,22 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { APP } from '../app.ts';
 import { commitOf, fetchBranch, removeWorktree, showFile } from '../git.ts';
 import { STEWARD_BRANCH } from '../glance.ts';
 import { alive } from '../kit/apart.ts';
 import { endProcesses } from '../kit/native.ts';
+import { seneschalSiblings, type SeneschalShard } from '../kit/seneschal.ts';
 import { dataFile, readJson, writeJson } from '../kit/store.ts';
 import type { Runner } from '../run.ts';
 import { treeOf, wholePassOf } from '../whole.ts';
-import { onlyFlaky, runChecks, type FailedChecks } from './bump.ts';
+import { onlyFlaky, runChecks, wholeTestFiles, type FailedChecks } from './bump.ts';
 import { freshWorktree, interrupted, workRootOf, type Ctx } from './common.ts';
 import { stewardEmployee } from './selfmerge.ts';
 import { apart, apartNow } from './slots.ts';
 import { phaseOf, timed } from '../buildtimes.ts';
 import type { StoodIn } from './standin.ts';
+import type { Employee } from '../settings.ts';
 
 /**
  * The whole suite before a kit's release. A vouch and a PR tested here run only the tests each change reaches
@@ -33,6 +36,12 @@ import type { StoodIn } from './standin.ts';
  * a kit no longer waiting for one. It ends when the Steward stops, with everything it started (endWholeSuite), and one a
  * Steward that is gone left running is ended before the next starts (endWholeOrphans): whole-suite.json keeps what it
  * runs. In a terminal round, and under node --test unless a test says otherwise, it runs inside the round as before.
+ *
+ * Where other PCs on the licence run the Steward's whole suite too (the Seneschal's siblings, Seneschal 0.2.0), it is cut
+ * into shards by test file (Steward 0.36.98): one for this PC and one for each of them, WHOLE_SHARDS_MOST at most, each
+ * its own full-suite task in a worktree of its own here. The Seneschal hands each to whichever PC has room first, and a
+ * shard another PC ran comes back as its pass or failure; one nobody else took runs here. A failure runs once more, only
+ * the shards that failed.
  *
  * The Steward's own release (v<version>), made after every merge, isn't held for it: that would be the whole suite once a
  * PR, more than the affected tests save. The Surveyor runs its whole suite on main once a day (or the Assayer's daily
@@ -112,6 +121,11 @@ export const wholeSuiteDone = (): Promise<void> => going?.done ?? Promise.resolv
 
 /** How long a round waits for a superseded run to stop and leave its worktree, before it goes on. */
 const STOP_WAIT_MS = 60_000;
+/** The most shards the whole suite is cut into: this PC and up to three others. */
+export const WHOLE_SHARDS_MOST = 4;
+/** The fewest test files a shard is cut for: with fewer, the setup each shard repeats outweighs the tests it spares. */
+export const FILES_PER_SHARD = 10;
+
 /** How long a run another Steward process runs (one still alive) is left to it, before it is taken for a stale record. */
 const ELSEWHERE_MS = 12 * 3600_000;
 
@@ -150,6 +164,9 @@ async function runWhole(ctx: Ctx, repo: string, dir: string, o: { tag: string; c
   const stoodIn: StoodIn = {};
   // A kit's release waits on it: the Seneschal's blocking lane, as a full-suite task (stages/seneschal.ts).
   const task = { kind: 'full-suite', lane: 'blocking' } as const;
+  // Other PCs run it too: cut into shards, one for each.
+  const of = await shardsFor(e, dir, say);
+  if (of > 1) return runShards(ctx, repo, dir, e, o, of, say, cut);
   const first = await runChecks(ctx, e, dir, { say, failed: firstFailed, stoodIn, task });
   // The whole checks already passed on exactly this code (standin.ts): here, in the Assayer, or on another PC.
   if (!first && stoodIn.by) {
@@ -181,6 +198,109 @@ async function runWhole(ctx: Ctx, repo: string, dir: string, o: { tag: string; c
   const why = `the whole suite passed at ${at}${first ? ` on a second try (the first: ${first})` : ''}`;
   say(`${o.tag}: ${why}`);
   return { verdict: 'passed', why };
+}
+
+/**
+ * How many shards the whole suite in `dir` is cut into: one for this PC and one for each other PC on the licence whose
+ * Steward runs the Steward's whole suite (the Seneschal's siblings), WHOLE_SHARDS_MOST at most and FILES_PER_SHARD test
+ * files each at least. 1, not cut, without them, without the Seneschal, or when `npm test` isn't a plain node --test.
+ */
+export async function shardsFor(e: Employee, dir: string, say: (line: string) => void, siblings = seneschalSiblings): Promise<number> {
+  if (!e.test.some((s) => s.trim() === 'npm test')) return 1;
+  const t = wholeTestFiles(dir);
+  if (!t) return 1;
+  const pcs = await siblings({ kind: 'full-suite', repo: e.repo });
+  if (!pcs?.length) return 1;
+  const of = Math.min(1 + pcs.length, WHOLE_SHARDS_MOST, Math.floor(t.files.length / FILES_PER_SHARD));
+  if (of < 2) return 1;
+  const names = pcs.slice(0, of - 1).map((p) => p.name);
+  say(`its whole suite cut into ${of} shards of its ${t.files.length} test files, for this PC and ${names.join(', ')}${pcs.length > names.length ? ` (of ${pcs.length} other PCs)` : ''}: each runs where there's room first`);
+  return of;
+}
+
+/** The worktree of the whole suite's shard `index` (2 on; shard 1 runs in the whole suite's own, `dir`). */
+export const shardDirOf = (dir: string, index: number) => `${dir}-${index}`;
+
+/** A shard's run of the checks, and what it came to. */
+interface ShardRun {
+  shard: SeneschalShard;
+  failed: string | null;
+  seen: FailedChecks;
+  stoodIn: StoodIn;
+}
+
+/**
+ * The whole suite cut into `of` shards (shardsFor), each a full-suite task of its own, run at once: shard 1 in `dir`,
+ * the others in worktrees of their own beside it (removed after). The Seneschal hands each to whichever PC has room;
+ * one another PC ran comes back as that PC's. A failure runs once more, only the shards that failed, and is weighed as
+ * the whole suite's is (a shard whose failing tests each passed in the other run is flaky).
+ */
+async function runShards(ctx: Ctx, repo: string, dir: string, e: Employee, o: { tag: string; commit: string }, of: number, say: (line: string) => void, cut: () => Verdict | null): Promise<Verdict> {
+  const at = o.commit.slice(0, 7);
+  const shards: SeneschalShard[] = Array.from({ length: of }, (_, i) => ({ index: i + 1, of }));
+  const dirOf = (s: SeneschalShard) => (s.index === 1 ? dir : shardDirOf(dir, s.index));
+  const named = (s: SeneschalShard) => `shard ${s.index} of ${of}`;
+  const task = { kind: 'full-suite', lane: 'blocking' } as const;
+  const runAll = (list: SeneschalShard[]): Promise<ShardRun[]> =>
+    Promise.all(
+      list.map(async (shard) => {
+        const seen: FailedChecks = {};
+        const stoodIn: StoodIn = {};
+        const failed = await runChecks(ctx, e, dirOf(shard), { say: (line) => say(`${named(shard)}: ${line}`), doing: `its whole suite, ${named(shard)}`, failed: seen, stoodIn, task, shard });
+        return { shard, failed, seen, stoodIn };
+      }),
+    );
+  const words = (runs: ShardRun[]) => runs.map((r) => `${named(r.shard)}: ${r.failed}`).join('; ');
+  try {
+    for (const s of shards.slice(1)) {
+      await removeWorktree(ctx.run, repo, dirOf(s));
+      await freshWorktree(ctx.run, ctx.settings, repo, dirOf(s), o.commit, '--detach');
+    }
+    const first = await runAll(shards);
+    const firstFailed = first.filter((r) => r.failed);
+    // The shards other PCs ran (or a pass of the same code stood in for), said by where.
+    const elsewhere = first.filter((r) => !r.failed && r.stoodIn.by).map((r) => `${named(r.shard)} ${r.stoodIn.where}`);
+    const cutWords = `cut into ${of} shards${elsewhere.length ? ` (${elsewhere.join(', ')})` : ''}`;
+    if (!firstFailed.length) {
+      const why = `the whole suite passed at ${at}, ${cutWords}`;
+      say(`${o.tag}: ${why}`);
+      return { verdict: 'passed', why };
+    }
+    const c = cut();
+    if (c) return c;
+    const ended = (runs: ShardRun[]): Verdict | null => {
+      const r = runs.find((x) => interrupted(x.failed!));
+      return r ? { verdict: 'ended', why: `Windows ended its whole suite at ${at} (${named(r.shard)}: ${r.failed})` } : null;
+    };
+    const endedFirst = ended(firstFailed);
+    if (endedFirst) return endedFirst;
+    say(`its whole suite once more, the ${firstFailed.length === 1 ? 'shard' : 'shards'} that failed (${words(firstFailed)})`);
+    // One that failed on two PCs already (the Seneschal's, 0.2.0) is the change's failure: not run a third time.
+    const again = [...firstFailed.filter((r) => r.seen.confirmed), ...(await runAll(firstFailed.filter((r) => !r.seen.confirmed).map((r) => r.shard)))].sort((a, b) => a.shard.index - b.shard.index);
+    const againFailed = again.filter((r) => r.failed);
+    if (againFailed.length) {
+      const c2 = cut();
+      if (c2) return c2;
+      const endedAgain = ended(againFailed);
+      if (endedAgain) return endedAgain;
+    }
+    if (!againFailed.length) {
+      const why = `the whole suite passed at ${at}, ${cutWords}, on a second try of ${firstFailed.map((r) => named(r.shard)).join(', ')} (the first: ${words(firstFailed)})`;
+      say(`${o.tag}: ${why}`);
+      return { verdict: 'passed', why };
+    }
+    // Each failing test of each shard passed in that shard's other run: flaky, as the whole suite's is.
+    const firstOf = (s: SeneschalShard) => first.find((r) => r.shard.index === s.index)!;
+    if (againFailed.every((r) => onlyFlaky(firstOf(r.shard).seen, r.seen))) {
+      const why = `its whole suite failed twice at ${at} in ${againFailed.map((r) => named(r.shard)).join(', ')}, but no test failed both times, each passing in the other run: flaky, released all the same (the first time: ${words(firstFailed)}; the second: ${words(againFailed)})`;
+      say(`${o.tag}: ${why}`);
+      return { verdict: 'flaky', why };
+    }
+    const twice = words(againFailed) === words(firstFailed);
+    return { verdict: 'failed', why: `its whole suite failed at ${at}, ${cutWords}: ${words(againFailed)}${twice ? ', twice' : ` (the first time: ${words(firstFailed)})`}` };
+  } finally {
+    for (const s of shards.slice(1)) await tidy(ctx.run, repo, dirOf(s), say);
+  }
 }
 
 /** The worktree removed, saying so when it can't be. */
@@ -306,6 +426,8 @@ function startBeside(ctx: Ctx, repo: string, dir: string, o: { tag: string; comm
         saveJob(g.job);
       }
       await tidy(ctx.run, repo, dir, say);
+      // Its shards' worktrees, which a run stopped midway couldn't remove (their git stopped with it).
+      for (let i = 2; i <= WHOLE_SHARDS_MOST; i++) if (existsSync(shardDirOf(dir, i))) await tidy(ctx.run, repo, shardDirOf(dir, i), say);
       if (going === g) going = null;
       if (!stopped) {
         say(`${o.tag}: its whole suite at ${o.commit.slice(0, 7)} ended beside the rounds (${v.verdict}): a round settles it now`);
