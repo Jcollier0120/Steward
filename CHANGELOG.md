@@ -4,7 +4,7 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 ## Unreleased (its version needs claiming on the main laptop)
 
-**A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
+**A PR whose kit.json pins a kit that will never be released is told so at once, and a draft or a vouched PR is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, a draft wasn't looked at at all, and a vouched PR could merge with it.**
 
 ### What changed
 
@@ -16,6 +16,9 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
   - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
   - A draft whose kit will never be released is told, and its hold says so after "a draft".
+- **A vouched PR's kit.json is looked at too** (stages/merge.ts `mergeOne`). A vouch is for a PR's checks, which its author's clone may have run with a kit filled from a Steward tree, not for the kit it pins. Before, a vouched PR skipped `kitReleaseHold`, so one pinned to a kit with no release could merge, even one that will never be released.
+  - Now every team PR the Steward would test itself has its pin read before its vouch: one whose kit has no release waits for it, and one whose kit will never be released is told and raises the alarm, as above.
+  - Once its kit is released, the vouch still spares its checks here, as before.
 
 ## 0.36.84
 
