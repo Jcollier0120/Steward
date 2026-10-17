@@ -884,6 +884,14 @@ export async function mergeOne(ctx: Ctx, e: Employee, o: { yes: boolean; team?: 
     );
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().split('\n').pop();
+      // Made a draft again after it was looked at, while it was tested here (2026-10-17, #316: "Pull Request is still a
+      // draft"): it waits as a draft does, not a merge that failed.
+      if (/\bdraft\b/i.test(why ?? '')) {
+        ctx.log(`[${e.id}] #${pr.number} was made a draft again before its merge: it waits, as a draft does`);
+        waits.push(`${describe(pr)} waits: a draft (made one again before its merge)`);
+        held.push(heldOf({ ...pr, draft: true }, 'a draft'));
+        continue;
+      }
       failed.push(`#${pr.number}: ${why}`);
       held.push(heldOf(pr, `couldn't merge it: ${why}`));
       continue;

@@ -15,6 +15,19 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 
 - Nothing: it updates itself as usual. Each staff member's page shows the pill in its new place once it takes kit 2.78.14.
 
+## 0.36.89
+
+**The Last stage card says what the stage was asked in words, and a pull request made a draft again just before its merge waits instead of failing.**
+
+### What changed
+
+- After a Build now, the Last stage card read "(full true; buildNow [object Object])". It now says "(every employee looked at; Build now)", or "Build now, to customers" when that was ticked, and names the employees a stage was for.
+- A pull request made a draft again while the Steward was testing it, before its merge, now waits as any draft does. Before, GitHub refused the merge ("Pull Request is still a draft") and the round showed it as a failed merge, though nothing had gone wrong.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.87
 
 **A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
