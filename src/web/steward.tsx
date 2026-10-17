@@ -9,6 +9,7 @@ import type { EmployeeResult, StageResult } from '../stages/common.ts';
 import type { WholeJob } from '../stages/wholesuite.ts';
 import type { HeldQueue } from '../version-queue.ts';
 import type { FoundView, PrView, RoundView, StaffRowView, StaffView, StewardView } from './types.ts';
+import { askedWords } from './asked.ts';
 
 /** The Steward's page: the kit, the staff's table, the stages, the last stage. (Settings is the kit's: shell.tsx.) */
 
@@ -426,10 +427,7 @@ function LastStage({ l, now }: { l: StageResult | null; now: number }) {
         No stage has run yet.
       </Card>
     );
-  const asked = Object.entries(l.asked)
-    .filter(([, v]) => v !== undefined && v !== null && v !== false && !(Array.isArray(v) && !v.length))
-    .map(([k, v]) => `${k} ${Array.isArray(v) ? v.join(',') : v}`)
-    .join('; ');
+  const asked = askedWords(l.asked);
   return (
     <Card>
       <p>
