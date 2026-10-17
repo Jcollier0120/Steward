@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.133
+
+**The kit 2.82.3: the NPU's refresh and patch looks no longer wait for the whole manor to be quiet, only the NPU.**
+
+### What changed
+
+- **The kit 2.82.3** ([kit/CHANGELOG.md](kit/CHANGELOG.md)):
+  - The looks that bring the NPU's command and its GenieX build up to date wait for 2 minutes without use of the NPU.
+  - They counted every agent's work turn as use of the NPU, so on a PC with many staff they hardly ever ran.
+  - Kit 2.82.1's GenieX build, which frees the vision encoder after a minute without a picture, now reaches the PC at the keeper's next look.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.132
 
 **Tidying after 0.36.124: the code for merging PRs that nothing runs any more is gone.**

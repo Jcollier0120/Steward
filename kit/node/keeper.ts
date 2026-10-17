@@ -661,11 +661,35 @@ export function locksActivityMs(lockDirs: string | string[]): number {
 
 /**
  * When anyone last took or let go of an accelerator's lock, or joined or left this one's line: its own folders and the
- * folder every lock shares, so another accelerator's lock counts too. For a look at whether the PC's accelerators were
- * used at all (the Smith's quiet look, the NPU refresh's quiet wait); an accelerator's idle time is `ownActivityMs`.
+ * folder every lock shares, so another accelerator's lock counts too, and the agents' work turns (pace.ts' locks
+ * live there as well). For a look at whether anything changed at all (the Smith's quiet look); an accelerator's idle
+ * time is `ownActivityMs`, and the NPU refresh's quiet wait `lastUseMs`.
  */
 export function lastActivityMs(lockDirs: string | string[]): number {
   return Math.max(locksActivityMs(lockDirs), ownActivityMs(lockDirs));
+}
+
+const useLooks = new Map<string, { atMs: number; held: boolean; usedMs: number }>();
+
+/**
+ * When an accelerator was last in use, for a look a process takes again and again (the NPU refresh's quiet wait, at each
+ * of the keeper's looks): held or waited on now, when its lock was last taken (`ownActivityMs`), and when it was let go,
+ * reckoned as the Reaper does (`letGoMs`): the folder every lock shares, but only when this accelerator was in use since
+ * this process's last look, and at its first look no later than a holder may keep a slot. Until kit 2.82.3 the wait
+ * counted every change to that folder, and the agents' work turns are there too: on a PC with the Smith's rounds a
+ * few minutes apart, the NPU was never quiet for 2 minutes, and the patch look waited for hours.
+ */
+export function lastUseMs(lockDirs: string | string[], now = Date.now()): number {
+  const dirs = [lockDirs].flat();
+  const l = lineState(dirs);
+  const held = !!(l.held || l.waiting);
+  const own = ownActivityMs(dirs);
+  const was = useLooks.get(dirs[0]);
+  const shared = locksActivityMs(dirs);
+  const letGo = was ? (was.held || own > was.atMs ? Math.min(shared, now) : 0) : own > 0 ? Math.min(shared, own + RULES.lock.staleMs) : 0;
+  const usedMs = Math.max(was?.usedMs ?? 0, own, letGo, held ? now : 0);
+  useLooks.set(dirs[0], { atMs: now, held, usedMs });
+  return usedMs;
 }
 
 /** Holds each folder's lock in turn (a plain mutex, at once or LockTimeout), then runs `fn`. */
@@ -939,13 +963,12 @@ export function startNpuRefresh(o: { who?: string; logFile?: string } = {}): voi
         npuDetected = null;
         throw e;
       })),
+    // Each one looked at, so its next look knows whether it was in use since (lastUseMs).
     idle: () =>
       [dirs, embedDirs()]
         .filter((d) => d.length)
-        .every((d) => {
-          const l = lineState(d);
-          return !l.held && !l.waiting && Date.now() - lastActivityMs(d) >= NPU_REFRESH_QUIET_MS;
-        }),
+        .map((d) => Date.now() - lastUseMs(d) >= NPU_REFRESH_QUIET_MS)
+        .every(Boolean),
     // A first compile with a new command can take minutes: the turn isn't taken as a dead holder's meanwhile.
     withTurn: <T>(fn: () => Promise<T>) => {
       const e = embedDirs();
