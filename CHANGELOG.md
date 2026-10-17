@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 0.36.87
 
 **A PR whose kit.json pins a kit that will never be released is told so at once, and a draft is too. Before, it waited quietly ("no open Steward PR brings it: release that kit, or pin a released one"), its alarm came a day later, and a draft wasn't looked at at all.**
 
@@ -16,6 +16,11 @@ Each version of the Steward itself, newest first, released as `v<version>`. The 
 - **Drafts are looked at too** (stages/merge.ts `lookAtDraftKits`). A draft never reached `kitReleaseHold`, because it was held as a draft first: Manor#276, a draft pinned to kit 2.78.3 on 2026-10-16, would have been told nothing until it was marked ready.
   - Each of the team's drafts into the branch has its kit.json read as a ready PR's is: its head is fetched only when it isn't in the clone yet.
   - A draft whose kit will never be released is told, and its hold says so after "a draft".
+- This release also brings 0.36.84 and kit 2.78.12, which weren't released on their own.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
 
 ## 0.36.84
 
