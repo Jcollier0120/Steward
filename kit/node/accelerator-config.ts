@@ -72,6 +72,12 @@ export interface Endpoint {
    * are encoded on the processor (setup's encodesOnProcessor), so its chat keeps the shorter ones.
    */
   timeouts?: Timeouts;
+  /**
+   * Vision's: the most tokens a picture may be on its server, where the server reads a picture at its own size, a token
+   * per 32 × 32 px (the Snapdragon X2's Qwen3-VL-2B through GenieX's llama.cpp plugin). The kit redraws a larger picture
+   * to fit first (accelerators.ts' fitPicture) and counts each picture so (the core's pictureTokensFor).
+   */
+  pictureTokens?: number;
 }
 
 /** An accelerator's own request timings, over rules.json's (the core's requestTimeoutMs): a slower NPU's. */
@@ -135,6 +141,13 @@ export type AcceleratorOrder = 'auto' | string[];
 export const DEFAULT_NPU_CAP = 2400;
 /** A graphics card counts as having its own memory from this much. */
 export const OWN_MEMORY_GB = 2;
+
+/**
+ * A vision endpoint's pictureTokens, at least and at most: under 64 tokens (256 × 256 px) a picture can't be read, and
+ * over 4,096 it fills GenieX's whole default context, leaving no room for the question.
+ */
+export const MIN_PICTURE_TOKENS = 64;
+export const MAX_PICTURE_TOKENS = 4096;
 
 const ID = /^(npu|cpu|gpu-[a-z0-9]+(-[a-z0-9]+)*)$/;
 
@@ -250,6 +263,8 @@ function readEndpoint(v: any): Endpoint | undefined {
   if (typeof v.turn === 'string' && kindOfId(v.turn) && v.turn !== 'npu') ep.turn = v.turn;
   const t = readTimeouts(v.timeouts);
   if (t) ep.timeouts = t;
+  const pictures = positiveInt(v.pictureTokens);
+  if (pictures) ep.pictureTokens = pictures;
   return ep;
 }
 
@@ -454,6 +469,8 @@ export function validateAccelerators(raw: Record<string, any> | null | undefined
           problems.push(`${where}: maxContextTokens must be a whole number from 512 to 1048576`);
         if (ep.turn !== undefined && !(typeof ep.turn === 'string' && kindOfId(ep.turn) && ep.turn !== 'npu'))
           problems.push(`${where}: turn must be a graphics card's id (gpu-…) or cpu, the device its server runs on`);
+        if (ep.pictureTokens !== undefined && !(k === 'vision' && Number.isInteger(ep.pictureTokens) && ep.pictureTokens >= MIN_PICTURE_TOKENS && ep.pictureTokens <= MAX_PICTURE_TOKENS))
+          problems.push(`${where}: pictureTokens is vision's, a whole number from ${MIN_PICTURE_TOKENS} to ${MAX_PICTURE_TOKENS}`);
         timeoutProblems(ep.timeouts, where);
         if (typeof ep.baseUrl === 'string' && isHttpUrl(ep.baseUrl)) {
           const base = serverBase(ep.baseUrl);

@@ -645,7 +645,7 @@ test("every X2 measures Qwen3-VL-2B as setup runs it, whatever its memory; --mod
     const two = await run({}, arm);
     assert.equal(two.report.run.model, TWO_B, what);
     assert.deepEqual(two.pulls, [['pull', TWO_B, '--model-hub', 'hf', '--model-type', 'vlm', '--skip-update']], `${what}: from Hugging Face`);
-    assert.deepEqual(two.s.fake.commands[0].slice(-4), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL'], `${what}: its pictures' encoder on the Adreno, as setup starts it`);
+    assert.deepEqual(two.s.fake.commands[0].slice(-6), ['--compute', 'npu', '--vit-compute', 'GPUOpenCL', '--nctx', '2560'], `${what}: its pictures' encoder on the Adreno and its window at 2,560 tokens, as setup starts it`);
     assert.ok(two.s.fake.seen.every((j) => j.model === TWO_B), `${what}: every request names the 2B`);
   }
   assert.equal((await run({ smallPc: true })).report.run.model, TWO_B, '--small-pc: no generation has a small PC of its own now');

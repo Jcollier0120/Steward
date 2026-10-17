@@ -2,6 +2,32 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## 2.80.2
+
+**Pictures fit the Snapdragon X2's Qwen3-VL-2B. It reads a picture at its own size, a token for each 32 × 32 px, so a 3840 × 2160 screen came to about 8,160 tokens and GenieX refused it, while the kit counted every picture as 400. Now a picture over 1,024 of its tokens is redrawn to fit before it's sent, and counted as 1,024 against the NPU's cap. And its window is 2,560 tokens instead of 4,096, 168 MB less memory.**
+
+### What's new
+
+- **The core:** `pictureTokensFor(rules, a)`, the tokens a picture counts on an accelerator: its vision's `pictureTokens`, else the rules' `imageTokens` (400). `visionTokens(rules, question, a)` takes the accelerator as its third argument; without it a picture counts 400, as before.
+- **accelerators.ts:**
+  - `pictureTokensOf(size)`: the tokens such a server reads a picture as. `PICTURE_TOKEN_PX` is 32.
+  - `pictureFit(size, tokens)`: the size to redraw it at, within that many tokens, each side a multiple of 32, never larger; null when it fits already.
+  - `pictureSizeFor(acc, size)`: the size `fitPicture` redraws at on that server, with `sides-of-32` applied after.
+- **config.json:** `vision.pictureTokens`, a whole number from 64 to 4,096, on a vision endpoint only (`validateAccelerators` says so otherwise). `NpuModel.pictureTokens` in npu-vendors.json, written by `npuEntry`.
+
+### What changed
+
+- **`fitPicture`** redraws a picture over its server's `vision.pictureTokens` to fit, and takes the accelerator's `vision` beside its `quirks`. A picture within it goes as it is.
+- **A picture's request** (npu.ts's `vision`) counts its picture with each serving accelerator's own count, and the largest of them goes against the cap.
+- **The X2's Qwen3-VL-2B** has `--nctx 2560` in its own `serve` and `pictureTokens: 1024`. Measured on the X2 Elite: on five screens from 1920 × 1080 to 3840 × 2160 and a phone's, 35 of 35 questions about their text right at 1,024 tokens, against 18 of 35 had they been fitted to 400 (the small text misread); 3840 × 2160, refused before, answered right. A question takes 4.4 to 4.7 s, against about 1.5 s at 400; fitting a picture 65 to 112 ms. spec/NPU-VENDORS.md has the measurements.
+- **The keeper's NPU refresh** brings both to an X2 set up before, after the same test as any new command. Its log says `--nctx 2560 added, pictures: at most 1024 tokens`.
+- **The Smith's check picture** still reads "Tally 827" on the 2B, as before this kit: at 512 × 512 it is 256 tokens and isn't fitted (spec/NPU-VENDORS.md).
+
+### Before you update
+
+- Nothing for an agent that sends pictures through the kit's `vision`. One that counts a picture with `visionTokens` itself should pass the accelerator.
+- An agent still on an older kit ignores `pictureTokens`: on an X2 it sends pictures at their own size, and a 4K screen is refused until it takes this kit.
+
 ## 2.80.1
 
 **FastFlowLM's working set is handed back to Windows once its model has loaded: qwen3.5:2b's went from 3,814 MB to 171 MB, and Gemma 4 E2B's from 6,595 MB to 173 MB. Both decode as fast as before.**

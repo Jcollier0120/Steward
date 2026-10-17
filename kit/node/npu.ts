@@ -281,6 +281,10 @@ function fromNpuConfig(c: NpuConfig): AcceleratorConfig | { error: string } {
   return cfg;
 }
 
+/** A request's prompt by the estimate: the same on every accelerator, or each one's own (a picture's, by its pictureTokens). */
+type PromptTokens = number | ((a: Accelerator) => number);
+const tokensOn = (p: PromptTokens, a: Accelerator) => (typeof p === 'number' ? p : p(a));
+
 function answerOf(json: any, model: string, ms: number) {
   const choice = json?.choices?.[0];
   return {
@@ -374,12 +378,14 @@ export class Npu {
    * One question about one image, by a vision model. Small vision models perceive well and reason
    * badly: ask what is there ("what text is the title", "is there a chart"), and leave conclusions to
    * code. `image` is a local path: GenieX reads it itself, other servers get it as a data: URL. FastFlowLM gets a picture
-   * with a side of a whole number of 32 px that side a pixel longer, which it reads right (fitPicture).
+   * with a side of a whole number of 32 px that side a pixel longer, which it reads right, and a server that reads a
+   * picture at its own size (the Snapdragon X2's Qwen3-VL-2B) a larger one redrawn within its pictureTokens (fitPicture).
    */
   async vision(image: string, question: string, opts: AskOptions = {}): Promise<NpuAnswer> {
     const maxTokens = opts.maxTokens ?? 64;
-    // The image is a fixed 256 tokens in the NPU's bundle; count 400 to be safe (the spec's rules.json).
-    return this.ask('vision', core.visionTokens(RULES, question), maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
+    // The picture counts what it's fitted to on each accelerator (its vision's pictureTokens), else 400 (rules.json's
+    // imageTokens: the Snapdragon X's Qwen3-VL-4B reads every picture as a fixed 256).
+    return this.ask('vision', (a) => core.visionTokens(RULES, question, a), maxTokens, opts, async (acc, ep, timeoutMs, loading) => {
       const { json, ms } = await postJson(ep, '/v1/chat/completions', visionBody(acc, ep, await fitPicture(acc, image), question, maxTokens), timeoutMs, { loading });
       return answerOf(json, ep.model, ms);
     });
@@ -400,14 +406,14 @@ export class Npu {
 
   private async ask(
     work: Work,
-    promptTokens: number,
+    promptTokens: PromptTokens,
     maxTokens: number,
     opts: AskOptions,
     send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<Omit<NpuAnswer, 'accelerator' | 'fellBackFrom'>>,
   ): Promise<NpuAnswer> {
     const r = await this.route(work, promptTokens, maxTokens, opts, send);
     // The server's count where it gives one, the kit's estimate where it doesn't.
-    tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, promptTokens: r.value.promptTokens || promptTokens, answerTokens: r.value.completionTokens, ms: r.value.ms });
+    tallyRequest(APP.id, { work, lane: opts.lane ?? 'background', kind: r.acc.kind, promptTokens: r.value.promptTokens || tokensOn(promptTokens, r.acc), answerTokens: r.value.completionTokens, ms: r.value.ms });
     return { ...r.value, accelerator: refOf(r.acc), ...(r.fellBackFrom ? { fellBackFrom: r.fellBackFrom } : {}) };
   }
 
@@ -417,7 +423,7 @@ export class Npu {
    */
   private async route<T>(
     work: Work,
-    promptTokens: number,
+    prompt: PromptTokens,
     maxTokens: number,
     opts: AskOptions,
     send: (acc: Accelerator, ep: Endpoint, timeoutMs: number, loading: boolean) => Promise<T>,
@@ -434,6 +440,8 @@ export class Npu {
       if (aside) throw new NpuError(core.say.gpuSetAside(aside));
       throw new NpuError(opts.accelerator ? core.say.notServing(opts.accelerator, work) : work === 'vision' ? core.say.noVisionModel() : core.say.noneServes(work));
     }
+    // A prompt whose size depends on the accelerator (a picture's) is counted at its most among those that could take it.
+    const promptTokens = Math.max(...serving.map((a) => tokensOn(prompt, a)));
     const tokens = promptTokens + maxTokens;
     const refused = core.tooBig(serving, promptTokens, maxTokens, work);
     if (refused) throw new NpuError(refused);

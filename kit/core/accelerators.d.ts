@@ -30,6 +30,12 @@ export type Endpoint = {
      * a card whose pictures are encoded on the processor): timeoutsFor.
      */
     timeouts?: Timeouts;
+    /**
+     * Vision's: the most tokens a picture may be on its server, where the server reads a
+     * picture at its own size, a token per 32 × 32 px (Qwen3-VL through GenieX's llama.cpp plugin). The kit redraws a larger
+     * picture to fit first (the node part's fitPicture) and counts each picture so (pictureTokensFor).
+     */
+    pictureTokens?: number;
 };
 export type Timeouts = {
     requestBaseMs?: number;
@@ -148,6 +154,9 @@ export type Look = {
  * (`gpu-…`), so it answers beside the NPU's chat. A `gpu-…` id or `cpu`; without it, its accelerator's own: turnOf.
  * @property {Timeouts} [timeouts] This kind's own request timings, over its accelerator's, when they differ (vision on
  * a card whose pictures are encoded on the processor): timeoutsFor.
+ * @property {number} [pictureTokens] Vision's: the most tokens a picture may be on its server, where the server reads a
+ * picture at its own size, a token per 32 × 32 px (Qwen3-VL through GenieX's llama.cpp plugin). The kit redraws a larger
+ * picture to fit first (the node part's fitPicture) and counts each picture so (pictureTokensFor).
  */
 /**
  * @typedef {object} Timeouts An accelerator's own request timings, over rules.json's accelerators (a slower NPU, a
@@ -267,6 +276,7 @@ export type Written = {
     maxContextTokens?: number;
     turn?: string;
     timeouts?: Timeouts;
+    pictureTokens?: number;
 };
 /**
  * The cap for one kind of request on an accelerator: its endpoint's own (maxContextTokens on chat, vision or embed)
@@ -606,12 +616,21 @@ export declare function chatTokens(rules: Rules, messages: {
     content: string;
 }[]): number;
 /**
- * A question about one image, by the estimate: the image counts imageTokens.
+ * What a picture counts for on an accelerator: its vision endpoint's pictureTokens, the size the kit fits each picture
+ * to there, else imageTokens.
  * @param {Rules} rules
- * @param {string} question
+ * @param {Partial<Pick<Accelerator, 'vision'>>} [a]
  * @returns {number}
  */
-export declare function visionTokens(rules: Rules, question: string): number;
+export declare function pictureTokensFor(rules: Rules, a?: Partial<Pick<Accelerator, 'vision'>>): number;
+/**
+ * A question about one image, by the estimate: the image counts pictureTokensFor `a`, imageTokens without one.
+ * @param {Rules} rules
+ * @param {string} question
+ * @param {Partial<Pick<Accelerator, 'vision'>>} [a]
+ * @returns {number}
+ */
+export declare function visionTokens(rules: Rules, question: string, a?: Partial<Pick<Accelerator, 'vision'>>): number;
 /**
  * Why a request is refused before anything is sent: over every candidate's cap (null when one fits). With `work`,
  * each one's cap for that kind (capFor).

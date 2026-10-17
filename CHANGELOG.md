@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.120
+
+**The Steward hands out kit 2.80.2: pictures fit the Snapdragon X2's Qwen3-VL-2B. A 4K screen is read instead of refused, and the small text on a screen reads right.**
+
+### What changed
+
+- On a Snapdragon X2, a picture is shrunk to at most 1,024 of the 2B's tokens (1344 × 768 for a widescreen screen) before it's sent, and counted so. A 3840 × 2160 screen, refused before, is read now. On five screens up to 4K and a phone's, 35 of 35 questions about their text were right, against 18 of 35 with pictures shrunk to the 400 tokens the kit counted before. Each question takes about 4.5 s.
+- The 2B keeps a 2,560-token window instead of 4,096: 168 MB less of the PC's memory.
+- A PC set up before gets both at the keeper's next look once it has the kit, after the 2B passes its test. Nothing is downloaded.
+
+### Before you update
+
+- Nothing: it updates itself as usual. An agent still on an older kit sends pictures to the X2 as before until it takes kit 2.80.2.
+
 ## 0.36.118
 
 **The Steward hands out kit 2.80.1: FastFlowLM's working set is handed back to Windows once its model has loaded. That's about 3.6 GB of RAM for qwen3.5:2b and 6.4 GB for Gemma 4 E2B, decoding as fast as before.**
