@@ -54,7 +54,7 @@ export interface Glance {
   stewardMain?: StewardMain | null;
   /**
    * By employee id. One GitHub gave no answer for is left out, and `errors` says why. The Steward's own repository is
-   * here too, by its own id (APP.id), on a PC that merges its PRs or shows it in the staff's table (stewardPrsAsked).
+   * here too, by its own id (APP.id), on a PC that shows it in the staff's table (stewardPrsAsked).
    */
   repos: Record<string, RepoGlance>;
   errors: Record<string, string>;
@@ -108,13 +108,13 @@ const ownerName = (repo: string) => {
 };
 
 /**
- * Whether the glance reads the Steward's own open PRs, as an employee's: on a PC that merges them (Settings' mergeSelf,
- * selfmerge.ts) or shows its repository in the staff's table (releasesCastellan), with its clone named. Its merge asked
- * `gh pr list` of it every round, and its row in the table three gh calls each time the table was made. One point more a
- * round (GitHub's cost of a query of 5 repositories and the Steward's went from 5 to 6, 2026-10-13), and no process.
+ * Whether the glance reads the Steward's own open PRs, as an employee's: on a PC that shows its repository in the staff's
+ * table (releasesCastellan), with its clone named; nothing else reads them since the Steward merges no PRs (0.36.124).
+ * Its row in the table took three gh calls each time the table was made; this is one point more a round (GitHub's cost
+ * of a query of 5 repositories and the Steward's went from 5 to 6, 2026-10-13), and no process.
  */
-export const stewardPrsAsked = (s: Partial<Pick<Settings, 'stewardRepo' | 'stewardCheckout' | 'mergeSelf' | 'releasesCastellan'>>): boolean =>
-  !!s.stewardRepo && !!s.stewardCheckout && (!!s.mergeSelf || !!s.releasesCastellan);
+export const stewardPrsAsked = (s: Partial<Pick<Settings, 'stewardRepo' | 'stewardCheckout' | 'releasesCastellan'>>): boolean =>
+  !!s.stewardRepo && !!s.stewardCheckout && !!s.releasesCastellan;
 
 /**
  * The query for these employees (aliased e0, e1, …, in order), and the Steward's releases when `stewardRepo` is given:
@@ -301,7 +301,7 @@ export function readGlance(employees: Employee[], answer: string, stewardRepo: s
 export async function takeGlance(
   run: Runner,
   cwd: string,
-  settings: Pick<Settings, 'employees' | 'stewardRepo'> & Partial<Pick<Settings, 'stewardCheckout' | 'mergeSelf' | 'releasesCastellan'>>,
+  settings: Pick<Settings, 'employees' | 'stewardRepo'> & Partial<Pick<Settings, 'stewardCheckout' | 'releasesCastellan'>>,
   host: (e: Employee) => Host = () => 'github',
   now: () => Date = () => new Date(),
   ask: GlanceAsk = ghAsk(run, cwd),
@@ -375,14 +375,4 @@ const sha = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).diges
 /** What GitHub says of one employee's repository, as one value that changes when anything in it does. */
 export function repoSig(g: RepoGlance): string {
   return sha({ head: g.head, prs: [...g.prs].sort((a, b) => Number(a.number) - Number(b.number)), releases: g.releases.map((r) => [r.tagName, r.isDraft, r.commit]).sort() });
-}
-
-/**
- * What a round's work for an employee rests on: its repository on GitHub, and the Settings that decide what a round
- * does with it (the employee's own, the team, the look at the Wright's drafts, catching up, releasing after merging,
- * rolling a kit out); and, while it rolls kits out, the kit it would roll out: the newest kit release, and the kit this
- * Steward carries (stages/rollout.ts). So a new kit release, or the Steward updated to one, is something new for everyone.
- */
-export function roundSig(e: Employee, g: RepoGlance, s: Pick<Settings, 'team' | 'wrightReview' | 'catchUp' | 'releaseAfterMerge' | 'rollout'>, kit: { newest: string | null; own: string | null } | null = null): string {
-  return sha({ repo: repoSig(g), employee: e, team: s.team, wrightReview: s.wrightReview, catchUp: s.catchUp, releaseAfterMerge: s.releaseAfterMerge, ...(s.rollout ? { rollout: kit } : {}) });
 }

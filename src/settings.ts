@@ -104,12 +104,12 @@ export interface Settings {
   mergeMinAgeMinutes?: number;
   /** What needs the person, after each round (alarms.ts). */
   alarms: AlarmSettings;
-  /** The Steward's look at the Wright's drafts (review.ts). */
+  /** No longer used (Steward 0.36.124: the Steward merges no PRs, so it no longer looks at the Wright's drafts); kept so older settings load. */
   wrightReview: WrightReviewSettings;
   /**
    * The packages whose install scripts may run where the Steward installs packages (installscripts.ts): every install is
-   * `npm ci --ignore-scripts`, then these alone have theirs run. Any other package with one holds the work, with an alarm;
-   * and a PR whose lockfile brings one is held for you. Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
+   * `npm ci --ignore-scripts`, then these alone have theirs run. Any other package with one holds the work, with an alarm.
+   * Absent: installscripts.ts's DEFAULT_INSTALL_SCRIPTS.
    */
   installScripts?: string[];
   /** No longer used (Steward 0.36.124: the Steward catches no PRs up); kept so older settings load. */
@@ -171,8 +171,9 @@ export interface Settings {
   makersPc: boolean;
 }
 
+/** The Steward's look at the Wright's drafts, until 0.36.124: no longer used, kept so older settings load. */
 export interface WrightReviewSettings {
-  /** In its rounds, a draft the Wright opened that passes the look is marked ready, then merged as any team PR. */
+  /** In its rounds, a draft the Wright opened that passed the look was marked ready, then merged as any team PR. */
   on: boolean;
   /** Larger than this (lines added and removed), it stays a draft for the person. */
   maxLines: number;
@@ -240,9 +241,9 @@ export const REEVE_URL = 'http://127.0.0.1:18383';
 
 /**
  * The Bailiff is ours alone too (Manor marks it internal), and reviews the Wright's drafts. Where it is installed
- * (%USERPROFILE%\.bailiff\app, or BAILIFF_HOME's app) the Steward takes it on as it does the Wright, reads its page for
- * alarms, and marks a draft of the Wright's ready only once the Bailiff has approved its head commit (review.ts). Where
- * it isn't, or Developer Pro isn't here, the Wright's drafts wait for a person: the manor takes on no new work without both.
+ * (%USERPROFILE%\.bailiff\app, or BAILIFF_HOME's app) the Steward takes it on as it does the Wright, and reads its page
+ * for alarms. Where it isn't, or Developer Pro isn't here, the Wright's drafts wait for a person: the manor takes on no
+ * new work without both.
  */
 export const bailiffInstalled = (env: NodeJS.ProcessEnv = process.env) => developerPro() && existsSync(path.join(env.BAILIFF_HOME ?? path.join(os.homedir(), '.bailiff'), 'app'));
 

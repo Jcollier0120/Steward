@@ -163,14 +163,6 @@ export class Bitbucket implements SourceHost {
     return this.repo(repo, 'POST', `/pullrequests/${n}/comments`, { content: { raw: body } });
   }
 
-  readyPr(repo: string, n: number): Promise<Answer> {
-    return this.update(repo, n, { draft: false });
-  }
-
-  draftPr(repo: string, n: number): Promise<Answer> {
-    return this.update(repo, n, { draft: true });
-  }
-
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);
@@ -239,10 +231,6 @@ export class Bitbucket implements SourceHost {
     return this.repo(repo, 'POST', '/refs/tags', { name: r.tag, target: { hash: r.target }, message: notes ? `${r.title}\n\n${notes}` : r.title }, 5 * MINUTE);
   }
 
-  async downloadRelease(repo: string, tag: string): Promise<Answer> {
-    return unsupported(`a release's files can't be downloaded from Bitbucket (${repo} ${tag}): it has no releases, only tags`);
-  }
-
   async listIssues(): Promise<Answer> {
     return unsupported(NO_ISSUES);
   }
@@ -266,11 +254,6 @@ export class Bitbucket implements SourceHost {
   async whoAmI(): Promise<Answer> {
     const a = await this.api('GET', `${API}/user`);
     return a.code === 0 ? { ...a, out: `${parsed<any>(a.out)?.nickname ?? ''}\n` } : a;
-  }
-
-  /** Bitbucket keeps no pull request head ref: the branch is fetched (a fork's isn't worked with). */
-  prRef(pr: { number: number; head: string }): string {
-    return `refs/heads/${pr.head}`;
   }
 
   releaseUrl(repo: string, tag: string): string {

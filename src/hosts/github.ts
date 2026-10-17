@@ -60,14 +60,6 @@ export class GitHub implements SourceHost {
     return this.gh(['pr', 'comment', String(n), '--repo', repo, '--body', body], MINUTE);
   }
 
-  readyPr(repo: string, n: number) {
-    return this.gh(['pr', 'ready', String(n), '--repo', repo], MINUTE);
-  }
-
-  draftPr(repo: string, n: number) {
-    return this.gh(['pr', 'ready', String(n), '--repo', repo, '--undo'], MINUTE);
-  }
-
   closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}) {
     return this.gh(['pr', 'close', String(n), '--repo', repo, ...(p.deleteBranch ? ['--delete-branch'] : []), ...(p.comment !== undefined ? ['--comment', p.comment] : [])], 2 * MINUTE);
   }
@@ -94,10 +86,6 @@ export class GitHub implements SourceHost {
 
   createRelease(repo: string, r: { tag: string; target: string; title: string; notesFile: string | null }) {
     return this.gh(['release', 'create', r.tag, '--repo', repo, '--target', r.target, '--title', r.title, ...(r.notesFile ? ['--notes-file', r.notesFile] : ['--generate-notes'])]);
-  }
-
-  downloadRelease(repo: string, tag: string, d: { patterns: string[]; dir: string }) {
-    return this.gh(['release', 'download', tag, '--repo', repo, ...d.patterns.flatMap((p) => ['--pattern', p]), '--dir', d.dir, '--clobber']);
   }
 
   listIssues(repo: string, q: { label: string; state: 'open' | 'closed'; limit?: number; fields: string }) {
@@ -127,10 +115,6 @@ export class GitHub implements SourceHost {
 
   whoAmI() {
     return this.gh(['api', 'user', '--jq', '.login'], MINUTE);
-  }
-
-  prRef(pr: { number: number }) {
-    return `refs/pull/${pr.number}/head`;
   }
 
   releaseUrl(repo: string, tag: string) {

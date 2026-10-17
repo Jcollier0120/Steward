@@ -41,23 +41,6 @@ function installedJobs(app: string): { name: string; script: string }[] | null {
   }
 }
 
-/** The sha256 of a job's script in the installed copy as it is now, or null when there's none. */
-export function installedHash(e: Employee, job: string): string | null {
-  if (!e.installed) return null;
-  const app = path.resolve(expandEnv(e.installed));
-  const script = installedJobs(app)?.find((j) => j.name === job)?.script;
-  const file = script ? path.join(app, 'jobs', script) : null;
-  return file && existsSync(file) ? sha256(readFileSync(file)) : null;
-}
-
-/** Notes that the Steward approved a job's installed script (`hash`), after a PR's approve-jobs say, so a round doesn't again. */
-export function noteApproved(e: Employee, job: string, hash = installedHash(e, job)): void {
-  if (!hash) return;
-  const kept = readJson<Record<string, Record<string, string>>>(jobsApprovedFile(), {});
-  kept[e.id] = { ...kept[e.id], [job]: hash };
-  writeJson(jobsApprovedFile(), kept);
-}
-
 /**
  * Runs the employee's approve command for one job, {job} its name and {sha256} the hash of the script that was
  * checked (Reeve's `--sha256 {sha256}` then approves that script only, read once, or refuses): its exit code, whether

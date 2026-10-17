@@ -142,7 +142,6 @@ test("Azure DevOps' requests: az rest to the repository's organization, bodies a
   assert.deepEqual([prs[0].number, prs[0].files, prs[0].statusCheckRollup.map((c: any) => c.context)], [7, [{ path: 'a.ts' }], ['ci/test', 'steward/tested']]);
   assert.deepEqual(JSON.parse(must(await host.listPrs(R, { state: 'closed', head: 'claude/feature', fields: 'number,headRefOid' }))), []);
   assert.equal(must(await host.createPr(R, { base: 'main', head: 'claude/x', title: 'T', body: '**B**' })), 'https://dev.azure.com/acme/proj/_git/fake/pullrequest/8\n');
-  await host.readyPr(R, 7);
   await host.mergePr(R, 7, { matchHead: 'abc123', deleteBranch: true });
   await host.closePr(R, 7, { comment: 'bye', deleteBranch: true });
   const statuses = JSON.parse(must(await host.statuses(R, 'abc123')));
@@ -154,15 +153,12 @@ test("Azure DevOps' requests: az rest to the repository's organization, bodies a
   assert.ok(ran.filter((r) => r.args[r.args.indexOf('--url') + 1].startsWith(B)).every((r) => r.args[r.args.indexOf('--url') + 1].endsWith('api-version=7.1')));
   assert.deepEqual(ran.filter((r) => r.body).map((r) => [...call(r.args), r.body]), [
     ['POST', '/pullrequests', { sourceRefName: 'refs/heads/claude/x', targetRefName: 'refs/heads/main', title: 'T', description: '**B**' }],
-    ['PATCH', '/pullrequests/7', { isDraft: false }],
     ['PATCH', '/pullrequests/7', { status: 'completed', lastMergeSourceCommit: { commitId: 'abc123' }, completionOptions: { mergeStrategy: 'noFastForward', deleteSourceBranch: true } }],
     ['POST', '/pullrequests/7/threads', { comments: [{ parentCommentId: 0, content: 'bye', commentType: 1 }], status: 'closed' }],
     ['PATCH', '/pullrequests/7', { status: 'abandoned' }],
     ['POST', '/refs', [{ name: 'refs/heads/claude/feature', oldObjectId: 'abc123', newObjectId: '0000000000000000000000000000000000000000' }]],
     ['POST', '/commits/abc123/statuses', { state: 'succeeded', description: 'npm test passed at abc123', context: { genre: 'steward', name: 'tested' } }],
   ]);
-  // No pull request head ref on Azure DevOps: its branch is fetched.
-  assert.equal(host.prRef({ number: 7, head: 'claude/feature' }), 'refs/heads/claude/feature');
   assert.equal(host.releaseUrl(R, 'v0.4.1'), 'https://dev.azure.com/acme/proj/_git/fake?version=GTv0.4.1');
 });
 
@@ -188,7 +184,6 @@ test('releases are v<version> tags; issues are not filed on Azure DevOps yet', a
   const issues = await host.listIssues(R, { label: 'manor:work', state: 'open', fields: 'number' });
   assert.equal(issues.code, 1);
   assert.match(issues.err, /work items/);
-  assert.equal((await host.downloadRelease(R, 'v0.4.0', { patterns: ['*.zip'], dir: tmp })).code, 1);
 });
 
 test('completing waits for Azure DevOps to finish; a policy that holds it is a failure', async () => {

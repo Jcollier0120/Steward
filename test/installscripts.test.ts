@@ -5,21 +5,17 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 // A rogue package's install script runs, unscanned, the moment npm installs it. The Steward's installs run none but the
-// ones Settings allow, and hold the work for any other; and a PR's lockfile that brings one, or a package new to the
-// repository, is said to be for the owner to look at (review.ts's lockfileHold). (The Steward held such a PR back from
-// merging until 0.36.124; whoever writes a PR merges it now.)
+// ones Settings allow, and hold the work for any other.
 const home = mkdtempSync(path.join(os.tmpdir(), 'steward-install-scripts-'));
 process.env.STEWARD_HOME = home;
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const scripts = await import('../src/installscripts.ts');
 const { DEFAULT_INSTALL_SCRIPTS, guardInstall, installHoldConditions, installLines, installPlan, keepHolds, loadInstallHolds, lockPackages, HOLD_SEEN_MS } = scripts;
-const { lockfileHold, lockfileNews } = await import('../src/review.ts');
 const { runChecks } = await import('../src/stages/bump.ts');
 const { normalizeSettings } = await import('../src/settings.ts');
 const { roundConditions } = await import('../src/alarms.ts');
-const { ctxFor, employee, fakeEmployee, ok, runner, sh } = await import('./helpers.ts');
-type PrInfo = import('../src/stages/staff.ts').PrInfo;
+const { ctxFor, employee, ok, runner } = await import('./helpers.ts');
 type Runner = import('../src/run.ts').Runner;
 
 const lock = (packages: Record<string, object>) =>
@@ -143,56 +139,6 @@ test("a worktree whose lockfile holds: its checks install nothing, run nothing, 
   assert.equal(Object.values(holds)[0].doing, "#12's checks");
   const conditions = roundConditions({ round: { stage: 'round', results: [] } as any, failedReleases: {}, installHolds: holds, employees: [e], settings: ctx.settings });
   assert.ok(conditions.some((c) => c.id === 'install-script:Jcollier0120/Fake:left-padd@1.0.0'), conditions.map((c) => c.id).join(', '));
-});
-
-test("a PR's lockfile: new names, and new install scripts not allowed, are news; an allowed one's new version and a version bump aren't", () => {
-  const base = lock({ ...ESBUILD, 'node_modules/typescript': { version: '7.0.2' } });
-  // A new version of the same packages, the project's own version raised: nothing new.
-  assert.deepEqual(lockfileNews(base, lock({ 'node_modules/esbuild': { version: '0.28.3', hasInstallScript: true }, 'node_modules/@esbuild/win32-x64': { version: '0.28.3' }, 'node_modules/typescript': { version: '7.1.0' } }), DEFAULT_INSTALL_SCRIPTS), { added: [], scripts: [] });
-  const news = lockfileNews(base, lock({ ...ESBUILD, 'node_modules/typescript': { version: '7.0.2' }, ...ROGUE, 'node_modules/chalk': { version: '5.0.0' } }), DEFAULT_INSTALL_SCRIPTS);
-  assert.deepEqual(news.added.map((p) => p.name), ['left-padd', 'chalk']);
-  assert.deepEqual(news.scripts.map((p) => p.name), ['left-padd']);
-  // A package already there that gains a script at a new version.
-  const gains = lockfileNews(lock({ 'node_modules/chalk': { version: '5.0.0' } }), lock({ 'node_modules/chalk': { version: '5.0.1', hasInstallScript: true } }), DEFAULT_INSTALL_SCRIPTS);
-  assert.deepEqual([gains.added.length, gains.scripts.map((p) => p.version)], [0, ['5.0.1']]);
-  // No lockfile where it started: every package is new.
-  assert.equal(lockfileNews(null, base, DEFAULT_INSTALL_SCRIPTS).added.length, 3);
-});
-
-const pr = (o: Partial<PrInfo> = {}): PrInfo => ({ number: 30, title: 'Fake 0.4.1: x', url: 'https://github.com/Jcollier0120/Fake/pull/30', head: 'claude/x', base: 'main', author: 'Jcollier0120', whose: 'team', headOid: '', after: null, afterError: null, mergeable: 'MERGEABLE', mergeState: 'CLEAN', draft: false, checks: 'none', labels: [], changed: 24, files: ['package-lock.json'], ...o });
-
-test('any PR, not only the Wright\'s, whose package-lock.json brings new packages is for the owner to look at until owner-done (real git)', async () => {
-  const f = fakeEmployee(path.join(home, 'lock-pr'));
-  const e = employee(f.checkout, { repo: 'Jcollier0120/Fake' });
-  const ctx = ctxFor({ employees: [e], workRoot: path.join(home, 'work-pr'), run: runner().run, neutralDir: home });
-  const push = (n: number, text: string) => {
-    sh(f.checkout, 'switch', '--quiet', '-c', `claude/${n}`, 'origin/main');
-    const file = path.join(f.checkout, 'package-lock.json');
-    const was = JSON.parse(readFileSync(file, 'utf8'));
-    writeFileSync(file, JSON.stringify({ ...was, packages: { ...was.packages, ...JSON.parse(text).packages, '': was.packages?.[''] ?? {} } }, null, 2) + '\n');
-    sh(f.checkout, 'commit', '--quiet', '-am', `pr ${n}`);
-    const oid = sh(f.checkout, 'rev-parse', 'HEAD');
-    sh(f.checkout, 'push', '--quiet', 'origin', `${oid}:refs/pull/${n}/head`);
-    sh(f.checkout, 'switch', '--quiet', 'main');
-    return oid;
-  };
-  const rogue = push(31, lock(ROGUE));
-  const why = await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue }));
-  assert.match(why!, /^its package-lock\.json brings a package with an install script not on "Install scripts allowed" \(left-padd@1\.0\.0\), and a package new to the repository \(left-padd@1\.0\.0\): look at them, and what their scripts run, then merge it yourself or label it owner-done$/);
-  // Whoever wrote it.
-  assert.equal(await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue, whose: 'steward' })), why);
-  // The owner looked: owner-done lets it go.
-  assert.equal(await lockfileHold(ctx, e, pr({ number: 31, headOid: rogue, labels: ['owner-done'] })), null);
-  // Only the version raised, no package new: nothing to hold. No lockfile changed: not even looked at.
-  sh(f.checkout, 'switch', '--quiet', '-c', 'claude/32', 'origin/main');
-  const file = path.join(f.checkout, 'package-lock.json');
-  writeFileSync(file, readFileSync(file, 'utf8').replace(/0\.4\.0/g, '0.4.1'));
-  sh(f.checkout, 'commit', '--quiet', '-am', 'pr 32');
-  const raised = sh(f.checkout, 'rev-parse', 'HEAD');
-  sh(f.checkout, 'push', '--quiet', 'origin', `${raised}:refs/pull/32/head`);
-  sh(f.checkout, 'switch', '--quiet', 'main');
-  assert.equal(await lockfileHold(ctx, e, pr({ number: 32, headOid: raised })), null);
-  assert.equal(await lockfileHold(ctx, e, pr({ number: 33, files: ['README.md'] })), null);
 });
 
 test("Settings' list: npm names, lowercased, once each; an empty list stays empty; absent, the manor's three", () => {

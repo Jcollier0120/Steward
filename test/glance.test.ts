@@ -99,18 +99,18 @@ test(`one gh call for up to ${PER_QUERY} employees, one more for each ${PER_QUER
   await assert.rejects(takeGlance(async () => ({ code: 1, out: '', err: 'gh: To get started with GitHub CLI, please run: gh auth login' }), '.', { employees: [porter], stewardRepo: 'x/y' }), /gh auth login/);
 });
 
-test("on a PC that merges the Steward's own PRs or shows its repository, the glance reads it as an employee's, under its own id; elsewhere as before", async () => {
-  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: true }), true);
-  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: false, releasesCastellan: true }), true);
-  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: false, releasesCastellan: false }), false);
-  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: '', mergeSelf: true }), false, 'no clone of it: nothing merges it here');
+test("on a PC that shows the Steward's own repository in the staff's table, the glance reads it as an employee's, under its own id; elsewhere as before", async () => {
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', releasesCastellan: true }), true);
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', releasesCastellan: false }), false);
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward' }), false, 'the Steward merges no PRs (0.36.124): its own are read for its row alone');
+  assert.equal(stewardPrsAsked({ stewardRepo: 'Jcollier0120/Steward', stewardCheckout: '', releasesCastellan: true }), false, 'no clone of it: no row for it here');
   assert.doesNotMatch(glanceQuery([porter], 'Jcollier0120/Steward'), /steward: repository\([^{]*\) \{ pullRequests/);
   assert.match(glanceQuery([porter], 'Jcollier0120/Steward', true), /steward: repository\([^{]*\) \{ pullRequests\(states: OPEN, first: 25, .* releases\(first: 100, .*tagCommit \{ oid \} .* main: ref/);
   assert.match(glanceQuery([], 'Jcollier0120/Steward', true), /^query \{ /, 'its PRs asked in its own part: no fragment needed');
 
   const own = { ...graphRepo(), ref: undefined, main: { target: { oid: 'd'.repeat(40) } }, kitVersion: { text: '2.9.0\n' }, packageJson: { text: '{"version":"0.35.1"}' }, pullRequests: { totalCount: 1, nodes: [graphPr()] } };
   const queries: string[] = [];
-  const g = await takeGlance(async (_cmd, args) => (queries.push(args[3]), ok({ data: { steward: own, e0: graphRepo() } })), '.', { employees: [porter], stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', mergeSelf: true });
+  const g = await takeGlance(async (_cmd, args) => (queries.push(args[3]), ok({ data: { steward: own, e0: graphRepo() } })), '.', { employees: [porter], stewardRepo: 'Jcollier0120/Steward', stewardCheckout: 'C:\\Steward', releasesCastellan: true });
   assert.match(queries[0], /steward: repository\([^{]*\) \{ pullRequests/);
   assert.equal(g.repos[APP.id].head, 'd'.repeat(40), "its main's head");
   assert.deepEqual(g.repos[APP.id].prs.map((p) => p.number), [7]);

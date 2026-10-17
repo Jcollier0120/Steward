@@ -35,7 +35,6 @@ test("GitHub's pull requests: the gh commands as the Steward has always run them
   await host.editPr(R, 31, { title: 'T' });
   await host.editPr(R, 31, { base: 'main' });
   await host.commentPr(R, 31, 'hello');
-  await host.readyPr(R, 31);
   await host.closePr(R, 31, { deleteBranch: true, comment: 'bye' });
   await host.closePr(R, 32, { comment: 'bye' });
   await host.mergePr(R, 31, { matchHead: 'abc', deleteBranch: true });
@@ -50,7 +49,6 @@ test("GitHub's pull requests: the gh commands as the Steward has always run them
       ['pr', 'edit', '31', '--repo', R, '--title', 'T'],
       ['pr', 'edit', '31', '--repo', R, '--base', 'main'],
       ['pr', 'comment', '31', '--repo', R, '--body', 'hello'],
-      ['pr', 'ready', '31', '--repo', R],
       ['pr', 'close', '31', '--repo', R, '--delete-branch', '--comment', 'bye'],
       ['pr', 'close', '32', '--repo', R, '--comment', 'bye'],
       ['pr', 'merge', '31', '--repo', R, '--merge', '--match-head-commit', 'abc', '--delete-branch'],
@@ -88,7 +86,6 @@ test("GitHub's statuses, releases and issues", async () => {
   await host.viewRelease(R, 'v0.4.0', 'targetCommitish');
   await host.createRelease(R, { tag: 'v0.4.1', target: 'abc', title: 'Fake 0.4.1', notesFile: 'C:/notes.md' });
   await host.createRelease(R, { tag: 'v0.4.2', target: 'def', title: 'Fake 0.4.2', notesFile: null });
-  await host.downloadRelease(R, 'v0.4.1', { patterns: ['*.zip', 'SHA256SUMS.txt'], dir: 'C:/d' });
   await host.listIssues(R, { label: 'manor:work', state: 'open', fields: 'number,url,body' });
   await host.editIssue(R, 7, { removeLabel: 'wright:done' });
   await host.commentIssue(R, 7, 'again');
@@ -104,7 +101,6 @@ test("GitHub's statuses, releases and issues", async () => {
       ['release', 'view', 'v0.4.0', '--repo', R, '--json', 'targetCommitish'],
       ['release', 'create', 'v0.4.1', '--repo', R, '--target', 'abc', '--title', 'Fake 0.4.1', '--notes-file', 'C:/notes.md'],
       ['release', 'create', 'v0.4.2', '--repo', R, '--target', 'def', '--title', 'Fake 0.4.2', '--generate-notes'],
-      ['release', 'download', 'v0.4.1', '--repo', R, '--pattern', '*.zip', '--pattern', 'SHA256SUMS.txt', '--dir', 'C:/d', '--clobber'],
       ['issue', 'list', '--repo', R, '--label', 'manor:work', '--state', 'open', '--limit', '100', '--json', 'number,url,body'],
       ['issue', 'edit', '7', '--repo', R, '--remove-label', 'wright:done'],
       ['issue', 'comment', '7', '--repo', R, '--body', 'again'],

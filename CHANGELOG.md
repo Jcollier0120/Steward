@@ -2,6 +2,20 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.132
+
+**Tidying after 0.36.124: the code for merging PRs that nothing runs any more is gone.**
+
+### What changed
+
+- The checks the Steward made on the Wright's drafts and on a PR's package-lock.json before merging it are gone, with the alarm that grouped the Wright's drafts waiting on the Bailiff. The Steward merges no one's PRs since 0.36.124, so none of them ran.
+- A round no longer asks GitHub for the Steward's own open PRs unless the staff's table shows the Steward's row, which is the only place they appear. That is one GitHub point less a round on such a PC.
+- Settings for the Wright's drafts stay hidden, and your values are kept.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.131
 
 **The Steward hands out kit 2.82.2: agents keep the decode speed of each chat answer, by boot, so Manor can say when the NPU has started slow and that a restart usually fixes it.**

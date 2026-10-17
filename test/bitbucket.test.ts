@@ -165,7 +165,6 @@ test("Bitbucket's requests: curl with the token from a file of its own, bodies a
   assert.deepEqual(JSON.parse(must(await host.listPrs(R, { state: 'closed', head: 'claude/feature', fields: 'number' }))), []);
   assert.equal(must(await host.createPr(R, { base: 'main', head: 'claude/x', title: 'T', body: '**B**' })), 'https://bitbucket.org/acme/fake/pull-requests/8\n');
   must(await host.editPr(R, 7, { body: 'new' }));
-  must(await host.readyPr(R, 7));
   must(await host.mergePr(R, 7, { matchHead: FULL, deleteBranch: true }));
   const moved = await host.mergePr(R, 7, { matchHead: 'f'.repeat(40) });
   assert.match(moved.err, /head moved .*: not merged/);
@@ -180,14 +179,12 @@ test("Bitbucket's requests: curl with the token from a file of its own, bodies a
   assert.deepEqual(ran.filter((c) => c.body).map((c) => [c.method, c.at, c.body]), [
     ['POST', '/pullrequests', { title: 'T', description: '**B**', source: { branch: { name: 'claude/x' } }, destination: { branch: { name: 'main' } } }],
     ['PUT', '/pullrequests/7', { title: 'Fake 0.4.1: A feature', description: 'new' }],
-    ['PUT', '/pullrequests/7', { title: 'Fake 0.4.1: A feature', draft: false }],
     ['POST', '/pullrequests/7/merge', { type: 'pullrequest_merge_parameters', merge_strategy: 'merge_commit', close_source_branch: true }],
     ['POST', '/pullrequests/7/comments', { content: { raw: 'bye' } }],
     ['POST', `/commit/${FULL}/statuses/build`, { key: 'steward/tested', state: 'SUCCESSFUL', name: 'steward/tested by jcollier0120', description: 'npm test passed at abc123d', url: `https://bitbucket.org/acme/fake/commits/${FULL}` }],
   ]);
   assert.deepEqual(ran.filter((c) => c.method === 'DELETE').map((c) => c.at), ['/refs/branches/claude%2Ffeature']);
   assert.equal(ran.filter((c) => c.at === '/pullrequests/7/merge').length, 1, 'a moved head is never merged');
-  assert.equal(host.prRef({ number: 7, head: 'claude/feature' }), 'refs/heads/claude/feature');
   assert.equal(host.releaseUrl(R, 'v0.4.1'), 'https://bitbucket.org/acme/fake/src/v0.4.1');
 });
 
@@ -213,7 +210,6 @@ test('releases are v<version> tags; a merge Bitbucket finishes later is waited f
   must(await host.createRelease(R, { tag: 'v0.4.1', target: FULL, title: 'Fake 0.4.1', notesFile: notes }));
   assert.deepEqual(ran.filter((c) => c.body).map((c) => [c.method, c.at, c.body]), [['POST', '/refs/tags', { name: 'v0.4.1', target: { hash: FULL }, message: 'Fake 0.4.1\n\n**Fake 0.4.1.**' }]]);
   assert.match((await host.listIssues(R, { label: 'manor:work', state: 'open', fields: 'number' })).err, /issue tracker/);
-  assert.equal((await host.downloadRelease(R, 'v0.4.0', { patterns: ['*.zip'], dir: tmp })).code, 1);
 
   const { Bitbucket } = await import('../src/hosts/bitbucket.ts');
   const states = ['OPEN', 'OPEN', 'MERGED'];

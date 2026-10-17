@@ -7,7 +7,6 @@ import { originRepo } from '../kit/manor.ts';
 import { makersPc, makersRepo } from '../maker.ts';
 import { employeeFromClone } from '../migrate.ts';
 import { originUrl, repoFromUrl } from '../scm.ts';
-import { WRIGHT_LABEL } from '../review.ts';
 import type { Employee } from '../settings.ts';
 import { checkKind, runChecks, type AffectedScope } from './bump.ts';
 import type { StoodIn } from './standin.ts';
@@ -37,6 +36,9 @@ import { hostFor } from '../hosts/index.ts';
  * On a maker's other PC, a clone of one of Castellan's own repositories, which only the maker's laptop looks after, is
  * vouched for with the checks the clone itself gives (makersClone), when GitHub says this PC's account can push there.
  */
+
+/** The label the Wright puts on its PRs. */
+export const WRIGHT_LABEL = 'wright';
 
 /** The Wright's PRs (labelled wright, or a wright/… branch): reviewed by the Bailiff, and always tested here. */
 export const isWrightPr = (pr: PrInfo) => pr.labels.includes(WRIGHT_LABEL) || pr.head.startsWith('wright/');

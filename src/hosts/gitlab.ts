@@ -113,23 +113,6 @@ export class GitLab implements SourceHost {
     return this.project(repo, 'POST', `/merge_requests/${n}/notes`, { body });
   }
 
-  /** Out of draft: GitLab's draft is its title's "Draft:" mark, taken off. */
-  async readyPr(repo: string, n: number): Promise<Answer> {
-    const a = await this.project(repo, 'GET', `/merge_requests/${n}`);
-    if (a.code !== 0) return a;
-    const title = String(parsed<any>(a.out)?.title ?? '');
-    const ready = undraft(title);
-    return ready === title ? a : this.project(repo, 'PUT', `/merge_requests/${n}`, { title: ready });
-  }
-
-  /** A draft here is a title marked Draft. */
-  async draftPr(repo: string, n: number): Promise<Answer> {
-    const a = await this.project(repo, 'GET', `/merge_requests/${n}`);
-    if (a.code !== 0) return a;
-    const title = String(parsed<any>(a.out)?.title ?? '');
-    return undraft(title) !== title ? a : this.project(repo, 'PUT', `/merge_requests/${n}`, { title: `Draft: ${title}` });
-  }
-
   async closePr(repo: string, n: number, p: { comment?: string; deleteBranch?: boolean } = {}): Promise<Answer> {
     if (p.comment !== undefined) {
       const c = await this.commentPr(repo, n, p.comment);
@@ -171,10 +154,6 @@ export class GitLab implements SourceHost {
     return this.project(repo, 'POST', '/releases', { tag_name: r.tag, ref: r.target, name: r.title, description }, 5 * MINUTE);
   }
 
-  async downloadRelease(repo: string, tag: string, _d: { patterns: string[]; dir: string }): Promise<Answer> {
-    return { code: 1, out: '', err: `a release's files can't be downloaded from GitLab yet (${repo} ${tag})`, what: `glab release download ${tag}` };
-  }
-
   async listIssues(repo: string, q: { label: string; state: 'open' | 'closed'; limit?: number; fields: string }): Promise<Answer> {
     const a = await this.project(repo, 'GET', `/issues?labels=${encodeURIComponent(q.label)}&state=${q.state === 'open' ? 'opened' : 'closed'}&per_page=${Math.min(q.limit ?? 100, 100)}`);
     return a.code === 0 ? { ...a, out: JSON.stringify((parsed<any[]>(a.out) ?? []).map(issueOf)) } : a;
@@ -209,10 +188,6 @@ export class GitLab implements SourceHost {
     return a.code === 0 ? { ...a, out: `${parsed<any>(a.out)?.username ?? ''}\n` } : a;
   }
 
-  prRef(pr: { number: number }): string {
-    return `refs/merge-requests/${pr.number}/head`;
-  }
-
   releaseUrl(repo: string, tag: string): string {
     return `https://${repo}/-/releases/${encodeURIComponent(tag)}`;
   }
@@ -233,9 +208,6 @@ const parsed = <T>(text: string): T | null => {
     return null;
   }
 };
-
-/** A title without GitLab's draft mark ("Draft:", "[Draft]", "(Draft)", the older "WIP:"). Pure. */
-export const undraft = (title: string) => title.replace(/^\s*(?:\[draft\]|\(draft\)|draft:|\[wip\]|wip:)\s*/i, '');
 
 /** A commit status's state as GitHub says it in a check rollup. Pure. */
 function checkState(status: string): string {
