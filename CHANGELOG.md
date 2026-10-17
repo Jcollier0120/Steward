@@ -2,7 +2,7 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
-## Unreleased (its version needs claiming on the main laptop)
+## 0.36.91
 
 **A vouched PR whose kit.json pins a kit with no release waits for it, as any PR does. Before, a vouch let it skip that hold, so it could merge pinned to a kit that will never be released.**
 
