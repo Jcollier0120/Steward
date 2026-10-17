@@ -271,10 +271,11 @@ export function installedRelease(e: Pick<Employee, 'release' | 'installed'>): { 
 
 /**
  * origin/<branch> fresh in the employee's checkout, and its commit: fetched, unless the glance says GitHub's branch is
- * at the commit the checkout already has (then there's nothing to fetch).
+ * at the commit the checkout already has (then there's nothing to fetch). `fetch`: fetched whatever the glance says,
+ * for a stage that something beside it may have moved the branch for since its glance (a rollout merging a kit's bump).
  */
-export async function freshBranch(ctx: Ctx, e: Employee, repo: string): Promise<string | null> {
-  const head = glanceOf(ctx, e)?.head;
+export async function freshBranch(ctx: Ctx, e: Employee, repo: string, o: { fetch?: boolean } = {}): Promise<string | null> {
+  const head = o.fetch ? null : glanceOf(ctx, e)?.head;
   const remote = `origin/${e.branch}`;
   if (head && (await commitOf(ctx.run, repo, remote)) === head) return head;
   await fetchBranch(ctx.run, repo, e.branch);

@@ -2,6 +2,21 @@
 
 Each version of the Steward itself, newest first, released as `v<version>`. The kit it hands out has its own changelog, [kit/CHANGELOG.md](kit/CHANGELOG.md). Versions before 0.8.1 are described in their commits and pull requests.
 
+## 0.36.137
+
+**A Release pressed while a new kit is still being rolled out now releases every repository you ticked, not only the ones the rollout had reached.**
+
+### What changed
+
+- **Release on the Steward's page waits for the kit's rollout.** When you release a kit whose rollout is still going, the Release now waits for the rollout to finish, saying so in the log. Then it releases each repository from the kit update the rollout merged.
+  - Before, it released only the repositories the rollout had already updated. It skipped the others with "its branch pins kit …, not …: merge the bump first". The next build round then held most of those back until the next day, because each had already had its one kit-only release that day.
+  - This happened with kit 2.82.4 on 2026-10-17: a Release pressed two minutes into the rollout released 22 repositories and skipped 13.
+- **A Release for a kit always reads each repository's branch from GitHub.** It no longer trusts the branch head it noted when it began, so a kit update merged after that is seen.
+
+### Before you update
+
+- Nothing: it updates itself as usual.
+
 ## 0.36.136
 
 **The kit 2.83.0: on graphics that share the PC's memory, and on the processor, local AI chats and sees with one smaller model, Qwen3-VL-2B. It is about twice as fast and holds about 2 GB less, with the same scores. Graphics cards with memory of their own keep the larger models.**

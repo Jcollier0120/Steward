@@ -24,6 +24,7 @@ import { runWhenReleased } from './gitevents.ts';
 import { withRepo } from './slots.ts';
 import { linkSharedModules } from './modules.ts';
 import { kitOnlyRelease, noteKitOnlyRelease, type KitOnly } from './kitonly.ts';
+import { rolloutDone, rolloutGoingOn } from './rollout.ts';
 
 /**
  * Stage 4, `steward release`: for each employee whose branch on origin carries the kit and a version with
@@ -144,7 +145,9 @@ async function releaseIn(ctx: Ctx, e: Employee, o: ReleaseOptions, awake: (what:
   const repo = checkoutOf(e);
   if (!existsSync(repo)) return result(e, 'refused', `no checkout at ${repo}`);
   const remote = `origin/${e.branch}`;
-  const commit = await freshBranch(ctx, e, repo);
+  // A release for a kit reads its branch from GitHub, whatever the stage's glance said: the kit's rollout may have merged
+  // the bump since, and the clone not fetched it yet (Steward 0.36.137).
+  const commit = await freshBranch(ctx, e, repo, { fetch: o.kit !== null });
   if (!commit) return result(e, 'refused', `no ${remote}`);
   // Asked together, so git reads them in one command (showFile).
   const [texts, pinText] = await Promise.all([Promise.all(e.versionFiles.map(async (f) => [f, await showFile(run, repo, remote, f)] as [string, string | null])), showFile(run, repo, remote, 'kit.json')]);
@@ -380,7 +383,19 @@ export async function pushReleaseTag(ctx: Ctx, e: Employee, o: { repo: string; c
   return pushed.code === 0 ? null : `git push failed: ${said(pushed)}`;
 }
 
+/**
+ * Each employee released, a few at a time. A release for a kit whose rollout runs beside the rounds (rollout.ts) waits for
+ * it to end first (Steward 0.36.137): until the rollout has merged an employee's bump, its branch pins the kit before,
+ * and the release would skip it ("merge the bump first"). The rollout bumps every employee, then pushes and merges each
+ * in turn, holding none of them in between: a Release pressed two minutes into kit 2.82.4's rollout (2026-10-17)
+ * released the 22 employees it had merged and skipped the 13 it hadn't, which a round then held as a new kit alone.
+ */
 export async function release(ctx: Ctx, employees: Employee[], o: { kit: string | null; hire?: boolean }): Promise<EmployeeResult[]> {
+  const going = o.kit !== null && !o.hire ? rolloutGoingOn() : null;
+  if (going && employees.some((e) => going.names.includes(e.name))) {
+    ctx.log(`waits for kit ${going.kit}'s rollout beside the rounds to end (${going.names.length} employee${going.names.length === 1 ? '' : 's'}), so each release reads the bump it merged`);
+    await rolloutDone();
+  }
   return mapLimit(employees, ctx.settings.parallel, async (e) => {
     try {
       return await withRepo(ctx.log, e.id, () => releaseOne(ctx, e, o));

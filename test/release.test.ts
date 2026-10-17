@@ -197,6 +197,40 @@ test("a release that reached GitHub but not the Exchequer is done, with the kit'
   assert.ok(done.message.endsWith(`, with kit 2.30.0; ${said}`), done.message);
 });
 
+test("a release for a kit reads its branch from GitHub, not from the stage's glance: a rollout beside it merged the bump since", async () => {
+  // Steward 0.36.137. On 2026-10-17 a Release for kit 2.82.4 took Crier's repository the moment the rollout let it go:
+  // the rollout had merged the bump on GitHub, but the stage's glance (taken as it began) still said the old head, and so
+  // did the clone, so it fetched nothing and read kit 2.81.0 ("merge the bump first").
+  const origin = path.join(tmp, 'glance-origin.git');
+  const checkout = path.join(tmp, 'Crier');
+  sh(tmp, 'init', '--quiet', '--bare', '-b', 'main', origin);
+  sh(tmp, 'clone', '--quiet', origin, checkout);
+  for (const [k, v] of Object.entries({ 'user.name': 'Test', 'user.email': 'test@example.invalid', 'core.autocrlf': 'false' })) sh(checkout, 'config', k, v);
+  const write = (version: string, kit: string) => {
+    writeFileSync(path.join(checkout, 'package.json'), `{\n  "name": "crier",\n  "version": "${version}",\n  "scripts": { "release": "node tools/kit.ts && node src/kit/release.ts" }\n}\n`);
+    writeFileSync(path.join(checkout, 'kit.json'), `{\n  "kit": "${kit}",\n  "parts": ["node", "web", "spec"]\n}\n`);
+    sh(checkout, 'add', '-A');
+    sh(checkout, 'commit', '--quiet', '-m', `Crier ${version}`);
+    sh(checkout, 'push', '--quiet', 'origin', 'main');
+  };
+  write('0.2.35', '2.81.0');
+  const old = sh(checkout, 'rev-parse', 'HEAD');
+  // The rollout's bump, merged on GitHub; the clone's origin/main still at the commit before.
+  write('0.2.36', '2.82.4');
+  sh(checkout, 'update-ref', 'refs/remotes/origin/main', old);
+  const clerk = DEFAULT_EMPLOYEES.find((x) => x.id === 'clerk')!;
+  const e: Employee = { ...clerk, id: 'crier', name: 'Crier', repo: 'Jcollier0120/Crier', checkout, versionFiles: ['package.json'] };
+  let ran = false;
+  const releases = () => [...(ran ? [{ tagName: 'v0.2.36', isDraft: false }] : []), { tagName: 'v0.2.35', isDraft: false }];
+  const r = runner((args) => (args[0] === 'release' && args[1] === 'list' ? ok(releases()) : undefined));
+  const run: Runner = async (cmd, args, opts) => (cmd === 'npm' ? (ran = true) && ok('Crier 0.2.36 (abc1234, kit 2.82.4): artifacts\\crier\\Crier-0.2.36.zip\n') : r.run(cmd, args, opts));
+  const ctx = ctxFor({ employees: [e], workRoot: path.join(tmp, 'work-glance'), run, neutralDir: tmp });
+  ctx.glance = { at: new Date().toISOString(), stewardReleases: null, repos: { crier: { head: old, prs: [], releases: releases().map((x) => ({ ...x, publishedAt: null, commit: null })) } }, errors: {} };
+  const done = await releaseOne(ctx, e, { kit: '2.82.4' });
+  assert.equal(done.outcome, 'done', `${done.message}\n${ctx.lines.join('\n')}`);
+  assert.match(done.message, /^released v0\.2\.36 from origin\/main \(.{7}\), with kit 2\.82\.4/);
+});
+
 test('a release whose entry, or one it brings, starts "**Urgent fix:" is let out to customers at once; any other is left for its release day', async () => {
   const origin = path.join(tmp, 'urgent-origin.git');
   const checkout = path.join(tmp, 'Clerk-urgent');
