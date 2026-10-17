@@ -146,10 +146,12 @@ export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATA
     if (!g.vendor || !NPU_VENDORS.includes(g.vendor) || !g.generation || g.generation === UNKNOWN_GENERATION) continue;
     const route = catalog.routes[g.vendor];
     if (!route || !Object.hasOwn(route.generations, g.generation)) continue;
-    // Only the route as it runs now: its server's version and its chat model. A report without a route (the NPU left
-    // out) says nothing of how the route runs.
+    // Only the route as it runs now on this generation: its server's version and the generation's chat model (its own
+    // models where it has them, the 2B on an X2). A report without a route (the NPU left out) says nothing of how the
+    // route runs.
     if (!g.server) continue;
-    if (g.server !== route.server || g.version !== route.version || g.model !== chatModel(route)) {
+    const run = routeFor(route, g.generation);
+    if (g.server !== route.server || g.version !== route.version || g.model !== chatModel(run)) {
       // A small PC's own models (smallPc), run in the route's place: listed apart, never counted toward the route's.
       const small = route.generations[g.generation].smallPc ? chatModel(routeFor(route, g.generation, true)) : null;
       if (small && g.server === route.server && g.version === route.version && g.model === small) {
@@ -158,7 +160,6 @@ export function reportsPatch(summary: NpuSummary, catalog: NpuCatalog = NPU_CATA
       continue;
     }
     const gen = route.generations[g.generation];
-    const run = routeFor(route, g.generation);
     const change: Partial<NpuGeneration> = {};
     const lines: string[] = [];
     const failing = g.pcs ? g.failedPcs / g.pcs : 0;
