@@ -2,6 +2,21 @@
 
 Each version of the Steward's kit, newest first. A version is released as `kit-v<version>` (tools/kit-release.ts), and each agent takes it by pinning it in its `kit.json`. An entry says what an agent's maintainer needs to know: what changed, and anything the agent must do.
 
+## Version to claim on the main laptop
+
+**The NPU benchmark sets up chat alone, so `--no-setup` downloads nothing. Before, it set up the route's embedding server too, and its check for what was missing counted only the route's models. On an Intel NPU 3720, whose chat model was there and embedder wasn't, `--no-setup` went on and pulled Qwen3-Embedding (428 MB) through OpenVINO Model Server.**
+
+### What changed
+
+- **npu-bench.ts plans the route without its embeddings (`planNpu`'s `noEmbed`, as the NPU check's hardening does).** The suite never asks for an embedding, so the embedding server and its model (Intel's second OpenVINO Model Server and Qwen3-Embedding, the Snapdragon's llama-server and its model) are no longer fetched or set up for a run. FastFlowLM's route is as it was.
+  - **`--no-setup`** stops with a `setup` mark, exit 1, whenever the plan would fetch anything: the server, its runtime, its model, or an embedding server and its model, if a plan ever carries one.
+  - **The download prompt** names the plan's own total (`downloadBytes`): on a fresh PC about 2.4 GB on Intel (was 2.8), 4.4 GB on a Snapdragon X (was 5.1) and 1.9 GB on an X2 (was 2.6).
+- **NPU-BENCHMARK.md** says what `--yes` fetches now, and that `--no-setup` refuses instead.
+
+### Before you update
+
+- Nothing to do: it updates itself as usual. A bench run in a tools home where setup already ran fetches nothing, as before.
+
 ## 2.78.14
 
 **The title bar's status pill sits on the role's line, after the role, so it no longer pushes the title bar to a second row in a normal desktop window.**
